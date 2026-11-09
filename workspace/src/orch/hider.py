@@ -6,6 +6,7 @@ import hmac
 import json
 import re
 import secrets
+import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import RLock
@@ -31,7 +32,27 @@ class NoHiderError(Refused):
         super().__init__("No hider registered")
 
 
+_GO_ESCAPES = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "+": "\\u002b", "'": "\\u0027"}
+
+
+def _lower_pct(text: str) -> str:
+    return re.sub(r"%[0-9A-Fa-f]{2}", lambda m: m[0].lower(), text)
+
+
+def _upper_u(text: str) -> str:
+    return re.sub(r"\\u[0-9a-fA-F]{4}", lambda m: m[0][:2] + m[0][2:].upper(), text)
+
+
 def _forms(value: str) -> set[str]:
+    forms: set[str] = set()
+    # the value as typed and its Unicode normal forms (NFC / NFD): a tool may print either
+    normal = (value, unicodedata.normalize("NFC", value), unicodedata.normalize("NFD", value))
+    for variant in dict.fromkeys(normal):
+        forms |= _forms_one(variant)
+    return forms
+
+
+def _forms_one(value: str) -> set[str]:
     if len(value) < 8:
         return set()
     raw = value.encode("utf-8")
@@ -43,11 +64,14 @@ def _forms(value: str) -> set[str]:
     forms = {value, raw.hex(), raw.hex().upper(), *b64}
     for ascii_only in (False, True):
         escaped = json.dumps(value, ensure_ascii=ascii_only)[1:-1]
-        forms.update((escaped, escaped.replace("/", "\\/")))
+        go = "".join(_GO_ESCAPES.get(c, c) for c in escaped)  # Go / .NET escape <>&+' in JSON
+        for base in (escaped, go):
+            for variant in (base, base.replace("/", "\\/")):
+                forms.update((variant, _upper_u(variant)))
     for source in (value, *b64):
-        for encode in (quote, quote_plus):
-            escaped = encode(source, safe="")
-            forms.update((escaped, re.sub(r"%[0-9A-Fa-f]{2}", lambda m: m[0].lower(), escaped)))
+        quoted = (quote(source, safe=""), quote(source), quote_plus(source, safe=""), quote_plus(source, safe="/"))
+        for escaped in quoted:
+            forms.update((escaped, _lower_pct(escaped)))
     if "\n" in value:
         forms.update(line for line in value.splitlines() if len(line) >= 16)
     return {form for form in forms if len(form) >= 8}

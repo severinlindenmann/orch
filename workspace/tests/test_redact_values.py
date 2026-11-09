@@ -362,3 +362,22 @@ def test_stream_one_byte_feeds_are_fast_and_equal():
         elapsed = time.perf_counter() - start
         assert source[:0].join(parts) == (expected.encode() if binary else expected)
         assert elapsed < 4, elapsed
+
+
+def test_normalisation_and_escape_variants():
+    value = "Caf\u00e9-\u00dcber<x>&y+z'q/w-1234"
+    hider = Hider({"token": value})
+    import unicodedata
+
+    variants = {unicodedata.normalize(f, value) for f in ("NFC", "NFD")}
+    assert len(variants) == 2
+    forms = set(variants)
+    for variant in variants:
+        escaped = json.dumps(variant)[1:-1]
+        upper = re.sub(r"\\u[0-9a-f]{4}", lambda m: m[0].upper().replace("\\U", "\\u"), escaped)
+        forms.add(upper)  # uppercase hex digits
+        go = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "+": "\\u002b", "'": "\\u0027"}
+        forms.add("".join(go.get(c, c) for c in escaped))  # Go / .NET
+        forms.add(quote(variant))  # default safe="/"
+    for form in forms:
+        assert hider.hide_text("x" + form + "y") == "x" + MARKER + "y", form
