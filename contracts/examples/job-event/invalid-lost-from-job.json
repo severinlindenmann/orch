@@ -1,0 +1,22 @@
+[
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 1,
+  "at": "2026-11-16T09:11:00Z",
+  "type": "start",
+  "title": "x"
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 2,
+  "at": "2026-11-16T09:12:00Z",
+  "type": "lost",
+  "reason": "quiet"
+ }
+]

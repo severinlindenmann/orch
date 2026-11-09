@@ -461,9 +461,34 @@ def _message(
             return {**msg, "sent": False}
         path.unlink(missing_ok=True)  # the relay said no: nothing to retry
         raise
+    _record_posted(root, msg["id"])
     path.unlink(missing_ok=True)
     _set_problem(root, None)  # it went out: whatever blocked it is fixed
-    return msg
+    return {**msg, "sent": True}
+
+
+def _posted_path(root: Path) -> Path | None:
+    """relay-posted.json, or None when .orch or the file is a link (never follow one)."""
+    p = root / ".orch" / "relay-posted.json"
+    return None if (root / ".orch").is_symlink() or p.is_symlink() else p
+
+
+def posted_ids(root: Path) -> list[str]:
+    p = _posted_path(root)
+    data = net.read_json(p, []) if p else []
+    return [x for x in data if isinstance(x, str)] if isinstance(data, list) else []
+
+
+def _record_posted(root: Path, mid: str) -> None:
+    """Only called after the relay accepted a post, never when merely queued. Bookkeeping: a failure here must
+    never turn a delivered message into a failed one or stop the outbox flush."""
+    with contextlib.suppress(Exception):
+        p = _posted_path(root)
+        if p is None:
+            return
+        with tickets._locked(root, "relay-posted"):
+            ids = [x for x in posted_ids(root) if x != mid]
+            net.write_json(p, (ids + [mid])[-5000:], True)
 
 
 def _problem_path(root: Path) -> Path:
@@ -485,6 +510,22 @@ def _set_problem(root: Path, text: str | None) -> None:
         p.write_text(text, encoding="utf-8")
     else:
         p.unlink(missing_ok=True)
+
+
+def log_send_failure(root: Path, what: str, why: object) -> None:
+    """One line in .orch/run/relay-errors.log (machine-local, git-ignored, private; newest 200 kept) for a
+    phone send that failed and was not shown to anybody (the proposal question).
+    Never fails the caller, never printed."""
+    try:
+        p = root / ".orch" / "run" / "relay-errors.log"
+        if (root / ".orch").is_symlink() or p.parent.is_symlink() or p.is_symlink():
+            return
+        p.parent.mkdir(parents=True, exist_ok=True)
+        line = f"{tickets.now()} {what}: {' '.join(str(why).split())[:300]}"
+        have = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.is_file() else []
+        net.write_atomic(p, ("\n".join([*have, line][-200:]) + "\n").encode("utf-8"), True)
+    except (OSError, ValueError, Refused):
+        pass
 
 
 def outbox_list(root: Path) -> list[dict]:
@@ -526,6 +567,7 @@ def resend_outbox(root: Path) -> dict:
                 break
             res["dropped"].append({"id": m["id"], "reason": str(e)})
         else:
+            _record_posted(root, m["id"])
             res["sent"].append(m["id"])
         p.unlink(missing_ok=True)
     if not res["waiting"] and "problem" not in res:
@@ -642,6 +684,9 @@ def send_text(
         if ticket and (title := _update_title(root, ticket)):
             body["update"]["title"] = title
     to_phone = to == "phones" or to.startswith("ph_")
+    if general and not update and sender != "you" and to_phone:
+        if proposal := next((r for r in chat.clean_refs(root, refs or []) if r["kind"] == "proposal"), None):
+            return _send_proposal(root, to, text, proposal, body, reply_to, refs)
     if view is None:
         view = to_phone and update in phone_view.SEND_KINDS
     if isinstance(view, dict):  # a ready (light) snapshot
@@ -649,12 +694,30 @@ def send_text(
     else:
         tv = view and update and ticket and phone_view.view_for(root, ticket)
     if update and ticket and tv:
+        mid = mid or new_id()  # the fallback reuses it: the relay drops a message it already stored
         try:
             msg = _message(root, to, "text", {**body, "ticket_view": tv}, ticket, reply_to, mid)
-        except Refused:
-            if isinstance(view, dict):  # a light update without its view says nothing: refused means refused
-                raise
-            msg = _message(root, to, "text", body, ticket, reply_to, mid)
+        except Refused as e:
+            # only an explicit refusal by the relay (4xx, not 408/429) may drop the view; a timeout, 5xx or
+            # connection error is ambiguous (the relay may have stored it) and is never sent a second time
+            if isinstance(view, dict) or _unreachable(e) or getattr(e, "status", None) is None:
+                raise  # a light update without its view says nothing: refused means refused
+            try:
+                msg = _message(root, to, "text", body, ticket, reply_to, mid)
+            except Refused as e2:
+                if getattr(e2, "status", None) != 409:
+                    raise
+                # 409: the relay has this id already (stored): that is a send, not a failure
+                msg = {
+                    "schema": "orch.msg/1",
+                    "id": mid,
+                    "to": to,
+                    "type": "text",
+                    "body": body,
+                    "created_at": tickets.now(),
+                    "ticket": ticket,
+                    "sent": True,
+                }
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)
     if update and ticket and to_phone and not isinstance(view, dict):  # a light update follows nothing new
@@ -662,16 +725,74 @@ def send_text(
     if general and not update and not sender == "you":
         # a real text to the General conversation: kept in its history: the dashboard shows both ways
         try:
-            gid = tickets.ensure_general(root, tickets.current_actor())
-            tickets.apply_op(
-                root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True)
-            )
-            chat.record(
-                root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs
-            )
+            _record_general(root, msg, text, body, reply_to, refs)
         except (Refused, OSError):
             pass  # the text is sent; a missing history line never fails the send
     return msg
+
+
+def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs) -> None:
+    from orch import chat
+
+    gid = tickets.ensure_general(root, tickets.current_actor())
+    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True))
+    chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)
+
+
+PROPOSAL_OPTIONS = ["make", "not_now"]
+
+
+def _send_proposal(
+    root: Path, to: str, text: str, proposal: dict, general_body: dict, reply_to, refs
+) -> dict:
+    """The General helper's ticket proposal on the phones (relay-api.md 'Ticket proposal question'):
+    ONE question
+    instead of the text, bound to its own message id. The asked record is written BEFORE the send."""
+    mid = new_id()
+    # the very string chat.make_ticket gives the ticket (and the ack): what the person sees is what is made
+    title = tickets.placeholder_title(str(proposal["title"]))
+    body = {
+        "question_id": f"proposal-{mid}",
+        "title": title,
+        "text": text,
+        "options": PROPOSAL_OPTIONS,
+        "recommended": None,
+        "proposal": "make_ticket",
+    }
+    # LOCAL FIRST: the proposal (chat entry + dashboard Make ticket card) exists whatever the relay says. The
+    # phone question is best effort afterwards: a refusal (an older relay without the proposal rule) or an
+    # outage never reaches the helper or the person and never removes the card.
+    local = {
+        "schema": "orch.msg/1",
+        "id": mid,
+        "to": to,
+        "type": "question",
+        "created_at": tickets.now(),
+        "body": body,
+    }
+    with contextlib.suppress(Refused, OSError):
+        _record_general(root, local, text, general_body, reply_to, refs)
+    rec = {"ticket": None, "question_id": body["question_id"], "to": to, "proposal": True, "title": title}
+    _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
+    # The caller (the helper's command) always gets "sent": relay trouble is not its business; a message that
+    # is only waiting offline goes out later from the outbox, the same bytes.
+    try:
+        return {**_message(root, to, "question", body, None, reply_to, mid), "sent": True, "problem": None}
+    except (
+        Refused,
+        OSError,
+    ) as e:  # a refusal, or the outbox could not be written: no card the phone never had
+        _asked_edit(root, lambda asked: asked.pop(mid, None))
+        log_send_failure(root, f"proposal question {mid} to {to} failed", e)
+    try:  # the phone still hears the helper, as a plain text (no card), under the same message id
+        return {
+            **_message(root, to, "text", general_body, None, reply_to, mid),
+            "sent": True,
+            "problem": None,
+        }
+    except (Refused, OSError) as e:
+        log_send_failure(root, f"proposal text {mid} to {to} failed", e)
+        return {**local, "sent": True}
 
 
 def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:
@@ -771,9 +892,8 @@ def send_question(
         **question_extras(q, previews, scope),
     }
     msg = _message(root, "phones", "question", body, ticket["id"])
-    asked = net.read_json(_asked_path(root), {})
-    asked[msg["id"]] = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
-    net.write_json(_asked_path(root), asked, True)
+    rec = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
+    _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
         send_text(root, "phones", "Waiting for your answer", ticket["id"], "note", view=True)
@@ -797,15 +917,12 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
         "recommended": None,
         "review": True,
     }
-    asked = net.read_json(_asked_path(root), {})
-    asked[mid] = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
-    net.write_json(_asked_path(root), asked, True)
+    rec = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
+    _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     try:
         return _message(root, "phones", "question", body, ticket["id"], mid=mid)
     except Refused:
-        asked = net.read_json(_asked_path(root), {})
-        if asked.pop(mid, None) is not None:
-            net.write_json(_asked_path(root), asked, True)
+        _asked_edit(root, lambda asked: asked.pop(mid, None))
         raise
 
 
@@ -820,6 +937,109 @@ def _paired_phone(root: Path, frm: str) -> dict | None:
         if isinstance(p, dict) and p.get("id") == frm:
             return p
     return None
+
+
+def _proposal_asked(root: Path, msg: dict) -> dict | None:
+    asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
+    return asked if isinstance(asked, dict) and asked.get("proposal") is True else None
+
+
+def _person_asked(root: Path, msg: dict) -> bool:
+    """A question only a person decides (review, ticket proposal): never applied from an agent session."""
+    return _review_asked(root, msg) is not None or _proposal_asked(root, msg) is not None
+
+
+def _asked_edit(root: Path, fn):
+    """One read-modify-write of questions-sent.json under its own small lock (never held while anything else
+    is called, so it nests safely inside relay.lock): fn(asked) edits the dict, returns its result."""
+    with locked(root, name="asked.lock"):
+        asked = net.read_json(_asked_path(root), {})
+        out = fn(asked)
+        net.write_json(_asked_path(root), asked, True)
+        return out
+
+
+def _set_asked(root: Path, mid: str, **fields) -> dict:
+    def edit(asked):
+        rec = asked.get(mid)
+        if isinstance(rec, dict):
+            rec.update(fields)
+        return rec if isinstance(rec, dict) else {}
+
+    return _asked_edit(root, edit)
+
+
+def ack_proposal(root: Path, mid: str, made: dict) -> None:
+    """Closes the phone's proposal card when the DASHBOARD made the ticket first: the ordinary ack ("Got it:
+    <title>", with the new ticket and its key), once, to where the question went. When a phone's own answer
+    made it, nothing is sent: the card already shows the result ("Ticket made"), no second text.
+    Only for a proposal asked on the phones."""
+
+    def claim(asked):
+        rec = asked.get(mid)
+        if not (isinstance(rec, dict) and rec.get("proposal") is True) or rec.get("acked"):
+            return None
+        rec["acked"] = True  # marked first: a lost ack is better than two
+        return None if rec.get("phone") else str(rec.get("to") or "phones")
+
+    if (target := _asked_edit(root, claim)) is None:
+        return
+    try:
+        send_text(root, target, f"Got it: {made['title']}"[:300], made["ticket"], "ack", mid)
+    except BaseException:
+        _set_asked(root, mid, acked=False)
+        raise
+
+
+def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
+    """An answer to a ticket proposal. It acts only when ALL hold: it comes from a phone paired with this
+    workspace (the relay-authenticated `from`, not group-routed), it answers THIS proposal's
+    question (reply_to),
+    the question is still open (first answer wins) and the proposal is not already a ticket. "make" = the
+    dashboard's Make ticket (chat.make_ticket, idempotent per proposal); "not_now" = a history line. Anything
+    else is a history line only. The actor is human:<stored phone name>, never taken from the body,
+    never an agent."""
+    from orch import chat
+
+    frm = str(msg.get("from", ""))
+    phone = _paired_phone(root, frm) if frm.startswith("ph_") else None
+    if phone is None or msg_group(msg):
+        return "ignored: only a phone paired with this workspace answers a ticket proposal", None
+    ans = clean_untrusted(str(msg.get("body", {}).get("answer")), 2000).strip().casefold()
+    if ans not in PROPOSAL_OPTIONS:
+        return "ignored: not an answer to a ticket proposal", None
+    name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
+    by, via = f"human:{name or frm}", "phone"
+    mid = str(msg.get("reply_to"))
+    title = str(asked.get("title") or "a proposal")
+
+    def line(text: str) -> None:
+        with contextlib.suppress(Refused, OSError):
+            tickets.note_history(root, tickets.ensure_general(root, by), by, text, via)
+
+    if _asked_edit(root, lambda asked: (asked.get(mid) or {}).get("done")):
+        line(f'A second answer to the ticket proposal "{title}" was ignored')
+        return "ignored: the ticket proposal was already decided", None
+    state = chat.proposal_state(root, mid)
+    if state in ("made", "gone") or (state == "open" and ans == "not_now"):
+        _set_asked(root, mid, done=state if state != "open" else "not_now")
+        if ans == "not_now" and state == "open":
+            line(f'Not now, from the phone: the ticket proposal "{title}"')
+            return "ticket proposal: not now", None
+        line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
+        return "ignored: the ticket proposal was already decided", None
+    if ans == "not_now":  # making has started: it finishes, the answer changes nothing
+        line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
+        return "ignored: the ticket proposal was already decided", None
+    _set_asked(root, mid, phone=frm)
+    try:
+        made = chat.make_ticket(root, mid, None, by)
+    except Refused as e:
+        _set_asked(root, mid, done="refused")
+        line("A ticket proposal answer from the phone was not used: " + str(e)[:120])
+        return f"not applied: {e}", None
+    _set_asked(root, mid, done="make")
+    return f"made {made['key']} from a ticket proposal (via {via})", made["ticket"]
 
 
 def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
@@ -958,6 +1178,8 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         return why, None
     if asked.get("review") is True:
         return _apply_review_answer(root, msg, asked)
+    if asked.get("proposal") is True:
+        return _apply_proposal_answer(root, msg, asked)
     by, via = _answer_by(msg, asked)
     try:
         t, q = tickets.answer(
@@ -1071,6 +1293,9 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     if ok:
         _journal(root, ok)
         _api(root, "POST", "/v1/inbox/ack", {"ids": [m["id"] for m in ok]})
+    from orch import chat
+
+    chat.dm_import_on_pull(root, ok)  # a saved workspace text reaches its Chat thread within this pull cycle
     return ok, arrival
 
 
@@ -1210,7 +1435,8 @@ def _save_phone_file(root: Path, tid: str, mid: str, att: dict, final: bool = Fa
         name = safe_name(att.get("name", ""))
     except Refused:
         name = "file"
-    dest = _save_into(tickets.files_dir(root, tid), name, raw)
+    with tickets.files_dir_locked(root, tid) as fdir:
+        dest = _save_into(fdir, name, raw)
     rel = dest.relative_to(root).as_posix()
     st["saved"][key] = rel
     st["saved"] = dict(list(st["saved"].items())[-V3_STATE_KEEP:])
@@ -1822,7 +2048,7 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                 after = None  # group hooks run after relay.lock is released (lock order: relay, never inside)
                 with locked(root):
                     if m["id"] not in seen(root):  # another reader may have handled it meanwhile
-                        if typ == "answer" and tickets.agent_tool() and _review_asked(root, m):
+                        if typ == "answer" and tickets.agent_tool() and _person_asked(root, m):
                             # accepting is the person's decision: never applied from an agent session; the
                             # workspace's own process picks the saved answer up (not marked seen)
                             note = "a review answer waits for the workspace to apply it"

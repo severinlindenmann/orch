@@ -1,0 +1,27 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_7k3f9q",
+  "title": "Rename field X in ingestion job",
+  "status": "open",
+  "created_at": "2026-11-04T09:12:00Z",
+  "updated_at": "2026-11-04T09:12:00Z",
+  "checklist": [
+    {
+      "id": "c1",
+      "text": "Add the CSV download button",
+      "done": false,
+      "evidence": [],
+      "covers": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  ],
+  "refs": [],
+  "questions": [],
+  "history": [
+    {
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:severin",
+      "text": "Created"
+    }
+  ],
+  "done_when": "A CSV download button on the invoice list; it works on the phone"
+}

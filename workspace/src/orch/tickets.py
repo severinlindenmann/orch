@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, procs, term
+from orch import config, procs, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -167,7 +167,7 @@ def next_key(root: Path) -> str:
         tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
         try:
             tmp.write_text(json.dumps({"last": n}) + "\n", encoding="utf-8")
-            os.replace(tmp, p)
+            syncgate.replace(tmp, p)
         finally:
             tmp.unlink(missing_ok=True)
     return f"{code}-{n}"
@@ -177,7 +177,27 @@ def load(root: Path, tid: str) -> dict:
     p = ticket_path(root, tid)
     if not p.exists():
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
-    return json.loads(p.read_text(encoding="utf-8"))
+    return _read_ticket(p, tid)
+
+
+def _read_ticket(p: Path, tid: str) -> dict:
+    """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
+    may be swapping the file in), then reported as "being updated". Read-only: a reader never rewrites,
+    quarantines or deletes a file."""
+    for attempt in range(4):
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
+            if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
+                if isinstance(e, PermissionError):
+                    raise
+                raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
+        time.sleep(0.1)
+    raise AssertionError("unreachable")
+
+
+def _root_of(p: Path) -> Path:
+    return p.parent.parent.parent  # <root>/.orch/tickets/<file>
 
 
 def _break_stale(lock: Path) -> bool:
@@ -205,11 +225,19 @@ def _break_stale(lock: Path) -> bool:
 
 
 @contextlib.contextmanager
-def _locked(root: Path, tid: str):
-    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s)."""
+def _locked(root: Path, tid: str, wait: float = 5.0):
+    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
+    Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
+    the lock and checks again after taking it, so the sync step (which holds the gate and takes this same lock
+    for every file it writes) never has a writer inside a file it replaces. Never waits for the gate while
+    holding the lock."""
+    gated = bool(_ID_RE.fullmatch(tid)) or tid == "key"  # chat / relay state is never synced
+    what = f"ticket {tid}" if tid != "key" else "the ticket counter"
     lock = tickets_dir(root) / f".lock-{tid}"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    end = time.monotonic() + 5
+    if gated:
+        syncgate.wait_clear(root, what)
+    end = time.monotonic() + wait
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -221,7 +249,7 @@ def _locked(root: Path, tid: str):
             PermissionError,
         ):  # Windows: a lock being deleted refuses with PermissionError
             if time.monotonic() > end:
-                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
+                raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             try:
                 stale = time.time() - lock.stat().st_mtime > 30
             except OSError:
@@ -230,9 +258,11 @@ def _locked(root: Path, tid: str):
             if stale and _break_stale(lock):
                 continue
             if time.monotonic() > end:
-                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
+                raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             time.sleep(0.02)
     try:
+        if gated and syncgate.live_holder(root) is not None:  # a gate appeared while we took the lock
+            raise syncgate.busy(what)
         yield
     finally:
         with contextlib.suppress(OSError):
@@ -359,7 +389,9 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = json.loads(p.read_text(encoding="utf-8"))
+                t = json.loads(
+                    p.read_text(encoding="utf-8")
+                )  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
             if include_general or not (isinstance(t, dict) and t.get("general") is True):
@@ -386,7 +418,10 @@ def general_id(root: Path) -> str | None:
 
 def ensure_general(root: Path, by: str) -> str:
     """The General ticket (flag general: true, no display key so no number is used up), made once."""
+    from orch import harness
+
     if tid := general_id(root):
+        harness.protect_local(root)  # older workspaces: the Chat ticket file stays out of git from now on
         return tid
     t = now()
     ticket = {
@@ -403,6 +438,7 @@ def ensure_general(root: Path, by: str) -> str:
         "history": [{"at": t, "by": by, "via": "cli", "text": "Created", "chat_message": False}],
     }
     save(root, ticket)
+    harness.protect_local(root)
     return ticket["id"]
 
 
@@ -561,6 +597,86 @@ def create(
 def checks_done(ticket: dict) -> tuple[int, int]:
     c = ticket.get("checklist", [])
     return sum(1 for x in c if x.get("done")), len(c)
+
+
+def _ev_failed(ev: dict) -> bool:
+    """A recorded failure: the proof explicitly says exit != 0. No exit recorded = unknown, never failed."""
+    code = ev.get("exit")
+    return isinstance(code, int) and not isinstance(code, bool) and code != 0
+
+
+def _norm_words(text: str) -> str:
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split())
+
+
+def _covered(part: str, cover: str) -> bool:
+    """One contains the other at word boundaries (the shorter one at least 3 characters)."""
+    a, b = _norm_words(part), cover
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 3 and f" {short} " in f" {long_} "
+
+
+def done_when_parts(done_when: str) -> list[str]:
+    """done_when split into its parts: one per line, ';' or sentence end. Plain and cheap on purpose."""
+    parts = []
+    for line in done_when.splitlines():
+        for chunk in line.split(";"):
+            parts += re.split(r"(?<=[.!?])\s+", chunk.strip())
+    return [p.strip() for p in parts if _norm_words(p)]
+
+
+def proof_state(ticket: dict) -> dict:
+    """Honest proof summary of a ticket, pure (no I/O).
+    per_item: id -> passed | failed | changed | note | missing.
+    done + a failed recorded exit = failed; done + any proof that is not a note = passed;
+    done + note proof only = note; not done = missing. `changed` is reserved (B8 computes it from files_sig).
+    uncovered: the parts of done_when that no task `covers` (a part is covered when a task's covers text
+    and the part contain one another, ignoring case and punctuation); one hint when done_when cannot be
+    split and nothing is linked. level: ok | note | warn | fail, so views never parse `line`."""
+    items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and isinstance(c.get("id"), str)]
+    per: dict[str, str] = {}
+    for c in items:
+        evs = [e for e in c.get("evidence") or [] if isinstance(e, dict)]
+        if not c.get("done"):
+            per[c["id"]] = "missing"
+        elif any(_ev_failed(e) for e in evs):
+            per[c["id"]] = "failed"
+        elif any(e.get("type") != "note" for e in evs):
+            per[c["id"]] = "passed"
+        else:
+            per[c["id"]] = "note" if evs else "missing"
+    done_when = ticket.get("done_when")
+    covers = [_norm_words(c["covers"]) for c in items if isinstance(c.get("covers"), str)]
+    covers = [c for c in covers if c]
+    uncovered: list[str] = []
+    if isinstance(done_when, str) and done_when.strip():
+        parts = done_when_parts(done_when)
+        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers)]
+        if not parts and not covers:
+            uncovered = ["Done when isn't linked to tasks"]
+    n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
+
+    def plural(count: int, word: str) -> str:
+        return f"{count} {word}" + ("" if count == 1 else "s")
+
+    if n["failed"]:
+        line, level = f"{plural(n['failed'], 'check')} failed", "fail"
+    elif n["changed"]:
+        line, level = "Changes haven't been checked yet", "warn"
+    elif uncovered:
+        count = len(uncovered)
+        one = count == 1 or uncovered == ["Done when isn't linked to tasks"]
+        noun = "1 part" if one else f"{count} parts"
+        line = f'{noun} of "Done when" {"has" if one else "have"} no task'
+        level = "warn"
+    elif n["passed"] or n["note"]:
+        bits = ([f"{plural(n['passed'], 'check')} passed"] if n["passed"] else []) + (
+            [plural(n["note"], "note")] if n["note"] else []
+        )
+        line, level = " · ".join(bits), "ok" if n["passed"] else "note"
+    else:
+        line, level = "No checks recorded", "note"
+    return {"per_item": per, "uncovered": uncovered, "line": line, "level": level}
 
 
 def _check_can_finish(ticket: dict) -> None:
@@ -941,6 +1057,43 @@ def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     return apply_op(root, tid, lambda t: _set_field(t, "summary", text))[0]
 
 
+# Short plain-text fields on a ticket (outcome parts); the schema maxLength matches.
+TEXT_FIELD_MAX = 300
+OUTCOME_KEYS = ("changed", "why", "not_included")
+
+
+def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
+    """What changed and why (outcome). Given parts replace theirs, empty clears one. No history line."""
+    clean = {}
+    for k, v in parts.items():
+        if k not in OUTCOME_KEYS:
+            raise Refused(f"An outcome has only: {', '.join(OUTCOME_KEYS)}.")
+        if v is None:
+            continue
+        if not isinstance(v, str):
+            raise Refused(f"{k} must be text.")
+        v = v.strip()
+        if len(v) > TEXT_FIELD_MAX:
+            raise Refused(f"'{k}' is at most {TEXT_FIELD_MAX} characters.")
+        clean[k] = v
+    if not clean:
+        raise Refused("Say what to record: --changed, --why or --not-included.")
+
+    def op(ticket):
+        out = dict(ticket.get("outcome") or {})
+        for k, v in clean.items():
+            if v:
+                out[k] = v
+            else:
+                out.pop(k, None)
+        if out:
+            ticket["outcome"] = out
+        else:
+            ticket.pop("outcome", None)
+
+    return apply_op(root, tid, op)[0]
+
+
 def _next_id(items: list[dict], prefix: str) -> str:
     nums = [int(i["id"][1:]) for i in items if re.fullmatch(prefix + r"[0-9]+", str(i.get("id", "")))]
     return f"{prefix}{max(nums, default=0) + 1}"
@@ -972,12 +1125,25 @@ def proof_label(ev: dict) -> str:
     return label
 
 
-def check_add(root: Path, tid: str, text: str, by: str) -> tuple[dict, dict]:
+def _clean_covers(covers: str | None) -> str | None:
+    """`covers`: the quoted part of done_when a task covers, 1 to 300 characters; None = not given."""
+    if covers is None:
+        return None
+    line = " ".join(covers.split())
+    if not 1 <= len(line) <= TEXT_FIELD_MAX:
+        raise Refused(f"--covers is a short quote of 'Done when' (1 to {TEXT_FIELD_MAX} characters).")
+    return line
+
+
+def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = None) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A checklist item needs text.")
+    covers = _clean_covers(covers)
 
     def op(ticket):
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
+        if covers:
+            item["covers"] = covers
         ticket["checklist"].append(item)
         add_history(ticket, by, f"Added check {item['id']}")
         return item
@@ -1042,15 +1208,30 @@ def check_exists(root: Path, tid: str, cid: str) -> None:
 
 
 def check_edit(
-    root: Path, tid: str, cid: str, text: str, by: str, if_revision: int | None = None, was: str | None = None
+    root: Path,
+    tid: str,
+    cid: str,
+    text: str | None,
+    by: str,
+    if_revision: int | None = None,
+    was: str | None = None,
+    covers: str | None = None,
 ) -> tuple[dict, dict]:
-    if not text.strip():
+    if text is None and covers is None:
+        raise Refused("Say the new text or --covers.")
+    if text is not None and not text.strip():
         raise Refused("A checklist item needs text.")
+    covers = _clean_covers(covers)
 
     def op(t):
         item = _item(t, cid)
-        item["text"] = text.strip()
-        add_history(t, by, f"Renamed {cid}")
+        if text is not None:
+            item["text"] = text.strip()
+            add_history(t, by, f"Renamed {cid}")
+        if covers is not None:
+            item["covers"] = covers
+            if text is None:
+                add_history(t, by, f"Linked {cid} to Done when")
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
@@ -1712,6 +1893,15 @@ def _too_big(name: str) -> str:
 def attach_file(
     root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
 ) -> dict:
+    """Copy a workspace file into the ticket's evidence/ folder (gate -> ticket lock held for the copy)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _attach_file(root, tid, path, title, role, summary)
+
+
+def _attach_file(
+    root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
+) -> dict:
     """Copy a workspace file into .orch/tickets/<tid>/evidence/ and return the evidence entry for it.
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
@@ -1821,7 +2011,21 @@ def artifacts_path(root: Path, tid: str) -> Path:
 
 def files_dir(root: Path, tid: str) -> Path:
     """.orch/tickets/<id>/files/ : files people send to the ticket (from the phone), created. A link anywhere
-    on the way is refused."""
+    on the way is refused. Only the creation is guarded; to WRITE a file there use files_dir_locked."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _files_dir_raw(root, tid)
+
+
+@contextlib.contextmanager
+def files_dir_locked(root: Path, tid: str):
+    """The files folder for one write: the gate check and the ticket lock are held for the whole `with`."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        yield _files_dir_raw(root, tid)
+
+
+def _files_dir_raw(root: Path, tid: str) -> Path:
     load(root, tid)
     cur = root / ".orch"
     for part in ("tickets", tid, "files"):
@@ -1836,7 +2040,14 @@ def files_dir(root: Path, tid: str) -> Path:
 
 
 def artifacts_dir(root: Path, tid: str) -> Path:
-    """The ticket's artifacts folder, created. A link anywhere on the way is refused."""
+    """The ticket's artifacts folder, created (guarded by the sync gate). A link anywhere on the way is
+    refused. Agents write files there with plain file I/O: not gated (a merge skips a changed path)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _artifacts_dir_raw(root, tid)
+
+
+def _artifacts_dir_raw(root: Path, tid: str) -> Path:
     d = artifacts_path(root, tid)
     cur = root / ".orch"
     for part in ("tickets", tid, "artifacts"):
@@ -1924,11 +2135,34 @@ def _open_artifacts_fd(root: Path, tid: str) -> int:
 
 
 def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
-    """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
+    """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
+    Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
     means it was done before (returned with existed=True, nothing written)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        res = _attach_write(root, tid, hint, data, exact)
+    text = f"Attached {res['name']}"
+    if res.get("existed"):
+        # done before: only the history line may be missing (an earlier call was refused as busy after the
+        # file was written); add it if it is not there
+        apply_op(
+            root,
+            tid,
+            lambda t: (
+                NO_WRITE
+                if any(h.get("text") == text for h in t.get("history", []))
+                else add_history(t, by, text)
+            ),
+        )
+    else:
+        apply_op(root, tid, lambda t: add_history(t, by, text))
+    return res
+
+
+def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) -> dict:
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
     name = attach_name(exact or hint)
     if exact and name != exact:
@@ -1945,7 +2179,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
         names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
-        d0 = artifacts_dir(root, tid)
+        d0 = _artifacts_dir_raw(root, tid)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
         linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
@@ -1989,7 +2223,6 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
                 remove(tmp)
     finally:
         close()
-    apply_op(root, tid, lambda t: add_history(t, by, f"Attached {final}"))
     return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
 
 

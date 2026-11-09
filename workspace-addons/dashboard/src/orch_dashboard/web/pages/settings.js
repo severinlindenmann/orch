@@ -261,31 +261,12 @@ async function addonAct(control) {
   d.append(actions);
   window.orch.open(d);
 }
-// An add-on row's "Send a message" opens a small box; Send passes the text on for that workspace or phone.
+// Workspace messages are composed in their persistent Chat thread.
 function messageSend(control) {
-  if (snapshot || route().kind !== 'addon') return;
-  const peer = control.dataset.sendTo, who = control.dataset.who || 'this workspace';
-  const {d, actions} = dialog('Send a message to ' + who, 'dialog');
-  const area = el('textarea', 'input');
-  Object.assign(area, {rows:4, maxLength:2000, name:'message', placeholder:'Write your message'});
-  area.setAttribute('aria-label', 'Message to ' + who);
-  const go = button('Send', 'primary', async () => {
-    const text = area.value.trim();
-    if (!text || go.disabled) return;
-    go.disabled = true;
-    const args = {workspace:peer, text};
-    if (control.dataset.replyTo !== undefined) args.reply_to = control.dataset.replyTo;
-    const result = await act('message.send', args);
-    go.disabled = false;
-    if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); return; }
-    await window.orch.close(d);
-    window.orch.toast('Sent to ' + who, 'ok');
-    loadAddon(route().id);
-  });
-  actions.append(go);
-  d.append(area, actions);
-  window.orch.open(d);
-  area.focus();
+  if (snapshot) return;
+  const peer = control.dataset.sendTo;
+  if (/^ws_[a-z0-9]{10}$/.test(peer)) location.hash = '#chat/' + peer;
+  else if (/^ph_[a-z0-9]{10}$/.test(peer) || peer === 'phones') location.hash = '#chat';
 }
 async function copyText(control) {
   try { await navigator.clipboard.writeText(control.dataset.copy); window.orch.toast('Copied', 'ok'); }
@@ -382,12 +363,3 @@ function bindAddonControls(host) {
   });
 }
 
-// Copy a ticket in one click and open the copy; the copy is the ticket that was not there before.
-async function copyTicket(t) {
-  const addon = repeatsAddon(), known = new Set(tickets().map(x => x.id));
-  if (!addon || snapshot) return;
-  const result = await act('addon.act', {addon, verb:'copy', target:t.id});
-  const made = result.ok ? tickets().find(x => !known.has(x.id)) : null;
-  window.orch.toast(result.ok ? 'Ticket copied.' : changeError(result), result.ok ? 'ok' : 'error');
-  if (made) location.hash = href(made.id);
-}

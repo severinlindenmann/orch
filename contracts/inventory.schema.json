@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/inventory.schema.json",
+  "title": "orch inventory v1 (orch.inventory/1): skills, connections and keys a workspace can use, names only",
+  "description": "See inventory.md. Never a key value, an environment value, a header or a full command line.",
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "version": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "action": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "source": { "enum": ["harness", "admin", "workspace", "builtin", "marketplace"] },
+    "skill": {
+      "type": "object", "required": ["name", "source", "version", "shadowed"], "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "source": { "$ref": "#/$defs/source" },
+        "version": { "$ref": "#/$defs/version" },
+        "shadowed": { "type": "boolean", "description": "true = another source has the same name and wins (workspace > admin > marketplace > builtin > harness)." }
+      }
+    },
+    "connection": {
+      "type": "object", "required": ["name", "source", "transport", "command", "host", "profile", "actions", "allow_all", "state", "shadowed", "version"], "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f<>]*$", "description": "Plain name for screens (Google Drive); default the name." },
+        "source": { "enum": ["harness", "admin", "workspace"] },
+        "transport": { "enum": ["stdio", "http"] },
+        "command": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Za-z0-9_.+@-]{1,64}$" }], "description": "Base name of the program only (stdio); never its arguments." },
+        "host": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-z0-9.-]{1,253}(:[0-9]{1,5})?$" }], "description": "Host of an http connection; never path, query or credentials." },
+        "profile": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" }], "description": "Key profile it starts with (orch secret exec)." },
+        "actions": { "type": "array", "maxItems": 200, "items": {
+          "type": "object", "required": ["name", "allowed"], "additionalProperties": false,
+          "properties": { "name": { "$ref": "#/$defs/action" }, "allowed": { "type": "boolean" } }
+        }, "description": "Actions (MCP tools) seen so far, from the server's tool list or from use." },
+        "allow_all": { "type": "boolean" },
+        "state": { "enum": ["ok", "missing-key", "not-started", "unknown"], "description": "missing-key = its profile names a key that is not there; not-started = never started by orch; unknown = listed from the agent tool's settings, never seen in use." },
+        "shadowed": { "type": "boolean", "description": "true = the same name from another source wins (workspace > admin > harness); both are listed." },
+        "version": { "$ref": "#/$defs/version" }
+      }
+    },
+    "key": {
+      "type": "object", "required": ["name", "type", "source"], "additionalProperties": false,
+      "properties": { "name": { "$ref": "#/$defs/name" }, "type": { "enum": ["token", "password", "key-file", "json"] }, "source": { "enum": ["workspace", "admin"] } }
+    },
+    "inventory": {
+      "type": "object", "required": ["schema", "generated_at", "skills", "connections", "keys"], "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "orch.inventory/1" },
+        "generated_at": { "$ref": "#/$defs/time" },
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/skill" } },
+        "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } },
+        "keys": { "type": "array", "items": { "$ref": "#/$defs/key" } }
+      }
+    },
+    "conn_page": {
+      "type": "object", "required": ["items", "next"], "additionalProperties": false,
+      "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/connection" } }, "next": { "type": ["string", "null"] } }
+    },
+    "server": {
+      "oneOf": [
+        { "type": "object", "required": ["command"], "additionalProperties": false, "properties": {
+          "command": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 300 } },
+          "profile": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f<>]*$" }
+        } },
+        { "type": "object", "required": ["url"], "additionalProperties": false, "properties": {
+          "url": { "type": "string", "pattern": "^https://[^\\s@<>\"'`]+$" },
+          "profile": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f<>]*$" }
+        } }
+      ],
+      "description": "No env, headers or other place for a key: keys come only through the profile."
+    },
+    "mcp_file": {
+      "type": "object", "required": ["schema", "servers"], "additionalProperties": false,
+      "description": ".orch/mcp.json: this workspace's connections and the allowed actions of every connection (all sources). Can be committed: no keys inside.",
+      "properties": {
+        "schema": { "const": "orch.mcp/1" },
+        "servers": { "type": "object", "maxProperties": 64, "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/server" } },
+        "allow": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": {
+          "oneOf": [{ "const": "*" }, { "type": "array", "maxItems": 200, "uniqueItems": true, "items": { "$ref": "#/$defs/action" } }]
+        } }
+      }
+    }
+  }
+}

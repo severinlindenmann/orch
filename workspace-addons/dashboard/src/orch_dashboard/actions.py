@@ -708,3 +708,37 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
     conflict = isinstance(out, dict) and "revision" in out and "changed_by" in out
     return (409 if conflict else 422), str(msg)[:500], out if conflict else None
+
+
+# Workspace direct messages: a separate operation from phone/group chat.
+def _chat_send_ws(a):
+    _only(a, ("workspace", "text", "retry", "client_id"))
+    ws = a.get("workspace")
+    if not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
+        raise BadRequest("That is not a workspace.")
+    text = _text(a.get("text"))
+    if len(text) > 2000:
+        raise BadRequest("A message has 1 to 2000 characters.")
+    retry = a.get("retry")
+    if retry is not None and (not isinstance(retry, str) or not re.fullmatch(r"m_[a-z0-9]{16}", retry)):
+        raise BadRequest("That is not a message.")
+    client_id = a.get("client_id")
+    if client_id is not None and (not isinstance(client_id, str) or not re.fullmatch(r"m_[a-z0-9]{16}", client_id)):
+        raise BadRequest("That is not a message.")
+    flags = (["--retry", retry] if retry else []) + (["--client-id", client_id] if client_id else [])
+    return ["chat", "send", ws], flags, [text]
+
+
+def _chat_sync_ws(a):
+    _only(a, ("workspace",))
+    if "workspace" not in a:
+        return ["chat", "sync"], [], []
+    ws = a.get("workspace")
+    if not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
+        raise BadRequest("That is not a workspace.")
+    return ["chat", "sync", ws], [], []
+
+
+OPS["chat.send_ws"] = _chat_send_ws
+
+OPS["chat.sync_ws"] = _chat_sync_ws

@@ -11,11 +11,17 @@ final class AccessibilityIdUITests: XCTestCase {
             // Reading identifiers from live XCUIElements would query the app repeatedly.
             let snapshot = try app.snapshot()
             var counts: [String: Int] = [:]
-            func visit(_ node: XCUIElementSnapshot) {
+            func visit(_ node: XCUIElementSnapshot, barIds: Set<String>? = nil) {
                 let id = node.identifier
+                // Inside the navigation bar: the ids of the enclosing elements (nil outside the bar).
+                var barIds = node.elementType == .navigationBar ? Set<String>() : barIds
+                // iOS 26 wraps each toolbar item in a host that carries the item's id around the same control: one control,
+                // not a copy. Only inside the navigation bar, so a container id copied onto its children elsewhere still fails.
+                let toolbarHost = barIds?.contains(id) == true
                 // SF Symbol images carry their symbol name ("chevron.right") as identifier: not ours.
-                if !id.isEmpty, !(node.elementType == .image && id.contains(".")) { counts[id, default: 0] += 1 }
-                for child in node.children { visit(child) }
+                if !id.isEmpty, !toolbarHost, !(node.elementType == .image && id.contains(".")) { counts[id, default: 0] += 1 }
+                if !id.isEmpty { barIds?.insert(id) }
+                for child in node.children { visit(child, barIds: barIds) }
             }
             for child in snapshot.children { visit(child) }
 
@@ -40,8 +46,22 @@ final class AccessibilityIdUITests: XCTestCase {
     @MainActor
     private func assertUniqueIds(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let duplicates = duplicateIds(in: app)
-        let details = duplicates.keys.sorted().map { "\($0): \(duplicates[$0]!)" }.joined(separator: "\n")
-        XCTAssertTrue(duplicates.isEmpty, "Duplicate accessibility identifiers (id: count):\n\(details)", file: file, line: line)
+        // One line: CI's failure summary only shows the first line of a message.
+        let details = duplicates.keys.sorted().map { "\($0)=\(duplicates[$0]!)" }.joined(separator: ", ")
+        XCTAssertTrue(duplicates.isEmpty, "Duplicate accessibility identifiers (id=count): \(details)", file: file, line: line)
+    }
+
+    /// -openTicket PUSHES the ticket chat over the workspace chat: until that transition is over both screens exist and
+    /// every id appears twice. Wait for the end of the push (exactly one conversation screen, the ticket's status line
+    /// hittable), then take ONE snapshot.
+    @MainActor
+    private func waitForTicketChatSettled(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let screens = app.descendants(matching: .any).matching(identifier: "conversation-view")
+        let one = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 1"), object: screens)
+        XCTAssertEqual(XCTWaiter.wait(for: [one], timeout: 20), .completed, "one conversation screen after the push", file: file, line: line)
+        let status = element(app, "tasks-toggle")
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: status)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 20), .completed, "ticket status line hittable", file: file, line: line)
     }
 
     @MainActor
@@ -99,6 +119,7 @@ final class AccessibilityIdUITests: XCTestCase {
         let app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
         XCTAssertTrue(element(app, "composer").waitForExistence(timeout: 20))
         XCTAssertTrue(element(app, "chat-title").waitForExistence(timeout: 10))
+        waitForTicketChatSettled(app)
         assertUniqueIds(in: app)
     }
 
@@ -107,6 +128,7 @@ final class AccessibilityIdUITests: XCTestCase {
         let app = launch(["-mockReview", "YES", "-openChat", "ws_pilatus001", "-openTicket", "t_reviewfish"])
         XCTAssertTrue(element(app, "review-bar").waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["review-accept"].waitForExistence(timeout: 10))
+        waitForTicketChatSettled(app)
         assertUniqueIds(in: app)
     }
 

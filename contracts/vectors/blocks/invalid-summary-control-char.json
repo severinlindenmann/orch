@@ -1,0 +1,16 @@
+{
+ "name": "summary control char",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "summary",
+    "text": "bell \u0007 here"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

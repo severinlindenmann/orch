@@ -7,3 +7,17 @@
 - **Lists:** newest first, `?limit=` (default 50, max 100) and `?after=<cursor>`. Response `{"items": [...], "next": "<cursor>" | null}`. The cursor is opaque.
 - **Unknown fields** in requests and messages are allowed and kept. Clients ignore unknown fields in responses.
 - **Nullable:** a field that has no value is `null`, never left out, in responses.
+
+## Cross-cutting invariants (all contracts, also the workspace CLI)
+
+**Threat-model boundary (owner decision R1: Level 1, no OS sandbox).** An agent runs as the same OS user and can always read
+or write anything that user can. **Goal:** no agent can act as the person *through orch's own interfaces*: flags,
+environment, workspace files, the local page, the relay client. **Non-goal:** an agent that patches the orch install, edits
+orch-home files directly, or traces processes; such findings go to "Level 2 later" (human-proof.md), not into these contracts.
+
+- **H1. A human-only action needs proof from the human channel, never caller-asserted flags or environment.** How: human-proof.md
+  (a short-lived HMAC proof minted by the local page server, bound to action, target and expiry, passed on stdin). Every
+  contract with a human-only op names it and links there.
+- **P1. Default = hide or deny.** Allowlists are minimal and enumerated; unknown or missing values fall into the hidden or
+  denied branch (unknown source → name hidden, unknown block → "can't show this here", unknown event kind → skipped, no
+  allow entry → action not allowed, no proof → refused, no value hider → nothing recorded).

@@ -1,0 +1,1 @@
+{"schema": "orch.keys/1", "keys": {"pin": {"type": "password", "source": "workspace", "value": "1234", "added_at": "2026-11-16T09:00:00Z"}}}

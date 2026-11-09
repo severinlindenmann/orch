@@ -40,6 +40,7 @@ actor MockRelay: RelayAPI {
     private let empty = UserDefaults.standard.bool(forKey: "mockEmpty")
 
     init(latency: Duration? = nil) {
+        if UserDefaults.standard.bool(forKey: "mockMakeTicket") { all.append(Self.makeTicketQuestion) }
         if UserDefaults.standard.bool(forKey: "mockReview") {
             all.append(Self.reviewQuestion)
             updateLog.append(TicketUpdate(id: "m_reviewupdate001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
@@ -56,6 +57,14 @@ actor MockRelay: RelayAPI {
         if UserDefaults.standard.bool(forKey: "mockChatDays") { let d = Self.chatDays(); sentMessages += d.sent; received += d.received }
         let ms = UserDefaults.standard.integer(forKey: "mockLatencyMs")
         self.latency = latency ?? .milliseconds(ms > 0 ? ms : 150)
+    }
+
+    static var makeTicketQuestion: Question {
+        Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_maketicket00001", from: pilatus,
+            to: "phones", type: "question", createdAt: now(), ticket: nil,
+            body: QuestionBody(questionId: "proposal-m_maketicket00001", title: "Check the backups",
+                text: "Here is a ticket for Friday 13 Nov.", options: ["make", "not_now"], recommended: nil,
+                proposal: "make_ticket", when: "2026-11-13")), workspaceName: "Pilatus Workspace")
     }
 
     private var names = [pilatus: "Pilatus Workspace", reports: "Reports"]
@@ -203,7 +212,7 @@ actor MockRelay: RelayAPI {
     func workspaces() async throws -> [Workspace] {
         try await check()
         if empty { return [] }
-        func open(_ ws: String) -> Int { all.filter { !$0.isReview && $0.message.from == ws && answered[$0.id] == nil }.count }
+        func open(_ ws: String) -> Int { all.filter { !$0.isReview && !$0.isMakeTicket && $0.message.from == ws && answered[$0.id] == nil }.count }
         var list = [
             Workspace(id: Self.pilatus, name: "Pilatus Workspace", description: "Data pipelines for the Pilatus client",
                       tags: ["client", "data", "ingestion"], online: true, lastSeen: "2026-11-04T10:41:00Z", openQuestions: open(Self.pilatus),

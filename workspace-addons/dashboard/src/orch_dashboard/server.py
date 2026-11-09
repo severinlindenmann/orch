@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from . import actions, reffiles, ticketfiles
+from . import actions, reffiles, selfupdate, ticketfiles
 from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
 from .views import ViewPuller
@@ -186,6 +186,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():  # DNS rebinding guard
             return self._send(421, b"misdirected request", "text/plain")
         path, _, query = self.path.partition("?")
+        if path == "/" and selfupdate.answer(self):
+            return
         px = PROXY.fullmatch(path)
         if (
             px
@@ -224,6 +226,14 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
                 "application/json",
             )
+        if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
+            from .data import load_chat_contacts, load_chat_thread
+
+            d = (load_chat_contacts(self.root, self.orch_bin) if path.endswith("/contacts")
+                 else load_chat_thread(self.root, self.orch_bin, path.rsplit("/", 1)[1]))
+            if d is None:
+                return self._send(404, b"not found", "text/plain")
+            return self._send(200, json.dumps(d).encode(), "application/json")
         if path == "/api/chat/days":  # History: the days that have texts, newest first
             d = load_chat_days(self.root, self.orch_bin)
             return self._send(200, json.dumps(d if d is not None else []).encode(), "application/json")
@@ -286,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
         ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat)\.(js|css)", name
+            r"pages/(home|tickets|ticket|newticket|settings|chat|notes)\.(js|css)", name
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (
@@ -398,6 +408,8 @@ class Handler(BaseHTTPRequestHandler):
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
         state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+        if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
+            state["chat_dm_result"] = extra
         if body.get("op") == "config.agent.test" and isinstance(
             extra, dict
         ):  # the answer of the try, plain words only

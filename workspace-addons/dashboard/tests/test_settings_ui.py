@@ -47,12 +47,11 @@ def test_shared_links_are_optional_and_use_plain_actions():
         assert text in src
 
 
-def test_reply_is_optional_and_never_invented():
+def test_message_button_opens_chat():
     src = webjs.all_js()
     part = src[src.index('function messageSend('):src.index('async function copyText(')]
-    assert 'const args = {workspace:peer, text};' in part
-    assert 'if (control.dataset.replyTo !== undefined) args.reply_to = control.dataset.replyTo;' in part
-    assert "act('message.send', args)" in part
+    assert "location.hash = '#chat/' + peer" in part
+    assert "dialog(" not in part
 
 
 def test_actions_and_feature_detection_in_node():
@@ -100,15 +99,11 @@ loadAddon = async () => {};
   repeatsDialog('t_open', 'automation');
   assert.equal(selects.at(-1).value, 'every day at 9');
   assert.deepEqual(calls.pop(), {op:'addon.act', args:{addon:'automation', verb:'copy', target:'t_open'}});
-  global.el = tag => Object.assign(node(tag), {value:'A reply'});
-  for (const reply of [undefined, 'msg_123']) {
-    const dataset = {sendTo:'ws_peer'};
-    if (reply !== undefined) dataset.replyTo = reply;
-    messageSend({dataset}); await controls.at(-1).onclick();
-    const expected = {workspace:'ws_peer', text:'A reply'};
-    if (reply !== undefined) expected.reply_to = reply;
-    assert.deepEqual(calls.pop(), {op:'message.send', args:expected});
-  }
+  global.location = {hash:''};
+  messageSend({dataset:{sendTo:'ws_abcdefghij'}});
+  assert.equal(location.hash, '#chat/ws_abcdefghij');
+  messageSend({dataset:{sendTo:'../../bad'}});
+  assert.equal(location.hash, '#chat/ws_abcdefghij');
   global.fetch = async () => ({status:200, json:async () => ({links:[]})});
   await loadSharedLinks(); assert.deepEqual(sharedLinks, []);
   global.fetch = async () => ({status:404});

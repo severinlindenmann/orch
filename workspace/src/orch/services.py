@@ -8,17 +8,72 @@ dropped on read.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from orch import addons, skills
 from orch.errors import Refused
+
+_local = threading.local()  # lock depth per thread: reentrant inside one thread only
+
+
+@contextlib.contextmanager
+def locked(timeout: float = 180.0):
+    """One lock (ORCH_HOME/services.lock) around every start, stop and restart, so two orch processes never
+    interleave their read-modify-write of running.json or stop what the other just started. Reentrant in this
+    process. Gives up after `timeout` seconds with a clear message (the lock dies with its process)."""
+    if getattr(_local, "depth", 0):
+        _local.depth += 1
+        try:
+            yield
+        finally:
+            _local.depth -= 1
+        return
+    path = addons.home() / "services.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+b") as f:
+        end = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() > end:
+                    raise Refused(
+                        "Another orch start or stop is still running. Try again in a minute."
+                    ) from None
+                time.sleep(0.2)
+        _local.depth = 1
+        try:
+            yield
+        finally:
+            _local.depth = 0
+            if os.name == "nt":
+                import msvcrt
+
+                try:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass  # closing the file releases it; never mask the original exception
+            # POSIX: closing the file releases the flock
 
 
 def running_path() -> Path:
@@ -108,8 +163,18 @@ def _services(root: Path) -> dict[str, dict]:
     return {n: m for n, m in sorted(addons.active_manifests(root).items()) if m["background"]}
 
 
+def _default_signals() -> None:
+    """In the child before exec: the add-on and the daemon it starts get normal SIGHUP/SIGPIPE handling even
+    when this process ignores them (an ignored signal is inherited through exec)."""
+    import signal
+
+    for sig in ("SIGHUP", "SIGPIPE"):
+        if hasattr(signal, sig):
+            signal.signal(getattr(signal, sig), signal.SIG_DFL)
+
+
 def _call(root: Path, name: str, m: dict, sub: str) -> dict:
-    env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": addons.orch_bin()}
+    env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
     try:
         r = subprocess.run(
             [sys.executable, "-P", "-m", m["run"], sub, "--json"],
@@ -119,6 +184,7 @@ def _call(root: Path, name: str, m: dict, sub: str) -> dict:
             text=True,
             timeout=60,
             stdin=subprocess.DEVNULL,
+            **({"preexec_fn": _default_signals} if os.name != "nt" else {}),
         )
     except subprocess.TimeoutExpired:
         return {"error": f"'{name} {sub}' did not answer within 60 seconds."}
@@ -155,6 +221,11 @@ def _workspace_root(root: Path) -> Path:
 
 
 def start(root: Path, only: set[str] | None = None) -> list[dict]:
+    with locked():
+        return _start(root, only)
+
+
+def _start(root: Path, only: set[str] | None = None) -> list[dict]:
     """Start the background process of every active add-on here. One row per add-on."""
     root = _workspace_root(root).resolve()
     skills.ensure_gitignore(root)  # .orch/run/ (runtime files of the add-ons) stays out of git
@@ -191,6 +262,11 @@ def start(root: Path, only: set[str] | None = None) -> list[dict]:
 
 
 def stop(root: Path, only: set[str] | None = None) -> list[dict]:
+    with locked():
+        return _stop(root, only)
+
+
+def _stop(root: Path, only: set[str] | None = None) -> list[dict]:
     """Stop every background process of this workspace. An add-on that is no longer on here is not run:
     its process sees that and ends by itself."""
     root = root.resolve()

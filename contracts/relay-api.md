@@ -21,7 +21,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | text with `body.ticket_view` | as text (a `ticket_view.light: true` update is a quiet status update of a ticket the phone already lists: only title, status, started, running, summary, agent, updated_at; the phone overlays them on its last full snapshot; the relay treats it like any other), and: `body.update` is set (schema), `body.ticket_view` is at most 16384 bytes as compact UTF-8 JSON (else `422 invalid`), and every attachment `blob_id` was uploaded by the sender with that `size` (another sender's or a missing blob → `404`, a wrong size → `422`). The relay never reads the snapshot otherwise |
 | text (phone fields) | `body.client_id`, `attachments`, `voice`, `location` and `feedback` are set only by the relay on the texts it builds for `POST /v1/phone/send`; a workspace text with any of them → `422 invalid` |
 | text, question | to a workspace: pair rule `text` from → to. `to: "ph_…"`: that phone is paired (signed in) and the sender is on its list, else `403 not_allowed` ("That phone is not paired with <name>. In the relay admin, open Phones and tick <name> …"). `to: "phones"` = every paired phone with the sender on its list (none = stored, reaches nobody). Only text and questions go to phones |
-| answer | `reply_to` is a `question` that `to` sent to `from` (questions to `phones` / `ph_…` are answered by phones only, `POST /v1/phone/answer`). `ticket` and `question_id` are copied from that question, not trusted from the sender |
+| answer | `reply_to` is a `question` that `to` sent to `from` (questions to `phones` / `ph_…` are answered by phones only, `POST /v1/phone/answer`). `ticket` (absent when the question has none: a ticket proposal) and `question_id` are copied from that question, not trusted from the sender |
 | file | pair rule `files`, and the blob was uploaded by the sender; `size` and `sha256` must match the stored blob |
 | delegate / start | pair rule `delegate` / `start`. The relay does **not** check the allow; the receiver does (local-files.md) |
 | allow | `reply_to` is a delegate/start that `to` sent to `from` |
@@ -49,6 +49,16 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
 | POST | `/v1/transcribe` | Same as `/v1/phone/transcribe`, with workspace auth (agents transcribe audio files) | Same as `/v1/phone/transcribe` |
 | GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}` (its `phones` = the paired phones that may reach this workspace). What is missing was unassigned and gets removed locally (local-files.md) |
+
+## Usage counts and policy (draft 02; usage-counts.md, counts.schema.json)
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| PUT | `/v1/usage/days/<YYYY-MM-DD>` | `$defs/upload` (`orch.usage/1`, counts only, `day` = the path) | `200 {day, replaced}`. Idempotent per workspace + day (replaces the stored day). Future or > 400 days old → `422`; counts off for this workspace or relay-wide → `403 not_allowed`; > 256 KB → `413`; with `share_names: false` a `name` on an item whose source is not admin, builtin or marketplace → `422 invalid`, nothing stored. Kept 400 days |
+| GET | `/v1/policy` | – | `$defs/policy` `{usage_counts: on\|off, live_session: allowed\|locked_off}`; also in `GET /v1/refresh` as `policy` (a change raises `version` + refresh-hint) |
+| GET / PUT | `/admin/api/policy` | PUT: `{usage_counts?: bool, live_session_locked?: bool}` | `{usage_counts, live_session_locked}` (defaults true, false). Admin auth as for all admin routes |
+| PATCH | `/admin/api/workspaces/<id>` | `{usage_counts: bool}` | `200` workspace card. Off for this workspace only; effective = relay-wide AND this |
+| GET | `/admin/api/usage?workspace=&from=&to=&kind=` | – | `{items: [{workspace, day, kind, name, ref, source, uses, runs, ok, failed, refused}], next}` |
 
 ## Phone API
 
@@ -203,6 +213,8 @@ Ask for changes answers the typed text (1-2000 chars, never empty). The workspac
 question is the current round, once (relay: first answer wins); `accept` = the dashboard Accept, any other text = the dashboard "Ask for changes" with
 that note (a bare `changes` is nothing to send: history line only). Attributed `human:<stored name of the paired phone>` (`human:<ph id>` if it has none), from the relay-authenticated sender only, never from `body.answered_by`. Only a phone paired with this workspace may answer; a group-routed answer is refused. The relay refuses (`422`) a question with `body.review` unless `question_id` is `review-<n>`, `options` are exactly `["accept","changes"]` and there is no `scope`. The relay stores and lists it like any question but does not push it (the Ready-for-review text is the push). A stale or repeated answer is a history line only. vectors/review-question-v1.json.
 
+**Ticket proposal question** (`body.proposal: "make_ticket"`): when the General helper proposes a ticket, the workspace sends ONE normal `question` to `phones` (no `ticket` on the message, no separate text) with `question_id: "proposal-<this question's own message id>"`, `title` = the proposed ticket title (1-120 chars, cleaned), `text` = the helper's one sentence, `options: ["make","not_now"]`, `recommended: null`, optional `when` (YYYY-MM-DD, only with the marker; the workspace does not send it yet). The phone shows a Make ticket card. `make` = the dashboard "Make ticket" (same code, idempotent per proposal id), no separate ack text: the phone shows the result on the card ("Ticket made"); only when the dashboard decided first does the workspace send the ordinary ack `Got it: <title>` (ticket + key, `reply_to` = the question), which closes the card; `not_now` = a history line only. First answer wins; a stale answer (the dashboard decided first, a second answer, a moved proposal) is nothing but a history line. Attributed `human:<stored name of the paired phone>`, from the relay-authenticated sender only, never from `body.answered_by`; only a phone paired with this workspace may answer, a group-routed answer, a subscriber or an agent is refused. The relay refuses (`422`) `body.proposal` unless it is `make_ticket`, `question_id` is `proposal-<the message's own id>`, `title` is 1-120 chars, `options` are exactly `["make","not_now"]`, there is no `scope`, no `review`, and the message has no `ticket`; and refuses a `question_id` starting with `proposal-` without the marker. Stored, listed and pushed like any question (it is the helper's reply to the person's own Chat message). vectors/proposal-question-v1.json.
+
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.
 Work updates (`body.update` on a text, message.schema.json): the relay pushes a text with `update.kind` = `result`, `question`,
@@ -223,7 +235,8 @@ Pushes go to the phones the message is for: `phones` = every paired phone with t
 
 Admin prompt for a workspace (shown once): `orch addon add relay --yes` then `orch relay connect https://relay.severin.io --workspace ws_… --token orn_…`
 (+ the `onboarding.sh/.ps1` line for machines without orch). `connect` runs `orch init` if needed, checks `/v1/whoami`,
-writes `.orch/secrets/relay.json`, copies the `orch-relay` skill (shipped inside the CLI), adds the AGENTS.md block, then runs `orch relay refresh`.
+writes the relay record (url, workspace, token) into the guarded orch home with a `relay.connect` proof (human-proof.md;
+the token is stored nowhere else) and `.orch/secrets/relay.json` with url and workspace only, copies the `orch-relay` skill (shipped inside the CLI), adds the AGENTS.md block, then runs `orch relay refresh`.
 
 Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one use):
 `orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_<22 chars>`

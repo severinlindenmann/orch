@@ -108,7 +108,7 @@ test('the review buttons show whenever the status is Review, an open question fi
   assert.ok(nodes(review).some(n => n.children.some(c => typeof c === 'string' && c.startsWith('Completed '))));
 
 });
-test('Copy ticket and Repeat show in the ticket menu only when the repeats add-on is on', () => {
+test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats add-on is on', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
   const ctx = {window:{DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
@@ -124,7 +124,7 @@ test('Copy ticket and Repeat show in the ticket menu only when the repeats add-o
   assert.doesNotMatch(JSON.stringify(ctx.detail(t)), /Copy ticket|Repeat…/);
   ctx.repeatsAddon = () => 'automation';
   const on = JSON.stringify(ctx.detail(t));
-  assert.match(on, /Copy ticket/);
+  assert.doesNotMatch(on, /Copy ticket/);
   assert.match(on, /Repeat…/);
 });
 
@@ -219,4 +219,16 @@ test('task proof chips: only plain evidence files and http(s) links get a chip, 
   // the summary of the proof is the task line, even when a later proof has none
   const task = {done:true, evidence:[{type:'file', ref:base + 'a.md', summary:'Connected as Dev Team.'}, {type:'file', ref:base + 'b.png'}]};
   assert.equal(helpers.outcome(task), 'Connected as Dev Team.');
+});
+
+test('agent bar shows the hold reason as plain text and hides it when absent', () => {
+  const c = context({state:{runs:{t1:{running:true, state:'alive', hold:"Waiting: clear the text in the agent's window.", claim:{agent:'claude', mode:'live'}}}, settings:null}, liveLinkFor:() => null, ticketWarmth:() => null, name:v => v, clean:v => String(v ?? '')});
+  vm.runInContext(source.slice(source.indexOf('function agentBar(t)'), source.indexOf('const surface =')), c);
+  const bar = JSON.stringify(c.agentBar({id:'t1', checklist:[{state:'doing', text:'Writing the plan'}]}));
+  assert.match(bar, /Waiting: clear the text in the agent's window\./);
+  assert.doesNotMatch(bar, /Writing the plan/);
+  c.state.runs.t1.hold = undefined;
+  const bare = JSON.stringify(c.agentBar({id:'t1', checklist:[{state:'doing', text:'Writing the plan'}]}));
+  assert.match(bare, /Writing the plan/);
+  assert.doesNotMatch(bare, /Waiting:/);
 });

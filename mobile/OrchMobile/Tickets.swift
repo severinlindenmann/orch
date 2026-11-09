@@ -103,7 +103,7 @@ enum TicketBuilder {
                                 title: view?.title ?? u.title ?? u.text, text: text, status: st, kind: u.kind, at: u.at, question: nil,
                                 key: u.key, view: view)
         }
-        for q in questions where !q.isReview && answers[q.id] == nil {
+        for q in questions where !q.isReview && !q.isMakeTicket && answers[q.id] == nil {
             let m = q.message
             let key = m.ticket.map { "\(m.from)|\($0)" } ?? "q|\(q.id)"
             let old = byKey[key]

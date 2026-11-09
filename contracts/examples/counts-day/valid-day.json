@@ -1,0 +1,34 @@
+{
+ "schema": "orch.counts-day/1",
+ "day": "2026-11-15",
+ "runs": [
+  {
+   "run": "r_a000001",
+   "ticket": "t_aaaaaa",
+   "sees": [
+    "skill",
+    "tool",
+    "mcp",
+    "key"
+   ],
+   "partial": false
+  }
+ ],
+ "items": [
+  {
+   "kind": "skill",
+   "name": "invoice-export",
+   "source": "workspace",
+   "action": null,
+   "version": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "uses": 1,
+   "ok": 1,
+   "failed": 0,
+   "refused": 0,
+   "unknown": 0,
+   "runs": [
+    "r_a000001"
+   ]
+  }
+ ]
+}

@@ -8,7 +8,7 @@ function context() {
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), snapshot:false,
     state:{workspace:'Fish', chat:{messages:[]}}, ticketOf:() => null, time:() => '',
     MutationObserver:class {observe(){}}, document:{documentElement:{}}, CSS:{supports:() => false},
-    iconEl:() => null, window:{}, location:{hash:''}, render(){}});
+    iconEl:() => null, window:{addEventListener(){}}, location:{hash:''}, render(){}});
   vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/chat.js'), 'utf8'), c);
   return c;
 }
@@ -40,4 +40,14 @@ test('moved conversation renders its banner and header ticket link', () => {
   assert.match(thread, /This conversation now belongs to ticket/);
   assert.match(thread, /Open ticket/);
   assert.match(JSON.stringify(c.chatHeader(null, false)), /FS-1/);
+});
+test('the helper is shown by the workspace name only, no "helper" suffix', () => {
+  const c = context();
+  c.state.workspace = 'pilatus'; c.state.chat.helper = 'pilatus helper';
+  c.state.chat.messages = [{id:'m1', by:'ws_x', text:'Hi', at:'2026-11-09T10:00:00Z'}];
+  const thread = JSON.stringify(c.chatThread(null, null));
+  assert.match(thread, /Pilatus/);
+  assert.doesNotMatch(thread, /[Pp]ilatus helper/);
+  assert.match(JSON.stringify(c.chatThinking('Pilatus', true)), /Pilatus is thinking/);
+  assert.doesNotMatch(JSON.stringify(c.chatThinking('Pilatus', true)), /helper/);
 });

@@ -90,6 +90,8 @@ struct QuestionBody: Codable, Sendable, Equatable {
     var scope: String? = nil
     var allowQuestion: Bool? = nil // allow_question via JSONCoding
     var review: Bool? = nil // review via JSONCoding
+    var proposal: String? = nil
+    var when: String? = nil
     var groupRef: GroupRef? = nil // group_ref via JSONCoding
 }
 
@@ -141,6 +143,15 @@ struct Question: Codable, Sendable, Equatable, Identifiable {
     var isReview: Bool {
         message.body.review == true && message.body.options.count == 2 &&
             Set(message.body.options) == Set(["accept", "changes"])
+    }
+    /// Only contract-valid proposals receive the ticket creation controls.
+    var isMakeTicket: Bool {
+        let body = message.body
+        return body.proposal == "make_ticket" && body.options.count == 2 &&
+            Set(body.options) == Set(["make", "not_now"]) &&
+            body.questionId == "proposal-" + message.id &&
+            (1...120).contains(body.title?.count ?? 0) &&
+            message.ticket == nil && body.scope == nil && body.review == nil
     }
     var isAllow: Bool { isGroupAllow || isLegacyAllow }
     /// Labels never change the raw option sent to the relay.

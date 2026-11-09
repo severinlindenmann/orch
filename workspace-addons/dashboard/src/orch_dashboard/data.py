@@ -173,6 +173,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         mobile.mark_chat_history(t)
         tickets.append(t)
     phone_delivery.mark(root, tickets)
+    add_proof_state(tickets)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     by_id = {t["id"]: t for t in tickets}
@@ -186,6 +187,19 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
             p["parts_total"] += 1
             p["parts_done"] += int(t["status"] == "done")
     return tickets, skipped
+
+
+def add_proof_state(tickets: list[dict]) -> None:
+    """`proof` on each ticket: the core's proof_state (per task, what is not covered, the one-line summary)."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        try:  # a ticket the core cannot read gets no line, never an error
+            t["proof"] = core.proof_state(t)
+        except (KeyError, TypeError, ValueError):
+            t.pop("proof", None)
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
@@ -586,6 +600,10 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
         with ThreadPoolExecutor(max_workers=6) as pool:
             got = list(pool.map(lambda i: run_orch(orch_bin, ["run", "status", i, "--json"], root), todo))
         for i, r in zip(todo, got, strict=True):
+            if isinstance(r, dict) and "hold" in r:  # the core's one-line reason a live run waits: text only
+                r["hold"] = " ".join(r["hold"].split())[:200] if isinstance(r["hold"], str) else None
+                if not r["hold"]:
+                    r.pop("hold")
             _RUNS[(str(root), i)] = (now, r if isinstance(r, dict) else None)
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
@@ -733,3 +751,16 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
             }
         )
     return {"links": links}
+
+
+# Workspace DM reads use the same CLI boundary as Chat History.
+def load_chat_contacts(root: Path, orch_bin: str | None) -> list | None:
+    data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
+    return data if isinstance(data, list) else None
+
+
+def load_chat_thread(root: Path, orch_bin: str | None, ws: str) -> dict | None:
+    if not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
+        return None
+    data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
+    return data if isinstance(data, dict) else None

@@ -1,0 +1,129 @@
+[
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 1,
+  "at": "2026-11-16T09:11:00Z",
+  "type": "start",
+  "title": "Nightly export",
+  "command": "export-invoices",
+  "pid": 4242
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 2,
+  "at": "2026-11-16T09:12:00Z",
+  "type": "step",
+  "step": "read",
+  "label": "Read invoices",
+  "state": "running"
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 3,
+  "at": "2026-11-16T09:13:00Z",
+  "type": "progress",
+  "done": 12,
+  "total": 40,
+  "unit": "files"
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 4,
+  "at": "2026-11-16T09:14:00Z",
+  "type": "step",
+  "step": "read",
+  "label": "Read invoices",
+  "state": "done"
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 5,
+  "at": "2026-11-16T09:15:00Z",
+  "type": "metric",
+  "name": "Rows",
+  "value": 1204
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 6,
+  "at": "2026-11-16T09:16:00Z",
+  "type": "table",
+  "table": {
+   "type": "table",
+   "columns": [
+    {
+     "key": "id",
+     "label": "Invoice"
+    }
+   ],
+   "rows": [
+    {
+     "id": "INV-1001"
+    }
+   ]
+  }
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 7,
+  "at": "2026-11-16T09:17:00Z",
+  "type": "artifact",
+  "path": ".orch/tickets/t_inv7c2/artifacts/invoices.csv",
+  "label": "invoices.csv"
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 8,
+  "at": "2026-11-16T09:18:00Z",
+  "type": "link",
+  "url": "https://example.com/reports/11",
+  "label": "Report"
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 9,
+  "at": "2026-11-16T09:19:00Z",
+  "type": "log",
+  "stream": "err",
+  "text": "2 invoices skipped"
+ },
+ {
+  "v": 1,
+  "job": "j_x7k2m9",
+  "run": "r_8k2m01",
+  "ticket": "t_inv7c2",
+  "seq": 10,
+  "at": "2026-11-16T09:20:00Z",
+  "type": "end",
+  "status": "ok",
+  "summary": "Exported 1 204 invoices",
+  "exit": 0
+ }
+]

@@ -762,3 +762,14 @@ def test_start_reason_never_shows_paths_commands_or_secrets():
         "",
     ):
         assert r(raw) == "it did not start"
+
+
+def test_agent_line_shows_the_core_hold_reason_and_drops_it_when_absent():
+    """fb18 (hold-why): a held live run's status line is the core's words, as text; nothing without a hold."""
+    now = 1_700_000_000_000
+    why = "Waiting: the agent's input box isn't visible."
+    run = {"running": True, "state": "alive", "claim": {"agent": "claude", "mode": "live", "live": {"state": "idle"}}}
+    w = call("agentLine", T, {**run, "hold": why}, now, None)
+    assert w["status"] == why and w["hold"] == why
+    w = call("agentLine", T, run, now, None)
+    assert "hold" not in w and why not in w["status"]

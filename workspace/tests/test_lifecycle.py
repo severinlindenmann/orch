@@ -275,7 +275,7 @@ def test_two_pulls_at_once_send_one_result(proj, run, monkeypatch):
 
 
 def test_a_result_that_could_not_be_sent_is_pushed_on_the_next_pull(proj, run, monkeypatch):
-    """F6 (delta review): a failed send undoes the claim, status too, so the retry is a result again."""
+    """F6 (delta review): a failed send keeps the result entry, so the retry is a result again."""
     from orch import relay
 
     tid = _new(run)
@@ -292,6 +292,8 @@ def test_a_result_that_could_not_be_sent_is_pushed_on_the_next_pull(proj, run, m
 
     monkeypatch.setattr(relay, "send_text", flaky)
     assert phone_view.sync(proj) == []
+    # an unclear failure keeps the entry; once its lease is over the same result goes again (same id)
+    phone_view.update_state(proj, lambda st: st["results"][tid].update(at=0))
     assert phone_view.sync(proj) == [tid] and calls == ["result", "result"]
 
 

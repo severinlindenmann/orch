@@ -28,9 +28,9 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, procs, services, tickets
+from orch import adapters, procs, runhooks, services, tickets
 from orch.errors import Refused
-from orch.procs import pid_started
+from orch.procs import pid_started, same_start
 
 LEASE_SECONDS = 30 * 60
 LOCK_STALE_SECONDS = 30
@@ -258,7 +258,7 @@ def _running(pid, started) -> bool:
     if not isinstance(pid, int) or not services.pid_alive(pid):
         return False
     now_started = pid_started(pid) if started else None
-    return not (started and now_started and now_started != started)  # else the pid was reused
+    return not (started and now_started and not same_start(now_started, started))  # else the pid was reused
 
 
 def state(rec: dict, at: float | None = None) -> str:
@@ -588,6 +588,7 @@ def claim(
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
             rec["pending"] = True
         _write(root, rec)
+    runhooks.fire("run_start", root=root, tid=tid, run=rec["run"], by=by)
     try:
         label = adapters.load(agent, root)["label"]
     except Refused:
@@ -636,7 +637,8 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         _delete(root, tid)
         for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
             (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
-        return {"released": True, "pending": waiting}
+    runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
+    return {"released": True, "pending": waiting}
 
 
 # A Working ticket with no run gets this long for its agent to start. A start writes
@@ -711,12 +713,22 @@ def _description_plan(ticket: dict) -> list[str]:
 
 
 def _done_when_plan(ticket: dict) -> list[str]:
-    if not ticket.get("done_when") or ticket.get("checklist"):
+    if not ticket.get("done_when"):
         return []
+    covers = 'Give each task `--covers "<the part of Done when it covers, quoted>"` so every part has a task.'
+    if ticket.get("checklist"):
+        if any(c.get("covers") for c in ticket["checklist"]):
+            return []
+        return [
+            "The person described what should be true when it is done: "
+            f"{_clip(ticket['done_when'], 2000)}. Link each existing task to the part it covers with "
+            f'`orch check edit {ticket["id"]} <task id> --covers "<quote>"`, '
+            "and add a task for any part that has none."
+        ]
     return [
         "The person described what should be true when it is done: "
         f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
-        "(one check per thing that must be true), then start."
+        f"(one check per thing that must be true). {covers} Then start."
     ]
 
 
@@ -974,6 +986,7 @@ def start(
             proc = subprocess.Popen(
                 cmd,
                 cwd=root,
+                env={**os.environ, "ORCH_ROOT": str(root)},
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=errlog,
@@ -994,10 +1007,11 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
-def _agent_environ() -> dict:
+def _agent_environ(root: Path) -> dict:
     """The agent's environment: ours without ORCH_VIA. A page that started the run is not where the agent's
-    own changes come from."""
-    return {k: v for k, v in os.environ.items() if k != "ORCH_VIA"}
+    own changes come from. ORCH_ROOT (always overwritten) names the workspace, so an agent working in a
+    copy of the folder still writes to the real tickets."""
+    return {**{k: v for k, v in os.environ.items() if k != "ORCH_VIA"}, "ORCH_ROOT": str(root)}
 
 
 def open_log(path: Path):
@@ -1139,7 +1153,7 @@ def wrap(
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
     current: dict = {}
@@ -1227,7 +1241,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     # guard: in-process lock between the submit watcher thread and the SIGTERM handler (the run lock is per
     # process, so it does not keep them apart); stop: set by either, the watcher writes nothing after it
     current: dict = {"guard": threading.Lock(), "stop": threading.Event()}
