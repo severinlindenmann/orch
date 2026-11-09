@@ -12,11 +12,20 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     for name in agentsdata.FRAGMENTS:
         if name == "reminder":  # B9: the work-check hooks (not empty)
             continue
-        assert json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes()) == {}
+        got = json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes())
+        if name == "connections":  # W2b 1.10: only the settings locations (inventory.md)
+            assert {a: set(v) for a, v in got["adapters"].items()} == {
+                "claude": {"mcp_settings"},
+                "codex": {"mcp_settings"},
+            }
+        else:
+            assert got == {}
     merged = agentsdata.load()
     rem = json.loads((agentsdata.agents_dir() / "reminder.json").read_bytes())["adapters"]["claude"]
     assert merged["adapters"]["claude"]["reminder_hooks"] == rem["reminder_hooks"]
     assert merged["adapters"]["claude"]["oneshot"]["settings_args"] == rem["oneshot"]["settings_args"]
+    for adapter in merged["adapters"].values():
+        adapter.pop("mcp_settings", None)
     for key in ("reminder_hooks", "reminder"):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")

@@ -1,1 +1,16 @@
-{}
+{
+  "adapters": {
+    "claude": {
+      "mcp_settings": [
+        {"file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"]},
+        {"file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"]},
+        {"file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"]}
+      ]
+    },
+    "codex": {
+      "mcp_settings": [
+        {"file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"]}
+      ]
+    }
+  }
+}
