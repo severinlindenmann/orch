@@ -30,7 +30,7 @@ from pathlib import Path
 
 from orch import adapters, procs, runhooks, services, tickets
 from orch.errors import Refused
-from orch.procs import pid_started
+from orch.procs import pid_started, same_start
 
 LEASE_SECONDS = 30 * 60
 LOCK_STALE_SECONDS = 30
@@ -258,7 +258,7 @@ def _running(pid, started) -> bool:
     if not isinstance(pid, int) or not services.pid_alive(pid):
         return False
     now_started = pid_started(pid) if started else None
-    return not (started and now_started and now_started != started)  # else the pid was reused
+    return not (started and now_started and not same_start(now_started, started))  # else the pid was reused
 
 
 def state(rec: dict, at: float | None = None) -> str:
