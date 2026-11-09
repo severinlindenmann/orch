@@ -565,3 +565,53 @@ def test_flags_that_are_not_bad_words_still_pass():
         ["log", "--", "--textconv"],
     ):
         assert safegit.refusal(ok) is None, ok
+
+
+REFUSED_CALLS = [
+    # caller-supplied global options before the command
+    ["-c", "x=y", "status"],
+    ["--config-env=a=b", "status"],
+    ["--git-dir=x", "status"],
+    ["--exec-path=x", "status"],
+    ["--work-tree", "x", "status"],
+    ["--attr-source", "x", "status"],
+    ["--namespace=x", "status"],
+    # words that run external programs, also abbreviated
+    ["diff", "--ext-diff"],
+    ["diff", "--ext"],
+    ["log", "--textconv"],
+    ["log", "--textc"],
+    ["log", "--show-signature"],
+    ["log", "--show-sig"],
+    ["cat-file", "--textconv", "HEAD:a"],
+    ["cat-file", "--textc", "HEAD:a"],
+    ["cat-file", "--filters", "HEAD:a"],
+    ["cat-file", "--filt", "HEAD:a"],
+    # commands and sub-commands orch does not run
+    ["config", "k", "v"],
+    ["config", "--unset", "k"],
+    ["config", "alias.x", "!sh"],
+    ["worktree", "move", "a", "b"],
+    ["worktree", "lock", "p"],
+    ["stash", "pop"],
+    ["stash", "push"],
+    ["gc"],
+    ["fetch"],
+    ["push"],
+    ["rebase", "-i"],
+    ["clean", "-i"],
+    ["checkout", "x"],
+    # interactive modes, also abbreviated
+    ["add", "--patc"],
+    ["add", "--inter"],
+    ["add", "--ed"],
+    ["add", "-e"],
+    ["commit", "--inte"],
+    ["commit", "-p"],
+]
+
+
+@pytest.mark.parametrize("args", REFUSED_CALLS, ids=lambda a: " ".join(a))
+def test_these_calls_are_refused_with_rc_125(args, tmp_path):
+    rc, _, err = safegit.run(args, tmp_path, filters=False)
+    assert rc == safegit.REFUSED == 125 and err
