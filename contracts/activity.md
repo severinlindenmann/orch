@@ -33,7 +33,8 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
 
 - `id` = the agent tool's own tool-call id when the source carries one (a hook payload and the tool's log carry the same id,
   which is what makes dedupe work). Otherwise `<run>:<seq>` (e.g. `r_8k2m01:12`). A collector that knows a tool-call id
-  must use it; it must not invent one.
+  must use it; it must not invent one. A tool-call id with characters outside `[A-Za-z0-9_.:-]` (or longer than 160) is
+  replaced by `x_` + the first 32 hex of its sha256, the same for hook and collector, so dedupe still works (vectors `ids`).
 - `seq` = position in the run file, 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
 - `run`, `session`, `agent` (`main` or `h_<n>`), `parent` (null for main) bind the event; `ticket` is the run's ticket.
 - **Detail file id**: `id` when it matches `^[A-Za-z0-9_-]{1,128}$`, else `x_` + the first 32 hex characters of
@@ -45,6 +46,11 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch run event`
   call that appends under the per-run lock `runs/<run>.lock`, O_EXCL, released in a `finally`). Each event is one line, one
   `write()` of at most 8 KB (text is cut, never the line split), so lines never mix.
+- **The hook entry is narrow.** `orch run event` (the only out-of-process way in) accepts only `step`, `denial`,
+  `helper.start`, `helper.end` and `usage`, and always writes `via: hook` whatever the caller sent. `task.*`, `ask`,
+  `run.state`, `key.use`, `job` and `session.input` are written only in-process by the core, the broker and `orch job`
+  (vectors `hook_entry`). *Implementing slice 1.7 must* also bind the call to the run (`ORCH_RUN` plus the run's per-run hook
+  file token) and drop lines for another run.
 - **Fail closed.** The writer takes a value hider as a required argument; there is no default and no pass-through. A hider is
   "registered" only when it was built from this workspace's key store in the **trusted orch home** (secrets.md, Where: resolved
   from the account database, never from an environment variable unless it equals the value pinned at install). An empty store

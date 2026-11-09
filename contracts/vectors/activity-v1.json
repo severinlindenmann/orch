@@ -944,5 +944,112 @@
     }
    ]
   }
+ ],
+ "hook_entry": [
+  {
+   "name": "step stored as hook",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   }
+  },
+  {
+   "name": "step claiming core is forced to hook",
+   "line": {
+    "kind": "step",
+    "via": "core",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   }
+  },
+  {
+   "name": "session.input refused",
+   "line": {
+    "kind": "session.input",
+    "via": "core",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "key.use refused",
+   "line": {
+    "kind": "key.use",
+    "via": "broker",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "task.done refused",
+   "line": {
+    "kind": "task.done",
+    "via": "core",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "run.state refused",
+   "line": {
+    "kind": "run.state",
+    "via": "core",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "job refused",
+   "line": {
+    "kind": "job",
+    "via": "job",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "unknown kind refused",
+   "line": {
+    "kind": "made.up",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "usage stored",
+   "line": {
+    "kind": "usage",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": {
+    "kind": "usage",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01"
+   }
+  }
  ]
 }

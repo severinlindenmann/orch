@@ -232,6 +232,16 @@ def _t(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
 
 
+HOOK_KINDS = ("step", "denial", "helper.start", "helper.end", "usage")
+
+
+def act_hook_accept(line):
+    """What the out-of-process hook entry (orch run event) stores: only hook kinds, always via hook."""
+    if line.get("kind") not in HOOK_KINDS:
+        return "refused"
+    return {**line, "via": "hook"}
+
+
 def act_retention(case):
     now, keep, cap = _t(case["now"]), case["keep_days"], case["max_mb"]
     runs = [dict(r) for r in case["runs"]]
@@ -342,6 +352,8 @@ def kind_activity():
         _expect(f"activity detail_names {c['id']}", act_detail_name(c["id"]), c["file"])
     for c in vec["dedupe"]:
         _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
+    for c in vec["hook_entry"]:
+        _expect(f"activity hook_entry {c['name']}", act_hook_accept(c["line"]), c["stored"])
     for c in vec["retention"]:
         _expect(f"activity retention {c['name']}", act_retention(c), c["expect"])
     for c in vec["fail_closed"]:
