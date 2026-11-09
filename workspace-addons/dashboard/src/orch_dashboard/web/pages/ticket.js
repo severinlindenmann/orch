@@ -432,9 +432,15 @@ function ticketShareButton(t, file) {
   };
   return ticketButton('Share with group', 'outline', () => share(false));
 }
-function ticketArtifactPreview(t) {
-  const file = array(artifactData.get(t.id)?.data?.files)[0];
-  return file ? ticketResultCard(t, {}, file, 'artifacts') : null;
+function ticketReviewTile(t, file) {
+  if (!file) return null;
+  const ext = /\.([^.\/]+)$/.exec(file.name)?.[1].toLowerCase();
+  const type = /^(html?|pdf)$/.test(ext || '') ? (ext === 'pdf' ? 'PDF' : 'Page') : ext?.toUpperCase();
+  const meta = [type, typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : null].filter(Boolean).join(' · ');
+  return h('div', {className:'ticket-review-tile'}, iconEl('file'),
+    h('span', {className:'ticket-review-name'}, clean(window.DashHelpers.plainFileName(file.name) || 'Result')),
+    meta ? h('span', {className:'meta'}, meta) : null,
+    snapshot ? null : ticketButton('Open', 'outline', () => previewFile(t.id, 'artifacts', file.name)));
 }
 function artifactsPanel(t) {
   const files = array(artifactData.get(t.id)?.data?.files), proofs = proofRows(t), links = linkRows(t);
@@ -623,22 +629,33 @@ async function ticketSendChanges(t, note) {
   return sent.ok;
 }
 function ticketChangesEditor(t) {
-  const host = h('div', {'data-key':'ticket-changes-' + t.id});
+  const key = 'ticket-changes-' + t.id;
+  const host = h('div', {'data-key':key});
+  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done'));
+  const row = h('div', {className:'row ticket-review-actions'});
   const open = ticketButton('Ask for changes', 'outline', () => {
-    locks.add(host.dataset.key);
-    const input = h('textarea', {className:'input', rows:3, 'aria-label':'What should change?'});
-    const close = () => { locks.delete(host.dataset.key); host.replaceChildren(open); open.focus(); };
-    input.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
-    let added = false;
-    const send = ticketButton('Send changes', 'primary', async () => {
-      if (!input.value.trim() || send.disabled) return;
-      send.disabled = true;
-      if (await ticketSendChanges(t, input.value)) { added = true; close(); render(); }
-      if (!added) send.disabled = false;
+    locks.add(key);
+    let sending = false;
+    const input = h('input', {type:'text', className:'input', placeholder:'What should change?', 'aria-label':'What should change?'});
+    const close = () => { if (sending) return; locks.delete(key); host.replaceChildren(row); open.focus(); };
+    const send = ticketButton('Send', 'primary sm', async () => {
+      if (!input.value.trim() || sending) return;
+      sending = true; send.disabled = true; input.disabled = true; cancel.disabled = true;
+      let sent = false;
+      try { sent = await ticketSendChanges(t, input.value); }
+      finally { sending = false; input.disabled = false; cancel.disabled = false; send.disabled = !input.value.trim(); }
+      if (sent) { close(); render(); }
     });
-    host.replaceChildren(h('label', {}, 'What should change?', input), send); input.focus();
+    const cancel = ticketButton(iconEl('x'), 'ghost icon', close, {'aria-label':'Cancel', 'data-key':'ticket-ask-cancel'});
+    send.disabled = true;
+    input.oninput = () => { send.disabled = sending || !input.value.trim(); };
+    input.onkeydown = e => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send.click(); }
+    };
+    host.replaceChildren(h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
   });
-  host.append(open); return host;
+  row.append(done, open); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
@@ -689,8 +706,13 @@ function detail(t) {
   let next = null;
   if (t.status !== 'done') {
     // Review buttons are there whenever the status is Review, even with an open question: the question comes first.
-    const review = t.status === 'review' ? h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step · Your review'), h('h2', {}, agent + ' finished. Check the result:'), ticketArtifactPreview(t),
-      snapshot ? null : h('div', {className:'row ticket-review-actions'}, ticketButton('Looks good — mark Done', 'primary', () => moveTicket(t.id, 'done')), ticketChangesEditor(t))) : null;
+    const file = array(artifactData.get(t.id)?.data?.files)[0];
+    const at = file?.mtime;
+    const review = t.status === 'review' ? h('section', {className:'card next-step'},
+      h('p', {className:'meta'}, 'Next step · Your review'),
+      h('h2', {}, agent + ' finished' + (file ? ': ' + clean(window.DashHelpers.plainFileName(file.name)) : '')),
+      at ? h('p', {className:'meta'}, 'Completed ' + window.DashHelpers.stamp(at, Date.now())) : null,
+      ticketReviewTile(t, file), snapshot ? null : ticketChangesEditor(t)) : null;
     if (openQuestions.length || review) next = [openQuestions.length ? ticketQuestion(t, openQuestions[0], true) : null, review];
     else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start agent', 'primary', () => act('run.start', {ticket:t.id})));
   }

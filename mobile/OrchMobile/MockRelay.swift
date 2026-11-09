@@ -209,7 +209,8 @@ actor MockRelay: RelayAPI {
                       tags: ["client", "data", "ingestion"], online: true, lastSeen: "2026-11-04T10:41:00Z", openQuestions: open(Self.pilatus),
                       icon: "wallet", color: "amber"),
             Workspace(id: Self.reports, name: "Reports", description: "Weekly and monthly reporting",
-                      tags: ["reports", "scheduler"], online: true, lastSeen: "2026-11-04T10:50:00Z", openQuestions: open(Self.reports)),
+                      tags: ["reports", "scheduler"], online: true, lastSeen: "2026-11-04T10:50:00Z", openQuestions: open(Self.reports),
+                      can: WorkspaceCan(chat: true, tasks: false, files: false)),
         ]
         if names["ws_home000001"] != nil {
             list.append(Workspace(id: "ws_home000001", name: "Home", description: "", tags: [], online: false, lastSeen: nil, openQuestions: 0))
