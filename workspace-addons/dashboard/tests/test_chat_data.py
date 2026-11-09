@@ -16,17 +16,7 @@ STATUS = {
     "helper": "Pilatus helper",
     "ticket": "t_chat0001",
     "day": "2026-11-08",
-    "messages": [
-        {
-            "id": "m_a",
-            "by": "you",
-            "via": "phone",
-            "text": "hi",
-            "convo_start": True,
-            "moved_to": {"id": "t_fish", "key": "FS-1", "title": "Fish"},
-            "refs": [{"kind": "proposal", "title": "Fish", "made": {"id": "t_fish", "key": "FS-1"}}],
-        }
-    ],
+    "messages": [{"id": "m_a", "by": "you", "via": "phone", "text": "hi", "convo_start": True, "moved_to": {"id": "t_fish", "key": "FS-1", "title": "Fish"}, "refs": [{"kind": "proposal", "title": "Fish", "made": {"id": "t_fish", "key": "FS-1"}}]}],
     "activity": {"day": "2026-11-08", "phone_today": 1, "from_workspaces": {"Home": 2}, "running": 3},
     "days": [{"day": "2026-11-07", "count": 4, "last": "bye"}],
 }

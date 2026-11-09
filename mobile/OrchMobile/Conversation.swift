@@ -364,7 +364,8 @@ enum ConversationBuilder {
                 else { key = "artifact:" + $0.id }
                 return seen.insert(key).inserted
             }
-            item.label = review ? "Ready for your review" : "Result"
+            item.label = "Result"
+            item.text = ConversationRules.withoutReviewHeadline(item.text)
             out.append(item)
         }
         return out
@@ -419,6 +420,16 @@ enum ConversationBuilder {
                              topics: topics(workspace: w.id, d, read: read),
                              openQuestions: d.questions.filter { !$0.isReview && $0.message.from == w.id && d.answers[$0.id] == nil }.count)
         }.sorted { ($0.openQuestions > 0 ? 1 : 0, $0.lastAt ?? "") > ($1.openQuestions > 0 ? 1 : 0, $1.lastAt ?? "") }
+    }
+}
+
+extension ConversationRules {
+    /// Remove only the opening review headline and its line break, preserving a nonempty body verbatim.
+    static func withoutReviewHeadline(_ text: String) -> String {
+        guard let newline = text.firstIndex(where: { $0.isNewline }),
+              text[..<newline].lowercased().hasPrefix("ready for your review") else { return text }
+        let body = text[text.index(after: newline)...]
+        return body.isEmpty ? text : String(body)
     }
 }
 
