@@ -34,8 +34,33 @@ from orch import init as init_mod
 from orch.errors import Refused
 
 
+def _env_root() -> Path | None:
+    """ORCH_ROOT, when set: the workspace of whoever started this process (an agent in a copy of the
+    folder must write to the real tickets). Strict: absolute, an existing folder with .orch/ in it; anything
+    else is refused, never a silent fall back to walking up (that could write a second, stale store)."""
+    raw = os.environ.get("ORCH_ROOT")
+    if not raw:
+        return None
+    p = Path(raw)
+    if not p.is_absolute():
+        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. Nothing was changed.")
+    try:
+        p = p.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise Refused(
+            f"ORCH_ROOT points to a folder that does not exist: {raw}. Nothing was changed."
+        ) from None
+    if not p.is_dir() or not (p / ".orch").is_dir():
+        raise Refused(f"ORCH_ROOT points to a folder without orch in it: {raw}. Nothing was changed.")
+    return p
+
+
 def _find_root() -> Path:
-    """The workspace root: nearest folder upwards with .orch/ or .agents/, else the current folder."""
+    """The workspace root: ORCH_ROOT when set, else the nearest folder upwards with .orch/ or .agents/,
+    else the current folder."""
+    env = _env_root()
+    if env is not None:
+        return env
     cwd = Path.cwd()
     for p in (cwd, *cwd.parents):
         if (p / ".orch").is_dir() or (p / ".agents").is_dir():
@@ -514,6 +539,21 @@ def _child_warning(root: Path, t: dict) -> list[str]:
     return [f"{len(kids)} sub-tickets are still open: " + ", ".join(k["id"] for k in kids)]
 
 
+def _init_guard(cwd: Path) -> None:
+    """`orch init` works on the current folder, so it refuses where that folder is a copy of a workspace."""
+    here = cwd.resolve()
+    env = _env_root()
+    if env is not None and env != here:
+        raise Refused(
+            "This folder is a copy of another orch workspace. Run orch init in the original folder."
+        )
+    # no addons.home() here: it falls back (and traces) when the folder we stand in is under ORCH_HOME
+    homes = [Path(os.environ["ORCH_HOME"])] if os.environ.get("ORCH_HOME") else []
+    for h in (*homes, addons.real_home() / ".orch-tool"):
+        if (h.resolve() / "worktrees") in (here, *here.parents):
+            raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
+
+
 def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
@@ -524,6 +564,7 @@ def run(args: argparse.Namespace) -> None:
 
     if cmd == "init":
         root = Path.cwd()
+        _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
         lines = init_mod.init(root, args.code)
@@ -882,7 +923,6 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
-    root = _find_root()
     want_json = "--json" in argv
 
     def refuse(e: Refused) -> int:
@@ -893,6 +933,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
         parser = build_parser(show_all, lines)
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):

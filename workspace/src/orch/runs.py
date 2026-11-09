@@ -974,6 +974,7 @@ def start(
             proc = subprocess.Popen(
                 cmd,
                 cwd=root,
+                env={**os.environ, "ORCH_ROOT": str(root)},
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=errlog,
@@ -994,10 +995,14 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
-def _agent_environ() -> dict:
+def _agent_environ(root: Path | None = None) -> dict:
     """The agent's environment: ours without ORCH_VIA. A page that started the run is not where the agent's
-    own changes come from."""
-    return {k: v for k, v in os.environ.items() if k != "ORCH_VIA"}
+    own changes come from. With root: ORCH_ROOT names the workspace, so an agent working in a copy of the
+    folder still writes to the real tickets."""
+    env = {k: v for k, v in os.environ.items() if k != "ORCH_VIA"}
+    if root is not None:
+        env["ORCH_ROOT"] = str(root)
+    return env
 
 
 def open_log(path: Path):
@@ -1139,7 +1144,7 @@ def wrap(
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
     current: dict = {}
@@ -1227,7 +1232,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**_agent_environ(), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
     # guard: in-process lock between the submit watcher thread and the SIGTERM handler (the run lock is per
     # process, so it does not keep them apart); stop: set by either, the watcher writes nothing after it
     current: dict = {"guard": threading.Lock(), "stop": threading.Event()}
