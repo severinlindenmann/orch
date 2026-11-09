@@ -1587,23 +1587,50 @@ def _restart_updated(root: Path) -> list[str]:
     if not names:
         return lines
     import signal
+    import threading
 
-    # The caller may be one of the services we stop (e.g. the dashboard started this update): its pipes close
-    # with it. Ignore the signals that would end this process between stop and start.
-    for sig in ("SIGPIPE", "SIGHUP"):
-        if hasattr(signal, sig):
-            signal.signal(getattr(signal, sig), signal.SIG_IGN)
+    # The caller may be one of the services we stop (e.g. the dashboard started this update): the terminal or
+    # pipe goes away with it. Survive SIGHUP in this process only for the restart (services.start resets it
+    # for what it spawns) and never let a dead output abort the work between stop and start.
+    old_hup = None
+    if hasattr(signal, "SIGHUP") and threading.current_thread() is threading.main_thread():
+        old_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    _output_failure_proof()
     try:
         with services.locked():  # one lock around stop + start + check: no other orch start/stop in between
             return _restart_locked(services, root, names)
     except Exception as e:  # a restart failure must not hide a successful update
         why = services._printable(e)
         return [f"Restart {n} to use the new version ({why})" for n in sorted(names)]
+    finally:
+        if old_hup is not None:
+            signal.signal(signal.SIGHUP, old_hup)
+
+
+def _output_failure_proof() -> None:
+    """If stdout or stderr is already gone (broken pipe, closed terminal), point it at the null device so
+    later prints cannot raise in the middle of a restart."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (OSError, ValueError):
+            try:
+                with open(os.devnull, "w") as null:
+                    os.dup2(null.fileno(), stream.fileno())
+            except (OSError, ValueError, AttributeError):
+                pass
+
+
+def _say(text: str) -> None:
+    try:
+        print(text, flush=True)
+    except (OSError, ValueError):  # the reader is gone: the update itself must not fail for it
+        _output_failure_proof()
 
 
 def _is_up(services, root: Path, name: str) -> bool:
     return any(
-        e.get("addon") == name and Path(e["workspace"]) == root and services.pid_alive(e.get("pid"))
+        e.get("addon") == name and e["workspace"] == str(root) and services.pid_alive(e.get("pid"))
         for e in services.running()
     )
 
@@ -1627,7 +1654,8 @@ def _restart_locked(services, root: Path, names: set[str]) -> list[str]:
         try:
             rows = services.start(root, only=set(todo))
         except Exception as e:
-            errors = {n: services._printable(e) for n in todo}
+            for n in todo:
+                errors.setdefault(n, services._printable(e))
             continue
         by = {r["addon"]: r for r in rows}
         for n in list(todo):
@@ -1635,7 +1663,7 @@ def _restart_locked(services, root: Path, names: set[str]) -> list[str]:
                 todo.discard(n)
                 errors.pop(n, None)
             elif by.get(n, {}).get("error"):
-                errors[n] = services._printable(by[n]["error"])
+                errors.setdefault(n, services._printable(by[n]["error"]))
     ok = sorted(stopped - todo)
     if ok:
         lines.insert(0, f"Restarting {', '.join(ok)}… done")
@@ -1727,11 +1755,11 @@ def update(
     if before is not None:
         lines, restart = _update_lines(before, found, sha)
         if not json_output:
-            print("\n".join(lines), flush=True)
+            _say("\n".join(lines))
         if restart:
             restart_lines = _restart_updated(root)
             if restart_lines and not json_output:
-                print("\n".join(restart_lines))
+                _say("\n".join(restart_lines))
         if report is not None:
             report.extend(lines)
         reg = registry()

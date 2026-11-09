@@ -363,11 +363,11 @@ def test_lock_times_out_with_a_clear_message(proj):
         th.join()
 
 
-def test_restart_retries_once_and_survives_sigpipe(proj, run, source, monkeypatch):  # noqa: F811
+def test_restart_retries_once_and_restores_sighup(proj, run, source, monkeypatch):  # noqa: F811
     import signal
 
     (proj / ".orch").mkdir(exist_ok=True)
-    old = signal.getsignal(signal.SIGPIPE)
+    old_hup = signal.getsignal(signal.SIGHUP)
     up = []
     monkeypatch.setattr(services, "pid_alive", lambda pid: True)
     monkeypatch.setattr(
@@ -387,9 +387,59 @@ def test_restart_retries_once_and_survives_sigpipe(proj, run, source, monkeypatc
     monkeypatch.setattr(services, "start", start)
     try:
         code, out, err = run("update")
-        assert signal.getsignal(signal.SIGPIPE) == signal.SIG_IGN
+        assert signal.getsignal(signal.SIGHUP) == old_hup  # SIGHUP is only ignored during the restart
     finally:
-        signal.signal(signal.SIGPIPE, old)
+        signal.signal(signal.SIGHUP, old_hup)
     assert code == 0, err
     assert calls == [{"dashboard"}, {"dashboard"}]
     assert "Restarting dashboard… done" in out
+
+
+def test_spawned_services_do_not_inherit_ignored_sighup():
+    import signal
+    import subprocess
+    import sys
+
+    old = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", "import signal;print(signal.getsignal(signal.SIGHUP) == signal.SIG_DFL)"],
+            capture_output=True,
+            text=True,
+            preexec_fn=services._default_signals,
+        )
+    finally:
+        signal.signal(signal.SIGHUP, old)
+    assert r.stdout.strip() == "True"
+
+
+def test_restart_matches_services_of_a_symlinked_root(proj, run, source, monkeypatch, tmp_path):  # noqa: F811
+    (proj / ".orch").mkdir(exist_ok=True)
+    link = tmp_path / "link"
+    link.symlink_to(proj, target_is_directory=True)
+    monkeypatch.chdir(link)
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(
+        services, "running", lambda: [{"workspace": str(proj.resolve()), "addon": "dashboard", "pid": 5}]
+    )
+    monkeypatch.setattr(services, "stop", lambda root, only=None: [{"addon": "dashboard", "stopped": True}])
+    calls = []
+    monkeypatch.setattr(
+        services,
+        "start",
+        lambda root, only=None: calls.append(root) or [{"addon": "dashboard", "running": True}],
+    )
+    assert addons._restart_updated(link) == ["Restarting dashboard… done"]
+    assert calls == [proj.resolve()]  # one start, no second attempt for a "not up" service
+
+
+def test_dead_output_does_not_abort_the_restart(monkeypatch):
+    class Dead:
+        def flush(self):
+            raise BrokenPipeError
+
+        def write(self, s):
+            raise BrokenPipeError
+
+    monkeypatch.setattr("sys.stdout", Dead())
+    addons._say("Updating orch")  # must not raise

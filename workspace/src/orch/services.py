@@ -68,8 +68,11 @@ def locked(timeout: float = 180.0):
             if os.name == "nt":
                 import msvcrt
 
-                f.seek(0)
-                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                try:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass  # closing the file releases it; never mask the original exception
             # POSIX: closing the file releases the flock
 
 
@@ -160,6 +163,16 @@ def _services(root: Path) -> dict[str, dict]:
     return {n: m for n, m in sorted(addons.active_manifests(root).items()) if m["background"]}
 
 
+def _default_signals() -> None:
+    """In the child before exec: the add-on and the daemon it starts get normal SIGHUP/SIGPIPE handling even
+    when this process ignores them (an ignored signal is inherited through exec)."""
+    import signal
+
+    for sig in ("SIGHUP", "SIGPIPE"):
+        if hasattr(signal, sig):
+            signal.signal(getattr(signal, sig), signal.SIG_DFL)
+
+
 def _call(root: Path, name: str, m: dict, sub: str) -> dict:
     env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": addons.orch_bin()}
     try:
@@ -171,6 +184,7 @@ def _call(root: Path, name: str, m: dict, sub: str) -> dict:
             text=True,
             timeout=60,
             stdin=subprocess.DEVNULL,
+            **({"preexec_fn": _default_signals} if os.name != "nt" else {}),
         )
     except subprocess.TimeoutExpired:
         return {"error": f"'{name} {sub}' did not answer within 60 seconds."}
