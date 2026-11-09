@@ -750,6 +750,7 @@ function ticketOutcomeCard(t) {
 // One honest line about the proof (computed by the core as t.proof): a mark, the line, and the detail behind "Details".
 const PROOF_MARK = {passed:['ok', '✓'], failed:['bad', '×'], changed:['warn', '!'], note:['none', 'i'], missing:['none', '–']};
 const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No proof yet'};
+const RECHECK_TEXT = 'Please run the checks again and record them with orch check record.';
 function ticketProofLine(t) {
   const p = t.proof;
   if (!p || typeof p.line !== 'string' || !p.line) return null;
@@ -760,6 +761,7 @@ function ticketProofLine(t) {
     return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing)); });
   return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
     h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
+    Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask the agent to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
     (rows.length || array(p.uncovered).length) && !snapshot ? h('details', {className:'ticket-proof-details'}, h('summary', {}, 'Details'), h('ul', {}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “' + clean(part) + '” ', h('span', {className:'meta'}, 'No task covers this'))))) : null);
 }
 
