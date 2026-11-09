@@ -915,13 +915,13 @@ def test_a_broad_cwd_does_not_switch_git_off(tmp_path, monkeypatch):
             monkeypatch.setenv("PATH", os.pathsep.join([str(broad / ".local" / "bin"), str(real.parent)]))
         monkeypatch.setattr(safegit, "_exes", {})
         monkeypatch.chdir(broad)
-        assert safegit.git_exe(broad) is not None, broad  # cwd `/` or home: git is still found
+        assert safegit.git_exe(tmp_path, tmp_path) is not None, broad  # PROCESS cwd `/` or home: git is found
     # but a PATH entry that IS the cwd is still avoided there
     monkeypatch.setattr(safegit, "_exes", {})
     monkeypatch.setenv("PATH", os.pathsep.join([str(tmp_path / "fakehome"), str(real.parent)]))
     sh(tmp_path / "fakehome" / "git", "exit 1")
     monkeypatch.chdir(tmp_path / "fakehome")
-    assert safegit.git_exe(tmp_path / "fakehome") == str(real)
+    assert safegit.git_exe(tmp_path, tmp_path) == str(real)
 
 
 def test_in_a_project_cwd_the_whole_subtree_is_still_avoided(tmp_path, monkeypatch):
@@ -955,3 +955,50 @@ def test_the_windows_hint_is_in_the_refusal(tmp_path, monkeypatch):
     monkeypatch.setattr(safegit, "trivial", lambda *a, **k: None)
     rc, _, err = safegit.run(["status"], tmp_path, filters=False)
     assert rc == safegit.REFUSED and "virtual environment located elsewhere" in err
+
+
+def test_a_failure_in_resolve_or_home_never_relaxes_the_avoidance(tmp_path, monkeypatch):
+    class Boom(type(tmp_path)):
+        def resolve(self, *a, **k):
+            raise OSError("boom")
+
+    assert safegit._broad(Boom(tmp_path)) is False  # an exception: full avoidance stays
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("no home"))))
+    assert safegit._is_home(tmp_path.resolve()) is False
+    assert safegit._broad(tmp_path) is False or safegit._broad(tmp_path) is True  # no crash
+    assert not safegit._entry(tmp_path / "proj").startswith("=")
+
+
+def test_the_relaxation_is_only_for_the_process_cwd(tmp_path, monkeypatch):
+    real = _exe(tmp_path)
+    home = tmp_path / "fakehome"
+    (home / ".local" / "bin").mkdir(parents=True)
+    sh(home / ".local" / "bin" / "git", "exit 1")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(home / ".local" / "bin"), str(real.parent)]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    monkeypatch.chdir(tmp_path)
+    # the CALLER's cwd == home: its whole subtree is avoided (the planted ~/.local/bin/git is not used)
+    assert safegit.git_exe(home, None) == str(real)
+    assert str(home) in safegit._avoid(home, None)  # a full-subtree entry, no "=" prefix
+    # the PROCESS cwd == home (relaxed): a git in ~/.local/bin is allowed (Homebrew-in-home)
+    monkeypatch.setattr(safegit, "_exes", {})
+    monkeypatch.chdir(home)
+    proj = tmp_path.parent / (tmp_path.name + "_proj")  # not above the fake home
+    proj.mkdir()
+    assert safegit.git_exe(proj, proj) == str(home / ".local" / "bin" / "git")
+    # process cwd `/` with a normal root: git is found
+    monkeypatch.setattr(safegit, "_exes", {})
+    monkeypatch.setenv("PATH", str(real.parent))
+    monkeypatch.chdir("/")
+    assert safegit.git_exe(proj, proj) == str(real)
+
+
+def test_a_root_that_is_home_or_a_drive_root_refuses_git(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    for root in (tmp_path, Path("/")):
+        rc, _, err = safegit.run(["status"], tmp_path, filters=False, root=root)
+        assert rc == safegit.REFUSED and "whole home folder or a drive root" in err
+        assert safegit.hardened(tmp_path, root) is None
+    assert safegit.unusable_root(tmp_path / "project") is None
+    assert safegit.unusable_root(None) is None
