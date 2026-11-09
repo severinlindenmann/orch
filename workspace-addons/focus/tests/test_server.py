@@ -113,7 +113,7 @@ def test_ops_build_exact_argv(server, fake_orch):
     assert got[0][:4] == ["run", "start", TID, "--by"] and got[0][4] == "focus"
     assert "--fresh" in got[1]
     assert got[2][:3] == ["run", "stop", TID]
-    assert got[3][-2:] == ["--", "--delete everything"]  # free text can never be an option
+    assert got[3][-3:] == ["--", TID, "--delete everything"]  # free text can never be an option
     assert got[4][:4] == ["check", "move", TID, "c2"] and "--after=c1" in got[4]
     assert got[5][-2:] == ["--", "New name"] and "--if-revision=3" in got[5]
     assert got[6][0] == "answer" and "--via" in got[6]
