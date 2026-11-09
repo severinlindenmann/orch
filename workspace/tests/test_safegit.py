@@ -18,7 +18,15 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX shell stubs")
 
 def plain_git(cwd, *args):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    p = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=env, check=False)
+    # (the test's own helper: a hostile core.fsmonitor in a fixture must not break its setup commands)
+    p = subprocess.run(
+        ["git", "-c", "core.fsmonitor=false", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
     assert p.returncode == 0, p.stderr
     return p.stdout.strip()
 
@@ -100,8 +108,8 @@ def test_creating_preparing_and_dropping_a_copy_never_runs_repo_code(hostile, pr
     # the hostile repo as a workspace
     (r / ".orch" / "tickets").mkdir(parents=True)
     (r / ".orch" / "tickets" / "t_abc123.json").write_text("{}")
-    plain_git(r, "add", "-A")
-    subprocess.run(["git", "commit", "-qm", "orch", "--no-verify"], cwd=r, capture_output=True)
+    assert safegit.run(["add", "-A"], r)[0] == 0  # plain git would run the hostile filter driver here
+    assert safegit.run(["commit", "-qm", "orch"], r)[0] == 0
     for p in marker.parent.glob(marker.name + "*"):
         p.unlink()
     monkeypatch.chdir(r)

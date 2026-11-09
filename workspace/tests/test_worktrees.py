@@ -552,7 +552,11 @@ def test_is_orch_copy_works_when_the_home_is_under_a_link(repo, tmp_path, monkey
     assert f != repo and worktrees.is_orch_copy(f)
 
 
-def test_a_committed_symlink_cannot_make_orch_write_outside_the_copy(repo, tmp_path):
+def test_a_committed_symlink_cannot_make_orch_write_outside_the_copy(repo, tmp_path, monkeypatch):
+    from orch import skills
+
+    # which agents' folders get links depends on the agents installed on THIS machine (none on CI): pin it
+    monkeypatch.setattr(skills, "detected_agents", lambda root: ["claude"])
     (repo / ".orch" / "harness" / "skills" / "orch").mkdir(parents=True)
     (repo / ".orch" / "harness" / "skills" / "orch" / "SKILL.md").write_text("# orch\n")
     victim = tmp_path / "victim.txt"

@@ -262,7 +262,7 @@ def _raw(
 def version(cwd: Path, root: Path | None = None) -> tuple[int, int]:
     exe = git_exe(cwd, root) or ""
     if exe not in _versions:
-        rc, out, _ = _raw(["git", "--version"], cwd, 10, None, root)
+        rc, out, _ = _raw(["git", *base_args(_NOOP, True), "--version"], cwd, 10, None, root)
         m = re.search(r"(\d+)\.(\d+)", out)
         _versions[exe] = (int(m[1]), int(m[2])) if rc == 0 and m else (0, 0)
     return _versions[exe]
