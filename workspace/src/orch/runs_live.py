@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import time
+import unicodedata
 from pathlib import Path
 
 from orch import adapters, procs, runs, tickets
@@ -368,6 +369,17 @@ def _prompt_box(agent: str, root: Path) -> bool:
     return (adapters.load(agent, root).get("live") or {}).get("prompt_box", True) is not False
 
 
+def _display_width(text: str) -> int:
+    """Columns the text takes on a terminal: wide East Asian characters 2, combining marks 0. Trailing
+    spaces count (the capture keeps them), so a draft that ended on the wrap point is seen."""
+    cols = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        cols += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return cols
+
+
 def _hold_reason(root: Path, tid: str, dialog: str | None, boxed: bool = True) -> str | None:
     """Why orch must not type its notice now (None: it may): the pane is unreadable, in copy mode
     (scrolled up), shows a dialog, or the prompt is not PROVEN empty (both would go as one line). A boxed
@@ -376,7 +388,7 @@ def _hold_reason(root: Path, tid: str, dialog: str | None, boxed: bool = True) -
     # ONE tmux call for the screen (with its colour codes) and the cursor state: a key pressed between two
     # calls could pair typed text with an "empty" verdict. The plain text is made from the same capture.
     r = tmux(
-        root, "capture-pane", "-e", "-p", "-t", target(tid), ";",
+        root, "capture-pane", "-e", "-N", "-p", "-t", target(tid), ";",
         "display-message", "-p", "-t", target(tid),
         "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x} #{alternate_on} #{cursor_flag} #{pane_width}",
         timeout=QUICK,
@@ -402,7 +414,7 @@ def _hold_reason(root: Path, tid: str, dialog: str | None, boxed: bool = True) -
         return "text" if _box_text(pane, cy, cx, raw) else None
     if alt != "0" or cursor != "1" or not 0 <= cy < len(lines):
         return "unsure"  # an alternate screen, a hidden cursor or a cursor off the capture: any doubt holds
-    if cx == 0 and cy > 0 and len(lines[cy - 1].rstrip()) >= width:
+    if cx == 0 and cy > 0 and _display_width(lines[cy - 1].rstrip("\r\n")) >= width - 1:
         return "unsure"  # a draft that filled the row exactly leaves the cursor on an empty row below it
     return "text" if _PROMPT_GLYPH.sub("", lines[cy], count=1).strip() else None
 

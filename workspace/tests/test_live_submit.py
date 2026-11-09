@@ -966,3 +966,29 @@ def test_every_adapter_with_a_live_mode_declares_whether_it_draws_a_box():
     for name, a in adapters._registry().items():
         if a.get("live"):
             assert isinstance(a["live"].get("prompt_box"), bool), name
+
+
+@pytest.mark.parametrize(
+    ("above", "width"),
+    [("字" * 20, 40), ("x" * 38 + "字", 40), ("x" * 38 + "字" + "x", 41), ("a" * 39 + "  ", 41)],
+    ids=["wide-fills", "wide-pushed-to-next-row", "one-short-of-width", "trailing-spaces"],
+)
+def test_a_plain_tools_row_that_reaches_the_edge_holds_by_display_width(proj, run, monkeypatch, above, width):
+    pane = "\n".join(["old output", above, "", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=width) == "unsure"
+
+
+def test_ordinary_short_output_still_types_and_the_capture_keeps_trailing_spaces(proj, run, monkeypatch):
+    pane = "\n".join(["old output", "字" * 5, "", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=40) is None
+    seen = []
+    tid, rn, sent, screen = _held(proj, run, monkeypatch)
+    orig = runs_live.tmux
+
+    def spy(root, *a, **k):
+        seen.append(a)
+        return orig(root, *a, **k)
+
+    monkeypatch.setattr(runs_live, "tmux", spy)
+    runs_live._hold_reason(proj, tid, None)
+    assert "-N" in seen[0] and seen[0][0] == "capture-pane"  # trailing spaces at a wrap point are kept
