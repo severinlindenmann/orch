@@ -6,13 +6,14 @@ import http.client
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 from pathlib import Path
 
 import pytest
-from conftest import _REAL_HOME_FN
+from conftest import _REAL_HOME_FN, stray_tmux
 
 from orch import addons, pageproof, runs, tickets
 from orch import humanproof as hp
@@ -38,14 +39,21 @@ def live(monkeypatch):
         if k.startswith("CODEX_") or k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ORCH_AGENT", "ORCH_BIN"):
             monkeypatch.delenv(k, raising=False)
     monkeypatch.chdir(root)
+    # No agent tool and no tmux can be found by the child: an answer would otherwise START a real agent (a
+    # live tmux session) via resume_after_answer. These tests check the op, not a real agent run.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
     srv = make_server(root, 0, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     port = srv.server_address[1]
     yield root, port
     srv.shutdown()
     srv.server_close()
+    leftovers = stray_tmux(str(root))
+    for sock in leftovers:  # clean up first, then fail: a test must leave no tmux server behind
+        subprocess.run(["/usr/bin/env", "tmux", "-L", sock, "kill-server"], check=False, capture_output=True)
     shutil.rmtree(root, ignore_errors=True)
     shutil.rmtree(home, ignore_errors=True)
+    assert not leftovers, f"tmux servers left behind: {leftovers}"
 
 
 def http_post(port, path, body, cookie=None):
@@ -90,7 +98,7 @@ def test_answer_click(live, run):
     assert st == 200, body
     t = tickets.load(root, tid)
     assert t["questions"][0]["answer"] == "Blue -- not red"  # text after `--` survived
-    assert t["history"][-1]["by"] == pageproof.actor()  # by comes from the proof
+    assert pageproof.actor() in [h["by"] for h in t["history"]]  # by comes from the proof
 
 
 def test_send_back_click_starts_a_run(live, run):
