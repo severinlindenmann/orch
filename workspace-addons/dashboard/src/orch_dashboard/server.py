@@ -21,7 +21,9 @@ from .events import Revisions
 from .views import ViewPuller
 
 DEFAULT_PORT = 8420
-MAX_BODY = 16384
+MAX_BODY = 16384  # every action but the ones below
+MAX_BIG_BODY = 5 * 1024 * 1024  # a new ticket with a long text and up to 5 attached files
+BIG_OPS = ("ticket.new", "ticket.paste")
 KIT = (
     "tokens.css",
     "components.css",
@@ -361,10 +363,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(415, b"send JSON", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            if not 0 < n <= MAX_BODY:
+            if not 0 < n <= MAX_BIG_BODY:
                 raise ValueError
-            body = json.loads(self.rfile.read(n))
+            raw = self.rfile.read(n)
+            body = json.loads(raw)
             if not isinstance(body, dict) or set(body) - {"op", "args"}:
+                raise ValueError
+            if n > MAX_BODY and body.get("op") not in BIG_OPS:
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
@@ -392,6 +397,13 @@ class Handler(BaseHTTPRequestHandler):
             and isinstance(extra.get("changes"), list)
         ):  # refresh
             state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
+        if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
+            att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
+            state["attached"] = {
+                "id": str(extra.get("id"))[:40],
+                "saved": [str(x)[:100] for x in att.get("saved", [])[:10]],
+                "failed": [str(x)[:100] for x in att.get("failed", [])[:10]],
+            }
         self._send(200, json.dumps(state).encode(), "application/json")
 
 

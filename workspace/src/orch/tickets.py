@@ -20,6 +20,7 @@ from pathlib import Path
 
 from orch import config, procs, term
 from orch.errors import Refused
+from orch.text import clean_untrusted
 
 STATUSES = ("open", "active", "waiting", "ready", "review", "done", "dropped")
 STATUS_WORDS = {
@@ -1705,6 +1706,72 @@ def artifacts_dir(root: Path, tid: str) -> Path:
         if not cur.exists():
             cur.mkdir()
     return d
+
+
+# What a person may attach to a ticket from the dashboard or the phone: plain text and pictures. Never a page or a
+# program that runs: html and scripts are not accepted.
+ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "xml", "yml", "yaml", "toml", "ini"})
+ATTACH_IMAGES = {
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    "jpg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "gif": (b"GIF87a", b"GIF89a"),
+    "webp": (b"RIFF",),
+}
+ATTACH_MAX = 2 * 1024 * 1024  # one attached file (the dashboard shows at most this much of a file)
+LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
+PASTED_NAME = "note.md"
+
+
+def attach_name(hint) -> str:
+    """The file name the SERVER keeps: the base name of the hint only, safe characters, an allowed type.
+    A name from a browser or a phone is a hint, never a path."""
+    base = re.split(r"[\\/]", clean_untrusted(str(hint), 1000))[-1].strip().strip(". ")
+    base = re.sub(r"[^A-Za-z0-9._ -]", "_", base)
+    base = re.sub(r"\.{2,}", ".", base)
+    stem, dot, ext = base.rpartition(".")
+    ext = ext.lower()
+    if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
+        raise Refused("That kind of file cannot be attached. Text files and pictures can.")
+    return stem.strip()[:80] + "." + ext
+
+
+def attach(root: Path, tid: str, hint, data: bytes, by: str) -> dict:
+    """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
+    ' (2)', ' (3)' ...; created with O_EXCL and no link followed). Text must be UTF-8 without NUL bytes, a picture
+    must start with its type's signature. One history line says what was attached."""
+    name = attach_name(hint)
+    ext = name.rsplit(".", 1)[-1]
+    if not isinstance(data, bytes) or not data:
+        raise Refused("That file is empty.")
+    if len(data) > ATTACH_MAX:
+        raise Refused(f"A file is at most {ATTACH_MAX // (1024 * 1024)} MB.")
+    if ext in ATTACH_IMAGES:
+        if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
+            raise Refused("That picture is not what its name says.")
+    else:
+        if b"\x00" in data:
+            raise Refused("That file is not plain text.")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Refused("That file is not plain text (UTF-8).") from None
+    d = artifacts_dir(root, tid)
+    stem = name[: -len(ext) - 1]
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    for n in range(1, 100):
+        final = name if n == 1 else f"{stem} ({n}).{ext}"
+        try:
+            fd = os.open(d / final, flags, 0o644)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        break
+    else:
+        raise Refused("Too many files with that name on this ticket.")
+    apply_op(root, tid, lambda t: add_history(t, by, f"Attached {final}"))
+    return {"name": final, "size": len(data), "path": (d / final).relative_to(root).as_posix()}
 
 
 def artifacts_list(root: Path, tid: str) -> list[dict]:

@@ -1,7 +1,9 @@
 import getpass
 import http.client
 import json
+import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -806,3 +808,98 @@ def test_link_actions_are_audited(ws, monkeypatch):
         assert actions.run_op(ws, 'orch', op, args)[0] == 200
     rows = [json.loads(line) for line in (ws / '.orch/run/dashboard/actions.log').read_text().splitlines()]
     assert [(r['op'], r['id'], r.get('days')) for r in rows] == [('link.extend', 'f_a', 7), ('link.stop', 'f_a', None)]
+
+
+# ---- fb19: long text and attached files for a new ticket
+
+
+def _post_raw(base, body, headers=None):
+    return post(base, None, headers=headers, raw=json.dumps(body))
+
+
+def test_big_body_is_allowed_only_for_a_new_ticket(act_server, act_orch):
+    big = "x" * 40000
+    s, _, _ = _post_raw(act_server, {"op": "ticket.new", "args": {"title": "T", "long_text": big}})
+    assert s == 200
+    c = acts(act_orch)[-1]
+    assert c[:2] == ["ticket", "new"] and not any(a.startswith("--note=") and len(a) > 2100 for a in c)
+    assert any(a.startswith("--note=The full text is attached as note.md") for a in c)
+    s, text, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}, "pad": big})
+    assert s == 400
+    s, _, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": big[:30000]}})
+    assert s == 400  # over 16 KB for an ordinary action
+
+
+def test_body_over_the_hard_cap_is_refused(act_server):
+    try:
+        status = _post_raw(act_server, {"op": "ticket.new", "args": {"title": "T", "long_text": "y" * (5 * 1024 * 1024)}})[0]
+    except (BrokenPipeError, ConnectionResetError):  # answered before the whole body was sent
+        return
+    assert status == 400
+
+
+def test_long_text_over_the_limit_and_short_text_cap_unchanged(act_server):
+    assert _post_raw(act_server, {"op": "ticket.new", "args": {"title": "T", "long_text": "z" * 500_001}})[0] == 400
+    assert _post_raw(act_server, {"op": "ticket.new", "args": {"title": "T", "note": "n" * 2001}})[0] == 400
+
+
+def test_paste_long_text_keeps_the_note_short():
+    text = "First line\n" + "word " * 800
+    words, flags, tail = actions.OPS["ticket.paste"]({"text": text})
+    assert tail == ["First line"]
+    assert flags == ["--note=" + actions.LONG_NOTE]
+    assert [n for n, _ in actions.attachments("ticket.paste", {"text": text})] == ["note.md"]
+    # a short paste is unchanged: no file, the text is the note
+    short = "Short title\nand some more"
+    words, flags, tail = actions.OPS["ticket.paste"]({"text": short})
+    assert flags == ["--note=" + short] and actions.attachments("ticket.paste", {"text": short}) == []
+
+
+def test_attachments_shape_and_limits():
+    import base64
+
+    ok = actions.attachments(
+        "ticket.new",
+        {"title": "T", "files": [{"name": "a.md", "text": "hi"}, {"name": "p.png", "data": base64.b64encode(b"\x89PNG").decode()}]},
+    )
+    assert ok == [("a.md", b"hi"), ("p.png", b"\x89PNG")]
+    bad = (
+        {"files": "nope"},
+        {"files": [{"name": "a.md"}]},
+        {"files": [{"name": "a.md", "text": "x", "path": "/etc/passwd"}]},
+        {"files": [{"name": "a.md", "text": "x", "data": "eA=="}]},
+        {"files": [{"name": "a.png", "data": "not base64!"}]},
+        {"files": [{"name": "a\x00.md", "text": "x"}]},
+        {"files": [{"name": "a.md", "text": "x"}] * 6},
+        {"long_text": "t", "files": [{"name": "a.md", "text": "x"}] * 5},
+    )
+    for args in bad:
+        with pytest.raises(actions.BadRequest):
+            actions.attachments("ticket.new", {"title": "T", **args})
+    assert actions.attachments("log", {"files": [1]}) == []  # only a new ticket takes files
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("ticket.paste", {"text": "x", "files": []})
+
+
+def test_attach_all_pipes_each_file_to_orch_and_reports_failures(tmp_path, monkeypatch):
+    fake = tmp_path / "orch"
+    fake.write_text(
+        f"""#!{sys.executable}
+import json, pathlib, sys
+d = pathlib.Path(__file__).parent
+a = sys.argv[1:]
+data = sys.stdin.buffer.read()
+with open(d / "att.jsonl", "a") as f:
+    f.write(json.dumps([a, data.decode("latin1")]) + "\\n")
+name = a[a.index("--name") + 1]
+if name.endswith(".exe"):
+    sys.stderr.write("Refused: no\\n"); sys.exit(2)
+print(json.dumps({{"name": "kept-" + name}}))
+"""
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(actions, "human_env", lambda root, b: dict(os.environ))
+    r = actions._attach_all(tmp_path, str(fake), "t_abcdef", [("note.md", b"BODY"), ("bad.exe", b"MZ")])
+    assert r == {"saved": ["kept-note.md"], "failed": ["bad.exe"]}
+    rows = [json.loads(x) for x in (tmp_path / "att.jsonl").read_text().splitlines()]
+    assert rows[0][0][:5] == ["ticket", "attach", "t_abcdef", "--name", "note.md"] and rows[0][1] == "BODY"

@@ -1103,6 +1103,22 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     assert len(_tickets(run)) == 1 and len(rel.sent) == 1
 
 
+def test_phone_long_text_is_kept_as_a_file_and_the_history_stays_short(proj, run, rel):
+    _phone_setup(rel, run)
+    long = "Point one.\n" + ("The inventory has many lines. " * 200)
+    rel.inbox.append(msg("m_phone00000000009", "text", {"text": long}, frm=PHONE))
+    code, out, _ = run("relay", "inbox")
+    assert code == 0 and "new ticket t_" in out
+    t = _tickets(run)[0]
+    assert t["title"] == "Point one."
+    kept = proj / ".orch" / "tickets" / t["id"] / "artifacts" / "note.md"
+    assert kept.read_text() == long.strip()  # word for word
+    said = "\n".join(h["text"] for h in t["history"] if h.get("via") == "phone")
+    assert "note.md" in said and len(said) < 900 and "The inventory has many lines. " * 20 not in said
+    run("relay", "inbox")  # redelivered: no second file
+    assert [p.name for p in kept.parent.iterdir()] == ["note.md"]
+
+
 def test_phone_text_crash_before_seen_is_idempotent(proj, run, rel, monkeypatch):
     from orch import relay
 

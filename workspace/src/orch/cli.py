@@ -345,6 +345,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
     x.add_argument("id")
+    x = t.add_parser("attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket")
+    x.add_argument("id")
+    x.add_argument("--name", required=True, help="a name hint; orch picks the final name")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
@@ -620,6 +623,10 @@ def run(args: argparse.Namespace) -> None:
             )
             or "No files yet. Put them in: orch ticket artifacts-dir " + args.id,
         )
+    elif cmd == "ticket" and sub == "attach":
+        data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
+        r = tickets.attach(root, args.id, args.name, data, by())
+        _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)
         rel = d.relative_to(root).as_posix()
