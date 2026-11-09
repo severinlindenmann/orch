@@ -193,6 +193,11 @@ struct ConversationView: View {
                 }
                 if historyDay == nil {
                 ToolbarItem(placement: .topBarTrailing) {
+                    ChatMuteButton(name: workspaceName, muted: model.workspace(resolved.workspace)?.isMuted(now: now) ?? false) { mute in
+                        Task { await model.setMute(resolved.workspace, mute) }
+                    }
+                }.chatCircleBackground()
+                ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                         headerIcon("info.circle")
                     }.buttonStyle(.plain).accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
@@ -479,7 +484,7 @@ struct TicketStatusChip: View {
 }
 
 // iOS 26 otherwise joins adjacent toolbar actions in one glass pill.
-private extension ToolbarItem {
+extension ToolbarItem {
     @ToolbarContentBuilder func chatCircleBackground() -> some ToolbarContent {
         if #available(iOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) }
         else { self }
