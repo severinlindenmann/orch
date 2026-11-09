@@ -277,7 +277,7 @@ def test_relay_refusal_keeps_the_dashboard_card(proj, run, conn):
     )
     assert not proposals(conn)
     assert any(m["type"] == "text" and m["id"] == sent["id"] for m in conn.sent), "the phone still hears it"
-    log = (proj / ".orch/relay-errors.log").read_text()
+    log = (proj / ".orch/run/relay-errors.log").read_text()
     assert f"proposal question {sent['id']} to phones refused" in log and "nothing like this" in log
     assert log.count("\n") == 1, "the text fallback went out: one line only"
     check_local_first(proj, conn, sent)
@@ -290,7 +290,7 @@ def test_relay_refusal_through_the_helper_command_says_nothing_about_the_relay(p
     code, out, err = run("relay", "send", "phones", SENTENCE, "--ticket", gid, "--ref", "proposal:Rename X")
     assert code == 0, err
     text = (out + err).lower()
-    assert (proj / ".orch/relay-errors.log").is_file()
+    assert (proj / ".orch/run/relay-errors.log").is_file()
     assert "refus" not in text and "not sent" not in text and "relay" not in text.replace("sent to", "")
     (entry,) = [m for m in chat.read_day(proj, chat.day_key(proj))["messages"] if m["by"] != "you"]
     assert chat.proposal_state(proj, entry["id"]) == "open"
@@ -305,11 +305,28 @@ def test_relay_refusing_everything_logs_both_and_shows_nothing(proj, run, conn, 
         proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
     )
     check_local_first(proj, conn, sent)
-    lines = (proj / ".orch/relay-errors.log").read_text().splitlines()
+    lines = (proj / ".orch/run/relay-errors.log").read_text().splitlines()
     assert [("question" in x, "text" in x) for x in lines] == [(True, False), (False, True)]
     assert "no" not in capsys.readouterr().out
     general = tickets.load(proj, tickets.general_id(proj))
     assert not any("relay-errors" in h["text"] or "refused" in h["text"] for h in general["history"])
+
+
+def test_the_failure_log_is_ignored_by_git_and_private(proj, conn):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    refuse_questions(conn)
+    chat.record(proj, "m_you0000000000001", "you", "phone", "please rename field X", phone=PHONE)
+    relay.send_text(
+        proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
+    )
+    log = proj / ".orch/run/relay-errors.log"
+    assert log.is_file() and (log.stat().st_mode & 0o077) == 0
+    out = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"], cwd=proj, capture_output=True, text=True
+    ).stdout
+    assert "relay-errors" not in out
 
 
 def test_relay_offline_keeps_the_dashboard_card(proj, run, conn):

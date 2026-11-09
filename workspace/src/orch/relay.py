@@ -513,16 +513,18 @@ def _set_problem(root: Path, text: str | None) -> None:
 
 
 def log_send_failure(root: Path, what: str, why: object) -> None:
-    """One line in .orch/relay-errors.log (newest 200 kept) for a phone send that failed and was not shown to
-    anybody (the proposal question). Never fails the caller, never printed."""
+    """One line in .orch/run/relay-errors.log (machine-local, git-ignored, private; newest 200 kept) for a
+    phone send that failed and was not shown to anybody (the proposal question).
+    Never fails the caller, never printed."""
     try:
-        p = root / ".orch" / "relay-errors.log"
-        if (root / ".orch").is_symlink() or p.is_symlink():
+        p = root / ".orch" / "run" / "relay-errors.log"
+        if (root / ".orch").is_symlink() or p.parent.is_symlink() or p.is_symlink():
             return
+        p.parent.mkdir(parents=True, exist_ok=True)
         line = f"{tickets.now()} {what}: {' '.join(str(why).split())[:300]}"
         have = p.read_text(encoding="utf-8").splitlines() if p.is_file() else []
-        net.write_atomic(p, ("\n".join([*have, line][-200:]) + "\n").encode("utf-8"))
-    except OSError:
+        net.write_atomic(p, ("\n".join([*have, line][-200:]) + "\n").encode("utf-8"), True)
+    except (OSError, Refused):
         pass
 
 
