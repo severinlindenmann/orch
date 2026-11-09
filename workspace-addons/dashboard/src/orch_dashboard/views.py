@@ -12,7 +12,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-TIMEOUT = 2.0
+TIMEOUT = 10.0  # a view that starts other orch commands (Focus with live sessions) needs more than 2 s on a busy machine
 MAX_BYTES = 256 * 1024
 TONES = ("neutral", "good", "warn", "needs-you", "bad")
 BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table")
