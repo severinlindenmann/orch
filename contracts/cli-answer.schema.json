@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/cli-answer.schema.json",
+  "title": "orch CLI answers v1: pages, errors, follow streams",
+  "description": "Shapes every core and add-on command uses with --json (addon-manifest.md, CLI contract). A list command that can grow answers a page; a refusal is exit 2 with an error object on stdout; a --follow command prints one JSON object per line.",
+  "$defs": {
+    "page": {
+      "type": "object", "required": ["items", "next"],
+      "properties": {
+        "items": { "type": "array" },
+        "next": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[A-Za-z0-9._~-]+$" }], "description": "Opaque cursor for --after; null = no more." }
+      },
+      "description": "Newest first unless the command says otherwise. --limit N (default 100, max 500) and --after <next>. Unknown fields allowed (e.g. since)."
+    },
+    "error": {
+      "type": "object", "required": ["error"], "additionalProperties": false,
+      "properties": {
+        "error": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Plain words for people, key values hidden." },
+        "code": { "enum": ["refused", "invalid", "not_found", "not_allowed", "switched_off", "locked_by_admin", "conflict", "gone", "too_large", "busy", "not_available"], "description": "Optional, for programs. Old commands answer without it." }
+      }
+    },
+    "stream_line": {
+      "type": "object", "required": ["type"],
+      "properties": { "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" } },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "error" } } }, "then": { "required": ["error"], "properties": { "error": { "$ref": "#/$defs/error/properties/error" }, "code": { "$ref": "#/$defs/error/properties/code" } } } }
+      ],
+      "description": "One line of a --follow stream. Readers skip types they do not know. A line of type error is the last line; the command then exits 2."
+    }
+  }
+}

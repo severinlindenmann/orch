@@ -174,7 +174,7 @@ def _default_signals() -> None:
 
 
 def _call(root: Path, name: str, m: dict, sub: str) -> dict:
-    env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": addons.orch_bin()}
+    env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
     try:
         r = subprocess.run(
             [sys.executable, "-P", "-m", m["run"], sub, "--json"],

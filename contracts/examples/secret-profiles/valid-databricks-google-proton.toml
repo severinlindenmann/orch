@@ -1,0 +1,19 @@
+schema = "orch.secret-profiles/1"
+
+[profile.databricks]
+env = { DATABRICKS_TOKEN = "databricks-token" }
+set = { DATABRICKS_HOST = "https://adb-1234.azuredatabricks.net" }
+run = ["databricks"]
+skills = ["databricks-jobs"]
+
+[profile.google]
+files = { GOOGLE_APPLICATION_CREDENTIALS = "google-sa.json" }
+
+[profile.proton]
+env = { PROTON_PASS_PERSONAL_ACCESS_TOKEN = "proton-pat" }
+run = ["pass-cli"]
+
+[profile.ci-deploy]
+env = { DEPLOY_TOKEN = "deploy-token" }
+allow_get = true
+note = "Used by the release script"

@@ -1,0 +1,17 @@
+{
+ "name": "link javascript",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "link",
+    "url": "javascript:alert(1)",
+    "label": "x"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}
