@@ -167,11 +167,39 @@ def test_the_mode_file_is_private(proj):
     assert stat.S_IMODE(config._perm_file().stat().st_mode) == 0o600
 
 
-def test_agents_without_a_mapping_ignore_the_mode(proj):
-    for perm in ("ask", "auto", "full"):
+BAD_CODEX = (
+    "danger-full-access", "dangerously", "bypass", "network", "add-dir", "writable_roots", "--yolo",
+    "read-only", "sandbox_permissions", 'approval_policy="on', "--full-auto",
+)  # fmt: skip
+SANDBOX = ["-c", 'sandbox_mode="workspace-write"', "-c", 'approval_policy="never"']
+
+
+def test_codex_gets_the_workspace_sandbox_in_every_mode(proj):
+    # exec cannot ask; a read-only default (no ~/.codex config) left orch-started codex unable to edit
+    for perm in ("ask", "auto", "full"):  # `full` never widens codex
         assert adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "permissions": perm}) == [
-            "codex", "exec", "--json", "--", "p",
+            "codex", "exec", "--json", *SANDBOX, "--", "p",
         ]  # fmt: skip
+        assert adapters.permission_args("codex", proj, perm) == SANDBOX
+    config.set_permissions(proj, "full")
+    assert adapters.permission_args("codex", proj) == SANDBOX  # the workspace's own setting, same answer
+
+
+def test_no_codex_argv_widens_the_sandbox():
+    v = {"prompt": "p", "session": OLD, "new_session": NEW}
+    for perm in ("ask", "auto", "full"):
+        for kind in ("fresh", "resume"):
+            argv = adapters.render("codex", kind, "oneshot", {**v, "permissions": perm})
+            text = " ".join(argv)
+            for bad in BAD_CODEX:
+                assert bad not in text, (kind, perm, bad)
+            assert (
+                argv.count("-c") == 2 and 'sandbox_mode="workspace-write"' in argv
+            )  # workspace only: no extra roots
+            assert argv[argv.index("--") - 1] == 'approval_policy="never"'  # nothing after it but the prompt
+
+
+def test_agents_without_a_mapping_ignore_the_mode(proj):
     _agent(proj, "mine", command="mine {prompt}")
     config.set_permissions(proj, "full")
     assert adapters.permission_args("mine", proj) == []
@@ -206,9 +234,11 @@ def test_no_blanket_orch_permission_in_any_argv():
 
 def test_codex_snapshots():
     v = {"prompt": "Do it", "session": "01a1ac76-7c05-70d2-824d-4854e0c9c3f8"}
-    assert adapters.render("codex", "fresh", "oneshot", v) == ["codex", "exec", "--json", "--", "Do it"]
+    assert adapters.render("codex", "fresh", "oneshot", v) == [
+        "codex", "exec", "--json", *SANDBOX, "--", "Do it",
+    ]  # fmt: skip
     assert adapters.render("codex", "resume", "oneshot", v) == [
-        "codex", "exec", "resume", "--json", v["session"], "--", "Do it",
+        "codex", "exec", "resume", "--json", v["session"], *SANDBOX, "--", "Do it",
     ]  # fmt: skip
     assert adapters.render("codex", "fresh", "live", v) is None  # no live mode
 

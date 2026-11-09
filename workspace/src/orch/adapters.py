@@ -206,7 +206,8 @@ def _help_text(binary: str) -> str:
 
 def permission_args(name: str, root: Path | None = None, mode: str | None = None) -> list[str]:
     """The tool's flags for the workspace's permission mode (ask | auto | full), from the adapter's
-    `permissions`. An agent without that data (a generic command, Codex) gets none: it ignores the mode.
+    `permissions`. An agent without that data (a generic command) gets none: it ignores the mode.
+    Codex maps every mode to its workspace-write sandbox (exec cannot ask, and is never given more).
     An entry may depend on the installed tool: `if_help_has` (text in its --help), else `else`."""
     a = load(name, root)
     table = a.get("permissions")
