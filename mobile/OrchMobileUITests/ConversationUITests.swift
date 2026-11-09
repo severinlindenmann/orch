@@ -24,10 +24,29 @@ final class ConversationUITests: XCTestCase {
         must(app, field, "composer-field")
         field.tap(); field.typeText("Please check the totals")
         el(app, "composer-send").tap()
+        XCTAssertFalse((field.value as? String ?? "").contains("totals"), "Send clears the field immediately")
         XCTAssertTrue(app.staticTexts["Please check the totals"].waitForExistence(timeout: 10), "my bubble")
         let any = ["receipt-queued", "receipt-sent", "receipt-delivered", "receipt-started"].contains { el(app, $0).waitForExistence(timeout: 5) }
         XCTAssertTrue(any, "a receipt under my bubble")
         XCTAssertFalse((field.value as? String ?? "").contains("totals"), "the field is empty again")
+    }
+
+    func testHeaderUsesWorkspaceNameAndRoundIconActions() {
+        let app = launch(["-openChat", "ws_pilatus001"])
+        let title = el(app, "chat-title")
+        must(app, title, "chat title")
+        XCTAssertFalse(title.label.contains("helper"))
+        XCTAssertNotEqual(title.label, "Chat")
+        let history = el(app, "chat-history"), info = el(app, "chat-info")
+        must(app, history, "History"); must(app, info, "Info")
+        XCTAssertEqual(history.label, "History")
+        XCTAssertFalse(history.staticTexts["History"].exists)
+        XCTAssertEqual(history.frame.width, 44, accuracy: 1)
+        XCTAssertEqual(history.frame.height, 44, accuracy: 1)
+        XCTAssertEqual(info.frame.width, history.frame.width, accuracy: 1)
+        XCTAssertEqual(info.frame.midY, history.frame.midY, accuracy: 1)
+        history.tap()
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' helper'")).firstMatch.exists)
     }
 
     func testQuestionUndoThenAnswered() {

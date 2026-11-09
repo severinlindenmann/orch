@@ -266,8 +266,14 @@ async function chatLoad(day) {
   render();
 }
 async function chatOperation(op, args, failure) {
-  try { const result = await window.orchAct(op, args); if (result?.ok) return true; } catch { /* Keep drafts and controls available after failure. */ }
-  window.orch.toast(failure || 'Could not update the group.', 'error'); return false;
+  let why = '';
+  try {
+    const result = await window.orchAct(op, args);
+    if (result?.ok) return true;
+    try { why = String(JSON.parse(result?.text || '{}').error || ''); } catch { why = ''; }  // the server's own reason
+  } catch { /* Keep drafts and controls available after failure. */ }
+  const base = failure || 'Could not update the group.';
+  window.orch.toast(why && why.length <= 160 ? base.replace(/\.$/, '') + ': ' + why : base, 'error'); return false;
 }
 async function chatSend() {
   const g = chatGroup(), id = g?.id || 'chat';
