@@ -660,25 +660,29 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
     elif cmd == "dev-proof":
-        # The e2e test human: a proof for a DEV demo workspace only (guarded-home record, dev/test install);
-        # a real workspace never gets one. Printed on stdout, to be piped into `<command> --proof-stdin`.
-        print(humanproof.mint_dev(root, args.op, args.target))
+        # The e2e test human (humanproof.dev_proof_cli: test install, ~/.orch-test, allowlisted ops, no agent
+        # context). Printed on stdout, to be piped into `<command> --proof-stdin`.
+        print(humanproof.dev_proof_cli(root, args.op, args.target, getattr(args, "by", None)))
     elif cmd == "update":
+        proven_update = False
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
             if not humanproof.person_by(
                 root, args, "update", "orch", label="Update orch to the latest version"
             ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
+            proven_update = True
         report, notes = [], []
-        done = addons.update(
-            root,
-            args.project_only,
-            args.after_install,
-            json_output=args.json,
-            report=report,
-            nonce=args.update_nonce,
-            notes=notes,
-        )
+        # ORCH_REPO / ORCH_REF (where the code comes from) count only inside a person-gated update
+        with addons.trusted_env_source() if proven_update else contextlib.nullcontext():
+            done = addons.update(
+                root,
+                args.project_only,
+                args.after_install,
+                json_output=args.json,
+                report=report,
+                nonce=args.update_nonce,
+                notes=notes,
+            )
         if args.after_install:
             pass
         elif args.project_only and (args.json or not report):

@@ -6,7 +6,8 @@ import argparse
 import json
 from pathlib import Path
 
-from orch import addons
+from orch import addons, humanproof
+from orch.errors import Refused
 
 
 def _out(args, data, text: str) -> None:
@@ -40,7 +41,22 @@ def dispatch(args, root: Path) -> bool:
             or "No add-ons are installed. Turn one on with: orch addon add <name>",
         )
     elif sub == "add":
-        addons.add(root, args.name, args.yes, args.project_only)
+        if addons._is_path(args.name) and not addons._local_add_ok():
+            # code from a folder runs inside orch itself: only a person's click (proof) may allow it (H1)
+            folder = Path(args.name).expanduser().resolve()
+            who = humanproof.person_by(
+                root,
+                args,
+                "addon.add_local",
+                addons.local_add_target(folder),
+                label=f"Add the add-on from {folder} \u2014 it runs inside orch",
+            )
+            if not who.startswith("human:"):
+                raise Refused(humanproof.AGENT_REFUSED)
+            with addons.trusted_local_add():
+                addons.add(root, args.name, args.yes, args.project_only)
+        else:
+            addons.add(root, args.name, args.yes, args.project_only)
         if args.project_only:
             _out(args, {"ok": True}, f"{args.name} is turned on in this workspace.")
     elif sub == "remove":

@@ -72,7 +72,6 @@ def _pick(running: list[dict]) -> list[Path]:
 
 
 def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
-    from orch import humanproof
 
     out = []
     for r in rows:

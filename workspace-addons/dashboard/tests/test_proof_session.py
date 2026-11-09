@@ -271,3 +271,33 @@ def test_resume_cookie_is_one_use_expires_and_only_after_a_click(live, monkeypat
     monkeypatch.setattr(time, "time", real)
     assert hp.take_resume_cookie(root, "dashboard") is None  # and the file is gone
     assert not hp.write_resume_cookie(root, "mine", "c" * 40)  # a local add-on gets nothing
+
+
+def test_print_launch_url_gives_the_page_a_session_once_and_reuse_revokes(live):
+    """`orch start --print-launch-url` (test install, test folder) uses the ONE launch-token writer: the link it
+    prints opens the page once; a second use of it revokes the session it made."""
+    root, port = live
+    url = hp.printable_launch_url(root, "dashboard", f"http://127.0.0.1:{port}")
+    token = url.split("#launch=")[1]
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})  # the page loads (read-only, no cookie)
+    assert c.getresponse().status == 200
+    st, ck, _ = post(port, "/session", {"token": token})
+    assert st == 204 and ck.startswith("orch_page=")
+    assert hp.LAUNCH_LIFE == 30 and not list(hp.key_dir(root).glob("launch-dashboard.token"))  # spent
+    st, _, body = post(port, "/session", {"token": token})
+    assert st == 403 and b"Someone else tried to use this sign-in link" in body
+    st, _, _ = post(
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"Cookie": ck.split(";")[0]},
+    )
+    assert st == 403  # the first session is revoked
+
+
+def test_the_printable_link_is_refused_outside_a_test_folder(live, monkeypatch):
+    root, port = live
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    with pytest.raises(hp.Refused):
+        hp.printable_launch_url(root, "dashboard", f"http://127.0.0.1:{port}")

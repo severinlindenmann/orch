@@ -922,6 +922,7 @@ HANDOFF_HEADS = {
     "relay.allow": (("relay", "allow"),),
     "relay.connect": (("relay", "connect"),),
     "update": (("update",),),
+    "addon.add_local": (("addon", "add"),),
     "chat.send": (("chat", "say"), ("chat", "send")),
     "chat.make_ticket": (("chat", "make-ticket"),),
 }
@@ -1288,3 +1289,40 @@ def take_resume_cookie(root: Path, server: str) -> str | None:
     if len(lines) == 2 and lines[1].isdigit() and int(lines[1]) > time.time() and 20 <= len(lines[0]) <= 80:
         return lines[0]
     return None
+
+
+# ----------------------------------------------------------------------------------- e2e test human (CLI)
+
+# What the e2e scripts need (e2e/scenarios_v2.py, e2e/scenarios_ws.py, e2e/windows/standard-user-flow.ps1 call
+# `orch dev-proof update orch`); the rest are the other first-batch ops an e2e driver may script.
+DEV_PROOF_OPS = frozenset(
+    "update ticket.verdict ticket.answer relay.connect relay.allow run.human_input chat.send "
+    "chat.make_ticket".split()
+)
+
+
+def dev_proof_cli(root: Path, op: str, target: str, by_flag: str | None = None) -> str:
+    """The proof the scripted test human of the e2e harness hands to `<command> --proof-stdin`. NARROW: a
+    TEST install only (not a dev one), a workspace under the literal <account home>/.orch-test, a dev record
+    for it, only the ops above, and never from an orch-started agent context (ORCH_RUN / ORCH_TICKET /
+    ORCH_VIA, a detected agent tool, `--by agent:`). Defence in depth only: the environment is
+    caller-controlled (Level 1), so an agent that scrubs it can still ask; this stops the agents orch
+    itself starts in test workspaces from self-approving. Every mint is logged as dev:test-human with the
+    op and nothing secret."""
+    from orch import tickets
+
+    no = "No test-human proof here."
+    if not is_test_workspace(root):
+        raise Refused(no)
+    if any(os.environ.get(k) for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")) or tickets.agent_tool():
+        raise Refused(no)
+    if by_flag and by_flag.startswith("agent:"):
+        raise Refused(no)
+    if op not in DEV_PROOF_OPS:
+        raise Refused(no)
+    proof = mint_dev(root, op, target)
+    with contextlib.suppress(Refused, OSError):
+        fd = os.open(key_dir(root) / "dev-proof.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(f"{_now()} dev:test-human minted op={op}\n")
+    return proof

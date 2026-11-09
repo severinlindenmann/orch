@@ -646,19 +646,61 @@ def test_an_unusable_key_folder_refuses_visibly_and_saves_nothing(ws, run, monke
     assert runs.undelivered(ws, rid) == []
 
 
-def test_dev_proof_command_works_only_in_a_dev_workspace(ws, run, capsys, monkeypatch):
-    # a real/normal workspace: refused
-    code, out, err = run("dev-proof", "update", "orch")
-    assert code == 2 and "hp1." not in out
-    # a dev demo workspace (marked at creation): the test human's proof drives `update --proof-stdin`'s gate
+def _demo(ws):
+    """A dev demo workspace under the test prefix, marked at creation (the dev installer's step)."""
     fresh = ws.parent / "demo"
     (fresh / ".orch").mkdir(parents=True)
-    monkeypatch.chdir(fresh)
-    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
     hp.dev_mark(fresh)
+    return fresh
+
+
+def test_dev_proof_command_works_only_in_a_dev_workspace(ws, run, monkeypatch):
+    code, out, err = run("dev-proof", "update", "orch")  # a test workspace without a dev record
+    assert code == 2 and "hp1." not in out
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
     code, out, err = run("dev-proof", "ticket.answer", "t_a:q1")
     assert code == 0 and out.strip().startswith("hp1.")
     assert hp.verify_and_consume(fresh, out.strip(), "ticket.answer", "t_a:q1") == "human:test-human"
+
+
+def test_dev_proof_refuses_a_dev_install_a_normal_install_and_a_real_workspace(ws, run, monkeypatch):
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
+    for kind in ("dev", "normal"):
+        monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
+        code, out, err = run("dev-proof", "update", "orch")
+        assert code == 2 and "hp1." not in out  # only a TEST install, even with the dev record
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    outside = ws.parent.parent / "real-ws"  # not under .orch-test
+    (outside / ".orch").mkdir(parents=True)
+    monkeypatch.chdir(outside)
+    code, out, err = run("dev-proof", "update", "orch")
+    assert code == 2 and "hp1." not in out
+
+
+def test_dev_proof_refuses_an_orch_started_agent_context(ws, run, monkeypatch):
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
+    for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA", "CLAUDECODE"):
+        monkeypatch.setenv(k, "x")
+        code, out, err = run("dev-proof", "update", "orch")
+        assert code == 2 and "hp1." not in out, k
+        monkeypatch.delenv(k)
+    code, out, err = run("dev-proof", "update", "orch", "--by", "agent:helper")
+    assert code == 2 and "hp1." not in out
+    assert run("dev-proof", "update", "orch")[0] == 0  # the clean harness context works
+
+
+def test_dev_proof_allowlist_and_a_log_without_secrets(ws, run, monkeypatch):
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
+    code, out, err = run("dev-proof", "config.share", "on")  # a real op, but not one the e2e scripts need
+    assert code == 2 and "hp1." not in out
+    code, proof, err = run("dev-proof", "update", "orch")
+    assert code == 0
+    log = (hp.key_dir(fresh) / "dev-proof.log").read_text()
+    assert "dev:test-human minted op=update" in log and proof.strip() not in log and "hp1" not in log
 
 
 # ------------------------------------------------------------------ chat: make-ticket, DM ops
@@ -725,3 +767,46 @@ def test_dm_reads_and_sync_need_no_proof_and_confer_no_person_input(ws, run):
         code, out, err = run(*argv, "--by", "human:pat", "--json")
         assert "dashboard on this computer" not in out + err and "Continue" not in out + err
     assert hp.handoffs(ws) == []
+
+
+# ------------------------------------------------------------------ update/ORCH_REF and folder add-ons
+
+
+def test_a_proven_update_honours_orch_ref_and_an_unproven_addon_add_does_not(ws, run, monkeypatch):
+    from orch import addons
+
+    seen = {}
+    monkeypatch.setattr(addons, "update", lambda *a, **k: seen.update(update=addons._ENV_SOURCE_PROVEN) or [])
+    monkeypatch.setattr(addons, "add", lambda *a, **k: seen.update(add=addons._ENV_SOURCE_PROVEN))
+    tid = "orch"
+    code, out, err = _cli(run, monkeypatch, _proof(ws, "update", tid), "update", "--json")
+    assert code == 0, out + err
+    assert seen["update"] is True  # ORCH_REPO / ORCH_REF count inside the person-gated update only
+    run("addon", "add", "relay", "--yes")
+    assert seen["add"] is False
+
+
+def test_a_folder_addon_needs_a_click_and_runs_inside_trusted_local_add(ws, run, monkeypatch):
+    from orch import addons
+
+    folder = ws.parent / "my-addon"
+    folder.mkdir()
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: addons._LOCAL_ADD_PROVEN)  # a normal install's rule
+    seen = {}
+    monkeypatch.setattr(addons, "add", lambda *a, **k: seen.update(args=a, proven=addons._LOCAL_ADD_PROVEN))
+    code, out, err = run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    assert code == 2 and "args" not in seen  # refused: nothing installed
+    card = hp.handoffs(ws)[0]
+    assert card["op"] == "addon.add_local" and str(folder.resolve()) in card["label"]
+    assert "runs inside orch" in card["label"]
+    item = hp.handoff_take(ws, card["id"])  # one click: the page takes the item and runs it with a proof
+    assert item["target"] == addons.local_add_target(folder)
+    proof = _proof(ws, item["op"], item["target"])
+    code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
+    assert code == 0, out + err
+    assert seen["proven"] is True and str(folder) in seen["args"][1]
+    # an agent's own add is refused outright, no hand-off by an agent
+    monkeypatch.setenv("CLAUDECODE", "1")
+    seen.clear()
+    code, out, err = run("addon", "add", str(folder), "--yes", "--json")
+    assert code == 2 and "args" not in seen
