@@ -2,7 +2,12 @@
   "adapters": {
     "claude": {
       "oneshot": { "settings_args": ["--settings", "{reminder_json}"] },
-      "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" }
+      "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
+      "reminder": {
+        "settings_file": ".claude/settings.local.json",
+        "skip": [".claude", "CLAUDE.local.md"],
+        "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } }
+      }
     }
   }
 }

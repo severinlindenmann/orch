@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -45,7 +46,7 @@ def _edit(proj, name="b.txt", ahead=30):
 def _hook(monkeypatch, proj, event="UserPromptSubmit", payload=None, capsys=None):
     body = json.dumps({"hook_event_name": event, "cwd": str(proj)}) if payload is None else payload
     monkeypatch.setattr(sys, "stdin", io.StringIO(body))
-    rc = workcheck.hook_main()
+    rc = workcheck.hook_main(["work-check", "--hook", "claude"])
     return rc, capsys.readouterr().out
 
 
@@ -140,7 +141,9 @@ def test_hook_exits_zero_on_any_error(ws, monkeypatch, capsys):
 def test_hook_as_a_process_never_fails(ws):
     """The real command line, also with a stdin that is not JSON and a folder that is no workspace."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "ORCH_RUN", "ORCH_TICKET"))}
-    argv = procs.orch_python_argv("work-check", "--hook", "claude")
+    argv = procs.orch_python_argv(
+        "work-check", "--hook", "claude"
+    )  # the shipped command differs (-I): see init tests
     for cwd, stdin in ((ws, '{"hook_event_name":"UserPromptSubmit"}'), (ws, "{{{"), (ws.parent, "")):
         r = subprocess.run(argv, cwd=cwd, input=stdin, capture_output=True, text=True, env=env, timeout=30)
         assert r.returncode == 0, r.stderr
@@ -218,8 +221,65 @@ def test_git_runs_with_the_hardened_flags(ws, monkeypatch):
     assert workcheck.check(ws)["remind"] is True
     assert seen
     for argv, env in seen:
-        assert argv[:8] == ["git", "--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c",
-                            "core.hooksPath=/dev/null", "-c"]  # fmt: skip
+        assert os.path.isabs(argv[0])  # resolved once, never a bare "git"
+        assert argv[1:8] == [
+            "--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c",
+            "core.hooksPath=/dev/null", "-c",
+        ]  # fmt: skip
         assert "core.untrackedCache=false" in argv
-        assert argv[argv.index("-c", 8) + 1 or 0] and not any(k.startswith("GIT_DIR") for k in env)
+        assert not any(k.startswith("GIT_DIR") for k in env)
         assert not {"diff", "status", "log", "show", "add", "commit"} & set(argv)
+
+
+def _fake_git(folder):
+    folder.mkdir(parents=True, exist_ok=True)
+    f = folder / ("git.exe" if os.name == "nt" else "git")
+    f.write_text("#!/bin/sh\ntouch planted.txt\n")
+    f.chmod(0o755)
+    return f
+
+
+def test_git_is_never_taken_from_the_project_or_a_relative_path_entry(ws, monkeypatch):
+    real = shutil.which("git")
+    _fake_git(ws / "tools")
+    _fake_git(ws / "bin")
+    monkeypatch.setattr(workcheck, "_GIT_EXE", [])
+    # the project's folders first on PATH, a relative entry, the current folder: all skipped
+    path = os.pathsep.join([str(ws / "tools"), "bin", "", ".", str(ws), os.path.dirname(real)])
+    monkeypatch.setenv("PATH", path)
+    monkeypatch.chdir(ws)
+    exe = workcheck._git_exe(ws)
+    assert exe == real and str(ws) not in exe
+    _edit(ws)
+    assert workcheck.check(ws)["remind"] is True
+    assert not (ws / "planted.txt").exists()
+
+
+def test_git_only_inside_the_project_means_no_git_and_a_walk(ws, monkeypatch):
+    _fake_git(ws / "tools")
+    monkeypatch.setattr(workcheck, "_GIT_EXE", [])
+    monkeypatch.setenv("PATH", str(ws / "tools"))
+    assert workcheck._git_exe(ws) is None
+    _edit(ws)
+    assert workcheck.check(ws)["files"] == 2 and not (ws / "planted.txt").exists()  # b.txt + tools/git
+
+
+def test_find_root_stays_in_its_own_project(tmp_path, monkeypatch):
+    shared = tmp_path / "shared"
+    (shared / ".orch").mkdir(parents=True)
+    proj = shared / "proj"
+    (proj / ".git").mkdir(parents=True)
+    (proj / "sub").mkdir()
+    assert workcheck.find_root(proj / "sub") == proj / "sub"  # stopped at the git top folder, no .orch there
+    (proj / ".orch").mkdir()
+    assert workcheck.find_root(proj / "sub") == proj
+
+
+def test_hook_unknown_tool_or_missing_arg_is_silent(ws, monkeypatch, capsys):
+    _edit(ws)
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO(json.dumps({"hook_event_name": "UserPromptSubmit", "cwd": str(ws)}))
+    )
+    assert workcheck.hook_main(["work-check", "--hook", "nosuchtool"]) == 0
+    assert workcheck.hook_main(["work-check", "--hook"]) == 0
+    assert capsys.readouterr().out == ""

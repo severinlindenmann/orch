@@ -877,10 +877,7 @@ def _local_settings(proj):
 
 def _ours(doc, event):
     return [
-        h
-        for g in doc["hooks"][event]
-        for h in g["hooks"]
-        if h["command"].endswith("orch work-check --hook claude")
+        h for g in doc["hooks"][event] for h in g["hooks"] if "orch work-check --hook claude" in h["command"]
     ]
 
 
@@ -947,7 +944,7 @@ def test_reminder_settings_refreshes_an_old_path(proj, run):
     (proj / ".claude/settings.local.json").write_text(json.dumps(old), encoding="utf-8")
     run("init")
     (h,) = _ours(_local_settings(proj), "SessionStart")
-    assert h["command"] == reminder_settings.hook_command()
+    assert h["command"] == reminder_settings.hook_command("claude")
 
 
 @pytest.mark.parametrize(
@@ -993,6 +990,57 @@ def test_reminder_settings_command_is_quoted(monkeypatch):
 
     nasty = "/tmp/a b/$(touch x);y'z/py"
     monkeypatch.setattr(sys, "executable", nasty)
-    cmd = reminder_settings.hook_command()
-    assert shlex.split(cmd) == [nasty, "-P", "-m", "orch", "work-check", "--hook", "claude"]
-    assert cmd.endswith(" -P -m orch work-check --hook claude")
+    cmd = reminder_settings.hook_command("claude")
+    words = shlex.split(cmd)
+    assert words[:8] == [nasty, "-I", "-P", "-m", "orch", "work-check", "--hook", "claude"]
+    assert words[8:] == ["2>/dev/null", "||", "true"]  # an uninstalled orch never errors on a prompt
+    assert cmd.endswith(" -m orch work-check --hook claude 2>/dev/null || true")
+
+
+def test_reminder_settings_command_uses_forward_slashes(monkeypatch):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(sys, "executable", "C:\\Program Files\\Python\\python.exe")
+    cmd = reminder_settings.hook_command("claude")
+    assert "\\" not in cmd and "C:/Program Files/Python/python.exe" in cmd
+
+
+def test_reminder_settings_tracked_file_is_left_alone(proj, run):
+    _git_repo(proj)
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text('{"env": {"A": "b"}}', encoding="utf-8")
+    _git(proj, "add", "-f", ".claude/settings.local.json")
+    code, out, _ = run("init")
+    assert code == 0 and f.read_text(encoding="utf-8") == '{"env": {"A": "b"}}'
+    assert out.count("left it as it is") == 1 and "tracked" in out
+
+
+def test_reminder_settings_deeply_nested_json_does_not_crash(proj, run):
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text("[" * 100000, encoding="utf-8")
+    code, out, _ = run("init")
+    assert code == 0 and f.read_text(encoding="utf-8") == "[" * 100000 and "left it as it is" in out
+
+
+def test_reminder_settings_retries_once_when_the_tool_wrote_meanwhile(proj, monkeypatch):
+    import json
+
+    from orch import reminder_settings
+
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text('{"a": 1}', encoding="utf-8")
+    real, calls = reminder_settings._sig, []
+
+    def sig(path):
+        calls.append(1)
+        if len(calls) == 2:  # between the read and the write the tool adds a key
+            path.write_text('{"a": 1, "permissions": {"allow": ["x"]}}', encoding="utf-8")
+        return real(path)
+
+    monkeypatch.setattr(reminder_settings, "_sig", sig)
+    assert reminder_settings.ensure(proj) == []
+    doc = json.loads(f.read_text(encoding="utf-8"))
+    assert doc["permissions"] == {"allow": ["x"]} and "hooks" in doc  # the tool's key survived

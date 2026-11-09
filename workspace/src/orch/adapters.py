@@ -262,14 +262,28 @@ REMINDER_TIMEOUT = 5  # seconds; the reminder hook must never hold up a turn
 
 
 def reminder_doc(name: str, root: Path | None = None) -> dict | None:
-    """The reminder hooks (`reminder_hooks` in agents.json) as the tool's settings, or None."""
+    """The reminder hooks (`reminder_hooks` in agents/reminder.json) as the tool's settings, or None.
+    The data holds `orch work-check --hook <tool>`; the command written is the ABSOLUTE one
+    (reminder_settings.hook_command), never `orch` found through a run's PATH."""
     rh = load(name, root).get("reminder_hooks")
     if not rh:
         return None
+    from orch import reminder_settings
+
     return {
         "hooks": {
-            event: [{"hooks": [{"type": "command", "command": cmd, "timeout": REMINDER_TIMEOUT}]}]
-            for event, cmd in rh.items()
+            event: [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": reminder_settings.hook_command(name),
+                            "timeout": REMINDER_TIMEOUT,
+                        }
+                    ]
+                }
+            ]
+            for event in rh
         }
     }
 
@@ -295,10 +309,8 @@ def hooks_doc(name: str, run_id: str, root: Path | None = None) -> dict | None:
         }
     }
     for event, groups in ((reminder_doc(name, root) or {}).get("hooks") or {}).items():
-        if event in doc["hooks"]:  # same event, one more command after the run-event one
-            doc["hooks"][event][0]["hooks"] += groups[0]["hooks"]
-        else:
-            doc["hooks"][event] = groups
+        doc["hooks"].setdefault(event, [])
+        doc["hooks"][event] += groups  # its own group: the run-event group's matcher does not apply
     return doc
 
 

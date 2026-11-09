@@ -17,7 +17,7 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     rem = json.loads((agentsdata.agents_dir() / "reminder.json").read_bytes())["adapters"]["claude"]
     assert merged["adapters"]["claude"]["reminder_hooks"] == rem["reminder_hooks"]
     assert merged["adapters"]["claude"]["oneshot"]["settings_args"] == rem["oneshot"]["settings_args"]
-    for key in ("reminder_hooks",):
+    for key in ("reminder_hooks", "reminder"):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")
     assert merged == base
