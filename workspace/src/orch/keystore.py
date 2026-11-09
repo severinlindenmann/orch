@@ -8,9 +8,8 @@
         profiles.toml  0600  names only, never a value
         <record>.json  0600  small records of orch itself (the relay record, written by relay.connect)
 
-WINDOWS FAILS CLOSED: the user-and-SYSTEM ACL of the contract is not implemented yet, so on Windows every
-function of this module refuses ("Keys can't be stored safely on Windows yet. Coming soon.") and nothing
-secret is written or read. Decided by the platform (os.name), never by an environment variable.
+WINDOWS: the same rules through orch.winacl (a user-and-SYSTEM-only ACL set before any secret is written, and
+checked on every read); loose files are set aside as on POSIX.
 
 Level 1 stops accidents and leaks (chat, logs, records, git, cloud sync of the workspace), not a hostile
 process of the same user; see secrets.md. Rights: POSIX folders 0700 and files 0600, checked on every read (a
@@ -61,23 +60,6 @@ NEEDS_REENTRY = "needs-reentry"
 REENTER = "This key must be entered again."
 _log = logging.getLogger("orch.keystore")
 READ_ONLY = "This key is managed by your admin and cannot be changed here."
-
-
-WINDOWS_MSG = "Keys can't be stored safely on Windows yet. Coming soon."
-
-
-def _windows() -> bool:
-    return os.name == "nt"
-
-
-def unsupported() -> bool:
-    """True where the key store refuses everything (Windows, until its ACL slice)."""
-    return _windows()
-
-
-def _guard() -> None:
-    if _windows():
-        raise Refused(WINDOWS_MSG)
 
 
 def _now() -> str:
@@ -165,16 +147,24 @@ def _is_loose(p: Path) -> bool:
 
 
 def _quarantine(path: Path) -> None:
-    """Rename a loose key file aside (caller holds keys.lock). Logs the file name, never a value."""
+    """Set a loose key file aside (caller holds keys.lock): a NAMES-ONLY copy `<name>.loose-<UTC time>` is
+    written with the proper rights and the original is deleted by exact path, so no value stays anywhere under
+    loose rights (a rename would keep the values and, on Windows, the loose ACL). Logs the file name, never a
+    value."""
     ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     dst = path.with_name(f"{path.name}.loose-{ts}")
     n = 0
     while dst.exists() or dst.is_symlink():
         n += 1
         dst = path.with_name(f"{path.name}.loose-{ts}-{n}")
-    os.rename(path, dst)
-    with contextlib.suppress(OSError):
-        os.chmod(dst, 0o600)
+    if path.parent.name == "files":  # a key-file value: nothing but the fact that it existed is kept
+        hp._write_private(dst, "")
+    else:
+        names = sorted(_names_from(path))
+        hp._write_private(
+            dst, json.dumps({"schema": KEYS_SCHEMA, "keys": {n: {} for n in names}}, indent=2) + "\n"
+        )
+    path.unlink()
     _log.warning("key file %s had loose rights and was set aside; its keys must be entered again", path.name)
 
 
@@ -318,7 +308,6 @@ def _files_dir(d: Path, create: bool) -> Path:
 def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> None:
     """Create or replace key `name` (a person's action; the proof is the caller's job, slice 1.2). A name an
     admin key holds is allowed: the workspace key is used and the admin key shows as shadowed."""
-    _guard()
     _name(name)
     if source != "workspace":
         raise Refused(READ_ONLY)  # admin keys come only from set_admin (the relay refresh)
@@ -370,6 +359,7 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as f:
+            hp.winacl.set_private(tmp, False)  # before any secret is written (Windows)
             f.write(data)
         os.replace(tmp, path)
     finally:
@@ -378,7 +368,6 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
 
 
 def remove(root: Path, name: str) -> None:
-    _guard()
     _name(name)
     d = hp.key_dir(root)
     with hp._key_lock(d):
@@ -404,7 +393,6 @@ def get_value(root: Path, name: str):
     """The value of key `name` (str; bytes for a key-file). The workspace key wins over an admin key of the
     same name (see list_keys: the admin one shows as shadowed). The caller hands it straight to a command and
     never prints it. Refused when there is none, or when it must be entered again (its file was loose)."""
-    _guard()
     _name(name)
     d = _existing_dir(root)
     if d is None:
@@ -437,7 +425,6 @@ def list_keys(root: Path) -> list[dict]:
     both stored: the workspace key is used (`active`) and the admin one shows as `shadowed`; removing the
     workspace key makes the admin one active again. A key whose file had loose rights shows as
     `needs-reentry` with the words "This key must be entered again" (its type is not known: None)."""
-    _guard()
     d = _existing_dir(root)
     mine = _load(d) if d else {}
     theirs = _load(d, admin=True) if d else {}
@@ -477,7 +464,6 @@ def preflight(root: Path) -> None:
     """Everything set_admin needs, checked without writing a key: the folder (pairing, binding, rights)
     and both key files readable. Refused means nothing was changed; the relay refresh calls it before it
     replaces anything."""
-    _guard()
     d = hp.key_dir(root)
     _tighten(d)
     _load(d)
@@ -489,7 +475,6 @@ def set_admin(root: Path, items: dict) -> list[str]:
     relay refresh, secrets.md "an interrupted refresh keeps the old keys"). Workspace keys are not touched. A
     name or value the store refuses is skipped and reported by name, never by value. Returns plain-words lines
     for the skipped ones. Raises Refused (nothing changed) when the folder is not usable."""
-    _guard()
     if not isinstance(items, dict):
         raise Refused("The admin keys are not a list of keys.")
     d = hp.key_dir(root)
@@ -518,7 +503,6 @@ def set_admin(root: Path, items: dict) -> list[str]:
 
 
 def admin_names(root: Path) -> list[str]:
-    _guard()
     d = _existing_dir(root)
     return sorted(_load(d, admin=True)) if d else []
 
@@ -604,7 +588,6 @@ def _toml(profiles: dict) -> str:
 
 def write_profiles(root: Path, profiles: dict) -> None:
     """Replace profiles.toml (a person's action: the proof is the caller's job, slice 1.2). Names only."""
-    _guard()
     d = hp.key_dir(root)
     with hp._key_lock(d):
         _tighten_locked(d)
@@ -618,7 +601,6 @@ def write_profiles(root: Path, profiles: dict) -> None:
 
 def read_profiles(root: Path) -> dict:
     """The profiles ({} when none yet). Unreadable or invalid: Refused."""
-    _guard()
     d = _existing_dir(root)
     if d is None:
         return {}
@@ -647,7 +629,6 @@ def _record_path(d: Path, record: str) -> Path:
 def record_write(root: Path, record: str, data: dict) -> None:
     """A small record of orch itself in the key folder (e.g. `relay`: {url, workspace, token, ...}, written by
     relay.connect). One file, new file + rename under keys.lock."""
-    _guard()
     if not isinstance(data, dict):
         raise Refused("A record is an object.")
     d = hp.key_dir(root)
@@ -658,7 +639,6 @@ def record_write(root: Path, record: str, data: dict) -> None:
 
 def record_read(root: Path, record: str) -> dict | None:
     """The record, or None when there is none. A damaged one is Refused, never guessed."""
-    _guard()
     d = _existing_dir(root)
     if d is None:
         return None

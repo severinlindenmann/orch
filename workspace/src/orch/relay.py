@@ -2481,18 +2481,14 @@ def _admin_keys(root: Path, cred: dict, skipped: list[str]) -> None:
     keeps the old keys), never into the workspace. No keys and no usable guarded home (nothing could be stored
     there): nothing to store. Keys but no usable home: Refused (_commit checks this first, before anything
     changes). A leftover credentials.json of an older refresh is always deleted (removing a secret is
-    safe). Windows: keys are skipped with a plain sentence."""
+    safe)."""
     paired = False
-    if keystore.unsupported():  # Windows, until the ACL slice: no keys stored, no fallback to the workspace
+    try:
+        humanproof.guarded_home(root)
+        paired = True
+    except Refused:
         if cred:
-            skipped.append(f"admin keys: {keystore.WINDOWS_MSG}")
-    else:
-        try:
-            humanproof.guarded_home(root)
-            paired = True
-        except Refused:
-            if cred:
-                raise
+            raise
     if paired:
         skipped.extend(keystore.set_admin(root, cred))
     legacy = net.secrets_dir(root) / "credentials.json"
@@ -2514,8 +2510,14 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
     skills.ensure_gitignore(root)
     for fn in ("credentials.json", "mcp.json", "shared.json"):
         harness.check_private_path(root, sec / fn)  # refuse before changing anything
-    if snap["credentials"] and not keystore.unsupported():
-        # pairing, binding, rights and readable key files: refuse before any change
+    try:
+        humanproof.guarded_home(root)
+        pairs = True
+    except Refused:
+        if snap["credentials"]:
+            raise
+        pairs = False
+    if pairs:  # pairing, binding, rights and readable key files: refuse before any change, with keys or not
         keystore.preflight(root)
     (agents / "orch-relay").mkdir(parents=True, exist_ok=True)
     os.replace(stage / "workspaces.json", agents / "orch-relay" / "workspaces.json")

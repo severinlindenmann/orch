@@ -152,44 +152,58 @@ def test_records_are_an_allowlist(tws):
     keystore.record_write(tws, "dev", {"a": 1})
 
 
-@pytest.mark.parametrize(
-    "call",
-    [
-        lambda ws: keystore.add(ws, "k", "token", TOKEN),
-        lambda ws: keystore.remove(ws, "k"),
-        lambda ws: keystore.get_value(ws, "k"),
-        lambda ws: keystore.list_keys(ws),
-        lambda ws: keystore.set_admin(ws, {"a": TOKEN}),
-        lambda ws: keystore.admin_names(ws),
-        lambda ws: keystore.write_profiles(ws, PROFILES),
-        lambda ws: keystore.read_profiles(ws),
-        lambda ws: keystore.record_write(ws, "relay", {}),
-        lambda ws: keystore.record_read(ws, "relay"),
-    ],
-)
-def test_windows_fails_closed_and_writes_nothing(tws, acct, monkeypatch, call):
-    monkeypatch.setattr(keystore, "_windows", lambda: True)
-    with pytest.raises(Refused, match="can't be stored safely on Windows"):
-        call(tws)
-    assert not (acct / ".orch-test" / "home" / "keys").exists()
+def test_every_key_store_write_sets_the_windows_rights_before_the_secret(tws, monkeypatch):
+    """Simulated Windows: winacl.set_private is called for each temp file before it is written (keys.json,
+    admin-keys.json, a key file, profiles.toml, a record, the binding)."""
+    from orch import winacl
+
+    calls = []
+    real_write = os.fdopen
+
+    def spy(path, is_dir):
+        p = Path(path)
+        calls.append((p.name, is_dir, p.stat().st_size if p.exists() else None))
+
+    monkeypatch.setattr(winacl, "set_private", spy)
+    keystore.add(tws, "k", "token", TOKEN)
+    keystore.add(tws, "kf", "key-file", b"filebytes")
+    keystore.set_admin(tws, {"adm": TOKEN2})
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
+    keystore.record_write(tws, "dev", {"a": 1})
+    assert real_write
+    temps = [c for c in calls if c[0].endswith(".tmp") and not c[1]]
+    assert temps and all(size == 0 for _, _, size in temps)  # always before the first byte
+    seen = " ".join(n for n, _, _ in temps)
+    for part in ("keys.json", "admin-keys.json", "kf", "profiles.toml", "dev.json", "binding"):
+        assert part in seen, part
 
 
-def test_windows_refresh_skips_the_admin_keys_and_never_falls_back_to_the_workspace(
-    rel, run, tws, monkeypatch
-):
-    monkeypatch.chdir(tws)
-    turn_on(tws, "relay")
-    legacy = tws / ".orch" / "secrets" / "credentials.json"
-    legacy.parent.mkdir(parents=True, exist_ok=True)
-    legacy.write_text('{"OLD": "old-value-0123456789"}')
-    monkeypatch.setattr(keystore, "_windows", lambda: True)
-    assert run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)[0] == 0
-    _snap_keys(rel, DB_URL="pg://db.example/prod")
-    code, out, err = run("relay", "refresh")
-    assert code == 0, (out, err)
-    assert "can't be stored safely on Windows" in out and "pg://db.example/prod" not in out
-    assert not legacy.exists() and "pg://db.example/prod" not in _tree_text(tws / ".orch")
-    assert not (tws.parent / "home" / "keys").exists()
+@posix_only
+def test_a_set_aside_file_keeps_names_only_and_the_original_is_gone(tws):
+    keystore.add(tws, "k1", "token", SENTINEL)
+    keystore.add(tws, "kf", "key-file", SENTINEL.encode())
+    d = hp.key_dir(tws)
+    os.chmod(d / "files" / "kf", 0o644)
+    keystore.list_keys(tws)
+    os.chmod(d / "keys.json", 0o644)
+    keystore.list_keys(tws)
+    for p in [*d.glob("keys.json*"), *(d / "files").glob("kf*")]:
+        assert SENTINEL not in p.read_text(errors="replace"), p
+        if ".loose-" in p.name:
+            assert _mode(p) == 0o600
+    assert not (d / "keys.json").exists() and not (d / "files" / "kf").exists()
+    assert {i["name"] for i in keystore.list_keys(tws)} == {"k1", "kf"}
+
+
+def test_preflight_with_empty_credentials_still_refuses_a_bad_key_store(tws, monkeypatch):
+    relay = _refresh_fixture(tws, monkeypatch)
+    keystore.add(tws, "mine", "token", TOKEN)
+    hp._write_private(hp.key_dir(tws) / "keys.json", "{broken")
+    snap = relay._api(None, None, None)[1]
+    snap["credentials"] = {}
+    with pytest.raises(Refused, match="damaged"):
+        relay.refresh(tws)
+    _nothing_replaced(tws)
 
 
 # ------------------------------------------------------------------------------ profiles
