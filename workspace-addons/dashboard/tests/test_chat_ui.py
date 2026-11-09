@@ -95,4 +95,5 @@ def test_open_agent_button_sits_directly_left_of_new_ticket():
     css = (web / "style.css").read_text(encoding="utf-8")
     assert html.index('id="open-agent"') < html.index('id="new-ticket"')
     assert html.index('id="new-ticket"') - html.index('id="open-agent"') < 400  # adjacent buttons
-    assert "#open-agent:not([hidden])+.btn.primary{margin-left:0}" in css
+    assert 'class="topbar-actions"' in html and html.index('class="topbar-actions"') < html.index('id="open-agent"')
+    assert ".topbar>.topbar-actions{display:flex;flex:0 0 auto;flex-wrap:nowrap" in css  # one row at 390 px too
