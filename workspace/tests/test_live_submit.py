@@ -177,10 +177,12 @@ def test_an_enter_the_tool_dropped_is_sent_again_and_submits_once(proj, run, tui
 B = "─" * 40
 
 
-def _combo(a, plain, raw, mode, cy, cx):
+def _combo(a, plain, raw, mode, cy, cx, alt="0", cursor="1", width=200):
     """The answer of the one-call screen+cursor read (capture-pane -e -p ; display-message)."""
     shown = raw if raw is not None else plain
-    return subprocess.CompletedProcess(a, 0, f"{shown}\n@@orch {mode} {cy} {cx}\n", "")
+    if cy == 49:  # "the usual cursor": the last (empty) line of the screen
+        cy = len(plain.split("\n")) - 1
+    return subprocess.CompletedProcess(a, 0, f"{shown}\n@@orch {mode} {cy} {cx} {alt} {cursor} {width}\n", "")
 
 
 def _screen(box="", above="", below="  auto mode on"):
@@ -620,7 +622,7 @@ def test_the_dialog_goes_away_the_notice_goes_in_and_the_count_restarts(proj, ru
     tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane="Do you want to make this edit?\n")
     memo, t0 = {}, time.time()
     runs_live.retry_deliver(proj, tid, rn, memo, now=t0)
-    screen["pane"] = ""
+    screen["pane"] = _screen("")  # the dialog is gone: the empty box shows
     assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 100) == "sent" and "blocked" not in memo
     assert sent[-2:] == [runs_live.notice_line(tid, False), "Enter"]
 
@@ -905,11 +907,110 @@ def test_the_real_tmux_accepts_the_one_call_read_and_the_client_target(proj, run
     assert runs_live._client_idle(proj, tid) == 0.0  # nobody attached: unknown, never cancels
 
 
-def test_a_tool_without_a_prompt_box_is_judged_by_the_cursor_line(proj, run, monkeypatch):
-    """A plain command-line agent (the generic adapter) draws no box: its output above the prompt is not
-    unsent text; text on the cursor's own line is."""
+def _hold(proj, run, monkeypatch, pane, boxed, cy=None, alt="0", cursor="1", cx=0, width=200):
     tid, rn, sent, screen = _held(proj, run, monkeypatch)
-    screen["pane"] = None
+    lines = pane.split("\n")
+
+    def fake(root, *a, **k):
+        if a[0] == "capture-pane" and ";" in a:
+            return _combo(a, pane, None, "0", len(lines) - 1 if cy is None else cy, cx, alt, cursor, width)
+        return subprocess.CompletedProcess(a, 0, "", "")
+
+    monkeypatch.setattr(runs_live, "tmux", fake)
+    return runs_live._hold_reason(proj, tid, None, boxed)
+
+
+def test_the_adapter_not_the_screen_decides_boxed_or_not(proj):
+    assert runs_live._prompt_box("claude", proj) is True
+    config.add_agent(proj, "plain", "true {prompt}", "true --interactive")
+    assert runs_live._prompt_box("plain", proj) is False
+
+
+@pytest.mark.parametrize("borders", [0, 1])
+def test_a_boxed_tool_whose_box_is_not_visible_holds(proj, run, monkeypatch, borders):
+    """Mid-redraw, a resize, an overlay: fewer than two borders on a boxed tool never means empty."""
+    pane = "\n".join(["old output"] + [B] * borders + ["", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=True) == "nobox"
+    assert "input box isn't visible" in runs_live.HOLD_WORDS["nobox"]
+
+
+def test_a_plain_tool_is_judged_by_the_cursor_line(proj, run, monkeypatch):
     pane = "\n".join(["old output", "more output", "", ""])
-    assert runs_live._box_text(pane, 2, 0) == ""
-    assert runs_live._box_text(pane.replace("\n\n", "\ntyped half a line\n", 1), 2, 15) == "typed half a line"
+    assert _hold(proj, run, monkeypatch, pane, boxed=False) is None
+    typed = "\n".join(["old output", "typed half a line", ""])
+    assert _hold(proj, run, monkeypatch, typed, boxed=False, cy=1, cx=17) == "text"
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [{"cy": 99}, {"cy": -1}, {"alt": "1"}, {"cursor": "0"}],
+    ids=["row-past", "row-neg", "alt", "hidden"],
+)
+def test_a_plain_tool_with_any_doubt_about_the_cursor_holds(proj, run, monkeypatch, kw):
+    pane = "\n".join(["old output", "", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, **kw) == "unsure"
+
+
+def test_a_plain_tool_whose_draft_filled_the_row_holds(proj, run, monkeypatch):
+    """An exact-width draft leaves the cursor at column 0 of an empty row; the draft is on the row above."""
+    draft = "x" * 40
+    pane = "\n".join(["old output", draft, "", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=40) == "unsure"
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=80) is None  # ordinary output
+
+
+def test_every_adapter_with_a_live_mode_declares_whether_it_draws_a_box():
+    """A plain tool that omitted `prompt_box` would be treated as boxed and wait forever: say it."""
+    from orch import adapters
+
+    for name, a in adapters._registry().items():
+        if a.get("live"):
+            assert isinstance(a["live"].get("prompt_box"), bool), name
+
+
+@pytest.mark.parametrize(
+    ("above", "width"),
+    [("字" * 20, 40), ("x" * 38 + "字", 40), ("x" * 38 + "字" + "x", 41), ("a" * 39 + "  ", 41)],
+    ids=["wide-fills", "wide-pushed-to-next-row", "one-short-of-width", "trailing-spaces"],
+)
+def test_a_plain_tools_row_that_reaches_the_edge_holds_by_display_width(proj, run, monkeypatch, above, width):
+    pane = "\n".join(["old output", above, "", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=width) == "unsure"
+
+
+def test_ordinary_short_output_still_types_and_the_capture_keeps_trailing_spaces(proj, run, monkeypatch):
+    pane = "\n".join(["old output", "字" * 5, "", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=40) is None
+    seen = []
+    tid, rn, sent, screen = _held(proj, run, monkeypatch)
+    orig = runs_live.tmux
+
+    def spy(root, *a, **k):
+        seen.append(a)
+        return orig(root, *a, **k)
+
+    monkeypatch.setattr(runs_live, "tmux", spy)
+    runs_live._hold_reason(proj, tid, None)
+    assert "-N" in seen[0] and seen[0][0] == "capture-pane"  # trailing spaces at a wrap point are kept
+
+
+def test_real_claude_captures_with_N_padding_still_say_empty_or_typed(proj, run, monkeypatch):
+    """`capture-pane -N` pads every row with spaces (after the ESC[0m that ends the hint): spaces are never
+    visible text, so the real placeholder still types and the typed prompt still holds."""
+    raw = (FIX / "placeholder-N.raw").read_text(encoding="utf-8")
+    assert any(ln.endswith("\x1b[0m" + " " * 5) or ln.endswith("   ") for ln in raw.split("\n"))  # padded
+    tid = _real("placeholder-N", monkeypatch, proj, run)
+    assert runs_live._hold_reason(proj, tid, None) is None
+    tid = _real("typed-N", monkeypatch, proj, run)
+    assert runs_live._hold_reason(proj, tid, None) == "text"
+
+
+def test_input_held_for_unsent_text_is_given_up_after_three_minutes(proj, run, monkeypatch):
+    """The hold is bounded: after DELIVER_GIVE_UP_SECONDS the input is kept (live_retry, one step)."""
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, box="a half-written note", cx=19)
+    memo, ended, t0 = {}, [], time.time()
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0) is None
+    got = runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 180, end=lambda: ended.append(1))
+    assert got == "gave_up" and ended == [1] and sent == []
+    (back,) = runs.undelivered(proj, tid)
+    assert back["live_retry"] is True
