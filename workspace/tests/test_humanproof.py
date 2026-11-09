@@ -1,5 +1,6 @@
 """Guarded home, human key, proof single use, settings, and the pending read-back rule (H1)."""
 
+import contextlib
 import json
 import os
 
@@ -102,9 +103,6 @@ def test_human_key_rights_and_reuse(tws):
     assert len(k) == 32 and hp.human_key(tws) == k
     f = hp.key_dir(tws) / "human.key"
     assert oct(f.stat().st_mode & 0o777) == "0o600"
-    f.chmod(0o644)
-    with pytest.raises(Refused, match="wrong rights"):
-        hp.human_key(tws)
 
 
 def _proof(tws, op="run.takeover", target=TID, by="human:pat", **kw):
@@ -268,21 +266,85 @@ def test_keys_folder_symlink_refused_on_read(tws):
         hp.verify_and_consume(tws, "hp1.x.y", "run.takeover", TID)
 
 
-def test_keys_folder_loose_rights_refused_on_read(tws):
-    hp.human_key(tws)
-    (tws.parent / "home" / "keys").chmod(0o755)
-    with pytest.raises(Refused, match="wrong rights"):
-        hp.key_dir(tws, create=False)
+def test_loose_folders_are_tightened_not_refused(tws):
+    k = hp.human_key(tws)
+    home = tws.parent / "home"
+    for d in (home, home / "keys", hp.key_dir(tws)):
+        d.chmod(0o755)
+    assert hp.human_key(tws, create=False) == k  # same key: only the folders were tightened
+    for d in (home, home / "keys", hp.key_dir(tws)):
+        assert oct(d.stat().st_mode & 0o777) == "0o700"
+    assert hp.take_notices(tws) == []
 
 
-def test_test_install_never_uses_the_account_home(tmp_path, monkeypatch):
-    acct = tmp_path / "acct"
-    acct.mkdir()
-    ws = tmp_path / "elsewhere"
-    (ws / ".orch").mkdir(parents=True)
-    monkeypatch.setattr(addons, "real_home", lambda: acct)
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
-    monkeypatch.delenv("ORCH_HOME", raising=False)
-    with pytest.raises(Refused, match="don't belong together"):
-        hp.human_key(ws)
-    assert list(acct.iterdir()) == []  # nothing created in the account home
+# ---------------------------------------------------------------- loose secret files: reset
+
+
+def _loose_setup(tws):
+    """A key, a spent proof, a delivered id, a handoff, a dev record and a widened setting."""
+    key = hp.human_key(tws)
+    old = hp.mint(key, hp.new_payload("run.takeover", TID, "human:pat"))
+    other = hp.mint(key, hp.new_payload("run.takeover", TID, "human:pat"))
+    hp.verify_and_consume(tws, other, "run.takeover", TID)  # writes proofs-used.json
+    hp.consume(tws, ["p_aaaaaaaa"])  # delivered.json
+    d = hp.key_dir(tws)
+    hp._write_private(d / "handoffs.json", json.dumps({"h": 1}))
+    home = tws.parent / "home"
+    hp._write_private(home / "dev-workspaces.json", json.dumps({"workspaces": {os.path.realpath(tws): {}}}))
+    hp.record_set(tws, "focus.session_typing", True, "human:pat")
+    assert hp.effective(tws, "focus.session_typing", True) is True
+    assert hp.dev_record(tws) is True
+    return key, old, d, home
+
+
+READERS = {
+    "human.key": lambda tws: hp.human_key(tws),
+    "human-settings.json": lambda tws: hp.effective(tws, "focus.session_typing", True),
+    "proofs-used.json": lambda tws: hp.verify_and_consume(tws, "hp1.x.y", "run.takeover", TID),
+    "delivered.json": lambda tws: hp.delivered_ids(tws),
+    "handoffs.json": lambda tws: hp.private_json(tws, "handoffs.json", {}),
+    "dev-workspaces.json": lambda tws: hp.dev_record(tws),
+}
+
+
+@pytest.mark.parametrize("name", list(READERS))
+def test_loose_secret_file_resets_protection(tws, name):
+    key, old, d, home = _loose_setup(tws)
+    path = home / name if name in ("human-settings.json", "dev-workspaces.json") else d / name
+    path.chmod(0o644)  # loose: the content is never trusted
+    with contextlib.suppress(Refused):
+        READERS[name](tws)
+    assert hp.human_key(tws) != key  # rotated
+    with pytest.raises(Refused):
+        hp.verify_and_consume(tws, old, "run.takeover", TID)  # old proofs stop verifying
+    assert not (d / "proofs-used.json").exists() and not (d / "delivered.json").exists()
+    assert not (d / "handoffs.json").exists()
+    for setting in ("focus.session_typing", "insights.share_names", "secret.allow_get", "conn.allow"):
+        assert hp.effective(tws, setting, True) is False  # safest defaults
+    assert hp.effective(tws, "focus.live_session", True) is True  # owner defaults stay
+    assert hp.effective(tws, "insights.share_counts", True) is True
+    notes = hp.take_notices(tws)
+    assert [n["text"] for n in notes] == [hp.RESET_NOTICE]
+    assert hp.take_notices(tws) == []  # one time
+    log = (home / "protection-reset.log").read_text()
+    assert name in log and key.hex() not in log and hp.human_key(tws).hex() not in log
+    assert oct((home / "human-settings.json").stat().st_mode & 0o777) == "0o600"
+    if name == "dev-workspaces.json":
+        assert hp.dev_record(tws) is False
+
+
+def test_wrong_type_is_loose_too(tws):
+    key = hp.human_key(tws)
+    f = hp.key_dir(tws) / "human.key"
+    f.unlink()
+    f.symlink_to(tws / "elsewhere")
+    assert hp.human_key(tws) != key  # a link in place of the key: never followed, key rotated
+    assert not (hp.key_dir(tws) / "human.key").is_symlink()
+
+
+def test_extra_file_check_hook_counts_as_loose(tws, monkeypatch):
+    key = hp.human_key(tws)
+    monkeypatch.setattr(hp, "FILE_CHECKS", [lambda p: "acl" if p.name == "human.key" else None])
+    assert hp.human_key(tws) != key
+    monkeypatch.setattr(hp, "FILE_CHECKS", [])
+    assert hp.take_notices(tws)

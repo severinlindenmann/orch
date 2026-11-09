@@ -24,3 +24,17 @@ def test_guard_fails_the_session_on_a_change(tmp_path):
     assert "1 passed" in r.stdout  # the test itself passed ...
     assert r.returncode != 0, r.stdout  # ... and the session still failed
     assert "REAL ~/.orch-tool CHANGED" in r.stderr + r.stdout
+
+
+def test_trace_ownership_is_by_pid_only(tmp_path, monkeypatch):
+    import conftest
+
+    reg = tmp_path / "pids"
+    reg.write_text("111\n222\n")
+    monkeypatch.setenv("ORCH_TEST_SESSION_PIDS", str(reg))
+    pytest_cwd = "/private/var/T/pytest-of-someone/pytest-1/test_x0"
+    assert conftest._ours({"pid": 111, "ppid": 1, "cwd": "/x"})
+    assert conftest._ours({"pid": 9, "ppid": 222, "cwd": "/x"})
+    assert not conftest._ours({"pid": 9, "ppid": 8, "cwd": pytest_cwd})  # a parallel session's line
+    monkeypatch.delenv("ORCH_TEST_SESSION_PIDS")
+    assert not conftest._ours({"pid": 111, "ppid": 1, "cwd": pytest_cwd})
