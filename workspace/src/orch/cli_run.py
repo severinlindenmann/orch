@@ -280,9 +280,6 @@ def _done(args, root: Path, tid: str | None) -> None:
 def _send(args, root: Path, tid: str, by: str) -> None:
     proven = False
     if getattr(args, "proof_stdin", False) or not (tickets.agent_tool() or by.startswith("agent:")):
-        if args.file and not getattr(args, "proof_stdin", False):
-            # the text a person approves must be the text that runs: no file read behind the card
-            raise Refused('Send the text itself: orch run send <ticket> "text"')
         by = humanproof.person_by(
             root,
             args,
@@ -290,6 +287,8 @@ def _send(args, root: Path, tid: str, by: str) -> None:
             tid,
             label="Send a message to " + humanproof.plain_ticket(root, tid),
             value=args.text or "",
+            # the text a person approves must be the text that runs: no file read behind the card
+            no_handoff='Send the text itself: orch run send <ticket> "text"' if args.file else None,
         )  # a person: proof or hand-off (H1)
         proven = by.startswith("human:")
     if args.file:

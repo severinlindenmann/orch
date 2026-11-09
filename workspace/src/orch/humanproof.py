@@ -1080,7 +1080,9 @@ def _dashboard_note(root: Path, open_ok: bool = True) -> str:
     return "Waiting for your click: open the dashboard on this computer and press Continue."
 
 
-def person_by(root: Path, args, op: str, target: str, *, label: str = "", value: str = "", argv=None) -> str:
+def person_by(
+    root: Path, args, op: str, target: str, *, label: str = "", value: str = "", argv=None, no_handoff=None
+) -> str:
     """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
     comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
     its own, unprivileged, identity. Anything claiming to be a person without a proof is refused and handed
@@ -1096,6 +1098,8 @@ def person_by(root: Path, args, op: str, target: str, *, label: str = "", value:
     explicit = getattr(args, "by", None)
     if explicit and explicit.startswith("agent:"):
         return tickets.current_actor(explicit)
+    if no_handoff:
+        raise Refused(no_handoff)  # this command cannot be approved on the page as typed
     clean = _clean_argv(CURRENT_ARGV) if argv is None else argv
     queued = request_handoff(root, op, target, label, value, clean)
     if not queued:
