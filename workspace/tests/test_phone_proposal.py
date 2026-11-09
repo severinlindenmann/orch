@@ -191,7 +191,7 @@ def agent_envs():
     from orch import adapters
 
     out = [("ORCH_AGENT", "anything")]
-    for name, a in adapters._registry().items():
+    for a in adapters._registry().values():
         d = a.get("detect") or {}
         if d.get("env_any"):
             out.append((d["env_any"][0], "1"))
