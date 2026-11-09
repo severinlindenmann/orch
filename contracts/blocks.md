@@ -32,8 +32,9 @@ Tones: `neutral` · `good` · `warn` · `bad` (the dashboard's design-system ton
 
 - **Plain text only.** Every string is drawn as text (`textContent`, SwiftUI `Text(verbatim:)`); `<b>` stays the four
   characters `<b>`. No markup, no Markdown.
-- **Links:** `https://` only; anything else makes the document invalid. Opened in a new tab / the system browser.
-- **Files:** a relative path inside the workspace (no `/` at the start, no `..`, no `\`, no drive letter). The renderer resolves
+- **Links:** `https://` only, no user name or password before the host; anything else makes the document invalid. Opened in a new tab / the system browser.
+- **Files:** a relative path inside the workspace (no `/` at the start, no `\`, no drive letter, no dot file or dot folder at
+  any depth, so no `..`, `.git`, `.env`, `.orch`), except a ticket's own `.orch/tickets/<id>/artifacts/`. The renderer resolves
   it against the workspace root and refuses a symlink that leaves it ("file not available"). The phone gets no file bytes
   through blocks: it shows the name and size (snapshots, below).
 - **Unknown block type** (a newer producer): valid, drawn as one muted row "can't show this here". A known type that breaks
@@ -41,10 +42,13 @@ Tones: `neutral` · `good` · `warn` · `bad` (the dashboard's design-system ton
   Details. Producers check before writing; `orch job table` refuses an invalid block with plain words.
 - **Versioning:** a new optional field keeps `orch.blocks/1`; a new block type keeps it too (old renderers fall back). A
   changed meaning gets `orch.blocks/2`; renderers refuse a schema they do not know.
+- **`from` is set by the core** from the channel (orch job → `job`, the agent's proof → `agent`, computed → `orch`); a
+  producer's own value is overwritten, so a job cannot present its result as the agent's proof.
 - **Phone:** the workspace sends a block snapshot inside the ticket's `ticket_view` through the relay (≤ 16 KB with the rest
   of the snapshot, relay-api.md); the sender drops `log` blocks first, then cuts tables to 20 rows (setting `total_rows`), then
   drops blocks from the end, and adds a final `summary` "More on the computer". Every string of the snapshot passes the
-  value hider (secrets.md) before it leaves the computer; a `file` block carries name and size only, never bytes or a path
+  value hider (secrets.md) before it leaves the computer; links are sent without query and fragment (tokens there are
+  unknown to the hider); a `file` block carries name and size only, never bytes or a path
   outside `.orch/tickets/<id>/artifacts/` (other paths are sent as the base name only).
 
 ## Fixtures (`vectors/blocks/`)

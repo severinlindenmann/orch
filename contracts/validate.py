@@ -555,9 +555,12 @@ def kind_blocks():
             fails.append(f"{label}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
         if want:
             texts = set(_strings(case["doc"]))
+            lines = texts | {ln for t in texts for ln in t.split("\n")}
             for s in case["shows"]:
-                if not any(s in t for t in texts):
-                    fails.append(f"{label}: shows {s!r} is not in the document")
+                if s not in lines:
+                    fails.append(f"{label}: shows {s!r} is not a whole text (or line) of the document")
+            if not case["shows"]:
+                fails.append(f"{label}: a valid fixture must list what it shows")
             unknown = sum(1 for b in case["doc"]["blocks"] if b.get("type") not in BLOCK_TYPES)
             _expect(f"{label} fallback", unknown, case["fallback"])
             seen.update(b.get("type") for b in case["doc"]["blocks"])

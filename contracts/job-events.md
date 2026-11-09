@@ -81,7 +81,8 @@ value hider and are shown as usual; the last 200 lines also become `log` events.
 text matches `^\s*(\d+)\s*/\s*(\d+)\b` (12/40) or `^\s*(\d{1,3}(?:\.\d+)?)\s*%` (45%) becomes a `progress` event (vectors
 `progress_pattern`). When the command exits, orch writes `end` (`ok` for exit 0, `cancelled` for a signal it sent, else
 `failed`, `exit` = the code) unless the program already sent one. Ctrl-C / `orch run stop` → the program gets SIGTERM, then
-SIGKILL after 10 s, and `end cancelled`.
+SIGKILL after 10 s, and `end cancelled`. orch signals only the process it started itself, through the handle `orch job run`
+keeps (pid + start time); `pid` and `command` in `$ORCH_EVENTS` input are refused.
 
 A program started any other way may still write to `$ORCH_EVENTS` when it inherits it; without it, it calls `orch job …`
 with `ORCH_JOB`.
