@@ -79,6 +79,7 @@ class ClaudeMapper:
         self._open: dict[str, dict] = {}  # tool_use id -> {kind, agent, at}
         self._helper_of: dict[str, str] = {}  # helper tool_use id -> h_<n>
         self._n = 0
+        self._seen: dict[str, tuple[int, int]] = {}  # assistant message id -> (cache read tokens, all input tokens)
 
     def _e(self, agent, kind, text, at=None, **data):
         return ev.make(
@@ -109,6 +110,7 @@ class ClaudeMapper:
     def _assistant(self, line, at, parent):
         out = []
         agent = self._agent(parent)
+        self._count(line.get("message") or {})
         for b in (line.get("message") or {}).get("content") or []:
             if not (isinstance(b, dict) and b.get("type") == "tool_use"):
                 continue
@@ -129,6 +131,22 @@ class ClaudeMapper:
                     self._e(agent, "tool.start", _step_text(name, inp), at, id=tid, tool=name, command=cmd)
                 )
         return out
+
+    def _count(self, msg: dict) -> None:
+        """Remember how much of one answer's input came from the saved conversation (counted once per message)."""
+        u = msg.get("usage")
+        if not isinstance(u, dict):
+            return
+        n = lambda k: u[k] if isinstance(u.get(k), int) and not isinstance(u.get(k), bool) and u[k] >= 0 else 0
+        read, total = n("cache_read_input_tokens"), n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens")
+        key = str(msg.get("id") or f"n{len(self._seen)}")
+        if total:
+            self._seen[key] = (read, total)
+
+    def reused(self) -> int | None:
+        """Percent of the input that was reused from the saved conversation, or None when nothing was counted."""
+        total = sum(t for _, t in self._seen.values())
+        return round(100 * sum(r for r, _ in self._seen.values()) / total) if total else None
 
     def _user(self, line, at):
         out = []
@@ -194,7 +212,7 @@ class ClaudeMapper:
         failed = bool(line.get("is_error"))
         out.append(self._e("main", "run.state", "Failed" if failed else "Finished", at,
                            state="failed" if failed else "idle", turns=line.get("num_turns"),
-                           denials=len(line.get("permission_denials") or [])))  # fmt: skip
+                           denials=len(line.get("permission_denials") or []), reused=self.reused()))  # fmt: skip
         return out
 
 

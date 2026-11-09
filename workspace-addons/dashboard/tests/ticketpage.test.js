@@ -91,6 +91,22 @@ test('the review buttons show whenever the status is Review, an open question fi
   assert.match(text, /Ask for changes/);
   assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
   assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
+  ctx.state.settings = {agents:[{name:'claude', label:'Claude', chosen:true}]};
+  vm.runInContext("artifactData.set('t_test', {at:Date.now(), data:{files:[{name:'next-steps.html', size:24576, mtime:'2026-11-09T07:30:00Z'}]}})", ctx);
+  const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
+  const all = nodes(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]}));
+  const review = all.find(n => n.attrs.className === 'card next-step');
+  const reviewText = JSON.stringify(review);
+  assert.match(reviewText, /Claude finished: Next steps/);
+  assert.equal((reviewText.match(/Next steps/g) || []).length, 2, 'title once, tile once, no preview box');
+  assert.doesNotMatch(reviewText, /Completed\.|ticket-preview|ticket-result/);
+  const tile = nodes(review).find(n => n.attrs.className === 'ticket-review-tile');
+  assert.match(JSON.stringify(tile), /Next steps/);
+  assert.doesNotMatch(JSON.stringify(tile), /\.html/);
+  assert.match(JSON.stringify(tile), /Page · 24 KB/);
+  assert.equal(nodes(tile).filter(n => n.tag === 'button').length, 1);
+  assert.ok(nodes(review).some(n => n.children.some(c => typeof c === 'string' && c.startsWith('Completed '))));
+
 });
 test('Copy ticket and Repeat show in the ticket menu only when the repeats add-on is on', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
@@ -182,4 +198,84 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   assert.ok(pre);
   assert.ok(pre.children[0].length <= 2048);
   assert.ok(pre.children[0].split('\n').length <= 8);
+});
+
+function interactiveNode(tag, attrs = {}, ...children) {
+  const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:'', dataset:{key:attrs['data-key']},
+    append(...kids){this.children.push(...kids);}, prepend(...kids){this.children.unshift(...kids);},
+    replaceChildren(...kids){this.children = kids;}, setAttribute(k,v){this.attrs[k] = v;}, focus(){},
+    click(){if (!this.disabled) return this.onclick?.();}};
+  return n;
+}
+const descendants = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(descendants)] : [];
+test('inline changes replace both buttons, preserve the lock, send on Enter and cancel on Escape', async () => {
+  let finish, renders = 0;
+  const calls = [], locks = new Set();
+  const c = context({h:interactiveNode, locks, moveTicket(){}, render(){renders++;},
+    act:async (op, args) => { calls.push([op,args]); return new Promise(resolve => {finish = resolve;}); }});
+  const host = c.ticketChangesEditor({id:'t_test'});
+  assert.equal(host.attrs['data-key'], 'ticket-changes-t_test');
+  host.children[0].children[1].click();
+  const nodes = descendants(host), input = nodes.find(n => n.tag === 'input');
+  const send = nodes.find(n => n.children.includes('Send'));
+  assert.ok(input);
+  assert.equal(input.attrs.placeholder, 'What should change?');
+  assert.equal(input.attrs['aria-label'], 'What should change?');
+  assert.equal(nodes.filter(n => n.tag === 'textarea').length, 0);
+  assert.ok(!nodes.some(n => n.children.includes('Looks good — mark Done')));
+  assert.ok(send.disabled && locks.has('ticket-changes-t_test'));
+  input.value = 'Fix the date'; input.oninput(); assert.equal(send.disabled, false);
+  input.onkeydown({key:'Enter', preventDefault(){}});
+  assert.ok(send.disabled);
+  input.onkeydown({key:'Enter', preventDefault(){}});
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].text, 'Fix the date');
+  finish({ok:true}); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(renders, 1); assert.equal(locks.size, 0);
+  host.children[0].children[1].click();
+  descendants(host).find(n => n.tag === 'input').onkeydown({key:'Escape', preventDefault(){}});
+  assert.equal(locks.size, 0);
+  assert.match(JSON.stringify(host), /Ask for changes/);
+});
+
+test('HTML sheets render only evidence with a valid Focus key and keep Code and Download', async () => {
+  for (const [kind, focus, rendered] of [
+    ['evidence', {page_key:'0123456789abcdef'}, true],
+    ['artifacts', {page_key:'0123456789abcdef'}, false],
+    ['evidence', {page_key:'invalid'}, false],
+    ['evidence', null, false],
+    ['evidence', 'offline', false],
+  ]) {
+    const calls = [], d = interactiveNode('dialog'), actions = interactiveNode('div');
+    actions.firstChild = {};
+    const c = context({h:interactiveNode, el:(tag, cls, text) => interactiveNode(tag, {className:cls}, text), dialog:() => ({d, actions}),
+      window:{DashHelpers:helpers, orch:{open(){}}}, fetch:async url => {
+        calls.push(url);
+        if (url.startsWith('/addon/focus/api/')) {
+          if (focus === 'offline') throw Error('offline');
+          return {ok:focus !== null, json:async () => focus};
+        }
+        return {ok:true, text:async () => '<h1>Result</h1>'};
+      }});
+    vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'), source.indexOf('function loadArtifacts')), c);
+    vm.runInContext(source.slice(source.indexOf('async function previewFile'), source.indexOf('function ticketActor')), c);
+    await c.previewFile('t_test', kind, 'reports/my result.htm');
+    const nodes = descendants(d), frame = nodes.find(n => n.tag === 'iframe');
+    assert.equal(!!frame, rendered);
+    assert.ok(nodes.some(n => n.tag === 'a' && n.children.includes('Download')));
+    const pre = nodes.find(n => n.tag === 'pre');
+    assert.equal(pre.textContent, '<h1>Result</h1>');
+    const page = nodes.find(n => n.tag === 'button' && n.children.includes('Page'));
+    if (rendered) {
+      assert.equal(frame.attrs.sandbox, 'allow-scripts');
+      assert.equal(frame.attrs.referrerpolicy, 'no-referrer');
+      assert.equal(frame.attrs.src, '/addon/focus/page/t_test/0123456789abcdef/reports/my%20result.htm');
+      const code = nodes.find(n => n.children.includes(pre));
+      assert.equal(code.hidden, true); assert.equal(frame.hidden, false);
+      nodes.find(n => n.tag === 'button' && n.children.includes('Code')).click();
+      assert.equal(code.hidden, false); assert.equal(frame.hidden, true);
+      page.click(); assert.equal(code.hidden, true);
+    } else assert.equal(page, undefined);
+    if (kind === 'artifacts') assert.ok(!calls.some(url => url.startsWith('/addon/focus')));
+  }
 });

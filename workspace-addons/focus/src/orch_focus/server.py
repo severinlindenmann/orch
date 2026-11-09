@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote
 
 from . import actions, adapterdata, chat, proofs, runfiles
 from .board import Board, TicketWatcher
+from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
 from .permissions import Permissions
 from .revisions import Revisions
@@ -75,6 +76,7 @@ class Tracker:
         # ticket -> run id, for the runs Focus started (kept in .orch/run/focus/ so a crash is recoverable)
         self.started: dict[str, str] = self._load_started()
         self.perms = Permissions(root, orch_bin)
+        self.clock = WorkClock(root)
         self.last_agent: dict[str, tuple[str, str]] = {}  # ticket -> (agent, mode) of its latest run
         self.ticket_cache: dict[str, tuple[float, dict | None]] = {}
         self.lookup_cache = {}
@@ -245,6 +247,8 @@ class Tracker:
         if run is None and claim.get("run") is not None:
             claim = {**claim, "run": None}  # an id that is not a run id is unknown
         v = self._shape(ticket, status, claim, board, events, self.is_generic(claim, tid), self.agents())
+        mode = "worked" if v["state"] == "working" else None if v["state"] == "done" or not v["ticket"]["started"] else "paused"
+        v["run"].update(self.clock.tick(tid, mode, claim.get("started_at") if isinstance(claim.get("started_at"), str) else None))
         mobile = self.mobile()
         v["capabilities"] = {"phone_mode": mobile["available"]}
         v["phone_mode"] = mobile["on"]
