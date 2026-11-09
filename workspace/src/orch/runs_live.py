@@ -288,6 +288,8 @@ HOLD_WORDS = {
     "dialog": "Waiting: the agent's window shows a question for a person.",
     "text": "Waiting: clear the text in the agent's window.",
     "unreadable": "Waiting: the agent's window cannot be read right now.",
+    "nobox": "Waiting: the agent's input box isn't visible.",
+    "unsure": "Waiting: the agent's window is in a state orch cannot judge.",
 }
 _PROMPT_GLYPH = re.compile(r"^\s*[>\u276f\u203a]\s?")
 _ANSI = re.compile(r"\x1b\[([0-9;:?]*)([A-Za-z])")
@@ -330,10 +332,6 @@ def _is_hint(raw_row: str) -> bool | None:
 def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str:
     """What is in the prompt box ("" only when it is PROVEN empty, see the invariant above)."""
     lines = pane.split("\n")
-    if sum(1 for ln in lines if _BORDER.match(ln)) < 2:
-        # a tool that draws no prompt box (a plain command-line agent): its prompt is the cursor's own line
-        cur = lines[cy] if 0 <= cy < len(lines) else ""  # no such row on the screen: nothing typed there
-        return "" if not _PROMPT_GLYPH.sub("", cur, count=1).strip() else cur.strip()
     a, b = _box_rows(lines, cy)
     rows = [_PROMPT_GLYPH.sub("", ln, count=1).strip() for ln in lines[a:b]]
     text = " ".join(r for r in rows if r)
@@ -364,19 +362,28 @@ def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str
     return "" if cx == start else text
 
 
-def _hold_reason(root: Path, tid: str, dialog: str | None) -> str | None:
+def _prompt_box(agent: str, root: Path) -> bool:
+    """Whether the tool draws a prompt box: declared by its adapter (`live.prompt_box`), never read off the
+    screen. Not declared: boxed (the strict rule)."""
+    return (adapters.load(agent, root).get("live") or {}).get("prompt_box", True) is not False
+
+
+def _hold_reason(root: Path, tid: str, dialog: str | None, boxed: bool = True) -> str | None:
     """Why orch must not type its notice now (None: it may): the pane is unreadable, in copy mode
-    (scrolled up), shows a dialog, or the prompt box holds text a person typed (both would go as one line)."""
-    # ONE tmux call for the screen (with its colour codes) and the cursor: a key pressed between two calls
-    # could pair typed text with an "empty" verdict. The plain text is made from the same capture.
+    (scrolled up), shows a dialog, or the prompt is not PROVEN empty (both would go as one line). A boxed
+    tool (its adapter says so) must show its box, else hold; a plain command-line tool is judged by the
+    cursor's own line, and any doubt about that line holds."""
+    # ONE tmux call for the screen (with its colour codes) and the cursor state: a key pressed between two
+    # calls could pair typed text with an "empty" verdict. The plain text is made from the same capture.
     r = tmux(
         root, "capture-pane", "-e", "-p", "-t", target(tid), ";",
-        "display-message", "-p", "-t", target(tid), "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x}",
+        "display-message", "-p", "-t", target(tid),
+        "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x} #{alternate_on} #{cursor_flag}",
         timeout=QUICK,
     )  # fmt: skip
     body, _, state = r.stdout.rpartition("@@orch ")
     fields = state.split()
-    if r.returncode != 0 or len(fields) < 3:
+    if r.returncode != 0 or len(fields) < 5:
         return "unreadable"
     if fields[0] != "0":
         return "scrolled"
@@ -385,10 +392,17 @@ def _hold_reason(root: Path, tid: str, dialog: str | None) -> str | None:
     if _dialog_shows(pane, dialog):
         return "dialog"
     try:
-        cy, cx = int(fields[1]), int(fields[2])
+        cy, cx, alt, cursor = int(fields[1]), int(fields[2]), fields[3], fields[4]
     except ValueError:
         return "unreadable"
-    return "text" if _box_text(pane, cy, cx, raw) else None
+    lines = pane.split("\n")
+    if boxed:
+        if sum(1 for ln in lines if _BORDER.match(ln)) < 2:
+            return "nobox"
+        return "text" if _box_text(pane, cy, cx, raw) else None
+    if alt != "0" or cursor != "1" or not 0 <= cy < len(lines):
+        return "unsure"  # an alternate screen, a hidden cursor or a cursor off the capture: any doubt holds
+    return "text" if _PROMPT_GLYPH.sub("", lines[cy], count=1).strip() else None
 
 
 def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
@@ -459,7 +473,7 @@ def deliver(root: Path, tid: str, stop=None) -> int:
                 runs._write(root, rec)
             return 0
         line = notice_line(tid, any(i.get("via") == "start" for i in items))
-        why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root))
+        why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root), _prompt_box(rec["agent"], root))
         _note_hold(root, tid, rec, why)
         if why:
             return (
@@ -665,7 +679,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
                 and runs.undelivered(root, tid)
                 and (rec.get("live") or {}).get("state") == "working"
                 and (rec.get("live") or {}).get("since") == s.get("live_since")
-                and _hold_reason(root, tid, dialog) is None
+                and _hold_reason(root, tid, dialog, _prompt_box(rec["agent"], root)) is None
                 and not (stop is not None and stop.is_set())
                 and _type_line(root, tid, s["line"], QUICK)
             ):
