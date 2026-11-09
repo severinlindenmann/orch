@@ -29,6 +29,12 @@ struct MobileMode: Codable, Sendable, Equatable {
     var machine: String? = nil
 }
 
+struct WorkspaceCan: Codable, Sendable, Equatable {
+    var chat: Bool
+    var tasks: Bool
+    var files: Bool
+}
+
 struct Workspace: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let name: String
@@ -44,6 +50,7 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     /// Look chosen in the workspace (contracts/look.md); nil = letter + Automatic colour. Unknown values fall back in `Look.shown`.
     var icon: String? = nil
     var color: String? = nil
+    var can: WorkspaceCan? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
         guard let m = mutedUntil else { return false }
@@ -52,6 +59,25 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     }
     /// Online while the last call is at most 5 minutes old (Presence.swift).
     func presence(now: Date = Date()) -> Presence { Presence.of(lastSeen: lastSeen, now: now) }
+}
+
+extension Workspace {
+    // Keep this initializer in an extension to preserve the memberwise initializer.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        tags = try c.decode([String].self, forKey: .tags)
+        online = try c.decode(Bool.self, forKey: .online)
+        lastSeen = try c.decodeIfPresent(String.self, forKey: .lastSeen)
+        openQuestions = try c.decode(Int.self, forKey: .openQuestions)
+        mutedUntil = try c.decodeIfPresent(String.self, forKey: .mutedUntil)
+        mobileMode = try c.decodeIfPresent(MobileMode.self, forKey: .mobileMode)
+        icon = try c.decodeIfPresent(String.self, forKey: .icon)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        can = try? c.decodeIfPresent(WorkspaceCan.self, forKey: .can)
+    }
 }
 
 struct QuestionBody: Codable, Sendable, Equatable {
@@ -65,6 +91,7 @@ struct QuestionBody: Codable, Sendable, Equatable {
     /// Permission questions: what "Always" covers, shown as "Always allow <scope>".
     var scope: String? = nil
     var allowQuestion: Bool? = nil // allow_question via JSONCoding
+    var review: Bool? = nil // review via JSONCoding
     var groupRef: GroupRef? = nil // group_ref via JSONCoding
 }
 
@@ -112,6 +139,10 @@ struct Question: Codable, Sendable, Equatable, Identifiable {
     var isGroupAllow: Bool {
         message.body.allowQuestion == true && message.body.options.count == 3 &&
             Set(message.body.options) == Set(["once", "always", "no"])
+    }
+    var isReview: Bool {
+        message.body.review == true && message.body.options.count == 2 &&
+            Set(message.body.options) == Set(["accept", "changes"])
     }
     var isAllow: Bool { isGroupAllow || isLegacyAllow }
     /// Labels never change the raw option sent to the relay.

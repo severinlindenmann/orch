@@ -55,3 +55,13 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run pytest -q tests/test_adapters.py::test_no_tool_names_outside_the_adapter
+  py311:
+    # The installer's tool Python is 3.11: argparse there is stricter (fb14, `-- <text>` after an optional positional).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: cd workspace-addons/focus && uv run --python 3.11 pytest -q tests/test_server.py -k "argv or send or control_char"
+      - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"

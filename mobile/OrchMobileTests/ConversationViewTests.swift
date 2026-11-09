@@ -78,8 +78,82 @@ final class ConversationViewTests: XCTestCase {
     }
 
     func testTopicSummaryHidesTheCountWithoutAChecklist() {
-        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Working"), "Working")
-        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 · Working")
+        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Working"), "")
+        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Ready for review"), "")
+        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 steps done")
+    }
+
+    func testResultCardsMergeOnlyConsecutiveAgentResults() {
+        let file = MessageAttachment(blobId: "b_html", kind: .file, name: "fish.html", size: 10, mime: "text/html")
+        let first = ConvItem(id: "r1", at: "1", side: .them, text: "Page is ready", attachments: [file], label: "RESULT",
+                             artifacts: [.init(blobId: "b_preview", name: "preview.png"), .init(name: "notes.txt")])
+        let second = ConvItem(id: "r2", at: "2", side: .them, text: "Duplicate summary", attachments: [file], label: "RESULT",
+                              artifacts: [.init(blobId: "b_html", name: "fish.html"), .init(blobId: "b_preview", name: "renamed.png"), .init(name: "notes.txt"), .init(name: "extra.txt")])
+        let merged = ConversationBuilder.mergingResults([first, second], review: true)
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged.first?.id, "r1")
+        XCTAssertEqual(merged.first?.text, "Page is ready")
+        XCTAssertEqual(merged.first?.label, "Ready for your review")
+        XCTAssertEqual(merged.first?.attachments, [file])
+        XCTAssertEqual(merged.first?.artifacts.map(\.name), ["preview.png", "notes.txt", "extra.txt"])
+        let mine = ConvItem(id: "m", at: "2", side: .me, text: "Another request")
+        let question = ConvItem(id: "q", at: "2", side: .them, kind: .question)
+        let plain = ConvItem(id: "p", at: "2", side: .them, text: "One moment")
+        for separator in [mine, question, plain] {
+            let separate = ConversationBuilder.mergingResults([first, separator, second], review: false)
+            XCTAssertEqual(separate.map(\.id), ["r1", separator.id, "r2"])
+            XCTAssertEqual(separate.first?.label, "Result")
+        }
+    }
+
+    func testTicketBuilderMergesResultsAcrossHiddenWorkingUpdates() {
+        func update(_ id: String, kind: String, text: String) -> PhoneMessage {
+            PhoneMessage(message: TextMessage(id: id, from: "ws_a", to: "ph_1", type: "text", createdAt: "2026-11-06T10:00:0\(id)Z", ticket: "t_1",
+                                              body: TextBody(text: text, update: TextUpdate(kind: kind))), workspaceName: "A")
+        }
+        let input = ConversationInputs(messages: [update("1", kind: "result", text: "First result"),
+                                                 update("2", kind: "working", text: "Working"),
+                                                 update("3", kind: "result", text: "Second result")])
+        let items = ConversationBuilder.items(.topic(workspace: "ws_a", ticket: "t_1"), input)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.text, "First result")
+        XCTAssertEqual(items.first?.label, "Result")
+    }
+
+    func testOutboxHandoffKeepsOneRowAndItsIdentity() {
+        let id = ConversationID.general(workspace: "ws_a")
+        var pending = OutboxItem(clientId: "c1", phone: "ph_1", kind: .send, workspace: "ws_a", createdAt: "2026-11-06T09:00:00Z")
+        pending.general = true; pending.text = "Start a thing"
+        var input = ConversationInputs(outbox: [pending])
+        let queued = ConversationBuilder.items(id, input)
+        XCTAssertEqual(queued.count, 1)
+        XCTAssertEqual(queued.first?.receipt, .queued)
+        pending.sentMessageId = "m1"; input.outbox = [pending]
+        let sent = ConversationBuilder.items(id, input)
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertEqual(sent.first?.receipt, .sent)
+        XCTAssertEqual(sent.first?.rowID, queued.first?.rowID)
+        input.messages = [general("m1")]
+        let listed = ConversationBuilder.items(id, input)
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed.first?.rowID, queued.first?.rowID)
+        XCTAssertEqual(listed.first?.id, "m1", "replies still use the server id")
+        input.outbox = []
+        XCTAssertEqual(ConversationBuilder.items(id, input), listed)
+        input.messages = []; pending.sentMessageId = nil; pending.failure = "Refused"; input.outbox = [pending]
+        XCTAssertEqual(ConversationBuilder.items(id, input).first?.receipt, .failed("Refused"))
+    }
+
+    func testGeneralStartedChipHidesItsAckBubble() {
+        let messages = [general("m1"), ack("a1", replyTo: "m1", ticket: "t_1")]
+        let chips = ConversationRules.startedChips(messages: messages, workspace: "ws_a", key: { _ in nil })
+        XCTAssertEqual(chips.map(\.ticket), ["t_1"])
+        let items = ConversationBuilder.items(.general(workspace: "ws_a"), ConversationInputs(messages: messages))
+        XCTAssertEqual(items.map(\.id), ["m1"])
+        XCTAssertFalse(items.contains { $0.text == "Got it" })
+        let legacy = ChatBuilder.workspaceItems("ws_a", ChatData(messages: messages))
+        XCTAssertFalse(legacy.contains { if case .theirs = $0.kind { return true }; return false })
     }
 
     func testPresenceLineIsLowercaseExceptTheMonth() {
