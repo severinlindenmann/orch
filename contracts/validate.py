@@ -1700,6 +1700,14 @@ def _pr_text(r):
     return "Couldn't make the ticket" if r["result"] == "refused" else "Already decided"
 
 
+_ms = json.loads((HERE / "message.schema.json").read_text())
+_key_pat = _ms["$defs"]["display_key"]["pattern"]
+_text_rule = json.dumps(_ms["allOf"])
+if "^Ticket made: " + _key_pat[1:] not in _text_rule.replace("\\\\", "\\"):
+    fails.append("proposal-result: the canonical-text pattern must copy display_key's pattern exactly")
+for _s in ("Ticket made: DM1-12", "Couldn't make the ticket", "Already decided"):
+    if not _s.isascii() or _s.endswith(".") or "  " in _s:
+        fails.append(f"proposal-result: canonical string {_s!r} must be plain ASCII, no period, single spaces")
 for v in prvec["valid"]:
     if v["message"]["body"]["text"] != _pr_text(v["message"]["body"]["proposal_result"]):
         fails.append(f"proposal-result vector valid {v['name']}: body.text is not the canonical line")
@@ -1714,6 +1722,8 @@ for v in prvec["relay"]:
         fails.append(f"proposal-result vector relay {v['name']}: body.text is not the canonical line")
     if v["name"] == "text-names-another-key" and v["message"]["body"]["text"] == _pr_text(v["message"]["body"]["proposal_result"]):
         fails.append("proposal-result vector relay text-names-another-key: text must differ from the canonical line")
+    if "request" in v and (phone_errors("send_request", v["request"]) or "proposal_result" not in v["request"] or v.get("stored_body_lacks") != "proposal_result"):
+        fails.append(f"proposal-result vector relay {v['name']}: the request must be a valid send_request that names the field the relay ignores")
     if v["expect"] not in (200, 201, 403, 404, 409, 422) or ("message" not in v and "request" not in v):
         fails.append(f"proposal-result vector relay {v['name']}: bad expect or entry")
 _pr_to = {"made": "phones"}
@@ -1721,7 +1731,7 @@ for case in prvec["cases"]:
     n, snd, st = f"proposal-result vector case {case['name']}", case["send"], case["state"]
     if st not in ("open", "made", "gone", "answered_make", "answered_not_now", "result_recorded"):
         fails.append(f"{n}: bad state")
-    should_send = case["authorised"] and case["answer"].strip().casefold() == "make"
+    should_send = case["authorised"] and case["answer"].strip().casefold() == "make" and not case.get("skipped")
     if (snd is not None) != should_send or (snd is None) != (case["to"] is None):
         fails.append(f"{n}: a result is sent exactly for an authorised make answer (and then has a `to`)")
     if snd is None:
