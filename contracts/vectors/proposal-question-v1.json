@@ -235,6 +235,7 @@
     }
   ],
   "question_id": "proposal-m_pr00000000000001",
+  "ack": "A phone answer that makes the ticket sends NO ack text (the card shows the result). Only a dashboard-first make sends the ordinary ack to the phones, which closes the card.",
   "cases": [
     {
       "name": "make",

@@ -1,0 +1,31 @@
+%begin 1794235422 317 0
+%end 1794235422 317 0
+%session-changed $0 fx
+%client-session-changed client-9217 $0 fx
+%window-renamed @0 bash
+%output %0 export PS1='$ '; clear\015\012\033[?2004l\015
+%output %0 \033[H\033[J
+%output %0 \033[?2004h$ 
+%output %0 bash /tmp/fx/demo.sh\015\012\033[?2004l\015
+%output %0 \033[31mred\033[0m \033[1;32mbold green\033[0m \033[38;5;208morange256\033[0m \033[38;2;10;200;250mtruecolor\033[0m \033[4munder\033[0m\015\012part1
+%output %0  part2
+%output %0  part3\015\012ä ö ü ß 😀 👩‍💻 ┌──┬──┐ │ ✓│ │ └──┴──┘ 日本語\015\012
+%output %0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+%output %0 \015\012
+%output %0 1\015\0122\015\0123\015\0124\015\0125\015\012
+%output %0 \033[?2004h$ 
+%output %0 less /tmp/fx/doc.txt\015\012\033[?2004l\015
+%output %0 \033[?1049h\033[40;1H\033[?1h\033=\0151 lorem ipsum\015\0122 lorem ipsum\015\0123 lorem ipsum\015\0124 lorem ipsum\015\0125 lorem ipsum\015\0126 lorem ipsum\015\0127 lorem ipsum\015\0128 lorem ipsum\015\0129 lorem ipsum\015\01210 lorem ipsum\015\01211 lorem ipsum\015\01212 lorem ipsum\015\01213 lorem ipsum\015\01214 lorem ipsum\015\01215 lorem ipsum\015\01216 lorem ipsum\015\01217 lorem ipsum\015\01218 lorem ipsum\015\01219 lorem ipsum\015\01220 lorem ipsum\015\01221 lorem ipsum\015\01222 lorem ipsum\015\01223 lorem ipsum\015\01224 lorem ipsum\015\01225 lorem ipsum\015\01226 lorem ipsum\015\01227 lorem ipsum\015\01228 lorem ipsum\015\01229 lorem ipsum\015\01230 lorem ipsum\015\01231 lorem ipsum\015\01232 lorem ipsum\015\01233 lorem ipsum\015\01234 lorem ipsum\015\01235 lorem ipsum\015\01236 lorem ipsum\015\01237 lorem ipsum\015\01238 lorem ipsum\015\01239 lorem ipsum\015\012\033[7m/tmp/fx/doc.txt\033[27m\033[K
+%window-renamed @0 less
+%output %0 \015\033[K40 lorem ipsum\015\012:\033[K
+%output %0 \015\033[K41 lorem ipsum\015\012:\033[K
+%output %0 \015\033[K42 lorem ipsum\015\01243 lorem ipsum\015\01244 lorem ipsum\015\01245 lorem ipsum\015\01246 lorem ipsum\015\01247 lorem ipsum\015\01248 lorem ipsum\015\01249 lorem ipsum\015\01250 lorem ipsum\015\01251 lorem ipsum\015\01252 lorem ipsum\015\01253 lorem ipsum\015\01254 lorem ipsum\015\01255 lorem ipsum\015\01256 lorem ipsum\015\01257 lorem ipsum\015\01258 lorem ipsum\015\01259 lorem ipsum\015\01260 lorem ipsum\015\01261 lorem ipsum\015\01262 lorem ipsum\015\01263 lorem ipsum\015\01264 lorem ipsum\015\01265 lorem ipsum\015\01266 lorem ipsum\015\01267 lorem ipsum\015\01268 lorem ipsum\015\01269 lorem ipsum\015\01270 lorem ipsum\015\01271 lorem ipsum\015\01272 lorem ipsum\015\01273 lorem ipsum\015\01274 lorem ipsum\015\01275 lorem ipsum\015\01276 lorem ipsum\015\01277 lorem ipsum\015\01278 lorem ipsum\015\01279 lorem ipsum\015\01280 lorem ipsum\015\012:\033[K
+%layout-change @0 a49d,90x30,0,0,0 a49d,90x30,0,0,0 *
+%output %0 \033[H\033[J\033[H42 lorem ipsum\015\01243 lorem ipsum\015\01244 lorem ipsum\015\01245 lorem ipsum\015\01246 lorem ipsum\015\01247 lorem ipsum\015\01248 lorem ipsum\015\01249 lorem ipsum\015\01250 lorem ipsum\015\01251 lorem ipsum\015\01252 lorem ipsum\015\01253 lorem ipsum\015\01254 lorem ipsum\015\01255 lorem ipsum\015\01256 lorem ipsum\015\01257 lorem ipsum\015\01258 lorem ipsum\015\01259 lorem ipsum\015\01260 lorem ipsum\015\01261 lorem ipsum\015\01262 lorem ipsum\015\01263 lorem ipsum\015\01264 lorem ipsum\015\01265 lorem ipsum\015\01266 lorem ipsum\015\01267 lorem ipsum\015\01268 lorem ipsum\015\01269 lorem ipsum\015\01270 lorem ipsum\015\012:\033[K
+%layout-change @0 aafd,120x40,0,0,0 aafd,120x40,0,0,0 *
+%output %0 \033[H\033[J\033[H42 lorem ipsum\015\01243 lorem ipsum\015\01244 lorem ipsum\015\01245 lorem ipsum\015\01246 lorem ipsum\015\01247 lorem ipsum\015\01248 lorem ipsum\015\01249 lorem ipsum\015\01250 lorem ipsum\015\01251 lorem ipsum\015\01252 lorem ipsum\015\01253 lorem ipsum\015\01254 lorem ipsum\015\01255 lorem ipsum\015\01256 lorem ipsum\015\01257 lorem ipsum\015\01258 lorem ipsum\015\01259 lorem ipsum\015\01260 lorem ipsum\015\01261 lorem ipsum\015\01262 lorem ipsum\015\01263 lorem ipsum\015\01264 lorem ipsum\015\01265 lorem ipsum\015\01266 lorem ipsum\015\01267 lorem ipsum\015\01268 lorem ipsum\015\01269 lorem ipsum\015\01270 lorem ipsum\015\01271 lorem ipsum\015\01272 lorem ipsum\015\01273 lorem ipsum\015\01274 lorem ipsum\015\01275 lorem ipsum\015\01276 lorem ipsum\015\01277 lorem ipsum\015\01278 lorem ipsum\015\01279 lorem ipsum\015\01280 lorem ipsum\015\012:\033[K
+%output %0 \015\033[K\033[?1l\033>\033[?1049l
+%output %0 \033[?2004h$ 
+%window-renamed @0 bash
+%output %0 echo after-less\015\012\033[?2004l\015
+%output %0 after-less\015\012\033[?2004h$ 
