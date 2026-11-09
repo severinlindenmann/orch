@@ -881,6 +881,7 @@ def plan(
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
+    adapters.check_start_folder(name, root, person, argv)  # the final command, resumed or fresh
     return {
         "agent": name,
         "adapter": a["adapter"],

@@ -252,7 +252,7 @@ def person_state(rule) -> dict:
         return st
     closed = {"strict": True, "approval": True}
     home, file = str(rule["home"]), str(rule["file"])
-    if any(Path(x).is_absolute() or ".." in Path(x).parts for x in (home, file)):
+    if any(Path(x).is_absolute() or ".." in Path(x).parts or ":" in x or "\\" in x for x in (home, file)):
         return closed
     base = Path(os.environ.get(rule.get("home_env") or "") or Path.home() / home)
     path = base / file
@@ -265,10 +265,22 @@ def person_state(rule) -> dict:
     if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_CONFIG:
         return closed
     try:
-        with open(path, "rb") as f:
-            doc = tomllib.loads(f.read(_MAX_CONFIG + 1).decode("utf-8"))
-    except (OSError, ValueError):
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))  # never blocks on a FIFO
+    except OSError:
         return closed
+    try:
+        fi = os.fstat(fd)
+        if not stat.S_ISREG(fi.st_mode) or fi.st_size > _MAX_CONFIG:
+            return closed
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            data = f.read(_MAX_CONFIG + 1)
+        if len(data) > _MAX_CONFIG:
+            return closed
+        doc = tomllib.loads(data.decode("utf-8"))
+    except (OSError, ValueError, RecursionError):  # deep TOML raises RecursionError
+        return closed
+    finally:
+        os.close(fd)
     tables = [doc]
     prof = doc.get(rule.get("profile_key") or "")
     profiles = doc.get(rule.get("profiles") or "")
@@ -316,11 +328,25 @@ def _inside(inner: Path, outer: Path) -> bool:
     return False
 
 
-def check_start_folder(name: str, root: Path, person: Mapping | None = None) -> None:
-    """A start whose flags include workspace-write (code, not data: no adapter can drop it) is refused when
-    ORCH_HOME is inside the start folder or a temporary folder the sandbox may write: the agent could then
-    write permissions.json, add-ons and the human-choice markers. Fails closed when ORCH_HOME is unknown."""
-    if not any("workspace-write" in x for x in permission_args(name, root, None, person)):
+_WIDE = ("workspace-write", "--full-auto", "danger-full-access", "bypass")
+
+
+def check_start_folder(
+    name: str, root: Path, person: Mapping | None = None, argv: list[str] | None = None
+) -> None:
+    """A start whose flags make the tool write its folder (workspace-write, --full-auto, danger-full-access,
+    any bypass flag; code, not data: no adapter can drop it) is refused when ORCH_HOME is inside the start
+    folder or a temporary folder the sandbox may write: the agent could then write permissions.json, add-ons
+    and the human-choice markers. argv: the final command (flags before `--` only), else the mode's flags.
+    Fails closed when ORCH_HOME is unknown."""
+    flags = (
+        permission_args(name, root, None, person)
+        if argv is None
+        else argv[: argv.index("--")]
+        if "--" in argv
+        else argv
+    )
+    if not any(w in x for x in flags for w in _WIDE):
         return
     from orch import addons
 

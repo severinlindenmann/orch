@@ -325,15 +325,6 @@ def test_codex_refuses_to_start_where_orch_home_is_inside(codex_home, proj, monk
     with pytest.raises(Refused, match="Start it from a smaller folder") as e:
         adapters.check_start_folder("codex", proj)
     assert str(proj) not in str(e.value)
-    # a mixed-case spelling of the same folder (case-insensitive filesystems) is the same folder
-    if (proj / "oh").exists() or (proj / "oh").mkdir():
-        pass
-    sw = Path(str(proj).swapcase())
-    if sw.exists() and os.path.samefile(sw, proj):
-        monkeypatch.setattr("orch.addons.home", lambda root=None: sw / "oh")
-        with pytest.raises(Refused):
-            adapters.check_start_folder("codex", proj)
-
     # unknown ORCH_HOME fails closed
 
     armed = []
@@ -359,6 +350,16 @@ def test_codex_refuses_to_start_where_orch_home_is_inside(codex_home, proj, monk
     adapters.check_start_folder("codex", proj)
 
 
+def test_a_mixed_case_spelling_of_the_start_folder_is_the_same_folder(codex_home, proj, monkeypatch):
+    (proj / "oh").mkdir(exist_ok=True)
+    sw = Path(str(proj).swapcase())
+    if not (sw.exists() and os.path.samefile(sw, proj)):
+        pytest.skip("this filesystem is case-sensitive")
+    monkeypatch.setattr("orch.addons.home", lambda root=None: sw / "oh")
+    with pytest.raises(Refused):
+        adapters.check_start_folder("codex", proj)
+
+
 def test_codex_refuses_an_orch_home_in_a_temp_folder(codex_home, proj, monkeypatch, tmp_path_factory):
     import tempfile
 
@@ -370,8 +371,45 @@ def test_codex_refuses_an_orch_home_in_a_temp_folder(codex_home, proj, monkeypat
         adapters.check_start_folder("codex", root)
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(root / "nothere"))
     monkeypatch.setattr("orch.addons.home", lambda r=None: Path.home() / ".orch-test-nope")
-    if not str(Path.home().resolve()).startswith(("/tmp", "/private/tmp")):
-        adapters.check_start_folder("codex", root)
+    if str(Path.home().resolve()).startswith(("/tmp", "/private/tmp")):
+        pytest.skip("the home folder itself is under /tmp here")
+    adapters.check_start_folder("codex", root)
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["workspace-write", "--full-auto", "danger-full-access", "--dangerously-bypass-approvals-and-sandbox"],
+)
+def test_the_guard_keys_on_the_final_argv(codex_home, proj, monkeypatch, flag):
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    with pytest.raises(Refused):
+        adapters.check_start_folder("codex", proj, None, ["codex", "exec", flag, "--", "p"])
+    adapters.check_start_folder(
+        "codex", proj, None, ["codex", "exec", "--", flag]
+    )  # the prompt is not a flag
+    adapters.check_start_folder("codex", proj, None, ["codex", "exec", "--", "p"])
+
+
+def test_deep_toml_and_oversized_reads_fail_closed(codex_home, proj):
+    cfg = codex_home / "config.toml"
+    cfg.write_text("a = " + "[" * 100000 + "]" * 100000 + "\n")
+    assert adapters.permission_args("codex", proj, "auto") == []  # RecursionError or a size refusal: closed
+    assert adapters.permission_note("codex", proj, "auto")
+
+
+def test_colon_and_backslash_in_adapter_paths_are_refused(codex_home, proj):
+    for home, file in ((".codex", "a:b"), (".co\\dex", "config.toml"), ("c:x", "f")):
+        rule = {"home": home, "file": file, "key": "sandbox_mode", "value": "read-only"}
+        assert adapters.person_state(rule)["strict"] is True
+
+
+def test_plan_refuses_codex_when_orch_home_is_inside_the_start_folder(proj, new_ticket, monkeypatch):
+    from orch import runs
+
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    tid = new_ticket()
+    with pytest.raises(Refused, match="smaller folder"):
+        runs.plan(proj, tid, agent="codex")
 
 
 def test_the_guard_is_code_not_data(codex_home, proj, monkeypatch):
