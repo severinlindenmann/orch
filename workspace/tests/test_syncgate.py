@@ -432,13 +432,22 @@ def test_fresh_empty_gate_counts_as_live_then_stale(proj):
         ("/usr/bin/sleep 60", False),
     ],
 )
-def test_cmdline_matches_the_orch_program_not_a_substring(monkeypatch, cmd, want):
-    class R:
-        stdout = cmd
+def test_cmdline_matches_the_orch_program_not_a_substring(cmd, want):
+    assert syncgate._cmd_is_orch(cmd) is want
 
-    monkeypatch.setattr(syncgate.subprocess, "run", lambda *a, **k: R())
-    monkeypatch.setattr(syncgate.os, "name", "posix")
-    assert syncgate._looks_like_orch(12345) is want
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="Linux /proc only")
+def test_identity_works_without_ps(proj, other, monkeypatch):
+    """Minimal Linux containers have no `ps`: start time and command line come from /proc."""
+
+    def no_ps(*a, **k):
+        raise FileNotFoundError("ps")
+
+    monkeypatch.setattr(procs.subprocess, "run", no_ps)
+    monkeypatch.setattr(syncgate.subprocess, "run", no_ps)
+    assert procs.pid_started(other.pid) and syncgate._looks_like_orch(other.pid)
+    _live_gate(proj, other)
+    assert syncgate.live_holder(proj) is not None
 
 
 def test_attach_works_without_dir_fds_and_never_self_deadlocks(proj, monkeypatch):

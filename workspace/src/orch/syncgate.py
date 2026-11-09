@@ -79,6 +79,13 @@ def _looks_like_orch(pid: int) -> bool:
     if os.name == "nt":
         return True  # no cheap command line here: the step record and the start time have to do
     try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:  # Linux: no ps needed
+            raw = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+        if raw:
+            return _cmd_is_orch(raw)
+    except OSError:
+        pass
+    try:
         r = subprocess.run(
             ["ps", "-o", "command=", "-p", str(pid)],
             capture_output=True,
@@ -89,8 +96,10 @@ def _looks_like_orch(pid: int) -> bool:
     except Exception:
         return True  # cannot tell: do not call a holder stale on a guess about ps
     cmd = r.stdout.strip()
-    if not cmd:
-        return True
+    return _cmd_is_orch(cmd) if cmd else True
+
+
+def _cmd_is_orch(cmd: str) -> bool:
     toks = cmd.split()
     names = {"orch", "orch.exe"}
     if any(re.split(r"[\\/]", t)[-1] in names for t in toks):

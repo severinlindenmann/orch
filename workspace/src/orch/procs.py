@@ -42,6 +42,8 @@ def pid_started(pid: int) -> str | None:
                 return _iso(ticks / 1e7 - 11644473600)
             finally:
                 k.CloseHandle(h)
+        if (t := _proc_started(pid)) is not None:
+            return t
         r = subprocess.run(
             ["ps", "-o", "lstart=", "-p", str(pid)],
             capture_output=True,
@@ -54,6 +56,19 @@ def pid_started(pid: int) -> str | None:
             return None
         return _iso(time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y")))
     except Exception:
+        return None
+
+
+def _proc_started(pid: int) -> str | None:
+    """Linux: start time from /proc (no ps, no locale: minimal containers have no procps), else None."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+            fields = f.read().rsplit(")", 1)[1].split()
+        ticks = int(fields[19])  # field 22 (starttime), after pid and comm
+        with open("/proc/stat", encoding="utf-8") as f:
+            btime = next(int(line.split()[1]) for line in f if line.startswith("btime "))
+        return _iso(btime + ticks // os.sysconf("SC_CLK_TCK"))
+    except (OSError, IndexError, ValueError, StopIteration, AttributeError):
         return None
 
 
