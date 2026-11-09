@@ -275,38 +275,48 @@
  ],
  "fail_closed": [
   {
-   "name": "store hider",
+   "name": "store hider, trusted home",
    "hider": "store",
-   "pytest": false,
-   "test_env": false,
+   "entry": "cli",
+   "home_trusted": true,
+   "env": {},
    "write": true
+  },
+  {
+   "name": "empty store via ORCH_HOME (untrusted)",
+   "hider": "store",
+   "entry": "cli",
+   "home_trusted": false,
+   "env": {
+    "ORCH_HOME": "/tmp/agent-home"
+   },
+   "write": false
   },
   {
    "name": "no hider",
    "hider": "none",
-   "pytest": true,
-   "test_env": true,
+   "entry": "cli",
+   "home_trusted": true,
+   "env": {},
    "write": false
   },
   {
-   "name": "test hider outside pytest",
+   "name": "test hider on the CLI with both old variables set",
    "hider": "test",
-   "pytest": false,
-   "test_env": true,
+   "entry": "cli",
+   "home_trusted": true,
+   "env": {
+    "PYTEST_CURRENT_TEST": "x",
+    "ORCH_TEST_HIDER": "1"
+   },
    "write": false
   },
   {
-   "name": "test hider without env",
+   "name": "test hider passed in by the tests package",
    "hider": "test",
-   "pytest": true,
-   "test_env": false,
-   "write": false
-  },
-  {
-   "name": "test hider in tests",
-   "hider": "test",
-   "pytest": true,
-   "test_env": true,
+   "entry": "tests",
+   "home_trusted": true,
+   "env": {},
    "write": true
   }
  ],

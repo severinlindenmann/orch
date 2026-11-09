@@ -21,7 +21,8 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 
 ## The proof
 
-1. **Human key.** The core creates `<orch home>/keys/<workspace local id>/human.key` (32 random bytes, hex, 0600, in the key
+1. **Human key.** The core creates `<trusted orch home>/keys/<workspace local id>/human.key` (secrets.md, Trusted orch home:
+   never chosen by `HOME` or `ORCH_HOME` unless pinned; the nonce store and `human-settings.json` live there too) (32 random bytes, hex, 0600, in the key
    folder of secrets.md, under its rights checks and the agent deny rules). It is never put in argv, in any environment
    variable, in the workspace or in a log.
 2. **Who holds it.** Only the page servers a person starts (Focus, dashboard) read it, at start, into memory. They refuse

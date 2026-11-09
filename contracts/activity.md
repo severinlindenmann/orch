@@ -46,10 +46,14 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   call that appends under the per-run lock `runs/<run>.lock`, O_EXCL, released in a `finally`). Each event is one line, one
   `write()` of at most 8 KB (text is cut, never the line split), so lines never mix.
 - **Fail closed.** The writer takes a value hider as a required argument; there is no default and no pass-through. A hider is
-  "registered" when it was built from the key store of this workspace (an empty store is fine: no keys, nothing to hide, the
-  generic secret patterns of `phone_view.redact` still run). Without one the writer refuses (`RecordRefused`, exit 2
-  `Refused: recording is off until key hiding is ready.`) and nothing is written. The only exception is a test hider whose
-  constructor refuses unless `PYTEST_CURRENT_TEST` is set **and** `ORCH_TEST_HIDER=1` (vectors `fail_closed`).
+  "registered" only when it was built from this workspace's key store in the **trusted orch home** (secrets.md, Where: resolved
+  from the account database, never from an environment variable unless it equals the value pinned at install). An empty store
+  in the trusted home is fine (no keys, nothing to hide, the generic secret patterns of `phone_view.redact` still run); a store
+  in an untrusted home never counts. Without a registered hider the writer refuses (`RecordRefused`, exit 2
+  `Refused: recording is off until key hiding is ready.`) and nothing is written.
+- **Test hider.** It lives only in the tests package (`workspace/tests/…`), is passed in by the test itself, and is never
+  reachable from a CLI entry point; there is no environment switch for it. A CLI call never gets it, whatever variables
+  are set (vectors `fail_closed`).
 - The hider runs on every string of the event and of the detail file, and on error texts (secrets.md, Hiding).
 
 ## Precedence and dedupe

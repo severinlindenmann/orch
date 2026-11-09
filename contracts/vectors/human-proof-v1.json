@@ -243,6 +243,19 @@
    "used_nonces": [],
    "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJzZWNyZXQucHJvZmlsZSIsInRhcmdldCI6ImNpLWRlcGxveSJ9.u6bfFODFp5-VKuZLyB5jA56ay50VGxeEiLWsWebZN94",
    "result": "expired"
+  },
+  {
+   "name": "orch_home_env: key from an ORCH_HOME the agent owns",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged",
+   "home_trusted": false
   }
  ],
  "effective": [

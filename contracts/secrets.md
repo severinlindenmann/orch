@@ -29,13 +29,19 @@ What Level 1 does:
 ## Where
 
 ```
-<orch home>/keys/                         0700. <orch home> = addons.home() (~/.orch-tool, or a trusted ORCH_HOME)
+<orch home>/keys/                         0700. <orch home> = the trusted orch home (below)
   <workspace local id>/                   0700, one folder per workspace (.orch/.local-id); a copy or clone has none
     keys.json                             0600, $defs/keys_file: {"schema": "orch.keys/1", "keys": {"<name>": {type, source, value|file, added_at}}}
     files/<name>                          0600, key-file values (≤ 1 MB)
     profiles.toml                         0600, $defs/profiles: names only
 ```
 
+- **Trusted orch home.** Everything that guards keys and human proofs (the key store, the hider, `human.key`, the nonce
+  store, `human-settings.json`) resolves the orch home from the account database (`pwd.getpwuid(os.getuid()).pw_dir` +
+  `/.orch-tool`; Windows: the profile folder from the OS, not `%USERPROFILE%`), never from `HOME` or `ORCH_HOME`. `ORCH_HOME`
+  counts for these only when it equals the value pinned at install in the default home (`<pw home>/.orch-tool/home.pin`);
+  otherwise it is ignored for them (and a note goes to stderr). An agent that sets `ORCH_HOME` or `HOME` to a folder it owns
+  therefore gets neither its own key, nor an empty store that counts as a hider.
 - POSIX: folders 0700 and files 0600, checked on every read; looser rights, another owner, or a symlink anywhere on the path
   → refused (`Refused: the key folder has the wrong rights. Fix: orch doctor`). Windows: an ACL with only the user and
   SYSTEM, set at creation, checked the same way.

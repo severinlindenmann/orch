@@ -259,10 +259,12 @@ def act_retention(case):
 
 
 def act_write_allowed(case):
+    """hider: store | none | test. A store hider counts only from the trusted orch home; the test hider only when the
+    tests package passes it in (entry = tests), never on a CLI entry, whatever env is set."""
     if case["hider"] == "store":
-        return True
+        return bool(case["home_trusted"])
     if case["hider"] == "test":
-        return bool(case["pytest"] and case["test_env"])
+        return case["entry"] == "tests"
     return False
 
 
@@ -943,6 +945,8 @@ def hp_verify(c):
     """Reference check of a human-only call. Flags (--by, --from) and the environment are never trusted."""
     if c.get("agent_env"):
         return "agent_env"
+    if c.get("home_trusted") is False:  # key, nonce store or settings came from an env-chosen orch home
+        return "forged"
     proof = c.get("proof")
     if not proof:
         return "missing"
