@@ -1689,6 +1689,23 @@ for case in pqvec["cases"]:
     if case["do"] not in ("make", "not_now", "nothing") or (case["do"] != "nothing" and not case.get("by")):
         fails.append(f"proposal-question vector {case['name']}: bad outcome")
 
+# Ticket proposal result (relay-api.md, Ticket proposal result).
+prvec = json.loads((HERE / "vectors" / "proposal-result-v1.json").read_text())
+for v in prvec["valid"]:
+    check("message", v["message"], True, f"proposal-result vector valid {v['name']}")
+for v in prvec["invalid"]:
+    check("message", v["message"], False, f"proposal-result vector invalid {v['name']}")
+for v in prvec["relay_invalid"]:
+    check("message", v["message"], True, f"proposal-result vector relay_invalid (schema-valid) {v['name']}")
+for case in prvec["cases"]:
+    snd = case["send"]
+    if snd is not None:
+        check("message", {"schema": "orch.msg/1", "id": "m_pres000000000099", "from": "ws_pilatus001", "to": "phones", "type": "text",
+                          "reply_to": "m_pr00000000000001", "created_at": "2026-11-09T10:42:00Z", "body": {"proposal_result": snd}},
+              True, f"proposal-result vector case {case['name']}: send body")
+    if (snd is not None) != (case["answer"] == "make" and "from" not in case):
+        fails.append(f"proposal-result vector {case['name']}: send only for an authorised make answer")
+
 # Mobile mode (relay-api.md, Mobile mode).
 mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())
 for case in mmvec["heartbeat"]:

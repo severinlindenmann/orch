@@ -1,0 +1,530 @@
+{
+  "about": "Ticket proposal result (relay-api.md 'Ticket proposal result'). valid: texts that validate against message.schema.json AND pass the relay. invalid: schema-invalid shapes (422). relay_invalid: schema-valid but the relay refuses (422 for the shape rules, 404/403 for reply_to lookups): reply_to must be a message of the sender with body.proposal make_ticket, to must be phones or a ph_ paired with the sender. The relay context: m_pr00000000000001 is a proposal question from ws_pilatus001 to phones; m_qq00000000000001 an ordinary question from ws_pilatus001; m_pr0000other00001 a proposal from ws_other00001. cases: what the workspace sends after handling a phone answer to a proposal. state: open = proposal not yet decided, made = it already became a ticket, gone = the proposal no longer exists, answered = a first answer was already handled. make: how the workspace's make_ticket ends (ok | refused:human_proof | refused:other). send: the proposal_result body, or null = nothing is sent. Exactly one result per handled make answer; an unauthorised or unknown answer sends nothing.",
+  "valid": [
+    {
+      "name": "made",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000001",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      }
+    },
+    {
+      "name": "refused-needs-person",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000002",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "refused",
+            "reason": "needs_person"
+          }
+        }
+      }
+    },
+    {
+      "name": "refused-unavailable",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000003",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "refused",
+            "reason": "unavailable"
+          }
+        }
+      }
+    },
+    {
+      "name": "decided",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000004",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "to-one-phone",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000005",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "no-reply-to",
+      "why": "reply_to is required",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000010",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown-result",
+      "why": "result is made, refused or decided",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000011",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "ok"
+          }
+        }
+      }
+    },
+    {
+      "name": "string-marker",
+      "why": "proposal_result is an object",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000012",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": "made"
+        }
+      }
+    },
+    {
+      "name": "made-without-key",
+      "why": "made needs key",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000013",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "made"
+          }
+        }
+      }
+    },
+    {
+      "name": "made-with-reason",
+      "why": "made has no reason",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000014",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12",
+            "reason": "unavailable"
+          }
+        }
+      }
+    },
+    {
+      "name": "bad-key",
+      "why": "key is a ticket display key",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000015",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "made",
+            "key": "dm1-12"
+          }
+        }
+      }
+    },
+    {
+      "name": "refused-without-reason",
+      "why": "refused needs a reason code",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000016",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "refused"
+          }
+        }
+      }
+    },
+    {
+      "name": "refused-free-text-reason",
+      "why": "reason is a fixed code, never raw text",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000017",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "refused",
+            "reason": "Traceback in /home/x/chat.py"
+          }
+        }
+      }
+    },
+    {
+      "name": "refused-with-key",
+      "why": "only made has a key",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000018",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "refused",
+            "reason": "unavailable",
+            "key": "DM1-12"
+          }
+        }
+      }
+    },
+    {
+      "name": "decided-with-key",
+      "why": "decided carries nothing",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000019",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided",
+            "key": "DM1-12"
+          }
+        }
+      }
+    },
+    {
+      "name": "extra-field",
+      "why": "no other field in proposal_result",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000020",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided",
+            "note": "x"
+          }
+        }
+      }
+    },
+    {
+      "name": "with-text",
+      "why": "not chat: no text next to it",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000021",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "with-update",
+      "why": "no update next to it",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000022",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "update": {
+            "kind": "ack"
+          },
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "with-ticket",
+      "why": "no ticket on the message",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000023",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        },
+        "ticket": "t_abcdefghij"
+      }
+    },
+    {
+      "name": "with-general",
+      "why": "no general flag",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000024",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "general": true,
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    }
+  ],
+  "relay_invalid": [
+    {
+      "name": "reply-to-missing-message",
+      "why": "reply_to must be a proposal question this workspace sent",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000030",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_nosuchmsg0000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      },
+      "relay_only": true
+    },
+    {
+      "name": "reply-to-ordinary-question",
+      "why": "reply_to is a question without the make_ticket marker",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000031",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_qq00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      },
+      "relay_only": true
+    },
+    {
+      "name": "reply-to-other-workspaces-proposal",
+      "why": "the proposal question was sent by another workspace",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000032",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr0000other00001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      },
+      "relay_only": true
+    },
+    {
+      "name": "to-a-workspace",
+      "why": "only to phones or a paired phone",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000033",
+        "from": "ws_pilatus001",
+        "to": "ws_other00001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      },
+      "relay_only": true
+    }
+  ],
+  "cases": [
+    {
+      "name": "make-ok",
+      "answer": "make",
+      "state": "open",
+      "make": "ok",
+      "key": "DM1-12",
+      "send": {
+        "result": "made",
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "make-refused-human-proof",
+      "answer": "make",
+      "state": "open",
+      "make": "refused:human_proof",
+      "send": {
+        "result": "refused",
+        "reason": "needs_person"
+      }
+    },
+    {
+      "name": "make-refused-other",
+      "answer": "make",
+      "state": "open",
+      "make": "refused:other",
+      "send": {
+        "result": "refused",
+        "reason": "unavailable"
+      }
+    },
+    {
+      "name": "make-already-made",
+      "answer": "make",
+      "state": "made",
+      "send": {
+        "result": "decided"
+      }
+    },
+    {
+      "name": "make-proposal-gone",
+      "answer": "make",
+      "state": "gone",
+      "send": {
+        "result": "decided"
+      }
+    },
+    {
+      "name": "make-second-answer",
+      "answer": "make",
+      "state": "answered",
+      "send": {
+        "result": "decided"
+      }
+    },
+    {
+      "name": "not-now",
+      "answer": "not_now",
+      "state": "open",
+      "send": null
+    },
+    {
+      "name": "make-from-unpaired-phone",
+      "answer": "make",
+      "from": "ph_stranger01",
+      "state": "open",
+      "send": null
+    },
+    {
+      "name": "other-word",
+      "answer": "sure",
+      "state": "open",
+      "send": null
+    }
+  ]
+}
