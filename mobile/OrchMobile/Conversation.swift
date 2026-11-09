@@ -170,7 +170,7 @@ struct ConversationInputs: Sendable {
 extension ReadState {
     func unread(_ chat: String, in items: [ConvItem]) -> Int {
         let s = seen[chat] ?? ""
-        return items.filter { $0.incoming && $0.at > s }.count
+        return items.filter { $0.incoming && $0.question?.isMakeTicket != true && $0.at > s }.count
     }
     static func generalKey(_ ws: String) -> String { "g:" + ws }
     static func key(_ id: ConversationID) -> String {
@@ -418,7 +418,7 @@ enum ConversationBuilder {
         d.workspaces.map { w in
             WorkspaceSummary(workspace: w, presence: w.presence(now: d.now), general: general(workspace: w.id, d, read: read),
                              topics: topics(workspace: w.id, d, read: read),
-                             openQuestions: d.questions.filter { !$0.isReview && $0.message.from == w.id && d.answers[$0.id] == nil }.count)
+                             openQuestions: d.questions.filter { !$0.isReview && !$0.isMakeTicket && $0.message.from == w.id && d.answers[$0.id] == nil }.count)
         }.sorted { ($0.openQuestions > 0 ? 1 : 0, $0.lastAt ?? "") > ($1.openQuestions > 0 ? 1 : 0, $1.lastAt ?? "") }
     }
 }

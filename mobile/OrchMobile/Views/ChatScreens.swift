@@ -12,7 +12,7 @@ struct StartedChip: Identifiable, Equatable {
 /// Pure rules of the conversation screen (unit-tested).
 enum ConversationRules {
     static func showsWriteOwn(_ q: Question) -> Bool {
-        !q.isAllow && !q.message.body.options.isEmpty
+        !q.isMakeTicket && !q.isAllow && !q.message.body.options.isEmpty
     }
 
     /// The General "<ws> is working…" line ends this long after the last ack/working, even with no new message.
@@ -164,7 +164,7 @@ struct ConversationView: View {
         if case .general = resolved { return ConversationRules.generalWorking(items, now: now) }
         return false
     }
-    private func unread(_ items: [ConvItem]) -> Int { items.filter { $0.incoming && !seenIncoming.contains($0.id) }.count }
+    private func unread(_ items: [ConvItem]) -> Int { items.filter { $0.incoming && $0.question?.isMakeTicket != true && !seenIncoming.contains($0.id) }.count }
 
     var body: some View {
         let items = self.items
@@ -429,7 +429,9 @@ struct ConversationView: View {
             (index == 0 || items[index - 1].by != item.by || items[index - 1].side != .them) {
             ChatHelperLabel(workspace: model.workspace(resolved.workspace))  // never a name from `by`: a workspace speaks only for itself in its Chat
         }
-        if item.kind == .question && historyDay == nil {
+        if let question = item.question, question.isMakeTicket {
+            MakeTicketCard(question: question, answer: item.answer).disabled(historyDay != nil)
+        } else if item.kind == .question && historyDay == nil {
             let stale = ConversationRules.isStale(index: index, in: items)
             QuestionCard(item: item, conversationId: resolved, onReply: { question in
                 reply = ReplyPreview(messageId: question.id, title: "Answering \(workspaceName)", quote: question.message.body.text)
