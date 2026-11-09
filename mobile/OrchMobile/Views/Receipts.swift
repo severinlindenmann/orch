@@ -29,15 +29,15 @@ struct ReceiptView: View {
             Group {
                 switch receipt {
                 case .queued:
-                    Image(systemName: "clock").accessibilityLabel("Waiting to send").accessibilityIdentifier("receipt-queued")
+                    Label("Sending…", systemImage: "clock").accessibilityIdentifier("receipt-queued")
                 case .sent:
                     Image(systemName: "checkmark").accessibilityLabel("Sent").accessibilityIdentifier("receipt-sent")
                 case .delivered:
                     checks.accessibilityLabel("Delivered").accessibilityIdentifier("receipt-delivered")
                 case .started:
-                    HStack(spacing: 4) { checks; Text("Working") }
+                    checks
                         .foregroundStyle(Theme.brand).accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Working on it").accessibilityIdentifier("receipt-started")
+                        .accessibilityLabel("Delivered").accessibilityIdentifier("receipt-started")
                 case .failed(let message):
                     Text("Not sent").foregroundStyle(Theme.danger).accessibilityHint(message)
                         .accessibilityIdentifier("receipt-failed")

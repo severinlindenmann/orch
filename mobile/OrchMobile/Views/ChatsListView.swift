@@ -30,6 +30,7 @@ struct ChatsListView: View {
                     ModelMessage()
                     searchField
                     chips
+                    MuteAllBanner()
                     content
                 }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 24)
             }
@@ -129,7 +130,6 @@ struct ChatsListView: View {
                 Image(systemName: "bubble.left").themeFont(32).foregroundStyle(Theme.brand)
                     .frame(width: 70, height: 70).background(Theme.surface, in: RoundedRectangle(cornerRadius: 24))
                 Text("No chats yet").themeFont(20, .semibold)
-                Text("Add your workspace to talk to its helper and keep up with your tickets.").themeFont(15).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 Button("Add a workspace") { sheet = .addWorkspace }.buttonStyle(PrimaryButtonStyle())
             }.frame(maxWidth: .infinity).padding(.vertical, 50).accessibilityIdentifier("chats-empty")
         } else {
@@ -170,7 +170,7 @@ struct ChatsListView: View {
     }
 
     @ViewBuilder private var attentionCards: some View {
-        let questions = model.questions.filter { model.answers[$0.id] == nil }
+        let questions = model.questions.filter { !$0.isReview && model.answers[$0.id] == nil }
         if !questions.isEmpty && (filter == "All" || filter == "Needs you") {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Needs you · \(questions.count)").themeFont(13, .semibold).foregroundStyle(Theme.warn)
@@ -205,22 +205,32 @@ struct ChatsListView: View {
         let name = WorkspaceAlias.name(for: summary.workspace)
         let newest = summary.topics.max { ($0.lastAt ?? "") < ($1.lastAt ?? "") }
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
-        return NavigationLink(value: ChatRoute.workspace(summary.id)) {
-            HStack(spacing: 12) {
-                WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Chat · \(name)").themeFont(17, .semibold).lineLimit(2)
-                    Text(starting ? "Getting started…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
-                    if summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .trailing, spacing: 10) {
-                    Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
-                    ShellBadge(count: summary.unread)
-                    if summary.isMuted { Image(systemName: "bell.slash").themeFont(12).foregroundStyle(Theme.muted).accessibilityLabel("Muted") }
+        return TimelineView(.everyMinute) { context in
+            let muted = model.notificationsMuted(workspace: summary.id, now: context.date)
+            NavigationLink(value: ChatRoute.workspace(summary.id)) {
+                HStack(spacing: 12) {
+                    WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("Chat · \(name)").themeFont(17, .semibold).lineLimit(2)
+                            if muted { MutedIcon() }
+                        }
+                        Text(starting ? "Getting started…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                        if summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .trailing, spacing: 10) {
+                        Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                        ShellBadge(count: summary.unread, muted: muted)
+                    }
+                    ShellChevron()
+                }.padding(.horizontal, 12).padding(.vertical, 14).contentShape(Rectangle())
+            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("room-\(summary.id)")
+                .contextMenu {
+                    MuteMenu(muted: summary.workspace.isMuted(now: context.date)) { mute in
+                        Task { await model.setMute(summary.id, mute) }
+                    }
                 }
-                ShellChevron()
-            }.padding(.horizontal, 12).padding(.vertical, 14).contentShape(Rectangle())
-        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("room-\(summary.id)")
+        }
     }
 
     @ViewBuilder private func searchResults(_ result: ChatSearchResult) -> some View {

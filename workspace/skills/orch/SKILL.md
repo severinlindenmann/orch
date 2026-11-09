@@ -27,7 +27,8 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
-    orch check add <id> "<step>"          # one per step, BEFORE you start; a ticket with 0 steps is wrong
+    orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
+                                        # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now
 
 Started by hand (not by orch)? Tell orch which ticket you work on so nobody starts a second agent on it:
@@ -101,8 +102,10 @@ Read the parent first, work only in yours, keep it at most 3 levels deep. Close 
 
 **End of every run**
 
-    orch ticket summary <id> "<where things stand>"      # at most 200 characters
+    orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters
     orch ticket status <id> done                         # only when every step has proof
+
+When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.
 
 If work remains, leave it visible (open steps, a log line).
 
