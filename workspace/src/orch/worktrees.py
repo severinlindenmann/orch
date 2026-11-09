@@ -237,8 +237,9 @@ def _mine(root: Path, ticket: str, e: dict) -> bool:
 
 
 def workdir_for(root: Path, rec: dict | None) -> Path:
-    """The folder a run works in: its record's `folder` when that is a copy of this workspace, else the root.
-    A path that is not one of this machine's copies (a synced record, an edited file) is ignored."""
+    """The folder a run works in: its record's `folder` when that is exactly THIS ticket's copy
+    (path_for(workspace id, ticket), resolved, and a copy orch made), else the root. A forged or synced record
+    (another ticket's copy, another workspace's, an edited path) is ignored."""
     f = (rec or {}).get("folder")
     if not isinstance(f, str) or not f:
         return root
@@ -246,10 +247,11 @@ def workdir_for(root: Path, rec: dict | None) -> Path:
         p = Path(f).resolve()
         if p == root.resolve():
             return root
-        mine = copies_dir(root)
-        if mine is not None and p.is_dir() and p.relative_to(mine) and is_orch_copy(p):
+        tid = (rec or {}).get("ticket")
+        want = path_for(addons.workspace_id(root) or "", tid, addons.home(root))
+        if p == want.resolve() and p.is_dir() and is_orch_copy(p):
             return p
-    except (OSError, ValueError, RuntimeError):
+    except (OSError, ValueError, RuntimeError, Refused):
         pass
     return root
 

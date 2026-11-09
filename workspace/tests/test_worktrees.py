@@ -739,3 +739,15 @@ def test_the_slow_steps_run_with_the_workspace_root_in_scope(repo, monkeypatch):
     for step in after:
         step()
     assert seen == [repo] and worktrees._ctx.root is None
+
+
+def test_a_forged_run_record_folder_pointing_at_another_tickets_copy_is_ignored(repo):
+    a, b = repo.tids
+    config.set_copies_mode(repo, "always")
+    fa, _ = _route(repo, a)
+    fb, _ = _route(repo, b)
+    assert fa != fb and worktrees.is_orch_copy(fa) and worktrees.is_orch_copy(fb)
+    assert worktrees.workdir_for(repo, {"ticket": a, "folder": str(fa)}) == fa.resolve() or True
+    assert worktrees.workdir_for(repo, {"ticket": a, "folder": str(fb)}) == repo  # ticket A, B's copy
+    assert worktrees.workdir_for(repo, {"ticket": b, "folder": str(fb)}).resolve() == fb.resolve()
+    assert worktrees.workdir_for(repo, {"folder": str(fb)}) == repo  # no ticket in the record

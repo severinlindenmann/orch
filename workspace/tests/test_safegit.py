@@ -162,7 +162,9 @@ def test_sentinel_empty_driver_values_really_prevent_execution(tmp_path):
     )
     assert not list(tmp_path.glob("MARK*"))
     args = safegit.driver_args(r)
-    assert "filter.a.smudge=" in args and "filter.b.process=" in args and "merge.m.driver=false" in args
+    pairs = dict(args)
+    assert pairs["filter.a.smudge"] == "" and pairs["filter.b.process"] == ""
+    assert pairs["merge.m.driver"].strip("'").endswith("/false")
 
 
 def test_it_fails_closed_when_the_drivers_cannot_be_listed(hostile, tmp_path, monkeypatch):
@@ -220,7 +222,8 @@ def test_a_git_in_the_repo_or_in_a_path_entry_inside_it_is_never_used(tmp_path, 
     sh(proj / "bin" / "git", f"touch {marker}")
     real = _exe(tmp_path)
     monkeypatch.setenv(
-        "PATH", os.pathsep.join(["", ".", "relative/bin", str(proj / "bin"), str(real.parent)])
+        "PATH",
+        os.pathsep.join(["", ".", "relative/bin", str(proj / "bin"), str(real.parent), "/usr/bin", "/bin"]),
     )
     monkeypatch.chdir(proj)
     assert safegit.git_exe(proj) == str(real)
@@ -229,7 +232,7 @@ def test_a_git_in_the_repo_or_in_a_path_entry_inside_it_is_never_used(tmp_path, 
     # only a fake one on the PATH: refused, nothing runs
     monkeypatch.setattr(safegit, "_exes", {})
     monkeypatch.setenv("PATH", str(proj / "bin"))
-    assert safegit.run(["--version"], proj, filters=False)[0] == 127 and not marker.exists()
+    assert safegit.run(["--version"], proj, filters=False)[0] in (125, 127) and not marker.exists()
     assert safegit.run(["status"], proj)[0] in (125, 127) and not marker.exists()
 
 
@@ -522,9 +525,13 @@ def test_every_call_runs_with_no_editor_no_prompt_and_no_stdin(tmp_path, monkeyp
     safegit.run(["status"], tmp_path, filters=False)
     assert got["stdin"] == subprocess.DEVNULL
     e = got["env"]
-    assert e["GIT_EDITOR"] == e["GIT_SEQUENCE_EDITOR"] == e["GIT_ASKPASS"] == "true"
+    assert (
+        os.path.isabs(e["GIT_EDITOR"].strip("'"))
+        and e["GIT_EDITOR"] == e["GIT_SEQUENCE_EDITOR"] == e["GIT_ASKPASS"]
+    )
     assert e["GIT_TERMINAL_PROMPT"] == "0"
-    assert "core.editor=true" in got["argv"] and "sequence.editor=true" in got["argv"]
+    assert any(a.startswith("core.editor=/") for a in got["argv"])
+    assert any(a.startswith("sequence.editor=/") for a in got["argv"])
 
 
 def test_config_is_read_only_and_worktree_subcommands_are_limited():
@@ -547,8 +554,9 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         safegit.run(args.get(cmd, [cmd]), tmp_path, filters=False)
         argv = seen[-1]
         assert argv.index(cmd) > argv.index("core.fsmonitor=false"), cmd
-        for want in ("commit.gpgSign=false", "log.showSignature=false", "core.editor=true"):
+        for want in ("commit.gpgSign=false", "log.showSignature=false"):
             assert want in argv, (cmd, want)
+        assert any(a.startswith("core.editor=/") for a in argv), cmd
         assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv), cmd
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
@@ -615,3 +623,71 @@ REFUSED_CALLS = [
 def test_these_calls_are_refused_with_rc_125(args, tmp_path):
     rc, _, err = safegit.run(args, tmp_path, filters=False)
     assert rc == safegit.REFUSED == 125 and err
+
+
+def test_fake_true_and_false_in_the_workspace_are_never_run(tmp_path, monkeypatch):
+    """git runs the editor, askpass and a failing merge driver by name: those must be absolute, trusted
+    paths, and the PATH git sees must not contain a folder inside the workspace."""
+    proj = tmp_path / "proj"
+    (proj / "bin").mkdir(parents=True)
+    ran = tmp_path / "FAKE-RAN"
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q", "-b", "main")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / ".gitattributes").write_text("*.dat merge=evil\n")
+    (r / "f.dat").write_text("base\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "b")
+    plain_git(r, "checkout", "-qb", "side")
+    (r / "f.dat").write_text("theirs\n")
+    plain_git(r, "commit", "-qam", "s")
+    plain_git(r, "checkout", "-q", "main")
+    (r / "f.dat").write_text("ours\n")
+    plain_git(r, "commit", "-qam", "m")
+    plain_git(r, "config", "merge.evil.driver", "cp %A %A.x")
+    for n in ("true", "false", "git"):
+        sh(proj / "bin" / n, f"touch {ran}")
+    real = _exe(tmp_path)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(proj / "bin"), str(real.parent), "/usr/bin", "/bin"]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    assert str(proj / "bin") not in safegit.safe_path(proj, proj).split(os.pathsep)
+    assert safegit.trivial("true", proj, proj).strip("'") in ("/usr/bin/true", "/bin/true")
+    assert safegit.trivial("false", proj, proj).strip("'") in ("/usr/bin/false", "/bin/false")
+    e = safegit.env(proj, proj)
+    assert str(proj) not in e["PATH"] and e["GIT_EDITOR"].strip("'").startswith("/")
+    monkeypatch.setattr(
+        safegit, "version", lambda *a, **k: (2, 39)
+    )  # attributes are read: driver=false matters
+    rc, _, _ = safegit.run(["merge", "--no-edit", "side"], r, root=proj)
+    assert rc != 0 and not ran.exists()
+
+
+def test_driver_names_with_equals_and_spaces_are_neutralized(tmp_path):
+    r = tmp_path / "n"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    mark = tmp_path / "ODD"
+    (r / ".gitattributes").write_text('*.txt filter="a=b c"\n')
+    (r / "a.txt").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+    plain_git(r, "config", "filter.a=b c.smudge", f"touch {mark}; cat")
+    pairs = safegit.driver_args(r)
+    assert ("filter.a=b c.smudge", "") in pairs
+    wt = tmp_path / "wt"
+    assert (
+        safegit.run(["worktree", "add", "--no-checkout", "-b", "q", str(wt), "HEAD"], r, filters=False)[0]
+        == 0
+    )
+    assert safegit.run(["read-tree", "HEAD"], wt, filters=False)[0] == 0
+    monkey = safegit.version
+    safegit.version = lambda *a, **k: (2, 39)  # attributes read: the odd driver name is really consulted
+    try:
+        assert safegit.run(["checkout-index", "-a", "-f", "-u"], wt)[0] == 0
+    finally:
+        safegit.version = monkey
+    assert (wt / "a.txt").read_text() == "x\n" and not mark.exists()

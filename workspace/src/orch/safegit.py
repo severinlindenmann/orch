@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import threading
 import uuid
@@ -144,12 +145,46 @@ def git_exe(cwd: Path, root: Path | None = None) -> str | None:
 # ---------------------------------------------------------------- arguments
 
 
-def env() -> dict[str, str]:
+def trivial(name: str, cwd: Path, root: Path | None = None) -> str | None:
+    """A command git runs as `true` or `false` (editor, askpass, a merge driver that must fail): an ABSOLUTE
+    path found by find_exe, never a bare name that git would resolve through a PATH an agent controls. On
+    Windows (no true/false programs) the python running orch, quoted. None = not found: the caller refuses."""
+    if os.name == "nt":
+        import sys
+
+        code = "pass" if name == "true" else "raise SystemExit(1)"
+        return f'"{sys.executable}" -c "{code}"'
+    exe = find_exe(name, _avoid(cwd, root))
+    return shlex.quote(exe) if exe else None
+
+
+def safe_path(cwd: Path, root: Path | None = None) -> str:
+    """PATH for git and everything it starts: absolute entries only, none inside the folder we work in, the
+    workspace root, the copy or an orch worktrees folder (a program an agent committed is never found)."""
+    avoid = _avoid(cwd, root)
+    keep = [
+        d
+        for d in os.environ.get("PATH", "").split(os.pathsep)
+        if d and os.path.isabs(d) and not any(_inside(d, a) for a in avoid)
+    ]
+    return os.pathsep.join(keep)
+
+
+def env(cwd: Path | None = None, root: Path | None = None, config: list[tuple[str, str]] | None = None):
+    """The environment of every git call: ours without any GIT_* variable, a sanitized PATH, and (set AFTER
+    the strip, on purpose) nothing may open an editor, ask a password or prompt. `config`: (key, value) pairs
+    given through GIT_CONFIG_COUNT/KEY_n/VALUE_n, so a repository-chosen name never has to survive `-c`."""
     e = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     e["LC_ALL"] = "C"
-    # set AFTER the GIT_* strip, on purpose: nothing may open an editor, a pager prompt or ask for a password
+    where = cwd or Path.cwd()
+    e["PATH"] = safe_path(where, root)
     e["GIT_TERMINAL_PROMPT"] = "0"
-    e["GIT_EDITOR"] = e["GIT_SEQUENCE_EDITOR"] = e["GIT_ASKPASS"] = "true"
+    true = trivial("true", where, root) or "true"
+    e["GIT_EDITOR"] = e["GIT_SEQUENCE_EDITOR"] = e["GIT_ASKPASS"] = true
+    if config:
+        e["GIT_CONFIG_COUNT"] = str(len(config))
+        for i, (k, v) in enumerate(config):
+            e[f"GIT_CONFIG_KEY_{i}"], e[f"GIT_CONFIG_VALUE_{i}"] = k, v
     return e
 
 
@@ -158,7 +193,7 @@ def _no_hooks() -> str:
     return (addons.home() / "no-hooks" / uuid.uuid4().hex).as_posix()
 
 
-def base_args(read_only: bool = False) -> list[str]:
+def base_args(read_only: bool = False, true: str = "true") -> list[str]:
     out = [
         "-c", f"core.hooksPath={_no_hooks()}",
         "-c", "core.fsmonitor=false",
@@ -171,13 +206,20 @@ def base_args(read_only: bool = False) -> list[str]:
         "-c", "credential.helper=",
         "-c", "diff.external=",
         "-c", "log.showSignature=false",
-        "-c", "core.editor=true",
-        "-c", "sequence.editor=true",
+        "-c", f"core.editor={true}",
+        "-c", f"sequence.editor={true}",
     ]  # fmt: skip
     return ["--no-optional-locks", *out] if read_only else out
 
 
-def _raw(argv: list[str], cwd: Path, timeout: float, data: bytes | None = None, root: Path | None = None):
+def _raw(
+    argv: list[str],
+    cwd: Path,
+    timeout: float,
+    data: bytes | None = None,
+    root: Path | None = None,
+    config: list[tuple[str, str]] | None = None,
+):
     exe = git_exe(cwd, root)
     if exe is None:
         return 127, "", "git is not installed (or only found inside the project, which orch does not run)"
@@ -189,7 +231,7 @@ def _raw(argv: list[str], cwd: Path, timeout: float, data: bytes | None = None, 
             capture_output=True,
             input=data,
             stdin=None if data is not None else subprocess.DEVNULL,  # never waits for a terminal
-            env=env(),
+            env=env(cwd, root, config),
             timeout=timeout,
             check=False,
         )
@@ -298,9 +340,13 @@ def subcommand_index(args: list[str]) -> int:
     return i
 
 
-def driver_args(cwd: Path, timeout: float = TIMEOUT, root: Path | None = None) -> list[str] | None:
-    """`-c filter.<d>.smudge= ...` and `-c merge.<d>.driver=false` for every driver the repository's
-    configuration defines; None when that could not be found out (the caller refuses)."""
+def driver_args(
+    cwd: Path, timeout: float = TIMEOUT, root: Path | None = None
+) -> list[tuple[str, str]] | None:
+    """(key, value) overrides for every filter driver (smudge/clean/process emptied, required off) and merge
+    driver (an ABSOLUTE `false`, so a merge conflicts and never silently drops "theirs") the repository's
+    configuration defines; None when that could not be found out (the caller refuses). They travel in the
+    environment (GIT_CONFIG_*), not as `-c name=value`: the names are repository-chosen."""
     rc, out, _ = _raw(
         ["git", *base_args(True), "config", "--includes", "--null", "--get-regexp",
          r"^(filter\..*\.(smudge|clean|process)|merge\..*\.driver)$"],
@@ -310,22 +356,27 @@ def driver_args(cwd: Path, timeout: float = TIMEOUT, root: Path | None = None) -
         return []
     if rc != 0:
         return None
-    args: list[str] = []
+    false = trivial("false", cwd, root)
+    pairs: list[tuple[str, str]] = []
     seen: set[str] = set()
     for rec in out.split("\0"):
-        m = _DRIVER.match(rec.split("\n", 1)[0].strip())
-        if not m or m[0] in seen:
+        if not rec:
             continue
-        seen.add(m[0])
+        key = rec.split("\n", 1)[0]
+        m = _DRIVER.match(key)
+        if not m:
+            return None  # a name we cannot parse safely (a newline in it): refuse, never guess
+        if key in seen:
+            continue
+        seen.add(key)
         if m[2]:
-            args += ["-c", f"filter.{m[2]}.smudge=", "-c", f"filter.{m[2]}.clean=", "-c",
-                     f"filter.{m[2]}.process=", "-c", f"filter.{m[2]}.required=false"]  # fmt: skip
+            pairs += [(f"filter.{m[2]}.{w}", "") for w in ("smudge", "clean", "process")]
+            pairs.append((f"filter.{m[2]}.required", "false"))
         else:
-            args += [
-                "-c",
-                f"merge.{m[4]}.driver=false",
-            ]  # `false` fails: a merge conflicts, never silently drops
-    return args
+            if false is None:
+                return None
+            pairs.append((f"merge.{m[4]}.driver", false))
+    return pairs
 
 
 def run(
@@ -347,7 +398,7 @@ def run(
     if why:
         return REFUSED, "", why
     top: list[str] = []  # options before the subcommand
-    extra: list[str] = []
+    extra: list[tuple[str, str]] = []
     if filters:
         found = driver_args(cwd, timeout, root)
         if found is None:
@@ -369,5 +420,9 @@ def run(
         sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"]
     elif k < len(sub) and sub[k] in _DIFFLIKE:
         sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"] if sub[k] != "grep" else ["--no-textconv"]
-    rc, out, err = _raw(["git", *top, *base_args(read_only), *extra, *sub], cwd, timeout, data, root)
+    true = trivial("true", cwd, root)
+    if true is None:
+        return REFUSED, "", "orch could not find a trusted `true` program, so it did not run git here"
+    kw = {"config": extra} if extra else {}
+    rc, out, err = _raw(["git", *top, *base_args(read_only, true), *sub], cwd, timeout, data, root, **kw)
     return rc, out.strip() if strip else out, err
