@@ -38,7 +38,7 @@
     function choices() {
       const options = make('div', 'qoptions');
       [...(question.options || [])].sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested)).forEach(option => {
-        const node = button('', 'btn qoption' + (option.suggested ? ' suggested' : ''), () => choose(option.text));
+        const node = button('', 'btn qoption' + (option.suggested ? ' suggested' : ''), () => choose(option.text, {immediate: question.oneTap === true && question.kind == null}));
         node.append(make('span', '', option.text));
         if (option.suggested) node.append(make('span', 'suggested-label', 'Suggested'));
         options.append(node);
@@ -75,8 +75,8 @@
       other.setAttribute('aria-expanded', 'false');
       options.append(other);
       controls.append(options, editor, err);
-      function choose(answer) {
-        const result = state.choose(answer);
+      function choose(answer, options) {
+        const result = state.choose(answer, options);
         if (!result.ok) { err.textContent = result.error; input.setAttribute('aria-invalid', 'true'); }
       }
     }

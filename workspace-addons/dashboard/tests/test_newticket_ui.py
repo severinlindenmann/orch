@@ -48,7 +48,8 @@ def test_edit_and_create_start_semantics_are_preserved():
         in js
     )
     assert "let startAfter = !t" in js
-    assert "startAfter = false; form.requestSubmit()" in js
+    assert "startAfter = false; planFirst = false; form.requestSubmit()" in js
+    assert "startAfter = true; planFirst = true; form.requestSubmit()" in js  # Show plan first
     assert "startAfter = true;" in js
     assert "act('run.start', {ticket:created.id})" in js
     assert "t.title === values.title && !previous.has(t.id)" in js
