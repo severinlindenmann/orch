@@ -7,7 +7,6 @@
 .settings .card{border-radius:12px}
 .settings .card-row{padding:16px}
 .settings details summary,.addon-native summary{min-height:44px;align-content:center;cursor:pointer;color:var(--text-muted)}
-.settings-details{padding:0 16px 12px}.settings-details .card-row{padding:0}
 .agent-cards{display:grid;gap:16px}
 .settings .agent-card{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;align-items:center;gap:12px;border:1px solid var(--border)}
 .settings .agent-card input,.settings .permission-choices input{width:24px;height:24px;margin:0;accent-color:var(--text)}

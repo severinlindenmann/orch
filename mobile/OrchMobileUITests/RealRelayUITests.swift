@@ -77,7 +77,7 @@ final class RealRelayUITests: XCTestCase {
         }
         row.tap()
         XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10))
-        XCTAssertTrue(any(app, "tasks-card").waitForExistence(timeout: 10), "tasks card")
+        XCTAssertTrue(any(app, "tasks-toggle").waitForExistence(timeout: 10), "ticket status line")
         XCTAssertTrue(any(app, "attachment-image").waitForExistence(timeout: 10), "image attachment")
         shot("08-ticket-chat")
         let yes = app.buttons["answer-yes"]

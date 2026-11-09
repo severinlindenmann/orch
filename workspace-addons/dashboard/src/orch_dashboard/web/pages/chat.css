@@ -143,3 +143,7 @@
 .chat-page .chat-contact:disabled {opacity:.5;cursor:default}
 .chat-page .chat-delivery .chat-button {font-size:inherit;padding:0 6px;min-height:44px}
 .chat-page .chat-main>.chat-compose {padding:10px 20px;border-top:1px solid var(--border)}
+/* Send: empty grey, ready green with icon, sending spinner (text contrast 4.5:1 in every state) */
+.chat-page .chat-compose>.chat-primary:disabled{opacity:1;background:var(--surface-3);border-color:var(--border-strong);color:var(--text-muted);cursor:default}
+.chat-page .chat-compose>.chat-primary[data-state=sending]{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.chat-page .chat-compose>.chat-primary .spinner{border-color:rgb(6 35 28 / .35);border-top-color:var(--on-brand)}

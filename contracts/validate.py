@@ -342,10 +342,11 @@ PHONE_ROUTES = [
     ("PATCH", r"/v1/phone/workspaces/ws_[a-z0-9]{10}", "workspace_patch_request", {200: "workspace_item"}),
     ("GET", r"/v1/phone/settings", None, {200: "settings"}),
     ("PATCH", r"/v1/phone/settings", "settings_patch_request", {200: "settings"}),
+    ("PATCH", r"/v1/phone/groups/ws_[a-z0-9]{10}/grp_t_[a-z0-9]{6,16}", "group_mute_request", {200: "group_mute_response"}),
     ("POST", r"/v1/phone/invitations/redeem", "redeem_request", {200: "redeem_response"}),
     ("POST", r"/v1/phone/transcribe(\?.*)?", None, {200: "transcribe_response"}),
 ]
-NEW_PHONE_PATHS = ["/v1/phone/blobs", "/v1/phone/speech/", "/v1/phone/settings", "/v1/phone/invitations/redeem"]
+NEW_PHONE_PATHS = ["/v1/phone/blobs", "/v1/phone/speech/", "/v1/phone/settings", "/v1/phone/invitations/redeem", "/v1/phone/groups/"]
 _seen_new = set()
 for i, ex in enumerate(json.loads((review / "relay-api.examples.json").read_text())):
     req, resp = ex["request"], ex["response"]
@@ -369,6 +370,12 @@ for i, ex in enumerate(json.loads((review / "relay-api.examples.json").read_text
 for np in NEW_PHONE_PATHS:
     if np not in _seen_new:
         fails.append(f"review/relay-api: needs an example for {np}")
+
+canvec = json.loads((HERE / "vectors" / "phone-can-v1.json").read_text())
+for case in canvec["workspaces"]:
+    errs = phone_errors("workspaces_response", case["response"])
+    if bool(errs) == case["ok"]:
+        fails.append(f"phone-can vector {case['name']}: expected {'ok' if case['ok'] else 'refused'}, got {errs[0].message if errs else 'valid'}")
 
 pvec = json.loads((HERE / "vectors" / "phone-v3-v1.json").read_text())
 
@@ -406,6 +413,44 @@ for sect, defname in (("answer", "answer_request"), ("settings_patch", "settings
         if (not phone_errors(defname, case["request"])) != case["ok"]:
             fails.append(f"phone-v3 vector {sect} {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
 
+
+# Mute (relay-api.md, Muted): push yes/no for a phone's mutes. Reference rule below; relay and phone replay the cases.
+def _active(until, now):
+    return until == "forever" or (isinstance(until, str) and until > now)
+
+
+def mute_push(case):
+    m, ph, now = case["message"], case["phone"], case["now"]
+    if _active(ph.get("mute_all_until"), now):
+        return False
+    if _active(ph.get("workspace_mutes", {}).get(m["from"]), now):
+        return False
+    body = m.get("body", {})
+    keys = [k for k in (body.get("group"), body.get("group_ref")) if isinstance(k, dict)]
+    for g in ph.get("group_mutes", []):
+        if _active(g["muted_until"], now) and any(k.get("host") == g["host"] and k.get("id") == g["id"] for k in keys):
+            return False
+    return True
+
+
+mvec = json.loads((HERE / "vectors" / "mute-v1.json").read_text())
+for case in mvec["cases"]:
+    if mute_push(case) != case["push"]:
+        fails.append(f"mute vector {case['name']}: expected push={case['push']}")
+    for g in case["phone"].get("group_mutes", []):
+        for e in phone_errors("group_mute", g)[:1]:
+            fails.append(f"mute vector {case['name']}: group_mutes item: {e.message}")
+for case in mvec["patch"]:
+    if (not phone_errors(case["def"], case["request"])) != case["ok"]:
+        fails.append(f"mute vector patch {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
+
+
+# Review question (relay-api.md, Review question): the question validates; the cases are fixed outcomes.
+rqvec = json.loads((HERE / "vectors" / "review-question-v1.json").read_text())
+check("message", rqvec["question"], True, "review-question vector: question")
+for case in rqvec["cases"]:
+    if case["do"] not in ("accept", "changes", "nothing") or (case["do"] == "changes" and not case.get("note")):
+        fails.append(f"review-question vector {case['name']}: bad outcome")
 
 # Mobile mode (relay-api.md, Mobile mode).
 mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())

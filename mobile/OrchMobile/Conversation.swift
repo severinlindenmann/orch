@@ -101,6 +101,9 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     /// What a RESULT update delivered (page, picture, file, pull request): tappable cards in the bubble.
     var artifacts: [TicketSnapshot.Attachment] = []
     var incoming: Bool { side == .them }
+    /// Keep the same SwiftUI row while an outbox copy becomes a listed message.
+    /// `id` remains the server id for replies and other message actions.
+    var rowID: String { clientId ?? id }
 
     /// One line for lists: the text, else what it carries.
     var preview: String {
@@ -319,7 +322,7 @@ enum ConversationBuilder {
         for o in d.outbox where o.kind == .send && o.workspace == id.workspace && !listed.contains(o.clientId) && outboxConversation(o) == id {
             out.append(queuedBubble(o))
         }
-        for q in d.questions where q.message.from == id.workspace {
+        for q in d.questions where !q.isReview && q.message.from == id.workspace {
             let qid: ConversationID = q.message.ticket.map { .topic(workspace: id.workspace, ticket: $0) } ?? .general(workspace: id.workspace)
             guard qid == id else { continue }
             var item = ConvItem(id: q.id, at: q.message.createdAt, side: .them, kind: .question, text: q.message.body.text)
@@ -328,6 +331,42 @@ enum ConversationBuilder {
         }
         out.sort { ($0.at, $0.id) < ($1.at, $1.id) }
         if let cut = d.erased[ReadState.key(id)] { out.removeAll { $0.at <= cut } }
+        if case .topic = id {
+            let review = d.tickets.first { $0.workspace == id.workspace && $0.ticket == id.ticket }.map { TopicStatus($0) == .review } ?? false
+            return mergingResults(out, review: review)
+        }
+        return out
+    }
+
+    /// Combine only adjacent agent results after hidden updates have been removed.
+    static func mergingResults(_ items: [ConvItem], review: Bool) -> [ConvItem] {
+        var out: [ConvItem] = []
+        var index = 0
+        while index < items.count {
+            var item = items[index]
+            index += 1
+            guard item.incoming, item.kind == .message, item.label == "RESULT" else {
+                out.append(item); continue
+            }
+            while index < items.count, items[index].incoming, items[index].kind == .message, items[index].label == "RESULT" {
+                item.attachments += items[index].attachments
+                item.artifacts += items[index].artifacts
+                index += 1
+            }
+            var seen = Set<String>()
+            item.attachments = item.attachments.filter {
+                seen.insert($0.blobId.isEmpty ? "name:" + $0.name : "blob:" + $0.blobId).inserted
+            }
+            item.artifacts = item.artifacts.filter {
+                let key: String
+                if let blob = $0.blobId, !blob.isEmpty { key = "blob:" + blob }
+                else if let name = $0.name, !name.isEmpty { key = "name:" + name }
+                else { key = "artifact:" + $0.id }
+                return seen.insert(key).inserted
+            }
+            item.label = review ? "Ready for your review" : "Result"
+            out.append(item)
+        }
         return out
     }
 
@@ -378,7 +417,7 @@ enum ConversationBuilder {
         d.workspaces.map { w in
             WorkspaceSummary(workspace: w, presence: w.presence(now: d.now), general: general(workspace: w.id, d, read: read),
                              topics: topics(workspace: w.id, d, read: read),
-                             openQuestions: d.questions.filter { $0.message.from == w.id && d.answers[$0.id] == nil }.count)
+                             openQuestions: d.questions.filter { !$0.isReview && $0.message.from == w.id && d.answers[$0.id] == nil }.count)
         }.sorted { ($0.openQuestions > 0 ? 1 : 0, $0.lastAt ?? "") > ($1.openQuestions > 0 ? 1 : 0, $1.lastAt ?? "") }
     }
 }

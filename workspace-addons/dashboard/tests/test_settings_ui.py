@@ -7,7 +7,6 @@ def test_settings_navigation_and_cards():
     for text in (
         "role:'tablist'", "'data-action':'settings-tab'", "'data-key':'settings-switch-'",
         "a.dashboard?.panel === 'phone'", "href:'#addon/' + phoneAddon.name",
-        "className:'settings-details'", "h('summary', {}, 'Details')",
         "OrchMobileMode?.settingsSection(h)", "OrchLook?.settingsSection()",
         "agent-card", "role:'status', className:'meta test-note'",
         "'data-action':'agent-test'", "'data-action':'settings-addon'",
@@ -15,6 +14,8 @@ def test_settings_navigation_and_cards():
         "panelOf(id) === 'repeats'", "panelOf(id) === 'links'", "a?.dashboard?.label",
     ):
         assert text in src
+    assert "className:'settings-details'" not in src  # fb11: the folder is shown directly
+    assert "h('span', {className:'set-label'}, 'Folder')" in src
     css = (webjs.WEB / 'pages/settings.css').read_text()
     assert '@media(max-width:760px)' in css
     assert 'overflow-x:auto' in css
