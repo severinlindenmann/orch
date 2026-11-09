@@ -214,6 +214,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found", "text/plain")
             m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
             return self._send(200, json.dumps({"pid": os.getpid(), "mac": m}).encode(), "application/json")
+        if path == "/api/notices":  # read once: the core clears them when read
+            from . import handoff
+
+            return self._send(200, json.dumps(handoff.notices(self.root)).encode(), "application/json")
         if path == "/api/handoffs":  # pending requests from a terminal; same-origin only (checked above)
             from . import handoff
 

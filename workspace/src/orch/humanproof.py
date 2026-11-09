@@ -734,7 +734,7 @@ def dev_workspace(root: Path) -> bool:
     """Is this workspace a dev demo workspace? ONLY the record in the guarded orch home counts (written by the
     dev installer when it creates the workspace); no workspace file, state dir file or environment is read."""
     try:
-        data = _read_json(_dev_path(root), {})
+        data = _read_json(root, _dev_path(root), {})
     except (Refused, OSError):
         return False
     ws = data.get("workspaces") if isinstance(data, dict) else None
@@ -757,7 +757,7 @@ def dev_mark(root: Path) -> None:
         raise Refused("This workspace cannot be a dev workspace.")
     path = _dev_path(root)
     with _key_lock(d):
-        data = _read_json(path, {"workspaces": {}})
+        data = _read_json(root, path, {"workspaces": {}})
         data.setdefault("workspaces", {})[os.path.realpath(root)] = {"at": int(time.time())}
         _write_private(path, json.dumps(data, indent=2, sort_keys=True))
         if not (d / "dev-human.key").exists():
@@ -829,7 +829,7 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
         path = d / "handoffs.json"
         now = int(time.time())
         with _key_lock(d):
-            items = [i for i in _read_json(path, []) if isinstance(i, dict) and i.get("exp", 0) > now]
+            items = [i for i in _read_json(root, path, []) if isinstance(i, dict) and i.get("exp", 0) > now]
             if any(i.get("op") == op and i.get("target") == target and i.get("argv") == argv for i in items):
                 return True
             if sum(1 for i in items if i.get("op") == op) >= HANDOFF_PER_OP:
@@ -857,7 +857,7 @@ def handoffs(root: Path) -> list[dict]:
     try:
         d = key_dir(root, create=False)
         now = int(time.time())
-        items = _read_json(d / "handoffs.json", [])
+        items = _read_json(root, d / "handoffs.json", [])
         return [i for i in items if isinstance(i, dict) and i.get("exp", 0) > now]
     except (Refused, OSError, ValueError):
         return []
@@ -869,7 +869,7 @@ def handoff_take(root: Path, hid: str) -> dict | None:
     try:
         d = key_dir(root, create=False)
         with _key_lock(d):
-            items = [i for i in _read_json(d / "handoffs.json", []) if isinstance(i, dict)]
+            items = [i for i in _read_json(root, d / "handoffs.json", []) if isinstance(i, dict)]
             hit = next((i for i in items if i.get("id") == hid and i.get("exp", 0) > time.time()), None)
             if hit is None:
                 return None
@@ -888,7 +888,9 @@ def handoff_drop(root: Path, hid: str) -> None:
         d = key_dir(root, create=False)
         with _key_lock(d):
             items = [
-                i for i in _read_json(d / "handoffs.json", []) if isinstance(i, dict) and i.get("id") != hid
+                i
+                for i in _read_json(root, d / "handoffs.json", [])
+                if isinstance(i, dict) and i.get("id") != hid
             ]
             _write_private(d / "handoffs.json", json.dumps(items))
     except (Refused, OSError, ValueError):

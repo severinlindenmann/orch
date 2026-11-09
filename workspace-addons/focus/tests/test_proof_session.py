@@ -130,4 +130,4 @@ def test_click_with_session_but_forwarded_is_refused(live):
 
 def test_orch_bin_from_the_environment_is_ignored():
     argv = pageproof.argv0(pageproof.SELF)
-    assert argv[1:4] == ["-I", "-m", "orch"] and argv[0] == pageproof.sys.executable
+    assert argv[1:5] == ["-I", "-P", "-m", "orch"] and argv[0] == pageproof.sys.executable

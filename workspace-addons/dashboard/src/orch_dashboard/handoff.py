@@ -24,6 +24,16 @@ def listing(root: Path) -> list[dict]:
     return [{k: i.get(k) for k in SHOW} for i in humanproof.handoffs(root)][:12]
 
 
+def notices(root: Path) -> list[dict]:
+    """One-time notices from the core (e.g. protection was reset), read once: the text is the core's own."""
+    if humanproof is None:
+        return []
+    return [
+        {"kind": str(n.get("kind"))[:40], "text": str(n.get("text"))[:600]}
+        for n in humanproof.take_notices(root)
+    ][:5]
+
+
 def confirm(root: Path, orch_bin, mint, hid, env, run_proof=None) -> tuple[int, str]:
     """The person clicked Continue. mint(op, target) exists only for a request with a page session."""
     if humanproof is None or mint is None:

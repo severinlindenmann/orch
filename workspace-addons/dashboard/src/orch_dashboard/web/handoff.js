@@ -31,5 +31,16 @@
   function poll() {
     fetch("/api/handoffs", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(render).catch(function () {});
   }
-  poll(); setInterval(poll, 4000);
+  function notices() {
+    fetch("/api/notices", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(function (items) {
+      items.forEach(function (n) {
+        var b = el("div", "", "orch-notice"); b.setAttribute("role", "status");
+        b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px;box-shadow:0 4px 16px rgba(0,0,0,.15)";
+        b.appendChild(el("div", n.text));
+        var x = el("button", "Got it"); x.type = "button"; x.style.marginTop = "8px"; x.onclick = function () { b.remove(); };
+        b.appendChild(x); document.body.appendChild(b);
+      });
+    }).catch(function () {});
+  }
+  notices(); poll(); setInterval(poll, 4000);
 })();

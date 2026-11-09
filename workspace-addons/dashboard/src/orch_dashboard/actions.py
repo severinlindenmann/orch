@@ -117,7 +117,7 @@ PROOF_OPS = {
     "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
     "chat.say": ("chat.send", lambda a: "general"),
-    "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by the embedded Focus page
+    "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
 }
 
 

@@ -187,3 +187,20 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
         {"Cookie": ck.split(";")[0]},
     )
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer mints
+
+
+def test_one_time_notice_is_shown_once_with_the_core_text(live):
+    root, port = live
+    d = hp.key_dir(root)
+    hp._write_private(
+        d / "notices.json", json.dumps([{"kind": "protection_reset", "at": "x", "text": hp.RESET_NOTICE}])
+    )
+
+    def get():
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request("GET", "/api/notices", headers={"Host": f"127.0.0.1:{port}"})
+        return json.loads(c.getresponse().read())
+
+    first = get()
+    assert first and first[0]["text"] == hp.RESET_NOTICE[:600]
+    assert get() == []  # once
