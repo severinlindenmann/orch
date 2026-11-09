@@ -1,5 +1,9 @@
 {
-  "about": "Ticket proposal result (relay-api.md 'Ticket proposal result'). valid: texts that validate against message.schema.json AND pass the relay. invalid: schema-invalid shapes (422). relay_invalid: schema-valid but the relay refuses (422 for the shape rules, 404/403 for reply_to lookups): reply_to must be a message of the sender with body.proposal make_ticket, to must be phones or a ph_ paired with the sender. The relay context: m_pr00000000000001 is a proposal question from ws_pilatus001 to phones; m_qq00000000000001 an ordinary question from ws_pilatus001; m_pr0000other00001 a proposal from ws_other00001. cases: what the workspace sends after handling a phone answer to a proposal. state: open = proposal not yet decided, made = it already became a ticket, gone = the proposal no longer exists, answered = a first answer was already handled. make: how the workspace's make_ticket ends (ok | refused:human_proof | refused:other). send: the proposal_result body, or null = nothing is sent. Exactly one result per handled make answer; an unauthorised or unknown answer sends nothing.",
+  "about": "Ticket proposal result (relay-api.md 'Ticket proposal result'). valid / invalid: texts that pass / fail message.schema.json. body.text is REQUIRED and is the canonical line derived from the result: made -> 'Ticket made: <key>', refused -> \"Couldn't make the ticket\", decided -> 'Already decided' or, with a key, 'Ticket made: <key>'. New phones hide the bubble and fold the result into the card by reply_to; old phones show the plain line. relay: what the relay answers (expect = HTTP status; 200 = identical duplicate) given state: the proposal is m_pr00000000000001 (a make_ticket question ws_pilatus001 sent to phones), answered_by = phones whose answer for it the relay stored, results = proposal_result messages already stored for it; m_qq00000000000001 is an ordinary question and m_tt00000000000001 a text of ws_pilatus001, m_pr0000other00001 a proposal of ws_other00001. A relay implementation replays every entry against the relay itself, not only the schema. cases: what the workspace does after a phone answer (authorised = a paired phone answered, not group-routed; state open|made|gone|answered_make|answered_not_now|result_recorded; send = the proposal_result body or null; to = phones or the answering ph_; got_it_ack = whether the ordinary Got it ack is sent). phone: the card a phone shows after the events (a result event applies only to the proposal the phone asked about; made is final for one reply_to).",
+  "phone_ids": {
+    "ph_iphone0001": "iPhone",
+    "ph_iphone0002": "iPad"
+  },
   "valid": [
     {
       "name": "made",
@@ -12,6 +16,7 @@
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Ticket made: DM1-12",
           "proposal_result": {
             "result": "made",
             "key": "DM1-12"
@@ -25,11 +30,12 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000002",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Couldn't make the ticket",
           "proposal_result": {
             "result": "refused",
             "reason": "needs_person"
@@ -43,11 +49,12 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000003",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Couldn't make the ticket",
           "proposal_result": {
             "result": "refused",
             "reason": "unavailable"
@@ -61,11 +68,12 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000004",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "proposal_result": {
             "result": "decided"
           }
@@ -73,7 +81,7 @@
       }
     },
     {
-      "name": "to-one-phone",
+      "name": "decided-with-key",
       "message": {
         "schema": "orch.msg/1",
         "id": "m_pres000000000005",
@@ -83,8 +91,10 @@
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Ticket made: DM1-12",
           "proposal_result": {
-            "result": "decided"
+            "result": "decided",
+            "key": "DM1-12"
           }
         }
       }
@@ -98,10 +108,11 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000010",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "proposal_result": {
             "result": "decided"
           }
@@ -115,7 +126,7 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000011",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
@@ -172,6 +183,7 @@
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Ticket made: DM1-12",
           "proposal_result": {
             "result": "made",
             "key": "DM1-12",
@@ -192,6 +204,7 @@
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Ticket made: DM1-12",
           "proposal_result": {
             "result": "made",
             "key": "dm1-12"
@@ -206,7 +219,7 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000016",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
@@ -224,11 +237,12 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000017",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Couldn't make the ticket",
           "proposal_result": {
             "result": "refused",
             "reason": "Traceback in /home/x/chat.py"
@@ -238,16 +252,17 @@
     },
     {
       "name": "refused-with-key",
-      "why": "only made has a key",
+      "why": "only made and decided have a key",
       "message": {
         "schema": "orch.msg/1",
         "id": "m_pres000000000018",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Couldn't make the ticket",
           "proposal_result": {
             "result": "refused",
             "reason": "unavailable",
@@ -257,20 +272,21 @@
       }
     },
     {
-      "name": "decided-with-key",
-      "why": "decided carries nothing",
+      "name": "decided-with-reason",
+      "why": "decided has no reason",
       "message": {
         "schema": "orch.msg/1",
         "id": "m_pres000000000019",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "proposal_result": {
             "result": "decided",
-            "key": "DM1-12"
+            "reason": "unavailable"
           }
         }
       }
@@ -282,33 +298,15 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000020",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "proposal_result": {
             "result": "decided",
             "note": "x"
-          }
-        }
-      }
-    },
-    {
-      "name": "with-text",
-      "why": "not chat: no text next to it",
-      "message": {
-        "schema": "orch.msg/1",
-        "id": "m_pres000000000021",
-        "from": "ws_pilatus001",
-        "to": "phones",
-        "type": "text",
-        "reply_to": "m_pr00000000000001",
-        "created_at": "2026-11-09T10:42:00Z",
-        "body": {
-          "text": "Ticket made",
-          "proposal_result": {
-            "result": "decided"
           }
         }
       }
@@ -320,11 +318,12 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000022",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "update": {
             "kind": "ack"
           },
@@ -341,11 +340,12 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000023",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "proposal_result": {
             "result": "decided"
           }
@@ -360,85 +360,145 @@
         "schema": "orch.msg/1",
         "id": "m_pres000000000024",
         "from": "ws_pilatus001",
-        "to": "phones",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "general": true,
           "proposal_result": {
             "result": "decided"
           }
         }
       }
-    }
-  ],
-  "relay_invalid": [
+    },
     {
-      "name": "reply-to-missing-message",
-      "why": "reply_to must be a proposal question this workspace sent",
+      "name": "with-answered-by",
+      "why": "no attribution in the body",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000025",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Already decided",
+          "answered_by": "human:iPhone",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "to-a-workspace",
+      "why": "never to a workspace",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000026",
+        "from": "ws_pilatus001",
+        "to": "ws_other00001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      }
+    },
+    {
+      "name": "made-to-one-phone",
+      "why": "made goes to phones",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000027",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      }
+    },
+    {
+      "name": "refused-to-phones",
+      "why": "refused goes only to the answering phone",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000028",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Couldn't make the ticket",
+          "proposal_result": {
+            "result": "refused",
+            "reason": "unavailable"
+          }
+        }
+      }
+    },
+    {
+      "name": "decided-to-phones",
+      "why": "decided goes only to the answering phone",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000029",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Already decided",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "not-a-text",
+      "why": "the marker only exists on a text",
       "message": {
         "schema": "orch.msg/1",
         "id": "m_pres000000000030",
         "from": "ws_pilatus001",
-        "to": "phones",
-        "type": "text",
-        "reply_to": "m_nosuchmsg0000001",
+        "to": "ph_iphone0001",
+        "type": "question",
+        "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
         "body": {
+          "text": "Already decided",
           "proposal_result": {
             "result": "decided"
           }
         }
-      },
-      "relay_only": true
+      }
     },
     {
-      "name": "reply-to-ordinary-question",
-      "why": "reply_to is a question without the make_ticket marker",
+      "name": "missing-text",
+      "why": "body.text is required (the plain line an old phone shows)",
       "message": {
         "schema": "orch.msg/1",
-        "id": "m_pres000000000031",
+        "id": "m_pres000000000080",
         "from": "ws_pilatus001",
-        "to": "phones",
-        "type": "text",
-        "reply_to": "m_qq00000000000001",
-        "created_at": "2026-11-09T10:42:00Z",
-        "body": {
-          "proposal_result": {
-            "result": "decided"
-          }
-        }
-      },
-      "relay_only": true
-    },
-    {
-      "name": "reply-to-other-workspaces-proposal",
-      "why": "the proposal question was sent by another workspace",
-      "message": {
-        "schema": "orch.msg/1",
-        "id": "m_pres000000000032",
-        "from": "ws_pilatus001",
-        "to": "phones",
-        "type": "text",
-        "reply_to": "m_pr0000other00001",
-        "created_at": "2026-11-09T10:42:00Z",
-        "body": {
-          "proposal_result": {
-            "result": "decided"
-          }
-        }
-      },
-      "relay_only": true
-    },
-    {
-      "name": "to-a-workspace",
-      "why": "only to phones or a paired phone",
-      "message": {
-        "schema": "orch.msg/1",
-        "id": "m_pres000000000033",
-        "from": "ws_pilatus001",
-        "to": "ws_other00001",
+        "to": "ph_iphone0001",
         "type": "text",
         "reply_to": "m_pr00000000000001",
         "created_at": "2026-11-09T10:42:00Z",
@@ -447,84 +507,929 @@
             "result": "decided"
           }
         }
+      }
+    },
+    {
+      "name": "wrong-text",
+      "why": "body.text is exactly the canonical string, no free text",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000081",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Done! Your ticket is ready",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "extra-text",
+      "why": "no text added to the canonical string",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000082",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Already decided, see you",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      }
+    },
+    {
+      "name": "made-text-without-key",
+      "why": "made text carries the key",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000083",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      }
+    },
+    {
+      "name": "refused-text-of-made",
+      "why": "text must match the result",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000084",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "refused",
+            "reason": "unavailable"
+          }
+        }
+      }
+    },
+    {
+      "name": "decided-with-key-text-already-decided",
+      "why": "decided with a key says Ticket made: <key>",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000085",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Already decided",
+          "proposal_result": {
+            "result": "decided",
+            "key": "DM1-12"
+          }
+        }
+      }
+    }
+  ],
+  "relay": [
+    {
+      "name": "made-to-phones",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000040",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
       },
-      "relay_only": true
+      "expect": 201
+    },
+    {
+      "name": "refused-to-answerer",
+      "state": {
+        "answered_by": [
+          "ph_iphone0001"
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000041",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Couldn't make the ticket",
+          "proposal_result": {
+            "result": "refused",
+            "reason": "needs_person"
+          }
+        }
+      },
+      "expect": 201
+    },
+    {
+      "name": "decided-to-answerer",
+      "state": {
+        "answered_by": [
+          "ph_iphone0001"
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000042",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Already decided",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      },
+      "expect": 201
+    },
+    {
+      "name": "same-id-again",
+      "state": {
+        "results": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_pres000000000043",
+              "from": "ws_pilatus001",
+              "to": "phones",
+              "type": "text",
+              "reply_to": "m_pr00000000000001",
+              "created_at": "2026-11-09T10:42:00Z",
+              "body": {
+                "text": "Ticket made: DM1-12",
+                "proposal_result": {
+                  "result": "made",
+                  "key": "DM1-12"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000043",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 200,
+      "why": "identical message again: 200 duplicate, nothing new stored"
+    },
+    {
+      "name": "second-made",
+      "state": {
+        "results": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_pres000000000044",
+              "from": "ws_pilatus001",
+              "to": "phones",
+              "type": "text",
+              "reply_to": "m_pr00000000000001",
+              "created_at": "2026-11-09T10:42:00Z",
+              "body": {
+                "text": "Ticket made: DM1-12",
+                "proposal_result": {
+                  "result": "made",
+                  "key": "DM1-12"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000045",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-13",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-13"
+          }
+        }
+      },
+      "expect": 409,
+      "why": "at most one made-or-refused per proposal"
+    },
+    {
+      "name": "made-after-refused",
+      "state": {
+        "answered_by": [
+          "ph_iphone0001"
+        ],
+        "results": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_pres000000000046",
+              "from": "ws_pilatus001",
+              "to": "ph_iphone0001",
+              "type": "text",
+              "reply_to": "m_pr00000000000001",
+              "created_at": "2026-11-09T10:42:00Z",
+              "body": {
+                "text": "Couldn't make the ticket",
+                "proposal_result": {
+                  "result": "refused",
+                  "reason": "unavailable"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000047",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 409,
+      "why": "at most one made-or-refused per proposal"
+    },
+    {
+      "name": "refused-after-made",
+      "state": {
+        "results": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_pres000000000048",
+              "from": "ws_pilatus001",
+              "to": "phones",
+              "type": "text",
+              "reply_to": "m_pr00000000000001",
+              "created_at": "2026-11-09T10:42:00Z",
+              "body": {
+                "text": "Ticket made: DM1-12",
+                "proposal_result": {
+                  "result": "made",
+                  "key": "DM1-12"
+                }
+              }
+            }
+          }
+        ],
+        "answered_by": [
+          "ph_iphone0001"
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000049",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0001",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Couldn't make the ticket",
+          "proposal_result": {
+            "result": "refused",
+            "reason": "unavailable"
+          }
+        }
+      },
+      "expect": 409,
+      "why": "at most one made-or-refused per proposal"
+    },
+    {
+      "name": "decided-after-made-is-allowed",
+      "state": {
+        "answered_by": [
+          "ph_iphone0002"
+        ],
+        "results": [
+          {
+            "message": {
+              "schema": "orch.msg/1",
+              "id": "m_pres000000000050",
+              "from": "ws_pilatus001",
+              "to": "phones",
+              "type": "text",
+              "reply_to": "m_pr00000000000001",
+              "created_at": "2026-11-09T10:42:00Z",
+              "body": {
+                "text": "Ticket made: DM1-12",
+                "proposal_result": {
+                  "result": "made",
+                  "key": "DM1-12"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000051",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0002",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "decided",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 201,
+      "why": "decided is not a made-or-refused: allowed to a phone that answered"
+    },
+    {
+      "name": "decided-to-phone-that-did-not-answer",
+      "state": {
+        "answered_by": [
+          "ph_iphone0001"
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000052",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0002",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Already decided",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      },
+      "expect": 403
+    },
+    {
+      "name": "refused-to-phone-that-did-not-answer",
+      "state": {
+        "answered_by": [
+          "ph_iphone0001"
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000053",
+        "from": "ws_pilatus001",
+        "to": "ph_iphone0002",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Couldn't make the ticket",
+          "proposal_result": {
+            "result": "refused",
+            "reason": "unavailable"
+          }
+        }
+      },
+      "expect": 403
+    },
+    {
+      "name": "to-unpaired-phone",
+      "state": {
+        "answered_by": [
+          "ph_stranger01"
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000054",
+        "from": "ws_pilatus001",
+        "to": "ph_stranger01",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Already decided",
+          "proposal_result": {
+            "result": "decided"
+          }
+        }
+      },
+      "expect": 403
+    },
+    {
+      "name": "reply-to-missing-message",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000055",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_nosuchmsg0000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 404
+    },
+    {
+      "name": "reply-to-other-workspaces-proposal",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000056",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr0000other00001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 404,
+      "why": "not sent by this sender: 404, never confirms that the id exists"
+    },
+    {
+      "name": "reply-to-own-ordinary-question",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000057",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_qq00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 403
+    },
+    {
+      "name": "reply-to-own-text",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000058",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tt00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-12",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 403
+    },
+    {
+      "name": "phone-sends-it-itself",
+      "state": {},
+      "via": "POST /v1/phone/send",
+      "request": {
+        "to": "ws_pilatus001",
+        "client_id": "c_000000000001",
+        "text": "x",
+        "proposal_result": {
+          "result": "made",
+          "key": "DM1-12"
+        }
+      },
+      "expect": 422,
+      "why": "phone texts never carry proposal_result; the relay builds phone texts and refuses the field (phone-api.schema.json send_request)"
+    },
+    {
+      "name": "text-names-another-key",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pres000000000070",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_pr00000000000001",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "text": "Ticket made: DM1-13",
+          "proposal_result": {
+            "result": "made",
+            "key": "DM1-12"
+          }
+        }
+      },
+      "expect": 422,
+      "why": "body.text must equal the canonical string for this result and key exactly (the schema only checks the shape; the relay checks the key)"
     }
   ],
   "cases": [
     {
       "name": "make-ok",
       "answer": "make",
+      "from": "ph_iphone0001",
+      "authorised": true,
       "state": "open",
-      "make": "ok",
-      "key": "DM1-12",
       "send": {
         "result": "made",
         "key": "DM1-12"
-      }
+      },
+      "to": "phones",
+      "make": "ok",
+      "key": "DM1-12"
+    },
+    {
+      "name": "make-case-and-space",
+      "answer": " Make ",
+      "from": "ph_iphone0001",
+      "authorised": true,
+      "state": "open",
+      "send": {
+        "result": "made",
+        "key": "DM1-12"
+      },
+      "to": "phones",
+      "make": "ok",
+      "key": "DM1-12"
     },
     {
       "name": "make-refused-human-proof",
       "answer": "make",
+      "from": "ph_iphone0001",
+      "authorised": true,
       "state": "open",
-      "make": "refused:human_proof",
       "send": {
         "result": "refused",
         "reason": "needs_person"
-      }
+      },
+      "to": "ph_iphone0001",
+      "make": "refused:human_proof"
     },
     {
       "name": "make-refused-other",
       "answer": "make",
+      "from": "ph_iphone0001",
+      "authorised": true,
       "state": "open",
-      "make": "refused:other",
       "send": {
         "result": "refused",
         "reason": "unavailable"
-      }
+      },
+      "to": "ph_iphone0001",
+      "make": "refused:other"
     },
     {
-      "name": "make-already-made",
+      "name": "make-dashboard-made-first",
       "answer": "make",
+      "from": "ph_iphone0001",
+      "authorised": true,
       "state": "made",
       "send": {
+        "result": "decided",
+        "key": "DM1-12"
+      },
+      "to": "ph_iphone0001",
+      "got_it_ack": false,
+      "why": "decided replaces the Got it ack when a phone answer is pending",
+      "key": "DM1-12"
+    },
+    {
+      "name": "make-after-earlier-make",
+      "answer": "make",
+      "from": "ph_iphone0002",
+      "authorised": true,
+      "state": "answered_make",
+      "send": {
+        "result": "decided",
+        "key": "DM1-12"
+      },
+      "to": "ph_iphone0002",
+      "key": "DM1-12"
+    },
+    {
+      "name": "make-after-not-now",
+      "answer": "make",
+      "from": "ph_iphone0001",
+      "authorised": true,
+      "state": "answered_not_now",
+      "send": {
         "result": "decided"
-      }
+      },
+      "to": "ph_iphone0001"
     },
     {
       "name": "make-proposal-gone",
       "answer": "make",
+      "from": "ph_iphone0001",
+      "authorised": true,
       "state": "gone",
       "send": {
         "result": "decided"
-      }
+      },
+      "to": "ph_iphone0001"
     },
     {
-      "name": "make-second-answer",
+      "name": "dashboard-decides-no-phone-answer",
+      "answer": "(dashboard)",
+      "from": "ph_iphone0001",
+      "authorised": false,
+      "state": "open",
+      "send": null,
+      "to": null,
+      "got_it_ack": true,
+      "why": "the dashboard-first Got it ack stays only when no phone answer is pending"
+    },
+    {
+      "name": "retry-resends-same-result",
       "answer": "make",
-      "state": "answered",
+      "from": "ph_iphone0001",
+      "authorised": true,
+      "state": "result_recorded",
       "send": {
-        "result": "decided"
-      }
+        "result": "made",
+        "key": "DM1-12"
+      },
+      "to": "phones",
+      "resend_same_message_id": true,
+      "why": "the workspace recorded the result sent next to the outcome; a retry resends that result with the same message id, never a different one",
+      "key": "DM1-12"
     },
     {
       "name": "not-now",
       "answer": "not_now",
+      "from": "ph_iphone0001",
+      "authorised": true,
       "state": "open",
-      "send": null
-    },
-    {
-      "name": "make-from-unpaired-phone",
-      "answer": "make",
-      "from": "ph_stranger01",
-      "state": "open",
-      "send": null
+      "send": null,
+      "to": null
     },
     {
       "name": "other-word",
       "answer": "sure",
+      "from": "ph_iphone0001",
+      "authorised": false,
       "state": "open",
-      "send": null
+      "send": null,
+      "to": null
+    },
+    {
+      "name": "unpaired-phone",
+      "answer": "make",
+      "from": "ph_stranger01",
+      "authorised": false,
+      "state": "open",
+      "send": null,
+      "to": null
+    },
+    {
+      "name": "from-subscriber",
+      "answer": "make",
+      "from": "sub_abc12345",
+      "authorised": false,
+      "state": "open",
+      "send": null,
+      "to": null
+    },
+    {
+      "name": "from-other-workspace",
+      "answer": "make",
+      "from": "ws_other00001",
+      "authorised": false,
+      "state": "open",
+      "send": null,
+      "to": null
+    }
+  ],
+  "phone": [
+    {
+      "name": "made",
+      "events": [
+        "answer_make",
+        {
+          "result": "made",
+          "key": "DM1-12"
+        }
+      ],
+      "card": "made",
+      "text": "Ticket made"
+    },
+    {
+      "name": "refused",
+      "events": [
+        "answer_make",
+        {
+          "result": "refused",
+          "reason": "unavailable"
+        }
+      ],
+      "card": "failed",
+      "text": "Couldn't make the ticket"
+    },
+    {
+      "name": "decided-no-key",
+      "events": [
+        "answer_make",
+        {
+          "result": "decided"
+        }
+      ],
+      "card": "closed"
+    },
+    {
+      "name": "decided-with-key",
+      "events": [
+        "answer_make",
+        {
+          "result": "decided",
+          "key": "DM1-12"
+        }
+      ],
+      "card": "made"
+    },
+    {
+      "name": "making-until-result",
+      "events": [
+        "answer_make"
+      ],
+      "card": "making",
+      "text": "Making ticket..."
+    },
+    {
+      "name": "slow-after-2-min",
+      "events": [
+        "answer_make",
+        "2_min"
+      ],
+      "card": "waiting",
+      "text": "Waiting for <workspace>..."
+    },
+    {
+      "name": "workspace-not-live",
+      "events": [
+        "answer_make",
+        "workspace_not_live"
+      ],
+      "card": "waiting"
+    },
+    {
+      "name": "late-made-after-waiting",
+      "events": [
+        "answer_make",
+        "2_min",
+        {
+          "result": "made",
+          "key": "DM1-12"
+        }
+      ],
+      "card": "made"
+    },
+    {
+      "name": "late-refused-after-waiting",
+      "events": [
+        "answer_make",
+        "workspace_not_live",
+        {
+          "result": "refused",
+          "reason": "needs_person"
+        }
+      ],
+      "card": "failed"
+    },
+    {
+      "name": "made-is-final-vs-refused",
+      "events": [
+        "answer_make",
+        {
+          "result": "made",
+          "key": "DM1-12"
+        },
+        {
+          "result": "refused",
+          "reason": "unavailable"
+        }
+      ],
+      "card": "made"
+    },
+    {
+      "name": "made-is-final-vs-decided",
+      "events": [
+        "answer_make",
+        {
+          "result": "made",
+          "key": "DM1-12"
+        },
+        {
+          "result": "decided"
+        }
+      ],
+      "card": "made"
+    },
+    {
+      "name": "made-on-another-phone",
+      "events": [
+        {
+          "result": "made",
+          "key": "DM1-12"
+        }
+      ],
+      "card": "made",
+      "why": "made goes to every phone: a card that was not answered here also shows the ticket"
+    },
+    {
+      "name": "unknown-reply-to-ignored",
+      "events": [
+        "answer_make",
+        {
+          "result": "made",
+          "key": "DM1-12",
+          "reply_to": "unknown"
+        }
+      ],
+      "card": "making"
+    },
+    {
+      "name": "not-now-sends-nothing",
+      "events": [
+        "answer_not_now"
+      ],
+      "card": "closed"
     }
   ]
 }
