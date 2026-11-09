@@ -513,16 +513,20 @@ def test_anchor_refuses_empty_parts_and_a_fifo_log_never_blocks(proj):
 
         def attempt():
             try:
-                saferead.safe_read_tail(proj, "x.log", 100)
-            except tickets.Refused:
-                out["tail"] = "refused"
-            out["state"] = saferead.file_state(proj.resolve(), "x.log", 10, [10])
+                try:
+                    saferead.safe_read_tail(proj, "x.log", 100)
+                except tickets.Refused:
+                    out["tail"] = "refused"
+                out["state"] = saferead.file_state(proj.resolve(), "x.log", 10, [10])
+            except BaseException as e:  # a clear failure below, not a silent thread death
+                out["error"] = repr(e)
 
         th = threading.Thread(target=attempt, daemon=True)
         th.start()
         th.join(2)
         assert not th.is_alive(), "a FIFO blocked the reader"  # a regression fails here instead of hanging CI
-        assert out == {"tail": "refused", "state": out["state"]} and out["state"].startswith("S:")
+        assert "error" not in out, out
+        assert out["tail"] == "refused" and out["state"].startswith("S:"), out
 
 
 def test_fallback_check_wants_the_path_itself_to_be_the_file(proj, tmp_path):

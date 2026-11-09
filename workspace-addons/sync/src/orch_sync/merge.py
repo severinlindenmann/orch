@@ -177,7 +177,7 @@ def _order(items, base_ids, key=None):
 
 
 RUNS_PER_REF = 5  # the rule below is the core's tickets.trim_runs (parity-tested), so replicas converge
-RUNS_PER_CHECK = 45
+RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes the runs
 _RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 
