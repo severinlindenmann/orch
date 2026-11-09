@@ -323,7 +323,7 @@ def test_setup_runs_once_in_the_copy_from_the_persons_config(repo):
     assert notes == [] and (f / "ready.txt").read_text() == "1"
     assert not (repo / "ready.txt").exists()
     log = (repo / ".orch" / "run" / "logs" / f"{a}-copy-setup.log").read_text()
-    assert log.startswith("$ ")
+    assert "$ " in log
     (f / "ready.txt").unlink()
     _route(repo, a)  # the copy exists: no second setup
     assert not (f / "ready.txt").exists()

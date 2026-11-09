@@ -53,11 +53,22 @@ EMPTY_TREE = {  # by `rev-parse --show-object-format`
 TIMEOUT = 60
 REFUSED = 125  # rc: orch would not run this git call (could not check the repository's drivers)
 _DRIVER = re.compile(r"^(filter\.(.+)\.(smudge|clean|process)|merge\.(.+)\.driver)$")
-_DIFFLIKE = {"diff", "log", "show", "format-patch", "blame", "grep"}
-_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--attr-source"}
+_DIFFLIKE = {"diff", "log", "show", "format-patch", "blame", "grep", "whatchanged", "range-diff"}
+_GLOBAL_WITH_VALUE = {
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--exec-path",
+    "--attr-source",
+    "--config-env",
+    "--super-prefix",
+}
 
 _exes: dict[frozenset, str | None] = {}
 _versions: dict[str, tuple[int, int]] = {}
+_trees: dict[str, str] = {}  # the empty tree id per folder
 _lock = threading.Lock()
 
 
@@ -89,30 +100,34 @@ def _avoid(cwd: Path, root: Path | None) -> frozenset:
     return frozenset(out)
 
 
+def find_exe(name: str, avoid) -> str | None:
+    """A program found on the PATH as an absolute path. The ONE lookup for git and for the person's setup
+    command. Not shutil.which (on Windows it also looks in the current folder, so a committed file would run).
+    Only absolute PATH entries count, only `<name>.exe` on Windows (never .cmd/.bat: they go through cmd.exe),
+    and never one inside any folder in `avoid` (the folder we work in, the workspace root, the copy, any orch
+    worktrees folder)."""
+    fn = name if os.name != "nt" or name.lower().endswith(".exe") else name + ".exe"
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if not d or d == "." or not os.path.isabs(d):
+            continue
+        p = os.path.join(d, fn)
+        if os.path.isfile(p) and os.access(p, os.X_OK) and not any(_inside(p, a) for a in avoid):
+            return p
+    return None
+
+
+def avoid_for(cwd: Path, root: Path | None = None) -> frozenset:
+    return _avoid(cwd, root)
+
+
 def git_exe(cwd: Path, root: Path | None = None) -> str | None:
-    """The one git program orch runs: an absolute path found on the PATH. Not shutil.which (on Windows it also
-    looks in the current folder, so a committed git.exe would run). Only absolute PATH entries count, only
-    `git.exe` on Windows (never .cmd/.bat: they go through cmd.exe), and never one inside the folder we work
-    in, the workspace root, or any orch worktrees folder. Cached per set of those folders."""
-    avoid = _avoid(cwd, root) | {"PATH=" + os.environ.get("PATH", "")}
+    """The one git program orch runs (see find_exe). Cached per set of avoided folders and the PATH."""
+    avoid = _avoid(cwd, root)
+    key = avoid | {"PATH=" + os.environ.get("PATH", "")}
     with _lock:
-        if avoid in _exes:
-            return _exes[avoid]
-        name = "git.exe" if os.name == "nt" else "git"
-        found = None
-        for d in os.environ.get("PATH", "").split(os.pathsep):
-            if not d or d == "." or not os.path.isabs(d):
-                continue
-            p = os.path.join(d, name)
-            if (
-                os.path.isfile(p)
-                and os.access(p, os.X_OK)
-                and not any(_inside(p, a) for a in avoid if not a.startswith("PATH="))
-            ):
-                found = p
-                break
-        _exes[avoid] = found
-        return found
+        if key not in _exes:
+            _exes[key] = find_exe("git", avoid)
+        return _exes[key]
 
 
 # ---------------------------------------------------------------- arguments
@@ -179,8 +194,13 @@ def version(cwd: Path, root: Path | None = None) -> tuple[int, int]:
 
 def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
     """The empty tree of this repository's hash algorithm; None when that can't be found out."""
-    rc, out, _ = _raw(["git", *base_args(True), "rev-parse", "--show-object-format"], cwd, 10, None, root)
-    return EMPTY_TREE.get(out.strip()) if rc == 0 else None
+    key = str(cwd)
+    if key not in _trees:
+        rc, out, _ = _raw(["git", *base_args(True), "rev-parse", "--show-object-format"], cwd, 10, None, root)
+        if rc != 0 or out.strip() not in EMPTY_TREE:
+            return None
+        _trees[key] = EMPTY_TREE[out.strip()]
+    return _trees[key]
 
 
 def subcommand_index(args: list[str]) -> int:

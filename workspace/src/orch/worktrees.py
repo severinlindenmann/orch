@@ -287,11 +287,13 @@ def _drop_partial(top: Path, dest: Path, branch: str, made_branch: bool) -> None
 
 def _create(root: Path, ticket: str) -> tuple[dict | None, str]:
     """Make the copy of this ticket within CREATE_BUDGET seconds of git time (see _create_inner)."""
-    _ctx.deadline, _ctx.root = time.monotonic() + CREATE_BUDGET, root
+    before = getattr(_ctx, "deadline", None)
+    _ctx.deadline = time.monotonic() + CREATE_BUDGET
     try:
-        return _create_inner(root, ticket)
+        with _scoped(root):
+            return _create_inner(root, ticket)
     finally:
-        _ctx.deadline = _ctx.root = None
+        _ctx.deadline = before
 
 
 def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
@@ -391,8 +393,7 @@ def create(root: Path, ticket: str) -> dict | None:
     (no git,
     git missing, no commit, a folder in the way). The caller then works in the project folder and shows the
     "also changing this folder" line."""
-    _ctx.root = root
-    with start_lock(root):
+    with _scoped(root), start_lock(root):
         ent = (registry(root).get(ticket) or {"paths": []})["paths"]
         if ent and _mine(root, ticket, ent[0]):
             return ent[0]
@@ -440,7 +441,7 @@ def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
             c = Path(argv[0]) if os.path.isabs(argv[0]) else work / argv[0]
             exe = str(c) if c.is_file() and os.access(c, os.X_OK) else None
         else:
-            exe = shutil.which(argv[0])
+            exe = safegit.find_exe(argv[0], safegit.avoid_for(work, root))  # same rules as git
     if not exe:
         return [
             f"The copy setup command '{argv[0] if argv else cmd}' was not found. The copy is used as it is."
@@ -478,13 +479,13 @@ def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
     return []
 
 
-def _note(root: Path, ticket: str, why: str) -> None:
-    """Why no copy was made, for whoever looks at the copy-setup log."""
+def _note(root: Path, ticket: str, why: str, prefix: str = "no separate copy: ") -> None:
+    """One line for whoever looks at the copy-setup log (why no copy was made, or what a copy is)."""
     if not why:
         return
     with contextlib.suppress(OSError, Refused):
         with runs.open_log(root / ".orch" / "run" / "logs" / f"{ticket}-copy-setup.log") as out:
-            out.write(f"no separate copy: {why}\n".encode())
+            out.write(f"{prefix}{why}\n".encode())
 
 
 def _record_on_ticket(root: Path, ticket: str, entry: dict) -> None:
@@ -516,14 +517,30 @@ def _alive_here(root: Path, ticket: str) -> dict | None:
     return rec if rec and runs.state(rec) in ("alive", "maybe-stale") else None
 
 
-def route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
+@contextlib.contextmanager
+def _scoped(root: Path):
+    """The workspace root for every safegit call of this thread, set and always reset (no stale value)."""
+    before = getattr(_ctx, "root", None)
+    _ctx.root = root
+    try:
+        yield
+    finally:
+        _ctx.root = before
+
+
+def route(root: Path, ticket: str):
+    """See _route."""
+    with _scoped(root):
+        return _route(root, ticket)
+
+
+def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
     """Where does this ticket's agent work: (folder, notes, after). Call it inside start_lock, with the claim
     in the same lock. The ticket keeps its copy for life; a new copy is made only when the setting asks for
     one (together: another alive run is in the project folder; always), git can make it, and fewer than
     `workflow.copies_max` copies exist. Anything else: the project folder.
     Under the lock only the quick part happens (decide, git worktree, register). `after` are the slow steps
     (harness files, the setup command, the ticket's record): call them once the lock is released."""
-    _ctx.root = root  # every safegit call of this thread avoids the workspace root when it looks for git
     rec = _alive_here(root, ticket)
     if rec:  # a run is on (or about to take over) this ticket: it stays where it is
         return workdir_for(root, rec), [], []
@@ -556,6 +573,12 @@ def route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
     notes: list[str] = []
 
     def after() -> list[str]:
+        _note(
+            root,
+            ticket,
+            "copies hold the committed files as they are (line-ending attributes are not applied)",
+            "",
+        )
         notes.extend(_prepare_files(root, entry))
         notes.extend(_setup(root, ticket, entry))
         with contextlib.suppress(Exception):  # a failed write must not stop the start

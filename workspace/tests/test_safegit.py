@@ -22,6 +22,12 @@ def plain_git(cwd, *args):
     return p.stdout.strip()
 
 
+def _exe(where):
+    exe = safegit.git_exe(where, where)
+    assert exe is not None
+    return Path(exe)
+
+
 def sh(path, body):
     path.write_text("#!/bin/sh\n" + body + "\n")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -192,7 +198,7 @@ def test_diff_like_calls_get_no_ext_diff_and_the_future_defaults(tmp_path, monke
 
 
 def test_the_cache_is_per_set_of_avoided_folders(tmp_path, monkeypatch):
-    real = Path(safegit.git_exe(tmp_path, tmp_path))
+    real = _exe(tmp_path)
     monkeypatch.setenv("PATH", str(real.parent))
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir()
@@ -212,7 +218,7 @@ def test_a_git_in_the_repo_or_in_a_path_entry_inside_it_is_never_used(tmp_path, 
     marker = tmp_path / "FAKE-GIT-RAN"
     sh(proj / "git", f"touch {marker}")
     sh(proj / "bin" / "git", f"touch {marker}")
-    real = Path(safegit.git_exe(tmp_path, tmp_path))
+    real = _exe(tmp_path)
     monkeypatch.setenv(
         "PATH", os.pathsep.join(["", ".", "relative/bin", str(proj / "bin"), str(real.parent)])
     )
@@ -359,7 +365,10 @@ def test_sha256_repo_gets_its_own_empty_tree(tmp_path):
     assert (wt / "a.txt").read_text() == "x\n"
 
 
-def test_a_merge_driver_never_runs_and_the_merge_conflicts(tmp_path):
+@pytest.mark.parametrize("old_git", [False, True])
+def test_a_merge_driver_never_runs_and_the_merge_conflicts(tmp_path, monkeypatch, old_git):
+    if old_git:  # git < 2.40: no --attr-source, the attributes ARE read, so driver=false forces the conflict
+        monkeypatch.setattr(safegit, "version", lambda *a, **k: (2, 39))
     r = tmp_path / "m"
     r.mkdir()
     plain_git(r, "init", "-q", "-b", "main")
@@ -380,7 +389,6 @@ def test_a_merge_driver_never_runs_and_the_merge_conflicts(tmp_path):
     rc, _, _ = safegit.run(["merge", "--no-edit", "side"], r)
     assert not mark.exists()
     assert rc != 0  # a conflict, not a silent success that dropped "theirs"
-    assert (r / "f.dat").read_text() != "ours\n" or rc != 0
 
 
 def test_a_copy_holds_the_committed_bytes_whatever_the_eol_attributes(tmp_path):
@@ -410,3 +418,44 @@ def test_a_copy_holds_the_committed_bytes_whatever_the_eol_attributes(tmp_path):
         assert (wt / "a.txt").read_bytes() == blob("a.txt") and (wt / "b.sh").read_bytes() == blob("b.sh")
     else:  # older git applies eol attributes (filters are still off): content is the converted form
         assert (wt / "a.txt").read_bytes().replace(b"\r\n", b"\n") == blob("a.txt").replace(b"\r\n", b"\n")
+
+
+def test_blame_and_format_patch_accept_the_no_textconv_flags_for_real(tmp_path):
+    r = tmp_path / "b"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("one\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+    (r / "a.txt").write_text("one\ntwo\n")
+    plain_git(r, "commit", "-qam", "j")
+    rc, out, err = safegit.run(["blame", "a.txt"], r)
+    assert rc == 0 and "two" in out, err
+    rc, out, err = safegit.run(["format-patch", "-1", "--stdout"], r)
+    assert rc == 0 and "+two" in out, err
+    rc, out, err = safegit.run(["log", "--oneline", "-p"], r)
+    assert rc == 0 and "+two" in out, err
+
+
+def test_find_exe_never_returns_a_committed_program(tmp_path, monkeypatch):
+    work = tmp_path / "copy"
+    (work / "bin").mkdir(parents=True)
+    good = tmp_path / "tools"
+    good.mkdir()
+    for d, n in ((work / "bin", "npm"), (work / "bin", "npm.cmd"), (work, "npm"), (good, "npm")):
+        sh(d / n, "true")
+    monkeypatch.setenv("PATH", os.pathsep.join(["", ".", "rel", str(work / "bin"), str(good)]))
+    avoid = safegit.avoid_for(work, tmp_path / "root")
+    assert safegit.find_exe("npm", avoid) == str(good / "npm")
+    monkeypatch.setenv("PATH", str(work / "bin"))
+    assert safegit.find_exe("npm", avoid) is None
+    assert safegit.find_exe("npm.cmd", avoid) is None or os.name != "nt"
+    monkeypatch.setenv("PATH", str(good))
+    assert safegit.find_exe("npm", safegit.avoid_for(good, good)) is None  # inside an avoided folder
+
+
+def test_global_options_with_a_value_are_skipped():
+    for opt in ("--config-env", "--super-prefix", "-C", "-c", "--attr-source"):
+        assert safegit.subcommand_index([opt, "v", "whatchanged"]) == 2
