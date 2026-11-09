@@ -50,6 +50,14 @@ The person reads the summary on the task and opens the proof from it. "Completed
 
     orch check done <id> c1 --summary "Connected as Dev Team; all 3 workspaces answered." --file out/check.md --title "Connection check"
 
+**A step that should not be done**
+
+Only the person marks a step "Won't do"; you cannot. Ask instead, with the step on the question:
+
+    orch ask <id> "Mark step c2 as won't do?" --option yes --option no --check c2
+
+Wait for the answer. If it is yes, the person marks it; do not try to tick or reopen it yourself.
+
 **Files you make**
 
     orch ticket artifacts-dir <id>        # prints the folder (.orch/tickets/<id>/artifacts/) and creates it
