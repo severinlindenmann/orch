@@ -149,12 +149,12 @@ test('task outcomes and result cards use plain text without sizes', () => {
   const ev = {type:'file',ref:'seating-plan.md',text:'seating-plan.md · 109 B',by:'agent:claude'};
   assert.equal(helpers.outcome({done:true,evidence:[]}), 'Completed.');
   assert.equal(helpers.outcome({done:true,evidence:[ev]}), 'Seating plan');
-  const c = context({clean:String});
-  vm.runInContext(source.slice(source.indexOf('function ticketResultCard'), source.indexOf('function artifactsPanel')), c);
+  const c = context({clean:String, ticketActor:() => 'Claude', ticketPreviewTile:() => 'preview', ticketButton:l => l, previewFile(){}, snapshot:false, state:{}});
+  vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function artifactsPanel')), c);
   const card = c.ticketResultCard({id:'t_test'}, ev);
   const text = JSON.stringify(card);
   assert.match(text, /ticket-result/);
-  assert.doesNotMatch(text, /109|\.md|Agent says/);
+  assert.doesNotMatch(text, /109|Agent says|Completed/);
 });
 
 test('next question stays above every tab and Answer scrolls and focuses it', () => {
@@ -186,7 +186,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
 
 test('result preview tiles keep HTML static and bound text excerpts', async () => {
   const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
-  const ctx = {h, window:{DashHelpers:helpers}, snapshot:false, URL, TextDecoder, fetch:async () => new Response('line\n'.repeat(1000),{headers:{'Content-Type':'text/plain'}})};
+  const ctx = {h, window:{DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('line\n'.repeat(1000),{headers:{'Content-Type':'text/plain'}})};
   vm.createContext(ctx);
   vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
   vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
@@ -200,41 +200,23 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   assert.ok(pre.children[0].split('\n').length <= 8);
 });
 
-function interactiveNode(tag, attrs = {}, ...children) {
-  const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), value:'', dataset:{key:attrs['data-key']},
-    append(...kids){this.children.push(...kids);}, prepend(...kids){this.children.unshift(...kids);},
-    replaceChildren(...kids){this.children = kids;}, setAttribute(k,v){this.attrs[k] = v;}, focus(){},
-    click(){if (!this.disabled) return this.onclick?.();}};
-  return n;
-}
-const descendants = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(descendants)] : [];
-test('inline changes replace both buttons, preserve the lock, send on Enter and cancel on Escape', async () => {
-  let finish, renders = 0;
-  const calls = [], locks = new Set();
-  const c = context({h:interactiveNode, locks, moveTicket(){}, render(){renders++;},
-    act:async (op, args) => { calls.push([op,args]); return new Promise(resolve => {finish = resolve;}); }});
-  const host = c.ticketChangesEditor({id:'t_test'});
-  assert.equal(host.attrs['data-key'], 'ticket-changes-t_test');
-  host.children[0].children[1].click();
-  const nodes = descendants(host), input = nodes.find(n => n.tag === 'input');
-  const send = nodes.find(n => n.children.includes('Send'));
-  assert.ok(input);
-  assert.equal(input.attrs.placeholder, 'What should change?');
-  assert.equal(input.attrs['aria-label'], 'What should change?');
-  assert.equal(nodes.filter(n => n.tag === 'textarea').length, 0);
-  assert.ok(!nodes.some(n => n.children.includes('Accept — mark Done')));
-  assert.ok(send.disabled && locks.has('ticket-changes-t_test'));
-  input.value = 'Fix the date'; input.oninput(); assert.equal(send.disabled, false);
-  input.onkeydown({key:'Enter', preventDefault(){}});
-  assert.ok(send.disabled);
-  input.onkeydown({key:'Enter', preventDefault(){}});
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][1].text, 'Fix the date');
-  finish({ok:true}); await new Promise(resolve => setImmediate(resolve));
-  assert.equal(renders, 1); assert.equal(locks.size, 0);
-  host.children[0].children[1].click();
-  descendants(host).find(n => n.tag === 'input').onkeydown({key:'Escape', preventDefault(){}});
-  assert.equal(locks.size, 0);
-  assert.match(JSON.stringify(host), /Ask for changes/);
+test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
+  const c = context({h, snapshot:false, safeHref:u => u, array:v => Array.isArray(v) ? v : [], clean:String, previewFile(){}, proofLabel:ev => ev.ref});
+  vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function ticketResultCard')), c);
+  vm.runInContext(source.slice(source.indexOf('// A small chip per proof'), source.indexOf('function taskRows')), c);
+  vm.runInContext('globalThis.evidenceFile = evidenceFile', c);
+  const t = {id:'t_a'}, base = '.orch/tickets/t_a/evidence/';
+  const hostile = ['../../t_b/artifacts/x.md', 'a/../../b', '/etc/passwd', 'a\\b.txt', 'a\0b', 'C:x.txt', 'a//b', './a.txt'];
+  for (const name of hostile) assert.equal(c.evidenceFile(t, {type:'file', ref:base + name}), null, name);
+  assert.equal(JSON.stringify(c.evidenceFile(t, {type:'file', ref:base + 'ok/plan.md', at:'x'})), JSON.stringify({name:'ok/plan.md', mtime:'x'}));
+  assert.equal(c.evidenceFile(t, {type:'file', ref:'.orch/tickets/t_b/evidence/x.md'}), null);
+  const row = ev => JSON.stringify(c.taskProofChips(t, {evidence:[ev]}));
+  assert.equal(row({type:'url', ref:'javascript:alert(1)'}), 'null');
+  assert.equal(row({type:'url', ref:'data:text/html,x'}), 'null');
+  assert.match(row({type:'url', ref:'HTTPS://example.com/x'}), /example\.com/);
+  assert.equal(row({type:'file', ref:base + '../x'}), 'null');
+  // the summary of the proof is the task line, even when a later proof has none
+  const task = {done:true, evidence:[{type:'file', ref:base + 'a.md', summary:'Connected as Dev Team.'}, {type:'file', ref:base + 'b.png'}]};
+  assert.equal(helpers.outcome(task), 'Connected as Dev Team.');
 });
-

@@ -18,7 +18,7 @@ def mk(run, title, *extra):
 def test_new_with_parent(proj, run, validate):
     p = mk(run, "Quarter close")
     code, out, _ = run("ticket", "new", "Q3 invoices", "--parent", p, "--by", "human:t")
-    assert code == 0 and "part of: Quarter close" in out
+    assert code == 0 and "step of: Quarter close" in out
     c = [t for t in tickets.list_all(proj) if t["title"] == "Q3 invoices"][0]
     validate(c)
     assert c["parent"] == p and c["history"][0]["text"] == f"Created under {p}"
@@ -38,7 +38,7 @@ def test_show_counts_and_part_of(proj, run):
     for k in kids[:2]:
         run("ticket", "status", k, "dropped")
     assert "Sub-tickets: 2 of 4 closed" in run("ticket", "show", p)[1]
-    assert f"Part of: Quarter close ({p})" in run("ticket", "show", kids[0])[1]
+    assert f"Step of: Quarter close ({p})" in run("ticket", "show", kids[0])[1]
 
 
 def test_list_json_children_and_missing_parent(proj, run):
@@ -52,7 +52,7 @@ def test_list_json_children_and_missing_parent(proj, run):
     (proj / ".orch" / "tickets" / f"{p}.json").unlink()
     text = run("ticket", "list")[1]
     assert "B" in text and "parent missing" in text
-    assert f"Part of: {p} (parent missing)" in run("ticket", "show", tickets.list_all(proj)[0]["id"])[1]
+    assert f"Step of: {p} (parent missing)" in run("ticket", "show", tickets.list_all(proj)[0]["id"])[1]
 
 
 def test_tree(proj, run):

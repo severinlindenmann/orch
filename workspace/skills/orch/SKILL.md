@@ -42,14 +42,21 @@ See what a run is doing with `orch run status <id>`; a person can send you a mes
 
 Proof flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
 into the ticket (workspace files, at most 25 MB). Record what really happened. Never invent proof.
+Every finished step also gets `--summary "<what came out, one plain line>"` (at most 200 characters; no file names or
+sizes) and, when the step produced a file, a picture or a PR, that as `--file` / `--pr` with `--title "<short name>"`.
+The person reads the summary on the task and opens the proof from it. "Completed" says nothing.
+
+    orch check done <id> c1 --summary "Connected as Dev Team; all 3 workspaces answered." --file out/check.md --title "Connection check"
 
 **Files you make**
 
     orch ticket artifacts-dir <id>        # prints the folder (.orch/tickets/<id>/artifacts/) and creates it
     orch ticket artifacts <id> [--json]   # what is there: name, size, time, path
 
-Write reports, exports, drafts and other output files for a ticket into that folder, unless the person
-explicitly asks for a file in the project. Proof can point at them: `orch check done <id> c1 --file <path>`.
+Write reports, exports, drafts, pictures and other output files for a ticket into that folder, unless the person
+explicitly asks for a file in the project. Give each a plain name (`connection-check.md`, not `out2.tmp`): the
+Artifacts tab shows the name, a preview and an Open button. Proof can point at them:
+`orch check done <id> c1 --file <path>`.
 
 **Change the step list**
 

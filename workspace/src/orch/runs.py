@@ -728,7 +728,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f'Before you start, use orch check add {tid} "<task>" for one task per piece of the person\'s '
         "work, in plain words (no ids, paths or commands). "
         f"Mark the task you work on with orch check start {tid} <task id> and finish each with proof: "
-        f'orch check done {tid} <task id> --note "<what you did>". '
+        f'orch check done {tid} <task id> --summary "<what came out, one line>" --note "<what you did>". '
         f'When you stop, use orch ticket summary {tid} "<what was done and what is left>"'
         " in plain words.",
         "When the ticket reaches Review, orch sends its summary and files to the person by itself: "

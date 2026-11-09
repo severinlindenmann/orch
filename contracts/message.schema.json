@@ -225,6 +225,7 @@
               "name": { "type": "string", "minLength": 1, "maxLength": 255 },
               "size": { "type": "integer", "minimum": 0, "maximum": 104857600 },
               "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
+              "preview": { "$ref": "#/$defs/artifact_id", "description": "Optional, on a page (kind file, name *.html): the id of the PNG attachment of the same list that shows this page (same file name, .png). One result, one thing to open: a phone that knows this field shows the page with that picture inside and does not list the picture on its own; one that does not simply shows both. A phone ignores `preview` unless its target is an `image` attachment of this same list, and it renders the PNG, never the HTML. Never a blob or a url of its own: it only names another attachment." },
               "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "Optional, url kinds only: what the link is (\"GitHub · Pull request\", \"Figma\", \"Link\"), from workspace/src/orch/refs.py." },
               "icon": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "Optional, url kinds only: the site or link-type icon key (github, figma, youtube, link, ...); an unknown key shows the mono tile." },
               "mono": { "type": "string", "minLength": 1, "maxLength": 3, "description": "Optional, url kinds only: the letters on the tile (GH, Fg)." },
