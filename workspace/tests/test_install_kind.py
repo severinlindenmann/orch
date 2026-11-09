@@ -353,40 +353,82 @@ def test_all_state_lives_in_one_home(throwaway):
     assert not (acct / ".orch-tool").exists()
 
 
-def test_update_on_a_normal_install_with_a_trusted_orch_home_touches_only_that_home(
-    throwaway, tmp_path, monkeypatch
-):
+def test_update_on_a_normal_install_with_another_orch_home_is_refused(throwaway, monkeypatch):
     acct, orch_home, ws = throwaway
-    entries = [{"name": "focus", "source": "built-in", "version": "0.1.0"}]
-    addons._save_registry(entries)
-    assert (orch_home / "addons.json").is_file() and not (acct / ".orch-tool").exists()
-    seen = {}
-
-    def fake_reinstall(reg, *, save, then, root, done):
-        seen.update(reg=reg, save=save, then=then)
-        return True
-
-    monkeypatch.setattr(addons, "_reinstall", fake_reinstall)
-    addons.update(ws)
-    assert [e["name"] for e in seen["reg"]] == ["focus"]  # the list came from ORCH_HOME
-    assert (orch_home / "update-before.json").is_file()
-    assert not (acct / ".orch-tool").exists()  # nothing under the real account home
-    # the real reinstall path too: uv runs once, the record is written, state stays in ORCH_HOME
-    monkeypatch.undo()
-    monkeypatch.setattr(addons, "real_home", lambda: acct)
-    monkeypatch.setenv("ORCH_HOME", str(orch_home))
-    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
-    env = _prefix(tmp_path, monkeypatch)
-    (env / "bin").mkdir()
-    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    addons._save_registry([{"name": "focus", "source": "built-in", "version": "0.1.0"}])
     ran = []
     monkeypatch.setattr(addons, "run_uv", lambda a: ran.append(a))
     monkeypatch.setattr(addons, "reexec", lambda a: ran.append(a))
-    addons._save_registry(entries)
+    for call in (
+        lambda: addons.update(ws),
+        lambda: addons._reinstall([], save=True, then=[], root=ws, done="x"),
+    ):
+        with pytest.raises(hp.HomeRefused, match="different orch folder than your account's") as e:
+            call()
+        assert "Start orch normally" in str(e.value) and e.value.code == hp.NOT_TOGETHER
+    assert ran == [] and not (acct / ".orch-tool").exists()  # nothing installed, real home untouched
+    assert addons.registry() and addons.home() == orch_home  # read-only ops still see the list
+
+
+def test_a_dev_or_test_install_may_update_from_its_own_orch_home(throwaway, monkeypatch):
+    acct, orch_home, ws = throwaway
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    addons._save_registry([{"name": "focus", "source": "built-in", "version": "0.1.0"}])
+    seen = []
+    monkeypatch.setattr(addons, "_install_tool", lambda e: seen.append(e))
+    monkeypatch.setattr(addons, "reexec", lambda a: None)
     addons.update(ws)
-    assert ran and hp.read_install_record() == "normal"
+    assert [e["name"] for e in seen[0]] == ["focus"]
     assert not (acct / ".orch-tool").exists()
+
+
+def test_a_crafted_registry_is_filtered(throwaway, capsys):
+    acct, orch_home, ws = throwaway
+    (orch_home / "addons.json").write_text(
+        json.dumps(
+            [
+                {
+                    "name": "focus",
+                    "source": "built-in",
+                    "version": "0.1.0",
+                    "spec": "git+https://evil/x",
+                    "extra": 1,
+                },
+                {
+                    "name": "evil",
+                    "source": "built-in",
+                    "version": "1",
+                },  # a fake built-in: orch does not ship it
+                {"name": "../x", "source": "built-in", "version": "1"},  # bad name
+                {"name": "Bad Name", "source": "/agent/dir", "version": "1"},
+                {"name": "relay", "source": "built-in", "version": "1"},  # reserved/core: not a tool entry
+            ]
+        )
+    )
+    reg = addons.registry()
+    assert reg == [{"name": "focus", "source": "built-in", "version": "0.1.0"}]  # extra fields stripped
+    err = capsys.readouterr().err
+    assert "'evil' was ignored" in err and "not a valid add-on name" in err
+
+
+def test_a_planted_hashless_folder_entry_rides_no_approval(rws, tmp_path, capsys):
+    from orch import addonsnap
+
+    good = _folder_addon(tmp_path)
+    snap = addons.prepare_local_add(rws, good)
+    addonsnap.allow(hp.guarded_home(rws), snap["hash"])
+    planted = {"name": "planted", "source": "/agent/dir", "version": "0.1.0"}
+    mine = {
+        "name": "mine",
+        "source": snap["snapshot"],
+        "version": "0.1.0",
+        "approved": True,
+        "hash": snap["hash"],
+    }
+    with addons.trusted_local_add(snap["hash"]):
+        args = addons._tool_args([planted, mine])
+    assert "/agent/dir" not in args and snap["snapshot"] in args
+    assert "only you can allow" in capsys.readouterr().err
 
 
 def test_install_uses_the_snapshot_not_the_live_folder(tws, tmp_path, monkeypatch):
@@ -435,6 +477,7 @@ def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, capsys):
 
 
 def _old_install(tmp_path, monkeypatch):
+    monkeypatch.setattr(addons, "_tool_env_change_ok", lambda: None)  # the home rule has its own tests
     env = _prefix(tmp_path, monkeypatch)  # no record
     (env / "bin").mkdir()
     monkeypatch.setattr(hp, "_source_tree", lambda: False)
