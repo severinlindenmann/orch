@@ -482,3 +482,49 @@ def test_attach_history_line_is_not_lost_when_apply_op_was_busy(proj, other, mon
     assert [h["text"] for h in tickets.load(proj, tid)["history"]].count("Attached x.md") == 1
     tickets.attach(proj, tid, "x.md", b"hi", "human:t", exact="x.md")  # and not twice
     assert [h["text"] for h in tickets.load(proj, tid)["history"]].count("Attached x.md") == 1
+
+
+def test_ps_comes_first_and_proc_is_the_fallback(monkeypatch):
+    """ps values stay what they were; /proc only answers when ps is missing or empty."""
+
+    class R:
+        stdout = "Mon Nov  9 15:00:00 2026"
+
+    monkeypatch.setattr(procs.os, "name", "posix")
+    monkeypatch.setattr(procs, "_proc_started", lambda pid: "PROC~")
+    monkeypatch.setattr(procs.subprocess, "run", lambda *a, **k: R())
+    assert procs.pid_started(4242) not in (None, "PROC~")
+    R.stdout = ""
+    assert procs.pid_started(4242) == "PROC~"
+
+    def no_ps(*a, **k):
+        raise FileNotFoundError("ps")
+
+    monkeypatch.setattr(procs.subprocess, "run", no_ps)
+    assert procs.pid_started(4242) == "PROC~"
+
+
+def test_same_start_exact_for_ps_and_tolerant_for_proc_values():
+    a = "2026-11-09T15:00:00Z"
+    assert procs.same_start(a, a)
+    assert not procs.same_start(a, "2026-11-09T15:00:01Z")  # ps values: exact
+    assert procs.same_start(a + "~", "2026-11-09T15:00:02Z~")  # /proc: +-2 s
+    assert procs.same_start(a, "2026-11-09T15:00:01Z~")  # mixed: tolerant
+    assert not procs.same_start(a + "~", "2026-11-09T15:00:03Z~")
+    assert not procs.same_start(a, None)
+
+
+def test_proc_boot_time_is_read_once(monkeypatch):
+    if not os.path.exists("/proc/self/stat"):
+        pytest.skip("Linux /proc only")
+    monkeypatch.setattr(procs, "_btime", None)
+    first = procs._proc_started(os.getpid())
+    real_open = open
+
+    def no_stat(path, *a, **k):
+        if path == "/proc/stat":
+            raise AssertionError("btime must be cached")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", no_stat)
+    assert procs._proc_started(os.getpid()) == first and first.endswith("~")

@@ -42,34 +42,60 @@ def pid_started(pid: int) -> str | None:
                 return _iso(ticks / 1e7 - 11644473600)
             finally:
                 k.CloseHandle(h)
-        if (t := _proc_started(pid)) is not None:
-            return t
-        r = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
-        )
-        text = " ".join(r.stdout.split())
+        try:
+            r = subprocess.run(
+                ["ps", "-o", "lstart=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+            )
+            text = " ".join(r.stdout.split())
+        except (OSError, subprocess.SubprocessError):  # no ps here (minimal Linux container)
+            text = ""
         if not text:
-            return None
+            return _proc_started(pid)  # Linux /proc; None elsewhere or when the process is gone
         return _iso(time.mktime(time.strptime(text, "%a %b %d %H:%M:%S %Y")))
     except Exception:
         return None
 
 
+_btime: int | None = None
+APPROX = "~"  # suffix of a /proc-derived start time: the kernel's boot time drifts by a second or so
+APPROX_SECONDS = 2
+
+
 def _proc_started(pid: int) -> str | None:
-    """Linux: start time from /proc (no ps, no locale: minimal containers have no procps), else None."""
+    """Linux: start time from /proc (no ps, no locale: minimal containers have no procps), else None.
+    Marked approximate (APPROX suffix); the boot time is read once per process so one process always sees
+    one value."""
+    global _btime
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
             fields = f.read().rsplit(")", 1)[1].split()
         ticks = int(fields[19])  # field 22 (starttime), after pid and comm
-        with open("/proc/stat", encoding="utf-8") as f:
-            btime = next(int(line.split()[1]) for line in f if line.startswith("btime "))
-        return _iso(btime + ticks // os.sysconf("SC_CLK_TCK"))
+        if _btime is None:
+            with open("/proc/stat", encoding="utf-8") as f:
+                _btime = next(int(line.split()[1]) for line in f if line.startswith("btime "))
+        return _iso(_btime + ticks // os.sysconf("SC_CLK_TCK")) + APPROX
     except (OSError, IndexError, ValueError, StopIteration, AttributeError):
         return None
+
+
+def same_start(a: str, b: str) -> bool:
+    """Two start times of one pid are the same process: exact for ps values, within APPROX_SECONDS when either
+    comes from /proc."""
+    if not isinstance(a, str) or not isinstance(b, str):
+        return False
+    if a == b:
+        return True
+    if not (a.endswith(APPROX) or b.endswith(APPROX)):
+        return False
+    try:
+        fa, fb = (datetime.strptime(x.removesuffix(APPROX), "%Y-%m-%dT%H:%M:%SZ") for x in (a, b))
+    except ValueError:
+        return False
+    return abs((fa - fb).total_seconds()) <= APPROX_SECONDS
 
 
 # Windows refuses to replace or delete a file another process has open (Python opens files without
@@ -126,4 +152,4 @@ def owner_dead(text: str) -> bool:
         return True
     started = parts[1] if len(parts) > 1 and parts[1] != "-" else None
     now = pid_started(pid) if started else None
-    return bool(started and now and now != started)
+    return bool(started and now and not same_start(now, started))
