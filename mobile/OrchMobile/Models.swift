@@ -184,8 +184,17 @@ extension Array where Element == Question {
     }
 }
 
-/// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction). contracts/message.schema.json, `text`.
+/// The workspace outcome of a ticket proposal answer.
+struct ProposalResult: Codable, Sendable, Equatable {
+    let result: String
+    var key: String? = nil
+    var reason: String? = nil
+}
+
+/// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
 struct TextBody: Codable, Sendable, Equatable {
+    var proposalResult: ProposalResult? = nil
+    var isProposalResult: Bool { proposalResult != nil }
     /// Empty when the text only carries attachments, a voice memo, a location or feedback.
     var text: String = ""
     /// Work update about the message's ticket; nil on a plain text.
@@ -217,18 +226,21 @@ struct TextBody: Codable, Sendable, Equatable {
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
          ticketView: TicketSnapshot? = nil,
          group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
-         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil) {
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil) {
+        self.proposalResult = proposalResult
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
         self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
         self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
     private enum CodingKeys: String, CodingKey {
-        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult
         case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
+        proposalResult = try? c.decodeIfPresent(ProposalResult.self, forKey: .proposalResult)
+        if let result = proposalResult, !["made", "refused", "decided"].contains(result.result) { proposalResult = nil }
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
@@ -253,6 +265,7 @@ struct TextBody: Codable, Sendable, Equatable {
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(proposalResult, forKey: .proposalResult)
         if !text.isEmpty { try c.encode(text, forKey: .text) }
         try c.encodeIfPresent(update, forKey: .update); try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encodeIfPresent(general, forKey: .general); try c.encodeIfPresent(speak, forKey: .speak)

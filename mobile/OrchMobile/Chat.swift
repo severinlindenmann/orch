@@ -116,6 +116,7 @@ enum ChatBuilder {
         var out: [ChatItem] = []
         let keyOf = Dictionary(d.tickets.filter { $0.workspace == ws }.compactMap { t in t.ticket.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
         for m in d.messages where m.workspaceId == ws {
+            guard !m.message.body.isProposalResult else { continue }
             let msg = m.message
             if let u = msg.body.update {
                 guard u.kind == "ack" else { continue }          // the rest lives on the ticket card and in the ticket chat
@@ -140,6 +141,7 @@ enum ChatBuilder {
         let t = d.tickets.first { $0.workspace == ws && $0.ticket == ticketId }
         var seenText = Set<String>()
         for m in d.messages where m.workspaceId == ws && m.message.ticket == ticketId {
+            guard !m.message.body.isProposalResult else { continue }
             let msg = m.message
             seenText.insert(msg.body.text)
             if m.fromPhone { out.append(ChatItem(id: m.id, at: msg.createdAt, kind: .mine(msg.body.text, queued: false))); continue }
@@ -192,6 +194,7 @@ enum ChatBuilder {
         }
         let inputs = ConversationInputs(messages: d.messages), ix = d.erased.isEmpty ? nil : ConversationBuilder.index(inputs)
         for m in d.messages where m.message.body.update == nil || m.message.body.update?.kind == "result" {
+            guard !m.message.body.isProposalResult else { continue }
             guard m.message.body.text.lowercased().contains(q) else { continue }
             if let ix, let id = ConversationBuilder.conversation(of: m, ix, inputs), let cut = d.erased[ReadState.key(id)], m.message.createdAt <= cut { continue }
             let who = (m.fromPhone ? "You" : m.workspaceName)
