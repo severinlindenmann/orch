@@ -4,6 +4,7 @@ same pid, same port, new code (the new page's files are served, no 404 blank pag
 import contextlib
 import os
 import shutil
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -93,30 +94,89 @@ def test_stamp_is_cached_and_changes_with_the_files(tmp_path, monkeypatch):
     assert selfupdate.changed(now=103.0) is True
 
 
-def test_new_argv_keeps_the_port_and_drops_ready_file_and_auto_port():
-    argv = [
-        "python",
-        "-P",
-        "-m",
-        PKG,
-        "--dir",
-        "/w",
-        "serve",
-        "--ready-file",
-        "/r.json",
-        "--port",
-        "8420",
-        "--auto-port",
-    ]
-    assert selfupdate.new_argv(argv, 8431) == [
-        "python",
-        "-P",
-        "-m",
-        PKG,
-        "--dir",
-        "/w",
-        "serve",
-        "--port",
-        "8431",
-    ]
-    assert selfupdate.new_argv([*argv[:-3], "--port=1"], 9) == [*argv[:7], "--port", "9"]
+def test_new_argv_is_rebuilt_isolated_and_keeps_the_port():
+    argv = ["python", "-m", PKG, "--dir", "/w", "serve", "--ready-file", "/r.json", "--port", "8420", "--auto-port"]
+    want = [sys.executable, "-P", "-m", PKG, "--dir", "/w", "serve", "--port", "8431"]
+    assert selfupdate.new_argv(argv, 8431) == want  # -P added even when the old process had none
+    assert selfupdate.new_argv([*argv[:-3], "--port=1"], 9) == [*want[:-1], "9"]
+    assert selfupdate.new_argv(["python", "server.py"], 1) is None  # not started as -m <package>
+    assert selfupdate.new_argv(["python", "-m", "other", "serve"], 1) is None
+
+
+def _reset(monkeypatch, stamps):
+    it = iter(stamps)
+    monkeypatch.setattr(selfupdate, "stamp", lambda: next(it, stamps[-1]))
+    monkeypatch.setattr(selfupdate, "_START", ("v1",))
+    monkeypatch.setattr(selfupdate, "_state", {"restarting": False, "failed": None, "thread": None})
+    selfupdate._cache.update(at=-1e9, stamp=None)
+    monkeypatch.setattr(sys, "orig_argv", ["python", "-m", PKG, "--dir", "/w", "serve"], raising=False)
+
+
+def test_exec_is_isolated_and_leaves_the_workspace_folder(monkeypatch):
+    _reset(monkeypatch, [("v2",)])
+    seen = {}
+    monkeypatch.setattr(selfupdate, "_runs_new_code", lambda: True)
+    monkeypatch.setattr(selfupdate.os, "chdir", lambda d: seen.setdefault("chdir", Path(d)))
+    monkeypatch.setattr(selfupdate.os, "execv", lambda exe, argv: seen.update(exe=exe, argv=argv))
+    assert selfupdate.restart(8431, delay=0)
+    selfupdate._state["thread"].join(5)
+    assert seen["argv"][:4] == [sys.executable, "-P", "-m", PKG]  # no working-folder imports
+    assert seen["chdir"] == SRC.parent  # before the exec, never the workspace folder
+
+
+def test_import_check_uses_the_same_isolation(monkeypatch):
+    calls = []
+
+    class R:
+        returncode = 0
+
+    monkeypatch.setattr(selfupdate.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)) or R())
+    assert selfupdate._runs_new_code()
+    cmd, kw = calls[0]
+    assert cmd[:2] == [sys.executable, "-P"] and kw["cwd"] == SRC.parent and "env" not in kw  # same env as the exec
+
+
+def test_broken_new_build_is_checked_once_and_the_normal_page_is_served(monkeypatch):
+    _reset(monkeypatch, [("v2",)])
+    checks = []
+    monkeypatch.setattr(selfupdate, "_runs_new_code", lambda: checks.append(1) or False)
+    monkeypatch.setattr(selfupdate.os, "execv", lambda *a: pytest.fail("exec of a broken build"))
+
+    class H:
+        def __init__(self):
+            self.sent = []
+
+        server = type("S", (), {"server_address": ("127.0.0.1", 8431)})()
+
+        def _send(self, code, body, ctype):
+            self.sent.append(body)
+
+    h = H()
+    assert selfupdate.answer(h) is True and b"restarting" in h.sent[0]  # the first request starts the check
+    selfupdate._state["thread"].join(5)
+    for _ in range(5):  # then the normal page, no new spawn, until the files change again
+        selfupdate._cache["at"] = -1e9
+        assert selfupdate.answer(h) is False
+    assert checks == [1]
+    # the files change again: one more check
+    monkeypatch.setattr(selfupdate, "stamp", lambda: ("v3",))
+    selfupdate._cache["at"] = -1e9
+    assert selfupdate.answer(h) is True
+    selfupdate._state["thread"].join(5)
+    assert checks == [1, 1]
+
+
+def test_concurrent_requests_start_one_restart(monkeypatch):
+    import threading
+
+    _reset(monkeypatch, [("v2",)])
+    gate = threading.Event()
+    checks = []
+    monkeypatch.setattr(selfupdate, "_runs_new_code", lambda: checks.append(1) or gate.wait(5) and False)
+    results = []
+    ts = [threading.Thread(target=lambda: results.append(selfupdate.restart(1, delay=0))) for _ in range(8)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    gate.set()
+    selfupdate._state["thread"].join(5)
+    assert results.count(True) == 1 and checks == [1]

@@ -1643,6 +1643,37 @@ def _say(text: str) -> None:
         _output_failure_proof()
 
 
+def _same_user(pid: int) -> bool:
+    """The process belongs to this user (POSIX; Windows keeps the add-on's own checks)."""
+    if os.name == "nt":
+        return True
+    try:
+        r = subprocess.run(
+            ["ps", "-o", "uid=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.stdout.strip() == str(os.getuid())
+
+
+def _unverified(services, root: Path, name: str, pid: int) -> str | None:
+    """Why this recorded service can not be trusted, or None. The add-on's own `status` is the proof: it
+    checks its record, the pid and its start time, the command line (this add-on's module for this folder) and
+    the nonce challenge on its port, and names the pid. Also: same user, add-on active here."""
+    if not isinstance(pid, int) or not services.pid_alive(pid) or not _same_user(pid):
+        return "can't verify"
+    try:
+        m = services._services(root).get(name)
+        if m is None:
+            return "can't verify"
+        res = services._call(root, name, m, "status")
+    except Exception:  # noqa: BLE001 - a forged folder must not break the update
+        return "can't verify"
+    if res.get("running") is not True or res.get("pid") != pid:
+        return "can't verify"
+    return None
+
+
 def _is_up(services, root: Path, name: str, old_pid: int | None) -> bool:
     """Running again under a NEW pid (the old process is gone)."""
     return any(
@@ -1657,12 +1688,21 @@ def _is_up(services, root: Path, name: str, old_pid: int | None) -> bool:
 def _restart_locked(services, root: Path, olds: dict[str, int]) -> tuple[list[str], list[str]]:
     """Restart these add-ons of one workspace. Returns (labels restarted, lines for what went wrong)."""
     label = lambda n: f"{n} ({root.name})"  # noqa: E731
-    names = set(olds)
     if not (root / ".orch").is_dir():
         return [], [
-            f"Restart {label(n)} to use the new version (workspace folder is gone)" for n in sorted(names)
+            f"Restart {label(n)} to use the new version (workspace folder is gone)" for n in sorted(olds)
         ]
-    lines = []
+    # running.json is only a hint (anything under ORCH_HOME may write it): act on a service only after the
+    # add-on itself verified it live, and never start a workspace whose service was not verified.
+    lines, names = [], set()
+    for n in sorted(olds):
+        why = _unverified(services, root, n, olds[n])
+        if why:
+            lines.append(f"{label(n)} not restarted ({why}); run orch start in {root}")
+        else:
+            names.add(n)
+    if not names:
+        return [], lines
     try:
         stops = {r["addon"]: r for r in services.stop(root, only=names)}
     except Exception as e:

@@ -94,8 +94,18 @@ class Fleet:
         }
         monkeypatch.setattr(services, "pid_alive", lambda pid: pid != 999)
         monkeypatch.setattr(services, "running", self.running)
+        monkeypatch.setattr(addons, "_same_user", lambda pid: True)
+        self.forged = set()  # (workspace, addon): live pid that is NOT the add-on's server
+        monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}, "focus": {}})
+        monkeypatch.setattr(services, "_call", self.call)
         monkeypatch.setattr(services, "stop", self.stop)
         monkeypatch.setattr(services, "start", self.start)
+
+    def call(self, root, name, m, sub):
+        assert sub == "status"  # the proof of life comes from the add-on itself
+        if (str(root), name) in self.forged:
+            return {"running": False}
+        return {"running": True, "pid": self.pids[(str(root), name)]}
 
     def running(self):
         rows = [{"workspace": w, "addon": a, "pid": p} for (w, a), p in self.pids.items()]
@@ -480,3 +490,27 @@ def test_dead_output_does_not_abort_the_restart(monkeypatch):
 
     monkeypatch.setattr("sys.stdout", Dead())
     addons._say("Updating orch")  # must not raise
+
+
+def test_forged_entry_with_a_live_unrelated_pid_is_neither_signalled_nor_started(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    f.forged = {(str(f.ws[0]), "dashboard"), (str(f.ws[0]), "focus")}  # all of Pilatus is forged
+    lines = addons._restart_updated()
+    assert not [c for c in f.calls if c[1] == "Pilatus"]  # no stop, no start for that workspace
+    assert "dashboard (Pilatus) not restarted (can't verify); run orch start in " + str(f.ws[0]) in "\n".join(
+        lines
+    )
+    assert "Restarted: dashboard (Rigi), focus (Rigi)" in lines  # the verified ones still restart
+
+
+def test_one_unverified_service_is_skipped_but_the_verified_sibling_restarts(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    f.forged = {(str(f.ws[0]), "focus")}
+    lines = addons._restart_updated()
+    assert ("stop", "Pilatus", {"dashboard"}) in f.calls and ("start", "Pilatus", {"dashboard"}) in f.calls
+    assert any("focus (Pilatus) not restarted (can't verify)" in x for x in lines)
+
+
+def test_other_users_process_is_not_verified(monkeypatch):
+    monkeypatch.setattr(addons.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "0\n"})())
+    assert addons._same_user(1234) is False
