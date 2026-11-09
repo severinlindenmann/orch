@@ -780,6 +780,74 @@ def send_question(
     return msg
 
 
+REVIEW_TEXT = "Is this done?"
+REVIEW_OPTIONS = ["accept", "changes"]
+
+
+def send_review_question(root: Path, ticket: dict, n: int) -> dict:
+    """fb8: the review question of round n to the phones (contracts/relay-api.md 'Review question'). A
+    normal question with body.review true; the relay does not push it (the Ready-for-review text did)."""
+    qid = f"review-{n}"
+    body = {
+        "question_id": qid,
+        "title": ticket["title"],
+        "text": REVIEW_TEXT,
+        "options": REVIEW_OPTIONS,
+        "recommended": None,
+        "review": True,
+    }
+    msg = _message(root, "phones", "question", body, ticket["id"])
+    asked = net.read_json(_asked_path(root), {})
+    asked[msg["id"]] = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
+    net.write_json(_asked_path(root), asked, True)
+    return msg
+
+
+def _review_asked(root: Path, msg: dict) -> dict | None:
+    asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
+    return asked if isinstance(asked, dict) and asked.get("review") is True else None
+
+
+_ACTOR_RE = re.compile(r"human:[A-Za-z0-9_.@ -]{1,64}")
+
+
+def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
+    """An answer to a review question. It acts only when ALL hold: it comes from a paired phone (ph_, never a
+    subscriber or another workspace), it answers THIS question (checked by _answer_asked), the round is
+    still the open current one (closed by exactly one answer: compare and set), and the ticket is still in
+    Review. "accept" = the dashboard Accept; other text = "Ask for changes" with that note. Anything else is
+    a history line only. Never an agent: tickets.accept_review / ask_for_changes refuse one."""
+    from orch import phone_view
+
+    tid, n = asked["ticket"], asked.get("round")
+    frm = str(msg.get("from", ""))
+    if not frm.startswith("ph_"):
+        return "ignored: only a paired phone answers a review question", None
+    ans = clean_untrusted(str(msg.get("body", {}).get("answer")), 2000).strip()
+    if not ans:
+        return "ignored: an empty review answer", None
+    by, via = _answer_by(msg, asked)
+    if not _ACTOR_RE.fullmatch(by):
+        by = f"human:{frm}"
+    if not phone_view.close_review(root, tid, n):
+        with contextlib.suppress(Refused):
+            tickets.note_history(root, tid, by, "A review answer from the phone came too late and was ignored", via)
+        return f"not applied to {tid}: not the current review", None
+    try:
+        if ans.casefold() == "accept":
+            tickets.accept_review(root, tid, by, via)
+            return f"accepted {tid} (via {via})", tid
+        tickets.ask_for_changes(root, tid, ans, by, via=via, phone=frm, pid="p_" + str(msg["id"])[2:])
+        return f"asked for changes on {tid} (via {via})", tid
+    except Refused as e:
+        with contextlib.suppress(Refused):
+            tickets.note_history(root, tid, by, "A review answer from the phone was not used: " + str(e)[:120], via)
+        return f"not applied to {tid}: {e}", None
+    except BaseException:
+        phone_view.reopen_review(root, tid, n)
+        raise
+
+
 # ---- inbox --------------------------------------------------------------------------------------
 
 
@@ -867,6 +935,8 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     asked, why = _answer_asked(root, msg)
     if not asked:
         return why, None
+    if asked.get("review") is True:
+        return _apply_review_answer(root, msg, asked)
     by, via = _answer_by(msg, asked)
     try:
         t, q = tickets.answer(
@@ -1617,6 +1687,7 @@ def sync_phone_views(root: Path) -> None:
         phone_view.sync_open(root)
         phone_view.sync(root)
         phone_view.sync_light(root)
+        phone_view.sync_reviews(root)
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
         send_working(root)
 
@@ -1696,15 +1767,20 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                 after = None  # group hooks run after relay.lock is released (lock order: relay, never inside)
                 with locked(root):
                     if m["id"] not in seen(root):  # another reader may have handled it meanwhile
-                        if typ == "answer":
-                            note, applied = _apply_answer(root, m)
-                            if applied and msg_group(m):
-                                after = "answer"
+                        if typ == "answer" and tickets.agent_tool() and _review_asked(root, m):
+                            # accepting is the person's decision: never applied from an agent session; the
+                            # workspace's own process picks the saved answer up (not marked seen)
+                            note = "a review answer waits for the workspace to apply it"
                         else:
-                            note = _store_allow(root, m)
-                            after = "allow"
-                        auto = True
-                        _mark_seen(root, m["id"])  # last
+                            if typ == "answer":
+                                note, applied = _apply_answer(root, m)
+                                if applied and msg_group(m):
+                                    after = "answer"
+                            else:
+                                note = _store_allow(root, m)
+                                after = "allow"
+                            auto = True
+                            _mark_seen(root, m["id"])  # last
                 if after == "answer":
                     _group_after_answer(root, m, applied)
                 elif after == "allow":
