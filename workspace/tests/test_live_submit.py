@@ -703,7 +703,7 @@ def _held(proj, run, monkeypatch, box="", mode="0", cx=2, raw=None):
     return tid, rec["run"], sent, screen
 
 
-def test_a_prompt_with_the_persons_unsent_text_is_never_typed_into(proj, run, monkeypatch):
+def test_a_prompt_with_the_persons_unsent_text_is_not_typed_into(proj, run, monkeypatch):
     """Lane C (B): the notice went in right after "commit the pptx skill too" and both were sent as one line."""
     tid, rn, sent, screen = _held(proj, run, monkeypatch, box="commit the pptx skill too", cx=27)
     assert runs_live.deliver(proj, tid) == 0 and sent == []
