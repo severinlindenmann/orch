@@ -78,6 +78,8 @@ _GLOBAL_WITH_VALUE = {
     "--super-prefix",
 }
 
+# a value that runs nothing, for the read-only questions orch asks first (no editor is ever involved there)
+_NOOP = ""
 _exes: dict[frozenset, str | None] = {}
 _versions: dict[str, tuple[int, int]] = {}
 _trees: dict[str, str] = {}  # the empty tree id per folder
@@ -145,15 +147,23 @@ def git_exe(cwd: Path, root: Path | None = None) -> str | None:
 # ---------------------------------------------------------------- arguments
 
 
+def _python_trivial(name: str, cwd: Path, root: Path | None) -> str | None:
+    """Windows has no true/false programs: the python running orch does it, unless that python is inside the
+    folder we work in, the workspace root or a copy (a project's own .venv is not a trusted program)."""
+    import sys
+
+    if any(_inside(sys.executable, a) for a in _avoid(cwd, root)):
+        return None
+    code = "pass" if name == "true" else "raise SystemExit(1)"
+    return f'"{sys.executable}" -c "{code}"'
+
+
 def trivial(name: str, cwd: Path, root: Path | None = None) -> str | None:
     """A command git runs as `true` or `false` (editor, askpass, a merge driver that must fail): an ABSOLUTE
     path found by find_exe, never a bare name that git would resolve through a PATH an agent controls. On
     Windows (no true/false programs) the python running orch, quoted. None = not found: the caller refuses."""
     if os.name == "nt":
-        import sys
-
-        code = "pass" if name == "true" else "raise SystemExit(1)"
-        return f'"{sys.executable}" -c "{code}"'
+        return _python_trivial(name, cwd, root)
     exe = find_exe(name, _avoid(cwd, root))
     return shlex.quote(exe) if exe else None
 
@@ -170,16 +180,14 @@ def safe_path(cwd: Path, root: Path | None = None) -> str:
     return os.pathsep.join(keep)
 
 
-def env(cwd: Path | None = None, root: Path | None = None, config: list[tuple[str, str]] | None = None):
+def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] | None = None):
     """The environment of every git call: ours without any GIT_* variable, a sanitized PATH, and (set AFTER
     the strip, on purpose) nothing may open an editor, ask a password or prompt. `config`: (key, value) pairs
     given through GIT_CONFIG_COUNT/KEY_n/VALUE_n, so a repository-chosen name never has to survive `-c`."""
     e = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     e["LC_ALL"] = "C"
-    where = cwd or Path.cwd()
-    e["PATH"] = safe_path(where, root)
+    e["PATH"] = safe_path(cwd, root)
     e["GIT_TERMINAL_PROMPT"] = "0"
-    true = trivial("true", where, root) or "true"
     e["GIT_EDITOR"] = e["GIT_SEQUENCE_EDITOR"] = e["GIT_ASKPASS"] = true
     if config:
         e["GIT_CONFIG_COUNT"] = str(len(config))
@@ -193,7 +201,7 @@ def _no_hooks() -> str:
     return (addons.home() / "no-hooks" / uuid.uuid4().hex).as_posix()
 
 
-def base_args(read_only: bool = False, true: str = "true") -> list[str]:
+def base_args(true: str, read_only: bool = False) -> list[str]:
     out = [
         "-c", f"core.hooksPath={_no_hooks()}",
         "-c", "core.fsmonitor=false",
@@ -220,6 +228,9 @@ def _raw(
     root: Path | None = None,
     config: list[tuple[str, str]] | None = None,
 ):
+    true = trivial("true", cwd, root)
+    if true is None:
+        return REFUSED, "", "orch could not find a trusted `true` program, so it did not run git here"
     exe = git_exe(cwd, root)
     if exe is None:
         return 127, "", "git is not installed (or only found inside the project, which orch does not run)"
@@ -231,7 +242,7 @@ def _raw(
             capture_output=True,
             input=data,
             stdin=None if data is not None else subprocess.DEVNULL,  # never waits for a terminal
-            env=env(cwd, root, config),
+            env=env(cwd, root, true, config),
             timeout=timeout,
             check=False,
         )
@@ -261,7 +272,9 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
     """The empty tree of this repository's hash algorithm; None when that can't be found out."""
     key = str(cwd)
     if key not in _trees:
-        rc, out, _ = _raw(["git", *base_args(True), "rev-parse", "--show-object-format"], cwd, 10, None, root)
+        rc, out, _ = _raw(
+            ["git", *base_args(_NOOP, True), "rev-parse", "--show-object-format"], cwd, 10, None, root
+        )
         if rc != 0 or out.strip() not in EMPTY_TREE:
             return None
         _trees[key] = EMPTY_TREE[out.strip()]
@@ -348,7 +361,7 @@ def driver_args(
     configuration defines; None when that could not be found out (the caller refuses). They travel in the
     environment (GIT_CONFIG_*), not as `-c name=value`: the names are repository-chosen."""
     rc, out, _ = _raw(
-        ["git", *base_args(True), "config", "--includes", "--null", "--get-regexp",
+        ["git", *base_args(_NOOP, True), "config", "--includes", "--null", "--get-regexp",
          r"^(filter\..*\.(smudge|clean|process)|merge\..*\.driver)$"],
         cwd, timeout, None, root,
     )  # fmt: skip
@@ -404,6 +417,8 @@ def run(
         if found is None:
             return REFUSED, "", "orch could not check this repository's filters, so it did not run git here"
         extra = found
+        if version(cwd, root) < (2, 31):  # older git ignores GIT_CONFIG_COUNT: the overrides would not apply
+            return REFUSED, "", "this git is older than 2.31: orch cannot switch off the repository's drivers"
         if version(cwd, root) >= (2, 40):
             tree = empty_tree(cwd, root)
             if tree is None:
@@ -424,5 +439,5 @@ def run(
     if true is None:
         return REFUSED, "", "orch could not find a trusted `true` program, so it did not run git here"
     kw = {"config": extra} if extra else {}
-    rc, out, err = _raw(["git", *top, *base_args(read_only, true), *sub], cwd, timeout, data, root, **kw)
+    rc, out, err = _raw(["git", *top, *base_args(true, read_only), *sub], cwd, timeout, data, root, **kw)
     return rc, out.strip() if strip else out, err

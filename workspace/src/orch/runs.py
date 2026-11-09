@@ -852,7 +852,8 @@ def plan(
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
     if (
         sid
-        and adapters.transcript_exists(name, sid, root, folder=workdir_for(root, read(root, tid))) is False
+        and adapters.transcript_exists(name, sid, root, folder=workdir_for(root, read(root, tid), tid))
+        is False
     ):
         sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
@@ -898,7 +899,7 @@ def plan(
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
-    argv = store_access(argv, name, root, workdir_for(root, read(root, tid)))
+    argv = store_access(argv, name, root, workdir_for(root, read(root, tid), tid))
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1060,13 +1061,13 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
-def workdir_for(root: Path, rec: dict | None) -> Path:
+def workdir_for(root: Path, rec: dict | None, tid: str | None = None) -> Path:
     """The folder this run's agent works in: the record's `folder` when it is a separate copy of this
     workspace
     (worktrees.workdir_for checks that), else the workspace folder."""
     from orch import worktrees
 
-    return worktrees.workdir_for(root, rec)
+    return worktrees.workdir_for(root, rec, tid)
 
 
 def _agent_environ(root: Path) -> dict:
@@ -1216,7 +1217,7 @@ def wrap(
         return 1
     set_process(root, tid, run, os.getpid())
     env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
-    work = workdir_for(root, rec)  # a separate copy of the folder, or the workspace itself
+    work = workdir_for(root, rec, tid)  # a separate copy of the folder, or the workspace itself
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
     current: dict = {}
@@ -1314,7 +1315,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
 
         signal.signal(signal.SIGINT, signal.SIG_IGN)  # Escape/^C belong to the agent, not to this wrapper
     try:
-        proc = subprocess.Popen(argv, cwd=workdir_for(root, rec), env=env)
+        proc = subprocess.Popen(argv, cwd=workdir_for(root, rec, tid), env=env)
     except OSError as e:
         print(f"orch could not start the agent: {e}", file=sys.stderr)
         with contextlib.suppress(Exception):

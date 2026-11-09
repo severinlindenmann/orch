@@ -236,22 +236,26 @@ def _mine(root: Path, ticket: str, e: dict) -> bool:
         return False
 
 
-def workdir_for(root: Path, rec: dict | None) -> Path:
+def workdir_for(root: Path, rec: dict | None, ticket: str | None = None) -> Path:
     """The folder a run works in: its record's `folder` when that is exactly THIS ticket's copy
-    (path_for(workspace id, ticket), resolved, and a copy orch made), else the root. A forged or synced record
-    (another ticket's copy, another workspace's, an edited path) is ignored."""
-    f = (rec or {}).get("folder")
-    if not isinstance(f, str) or not f:
-        return root
+    (path_for(workspace id, ticket), resolved, and a copy orch made), else the root. `ticket`: the run's real
+    ticket id when the caller has it (preferred over the record's). A forged or synced record (another
+    ticket's copy, another workspace's, an edited path) is ignored."""
     try:
+        f = (rec or {}).get("folder")
+        if not isinstance(f, str) or not f:
+            return root
         p = Path(f).resolve()
         if p == root.resolve():
             return root
-        tid = (rec or {}).get("ticket")
-        want = path_for(addons.workspace_id(root) or "", tid, addons.home(root))
+        tid = ticket if ticket is not None else (rec or {}).get("ticket")
+        wid = addons.workspace_id(root)
+        if not (isinstance(tid, str) and tid and wid):
+            return root
+        want = path_for(wid, tid, addons.home(root))
         if p == want.resolve() and p.is_dir() and is_orch_copy(p):
             return p
-    except (OSError, ValueError, RuntimeError, Refused):
+    except (OSError, ValueError, RuntimeError, TypeError, AttributeError, Refused):
         pass
     return root
 

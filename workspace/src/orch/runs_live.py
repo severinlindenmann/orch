@@ -179,7 +179,7 @@ def start_live(
         tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone
     rec, copy_notes = runs.claim_routed(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)
     run = rec["run"]
-    work = runs.workdir_for(root, rec)  # a separate copy of the folder, or the workspace itself
+    work = runs.workdir_for(root, rec, tid)  # a separate copy of the folder, or the workspace itself
     # never blocks a start: a screen the tool still shows is explained by check_starting
     with contextlib.suppress(Exception):
         adapters.trust_folder(name, root)
@@ -1156,7 +1156,9 @@ def check_starting(
     if scr and scr.get("answer"):
         if answered is None or scr["what"] in answered:
             scr = None  # the wrapper answers it (or already did: the tool is still redrawing)
-        elif not scr.get("folder") or _names_own_folder(root, pane.stdout, runs.workdir_for(root, rec)):
+        elif not scr.get("folder") or _names_own_folder(
+            root, pane.stdout, runs.workdir_for(root, rec, rec.get("ticket"))
+        ):
             for i, k in enumerate(scr["answer"]):
                 if i:
                     time.sleep(PASTE_DELAY)

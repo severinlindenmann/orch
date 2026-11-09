@@ -747,7 +747,22 @@ def test_a_forged_run_record_folder_pointing_at_another_tickets_copy_is_ignored(
     fa, _ = _route(repo, a)
     fb, _ = _route(repo, b)
     assert fa != fb and worktrees.is_orch_copy(fa) and worktrees.is_orch_copy(fb)
-    assert worktrees.workdir_for(repo, {"ticket": a, "folder": str(fa)}) == fa.resolve() or True
+    assert worktrees.workdir_for(repo, {"ticket": a, "folder": str(fa)}).resolve() == fa.resolve()
     assert worktrees.workdir_for(repo, {"ticket": a, "folder": str(fb)}) == repo  # ticket A, B's copy
     assert worktrees.workdir_for(repo, {"ticket": b, "folder": str(fb)}).resolve() == fb.resolve()
     assert worktrees.workdir_for(repo, {"folder": str(fb)}) == repo  # no ticket in the record
+
+
+def test_workdir_for_survives_odd_records_and_prefers_the_callers_ticket(repo):
+    a, b = repo.tids
+    config.set_copies_mode(repo, "always")
+    fa, _ = _route(repo, a)
+    for rec in (
+        {"ticket": 5, "folder": str(fa)},
+        {"ticket": "", "folder": str(fa)},
+        {"folder": 7},
+        {"ticket": ["x"]},
+    ):
+        assert worktrees.workdir_for(repo, rec) == repo
+    assert worktrees.workdir_for(repo, {"ticket": b, "folder": str(fa)}, a).resolve() == fa.resolve()
+    assert worktrees.workdir_for(repo, {"ticket": a, "folder": str(fa)}, b) == repo

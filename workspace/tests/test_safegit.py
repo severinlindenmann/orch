@@ -120,12 +120,13 @@ def test_every_call_carries_the_hardening(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("GIT_DIR", "/elsewhere")
     monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
-    safegit.run(["status"], tmp_path, read_only=True)
+    safegit.run(["status"], tmp_path, read_only=True, filters=False)
     argv = seen[-1][0]
     assert "--no-optional-locks" in argv and "core.fsmonitor=false" in argv and "protocol.allow=never" in argv
     assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv)
     assert "core.longpaths=true" in argv and "core.untrackedCache=false" in argv
-    assert "GIT_DIR" not in safegit.env() and safegit.env()["GIT_TERMINAL_PROMPT"] == "0"
+    e = safegit.env(tmp_path, None, "/bin/true")
+    assert "GIT_DIR" not in e and e["GIT_TERMINAL_PROMPT"] == "0"
 
 
 def test_hooks_path_is_a_fresh_path_that_does_not_exist():
@@ -655,7 +656,7 @@ def test_fake_true_and_false_in_the_workspace_are_never_run(tmp_path, monkeypatc
     assert str(proj / "bin") not in safegit.safe_path(proj, proj).split(os.pathsep)
     assert safegit.trivial("true", proj, proj).strip("'") in ("/usr/bin/true", "/bin/true")
     assert safegit.trivial("false", proj, proj).strip("'") in ("/usr/bin/false", "/bin/false")
-    e = safegit.env(proj, proj)
+    e = safegit.env(proj, proj, safegit.trivial("true", proj, proj))
     assert str(proj) not in e["PATH"] and e["GIT_EDITOR"].strip("'").startswith("/")
     monkeypatch.setattr(
         safegit, "version", lambda *a, **k: (2, 39)
@@ -664,7 +665,7 @@ def test_fake_true_and_false_in_the_workspace_are_never_run(tmp_path, monkeypatc
     assert rc != 0 and not ran.exists()
 
 
-def test_driver_names_with_equals_and_spaces_are_neutralized(tmp_path):
+def test_driver_names_with_equals_and_spaces_are_neutralized(tmp_path, monkeypatch):
     r = tmp_path / "n"
     r.mkdir()
     plain_git(r, "init", "-q")
@@ -684,10 +685,66 @@ def test_driver_names_with_equals_and_spaces_are_neutralized(tmp_path):
         == 0
     )
     assert safegit.run(["read-tree", "HEAD"], wt, filters=False)[0] == 0
-    monkey = safegit.version
-    safegit.version = lambda *a, **k: (2, 39)  # attributes read: the odd driver name is really consulted
-    try:
-        assert safegit.run(["checkout-index", "-a", "-f", "-u"], wt)[0] == 0
-    finally:
-        safegit.version = monkey
+    monkeypatch.setattr(
+        safegit, "version", lambda *a, **k: (2, 39)
+    )  # attributes read: the odd name is consulted
+    assert safegit.run(["checkout-index", "-a", "-f", "-u"], wt)[0] == 0
     assert (wt / "a.txt").read_text() == "x\n" and not mark.exists()
+
+
+def test_git_older_than_2_31_is_refused_when_drivers_would_have_to_be_switched_off(
+    hostile, tmp_path, monkeypatch
+):
+    r, marker = hostile
+    monkeypatch.setattr(safegit, "version", lambda *a, **k: (2, 30))
+    wt = tmp_path / "wt"
+    assert (
+        safegit.run(["worktree", "add", "--no-checkout", "-b", "x", str(wt), "HEAD"], r, filters=False)[0]
+        == 0
+    )
+    rc, _, err = safegit.run(["checkout-index", "-a", "-f", "-u"], wt)
+    assert rc == safegit.REFUSED and "2.31" in err and marks(marker) == []
+    assert safegit.run(["rev-parse", "HEAD"], wt, filters=False)[0] == 0  # nothing to neutralize: still runs
+
+
+def test_the_driver_overrides_really_reach_the_git_process(hostile, tmp_path, monkeypatch):
+    r, _ = hostile
+    seen = {}
+    real = safegit.subprocess.run
+
+    def spy(argv, **kw):
+        if "checkout-index" in argv:
+            seen.update(kw["env"])
+        return real(argv, **kw)
+
+    monkeypatch.setattr(safegit.subprocess, "run", spy)
+    wt = tmp_path / "wt"
+    assert (
+        safegit.run(["worktree", "add", "--no-checkout", "-b", "x", str(wt), "HEAD"], r, filters=False)[0]
+        == 0
+    )
+    assert safegit.run(["read-tree", "HEAD"], wt, filters=False)[0] == 0
+    safegit.run(["checkout-index", "-a", "-f", "-u"], wt)
+    n = int(seen["GIT_CONFIG_COUNT"])
+    pairs = {seen[f"GIT_CONFIG_KEY_{i}"]: seen[f"GIT_CONFIG_VALUE_{i}"] for i in range(n)}
+    assert pairs["filter.evil.smudge"] == "" and pairs["filter.evil.process"] == ""
+    assert pairs["filter.evil.required"] == "false" and pairs["filter.evil2.smudge"] == ""
+
+
+def test_no_bare_true_anywhere(tmp_path, monkeypatch):
+    monkeypatch.setattr(safegit, "trivial", lambda *a, **k: None)
+    for filters in (True, False):
+        rc, _, err = safegit.run(["status"], tmp_path, filters=filters)
+        assert rc == safegit.REFUSED and err
+    import inspect
+
+    assert inspect.signature(safegit.base_args).parameters["true"].default is inspect.Parameter.empty
+    assert inspect.signature(safegit.env).parameters["true"].default is inspect.Parameter.empty
+
+
+def test_a_project_python_is_not_a_trusted_trivial_command_on_windows(tmp_path):
+    import sys
+
+    assert safegit._python_trivial("true", tmp_path, tmp_path).startswith(f'"{sys.executable}"')
+    inside = Path(sys.executable).parent
+    assert safegit._python_trivial("true", inside, inside) is None
