@@ -288,7 +288,7 @@ class Tracker:
             },
             "run": {
                 "running": running, "mode": claim.get("mode"), "agent": agent, "label": label, "run": claim.get("run"),
-                "started_at": claim.get("started_at"), "pending": status.get("pending", 0),
+                "pending": status.get("pending", 0),
             },
             "state": state,
             "generic": generic,
@@ -562,8 +562,13 @@ def stop_started(srv) -> None:
     tracker._save_started()
 
 
+CLOCK_EVERY = 10.0  # seconds between the server's own looks at tickets whose clock runs
+
+
 class _Server(ThreadingHTTPServer):
     def server_close(self):
+        if hasattr(self, "ticker_stop"):
+            self.ticker_stop.set()
         if hasattr(self, "revisions"):  # not yet set when the bind failed
             self.revisions.close()
         super().server_close()
@@ -574,4 +579,17 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
     tracker = Tracker(root, orch_bin)
     srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker))
     srv.revisions = Revisions(root)
+    srv.ticker_stop = stop = threading.Event()
+
+    def ticker():  # the clock of a working ticket moves without anyone watching
+        while not stop.wait(CLOCK_EVERY):
+            for tid in sorted(tracker.clock.active()):
+                if stop.is_set():
+                    return
+                try:
+                    tracker.view(tid)
+                except Exception:  # noqa: BLE001 - one bad ticket must not end the ticker
+                    pass
+
+    threading.Thread(target=ticker, daemon=True, name="focus-clock").start()
     return srv

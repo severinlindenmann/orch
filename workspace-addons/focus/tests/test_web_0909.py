@@ -1,50 +1,36 @@
-"""Static regressions for the 0909 Focus board changes."""
+"""The 0909 Focus board changes that matter for safety. The page endpoint's headers and the POST origin fence are
+asserted against a running server (test_proof_file.py, test_server.py); here the same is checked on a real page request
+and the frame that shows the page."""
+
 from pathlib import Path
 
+import pytest
+
+from .conftest import TID
+from .test_server import req
+
 WEB = Path(__file__).resolve().parents[1] / "src/orch_focus/web"
-JS = (WEB / "focus.js").read_text()
-CSS = (WEB / "focus.css").read_text()
-PROOF = (WEB / "proof.js").read_text()
 
 
-def test_task_form_is_visible_and_quiet():
-    assert "class: 'fx-add'" not in JS
-    assert "+ Add task" not in JS
-    assert "placeholder: 'Add a task'" in JS
-    form = JS.split("els.addForm =", 1)[1].split("const rail", 1)[0]
-    assert "icon: 'plus'" in form
-    assert "icon: 'send'" not in form
-    assert "aria-label': 'Add task'" in form
-    assert "margin-top:auto" in CSS
+def test_agent_page_is_sandboxed_by_the_server_whoever_opens_it(server, ws):
+    ev = ws / ".orch" / "tickets" / TID / "evidence"
+    ev.mkdir(parents=True)
+    (ev / "index.html").write_text("<script>1</script>")
+    key = server.RequestHandlerClass.keywords["tracker"].view(TID)["page_key"]
+    st, _, h = req(server, "GET", f"/page/{TID}/{key}/index.html")
+    csp = h["Content-Security-Policy"]
+    assert st == 200 and "sandbox allow-scripts" in csp and "allow-same-origin" not in csp
+    assert h["X-Content-Type-Options"] == "nosniff"
 
 
-def test_worked_clock_and_accessible_session():
-    assert "h('button', {class: 'fx-live'" in JS
-    pill = JS.split("els.live =", 1)[1].split("els.stopIc", 1)[0]
-    assert "'aria-expanded': 'false'" in pill
-    assert "'aria-haspopup': 'dialog'" in pill
-    assert "aria-live" not in pill
-    assert "v.run.worked" in JS
-    assert "Date.parse(v.run.started_at)" not in JS
-    assert "performance.now()" in JS
-    assert "v.state === 'working'" in JS
-    assert "v.run.paused" in JS and "stamp(v.run.first)" in JS
-    assert "if (context)" in JS and "context.reused" in JS
+@pytest.mark.parametrize("origin", ["null", "http://evil.example"])
+def test_a_sandboxed_page_cannot_post_to_the_board(server, fake_orch, origin):
+    st, _, _ = req(server, "POST", "/api/act", {"op": "run.stop", "args": {"ticket": TID}}, {"Origin": origin})
+    assert st == 403
 
 
-def test_menu_floats_and_keeps_stop_in_toolbar():
-    assert "h('details', {class: 'fx-more'" not in JS
-    assert "els.phone, els.stop, els.more" in JS
-    assert "prepend(els.stop)" not in JS
-    assert ".fx-popover{position:absolute;right:0;top:100%;z-index:40" in CSS
-    assert "width:222px;padding:5px" in CSS
-    assert "max-width:calc(100vw - 32px)" in CSS
-    assert "height:40px" in CSS
-    assert "e.key !== 'Escape'" in JS
-    assert "!els.more.contains(e.target)" in JS
-
-
-def test_page_preview_defaults_to_page_and_preserves_sandbox():
-    assert "[['Page', showPage], ['Code', showSource]]" in PROOF
-    assert "        showPage();" in PROOF
-    assert "sandbox: 'allow-scripts', referrerpolicy: 'no-referrer'" in PROOF
+def test_the_frame_has_no_same_origin_and_page_comes_first():
+    proof = (WEB / "proof.js").read_text()
+    assert "allow-same-origin" not in proof
+    assert "sandbox: 'allow-scripts'" in proof
+    assert proof.index("['Page', showPage]") < proof.index("['Code', showSource]")

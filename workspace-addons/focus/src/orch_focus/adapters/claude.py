@@ -79,7 +79,7 @@ class ClaudeMapper:
         self._open: dict[str, dict] = {}  # tool_use id -> {kind, agent, at}
         self._helper_of: dict[str, str] = {}  # helper tool_use id -> h_<n>
         self._n = 0
-        self._seen: dict[str, tuple[int, int]] = {}  # assistant message id -> (cache read tokens, all input tokens)
+        self._seen: dict[object, tuple[int, int]] = {}  # assistant message id -> (cache read tokens, all input tokens)
 
     def _e(self, agent, kind, text, at=None, **data):
         return ev.make(
@@ -139,7 +139,7 @@ class ClaudeMapper:
             return
         n = lambda k: u[k] if isinstance(u.get(k), int) and not isinstance(u.get(k), bool) and u[k] >= 0 else 0
         read, total = n("cache_read_input_tokens"), n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens")
-        key = str(msg.get("id") or f"n{len(self._seen)}")
+        key = msg.get("id") if isinstance(msg.get("id"), str) and msg.get("id") else (len(self._seen), "anon")
         if total:
             self._seen[key] = (read, total)
 

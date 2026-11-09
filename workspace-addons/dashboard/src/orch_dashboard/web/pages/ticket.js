@@ -428,10 +428,6 @@ function ticketReviewTile(t, file) {
     meta ? h('span', {className:'meta'}, meta) : null,
     snapshot ? null : ticketButton('Open', 'outline', () => previewFile(t.id, 'artifacts', file.name)));
 }
-function ticketArtifactPreview(t) {
-  const file = array(artifactData.get(t.id)?.data?.files)[0];
-  return file ? ticketResultCard(t, {}, file, 'artifacts') : null;
-}
 function artifactsPanel(t) {
   const files = array(artifactData.get(t.id)?.data?.files), proofs = proofRows(t), links = linkRows(t);
   if (!files.length && !proofs.length && !links.length) return h('div', {className:'card artifacts-empty'}, h('h2', {}, 'Nothing here yet'), h('p', {className:'meta'}, 'Results and references from this ticket show up here.'));
@@ -621,7 +617,7 @@ async function ticketSendChanges(t, note) {
 function ticketChangesEditor(t) {
   const key = 'ticket-changes-' + t.id;
   const host = h('div', {'data-key':key});
-  const done = ticketButton('Looks good — mark Done', 'primary', () => moveTicket(t.id, 'done'));
+  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done'));
   const row = h('div', {className:'row ticket-review-actions'});
   const open = ticketButton('Ask for changes', 'outline', () => {
     locks.add(key);
@@ -700,7 +696,7 @@ function detail(t) {
     const at = file?.mtime;
     const review = t.status === 'review' ? h('section', {className:'card next-step'},
       h('p', {className:'meta'}, 'Next step · Your review'),
-      h('h2', {}, agent + ' finished' + (file ? ': ' + window.DashHelpers.plainFileName(file.name) : '')),
+      h('h2', {}, agent + ' finished' + (file ? ': ' + clean(window.DashHelpers.plainFileName(file.name)) : '')),
       at ? h('p', {className:'meta'}, 'Completed ' + window.DashHelpers.stamp(at, Date.now())) : null,
       ticketReviewTile(t, file), snapshot ? null : ticketChangesEditor(t)) : null;
     if (openQuestions.length || review) next = [openQuestions.length ? ticketQuestion(t, openQuestions[0], true) : null, review];

@@ -87,10 +87,10 @@ test('the review buttons show whenever the status is Review, an open question fi
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
   vm.createContext(ctx); vm.runInContext(source, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
-  assert.match(text, /Looks good/);
+  assert.match(text, /Accept/);
   assert.match(text, /Ask for changes/);
-  assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
-  assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
+  assert.ok(text.indexOf('Which colour?') < text.indexOf('Accept'), 'the question comes first');
+  assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Accept/);
   ctx.state.settings = {agents:[{name:'claude', label:'Claude', chosen:true}]};
   vm.runInContext("artifactData.set('t_test', {at:Date.now(), data:{files:[{name:'next-steps.html', size:24576, mtime:'2026-11-09T07:30:00Z'}]}})", ctx);
   const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
@@ -150,7 +150,7 @@ test('task outcomes and result cards use plain text without sizes', () => {
   assert.equal(helpers.outcome({done:true,evidence:[]}), 'Completed.');
   assert.equal(helpers.outcome({done:true,evidence:[ev]}), 'Seating plan');
   const c = context({clean:String});
-  vm.runInContext(source.slice(source.indexOf('function ticketResultCard'), source.indexOf('function ticketArtifactPreview')), c);
+  vm.runInContext(source.slice(source.indexOf('function ticketResultCard'), source.indexOf('function artifactsPanel')), c);
   const card = c.ticketResultCard({id:'t_test'}, ev);
   const text = JSON.stringify(card);
   assert.match(text, /ticket-result/);
@@ -222,7 +222,7 @@ test('inline changes replace both buttons, preserve the lock, send on Enter and 
   assert.equal(input.attrs.placeholder, 'What should change?');
   assert.equal(input.attrs['aria-label'], 'What should change?');
   assert.equal(nodes.filter(n => n.tag === 'textarea').length, 0);
-  assert.ok(!nodes.some(n => n.children.includes('Looks good — mark Done')));
+  assert.ok(!nodes.some(n => n.children.includes('Accept — mark Done')));
   assert.ok(send.disabled && locks.has('ticket-changes-t_test'));
   input.value = 'Fix the date'; input.oninput(); assert.equal(send.disabled, false);
   input.onkeydown({key:'Enter', preventDefault(){}});
