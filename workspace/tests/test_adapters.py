@@ -11,7 +11,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import adapters, agentsdata, config
+from orch import adapters, agentsdata, config, reminder_settings
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -51,8 +51,15 @@ RUN_CMDS = (
 # the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
 # (ticket outcome writes only three short ticket texts: no exec, no config, no add-on or run control)
 ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
-CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, *ORCH_OK, "--", "Do it"]
-CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, *ORCH_OK, "--", "Do it"]
+# the reminder hooks go in inline for a one-shot run (`orch work-check --hook claude`, never blocks)
+_REMINDER_CMD = reminder_settings.hook_command("claude")  # absolute, quoted, never errors
+_REMINDER = {
+    e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
+    for e in ("SessionStart", "UserPromptSubmit")
+}
+SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
+CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, *ORCH_OK, *SETTINGS, "--", "Do it"]
+CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, *ORCH_OK, *SETTINGS, "--", "Do it"]
 
 
 def test_claude_snapshots():
@@ -284,6 +291,15 @@ def test_hooks_doc_comes_from_data():
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
     assert set(cmds) == {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    for event in ("SessionStart", "UserPromptSubmit"):  # the reminder: a second command, with a timeout
+        group = d["hooks"][event][1]  # its own group: the run-event group's matcher does not apply
+        assert group == {
+            "hooks": [{"type": "command", "command": reminder_settings.hook_command("claude"), "timeout": 5}]
+        }
+        cmd = group["hooks"][0]["command"]
+        assert os.path.isabs(cmd[1 : cmd.index('"', 1)])  # the absolute interpreter, double-quoted
+        assert "matcher" not in group and len(d["hooks"][event][0]["hooks"]) == 1
+    assert len(d["hooks"]["Stop"]) == 1
     assert adapters.hooks_doc("codex", "r_1") is None
 
 

@@ -275,6 +275,16 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   assert.ok(all.some(n => n.children.includes('–')));
 });
 
+
+test('shared folder line is one quiet text line from the core, absent when none', () => {
+  const c = context({state:{runs:{t1:{running:true, shared_folder:{line:'"Fix login form" is also changing this folder.'}}, t2:{running:true}}}, clean:v => String(v ?? '')});
+  vm.runInContext(source.slice(source.indexOf('function sharedFolderLine(t)'), source.indexOf('const surface =')), c);
+  const on = JSON.stringify(c.sharedFolderLine({id:'t1'}));
+  assert.match(on, /Fix login form\\" is also changing this folder\./);
+  assert.doesNotMatch(on, /banner|danger|warn/);
+  assert.equal(c.sharedFolderLine({id:'t2'}), null);
+  assert.equal(c.sharedFolderLine({id:'nope'}), null);
+});
 test('plan-first waiting card answers and edits only unstarted steps', async () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};

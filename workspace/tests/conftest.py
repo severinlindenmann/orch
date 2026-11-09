@@ -73,6 +73,9 @@ def _strict_orch_home(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(addons, "real_home", lambda: fake)
     monkeypatch.setenv("ORCH_HOME", str(fake / "toolhome"))
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    # children and Path.home()/expanduser fallbacks must not find the real home through $HOME either
+    monkeypatch.setenv("HOME", str(fake))
+    monkeypatch.setenv("USERPROFILE", str(fake))
 
 
 def pytest_sessionfinish(session, exitstatus):
