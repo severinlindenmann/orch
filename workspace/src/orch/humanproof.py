@@ -218,6 +218,8 @@ def file_problem(p: Path) -> str | None:
 
 def _check_file(p: Path) -> None:
     why = file_problem(p)
+    if why == "unknown":  # Windows could not tell: refuse this call, reset nothing
+        raise Refused("Windows would not tell the rights of a protected file. Try again.")
     if why:
         raise LooseFile(f"{p.name}:{why}")
 
@@ -261,7 +263,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
     from orch import addons
 
     home = guarded_home(root)
-    winacl.no_reparse(home)  # a junction anywhere on the path to the home (Windows)
+    winacl.no_reparse(home)  # a symlink or junction below the profile folder (Windows)
     ws = addons.workspace_id(root, create=create)
     if ws is None:
         raise Refused("This folder has no local id yet.")
