@@ -232,7 +232,7 @@ def _break_stale(lock: Path) -> bool:
 
 
 @contextlib.contextmanager
-def _locked(root: Path, tid: str):
+def _locked(root: Path, tid: str, wait: float = 5.0):
     """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
     Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
     the lock and checks again after taking it, so the sync step (which holds the gate and takes this same lock
@@ -244,7 +244,7 @@ def _locked(root: Path, tid: str):
     lock.parent.mkdir(parents=True, exist_ok=True)
     if gated:
         syncgate.wait_clear(root, what)
-    end = time.monotonic() + 5
+    end = time.monotonic() + wait
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -256,7 +256,7 @@ def _locked(root: Path, tid: str):
             PermissionError,
         ):  # Windows: a lock being deleted refuses with PermissionError
             if time.monotonic() > end:
-                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
+                raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             try:
                 stale = time.time() - lock.stat().st_mtime > 30
             except OSError:
@@ -265,7 +265,7 @@ def _locked(root: Path, tid: str):
             if stale and _break_stale(lock):
                 continue
             if time.monotonic() > end:
-                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
+                raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             time.sleep(0.02)
     try:
         if gated and syncgate.live_holder(root) is not None:  # a gate appeared while we took the lock
