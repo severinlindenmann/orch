@@ -848,12 +848,15 @@ def test_paste_long_text_keeps_the_note_short():
     text = "First line\n" + "word " * 800
     _, flags, tail = actions.OPS["ticket.paste"]({"text": text})
     assert tail == ["First line"]
-    assert flags == ["--note=" + actions.LONG_NOTE]
+    assert flags == ["--title-auto", "--note=" + actions.LONG_NOTE]
     assert [n for n, _ in actions.attachments("ticket.paste", {"text": text})] == ["note.md"]
     # a short paste is unchanged: no file, the text is the note
     short = "Short title\nand some more"
     _, flags, _ = actions.OPS["ticket.paste"]({"text": short})
-    assert flags == ["--note=" + short] and actions.attachments("ticket.paste", {"text": short}) == []
+    assert flags == ["--title-auto", "--note=" + short]  # several lines: the agent writes the title
+    _, flags, _ = actions.OPS["ticket.paste"]({"text": "Fix the login"})
+    assert flags == ["--note=Fix the login"]  # one short line is its own title
+    assert actions.attachments("ticket.paste", {"text": short}) == []
 
 
 def test_attachments_shape_and_limits():

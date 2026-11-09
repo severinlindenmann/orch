@@ -156,3 +156,11 @@ test('a text file that is not UTF-8 is sent as base64, unaltered; a body over 4.
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
 });
+test('the agent writes the title for long or multi-line text, a short one-liner is its own title', async () => {
+  const a = setup(); await a.paste('x'.repeat(1501)); await a.form.fire('submit');
+  assert.equal(a.calls[0].args.title_auto, true);
+  const b = setup(); b.input.value = 'Fix the login page'; await b.input.fire('input'); await b.form.fire('submit');
+  assert.equal(b.calls[0].args.title_auto, false);
+  const c = setup(); c.input.value = 'Fix it\nand more'; await c.input.fire('input'); await c.form.fire('submit');
+  assert.equal(c.calls[0].args.title_auto, true);
+});

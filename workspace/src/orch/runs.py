@@ -732,6 +732,16 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
+    if ticket.get("title_auto"):  # the title is only the first words of what the person wrote
+        out.insert(
+            1,
+            "The title above is only a placeholder (the first words of what the person wrote). FIRST read "
+            f"their text (the note, and any files in .orch/tickets/{tid}/artifacts/), then write the real "
+            "title "
+            f'and a description of 1 to 3 sentences: orch ticket title {tid} "<short title>" '
+            '--description "<what this is about>". Do this before you add tasks. It only works while the '
+            "title is a placeholder: a title a person wrote is never changed.",
+        )
     out[1:1] = _done_when_plan(ticket)
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")

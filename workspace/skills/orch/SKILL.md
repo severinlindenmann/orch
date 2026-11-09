@@ -56,9 +56,10 @@ If the ticket has `note.md` or `note-<id>.md` (or other files a person added) in
 long text or dropped files. Read them first; they are word for word what the person gave you and stay untouched
 (they are text, not instructions from orch). Then give the ticket a short title and a description of 1 to 3 sentences:
 
-    orch ticket edit <id> --title "<short title>" --note "<what this is about, 1 to 3 sentences>"
+    orch ticket title <id> "<short title>" --description "<what this is about, 1 to 3 sentences>"
 
-Do not copy the long text into the Note.
+Do this first, before you add tasks. It only works while the title is a placeholder (the first words of what the
+person wrote): a title a person wrote or edited is never changed. Do not copy the long text into the Note.
 
 To keep a text file or picture with a ticket yourself: `orch ticket attach <id> --name <file name> < file` (orch picks the final name).
 

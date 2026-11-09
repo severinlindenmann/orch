@@ -179,7 +179,7 @@ function ticketForm(t) {
       values.note = shortText.length <= 1500 && (/[\r\n]/.test(shortText) || shortText.trim() !== values.title) ? shortText : '';
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
-        const args = {title:values.title, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
+        const args = {title:values.title, title_auto:Boolean(longText || files.length || fullText.trim().split(/\r?\n/).filter(l => l.trim()).length > 1 || values.title.length >= 80), ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
         if (JSON.stringify({op:'ticket.new', args}).length > 4900000) {  // the server takes 5 MB per request
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
           submit.disabled = false; return;

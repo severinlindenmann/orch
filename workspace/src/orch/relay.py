@@ -1426,7 +1426,12 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         return f"added to {tid}", tid
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
-        t = tickets.create(root, _phone_title(root, str(body.get("text") or spoken or ""), frm), by)
+        said = str(body.get("text") or spoken or "")
+        t = (
+            tickets.create_from_input(root, said, by)
+            if said.strip()
+            else tickets.create(root, _phone_title(root, said, frm), by)
+        )
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
     if mid not in _v3_state(root)["described"]:

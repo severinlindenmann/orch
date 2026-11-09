@@ -48,6 +48,7 @@
     "note": { "type": "string", "maxLength": 2000, "description": "Optional. Free note from people, shown on the ticket. Plain text." },
     "done_when": { "type": "string", "maxLength": 2000, "description": "Optional. What people want to be true when the ticket is done. Plain text." },
     "summary": { "type": "string", "maxLength": 200, "description": "Optional. Where things stand, one or two plain sentences, kept current by whoever works on it. Used to start a fresh agent session." },
+    "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
     "sessions": {
       "type": "array",

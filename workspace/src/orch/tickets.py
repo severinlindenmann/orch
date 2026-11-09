@@ -495,7 +495,10 @@ def create(
     parent: str | None = None,
     ext: dict[str, dict] | None = None,
     fields: dict | None = None,
+    title_auto: bool = False,
 ) -> dict:
+    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    writes the real one (`orch ticket title`). The flag clears when anyone sets the title."""
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
@@ -528,6 +531,8 @@ def create(
     }
     if parent is not None:
         ticket["parent"] = parent
+    if title_auto:
+        ticket["title_auto"] = True
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -797,6 +802,8 @@ def edit(
 
     def op(ticket):
         if title is not None:
+            if title != ticket.get("title"):
+                ticket.pop("title_auto", None)  # a person's (or anyone's) own title is final
             ticket["title"] = title
             add_history(ticket, by, "Title changed")
         for k, v in fields.items():
@@ -805,6 +812,67 @@ def edit(
             add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
 
     return apply_op(root, tid, op, if_revision=if_revision)[0]
+
+
+LONG_NOTE = (
+    "The full text is attached as note.md. Read it, then give this ticket a short title and description."
+)
+PLACEHOLDER_TITLE = 80  # characters of a person's text kept as the title until the agent writes one
+
+
+def placeholder_title(text: str) -> str:
+    """The first words of what a person wrote, on one line: the title until the agent writes the real one."""
+    first = next((x for x in clean_untrusted(str(text), 4000).splitlines() if x.strip()), "")
+    return " ".join(first.split())[:PLACEHOLDER_TITLE].strip() or "New ticket"
+
+
+def needs_agent_title(text: str) -> bool:
+    """Short one-line text is its own title. A long or multi-line text gets a title from the agent."""
+    lines = [x for x in clean_untrusted(str(text), 100000).splitlines() if x.strip()]
+    return (
+        len(lines) > 1
+        or len(" ".join(lines[0].split()) if lines else "") > PLACEHOLDER_TITLE
+        or len(text) > LONG_TEXT
+    )
+
+
+def create_from_input(
+    root: Path,
+    text: str,
+    by: str,
+    parent: str | None = None,
+    fields: dict | None = None,
+    ext: dict[str, dict] | None = None,
+) -> dict:
+    """THE way a ticket is made from what a person wrote or said (dashboard paste box, phone text, Open
+    agent): the title is the first words (a placeholder, flag `title_auto`, when the text is long or has
+    several lines)
+    and the agent writes the real title and the description first (runs.fresh_prompt, `orch ticket title`)."""
+    return create(root, placeholder_title(text), by, parent, ext, fields, title_auto=needs_agent_title(text))
+
+
+def set_auto_title(root: Path, tid: str, title: str, by: str, description: str | None = None) -> dict:
+    """The agent's real title (and description, in the Note) for a ticket whose title is a placeholder.
+    Refused when a person set the title (or it was never a placeholder): a person's title is never
+    overwritten."""
+    title = title.strip()
+    if not title or len(title) > 200:
+        raise Refused("A title needs 1 to 200 characters.")
+    if description is not None:
+        clean_field("note", description)
+
+    def op(ticket):
+        if not ticket.get("title_auto"):
+            raise Refused("This title was set by a person (or already written). It is left as it is.")
+        ticket["title"] = title
+        ticket.pop("title_auto", None)
+        add_history(ticket, by, "Title written")
+        if description:
+            old = str(ticket.get("note") or "")
+            ticket["note"] = description if not old or old == LONG_NOTE else old + "\n\n" + description
+            _set_field(ticket, "note", ticket["note"][:2000])
+
+    return apply_op(root, tid, op)[0]
 
 
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
@@ -1499,6 +1567,8 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
 
     def op(ticket):
         if "title" in obj:
+            if obj["title"].strip() != ticket.get("title"):
+                ticket.pop("title_auto", None)
             ticket["title"] = obj["title"].strip()
         status = obj.get("status", ticket["status"])
         if status not in STATUSES:

@@ -133,8 +133,10 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files"))
+    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files", "title_auto"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
+    if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
+        flags.append("--title-auto")
     long_text = a.get("long_text")
     if long_text is not None:
         _text(long_text, "text", limit=MAX_LONG)
@@ -198,9 +200,11 @@ def _ticket_paste(a):
     _only(a, ("text", "parent"))
     text = _text(a.get("text"), limit=MAX_LONG)
     first = next(line.strip() for line in text.splitlines() if line.strip())
+    auto = len(text) > LONG_TEXT or len([x for x in text.splitlines() if x.strip()]) > 1 or len(first) > 80
+    args = {"title": first[:80], "parent": a.get("parent"), "title_auto": auto}
     if len(text) > LONG_TEXT:  # kept as note.md (see attachments); the Note stays short
-        return _ticket_new({"title": first[:80], "long_text": text, "parent": a.get("parent")})
-    return _ticket_new({"title": first[:80], "note": text, "parent": a.get("parent")})
+        return _ticket_new({**args, "long_text": text})
+    return _ticket_new({**args, "note": text})
 
 
 def _ticket_patch(a):

@@ -1110,7 +1110,7 @@ def test_phone_long_text_is_kept_as_a_file_and_the_history_stays_short(proj, run
     code, out, _ = run("relay", "inbox")
     assert code == 0 and "new ticket t_" in out
     t = _tickets(run)[0]
-    assert t["title"] == "Point one."
+    assert t["title"] == "Point one." and t["title_auto"] is True  # the agent writes the real title
     kept = next((proj / ".orch" / "tickets" / t["id"] / "artifacts").glob("note-*.md"))
     assert kept.read_text() == long.strip()  # word for word
     said = "\n".join(h["text"] for h in t["history"] if h.get("via") == "phone")
