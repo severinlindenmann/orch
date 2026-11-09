@@ -138,11 +138,13 @@ def _check_file(p: Path) -> None:
 def _is_loose(p: Path) -> bool:
     """Loose = wider than 0600, another owner, or (Windows) an ACL beyond user and SYSTEM: the verdict is
     humanproof.file_problem, so its platform hook applies here too. A link or a non-file is not "loose":
-    it stays refused."""
+    it stays refused. "unknown" (Windows could not tell) raises winacl.Unknown: refuse, set nothing aside."""
     try:
         why = hp.file_problem(p)
     except OSError:
         return False
+    if why == "unknown":  # Windows could not tell: refuse this call only, never set a key aside for it
+        raise hp.winacl.Unknown("Windows would not tell the rights of a key file. Try again.")
     return why is not None and why != "type"
 
 

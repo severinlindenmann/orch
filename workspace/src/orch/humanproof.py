@@ -341,6 +341,10 @@ def _check_binding(root: Path, d: Path) -> None:
         stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
     except FileNotFoundError:
         raise Refused(BINDING_MISMATCH) from None
+    except (LooseFile, winacl.Unknown):
+        # a loose or unreadable binding refuses: a reset cannot repair it (the folder is not re-bound),
+        # so there is no reset and nothing is written; the person reconnects the workspace
+        raise Refused(BINDING_MISMATCH) from None
     except (ValueError, AttributeError):
         raise Refused("A record in the orch folder is unreadable.") from None
     if not isinstance(stored, str):

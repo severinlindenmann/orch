@@ -807,3 +807,26 @@ def test_profiles_still_work_while_a_key_needs_re_entry(tws):
     keystore.write_profiles(tws, {"p": {"env": {"A": "k1"}, "set": {"B": "plain host"}}})
     assert keystore.read_profiles(tws)["p"]["env"] == {"A": "k1"}
     assert not (d / "keys.json").exists()  # the loose file stayed set aside, never read for values
+
+
+def test_an_unknown_file_check_refuses_the_call_and_sets_nothing_aside(tws, monkeypatch):
+    from orch import winacl
+
+    keystore.add(tws, "k", "token", TOKEN)
+    keystore.add(tws, "kf", "key-file", b"filebytes")
+    d = hp.key_dir(tws)
+    before = sorted(p.name for p in d.rglob("*"))
+    with monkeypatch.context() as m:
+        m.setattr(hp, "FILE_CHECKS", [lambda p: "unknown"])  # a transient Windows error
+        for call in (
+            lambda: keystore.get_value(tws, "k"),
+            lambda: keystore.list_keys(tws),
+            lambda: keystore.add(tws, "k2", "token", TOKEN2),
+            lambda: keystore.set_admin(tws, {"a": TOKEN2}),
+        ):
+            with pytest.raises(Refused):
+                call()
+    assert sorted(p.name for p in d.rglob("*")) == before  # nothing set aside, nothing written
+    assert not list(d.rglob("*.loose-*"))
+    assert keystore.get_value(tws, "k") == TOKEN and keystore.get_value(tws, "kf") == b"filebytes"
+    assert winacl.Unknown  # the exception type the refusal carries
