@@ -754,11 +754,60 @@ def scr_unescape(data):
     return OCTAL_RE.sub(lambda m: bytes([int(m.group(1), 8)]), data)
 
 
+class ScrStrip:
+    """Streaming filter: drops every OSC (ESC ] / 0x9d), DCS (ESC P / 0x90), APC (ESC _ / 0x9f), PM (ESC ^ / 0x9e) and
+    SOS (ESC X / 0x98) string up to its terminator (BEL, ESC \\ or 0x9c), also when split across chunks. P1: none of these
+    are needed to draw the screen; they carry clipboard writes, links, titles, notifications and query replies."""
+
+    STARTS = {"]": "osc", "P": "str", "_": "str", "^": "str", "X": "str"}
+    C1 = {"\x9d": "osc", "\x90": "str", "\x9f": "str", "\x9e": "str", "\x98": "str"}
+
+    def __init__(self):
+        self.mode, self.pending = None, ""
+
+    def feed(self, text, final=False):
+        out, s, i = [], self.pending + text, 0
+        self.pending = ""
+        while i < len(s):
+            ch = s[i]
+            if self.mode:
+                if (ch == "\x07" and self.mode == "osc") or ch == "\x9c":
+                    self.mode = None
+                elif ch == "\x1b":
+                    if i + 1 >= len(s):
+                        self.pending = ch if not final else ""
+                        break
+                    if s[i + 1] == "\\":
+                        self.mode = None
+                        i += 1
+                i += 1
+                continue
+            if ch == "\x1b":
+                if i + 1 >= len(s):
+                    if not final:
+                        self.pending = ch
+                    else:
+                        out.append(ch)
+                    break
+                if s[i + 1] in self.STARTS:
+                    self.mode = self.STARTS[s[i + 1]]
+                    i += 2
+                    continue
+            if ch in self.C1:
+                self.mode = self.C1[ch]
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+
 def scr_from_control(lines, needles=()):
     """Control-mode lines (bytes, without newline) -> stream lines after hello/snapshot (seq from 1)."""
     out, dec, alt, size = [], codecs.getincrementaldecoder("utf-8")("replace"), False, None
     longest = max((len(n) for n, _ in needles), default=1)
     hold = [""]
+    strip = ScrStrip()
 
     def emit(**k):
         out.append({"v": 1, "seq": len(out) + 1, **k})
@@ -766,7 +815,7 @@ def scr_from_control(lines, needles=()):
     for raw in lines:
         if raw.startswith(b"%output "):
             parts = raw.split(b" ", 2)
-            text = dec.decode(scr_unescape(parts[2] if len(parts) > 2 else b""))
+            text = strip.feed(dec.decode(scr_unescape(parts[2] if len(parts) > 2 else b"")))
             buf = hold[0] + text
             done, i = _hide_upto(buf, list(needles), max(0, len(buf) - (longest - 1)))
             hold[0] = buf[i:]
@@ -784,7 +833,7 @@ def scr_from_control(lines, needles=()):
                 emit(type="resize", cols=size[0], rows=size[1])
         elif raw.startswith(b"%exit"):
             emit(type="end", reason="session-gone")
-    rest = hold[0] + dec.decode(b"", final=True)
+    rest = hold[0] + strip.feed(dec.decode(b"", final=True), final=True)
     if rest:
         emit(type="output", data=sec_hide(rest, list(needles)))
     return out

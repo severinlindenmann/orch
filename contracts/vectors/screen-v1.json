@@ -233,6 +233,71 @@
      "reason": "session-gone"
     }
    ]
+  },
+  {
+   "name": "OSC 52 clipboard write dropped",
+   "lines": [
+    "%output %0 a\\033]52;c;ZWNobyBoaQ==\\007b"
+   ],
+   "joined": "ab"
+  },
+  {
+   "name": "OSC 8 link dropped, text kept",
+   "lines": [
+    "%output %0 \\033]8;;javascript:alert(1)\\033\\134click\\033]8;;\\033\\134 done"
+   ],
+   "joined": "click done"
+  },
+  {
+   "name": "OSC 0 title dropped",
+   "lines": [
+    "%output %0 \\033]0;evil title\\007$ "
+   ],
+   "joined": "$ "
+  },
+  {
+   "name": "OSC 9, 777 and 1337 dropped",
+   "lines": [
+    "%output %0 x\\033]9;note\\007y\\033]777;notify;a;b\\007z\\033]1337;File=x\\007!"
+   ],
+   "joined": "xyz!"
+  },
+  {
+   "name": "DCS dropped",
+   "lines": [
+    "%output %0 a\\033P$q\"p\\033\\134b"
+   ],
+   "joined": "ab"
+  },
+  {
+   "name": "OSC 11 colour query dropped",
+   "lines": [
+    "%output %0 \\033]11;?\\007ok"
+   ],
+   "joined": "ok"
+  },
+  {
+   "name": "OSC split across two output lines",
+   "lines": [
+    "%output %0 before\\033]52;c;AAAA",
+    "%output %0 BBBB\\007after"
+   ],
+   "joined": "beforeafter"
+  },
+  {
+   "name": "ESC alone at the end of a chunk",
+   "lines": [
+    "%output %0 red\\033",
+    "%output %0 [31mR\\033[0m"
+   ],
+   "joined": "red\u001b[31mR\u001b[0m"
+  },
+  {
+   "name": "C1 OSC (U+009D) dropped",
+   "lines": [
+    "%output %0 a0;titleb"
+   ],
+   "joined": "ab"
   }
  ],
  "utf8_split": [

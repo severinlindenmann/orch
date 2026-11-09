@@ -44,11 +44,23 @@ Other control-mode lines (`%begin`/`%end`, `%session-changed`, `%window-renamed`
 consecutive `output` lines within 30 ms; readers never depend on chunk boundaries. One `data` ≤ 64 KB (a larger chunk is split
 at a character boundary).
 
-**Hiding.** Every `data` passes through the streaming hider of secrets.md before the line is written: one hider per stream,
-fed in order, so a value split over two `%output` lines is still hidden (vectors `hide`). To keep the screen live, the
-producer holds back only a tail that is a prefix of some hidden form (at least 4 characters long); a shorter tail is
-flushed after 200 ms. The result equals hiding the whole text at once, except that at most 3 characters of a value that
-arrives more than 200 ms apart may show. Known limit (Level 1): a value split by colour codes or cursor moves is not found.
+**Stripping (P1).** Before hiding, the producer drops every OSC (`ESC ]` / U+009D), DCS (`ESC P` / U+0090), APC, PM and SOS
+string up to its terminator (BEL, `ESC \` or U+009C), with a state machine that survives chunk boundaries. Nothing on the
+screen needs them, and they carry clipboard writes (OSC 52), links (OSC 8, incl. `javascript:` / `file:`), titles (OSC 0/2),
+notifications (OSC 9/777), file transfers (OSC 1337) and colour or device queries whose answers would come back as input.
+Reference `ScrStrip`, vectors `control_mode` (OSC 52/8/0/9/777/1337/11, DCS, split across lines, C1 forms).
+
+**Hiding.** Every `data` then passes through the streaming hider of secrets.md before the line is written: one hider per
+stream, fed in order, so a value split over two `%output` lines is still hidden (vectors `control_mode` "value split"). The
+producer holds back the last L-1 characters (L = the longest hidden form, as the reference `scr_from_control`) and flushes a
+held tail after 200 ms without new output so the screen stays live; a value whose parts arrive more than 200 ms apart may
+show its first characters (known limit). Also a value split by colour codes or cursor moves is not found (Level 1).
+
+**Viewer rules (slice 4.3/4.4, the page's terminal view).** The terminal emulator runs with clipboard access, link
+detection, title changes and bell notifications off. Everything the emulator generates by itself (device-attribute and
+status replies, focus reports, mouse reports) is discarded, never sent anywhere. In a take-over, only real key events from
+the person (trusted `keydown`, and a trusted `paste` event) become `type` input; the emulator's own `onData` output is never
+forwarded. Watching sends nothing at all.
 
 ## `orch run type <ticket>` (take-over)
 
