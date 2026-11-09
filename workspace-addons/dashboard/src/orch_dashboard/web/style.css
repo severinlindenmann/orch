@@ -383,3 +383,10 @@ body.mobile-mode-on .mm-phone::after{content:'';position:absolute;bottom:3px;lef
 .task-proofs .chip{cursor:pointer;font:inherit;font-size:12px;color:var(--text);background:var(--surface-2);border:1px solid var(--border);padding:2px 10px;min-height:0;text-decoration:none}
 .ticket-result .row.between{justify-content:space-between;align-items:baseline;gap:12px}
 .ticket-result .ticket-preview-label{display:none}
+.ticket-proof{margin:8px 0}
+.ticket-proof-line{display:flex;gap:8px;align-items:center;margin:0}
+.ticket-proof-details ul{list-style:none;padding:0;margin:6px 0}
+.proof-mark{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:1.5px dashed var(--border-strong,#888);color:var(--text-faint,#888)}
+.proof-mark.proof-ok{background:var(--success);color:#06210f;border:0}
+.proof-mark.proof-warn{background:var(--warning);color:#2a1d00;border:0}
+.proof-mark.proof-bad{background:var(--danger);color:#2b0707;border:0}

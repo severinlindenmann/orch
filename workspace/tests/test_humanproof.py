@@ -343,7 +343,14 @@ def test_wrong_type_is_loose_too(tws):
 
 def test_extra_file_check_hook_counts_as_loose(tws, monkeypatch):
     key = hp.human_key(tws)
-    monkeypatch.setattr(hp, "FILE_CHECKS", [lambda p: "acl" if p.name == "human.key" else None])
+    flagged = []  # the hook flags the key once; the reset writes a good one
+
+    def acl(p):
+        if p.name == "human.key" and not flagged:
+            flagged.append(1)
+            return "acl"
+
+    monkeypatch.setattr(hp, "FILE_CHECKS", [acl])
     assert hp.human_key(tws) != key
     monkeypatch.setattr(hp, "FILE_CHECKS", [])
     assert hp.take_notices(tws)
@@ -419,3 +426,41 @@ def test_reset_never_opens_a_setting(tws, seed):
     saved = json.loads((home / "human-settings.json").read_text())["workspaces"]
     if not garbage:  # tombstones in any workspace survive
         assert saved["f" * 32] == other
+
+
+# ---------------------------------------------------------------- guarded reads go through saferead
+
+
+def test_fifo_in_place_of_a_guarded_file_does_not_hang(tws):
+    key = hp.human_key(tws)
+    f = hp.key_dir(tws) / "proofs-used.json"
+    os.mkfifo(f, 0o600)
+    pr = hp.mint(key, hp.new_payload("run.takeover", TID, "human:pat"))
+    with pytest.raises(Refused):
+        hp.verify_and_consume(tws, pr, "run.takeover", TID)  # returns, never blocks: reset + refused
+    assert hp.human_key(tws) != key
+
+
+def test_symlinked_and_oversized_and_hardlinked_files_are_loose(tws):
+    for kind in ("symlink", "big", "hardlink"):
+        key = hp.human_key(tws)
+        f = hp.key_dir(tws) / "human.key"
+        f.unlink()
+        if kind == "symlink":
+            f.symlink_to(tws / ".orch")
+        elif kind == "big":
+            hp._write_private(f, "a" * (hp.MAX_READ + 10))
+        else:
+            hp._write_private(tws / "other", key.hex())
+            os.link(tws / "other", f)
+        assert hp.human_key(tws) != key, kind  # never read, reset
+        hp.take_notices(tws)
+
+
+def test_install_record_read_through_saferead(tmp_path, monkeypatch):
+    (tmp_path / "orch-install.json").write_text('{"kind": "dev"}')
+    monkeypatch.setattr(hp.sys, "prefix", str(tmp_path))
+    assert hp.install_kind() == "dev"
+    (tmp_path / "orch-install.json").unlink()
+    os.mkfifo(tmp_path / "orch-install.json")
+    assert hp.install_kind() in ("test", "normal")  # a FIFO is no record, and does not hang

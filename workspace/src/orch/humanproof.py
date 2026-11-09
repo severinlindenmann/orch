@@ -26,6 +26,7 @@ import threading
 import time
 from pathlib import Path
 
+from orch import saferead
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
@@ -86,7 +87,8 @@ def install_kind() -> str:
     (<sys.prefix>/orch-install.json,
     written by the installer). No record: running from the source tree = test, anything else = normal."""
     try:
-        data = json.loads((Path(sys.prefix) / "orch-install.json").read_text(encoding="utf-8"))
+        raw = saferead.read_private(Path(os.path.realpath(sys.prefix)), "orch-install.json", 4096)
+        data = json.loads(raw) if raw is not None else None
         kind = data.get("kind") if isinstance(data, dict) else None
         if kind in ("normal", "dev", "test"):
             return kind
@@ -217,6 +219,27 @@ def _check_file(p: Path) -> None:
     why = file_problem(p)
     if why:
         raise LooseFile(f"{p.name}:{why}")
+
+
+def _home_of(path: Path) -> tuple[Path, str]:
+    """(guarded home, relative path) of a file in the guarded home: keys/<id>/x or human-settings.json."""
+    parts = path.parts
+    i = parts.index("keys") if "keys" in parts else len(parts) - 1
+    return Path(os.path.realpath(Path(*parts[:i]))), "/".join(parts[i:])
+
+
+MAX_READ = 1 << 20
+
+
+def _read_guarded(path: Path) -> bytes:
+    """The bytes of a secret or integrity file. FileNotFoundError when it is not there; LooseFile when its
+    rights, owner or type are wrong, or saferead.read_private refuses it (link, FIFO, hard link, swap)."""
+    _check_file(path)
+    base, rel = _home_of(path)
+    data = saferead.read_private(base, rel, MAX_READ)
+    if data is None:
+        raise LooseFile(f"{path.name}:read")
+    return data
 
 
 def _private_dir(p: Path, stop: Path) -> None:
@@ -368,8 +391,7 @@ def _key_lock(d: Path):
 
 def _read_json(root: Path, path: Path, default):
     try:
-        _check_file(path)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(_read_guarded(path))
     except FileNotFoundError:
         return default
     except LooseFile as e:  # never trusted: reset the protection, the store starts empty
@@ -390,12 +412,13 @@ def human_key(root: Path, create: bool = True) -> bytes:
     with _key_lock(d) if create else contextlib.nullcontext():
         try:
             try:
-                _check_file(f)
+                raw = _read_guarded(f)
             except (
                 LooseFile
             ) as e:  # a loose key is never read: rotate it (old proofs and MACs stop verifying)
                 reset_protection(root, str(e))
-            hexkey = f.read_text(encoding="utf-8").strip()
+                raw = _read_guarded(f)
+            hexkey = raw.decode("utf-8", "replace").strip()
         except FileNotFoundError:
             if not create:
                 raise Refused("There is no human key here yet.") from None
@@ -587,10 +610,11 @@ def _settings_load(root: Path, path: Path):
     off). A loose file is reset (reset_protection) and read again."""
     try:
         try:
-            _check_file(path)
+            raw = _read_guarded(path)
         except LooseFile as e:
             reset_protection(root, str(e))
-        data = json.loads(path.read_text(encoding="utf-8"))
+            raw = _read_guarded(path)
+        data = json.loads(raw)
     except FileNotFoundError:
         return None
     except (OSError, ValueError, Refused) as e:
@@ -679,7 +703,10 @@ def reset_protection(root: Path, reason: str) -> None:
                 f.write(f"{_now()} workspace={ws} reset: {safe}\n")
         with contextlib.suppress(OSError, ValueError):
             nf = d / "notices.json"
-            notes = json.loads(nf.read_text(encoding="utf-8")) if nf.exists() else []
+            try:
+                notes = json.loads(_read_guarded(nf))
+            except (FileNotFoundError, LooseFile, ValueError):
+                notes = []
             if not any(isinstance(n, dict) and n.get("kind") == "protection_reset" for n in notes):
                 notes.append({"kind": "protection_reset", "at": _now(), "text": RESET_NOTICE})
                 _write_private(nf, json.dumps(notes))
@@ -692,7 +719,12 @@ def _reset_settings(root: Path, home: Path) -> None:
     path, wkey = _settings_path(root)
     readable, prior = True, {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        os.lstat(path)  # FileNotFoundError: the record never existed
+        base, rel = _home_of(path)
+        raw = saferead.read_private(base, rel, MAX_READ)  # whatever its rights: only False values are kept
+        if raw is None:
+            raise ValueError("unreadable")
+        data = json.loads(raw)
         if (
             not isinstance(data, dict)
             or data.get("schema") != "orch.human-settings/1"
@@ -725,7 +757,7 @@ def take_notices(root: Path) -> list[dict]:
     """The one-time notices for the person (dashboard), cleared when read."""
     try:
         nf = key_dir(root, create=False) / "notices.json"
-        notes = json.loads(nf.read_text(encoding="utf-8"))
+        notes = json.loads(_read_guarded(nf))
         nf.unlink()
     except (OSError, ValueError, Refused):
         return []
