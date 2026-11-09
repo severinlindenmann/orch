@@ -32,6 +32,7 @@ from orch import (
     relay,
     runs_live,
     services,
+    sharedfolder,
     term,
     tickets,
     workcheck,
@@ -207,6 +208,8 @@ def _show(t: dict, root: Path | None = None) -> str:
         cc = tickets.children_counts(tickets.list_all(root), t["id"])
         if cc["total"]:
             out.append(f"Sub-tickets: {cc['closed']} of {cc['total']} closed")
+    if root is not None and (shared := sharedfolder.line(sharedfolder.others_in_folder(root, t["id"]))):
+        out.append(shared)
     if t.get("waiting_on"):
         w = t["waiting_on"]
         if w["kind"] == "time":
