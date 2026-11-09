@@ -38,11 +38,12 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].waitForExistence(timeout: 10))
     }
 
-    /// + -> Compose -> New topic sheet with the workspace picker; the first message starts the topic.
+    /// + -> New chat -> New topic sheet with the workspace picker; the first message starts the topic.
     func testNewTopicSheetPicksWorkspace() {
         let app = paired()
         XCTAssertTrue(app.buttons["new-chat"].waitForExistence(timeout: 15))
         app.buttons["new-chat"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["new-chat-sheet"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
         app.buttons["compose-new-topic"].tap()
         let picker = app.buttons["workspace-picker"]
@@ -85,7 +86,9 @@ final class M1ShellUITests: XCTestCase {
     /// Add workspace sheet: a bad link is explained inline and the typed text stays.
     func testAddWorkspaceRejectsABadLink() {
         let app = paired()
+        XCTAssertTrue(app.buttons["new-chat"].waitForExistence(timeout: 15))
         app.buttons["new-chat"].tap()
+        XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
         app.buttons["compose-add-workspace"].tap()
         if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5))
