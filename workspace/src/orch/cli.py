@@ -103,11 +103,14 @@ def _who_added(t: dict, c: dict, ev: dict) -> str:
 
 def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:
     q = next((q for q in open_q if q.get("check") == c["id"]), None)
-    mark = "✓" if c["done"] else ("◐" if c.get("state") == "doing" else "○")
+    wont = bool(c.get("wont_do"))
+    mark = "✓" if c["done"] else ("–" if wont else ("◐" if c.get("state") == "doing" else "○"))
     line = f"  {mark} {c['id']} {c['text']}"
-    if q and not c["done"]:
+    if wont:
+        line += "   Won't do" + (f": {c['reason']}" if c.get("reason") else "")
+    if q and not c["done"] and not wont:
         line += f"   waiting for your answer ({q['id']})"
-    if c.get("state") == "doing" and not c["done"] and root is not None:
+    if c.get("state") == "doing" and not c["done"] and not wont and root is not None:
         who = c.get("by", "someone")
         if tickets.doing_stale(root, t, c):
             line += f"   {who} was on it ({_ago(c.get('at', ''))}, not running)"
@@ -402,13 +405,17 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--after", required=True, metavar="CID")
     for name, hlp in (
         ("remove", "remove a task (kept in the history)"),
-        ("reopen", "open a done task again"),
+        ("reopen", "open a done or won't-do task again"),
         ("start", "mark a task as being worked on"),
         ("stop", "clear the working mark"),
     ):
         x = c.add_parser(name, parents=[common], help=hlp)
         x.add_argument("id")
         x.add_argument("check")
+    x = c.add_parser("wont-do", parents=[common], help="a person decides a task will not be done")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--reason", metavar="TEXT", help="one line, why (optional)")
     x = c.add_parser("done", parents=[common])
     x.add_argument("id")
     x.add_argument("check")
@@ -682,6 +689,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by())
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
+    elif cmd == "check" and sub == "wont-do":
+        t, c = tickets.check_wont_do(root, args.id, args.check, by(), args.reason)
+        _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":

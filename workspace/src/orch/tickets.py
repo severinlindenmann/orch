@@ -461,6 +461,8 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
         return "Added a task" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
         return "Finished a task" + task(m.group(1))
+    if m := re.fullmatch(r"Marked (c\d+) as won't do", t):
+        return "Marked as won't do" + task(m.group(1))
     if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
         return f"Updated {addon(m.group(1))} settings"
     if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
@@ -564,14 +566,14 @@ def create(
 
 def checks_done(ticket: dict) -> tuple[int, int]:
     c = ticket.get("checklist", [])
-    return sum(1 for x in c if x.get("done")), len(c)
+    return sum(1 for x in c if x.get("done") or x.get("wont_do")), len(c)  # Won't do is resolved
 
 
 def _check_can_finish(ticket: dict) -> None:
-    open_ = [c["id"] for c in ticket["checklist"] if not c.get("done")]
+    open_ = [c["id"] for c in ticket["checklist"] if not c.get("done") and not c.get("wont_do")]
     if open_:
         raise Refused(f"Not done: {', '.join(open_)} is not checked yet.")
-    bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence")]
+    bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence") and not c.get("wont_do")]
     if bad:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
@@ -1029,6 +1031,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
 
     def op(t):
         item = _item(t, cid)
+        _refuse_if_wont_do(item, tid, cid)
         for ev in evs:
             ev.setdefault("by", by)
             ev.setdefault("at", now())
@@ -1036,6 +1039,45 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
         item["done"] = True
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
+        return item
+
+    return apply_op(root, tid, op)
+
+
+WONT_DO_AGENT = (
+    "Only a person marks a step as won't do. Ask them: orch ask {tid} \"Mark step {cid} as won't do?\" "
+    "--option yes --option no --check {cid}"
+)
+
+
+def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
+    if item.get("wont_do"):
+        raise Refused(f"{cid} was marked won't do by a person. Only a person opens it again.")
+
+
+def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
+    """A person decides a step will not be done. Person only, enforced here like accept_review: `by` must be
+    human: and no agent tool may be in the environment; an agent can only ask (orch ask ...). The step stays
+    done=false (it is not done), counts as resolved and needs no proof. Calling it again changes the reason."""
+    if not by.startswith("human:") or agent_tool():
+        raise Refused(WONT_DO_AGENT.format(tid=tid, cid=cid))
+    why = " ".join((reason or "").split())
+    if len(why) > 200 or (why and not why.isprintable()):
+        raise Refused("The reason is one line of at most 200 characters.")
+
+    def op(t):
+        item = _item(t, cid)
+        if item.get("done"):
+            raise Refused(f"{cid} is already done. Open it again first.")
+        item["evidence"] = []
+        _clear_doing(item)
+        item["wont_do"] = True
+        if why:
+            item["reason"] = why
+        else:
+            item.pop("reason", None)
+        item.update({"by": by, "at": now()})
+        add_history(t, by, f"Marked {cid} as won't do")
         return item
 
     return apply_op(root, tid, op)
@@ -1093,10 +1135,19 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
 
 
 def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
-    """Open again; the old proof stays in the history line."""
+    """Open again; the old proof stays in the history line. A Won't do step is a person's decision: only a
+    person undoes it."""
 
     def op(t):
         item = _item(t, cid)
+        if item.get("wont_do"):
+            if not by.startswith("human:") or agent_tool():
+                _refuse_if_wont_do(item, tid, cid)
+            for k in ("wont_do", "reason"):
+                item.pop(k, None)
+            _clear_doing(item)
+            add_history(t, by, f"Reopened {cid}")
+            return item
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         item["done"] = False
         item["evidence"] = []
@@ -1114,6 +1165,7 @@ def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         item = _item(t, cid)
         if item.get("done"):
             raise Refused(f"{cid} is already done. Reopen it first: orch check reopen {tid} {cid}")
+        _refuse_if_wont_do(item, tid, cid)
         for c in t["checklist"]:
             _clear_doing(c)
         item.update({"state": "doing", "by": by, "at": now()})

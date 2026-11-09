@@ -158,3 +158,72 @@ def test_bad_ticket_id_reads_no_run_file(proj, run, new_ticket, monkeypatch):
     monkeypatch.setattr(tickets.Path, "is_file", lambda self: opened.append(str(self)) or False)
     assert tickets.doing_stale(proj, t, t["checklist"][0]) is False
     assert opened == []
+
+
+# ---- Won't do (a person's decision; an agent can only ask)
+
+
+def test_wont_do_by_person_counts_as_resolved_and_undo(proj, run, validate, new_ticket):
+    tid = with_checks(proj, run, new_ticket)
+    code, out, _ = run("check", "wont-do", tid, "c2", "--reason", "Finance pulls it", "--by", "human:tester")
+    assert code == 0 and "Won't do" in out
+    t = read(proj, tid)
+    validate(t)
+    c2 = t["checklist"][1]
+    assert c2["wont_do"] is True and c2["done"] is False and c2["reason"] == "Finance pulls it"
+    assert t["history"][-1]["by"] == "human:tester" and t["history"][-1]["text"] == "Marked c2 as won't do"
+    assert tickets.history_line(t["history"][-1]["text"], t["checklist"]) == "Marked as won't do: step 2"
+    assert tickets.checks_done(t) == (1, 3)  # only c2 resolved
+    code, out, _ = run("ticket", "show", tid)
+    assert "Won't do: Finance pulls it" in out
+    # undo by the person
+    assert run("check", "reopen", tid, "c2", "--by", "human:tester")[0] == 0
+    c2 = read(proj, tid)["checklist"][1]
+    assert "wont_do" not in c2 and "reason" not in c2 and c2["done"] is False
+
+
+def test_wont_do_counts_for_finishing_the_ticket(proj, run, new_ticket, monkeypatch):
+    tid = with_checks(proj, run, new_ticket, n=2)
+    run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    with_open = tickets.load(proj, tid)
+    try:
+        tickets._check_can_finish(with_open)
+        raise AssertionError("open step must block")
+    except tickets.Refused:
+        pass
+    run("check", "wont-do", tid, "c2", "--by", "human:tester")
+    tickets._check_can_finish(tickets.load(proj, tid))  # resolved without proof: no refusal
+
+
+def test_agent_can_never_set_or_undo_wont_do(proj, run, new_ticket, monkeypatch):
+    tid = with_checks(proj, run, new_ticket)
+    # an explicit agent actor
+    code, _, err = run("check", "wont-do", tid, "c1", "--by", "agent:claude")
+    assert code == 2 and "orch ask" in err
+    # a person's name given from inside an agent session (environment wins)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    code, _, err = run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    assert code == 2
+    assert "wont_do" not in read(proj, tid)["checklist"][0]
+    monkeypatch.delenv("CLAUDECODE")
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    # an agent can neither reopen it, tick it, start it nor patch it in
+    for argv in (
+        ("check", "reopen", tid, "c1", "--by", "human:tester"),
+        ("check", "reopen", tid, "c1"),
+        ("check", "done", tid, "c1", "--note", "x"),
+        ("check", "start", tid, "c1"),
+    ):
+        assert run(*argv)[0] == 2, argv
+    assert run("ticket", "patch", tid, "--if-revision", "1", '{"checklist": []}')[0] == 2
+    assert read(proj, tid)["checklist"][0]["wont_do"] is True
+
+
+def test_wont_do_reason_and_done_step(proj, run, new_ticket):
+    tid = with_checks(proj, run, new_ticket)
+    assert run("check", "wont-do", tid, "c1", "--reason", "x" * 201, "--by", "human:tester")[0] == 2
+    run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
+    assert run("check", "wont-do", tid, "c1", "--by", "human:tester")[0] == 2  # done: reopen first
+    assert run("check", "wont-do", tid, "c9", "--by", "human:tester")[0] == 2  # unknown step

@@ -653,6 +653,15 @@ def shown_summary(ticket: dict) -> str:
     return _clip(redact(text), 200) if text else ""
 
 
+def _view_step(c: dict) -> dict:
+    step = {"text": _clip(c.get("text", ""), 500) or "Task", "done": bool(c.get("done"))}
+    if c.get("wont_do") is True and not step["done"]:  # a person's "Won't do": struck through on the phone
+        step["wont_do"] = True
+        if reason := _clip(redact(str(c.get("reason") or "")), 200):
+            step["reason"] = reason
+    return step
+
+
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     checklist = _shown_checklist(ticket)
     done, total = tickets.checks_done({"checklist": checklist})
@@ -675,10 +684,7 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "title": _clip(ticket.get("title", ""), 200) or "Ticket",
         "status": ticket.get("status", "open"),
         "running": running,
-        "checklist": [
-            {"text": _clip(c.get("text", ""), 500) or "Task", "done": bool(c.get("done"))}
-            for c in checklist[:200]
-        ],
+        "checklist": [_view_step(c) for c in checklist[:200]],
         "done": done,
         "total": total,
         "history_tail": hist,
