@@ -54,7 +54,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| PUT | `/v1/usage/days/<YYYY-MM-DD>` | `$defs/upload` (`orch.usage/1`, counts only, `day` = the path) | `200 {day, replaced}`. Idempotent per workspace + day (replaces the stored day). Future or > 400 days old → `422`; counts off for this workspace or relay-wide → `403 not_allowed`; > 256 KB → `413`. Kept 400 days |
+| PUT | `/v1/usage/days/<YYYY-MM-DD>` | `$defs/upload` (`orch.usage/1`, counts only, `day` = the path) | `200 {day, replaced}`. Idempotent per workspace + day (replaces the stored day). Future or > 400 days old → `422`; counts off for this workspace or relay-wide → `403 not_allowed`; > 256 KB → `413`; with `share_names: false` a `name` on an item whose source is not admin, builtin or marketplace → `422 invalid`, nothing stored. Kept 400 days |
 | GET | `/v1/policy` | – | `$defs/policy` `{usage_counts: on\|off, live_session: allowed\|locked_off}`; also in `GET /v1/refresh` as `policy` (a change raises `version` + refresh-hint) |
 | GET / PUT | `/admin/api/policy` | PUT: `{usage_counts?: bool, live_session_locked?: bool}` | `{usage_counts, live_session_locked}` (defaults true, false). Admin auth as for all admin routes |
 | PATCH | `/admin/api/workspaces/<id>` | `{usage_counts: bool}` | `200` workspace card. Off for this workspace only; effective = relay-wide AND this |

@@ -4,118 +4,626 @@
   "title": "orch counts v1: `orch record counts --json` (orch.counts/1), day files, daily counts for the admin (orch.usage/1) and the admin policy",
   "description": "See counts.md and usage-counts.md. Counts only: no text, no chats, no key values. Names leave the workspace only as usage-counts.md allows.",
   "$defs": {
-    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
-    "day": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
-    "n": { "type": "integer", "minimum": 0 },
-    "kind": { "enum": ["skill", "tool", "mcp", "key", "helper", "job"] },
-    "source": { "enum": ["harness", "admin", "workspace", "builtin", "marketplace", "none"] },
-    "name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$" },
-    "version": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "day": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "n": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "enum": [
+        "skill",
+        "tool",
+        "mcp",
+        "key",
+        "helper",
+        "job"
+      ]
+    },
+    "source": {
+      "enum": [
+        "harness",
+        "admin",
+        "workspace",
+        "builtin",
+        "marketplace",
+        "none"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
     "item": {
-      "type": "object", "required": ["kind", "name", "source", "action", "runs", "uses", "ok", "failed", "refused", "unknown", "seen", "first_seen", "last_seen", "versions"], "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "kind",
+        "name",
+        "source",
+        "action",
+        "runs",
+        "uses",
+        "ok",
+        "failed",
+        "refused",
+        "unknown",
+        "seen",
+        "first_seen",
+        "last_seen",
+        "versions"
+      ],
+      "additionalProperties": false,
       "properties": {
-        "kind": { "$ref": "#/$defs/kind" },
-        "name": { "$ref": "#/$defs/name" },
-        "source": { "$ref": "#/$defs/source" },
-        "action": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/name" }] },
+        "kind": {
+          "$ref": "#/$defs/kind"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "action": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/name"
+            }
+          ]
+        },
         "runs": {
-          "type": "object", "required": ["used", "of", "unseen"], "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "used",
+            "of",
+            "unseen"
+          ],
+          "additionalProperties": false,
           "properties": {
-            "used": { "$ref": "#/$defs/n", "description": "Runs that used it." },
-            "of": { "$ref": "#/$defs/n", "description": "Runs in the window that could have seen it (their agent tool reports this kind)." },
-            "unseen": { "$ref": "#/$defs/n", "description": "Runs in the window whose agent tool cannot report this kind: unknown, not zero." }
+            "used": {
+              "$ref": "#/$defs/n",
+              "description": "Runs that used it."
+            },
+            "of": {
+              "$ref": "#/$defs/n",
+              "description": "Runs in the window that could have seen it (their agent tool reports this kind)."
+            },
+            "unseen": {
+              "$ref": "#/$defs/n",
+              "description": "Runs in the window whose agent tool cannot report this kind: unknown, not zero."
+            }
           }
         },
-        "uses": { "$ref": "#/$defs/n" }, "ok": { "$ref": "#/$defs/n" }, "failed": { "$ref": "#/$defs/n" },
-        "refused": { "$ref": "#/$defs/n", "description": "Denials and key refusals." },
-        "unknown": { "$ref": "#/$defs/n", "description": "Finished with an unknown result." },
-        "seen": { "enum": ["yes", "not_seen", "unknown"], "description": "yes = used at least once; not_seen = in the inventory, could have been seen, never used; unknown = no run in the window could have seen it." },
-        "first_seen": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/time" }] },
-        "last_seen": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/time" }] },
-        "versions": { "type": "array", "maxItems": 20, "items": {
-          "type": "object", "required": ["version", "uses", "ok", "failed", "first_seen"], "additionalProperties": false,
-          "properties": { "version": { "$ref": "#/$defs/version" }, "uses": { "$ref": "#/$defs/n" }, "ok": { "$ref": "#/$defs/n" }, "failed": { "$ref": "#/$defs/n" }, "first_seen": { "$ref": "#/$defs/time" } }
-        } },
+        "uses": {
+          "$ref": "#/$defs/n"
+        },
+        "ok": {
+          "$ref": "#/$defs/n"
+        },
+        "failed": {
+          "$ref": "#/$defs/n"
+        },
+        "refused": {
+          "$ref": "#/$defs/n",
+          "description": "Denials and key refusals."
+        },
+        "unknown": {
+          "$ref": "#/$defs/n",
+          "description": "Finished with an unknown result."
+        },
+        "seen": {
+          "enum": [
+            "yes",
+            "not_seen",
+            "unknown"
+          ],
+          "description": "yes = used at least once; not_seen = in the inventory, could have been seen, never used; unknown = no run in the window could have seen it."
+        },
+        "first_seen": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/time"
+            }
+          ]
+        },
+        "last_seen": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/time"
+            }
+          ]
+        },
+        "versions": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "version",
+              "uses",
+              "ok",
+              "failed",
+              "first_seen"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "version": {
+                "$ref": "#/$defs/version"
+              },
+              "uses": {
+                "$ref": "#/$defs/n"
+              },
+              "ok": {
+                "$ref": "#/$defs/n"
+              },
+              "failed": {
+                "$ref": "#/$defs/n"
+              },
+              "first_seen": {
+                "$ref": "#/$defs/time"
+              }
+            }
+          }
+        },
         "tickets": {
-          "type": "object", "required": ["done", "sent_back", "open"], "additionalProperties": false,
-          "properties": { "done": { "$ref": "#/$defs/n" }, "sent_back": { "$ref": "#/$defs/n" }, "open": { "$ref": "#/$defs/n" } },
+          "type": "object",
+          "required": [
+            "done",
+            "sent_back",
+            "open"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "done": {
+              "$ref": "#/$defs/n"
+            },
+            "sent_back": {
+              "$ref": "#/$defs/n"
+            },
+            "open": {
+              "$ref": "#/$defs/n"
+            }
+          },
           "description": "Outcome of the tickets whose runs used it (a join, not a cause)."
         }
       }
     },
     "answer": {
-      "type": "object", "required": ["schema", "generated_at", "since", "from", "to", "runs", "tickets", "coverage", "items", "inventory", "sharing"], "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "schema",
+        "generated_at",
+        "since",
+        "from",
+        "to",
+        "runs",
+        "tickets",
+        "coverage",
+        "items",
+        "inventory",
+        "sharing"
+      ],
+      "additionalProperties": false,
       "properties": {
-        "schema": { "const": "orch.counts/1" },
-        "generated_at": { "$ref": "#/$defs/time" },
-        "since": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/time" }], "description": "Recording since (activity.md); null = nothing recorded yet." },
-        "from": { "$ref": "#/$defs/day" }, "to": { "$ref": "#/$defs/day" },
-        "runs": { "$ref": "#/$defs/n" }, "tickets": { "$ref": "#/$defs/n" },
-        "coverage": { "type": "object", "required": ["full", "partial"], "additionalProperties": false, "properties": { "full": { "$ref": "#/$defs/n" }, "partial": { "$ref": "#/$defs/n" } }, "description": "Runs whose every step had full coverage vs runs with some partial step." },
-        "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
-        "inventory": { "$ref": "inventory.schema.json#/$defs/inventory" },
-        "sharing": {
-          "type": "object", "required": ["counts", "names", "last_sent", "queued"], "additionalProperties": false,
+        "schema": {
+          "const": "orch.counts/1"
+        },
+        "generated_at": {
+          "$ref": "#/$defs/time"
+        },
+        "since": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/time"
+            }
+          ],
+          "description": "Recording since (activity.md); null = nothing recorded yet."
+        },
+        "from": {
+          "$ref": "#/$defs/day"
+        },
+        "to": {
+          "$ref": "#/$defs/day"
+        },
+        "runs": {
+          "$ref": "#/$defs/n"
+        },
+        "tickets": {
+          "$ref": "#/$defs/n"
+        },
+        "coverage": {
+          "type": "object",
+          "required": [
+            "full",
+            "partial"
+          ],
+          "additionalProperties": false,
           "properties": {
-            "counts": { "enum": ["on", "off", "off_by_admin", "not_connected"] },
-            "names": { "type": "boolean" },
-            "last_sent": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/day" }] },
-            "queued": { "$ref": "#/$defs/n", "description": "Days waiting to be sent (admin server offline)." }
+            "full": {
+              "$ref": "#/$defs/n"
+            },
+            "partial": {
+              "$ref": "#/$defs/n"
+            }
+          },
+          "description": "Runs whose every step had full coverage vs runs with some partial step."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "inventory": {
+          "$ref": "inventory.schema.json#/$defs/inventory"
+        },
+        "sharing": {
+          "type": "object",
+          "required": [
+            "counts",
+            "names",
+            "last_sent",
+            "queued"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "counts": {
+              "enum": [
+                "on",
+                "off",
+                "off_by_admin",
+                "not_connected"
+              ]
+            },
+            "names": {
+              "type": "boolean"
+            },
+            "last_sent": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/day"
+                }
+              ]
+            },
+            "queued": {
+              "$ref": "#/$defs/n",
+              "description": "Days waiting to be sent (admin server offline)."
+            }
           }
         }
       }
     },
     "day_file": {
-      "type": "object", "required": ["schema", "day", "runs", "items"], "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "schema",
+        "day",
+        "runs",
+        "items"
+      ],
+      "additionalProperties": false,
       "description": ".orch/record/counts/<day>.json: one UTC day folded from the run files before they are pruned; the counts answer is rebuilt from these plus the run files still there.",
       "properties": {
-        "schema": { "const": "orch.counts-day/1" },
-        "day": { "$ref": "#/$defs/day" },
-        "runs": { "type": "array", "items": {
-          "type": "object", "required": ["run", "ticket", "sees", "partial"], "additionalProperties": false,
-          "properties": { "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" }, "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "sees": { "$ref": "#/$defs/sees" }, "partial": { "type": "boolean" } }
-        } },
-        "items": { "type": "array", "items": {
-          "type": "object", "required": ["kind", "name", "source", "action", "version", "uses", "ok", "failed", "refused", "unknown", "runs"], "additionalProperties": false,
-          "properties": {
-            "kind": { "$ref": "#/$defs/kind" }, "name": { "$ref": "#/$defs/name" }, "source": { "$ref": "#/$defs/source" },
-            "action": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/name" }] }, "version": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/version" }] },
-            "uses": { "$ref": "#/$defs/n" }, "ok": { "$ref": "#/$defs/n" }, "failed": { "$ref": "#/$defs/n" }, "refused": { "$ref": "#/$defs/n" }, "unknown": { "$ref": "#/$defs/n" },
-            "runs": { "type": "array", "items": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" } }
+        "schema": {
+          "const": "orch.counts-day/1"
+        },
+        "day": {
+          "$ref": "#/$defs/day"
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "run",
+              "ticket",
+              "sees",
+              "partial"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "run": {
+                "type": "string",
+                "pattern": "^r_[a-z0-9_]{6,32}$"
+              },
+              "ticket": {
+                "type": "string",
+                "pattern": "^t_[a-z0-9]{6,16}$"
+              },
+              "sees": {
+                "$ref": "#/$defs/sees"
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            }
           }
-        } }
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "name",
+              "source",
+              "action",
+              "version",
+              "uses",
+              "ok",
+              "failed",
+              "refused",
+              "unknown",
+              "runs"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/$defs/kind"
+              },
+              "name": {
+                "$ref": "#/$defs/name"
+              },
+              "source": {
+                "$ref": "#/$defs/source"
+              },
+              "action": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/name"
+                  }
+                ]
+              },
+              "version": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/version"
+                  }
+                ]
+              },
+              "uses": {
+                "$ref": "#/$defs/n"
+              },
+              "ok": {
+                "$ref": "#/$defs/n"
+              },
+              "failed": {
+                "$ref": "#/$defs/n"
+              },
+              "refused": {
+                "$ref": "#/$defs/n"
+              },
+              "unknown": {
+                "$ref": "#/$defs/n"
+              },
+              "runs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^r_[a-z0-9_]{6,32}$"
+                }
+              }
+            }
+          }
+        }
       }
     },
-    "sees": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/kind" }, "description": "What the run's agent tool can report (capability flags of the adapter, written at run start in run.state starting data.sees)." },
+    "sees": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/kind"
+      },
+      "description": "What the run's agent tool can report (capability flags of the adapter, written at run start in run.state starting data.sees)."
+    },
     "upload": {
-      "type": "object", "required": ["schema", "day", "runs", "tickets", "items"], "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "schema",
+        "day",
+        "share_names",
+        "runs",
+        "tickets",
+        "items"
+      ],
+      "additionalProperties": false,
       "description": "Body of PUT /v1/usage/days/<day> (usage-counts.md). Counts only, no text field anywhere.",
       "properties": {
-        "schema": { "const": "orch.usage/1" },
-        "day": { "$ref": "#/$defs/day" },
-        "runs": { "$ref": "#/$defs/n" }, "tickets": { "$ref": "#/$defs/n" },
-        "items": { "type": "array", "maxItems": 2000, "items": {
-          "type": "object", "required": ["kind", "name", "ref", "source", "uses", "runs", "ok", "failed", "refused"], "additionalProperties": false,
-          "properties": {
-            "kind": { "$ref": "#/$defs/kind" },
-            "name": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/name" }], "description": "null = this workspace's own name, hidden (usage-counts.md)." },
-            "ref": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^h_[0-9a-f]{16}$" }], "description": "Stable stand-in for a hidden name (keyed hash); null when name is sent." },
-            "source": { "$ref": "#/$defs/source" },
-            "uses": { "$ref": "#/$defs/n" }, "runs": { "$ref": "#/$defs/n" }, "ok": { "$ref": "#/$defs/n" }, "failed": { "$ref": "#/$defs/n" }, "refused": { "$ref": "#/$defs/n" }
-          },
-          "oneOf": [
-            { "properties": { "name": { "type": "null" }, "ref": { "type": "string" } } },
-            { "properties": { "name": { "type": "string" }, "ref": { "type": "null" } } }
-          ]
-        } }
+        "schema": {
+          "const": "orch.usage/1"
+        },
+        "day": {
+          "$ref": "#/$defs/day"
+        },
+        "share_names": {
+          "type": "boolean",
+          "description": "[insights] share_names in effect (with its settings record). false = names of workspace, harness and unknown sources must be null."
+        },
+        "runs": {
+          "$ref": "#/$defs/n"
+        },
+        "tickets": {
+          "$ref": "#/$defs/n"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "name",
+              "ref",
+              "source",
+              "uses",
+              "runs",
+              "ok",
+              "failed",
+              "refused"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/$defs/kind"
+              },
+              "name": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/name"
+                  }
+                ],
+                "description": "null = this workspace's own name, hidden (usage-counts.md)."
+              },
+              "ref": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^h_[0-9a-f]{16}$"
+                  }
+                ],
+                "description": "Stable stand-in for a hidden name (keyed hash); null when name is sent."
+              },
+              "source": {
+                "$ref": "#/$defs/source"
+              },
+              "uses": {
+                "$ref": "#/$defs/n"
+              },
+              "runs": {
+                "$ref": "#/$defs/n"
+              },
+              "ok": {
+                "$ref": "#/$defs/n"
+              },
+              "failed": {
+                "$ref": "#/$defs/n"
+              },
+              "refused": {
+                "$ref": "#/$defs/n"
+              }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "name": {
+                    "type": "null"
+                  },
+                  "ref": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "share_names": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "items": {
+            "items": {
+              "if": {
+                "properties": {
+                  "source": {
+                    "not": {
+                      "enum": [
+                        "admin",
+                        "builtin",
+                        "marketplace"
+                      ]
+                    }
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "name": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "policy": {
-      "type": "object", "required": ["usage_counts", "live_session"], "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "usage_counts",
+        "live_session"
+      ],
+      "additionalProperties": false,
       "description": "What the admin allows, in GET /v1/refresh (policy) and GET /v1/policy.",
       "properties": {
-        "usage_counts": { "enum": ["on", "off"] },
-        "live_session": { "enum": ["allowed", "locked_off"] }
+        "usage_counts": {
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "live_session": {
+          "enum": [
+            "allowed",
+            "locked_off"
+          ]
+        }
       }
     }
   }

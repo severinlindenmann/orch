@@ -689,6 +689,19 @@ def inv_winners(kind, entries):
     return dict(sorted(best.items()))
 
 
+def inv_allowed(c):
+    """Allowed actions of one connection: the .orch/mcp.json entry counts only where it matches the proof-made grant
+    (human-proof.md); no entry or no grant = nothing allowed (P1)."""
+    entry, grant, actions = c.get("file"), c.get("grant"), c["actions"]
+    if entry is None or grant is None:
+        return []
+
+    def expand(x):
+        return set(actions) if x == "*" else set(x)
+
+    return sorted(expand(entry) & expand(grant) & set(actions))
+
+
 def kind_inventory():
     vi, vm, vp = _w("inventory", "inventory"), _w("inventory", "mcp_file"), _w("inventory", "conn_page")
     _core_clean("inventory")
@@ -702,6 +715,8 @@ def kind_inventory():
         _expect(f"inventory conn_version {c['name']}", inv_conn_version(c["server"]), c["version"])
     for c in vec["precedence"]:
         _expect(f"inventory precedence {c['name']}", inv_winners(c["kind"], c["entries"]), c["winners"])
+    for c in vec["allowed"]:
+        _expect(f"inventory allowed {c['name']}", inv_allowed(c), c["allowed"])
 
 
 
@@ -839,7 +854,7 @@ def kind_screen():
 import hmac
 
 CNT_FIELDS = ("kind", "name", "source", "runs", "uses", "ok", "failed", "refused", "unknown", "seen")
-NAMES_ALWAYS_SENT = ("admin", "builtin", "marketplace", "none")
+NAMES_ALWAYS_SENT = ("admin", "builtin", "marketplace")  # P1: anything else (workspace, harness, none, unknown) is hidden
 
 
 def cnt_items(case):

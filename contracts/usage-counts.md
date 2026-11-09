@@ -20,10 +20,10 @@ relay-api.md (Usage counts and policy).
 - **What is sent**: one `orch.usage/1` body per closed UTC day (never today; a day closes at 01:00 UTC), built from the
   counts: per item `kind`, `source`, `uses`, `runs`, `ok`, `failed`, `refused`, plus the day's `runs` and `tickets`. No text,
   no ticket titles, no chats, no key values, no versions, no file paths. The schema has no field for text.
-- **Names**: sent as they are for `admin`, `builtin`, `marketplace` sources (the admin knows them already, or they are public).
-  For `workspace` and `harness` sources the name is replaced by `ref` = `h_` + the first 16 hex of
+- **Names** (invariant P1, common.md): sent as they are only for `admin`, `builtin`, `marketplace` sources (the admin knows
+  them already, or they are public). For every other source (`workspace`, `harness`, `none`, anything unknown) the name is replaced by `ref` = `h_` + the first 16 hex of
   HMAC-SHA256(key = a random salt in `.orch/.local-id`'s folder, message = `<kind>:<name>`), stable per workspace so the
-  admin sees "own skill h_3fa9… used 14×" without the name, unless `share_names = true`.
+  admin sees "own skill h_3fa9… used 14×" without the name, unless `share_names = true` (in effect only with its settings record, human-proof.md). The body says `share_names`.
 - **Queue**: each closed day is written to `.orch/record/outbox-usage/<day>.json` first, then sent oldest first on the next
   relay call (inbox pull, refresh) or the daily timer; deleted after a 2xx. Kept at most 60 days, older ones are dropped.
   `share_counts = false` or the admin's `usage_counts: "off"` → nothing is queued and the queue is deleted. Offline → the
@@ -35,7 +35,8 @@ relay-api.md (Usage counts and policy).
 - `PUT /v1/usage/days/<YYYY-MM-DD>` (workspace auth), body `$defs/upload` with `day` equal to the path. **Idempotent per
   workspace + day**: the stored day is replaced as a whole. `200 {day, replaced: bool}`. A day in the future or older than
   400 days → `422 invalid`; counts off for this workspace or relay-wide → `403 not_allowed`; body over 256 KB → `413`.
-  Stored 400 days.
+  Stored 400 days. **The relay enforces the names rule on receipt**: with `share_names: false`, an item whose source is not
+  `admin`, `builtin` or `marketplace` and that carries a `name` makes the whole body `422 invalid` (nothing stored).
 - `GET /v1/policy` (workspace auth) → `$defs/policy` `{usage_counts: "on" | "off", live_session: "allowed" | "locked_off"}`;
   the same object is in `GET /v1/refresh` as `policy` (a change raises `version` and sends a refresh-hint).
 - Admin: `GET / PUT /admin/api/policy` `{usage_counts: bool, live_session_locked: bool}` (relay-wide defaults: true, false);

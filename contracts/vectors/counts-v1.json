@@ -287,6 +287,30 @@
     "name": null,
     "ref": "h_25cdad2facf017b4"
    }
+  },
+  {
+   "name": "source none is hidden",
+   "kind": "skill",
+   "item": "unknown-thing",
+   "source": "none",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": null,
+    "ref": "h_1be40455de0769f7"
+   }
+  },
+  {
+   "name": "source mystery is hidden",
+   "kind": "skill",
+   "item": "odd-source",
+   "source": "mystery",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": null,
+    "ref": "h_9e70e1483e588c9d"
+   }
   }
  ],
  "queue": [

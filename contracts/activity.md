@@ -80,6 +80,10 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 | `job` | job | null | `job`, `type`, `state` | one line per job event that changes what people see (job-events.md); the full stream is in `jobs/` |
 | `session.input` | core | null | `by`, `from`, `since`, `ended`, `reason`, `keys` | one per take-over, written at hand-back (screen.md); the typed text is never stored |
 
+A collector that cannot tell where a skill or connection comes from writes `source: harness` (the agent tool's own),
+which is hidden at the admin like a workspace name (invariant P1, usage-counts.md); it never guesses `admin` or `builtin`.
+Readers skip unknown `kind`s (they are never shown as steps or counted).
+
 `coverage`: `full` when the source saw the whole step, `partial` when something is missing (the collector cannot see chat
 text, output was cut, helpers are not visible). Capability flags per adapter (agents.json) say what a source can see;
 `orch record counts` turns them into "unknown / not seen" (counts.md).

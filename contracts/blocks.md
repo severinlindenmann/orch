@@ -43,7 +43,9 @@ Tones: `neutral` · `good` · `warn` · `bad` (the dashboard's design-system ton
   changed meaning gets `orch.blocks/2`; renderers refuse a schema they do not know.
 - **Phone:** the workspace sends a block snapshot inside the ticket's `ticket_view` through the relay (≤ 16 KB with the rest
   of the snapshot, relay-api.md); the sender drops `log` blocks first, then cuts tables to 20 rows (setting `total_rows`), then
-  drops blocks from the end, and adds a final `summary` "More on the computer".
+  drops blocks from the end, and adds a final `summary` "More on the computer". Every string of the snapshot passes the
+  value hider (secrets.md) before it leaves the computer; a `file` block carries name and size only, never bytes or a path
+  outside `.orch/tickets/<id>/artifacts/` (other paths are sent as the base name only).
 
 ## Fixtures (`vectors/blocks/`)
 

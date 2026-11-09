@@ -139,5 +139,91 @@
     "stripe-key": "workspace"
    }
   }
+ ],
+ "allowed": [
+  {
+   "name": "no entry: nothing allowed",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": null,
+   "grant": null,
+   "allowed": []
+  },
+  {
+   "name": "entry written by an agent, no grant",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": "*",
+   "grant": null,
+   "allowed": []
+  },
+  {
+   "name": "entry and grant agree",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": [
+    "search"
+   ],
+   "grant": [
+    "search"
+   ],
+   "allowed": [
+    "search"
+   ]
+  },
+  {
+   "name": "file widens beyond the grant",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": "*",
+   "grant": [
+    "search"
+   ],
+   "allowed": [
+    "search"
+   ]
+  },
+  {
+   "name": "all allowed by a person",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": "*",
+   "grant": "*",
+   "allowed": [
+    "post_message",
+    "read_file",
+    "search"
+   ]
+  },
+  {
+   "name": "unknown action name is not allowed",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": [
+    "delete_all"
+   ],
+   "grant": [
+    "delete_all"
+   ],
+   "allowed": []
+  }
  ]
 }
