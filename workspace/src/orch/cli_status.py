@@ -79,10 +79,8 @@ def _services_cmd(args, root: Path) -> None:
         row = next((r for r in rows if services.local_url(r.get("url"))), None)
         url = services.local_url(row.get("url")) if row else None
         if url and not args.no_open and not args.json and term.is_terminal(sys.stdout):
-            import webbrowser
-
             # a person opens the page: the launch token (URL fragment) lets it start a proof session (H1)
-            webbrowser.open(humanproof.launch_url(root, row.get("addon"), url))
+            humanproof.open_browser(humanproof.launch_url(root, row.get("addon"), url))
         bad = [r for r in rows if r.get("error")]
         if bad:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")

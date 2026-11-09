@@ -15,7 +15,7 @@ from orch.errors import Refused
 
 @pytest.fixture
 def ws(proj, monkeypatch):
-    """A TEST workspace under <fake account home>/.orch-test with its test home (a source-tree test install never
+    """A TEST workspace under <fake home>/.orch-test with its test home (a source-tree test install never
     pairs a real workspace with the account home), with the same environment hygiene as `proj`."""
     from orch import addons
 
@@ -68,7 +68,9 @@ def test_answer_without_proof_is_refused_and_handed_off(ws, run):
 
 def test_answer_with_valid_proof_takes_by_from_proof(ws, run, monkeypatch):
     tid, q = _ask(ws, run)
-    code, out, err = _cli(run, monkeypatch, _proof(ws, "ticket.answer", f"{tid}:{q}"), "answer", tid, q, "A", "--json")
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "ticket.answer", f"{tid}:{q}"), "answer", tid, q, "A", "--json"
+    )
     assert code == 0, out + err
     assert tickets.load(ws, tid)["history"][-1]["by"] == "human:pat"
 
@@ -93,7 +95,9 @@ def test_answer_bad_proofs_refused(ws, run, monkeypatch, mk):
 def test_answer_forged_by_flag_with_valid_proof_is_refused(ws, run, monkeypatch):
     tid, q = _ask(ws, run)
     proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
-    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--by", "human:someone-else", "--json")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "answer", tid, q, "A", "--by", "human:someone-else", "--json"
+    )
     assert code == 2 and tickets.load(ws, tid)["questions"][0].get("answer") is None
 
 
@@ -118,7 +122,14 @@ def test_agent_in_the_environment_cannot_use_a_valid_proof(ws, run, monkeypatch)
 
 def test_looks_good_needs_the_proof(ws, run, monkeypatch):
     tid = _review_ticket(ws, run)
-    args = ("ticket", "patch", tid, '{"status": "done"}', "--if-revision", str(tickets.load(ws, tid)["revision"]))
+    args = (
+        "ticket",
+        "patch",
+        tid,
+        '{"status": "done"}',
+        "--if-revision",
+        str(tickets.load(ws, tid)["revision"]),
+    )
     code, out, err = run(*args, "--by", "human:pat", "--json")
     assert code == 2 and tickets.load(ws, tid)["status"] == "review"
     code, out, err = _cli(run, monkeypatch, _proof(ws, "ticket.verdict", tid), *args, "--json")
@@ -130,7 +141,9 @@ def test_send_back_forged_and_proven(ws, run, monkeypatch):
     tid = _review_ticket(ws, run)
     code, out, err = run("ticket", "changes", tid, "do more", "--by", "human:pat", "--json")
     assert code == 2 and tickets.load(ws, tid)["status"] == "review"
-    code, out, err = _cli(run, monkeypatch, _proof(ws, "ticket.verdict", tid), "ticket", "changes", tid, "do more", "--json")
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "ticket.verdict", tid), "ticket", "changes", tid, "do more", "--json"
+    )
     assert code == 0, out + err
     # the note is queued as the person's input: it carries the pending MAC and counts as a person's
     assert [i["text"] for i in runs.human_waiting(ws, tid)] == ["do more"]
@@ -146,7 +159,16 @@ def test_update_and_relay_connect_refuse_without_proof(ws, run):
     code, out, err = run("update", "--by", "human:pat", "--json")
     assert code == 2 and "dashboard on this computer" in (out + err)
     code, out, err = run(
-        "relay", "connect", "https://r.example", "--workspace", "w", "--token", "orn_x", "--by", "human:pat", "--json"
+        "relay",
+        "connect",
+        "https://r.example",
+        "--workspace",
+        "w",
+        "--token",
+        "orn_x",
+        "--by",
+        "human:pat",
+        "--json",
     )
     assert code == 2 and "dashboard on this computer" in (out + err)
     assert not (ws / ".orch" / "secrets" / "relay.json").exists()
@@ -169,7 +191,9 @@ def test_forged_pending_line_does_not_start(ws, run):
 
 def test_run_send_with_proof_counts_as_a_person(ws, run, monkeypatch):
     tid, _ = _ask(ws, run)
-    code, out, err = _cli(run, monkeypatch, _proof(ws, "run.human_input", tid), "run", "send", tid, "go on", "--json")
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "run.human_input", tid), "run", "send", tid, "go on", "--json"
+    )
     assert code == 0, out + err
     assert [i["text"] for i in runs.human_waiting(ws, tid)] == ["go on"]
 
@@ -178,7 +202,6 @@ def test_run_send_without_proof_is_handed_off(ws, run):
     tid, _ = _ask(ws, run)
     code, out, err = run("run", "send", tid, "go on", "--by", "human:pat", "--json")
     assert code == 2 and runs.human_waiting(ws, tid) == []
-
 
 
 # ------------------------------------------------------------------ dev test human
@@ -272,7 +295,9 @@ def test_terminal_answer_queues_a_handoff_with_the_command_and_no_token(ws, run)
     assert "Continue" in text and "launch" not in text and "hp1." not in text
     item = hp.handoffs(ws)[0]
     assert item["argv"][:3] == ["answer", tid, q] and "--by" not in item["argv"]
-    assert not list(hp.key_dir(ws).glob("launch-*.token"))  # a hand-off writes no token for the caller to read
+    assert not list(
+        hp.key_dir(ws).glob("launch-*.token")
+    )  # a hand-off writes no token for the caller to read
 
 
 def test_handoff_take_only_runs_the_allowed_command_words(ws):

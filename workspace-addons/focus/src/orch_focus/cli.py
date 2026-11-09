@@ -32,6 +32,18 @@ def _orch_bin() -> str | None:
     return SELF if importlib.util.find_spec("orch") else os.environ.get("ORCH_BIN") or None
 
 
+def _open(root: Path, page: str) -> None:
+    """Open the page; the launch token (URL fragment) goes only to an absolute-path opener (H1)."""
+    try:
+        from orch import humanproof
+
+        if humanproof.open_browser(humanproof.launch_url(root, "focus", page)):
+            return
+    except ImportError:
+        pass
+    webbrowser.open(page)  # no token in this URL
+
+
 def _launch(root: Path, page: str) -> str:
     """The page address with a one-time launch token in the fragment (a person opens it: H1)."""
     try:
@@ -162,7 +174,7 @@ def _service(args, root: Path) -> int:
             page = f"{u}/t/{args.ticket}"
             out({"running": True, "pid": cur["pid"], "url": page}, page, as_json)
             if not args.no_open:
-                webbrowser.open(_launch(root, page))
+                _open(root, page)
         else:
             out(
                 {"running": True, "pid": cur["pid"], "url": u},

@@ -656,9 +656,9 @@ def read_proof_line() -> str:
         return ""
 
 
-# The command line a hand-off will run once the person clicks (set by cli.main; never contains --by / --proof-stdin).
+# The command a hand-off runs once the person clicks (set by cli.main; no --by / --proof-stdin in it).
 CURRENT_ARGV: list[str] | None = None
-# What a page may run for a hand-off: the command words an op may start with. The proof binds op and target too.
+# What a page may run for a hand-off: the command words an op may start with (the proof binds op + target).
 HANDOFF_HEADS = {
     "ticket.answer": (("answer",),),
     "run.human_input": (("run", "send"),),
@@ -752,15 +752,17 @@ def handoff_drop(root: Path, hid: str) -> None:
     try:
         d = key_dir(root, create=False)
         with _key_lock(d):
-            items = [i for i in _read_json(d / "handoffs.json", []) if isinstance(i, dict) and i.get("id") != hid]
+            items = [
+                i for i in _read_json(d / "handoffs.json", []) if isinstance(i, dict) and i.get("id") != hid
+            ]
             _write_private(d / "handoffs.json", json.dumps(items))
     except (Refused, OSError, ValueError):
         pass
 
 
 def _dashboard_note(root: Path) -> str:
-    """After a hand-off: open the dashboard on a desktop (fresh launch token in the URL fragment, never printed)
-    and say in plain words what to click. No token is ever returned or printed."""
+    """After a hand-off: open the dashboard on a desktop (launch token in the URL
+    fragment, never printed) and say in plain words what to click. No token is ever returned or printed."""
     url = None
     try:
         from orch import services
@@ -770,13 +772,10 @@ def _dashboard_note(root: Path) -> str:
     except Exception:  # noqa: BLE001 - the note is best effort
         url = None
     if url and sys.stdout.isatty():
-        import webbrowser
-
-        with contextlib.suppress(Exception):
-            webbrowser.open(launch_url(root, "dashboard", url))
+        open_browser(launch_url(root, "dashboard", url))
         return f"Opened the dashboard ({url}): press Continue to send this to the agent."
     if url:
-        return f"Waiting for your click: open the dashboard ({url}) and press Continue to send this to the agent."
+        return f"Waiting for your click: open the dashboard ({url}) and press Continue to send this."
     return "Waiting for your click: open the dashboard on this computer and press Continue."
 
 
@@ -837,6 +836,31 @@ def consume_launch_token(root: Path, server: str, token: str) -> bool:
         and int(lines[1]) > time.time()
         and hmac.compare_digest(lines[0], token)
     )
+
+
+def open_browser(url: str) -> bool:
+    """Open `url` (it may hold a launch token in its fragment) in the person's browser through an
+    ABSOLUTE-path helper, never a bare name found on PATH or in the cwd: macOS /usr/bin/open, Windows
+    os.startfile, Linux xdg-open only from a fixed system folder. No other process gets the token."""
+    import subprocess
+
+    try:
+        if sys.platform == "darwin":
+            cmd = ["/usr/bin/open", url]
+        elif sys.platform == "win32":
+            os.startfile(url)  # type: ignore[attr-defined]  # noqa: S606
+            return True
+        else:
+            helper = next(
+                (p for p in ("/usr/bin/xdg-open", "/usr/local/bin/xdg-open") if os.access(p, os.X_OK)), None
+            )
+            if helper is None:
+                return False
+            cmd = [helper, url]
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+        return True
+    except OSError:
+        return False
 
 
 def launch_url(root: Path, server: str, url: str) -> str:

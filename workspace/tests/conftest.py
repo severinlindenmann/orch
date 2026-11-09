@@ -228,7 +228,7 @@ REAL_PROOF_MODULES = ("test_human_proof_ops", "test_humanproof")
 
 @pytest.fixture(autouse=True)
 def _legacy_trust(request, monkeypatch):
-    """TEST-ONLY (slice 1.0a-2): older CLI tests act as `--by human:` without a proof. For them (a Python-level
+    """TEST-ONLY (1.0a-2): older CLI tests act as `--by human:` without a proof. For them (a Python-level
     patch, no env var, no config key; production has no such path) the human gate trusts --by as before, and
     the pending read-back is the old by/via allowlist. Modules that test the real proof opt out by name."""
     if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
