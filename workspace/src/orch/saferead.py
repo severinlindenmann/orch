@@ -35,6 +35,13 @@ SECRETISH = (
     "*.kdbx",
     "*password*",
     "*credential*",
+    "*.gpg",
+    "*.asc",
+    ".netrc",
+    ".pgpass",
+    ".npmrc",
+    ".pypirc",
+    ".env*",
     "id_rsa*",
     "id_ed25519*",
     "id_ecdsa*",
@@ -42,22 +49,53 @@ SECRETISH = (
 _NO = "The output file must be a plain log file inside this workspace."
 
 
-def _open_regular(path: Path) -> tuple[int, os.stat_result] | None:
-    """(fd, fstat) of a regular, single-name file opened without following links; None for anything else."""
+_DIRFD = os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY")
+_DIRFLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _walk(root: Path, parts: tuple[str, ...]) -> int:
+    """POSIX: an fd of the folder root/parts, opened one folder at a time with dir_fd and O_NOFOLLOW, starting
+    from root (a real path: callers resolve it once). A link anywhere on the way (also one swapped in
+    while we look) fails, so what is
+    opened is inside root by construction. Raises OSError."""
+    cur = os.open(root, _DIRFLAGS)
     try:
-        before = os.lstat(path)
-        if not stat.S_ISREG(before.st_mode):
-            return None
-        fd = os.open(path, _FLAGS)
+        for part in parts:
+            nxt = os.open(part, _DIRFLAGS, dir_fd=cur)
+            os.close(cur)
+            cur = nxt
+    except OSError:
+        os.close(cur)
+        raise
+    return cur
+
+
+def _anchor(root: Path, parts: tuple[str, ...]) -> tuple[str, dict, int | None]:
+    """(name, kwargs, dir fd to close) to act on the last part so that nothing outside root can be reached.
+    Without dir_fd (Windows) the folder's real path is checked to be inside root instead; callers then
+    compare the opened handle with the real path (`_open_checked(check=...)`). Raises OSError."""
+    if _DIRFD:
+        fd = _walk(root, parts[:-1])
+        return parts[-1], {"dir_fd": fd}, fd
+    full = Path(root).joinpath(*parts)
+    if not Path(os.path.realpath(full.parent)).is_relative_to(Path(os.path.realpath(root))):
+        raise OSError("outside the workspace")
+    return str(full), {}, None
+
+
+def _open_checked(name: str, kw: dict, check: str | None = None) -> tuple[int, os.stat_result] | None:
+    """(fd, fstat) of a regular, single-name file opened without following a link; None for anything else."""
+    try:
+        fd = os.open(name, _FLAGS, **kw)
     except OSError:
         return None
     try:
         st = os.fstat(fd)
-        if (
-            not stat.S_ISREG(st.st_mode)
-            or st.st_nlink != 1
-            or (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino)
-        ):
+        ok = stat.S_ISREG(st.st_mode) and st.st_nlink == 1
+        if ok and check is not None:  # no dir_fd: the handle must be the file the real path names
+            real = os.stat(os.path.realpath(check))
+            ok = (st.st_dev, st.st_ino) == (real.st_dev, real.st_ino)
+        if not ok:
             os.close(fd)
             return None
     except OSError:
@@ -100,13 +138,19 @@ def safe_read_tail(root: Path, path: str, limit: int) -> bytes:
             asked = inside
     if not (_name_ok(inside) and _name_ok(asked)):
         raise Refused(_NO)
-    opened = _open_regular(real)
+    try:
+        name, kw, dfd = _anchor(base, inside)
+    except OSError:
+        raise Refused(_NO) from None
+    try:
+        opened = _open_checked(name, kw, str(base.joinpath(*inside)))
+    finally:
+        if dfd is not None:
+            os.close(dfd)
     if opened is None:
         raise Refused(_NO)
     fd, st = opened
     try:
-        if Path(os.path.realpath(real)) != real:  # a folder on the way was swapped for a link meanwhile
-            raise Refused(_NO)
         want = min(limit, st.st_size)
         if hasattr(os, "pread"):
             return os.pread(fd, want, st.st_size - want) if want else b""
@@ -116,23 +160,38 @@ def safe_read_tail(root: Path, path: str, limit: int) -> bytes:
         os.close(fd)
 
 
-def file_state(path: Path, hash_limit: int, budget: list[int], root: Path | None = None) -> str:
-    """A short string for the file as it is now, for files_sig. Regular single-name file: sha256 of up to
-    `hash_limit` bytes (streamed) + size (+ mtime when it is bigger than the limit). Link: its target text.
-    Anything else: its type only. `budget[0]` is the bytes that may still be read; spent, it becomes -1
-    (caller: None)."""
+def file_state(root: Path, rel: str, hash_limit: int, budget: list[int]) -> str:
+    """A short string for the file root/rel (rel as git lists it, `/` separated), for files_sig. Regular
+    single-name file: sha256 of up to `hash_limit` bytes (streamed) + size (+ mtime and ctime when it is
+    bigger
+    than the limit). Link: its target text. Anything else (also a folder, so a submodule): its type only.
+    Nothing outside root is ever touched (see `_walk`). `budget[0]` is the bytes that may still be read;
+    spent,
+    it becomes -1 (the caller then gives up)."""
+    parts = tuple(p for p in rel.split("/") if p)
+    if not parts:
+        return "?"
     try:
-        if root is not None:  # a folder on the way swapped for a link to somewhere else: not ours to read
-            if not Path(os.path.realpath(path.parent)).is_relative_to(Path(os.path.realpath(root))):
-                return "?"
-        st = os.lstat(path)
+        name, kw, dfd = _anchor(root, parts)
+    except OSError:
+        return "?"
+    try:
+        return _state_at(name, kw, str(Path(root).joinpath(*parts)), hash_limit, budget)
+    finally:
+        if dfd is not None:
+            os.close(dfd)
+
+
+def _state_at(name: str, kw: dict, full: str, hash_limit: int, budget: list[int]) -> str:
+    try:
+        st = os.lstat(name, **kw)
     except OSError:
         return "?"
     mode = st.st_mode
     exe = "x" if mode & 0o111 else "-"
     if stat.S_ISLNK(mode):
         try:
-            return "L:" + os.readlink(path)
+            return "L:" + os.readlink(name, **kw)
         except OSError:
             return "L?"
     if not stat.S_ISREG(mode):
@@ -144,7 +203,7 @@ def file_state(path: Path, hash_limit: int, budget: list[int], root: Path | None
     if budget[0] < st.st_size:
         budget[0] = -1
         return "?"
-    opened = _open_regular(path)
+    opened = _open_checked(name, kw, None if kw else full)
     if opened is None:
         return "?"
     fd, st = opened

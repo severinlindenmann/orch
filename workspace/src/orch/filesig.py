@@ -96,7 +96,7 @@ def _state(root: Path, rel: str, budget: list[int]) -> str:
     hit = _HASHES.get(key)
     if hit is not None:
         return hit
-    state = saferead.file_state(full, HASH_LIMIT, budget, root)
+    state = saferead.file_state(root, rel, HASH_LIMIT, budget)
     if "?" not in state:
         if len(_HASHES) > 50_000:
             _HASHES.clear()
@@ -106,7 +106,7 @@ def _state(root: Path, rel: str, budget: list[int]) -> str:
 
 def files_sig(root: Path) -> str | None:
     """The fingerprint (64 hex characters) of the work folder under `root`, or None."""
-    root = Path(root)
+    root = Path(os.path.realpath(root))  # once; saferead walks down from this real path
     deadline = time.monotonic() + TIMEOUT
     names = _listed(root, deadline)
     if names is None or len(names) > MAX_FILES:

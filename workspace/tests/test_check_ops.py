@@ -422,6 +422,7 @@ def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     assert seen and all(not any(k.startswith("GIT_") and k != "GIT_OPTIONAL_LOCKS" for k in e) for e in seen)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="st_ctime is the creation time on Windows")
 def test_files_sig_sees_an_edit_with_the_old_mtime(repo):
     big = repo / "big.bin"
     big.write_bytes(b"a" * (filesig.HASH_LIMIT + 10))  # above the hash limit: size + times only
@@ -446,14 +447,17 @@ def test_files_sig_does_not_read_through_a_swapped_folder(repo, tmp_path, monkey
     (repo / "sub" / "f.txt").unlink()
     (repo / "sub").rmdir()
     (repo / "sub").symlink_to(outside)
-    opened = []
-    real = saferead._open_regular
-    monkeypatch.setattr(saferead, "_open_regular", lambda p: opened.append(str(p)) or real(p))
+    read = []
+    real = os.read
+    monkeypatch.setattr(saferead.os, "read", lambda fd, n: read.append(real(fd, n)) or read[-1])
     after = filesig.files_sig(repo)
-    assert after != before and not any(str(outside) in p or "sub/f.txt" in p for p in opened)
+    assert after != before and not any(b"secret" in chunk for chunk in read)  # never read through the link
+    budget = [10_000]
+    assert saferead.file_state(repo.resolve(), "sub/f.txt", 1000, budget) == "?"  # the folder is a link now
+    assert budget == [10_000] and not any(b"secret" in chunk for chunk in read)
 
 
-def test_runs_and_files_are_capped_per_check():
+def test_runs_and_entries_are_capped_per_check():
     stamp = lambda i: f"2026-11-09T{i // 3600:02d}:{i % 3600 // 60:02d}:{i % 60:02d}Z"  # noqa: E731
     evs = [{"type": "note", "ref": f"n{i}"} for i in range(10)]
     evs += [
@@ -466,3 +470,15 @@ def test_runs_and_files_are_capped_per_check():
     assert [e["ran_at"] for e in out if e["ref"].startswith("cmd")] == sorted(
         e["ran_at"] for e in out if e["ref"].startswith("cmd")
     )
+
+
+def test_cap_never_drops_the_newest_run_and_notes_go_last():
+    stamp = lambda i: f"2026-11-09T10:{i // 60:02d}:{i % 60:02d}Z"  # noqa: E731
+    old_runs = [{"type": "command", "ref": f"c{i}", "ran_at": stamp(i)} for i in range(5)]
+    newest = {"type": "command", "ref": "latest", "ran_at": "2026-11-09T23:00:00Z"}
+    notes = [{"type": "note", "ref": f"n{i}"} for i in range(60)]
+    out = tickets.trim_runs([*notes, *old_runs, newest])
+    assert len(out) == 50 and newest in out and not any(r in out for r in old_runs)
+    assert out[0] == notes[11] and notes[10] not in out  # runs went first, then the oldest notes
+    only = tickets.trim_runs([*notes, newest])
+    assert newest in only and len(only) == 50

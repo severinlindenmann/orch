@@ -7,6 +7,7 @@ Shared vectors: contracts/vectors/ticket-merge-v1.json.
 import json
 import re
 from copy import deepcopy
+from datetime import datetime
 
 FINAL = ("done", "dropped")
 LOSER_FIELDS = ("title", "note", "summary", "owner", "due", "key", "text")  # a replaced value goes to history
@@ -175,14 +176,46 @@ def _order(items, base_ids, key=None):
     return [items[i] for i in first + rest]
 
 
-RUNS_PER_REF = 5  # same rule as the core's tickets.trim_runs, so every replica ends with the same entries
+RUNS_PER_REF = 5  # the rule below is the core's tickets.trim_runs (parity-tested), so replicas converge
 RUNS_PER_CHECK = 50
 _RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 
+def _ran_at_ok(v) -> bool:
+    if not isinstance(v, str) or not _RAN_AT.fullmatch(v):
+        return False
+    try:
+        datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
+
+
 def _is_run(e) -> bool:
-    ran = e.get("ran_at")
-    return e.get("type") == "command" and isinstance(ran, str) and _RAN_AT.fullmatch(ran) is not None
+    return isinstance(e, dict) and e.get("type") == "command" and _ran_at_ok(e.get("ran_at"))
+
+
+def trim_runs(evidence: list) -> list:
+    """Same as orch.tickets.trim_runs: newest 5 runs per command text, at most 50 entries, the newest run
+    is never dropped, run order (ran_at, canonical JSON)."""
+    key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))
+    by_ref = {}
+    for i, e in enumerate(evidence):
+        if _is_run(e):
+            by_ref.setdefault(str(e.get("ref")), []).append(i)
+    drop = set()
+    for idx in by_ref.values():
+        idx.sort(key=key)
+        drop.update(idx[:-RUNS_PER_REF])
+    live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
+    over = len(evidence) - len(drop) - RUNS_PER_CHECK
+    if over > 0:
+        older = live[:-1]
+        drop.update(older[:over])
+        over -= min(over, len(older))
+    if over > 0:
+        drop.update([i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop][:over])
+    return [e for i, e in enumerate(evidence) if i not in drop]
 
 
 def _evidence(*lists):
@@ -196,22 +229,7 @@ def _evidence(*lists):
         k = (str(e.get("type")), str(e.get("ref")), ran if isinstance(ran, str) else "")
         if k not in seen or _canon(e) > _canon(seen[k]):
             seen[k] = e
-    out = sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e)))
-    runs = {}
-    for i, e in enumerate(out):
-        if _is_run(e):
-            runs.setdefault(str(e.get("ref")), []).append(i)
-    drop = set()
-    for idx in runs.values():
-        idx.sort(key=lambda i: (out[i]["ran_at"], i))
-        drop.update(idx[:-RUNS_PER_REF])
-    kept = sorted(
-        (i for idx in runs.values() for i in idx if i not in drop), key=lambda i: (out[i]["ran_at"], i)
-    )
-    over = len(out) - len(drop) - RUNS_PER_CHECK
-    if over > 0:
-        drop.update(kept[:over])
-    return [e for i, e in enumerate(out) if i not in drop]
+    return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
 
 
 def _check_item(ctx, x0, xa, xb):

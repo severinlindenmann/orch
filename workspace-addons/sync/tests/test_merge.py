@@ -535,3 +535,29 @@ def test_only_well_formed_runs_count_and_each_check_is_capped():
     m = merge_ticket(base, up(base, T2, checklist=side), up(base, T3), NOW)
     ev = m["checklist"][0]["evidence"]
     assert len(ev) == 50 and all(e in ev for e in odd)  # not-runs are never trimmed; the oldest runs go first
+
+
+def test_core_and_merge_trim_runs_identically():
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "workspace" / "src"))
+    from orch import tickets
+
+    from orch_sync import merge
+
+    def run(ref, at, **kw):
+        return {"type": "command", "ref": ref, "ran_at": at, **kw}
+
+    hostile = [
+        run("a", "2026-99-99T99:00:00Z"),
+        run("a", "2026-11-09T10:00:00Z\n"),
+        run("a", 5),
+        run(["x"], "2026-11-09T10:00:00Z"),
+        {"type": "note", "ref": "n"},
+        "junk",
+    ]
+    ties = [run(ref, "2026-11-09T10:00:00Z", exit=i) for i, ref in enumerate("abcdefgh" * 8)]
+    many = [run("r", f"2026-11-09T11:00:{i:02d}Z", exit=i) for i in range(9)]
+    notes = [{"type": "note", "ref": f"n{i}"} for i in range(55)]
+    for case in (hostile + many, ties, ties + hostile + many, notes + many + ties, many[:3]):
+        assert tickets.trim_runs(list(case)) == merge.trim_runs(list(case))

@@ -1164,28 +1164,39 @@ def _check_record_fields(ev: dict) -> None:
             raise Refused(f"{k} must not contain control or direction-changing characters.")
 
 
+def _canon(entry) -> str:
+    return json.dumps(entry, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _is_run(e) -> bool:
+    return isinstance(e, dict) and e.get("type") == "command" and _ran_at_ok(e.get("ran_at"))
+
+
 def trim_runs(evidence: list) -> list:
-    """Recorded runs (command evidence with a well-formed ran_at): keep the newest RUNS_PER_REF per
-    command text
-    and at most RUNS_PER_CHECK evidence entries in all (oldest runs go first), so a loop of `orch check
-    record`
-    cannot grow a ticket without bound. Other evidence is never dropped. Same rule in the sync add-on's merge,
-    so replicas converge."""
-    runs: dict[str, list[int]] = {}
+    """Recorded runs (command evidence with a well-formed ran_at, see _ran_at_ok): keep the newest
+    RUNS_PER_REF per command text and at most RUNS_PER_CHECK evidence entries in all, so a loop of
+    `orch check record` cannot grow a ticket without bound. Order of runs: (ran_at, canonical JSON).
+    Over the cap, older runs go first; the newest run is never dropped (the one just recorded stays); only
+    when nothing but that run and other proof is left, the oldest other entries go. The sync add-on's merge
+    has the same rule (orch_sync.merge.trim_runs, parity-tested) so every replica ends with the same
+    entries."""
+    key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))  # noqa: E731
+    by_ref: dict[str, list[int]] = {}
     for i, e in enumerate(evidence):
-        if isinstance(e, dict) and e.get("type") == "command" and _ran_at_ok(e.get("ran_at")):
-            runs.setdefault(str(e.get("ref")), []).append(i)
+        if _is_run(e):
+            by_ref.setdefault(str(e.get("ref")), []).append(i)
     drop: set[int] = set()
-    for idx in runs.values():
-        idx.sort(key=lambda i: (evidence[i]["ran_at"], i))
+    for idx in by_ref.values():
+        idx.sort(key=key)
         drop.update(idx[:-RUNS_PER_REF])
-    kept = [
-        i for i in sorted((i for idx in runs.values() for i in idx), key=lambda i: (evidence[i]["ran_at"], i))
-    ]
-    kept = [i for i in kept if i not in drop]
+    live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
     over = len(evidence) - len(drop) - RUNS_PER_CHECK
     if over > 0:
-        drop.update(kept[:over])
+        older = live[:-1]
+        drop.update(older[:over])
+        over -= min(over, len(older))
+    if over > 0:
+        drop.update([i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop][:over])
     return [e for i, e in enumerate(evidence) if i not in drop]
 
 
