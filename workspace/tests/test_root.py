@@ -160,11 +160,13 @@ def test_runs_start_overwrites_a_stale_orch_root_in_the_agent_environment(
     config.set_key(proj, "workspace", "agent", "fake")
     tid = json.loads(run("ticket", "new", "T", "--json", "--by", "human:t")[1])["id"]
     monkeypatch.setenv("ORCH_ROOT", str(other))
+    other_before = _files(other)
     runs.start(proj, tid, "agent:focus", mode="oneshot")  # the library, as the dashboard calls it
     end = time.monotonic() + 25
     while time.monotonic() < end and (runs.read(proj, tid) is not None or not out.exists()):
         time.sleep(0.05)
     assert out.read_text(encoding="utf-8") == str(proj.resolve())
+    assert _files(other) == other_before  # the other (stale) store was never touched
 
 
 def test_a_symlinked_workspace_gives_one_root_string(proj, monkeypatch):
@@ -257,3 +259,16 @@ def test_a_note_names_a_stale_orch_root_but_not_inside_a_copy(proj, run, monkeyp
     monkeypatch.setattr(cli, "_noted", False)
     _, _, err = run("ticket", "new", "B", "--by", "human:t")
     assert "Note:" not in err
+
+
+def test_init_in_the_orch_root_folder_reached_through_a_symlink_is_not_refused(proj, run, monkeypatch):
+    real = _store(proj / "real")
+    link = proj / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("no symlinks here")
+    monkeypatch.chdir(link)
+    monkeypatch.setenv("ORCH_ROOT", str(real))
+    code, _, err = run("init", "--yes")
+    assert code == 0, err

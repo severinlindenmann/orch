@@ -319,7 +319,7 @@ def _spawn_keeper(root: Path) -> None:
     subprocess.Popen(
         procs.orch_python_argv("relay", "mobile", "keeper"),
         cwd=str(root),
-        env={**os.environ, "ORCH_ROOT": str(root)},
+        env={**os.environ, "ORCH_ROOT": str(root.resolve())},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

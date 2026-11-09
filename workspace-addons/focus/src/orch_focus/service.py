@@ -128,7 +128,7 @@ def start(root: Path, port: int | None = None) -> dict:
             stdout=out,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            env={**os.environ, "ORCH_ROOT": str(root), "ORCH_FOCUS_NONCE": nonce},
+            env={**os.environ, "ORCH_ROOT": str(root.resolve()), "ORCH_FOCUS_NONCE": nonce},
             **kw,
         )
     try:
