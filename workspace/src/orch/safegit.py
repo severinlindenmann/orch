@@ -122,6 +122,14 @@ def _is_home(f: Path) -> bool:
         return False  # a failing home lookup never makes a folder "home" (and so never relaxes anything)
 
 
+def _same_as_home(f: Path) -> bool:
+    """The same folder as home even when spelled differently (a case-insensitive file system, a link)."""
+    try:
+        return os.path.samefile(f, Path.home())
+    except (OSError, RuntimeError, KeyError, ValueError):
+        return False
+
+
 def _is_anchor(f: Path) -> bool:
     return f.parent == f
 
@@ -153,7 +161,7 @@ def unusable_root(root: Path | None) -> str | None:
         f = Path(root).resolve()
     except (OSError, RuntimeError):
         return None
-    if _is_anchor(f) or _is_home(f):
+    if _is_anchor(f) or _is_home(f) or _same_as_home(f):
         return (
             "orch can't use git when the workspace is your whole home folder or a drive root; "
             "open a project folder instead"

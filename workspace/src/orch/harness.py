@@ -305,6 +305,13 @@ def _tracked(root: Path, rel: str) -> bool:
     return rc == 0
 
 
+def _root_message(root: Path) -> str | None:
+    """The plain reason safegit refuses this root (it is the home folder or a drive root), or None."""
+    from orch import safegit
+
+    return safegit.unusable_root(root)
+
+
 def _git_on_path() -> bool:
     """Is there SOME git program on the PATH (the hardened lookup may still refuse it: a planted one)?"""
     name = "git.exe" if os.name == "nt" else "git"
@@ -334,6 +341,9 @@ def _in_git_repo(root: Path) -> bool:
     h = _hardened(root)
     try:
         if h is None:
+            why = _root_message(root)
+            if why:
+                raise Refused(f"{why[0].upper()}{why[1:]}. Nothing was stored.")
             if _git_on_path():  # a git exists but none is trusted (a planted one?): never "not a repo"
                 raise Refused(
                     "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
@@ -366,7 +376,12 @@ def _in_git_repo(root: Path) -> bool:
 def _ignored(root: Path, rel: str) -> bool:
     h = _hardened(root)
     if h is None:
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
+        why = _root_message(root)
+        raise Refused(
+            f"{why[0].upper()}{why[1:]}. Nothing was stored."
+            if why
+            else "orch cannot ask git about this folder. Nothing was stored."
+        )
     try:
         r = subprocess.run(
             [*h[0], "check-ignore", "-q", "--", rel],
@@ -440,7 +455,12 @@ def check_private_path(root: Path, path: Path) -> None:
     rel = path.absolute().relative_to(root.absolute()).as_posix()
     h = _hardened(root)
     if h is None:
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
+        why = _root_message(root)
+        raise Refused(
+            f"{why[0].upper()}{why[1:]}. Nothing was stored."
+            if why
+            else "orch cannot ask git about this folder. Nothing was stored."
+        )
     try:
         t = subprocess.run(
             [
