@@ -45,8 +45,9 @@ def test_argv_rule_checker_finds_bad_templates():
 RUN_CMDS = (
     "check", "ask", "log", "ref", "needs", "wait", "ticket show", "ticket list", "ticket tree", "ticket new",
     "ticket summary", "ticket status", "ticket artifacts", "ticket artifacts-dir", "ticket wait",
-    "ticket set", "run done", "run input", "run status",
+    "ticket set", "ticket plan", "run done", "run input", "run status",
 )  # fmt: skip
+# `ticket plan` writes only the ticket's goal / not-included text: no exec, no config, no network
 # the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
 ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
 CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, *ORCH_OK, "--", "Do it"]
