@@ -1,4 +1,4 @@
-"""NOT mocked (slice 1.0a-2): the real dashboard server -> run_with_proof -> a REAL `sys.executable -I -m orch`
+"""NOT mocked (1.0a-2): the real dashboard server -> run_with_proof -> a REAL `sys.executable -I -m orch`
 child on a test workspace and test home. Per first-batch op: the op succeeds, `by` comes from the proof, and
 the input counts as a person's (it is what starts a run). Runs in CI on POSIX."""
 
