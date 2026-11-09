@@ -34,8 +34,8 @@ def read(root: Path) -> dict:
 
 
 # ---- THE trust rule: orch runs a settings-supplied agent command only if THIS person approved exactly that
-# command on THIS machine. Approvals live in the orch home (like permissions.json), never in the workspace, and
-# do not depend on git, links or where the file came from. Any error = not approved.
+# command on THIS machine. Approvals live in the orch home (like permissions.json), never in the workspace,
+# and do not depend on git, links or where the file came from. Any error = not approved.
 
 
 def _approvals_path() -> Path:
@@ -103,8 +103,9 @@ SHOW_MAX = 500  # an entry with a longer field cannot be shown in full, so it ca
 
 
 def _safe_text(v: str) -> bool:
-    """Plain printable text only: no control (C0/C1, ESC), format (bidi, zero-width), line/paragraph separator,
-    private-use or unassigned character, and no space but the plain one. What is shown is exactly what is hashed."""
+    """Plain printable text only: no control (C0/C1, ESC), format (bidi, zero-width), line/paragraph
+    separator, private-use or unassigned character, and no space but the plain one.
+    What is shown is exactly what is hashed."""
     import unicodedata
 
     return len(v) <= SHOW_MAX and all(
@@ -126,7 +127,8 @@ def pending_agents(root: Path) -> list[dict]:
                 "name": n,
                 **fields,
                 "key": _entry_key(root, n, e),
-                "showable": all(_safe_text(v) for v in fields.values() if isinstance(v, str)) and _safe_text(n),
+                "showable": all(_safe_text(v) for v in fields.values() if isinstance(v, str))
+                and _safe_text(n),
             }
         )
     return out
@@ -141,7 +143,9 @@ def allow_agent(root: Path, name: str, key: str) -> str:
     if not isinstance(key, str) or _entry_key(root, name, e) != key:
         raise Refused("That command changed since you looked. Please look again.")
     if not (_safe_text(name) and all(_safe_text(v) for v in e.values() if isinstance(v, str))):
-        raise Refused("That command cannot be shown safely (too long or odd characters), so it cannot be allowed.")
+        raise Refused(
+            "That command cannot be shown safely (too long or odd characters), so it cannot be allowed."
+        )
     approve_agent(root, name, e)
     return name
 
@@ -292,7 +296,7 @@ def set_code(root: Path, value: str) -> str:
 
 
 def agent_entries(root: Path) -> dict[str, dict]:
-    """The [agents.<name>] entries that may be used: well-formed, and approved here when they run a command."""
+    """The [agents.<name>] entries that may be used: well-formed, approved here when they run a command."""
     return {n: e for n, e in _raw_entries(root).items() if agent_approved(root, n, e)}
 
 

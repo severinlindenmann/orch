@@ -311,7 +311,9 @@ def private_lines(root: Path) -> list[str]:
                 f"Allow on this machine: orch private allow {p['name']} --key {p['key']}"
             )
         else:
-            out.append("This workspace asks to run a command orch can't show safely. Not allowed; it is not run.")
+            out.append(
+                "This workspace asks to run a command orch can't show safely. Not allowed; it is not run."
+            )
     return out
 
 
@@ -336,7 +338,8 @@ def _private(args, root: Path) -> None:
             print(json.dumps({"moved": len(moved)}))
         else:
             print(
-                f"Moved {len(moved)} file{'s' if len(moved) != 1 else ''} out of the team repo. Your files stay here. "
+                f"Moved {len(moved)} file{'s' if len(moved) != 1 else ''} out of the team repo. "
+                "Your files stay here. "
                 "Commit the removal when you are ready; older commits keep their copies."
                 if moved
                 else "Nothing to move."

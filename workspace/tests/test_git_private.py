@@ -4,11 +4,10 @@ committed config.toml never decides which command runs."""
 import json
 import os
 import subprocess
-import sys
 
 import pytest
 
-from orch import adapters, config, harness, runs, tickets
+from orch import adapters, config, harness, runs
 from orch.errors import Refused
 
 
@@ -45,6 +44,7 @@ def make_files(proj, run):
 
 # ---- 1. ignored by default
 
+
 def test_personal_files_are_ignored_in_a_git_repo(proj, run):
     repo(proj)
     harness.protect_local(proj)
@@ -72,6 +72,7 @@ def test_fixed_patterns_only(proj):
 
 
 # ---- 2. warning for tracked files
+
 
 def test_no_warning_when_nothing_is_tracked(proj):
     repo(proj)
@@ -112,11 +113,17 @@ def test_move_to_private_untracks_and_keeps_files_and_commits_nothing(proj, run)
     code, out, _ = run("private", "move")
     assert code == 0 and "Moved 5 files" in out
     assert harness.tracked_private(proj) == []
-    assert (proj / ".orch" / "config.toml").is_file() and (proj / ".orch" / "tickets" / "DM1-1.json").is_file()
+    assert (proj / ".orch" / "config.toml").is_file() and (
+        proj / ".orch" / "tickets" / "DM1-1.json"
+    ).is_file()
     assert git(proj, "rev-parse", "HEAD").stdout == head  # nothing committed
-    assert git(proj, "ls-files", ".orch/tickets", ".orch/config.toml", ".orch/addons.json").stdout.strip() == ""
+    assert (
+        git(proj, "ls-files", ".orch/tickets", ".orch/config.toml", ".orch/addons.json").stdout.strip() == ""
+    )
     assert "D  .orch/config.toml" in git(proj, "status", "--short").stdout  # staged removal for the person
-    assert git(proj, "status", "--short", "--", ".orch/tickets").stdout.strip().count("??") == 0  # now ignored
+    assert (
+        git(proj, "status", "--short", "--", ".orch/tickets").stdout.strip().count("??") == 0
+    )  # now ignored
 
 
 def test_move_is_for_a_person_not_an_agent(proj, run, monkeypatch):
@@ -252,7 +259,11 @@ def test_the_line_says_what_waits(proj, run):
     assert "Allow on this machine" in run("status")[1]
 
 
-TWO = EVIL + '\n[agents.other]\nadapter = "generic"\ncommand = "touch OTHER {prompt}"\ninteractive = "other --live"\n'
+TWO = (
+    EVIL
+    + '\n[agents.other]\nadapter = "generic"\ncommand = "touch OTHER {prompt}"\n'
+    + 'interactive = "other --live"\n'
+)
 
 
 def test_no_blanket_approval_one_yes_approves_one_entry(proj, run):
@@ -284,7 +295,11 @@ def test_the_listing_covers_every_hashed_field(proj):
     write_config(proj, EVIL + 'interactive = "x --live"\nprompt = "stdin"\n')
     p = config.pending_agents(proj)[0]
     assert (p["adapter"], p["command"], p["interactive"], p["prompt"]) == (
-        "generic", "touch PWNED {prompt}", "x --live", "stdin")
+        "generic",
+        "touch PWNED {prompt}",
+        "x --live",
+        "stdin",
+    )
 
 
 def test_an_entry_too_long_to_show_cannot_be_allowed(proj):
@@ -302,8 +317,10 @@ def test_unsafe_characters_make_an_entry_not_approvable(proj, run, field, bad):
     import json as _json
 
     cmd = _json.dumps("touch X" + bad + " {prompt}")
-    extra = {"command": "", "interactive": f"interactive = {cmd}\n", "prompt": f'prompt = {cmd}\n'}[field]
-    base = '[agents.mine]\nadapter = "generic"\n' + (f"command = {cmd}\n" if field == "command" else 'command = "ok {prompt}"\n')
+    extra = {"command": "", "interactive": f"interactive = {cmd}\n", "prompt": f"prompt = {cmd}\n"}[field]
+    base = '[agents.mine]\nadapter = "generic"\n' + (
+        f"command = {cmd}\n" if field == "command" else 'command = "ok {prompt}"\n'
+    )
     write_config(proj, base + (extra if field != "command" else ""))
     p = config.pending_agents(proj)
     assert len(p) == 1 and p[0]["showable"] is False
