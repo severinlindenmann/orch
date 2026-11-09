@@ -342,3 +342,19 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
  .fx-more,.fx-help-btn,.fx-exit{order:3}
  .fx-exit .opt{display:none}
 }
+/* Running now (every run Focus started) and the Done search on the ticket list */
+.fx-procs{margin-top:24px}
+.fx-procs-h{align-items:center;margin-bottom:12px;gap:12px}
+.fx-procs-h h2{font-size:15px;margin:0}
+.fx-proc{padding:12px 16px}
+.fx-proc+.fx-proc{border-top:1px solid var(--border)}
+.fx-proc .row{align-items:center;gap:12px;flex-wrap:wrap}
+.fx-proc details{margin-top:4px}
+.fx-proc summary{cursor:pointer;color:var(--text-muted);font-size:12px}
+.fx-pick .fx-proc a{display:inline;min-height:0;padding:0;border:0;background:none;text-decoration:underline}
+.fx-pick .fx-proc a+a{border-top:0}
+.fx-confirm .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.fx-group-done .row{align-items:center;gap:12px;margin-bottom:12px}
+.fx-group-done .row h2{margin:0}
+.fx-group-done input[type=search]{max-width:260px}
+.fx-none{padding:12px 16px;margin:0}
