@@ -25,3 +25,10 @@ test('picker counts and done timestamps use real data', () => {
   assert.equal(H.completedAt({}),null);
   assert.equal(H.completedAt({history:[{text:'Status review -> done', at:'2026-11-08T09:12:00Z'}]}),'2026-11-08T09:12:00Z');
 });
+test('the hold reason is plain text while the run runs and gone when absent', () => {
+  const why = "Waiting: the agent's window is scrolled up.";
+  assert.equal(H.holdText({run:{running:true}, hold:why}), why);
+  assert.equal(H.holdText({run:{running:true}, hold:''}), '');
+  assert.equal(H.holdText({run:{running:true}}), '');
+  assert.equal(H.holdText({run:{running:false}, hold:why}), '');
+});

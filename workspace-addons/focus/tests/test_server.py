@@ -427,3 +427,21 @@ def test_run_send_argv_parses_on_every_python(tmp_path):
     x.add_argument("text", nargs="?")
     ns = top.parse_args(argv)
     assert (ns.ticket, ns.text) == (TID, "can you mark all tickets as done")
+
+
+def test_view_carries_the_hold_reason_only_while_the_run_runs(server, ws, fake_orch):
+    """fb18 (hold-why): the core's one-line reason shows as `hold`; it is empty without one or without a run."""
+    import json
+
+    tracker = server.RequestHandlerClass.keywords["tracker"]
+    status = fake_orch.parent / "status.json"
+    why = "Waiting: clear the text in the agent's window."
+    status.write_text(json.dumps({"running": True, "state": "alive", "claim": {"mode": "live", "run": "r_abcd1234"}, "hold": why + "\n<b>x</b>"}))
+    tracker.status_cache.clear()
+    assert tracker.view(TID)["hold"] == why + " <b>x</b>"
+    status.write_text(json.dumps({"running": True, "state": "alive", "claim": {"mode": "live", "run": "r_abcd1234"}}))
+    tracker.status_cache.clear()
+    assert tracker.view(TID)["hold"] == ""
+    status.write_text(json.dumps({"running": False, "hold": why}))
+    tracker.status_cache.clear()
+    assert tracker.view(TID)["hold"] == ""
