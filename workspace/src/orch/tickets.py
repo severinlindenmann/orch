@@ -690,6 +690,7 @@ def ask_for_changes(
     via: str | None = None,
     phone: str | None = None,
     pid: str | None = None,
+    proven: bool = False,
 ) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
@@ -721,7 +722,9 @@ def ask_for_changes(
     if load(root, tid)["status"] != "review":
         raise Refused("This ticket is not waiting for your review.")
     # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
-    item = runs.pending_add(root, tid, by, "message", note, via or _env_via(), pid, phone=phone)
+    item = runs.pending_add(
+        root, tid, by, "message", note, via or _env_via(), pid, phone=phone, proven=proven
+    )
     try:
         return apply_op(root, tid, op)[0]
     except BaseException:

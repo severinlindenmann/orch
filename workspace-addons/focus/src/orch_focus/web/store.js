@@ -37,7 +37,23 @@
   const toast = (text, kind) => (window.orch ? window.orch.toast(text, kind) : null);
   const proof = window.FocusProof.create({h, ic, P, TID, toast});
 
+  // Embedded under the dashboard (P = "/addon/focus"): a person's click is sent to the dashboard's own act
+  // endpoint, which holds the page session and mints the proof (H1). Focus never trusts forwarded headers.
+  const EMBED_HUMAN = new Set(['answer', 'ticket.done', 'run.send']);
+  async function actEmbedded(op, args) {
+    const dop = op === 'ticket.done' ? 'ticket.patch' : op;
+    const dargs = op === 'ticket.done' ? {ticket: args.ticket, data: {status: 'done'}, if_revision: args.if_revision} : args;
+    let r;
+    try {
+      r = await fetch('/api/act', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op: dop, args: dargs})});
+    } catch (e) { return {ok: false, status: 0, message: 'Could not reach the dashboard.'}; }
+    if (!r.ok) return {ok: false, status: r.status, message: (await r.text()).slice(0, 300)};
+    try { await store.poll(); } catch (e) { /* the next poll shows it */ }
+    return {ok: true, status: r.status, result: null, note: null};
+  }
+
   async function act(op, args) {
+    if (P && EMBED_HUMAN.has(op)) return actEmbedded(op, args);
     let r;
     try {
       r = await fetch(P + '/api/act', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op, args})});

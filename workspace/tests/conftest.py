@@ -219,3 +219,24 @@ def rel(proj, run):
     srv = make_relay()
     yield srv
     srv.stop()
+
+
+REAL_PROOF_MODULES = ("test_human_proof_ops", "test_humanproof")
+
+
+@pytest.fixture(autouse=True)
+def _legacy_trust(request, monkeypatch):
+    """TEST-ONLY (slice 1.0a-2): older CLI tests act as `--by human:` without a proof. For them (a Python-level
+    patch, no env var, no config key; production has no such path) the human gate trusts --by as before, and
+    the pending read-back is the old by/via allowlist. Modules that test the real proof opt out by name."""
+    if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
+        return
+    from orch import humanproof, tickets
+
+    def legacy(root, args, op, target, **kw):
+        if tickets.agent_tool():
+            return "agent:" + str(tickets.agent_tool())
+        return tickets.current_actor(getattr(args, "by", None))
+
+    monkeypatch.setattr(humanproof, "person_by", legacy)
+    monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)

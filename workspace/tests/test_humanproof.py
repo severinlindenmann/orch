@@ -37,8 +37,8 @@ def enforce(monkeypatch):
     monkeypatch.setattr(hp, "ENFORCE_PENDING_MAC", True)
 
 
-def test_switch_is_off_by_default():
-    assert hp.ENFORCE_PENDING_MAC is False
+def test_switch_is_on():
+    assert hp.ENFORCE_PENDING_MAC is True
 
 
 # ---------------------------------------------------------------- guarded home
@@ -157,7 +157,8 @@ def _file(tws):
     return runs.pending_path(tws, TID)
 
 
-def test_off_keeps_old_behaviour(tws):
+def test_off_keeps_old_behaviour(tws, monkeypatch):
+    monkeypatch.setattr(hp, "ENFORCE_PENDING_MAC", False)
     runs.pending_add(tws, TID, "human:pat", "answer", "yes")
     assert len(runs.human_waiting(tws, TID)) == 1
 

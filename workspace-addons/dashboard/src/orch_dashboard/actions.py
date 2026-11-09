@@ -21,6 +21,16 @@ from .look import LOOK_OPS
 from .look import forget as look_forget
 from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
+try:
+    from orch.pageproof import SELF, argv0, run_with_proof
+except ImportError:  # standalone use without orch: nothing runs
+    SELF = "orch:self"
+
+    def argv0(orch_bin):
+        return [str(orch_bin)]
+
+    run_with_proof = None
+
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
@@ -95,6 +105,28 @@ class BadRequest(Exception):
 
 class Unavailable(Exception):
     """No orch command to run (HTTP 503)."""
+
+
+class NeedsPerson(Exception):
+    """A human-only click without a proof session (HTTP 403): the page is watch-only here."""
+
+
+# page op -> (core op, target of the proof) for the clicks that are a person's (H1, contracts/human-proof.md).
+# `ticket.patch` is a verdict only when it sets Done ("Looks good"); the core checks the rest.
+PROOF_OPS = {
+    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
+    "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
+    "chat.say": ("chat.send", lambda a: "general"),
+    "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by the embedded Focus page
+}
+
+
+def proof_for(op, args):
+    """(core op, target) when this click needs a proof, else None."""
+    if op == "ticket.patch" and isinstance(args.get("data"), dict) and args["data"].get("status") == "done":
+        return "ticket.verdict", args.get("ticket")
+    hit = PROOF_OPS.get(op)
+    return (hit[0], hit[1](args)) if hit else None
 
 
 def _tid(v) -> str:
@@ -362,6 +394,11 @@ def _run_start(a):
     return ["run", "start", _tid(a.get("ticket"))], flags, []
 
 
+def _run_send(a):
+    _only(a, ("ticket", "text"))
+    return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
+
+
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _tid(a.get("ticket"))], [], []
@@ -497,6 +534,7 @@ OPS = {
     "check.set": _check_set,
     "run.start": _run_start,
     "run.stop": _run_stop,
+    "run.send": _run_send,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,
@@ -611,7 +649,7 @@ def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, byte
     for hint, raw in files:
         try:
             r = subprocess.run(
-                [orch_bin, "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
+                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
                 check=False,
                 cwd=root,
                 capture_output=True,
@@ -636,12 +674,16 @@ def human_env(root: Path, orch_bin: str) -> dict:
     except ImportError:
         raise Unavailable("The orch tool is not available here.") from None
     env = _without_agent(os.environ)
-    return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"}
+    from orch.pageproof import child_env
+
+    return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
 
 
-def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
-    """Run one op. Returns (http status, plain text, parsed json or None)."""
+def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
+    """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
+    proof for a request that carries a page session; None = watch-only (the click is refused)."""
     argv = build_argv(op, args)
+    need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
     files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
@@ -660,17 +702,24 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
+    if need and mint is None:
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
     try:
-        r = subprocess.run(
-            [orch_bin, *argv],
-            check=False,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=75 if op == "config.agent.test" else 60,
-            stdin=subprocess.DEVNULL,
-            env=human_env(root, orch_bin),
-        )
+        if need:
+            r = run_with_proof(
+                argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
+            )
+        else:
+            r = subprocess.run(
+                [*argv0(orch_bin), *argv],
+                check=False,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=75 if op == "config.agent.test" else 60,
+                stdin=subprocess.DEVNULL,
+                env=human_env(root, orch_bin),
+            )
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None
     except OSError:
@@ -723,7 +772,9 @@ def _chat_send_ws(a):
     if retry is not None and (not isinstance(retry, str) or not re.fullmatch(r"m_[a-z0-9]{16}", retry)):
         raise BadRequest("That is not a message.")
     client_id = a.get("client_id")
-    if client_id is not None and (not isinstance(client_id, str) or not re.fullmatch(r"m_[a-z0-9]{16}", client_id)):
+    if client_id is not None and (
+        not isinstance(client_id, str) or not re.fullmatch(r"m_[a-z0-9]{16}", client_id)
+    ):
         raise BadRequest("That is not a message.")
     flags = (["--retry", retry] if retry else []) + (["--client-id", client_id] if client_id else [])
     return ["chat", "send", ws], flags, [text]

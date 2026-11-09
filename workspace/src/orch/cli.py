@@ -26,6 +26,7 @@ from orch import (
     cli_secret,
     cli_status,
     fields,
+    humanproof,
     mobile_mode,
     net,
     refs,
@@ -336,6 +337,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
+    common.add_argument(
+        "--proof-stdin", action="store_true", help=argparse.SUPPRESS
+    )  # human proof (H1): first line of stdin
 
     p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
     p.add_argument("--version", action="version", version=f"orch {__version__}")
@@ -589,6 +593,18 @@ def _init_guard(cwd: Path) -> None:
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 
+def _patch_is_verdict(root: Path, args) -> bool:
+    """A `ticket patch` that moves a ticket in Review to Done as a person is the verdict "Looks good"."""
+    if (getattr(args, "by", None) or "").startswith("agent:") or tickets.agent_tool():
+        return False
+    try:
+        if json.loads(args.data).get("status") != "done":
+            return False
+        return tickets.load(root, args.id)["status"] == "review"
+    except (ValueError, AttributeError, KeyError, Refused):
+        return False
+
+
 def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
@@ -619,6 +635,9 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
     elif cmd == "update":
+        if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
+            if not humanproof.person_by(root, args, "update", "orch").startswith("human:"):
+                raise Refused(humanproof.HANDOFF)
         report, notes = [], []
         done = addons.update(
             root,
@@ -747,10 +766,14 @@ def run(args: argparse.Namespace) -> None:
         rel = d.relative_to(root).as_posix()
         _out(args, {"path": rel}, rel)
     elif cmd == "ticket" and sub == "changes":
-        t = tickets.ask_for_changes(root, args.id, args.text, by())
+        who = humanproof.person_by(root, args, "ticket.verdict", args.id)
+        t = tickets.ask_for_changes(root, args.id, args.text, who, proven=True)
         _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
-        t = tickets.patch(root, args.id, args.if_revision, args.data, by())
+        who = by()
+        if _patch_is_verdict(root, args):  # Looks good: Review -> Done by a person needs the person's proof
+            who = humanproof.person_by(root, args, "ticket.verdict", args.id)
+        t = tickets.patch(root, args.id, args.if_revision, args.data, who)
         warn = _child_warning(root, t)
         _out(
             args,
@@ -838,16 +861,15 @@ def run(args: argparse.Namespace) -> None:
             "is now waiting for an answer.",
         )
     elif cmd == "answer":
-        who = by()
-        if tickets.agent_tool():  # an agent counts as an agent whatever --by says (as for finishing)
-            who = "agent:" + str(tickets.agent_tool())
+        # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says
+        who = humanproof.person_by(root, args, "ticket.answer", f"{args.id}:{args.question}")
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
-            runs_live.pass_answer(root, t["id"], q, who)
+            runs_live.pass_answer(root, t["id"], q, who, proven=who.startswith("human:"))
         note = _addon_note(root, q)
         _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
     elif cmd == "ref":
@@ -970,6 +992,7 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
     argv = sys.argv[1:] if argv is None else list(argv)
+    humanproof.CURRENT_ARGV = list(argv)  # what a hand-off to the dashboard will run (H1)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
     want_json = "--json" in argv

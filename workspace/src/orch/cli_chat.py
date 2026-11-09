@@ -53,7 +53,10 @@ def dispatch(args, root: Path) -> bool:
             raise Refused(
                 "Only a person writes as themselves in Chat. Use: orch relay send ... --ticket <chat>."
             )
-        r = chat.say(root, args.text, getattr(args, "by", None), new=args.new)
+        from orch import humanproof
+
+        who = humanproof.person_by(root, args, "chat.send", "general")
+        r = chat.say(root, args.text, who, new=args.new, proven=True)
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
         )

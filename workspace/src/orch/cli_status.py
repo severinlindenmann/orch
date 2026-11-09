@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import look, services, term
+from orch import humanproof, look, services, term
 from orch.errors import Refused
 
 
@@ -76,11 +76,13 @@ def _services_cmd(args, root: Path) -> None:
             print(f"Started in {root.name}:")
             print("\n".join(_service_line(r) for r in rows))
             print("Stop: orch stop")
-        url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
+        row = next((r for r in rows if services.local_url(r.get("url"))), None)
+        url = services.local_url(row.get("url")) if row else None
         if url and not args.no_open and not args.json and term.is_terminal(sys.stdout):
             import webbrowser
 
-            webbrowser.open(url)
+            # a person opens the page: the launch token (URL fragment) lets it start a proof session (H1)
+            webbrowser.open(humanproof.launch_url(root, row.get("addon"), url))
         bad = [r for r in rows if r.get("error")]
         if bad:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")

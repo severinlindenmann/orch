@@ -88,8 +88,8 @@ _PORTS: dict[tuple[str, str], tuple[float, int | None]] = {}
 class Handler(BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
-    def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, **kw):
-        self.root, self.orch_bin, self.puller = root, orch_bin, puller
+    def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, session=None, **kw):
+        self.root, self.orch_bin, self.puller, self.session = root, orch_bin, puller, session
         self.nonce = os.environ.get("ORCH_DASHBOARD_NONCE", "")
         super().__init__(*a, **kw)
 
@@ -206,6 +206,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found", "text/plain")
             m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
             return self._send(200, json.dumps({"pid": os.getpid(), "mac": m}).encode(), "application/json")
+        if path == "/api/handoffs":  # pending requests from a terminal; same-origin only (checked above)
+            from . import handoff
+
+            return self._send(200, json.dumps(handoff.listing(self.root)).encode(), "application/json")
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":
@@ -229,8 +233,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
 
-            d = (load_chat_contacts(self.root, self.orch_bin) if path.endswith("/contacts")
-                 else load_chat_thread(self.root, self.orch_bin, path.rsplit("/", 1)[1]))
+            d = (
+                load_chat_contacts(self.root, self.orch_bin)
+                if path.endswith("/contacts")
+                else load_chat_thread(self.root, self.orch_bin, path.rsplit("/", 1)[1])
+            )
             if d is None:
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(d).encode(), "application/json")
@@ -310,6 +317,8 @@ class Handler(BaseHTTPRequestHandler):
             "switcher.js",
             "blocks.js",
             "helpers.js",
+            "session.js",
+            "handoff.js",
             "style.css",
             "logo.svg",
             "favicon.svg",
@@ -367,8 +376,38 @@ class Handler(BaseHTTPRequestHandler):
             return "This request came from another website and was refused."
         return check_request("POST", self.headers, self.server.server_address[1], api=True)
 
+    def _session_post(self):
+        """POST /session: the page hands over the one-time launch token it got in the URL fragment; the server
+        spends it and sets the session cookie (H1). Same fence as an action; loopback Host, no proxy headers."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        from orch.pageproof import COOKIE, forwarded, host_ok
+
+        if (
+            self.session is None
+            or forwarded(self.headers)
+            or not host_ok(self.headers, self.server.server_address[1])
+        ):
+            return self._send(403, b"forbidden", "text/plain")
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
+        except (ValueError, AttributeError, OSError):
+            token = None
+        cookie = self.session.launch(token)
+        if not cookie:
+            return self._send(
+                403, b"This link was already used. Open the dashboard again from orch.", "text/plain"
+            )
+        self._send(
+            204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"}
+        )
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
+        if path == "/session":
+            return self._session_post()
         px = PROXY.fullmatch(path)
         if path != "/api/act" and not (px and px.group(2) == "/api/act"):
             return self._refuse()
@@ -399,7 +438,35 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
         try:
-            code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), body.get("args", {}))
+            mint = None
+            if self.session is not None and self.session.can_mint(
+                self.headers, self.server.server_address[1]
+            ):
+                mint = self.session.mint
+            if body.get("op") in ("handoff.confirm", "handoff.dismiss"):
+                from . import handoff
+
+                hid = (body.get("args") or {}).get("id")
+                if body["op"] == "handoff.dismiss":
+                    handoff.dismiss(self.root, hid)
+                    return self._send(200, b"{}", "application/json")
+                code, text = handoff.confirm(
+                    self.root, self.orch_bin, mint, hid, actions.human_env(self.root, self.orch_bin)
+                )
+                if code != 200:
+                    return self._send(code, text.encode(), "text/plain; charset=utf-8")
+                return self._send(
+                    200,
+                    json.dumps(
+                        load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+                    ).encode(),
+                    "application/json",
+                )
+            code, text, extra = actions.run_op(
+                self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint
+            )
+        except actions.NeedsPerson as e:
+            return self._send(403, str(e).encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
         except actions.Unavailable as e:
@@ -446,9 +513,16 @@ class _Server(ThreadingHTTPServer):
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
-    orch_bin = orch_bin if orch_bin is not None else os.environ.get("ORCH_BIN") or None
+    # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
+    # test harness passes a fake path. None = standalone, reads files only.
+    session = None
+    if orch_bin == actions.SELF:
+        from orch.pageproof import PageSession
+
+        session = PageSession(root, "dashboard")
     srv = _Server(
-        ("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin))
+        ("127.0.0.1", port),
+        partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=session),
     )
     srv.revisions = Revisions(root)
     return srv

@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from orch import adapters, cli_screen, net, runs, runs_live, term, tickets
+from orch import adapters, cli_screen, humanproof, net, runs, runs_live, term, tickets
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -278,6 +278,10 @@ def _done(args, root: Path, tid: str | None) -> None:
 
 
 def _send(args, root: Path, tid: str, by: str) -> None:
+    proven = False
+    if getattr(args, "proof_stdin", False) or not (tickets.agent_tool() or by.startswith("agent:")):
+        by = humanproof.person_by(root, args, "run.human_input", tid)  # a person: proof or hand-off (H1)
+        proven = by.startswith("human:")
     if args.file:
         p = Path(args.file)
         if p.stat().st_size > 64_000:
@@ -287,7 +291,7 @@ def _send(args, root: Path, tid: str, by: str) -> None:
         text = args.text
     if not text:
         raise Refused('Say what to send: orch run send <ticket> "text"  (or --file <path>)')
-    res = runs_live.send(root, tid, by, text, args.kind)
+    res = runs_live.send(root, tid, by, text, args.kind, proven=proven)
     _out(args, res, runs_live.send_text(res, tid))
 
 

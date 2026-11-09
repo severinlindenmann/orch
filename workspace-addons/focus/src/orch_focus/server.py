@@ -47,7 +47,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -493,8 +493,8 @@ class Tracker:
 class Handler(BaseHTTPRequestHandler):
     timeout = 10
 
-    def __init__(self, *a, root: Path, orch_bin: str | None, tracker: Tracker, **kw):
-        self.root, self.orch_bin, self.tracker = root, orch_bin, tracker
+    def __init__(self, *a, root: Path, orch_bin: str | None, tracker: Tracker, session=None, **kw):
+        self.root, self.orch_bin, self.tracker, self.session = root, orch_bin, tracker, session
         self.nonce = os.environ.get("ORCH_FOCUS_NONCE", "")
         super().__init__(*a, **kw)
 
@@ -643,8 +643,31 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = _refuse
 
+    def _session_post(self):
+        """POST /session: the page hands over the one-time launch token from its URL fragment; the server spends
+        it and sets the session cookie (H1). Loopback Host, no proxy headers, same fence as an action."""
+        why = self._fence("POST", True)
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        from orch.pageproof import COOKIE, forwarded, host_ok
+
+        if self.session is None or forwarded(self.headers) or not host_ok(self.headers, self.server.server_address[1]):
+            return self._send(403, b"forbidden", "text/plain")
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
+        except (ValueError, AttributeError, OSError):
+            token = None
+        cookie = self.session.launch(token)
+        if not cookie:
+            return self._send(403, b"This link was already used. Open Focus again from orch.", "text/plain")
+        self._send(204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"})
+
     def do_POST(self):
-        if self.path.split("?", 1)[0] != "/api/act":
+        path = self.path.split("?", 1)[0]
+        if path == "/session":
+            return self._session_post()
+        if path != "/api/act":
             return self._refuse()
         why = self._fence("POST", True)
         if why:
@@ -666,7 +689,12 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("op") in ("proc.stop", "proc.stop_all"):
             return self._proc_op(body["op"], args)
         try:
-            code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args)
+            mint = None
+            if self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1]):
+                mint = self.session.mint
+            code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args, mint=mint)
+        except actions.NeedsPerson as e:
+            return self._send(403, str(e).encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
         except actions.Unavailable as e:
@@ -725,9 +753,15 @@ class _Server(ThreadingHTTPServer):
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
-    orch_bin = orch_bin if orch_bin is not None else os.environ.get("ORCH_BIN") or None
+    # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
+    # test harness passes a fake path. None = no orch.
+    session = None
+    if orch_bin == actions.SELF:
+        from orch.pageproof import PageSession
+
+        session = PageSession(root, "focus")
     tracker = Tracker(root, orch_bin)
-    srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker))
+    srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=session))
     srv.revisions = Revisions(root)
     srv.ticker_stop = stop = threading.Event()
 

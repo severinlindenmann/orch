@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from . import service
+from .actions import SELF
 from .data import find_workspace
 from .server import DEFAULT_PORT, make_server
 from .snapshot import publish_snapshot, write_snapshot
+
+
+def _orch_bin() -> str | None:
+    """This Python's own orch (`-I -m orch`), never ORCH_BIN or PATH (H1). Without an importable orch (a
+    stand-alone or test install) the old ORCH_BIN is all there is, and there is no key to protect either."""
+    import importlib.util
+
+    return SELF if importlib.util.find_spec("orch") else os.environ.get("ORCH_BIN") or None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,11 +63,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     port = getattr(args, "port", DEFAULT_PORT)
     try:
-        srv = make_server(root, port)
+        srv = make_server(root, port, orch_bin=_orch_bin())
     except OSError:
         if not getattr(args, "auto_port", False):
             raise
-        srv = make_server(root, 0)  # another workspace has 8420
+        srv = make_server(root, 0, orch_bin=_orch_bin())  # another workspace has 8420
     if getattr(args, "ready_file", None):
         service.write_ready(Path(args.ready_file), srv.server_address[1])
     print(f"orch dashboard for {root.name}: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C to stop)")

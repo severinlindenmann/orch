@@ -28,9 +28,9 @@ from pathlib import Path
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
-# the old by/via allowlist; ON = only with a valid pending MAC. Slice 1.0a-2 turns it on once every human path
-# writes the MAC. A module constant on purpose: not an env var, not a workspace file.
-ENFORCE_PENDING_MAC = False
+# the old by/via allowlist; ON (since 1.0a-2) = only with a valid pending MAC.
+# A module constant on purpose: not an env var, not a workspace file.
+ENFORCE_PENDING_MAC = True
 
 HP_MAX_LIFE = 60
 NOT_TOGETHER = "Refused: this workspace and this orch home don't belong together."
@@ -390,9 +390,12 @@ def verify_and_consume(root: Path, proof, op: str, target: str, by_flag: str | N
     msg = "Do this in the dashboard on this computer."
     try:
         d = key_dir(root, create=False)
-        key = human_key(root, create=False)
     except (Refused, OSError):
         raise Refused(msg) from None
+    try:
+        key = human_key(root, create=False).hex()
+    except (Refused, OSError):
+        key = None  # a dev demo workspace has only the dev key; check_proof refuses any non-dev proof then
     now = int(time.time())
     store = d / "proofs-used.json"
     with _key_lock(d):
@@ -405,13 +408,15 @@ def verify_and_consume(root: Path, proof, op: str, target: str, by_flag: str | N
         used = {n: e for n, e in used.items() if isinstance(e, int) and e > now}
         res = check_proof(
             proof,
-            key_hex=key.hex(),
+            key_hex=key,
             op=op,
             target=target,
             now=now,
             by_flag=by_flag,
             agent_env=bool(tickets.agent_tool()),
             used_nonces=used,
+            dev_record=dev_workspace(root),
+            dev_key=_dev_key_hex(d),
         )
         if res != "ok":
             raise Refused(msg)
@@ -573,3 +578,259 @@ def wontdo_is_human(key: bytes, workspace: str, item: dict, mac, relay_authentic
 
 def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:
     return bool(install_dev and creating and not has_human_key)
+
+
+# ------------------------------------------------------------------------------------------- dev test human
+
+
+def _dev_path(root: Path) -> Path:
+    return guarded_home(root) / "dev-workspaces.json"
+
+
+def dev_workspace(root: Path) -> bool:
+    """Is this workspace a dev demo workspace? ONLY the record in the guarded orch home counts (written by the
+    dev installer when it creates the workspace); no workspace file, state dir file or environment is read."""
+    try:
+        data = _read_json(_dev_path(root), {})
+    except (Refused, OSError):
+        return False
+    ws = data.get("workspaces") if isinstance(data, dict) else None
+    return isinstance(ws, dict) and os.path.realpath(root) in ws and install_kind() in ("dev", "test")
+
+
+def _dev_key_hex(d: Path) -> str | None:
+    try:
+        _check_file(d / "dev-human.key")
+        return (d / "dev-human.key").read_text(encoding="utf-8").strip()
+    except (OSError, Refused):
+        return None
+
+
+def dev_mark(root: Path) -> None:
+    """Called only by the dev installer when it CREATES a demo workspace (reference dev_can_mark): record the
+    workspace as dev and make its dev key. A workspace that already has a human.key never becomes dev."""
+    d = key_dir(root)
+    if not dev_can_mark(install_kind() in ("dev", "test"), True, (d / "human.key").exists()):
+        raise Refused("This workspace cannot be a dev workspace.")
+    path = _dev_path(root)
+    with _key_lock(d):
+        data = _read_json(path, {"workspaces": {}})
+        data.setdefault("workspaces", {})[os.path.realpath(root)] = {"at": int(time.time())}
+        _write_private(path, json.dumps(data, indent=2, sort_keys=True))
+        if not (d / "dev-human.key").exists():
+            _write_private(d / "dev-human.key", secrets.token_hex(32) + "\n")
+
+
+def mint_dev(root: Path, op: str, target: str, life: int = 30) -> str:
+    """The scripted test human's proof (e2e only). Refused unless this is a dev workspace."""
+    if not dev_workspace(root):
+        raise Refused("This is not a dev workspace.")
+    key = _dev_key_hex(key_dir(root, create=False))
+    if not key:
+        raise Refused("This is not a dev workspace.")
+    p = new_payload(op, target, "human:test-human", life=life)
+    p["dev"] = True
+    return mint(bytes.fromhex(key), p)
+
+
+# ------------------------------------------------------------------------------------------- CLI gate
+
+HANDOFF = "Do this in the dashboard on this computer."
+HANDOFF_PER_OP = 3
+
+
+def read_proof_line() -> str:
+    """The proof is the FIRST line of stdin (--proof-stdin). Never argv, never env."""
+    try:
+        return sys.stdin.readline().strip()
+    except (OSError, ValueError):
+        return ""
+
+
+# The command line a hand-off will run once the person clicks (set by cli.main; never contains --by / --proof-stdin).
+CURRENT_ARGV: list[str] | None = None
+# What a page may run for a hand-off: the command words an op may start with. The proof binds op and target too.
+HANDOFF_HEADS = {
+    "ticket.answer": (("answer",),),
+    "run.human_input": (("run", "send"),),
+    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch")),
+    "relay.allow": (("relay", "allow"),),
+    "update": (("update",),),
+    "chat.send": (("chat", "say"),),
+}
+
+
+def _clean_argv(argv) -> list[str] | None:
+    out, skip = [], False
+    for a in argv or []:
+        if skip:
+            skip = False
+            continue
+        if a == "--by":
+            skip = True
+            continue
+        if a.startswith("--by=") or a == "--proof-stdin":
+            continue
+        out.append(a)
+    return out if all(isinstance(x, str) and len(x) <= 4000 for x in out) and len(out) <= 20 else None
+
+
+def request_handoff(root: Path, op: str, target: str, label: str = "", value: str = "", argv=None) -> bool:
+    """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
+    by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
+    The item holds the command to run once the person clicks. Best effort: a failure here only means the item
+    is missing. Returns True when queued."""
+    try:
+        d = key_dir(root)
+        path = d / "handoffs.json"
+        now = int(time.time())
+        with _key_lock(d):
+            items = [i for i in _read_json(path, []) if isinstance(i, dict) and i.get("exp", 0) > now]
+            if any(i.get("op") == op and i.get("target") == target and i.get("argv") == argv for i in items):
+                return True
+            if sum(1 for i in items if i.get("op") == op) >= HANDOFF_PER_OP:
+                return False
+            items.append(
+                {
+                    "id": _b64u(secrets.token_bytes(9)),
+                    "op": op,
+                    "target": target,
+                    "label": label[:120],
+                    "value": value[:300],
+                    "argv": argv,
+                    "at": now,
+                    "exp": now + 600,
+                }
+            )
+            _write_private(path, json.dumps(items))
+        return True
+    except (Refused, OSError, ValueError):
+        return False
+
+
+def handoffs(root: Path) -> list[dict]:
+    """The pending command requests for the page to show (core-written, read by the page servers)."""
+    try:
+        d = key_dir(root, create=False)
+        now = int(time.time())
+        items = _read_json(d / "handoffs.json", [])
+        return [i for i in items if isinstance(i, dict) and i.get("exp", 0) > now]
+    except (Refused, OSError, ValueError):
+        return []
+
+
+def handoff_take(root: Path, hid: str) -> dict | None:
+    """The item with this id, removed from the list (single click, single run). The command must start with
+    the words its op allows, else None."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            items = [i for i in _read_json(d / "handoffs.json", []) if isinstance(i, dict)]
+            hit = next((i for i in items if i.get("id") == hid and i.get("exp", 0) > time.time()), None)
+            if hit is None:
+                return None
+            _write_private(d / "handoffs.json", json.dumps([i for i in items if i is not hit]))
+    except (Refused, OSError, ValueError):
+        return None
+    argv = hit.get("argv")
+    heads = HANDOFF_HEADS.get(hit.get("op"), ())
+    if not isinstance(argv, list) or not any(argv[: len(h)] == list(h) for h in heads):
+        return None
+    return hit
+
+
+def handoff_drop(root: Path, hid: str) -> None:
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            items = [i for i in _read_json(d / "handoffs.json", []) if isinstance(i, dict) and i.get("id") != hid]
+            _write_private(d / "handoffs.json", json.dumps(items))
+    except (Refused, OSError, ValueError):
+        pass
+
+
+def _dashboard_note(root: Path) -> str:
+    """After a hand-off: open the dashboard on a desktop (fresh launch token in the URL fragment, never printed)
+    and say in plain words what to click. No token is ever returned or printed."""
+    url = None
+    try:
+        from orch import services
+
+        row = next((r for r in services.workspace_rows(root) if r.get("addon") == "dashboard"), None)
+        url = services.local_url(row.get("url")) if row else None
+    except Exception:  # noqa: BLE001 - the note is best effort
+        url = None
+    if url and sys.stdout.isatty():
+        import webbrowser
+
+        with contextlib.suppress(Exception):
+            webbrowser.open(launch_url(root, "dashboard", url))
+        return f"Opened the dashboard ({url}): press Continue to send this to the agent."
+    if url:
+        return f"Waiting for your click: open the dashboard ({url}) and press Continue to send this to the agent."
+    return "Waiting for your click: open the dashboard on this computer and press Continue."
+
+
+def person_by(root: Path, args, op: str, target: str, *, label: str = "", value: str = "") -> str:
+    """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
+    comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
+    its own, unprivileged, identity. Anything claiming to be a person without a proof is refused and handed
+    off to the page."""
+    if getattr(args, "proof_stdin", False):
+        return verify_and_consume(root, read_proof_line(), op, target, getattr(args, "by", None))
+    tool = None
+    from orch import tickets
+
+    tool = tickets.agent_tool()
+    if tool:
+        return "agent:" + str(tool)
+    explicit = getattr(args, "by", None)
+    if explicit and explicit.startswith("agent:"):
+        return tickets.current_actor(explicit)
+    request_handoff(root, op, target, label, value, _clean_argv(CURRENT_ARGV))
+    raise Refused(_dashboard_note(root))
+
+
+# ------------------------------------------------------------------------------------------- launch token
+
+LAUNCH_LIFE = 120
+
+
+def write_launch_token(root: Path, server: str) -> str | None:
+    """The one-time token that bootstraps a page session: <key folder>/launch-<server>.token (0600, once,
+    120 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
+    printed or logged."""
+    if server not in ("focus", "dashboard"):
+        return None
+    try:
+        d = key_dir(root)
+        token = secrets.token_urlsafe(24)
+        _write_private(d / f"launch-{server}.token", f"{token}\n{int(time.time()) + LAUNCH_LIFE}\n")
+        return token
+    except (Refused, OSError):
+        return None
+
+
+def consume_launch_token(root: Path, server: str, token: str) -> bool:
+    """Compare with the file and delete it (single use), whatever the outcome of the comparison."""
+    try:
+        d = key_dir(root, create=False)
+        f = d / f"launch-{server}.token"
+        with _key_lock(d):
+            _check_file(f)
+            lines = f.read_text(encoding="utf-8").split()
+            f.unlink()
+    except (Refused, OSError):
+        return False
+    return (
+        len(lines) == 2
+        and lines[1].isdigit()
+        and int(lines[1]) > time.time()
+        and hmac.compare_digest(lines[0], token)
+    )
+
+
+def launch_url(root: Path, server: str, url: str) -> str:
+    """`url` with a fresh launch token in the fragment, for the code that opens the browser for a person."""
+    token = write_launch_token(root, server)
+    return f"{url}#launch={token}" if token else url
