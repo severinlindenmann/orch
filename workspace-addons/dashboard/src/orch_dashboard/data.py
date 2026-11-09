@@ -189,6 +189,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         mobile.mark_chat_history(t)
         tickets.append(t)
     phone_delivery.mark(root, tickets)
+    add_proof_state(tickets, root)
     add_artifact_marks(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     by_id = {t["id"]: t for t in tickets}
@@ -202,6 +203,20 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
             p["parts_total"] += 1
             p["parts_done"] += int(t["status"] == "done")
     return tickets, skipped
+
+
+def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
+    """`proof` on each ticket: the core's proof_state (per task, what is not covered, the one-line summary).
+    With `root` it also tells when files changed since a recorded check (one cached git read, a few seconds)."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        try:  # a ticket the core cannot read gets no line, never an error
+            t["proof"] = core.proof_state(t, root, cache=True)
+        except (KeyError, TypeError, ValueError):
+            t.pop("proof", None)
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
