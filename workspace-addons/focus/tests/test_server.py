@@ -429,6 +429,10 @@ def test_run_send_argv_parses_on_every_python(tmp_path):
     assert (ns.ticket, ns.text) == (TID, "can you mark all tickets as done")
 
 
+def test_listen_backlog_is_large(server):
+    # the default backlog of 5 resets connections when a page loads many files at once (blank Focus page)
+    assert server.request_queue_size >= 128
+
 def test_view_carries_the_hold_reason_only_while_the_run_runs(server, ws, fake_orch):
     """fb18 (hold-why): the core's one-line reason shows as `hold`; it is empty without one or without a run."""
     import json

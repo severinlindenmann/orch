@@ -313,6 +313,7 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-toggle[aria-checked=true] .mm-sw{background:var(--brand)}
 .mm-toggle[aria-checked=true] .mm-sw:after{transform:translateX(12px);background:var(--on-brand)}
 .topbar>.mm-toggle:not([hidden])+.btn.primary{margin-left:0}
+@media(max-width:720px){.topbar>.mm-toggle:not([hidden])+.btn.primary{margin-left:auto}} /* fb29: New ticket stays at the right edge */
 /* Open agent sits directly left of New ticket (fb9): it takes the push to the right, New ticket follows it */
 .topbar>#open-agent:not([hidden]){margin-left:auto}
 .topbar>.mm-toggle:not([hidden])~#open-agent{margin-left:0}

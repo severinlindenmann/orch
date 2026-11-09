@@ -712,6 +712,8 @@ CLOCK_EVERY = 10.0  # seconds between the server's own looks at tickets whose cl
 
 
 class _Server(ThreadingHTTPServer):
+    request_queue_size = 128  # a page loads a dozen files at once; the default backlog of 5 resets connections
+
     def server_close(self):
         if hasattr(self, "ticker_stop"):
             self.ticker_stop.set()
