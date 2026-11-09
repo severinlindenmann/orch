@@ -85,6 +85,14 @@ def web_file(name: str) -> bytes:
 _PORTS: dict[tuple[str, str], tuple[float, int | None]] = {}
 
 
+def _link_msg(session, name: str) -> bytes:
+    from orch.pageproof import REVOKED_MSG
+
+    if session.revoked:
+        return REVOKED_MSG.encode()
+    return f"This link was already used. Open the {name} again from orch.".encode()
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
@@ -397,9 +405,7 @@ class Handler(BaseHTTPRequestHandler):
             token = None
         cookie = self.session.launch(token)
         if not cookie:
-            return self._send(
-                403, b"This link was already used. Open the dashboard again from orch.", "text/plain"
-            )
+            return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
         self._send(
             204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"}
         )
@@ -466,7 +472,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint
             )
         except actions.NeedsPerson as e:
-            return self._send(403, str(e).encode(), "text/plain; charset=utf-8")
+            from orch.pageproof import REVOKED_MSG
+
+            msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
+            return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
         except actions.Unavailable as e:

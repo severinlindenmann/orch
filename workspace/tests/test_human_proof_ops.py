@@ -319,3 +319,80 @@ def test_handoff_click_delivers_the_answer_and_it_counts_as_a_person(ws, run, mo
     code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
     assert code == 0, out + err
     assert tickets.load(ws, tid)["questions"][0]["answer"] == "Blue"
+
+
+# ------------------------------------------------------------------ the browser opener gets no caller env
+
+
+def test_opener_env_is_built_from_scratch(monkeypatch):
+    for k, v in {
+        "BROWSER": "/tmp/steal",
+        "PATH": "/tmp/evil",
+        "LD_PRELOAD": "/tmp/x.so",
+        "GIO_EXTRA_MODULES": "/t",
+        "XDG_CONFIG_HOME": "/t",
+        "PYTHONPATH": "/t",
+        "DISPLAY": ":0",
+    }.items():
+        monkeypatch.setenv(k, v)
+    env = hp.opener_env()
+    assert env["PATH"] == "/usr/bin:/bin"
+    assert not {
+        k for k in env if "BROWSER" in k or k.startswith(("LD_", "GIO_", "XDG_CONFIG", "PYTHON", "DYLD_"))
+    }
+    assert set(env) <= {
+        "PATH",
+        "HOME",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XDG_RUNTIME_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
+    }
+
+
+def test_open_browser_passes_exactly_that_env_and_cwd(monkeypatch):
+    import subprocess
+
+    seen = {}
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: seen.update(cmd=cmd, **kw))
+    monkeypatch.setenv("BROWSER", "/tmp/steal")
+    monkeypatch.setattr(hp.sys, "platform", "darwin")
+    assert hp.open_browser("http://127.0.0.1:1/#launch=abc") is True
+    assert seen["cmd"][0] == "/usr/bin/open" and seen["cwd"] == "/" and seen["env"] == hp.opener_env()
+    assert "BROWSER" not in seen["env"]
+
+
+def test_proof_child_env_drops_code_loading_variables():
+    env = pageproof.child_env(
+        {"LD_PRELOAD": "x", "DYLD_INSERT_LIBRARIES": "x", "PYTHONPATH": "x", "HOME": "/h"}, pageproof.SELF
+    )
+    assert env == {"HOME": "/h"}
+
+
+# ------------------------------------------------------------------ launch token: expiry, second use revokes
+
+
+def test_launch_token_lives_30_seconds_and_an_expired_one_is_refused(ws, monkeypatch):
+    assert hp.LAUNCH_LIFE <= 30
+    s = pageproof.PageSession(ws, "focus")
+    tok = hp.write_launch_token(ws, "focus")
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 31)
+    assert s.launch(tok) is None
+    assert not s.revoked  # an expired token is just refused
+
+
+def test_second_use_of_a_spent_token_revokes_the_session(ws, capsys):
+    s = pageproof.PageSession(ws, "dashboard")
+    tok = hp.write_launch_token(ws, "dashboard")
+    cookie = s.launch(tok)
+    hdr = {"Host": "127.0.0.1:1", "Cookie": f"{pageproof.COOKIE}={cookie}"}
+    assert s.can_mint(hdr, 1)
+    assert s.launch(tok) is None  # the same link used again
+    assert s.revoked and not s.can_mint(hdr, 1)  # the session minted from it is dead
+    assert "Someone else tried to use this sign-in link" in pageproof.REVOKED_MSG
+    err = capsys.readouterr().err
+    assert "used twice" in err and tok not in err and cookie not in err  # the log line holds no secret
+    # one more click on the dashboard from orch gives a new token and a working session
+    cookie2 = s.launch(hp.write_launch_token(ws, "dashboard"))
+    assert cookie2 and cookie2 != cookie and s.can_mint({**hdr, "Cookie": f"{pageproof.COOKIE}={cookie2}"}, 1)

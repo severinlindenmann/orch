@@ -18,7 +18,9 @@ from orch_dashboard.server import make_server  # noqa: E402
 @pytest.fixture
 def live(tmp_path, monkeypatch):
     acct = tmp_path / "acct"
-    (acct / ".orch-test").mkdir(parents=True)  # a test workspace pairs only with a test home (never the real one)
+    (acct / ".orch-test").mkdir(
+        parents=True
+    )  # a test workspace pairs only with a test home (never the real one)
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
     import os
@@ -85,7 +87,9 @@ def test_click_without_a_session_is_watch_only(live, monkeypatch):
     root, port = live
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
-    st, _, body = post(port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}})
+    st, _, body = post(
+        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+    )
     assert st == 403 and ran == []
 
 
@@ -103,7 +107,10 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
 
     monkeypatch.setattr(actions, "run_with_proof", fake)
     st, _, _ = post(
-        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}, {"Cookie": ck}
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"Cookie": ck},
     )
     assert st == 200, seen
     assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # run_with_proof adds the flag itself
@@ -133,7 +140,12 @@ def test_orch_bin_from_the_environment_is_ignored():
 def test_handoff_listing_hides_the_command_and_confirm_runs_it_with_a_proof(live, monkeypatch):
     root, port = live
     hp.request_handoff(
-        root, "ticket.answer", "t_abc123:q1", "Answer q1", "Blue", argv=["answer", "t_abc123", "q1", "--", "Blue"]
+        root,
+        "ticket.answer",
+        "t_abc123:q1",
+        "Answer q1",
+        "Blue",
+        argv=["answer", "t_abc123", "q1", "--", "Blue"],
     )
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
@@ -150,7 +162,25 @@ def test_handoff_listing_hides_the_command_and_confirm_runs_it_with_a_proof(live
 
     from orch_dashboard import handoff
 
-    monkeypatch.setattr(handoff, "run_with_proof", lambda argv, proof, **kw: seen.update(argv=argv, proof=proof) or R())
+    monkeypatch.setattr(
+        handoff, "run_with_proof", lambda argv, proof, **kw: seen.update(argv=argv, proof=proof) or R()
+    )
     st, _, _ = post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})
     assert st == 200 and seen["argv"][0] == "answer" and seen["proof"].startswith("hp1.")
     assert post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})[0] == 404
+
+
+def test_second_use_of_a_link_ends_the_session_and_says_so(live):
+    root, port = live
+    tok = hp.write_launch_token(root, "dashboard")
+    st, ck, _ = post(port, "/session", {"token": tok})
+    assert st == 204
+    st, _, body = post(port, "/session", {"token": tok})
+    assert st == 403 and b"Someone else tried to use this sign-in link" in body
+    st, _, body = post(
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"Cookie": ck.split(";")[0]},
+    )
+    assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer mints

@@ -801,7 +801,7 @@ def person_by(root: Path, args, op: str, target: str, *, label: str = "", value:
 
 # ------------------------------------------------------------------------------------------- launch token
 
-LAUNCH_LIFE = 120
+LAUNCH_LIFE = 30  # seconds: the token is single use and dies on the first page load
 
 
 def write_launch_token(root: Path, server: str) -> str | None:
@@ -838,18 +838,29 @@ def consume_launch_token(root: Path, server: str, token: str) -> bool:
     )
 
 
+def opener_env() -> dict:
+    """The browser opener's environment, built from scratch (never inherited): no BROWSER, no *_BROWSER, no
+    GIO_* / XDG_* overrides, no LD_* / DYLD_* / PYTHON*, a fixed PATH. Only what a desktop session needs."""
+    if sys.platform == "darwin":
+        keep = ("HOME",)
+    else:
+        keep = ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "HOME", "DBUS_SESSION_BUS_ADDRESS")
+    return {"PATH": "/usr/bin:/bin", **{k: os.environ[k] for k in keep if k in os.environ}}
+
+
 def open_browser(url: str) -> bool:
-    """Open `url` (it may hold a launch token in its fragment) in the person's browser through an
-    ABSOLUTE-path helper, never a bare name found on PATH or in the cwd: macOS /usr/bin/open, Windows
-    os.startfile, Linux xdg-open only from a fixed system folder. No other process gets the token."""
+    """Open `url` (it may hold a launch token in its fragment) in the person's browser by an absolute-path
+    helper with a FIXED CLEAN environment and cwd "/", never a bare name from PATH or cwd and never the
+    caller's BROWSER/PATH/LD_*: macOS /usr/bin/open, Linux xdg-open from a system folder. Windows os.startfile
+    uses the registry's file association, not environment variables. No other process gets the token."""
     import subprocess
 
     try:
-        if sys.platform == "darwin":
-            cmd = ["/usr/bin/open", url]
-        elif sys.platform == "win32":
+        if sys.platform == "win32":
             os.startfile(url)  # type: ignore[attr-defined]  # noqa: S606
             return True
+        if sys.platform == "darwin":
+            cmd = ["/usr/bin/open", url]
         else:
             helper = next(
                 (p for p in ("/usr/bin/xdg-open", "/usr/local/bin/xdg-open") if os.access(p, os.X_OK)), None
@@ -857,7 +868,14 @@ def open_browser(url: str) -> bool:
             if helper is None:
                 return False
             cmd = [helper, url]
-        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+        subprocess.Popen(  # noqa: S603
+            cmd,
+            cwd="/",
+            env=opener_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         return True
     except OSError:
         return False

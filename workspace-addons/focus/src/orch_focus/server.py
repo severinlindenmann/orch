@@ -490,6 +490,14 @@ class Tracker:
         return out[:200]
 
 
+def _link_msg(session, name: str) -> bytes:
+    from orch.pageproof import REVOKED_MSG
+
+    if session.revoked:
+        return REVOKED_MSG.encode()
+    return f"This link was already used. Open {name} again from orch.".encode()
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 10
 
@@ -660,7 +668,7 @@ class Handler(BaseHTTPRequestHandler):
             token = None
         cookie = self.session.launch(token)
         if not cookie:
-            return self._send(403, b"This link was already used. Open Focus again from orch.", "text/plain")
+            return self._send(403, _link_msg(self.session, "Focus"), "text/plain; charset=utf-8")
         self._send(204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"})
 
     def do_POST(self):
@@ -694,7 +702,10 @@ class Handler(BaseHTTPRequestHandler):
                 mint = self.session.mint
             code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args, mint=mint)
         except actions.NeedsPerson as e:
-            return self._send(403, str(e).encode(), "text/plain; charset=utf-8")
+            from orch.pageproof import REVOKED_MSG
+
+            msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
+            return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
         except actions.Unavailable as e:

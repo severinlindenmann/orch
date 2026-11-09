@@ -8,6 +8,7 @@ ORCH_BIN or PATH, so a planted command never sees a proof.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import re
 import secrets
@@ -23,6 +24,7 @@ SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE = "orch_page"
 SERVERS = ("focus", "dashboard")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
+REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 
 
 def argv0(orch_bin: str | None) -> list[str]:
@@ -35,6 +37,9 @@ def child_env(env: dict, orch_bin: str | None) -> dict:
     out = dict(env)
     if orch_bin == SELF:
         out.pop("ORCH_BIN", None)
+        # nothing that makes a process load other code (a proof goes to this child's stdin)
+        for k in [k for k in out if k.startswith(("LD_", "DYLD_", "PYTHON"))]:
+            out.pop(k)
     else:
         out["ORCH_BIN"] = str(orch_bin)
     return out
@@ -59,6 +64,8 @@ class PageSession:
         self.root, self.server = root, server
         self.cookie = secrets.token_urlsafe(32)  # new on every start
         self.key: bytes | None = None
+        self.spent: set[str] = set()  # sha256 of launch tokens already used in this server run
+        self.revoked = False
         if tickets.agent_tool():
             return
         try:
@@ -68,10 +75,25 @@ class PageSession:
 
     # -- the launch token (one time, 120 s) ----------------------------------------------------------
     def launch(self, token) -> str | None:
-        """Spend the launch token. Returns the cookie value to set, or None."""
+        """Spend the launch token. Returns the cookie value to set, or None. A SECOND use of a token that was
+        already spent revokes the session minted from it (new cookie secret: the old cookie is dead) and logs
+        one line without any token value."""
         if self.key is None or not isinstance(token, str) or not _TOKEN_RE.fullmatch(token):
             return None
-        return self.cookie if humanproof.consume_launch_token(self.root, self.server, token) else None
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        if digest in self.spent:
+            self.cookie = secrets.token_urlsafe(32)
+            self.revoked = True
+            print(
+                f"orch {self.server}: a sign-in link was used twice; the page session was ended.",
+                file=sys.stderr,
+            )
+            return None
+        if not humanproof.consume_launch_token(self.root, self.server, token):
+            return None
+        self.spent.add(digest)
+        self.revoked = False
+        return self.cookie
 
     def authed(self, headers) -> bool:
         raw = headers.get("Cookie") or ""
