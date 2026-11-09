@@ -965,3 +965,14 @@ def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
                 {"setup": "x" * 501}, {"mode": "off", "max": 2}, {}, {"mode": "off", "extra": 1}):
         with pytest.raises(BadRequest):
             build_argv("copies.set", bad)
+
+@pytest.mark.parametrize("value", [True, False, None])
+def test_ticket_new_plan_first(value):
+    _, flags, _ = actions._ticket_new({"title": "Plan", "plan_first": value})
+    assert ("--plan-first" in flags) is (value is True)
+
+
+@pytest.mark.parametrize("value", ["true", 1, [], {}])
+def test_ticket_new_plan_first_requires_boolean(value):
+    with pytest.raises(actions.BadRequest):
+        actions._ticket_new({"title": "Plan", "plan_first": value})

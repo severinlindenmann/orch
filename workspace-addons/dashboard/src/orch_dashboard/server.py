@@ -35,6 +35,8 @@ KIT = (
     "question-card-state.js",
     "question-card.js",
     "evidence.js",
+    "blocks.js",
+    "blocks.css",
 )
 TYPES = {
     ".html": "text/html; charset=utf-8",

@@ -188,6 +188,7 @@ def _show(t: dict, root: Path | None = None) -> str:
     )
     if n and d == n:
         out.append(f"✓ All done · {n} of {n}")
+    out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
         out.append("  ".join(extra))
@@ -368,6 +369,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
     )
     x.add_argument(
+        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -415,6 +419,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
     )
+    x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
+    x.add_argument("id")
+    x.add_argument("--goal", required=True)
+    x.add_argument("--not-included", dest="not_included")
     x = t.add_parser(
         "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
     )
@@ -448,10 +456,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = c.add_parser("add", parents=[common])
     x.add_argument("id")
     x.add_argument("text")
-    x = c.add_parser("edit", parents=[common], help="rename a task")
+    x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
+    x = c.add_parser("edit", parents=[common], help="rename a task or link it to a part of Done when")
     x.add_argument("id")
     x.add_argument("check")
-    x.add_argument("text")
+    x.add_argument("text", nargs="?")
+    x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x.add_argument("--was", metavar="TEXT", help="refused when the task text is no longer this")
     x = c.add_parser("move", parents=[common], help="put a task after another")
@@ -467,6 +477,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         x = c.add_parser(name, parents=[common], help=hlp)
         x.add_argument("id")
         x.add_argument("check")
+    x = c.add_parser("record", parents=[common], help="record that a command ran (orch does not run it)")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--cmd", required=True, metavar="TEXT", dest="ran", help="what ran, as text")
+    x.add_argument("--exit", type=int, metavar="N", dest="exit_code", help="its exit code")
+    x.add_argument("--output", metavar="FILE", help="a plain log file in this workspace with its output")
     x = c.add_parser("done", parents=[common])
     x.add_argument("id")
     x.add_argument("check")
@@ -659,6 +675,7 @@ def run(args: argparse.Namespace) -> None:
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
+            plan_first=args.plan_first,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -741,6 +758,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "title":
         t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
         _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "plan":
+        t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
+        _out(args, t, "Plan written.")
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         r = tickets.attach(root, args.id, args.name, data, by())
@@ -773,12 +793,17 @@ def run(args: argparse.Namespace) -> None:
             + (f" until {t['waiting_on']['until']}" if args.until else f" on {args.on}"),
         )
     elif cmd == "check" and sub == "add":
-        t, c = tickets.check_add(root, args.id, args.text, by())
+        t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
+    elif cmd == "check" and sub == "record":
+        t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
+        _out(args, c, f"Recorded for {c['id']}: {c['evidence'][-1]['ref']}")
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":
-            t, c = tickets.check_edit(root, args.id, args.check, args.text, who, args.if_revision, args.was)
+            t, c = tickets.check_edit(
+                root, args.id, args.check, args.text, who, args.if_revision, args.was, args.covers
+            )
             msg = f"{c['id']} renamed."
         elif sub == "move":
             t, c = tickets.check_move(root, args.id, args.check, args.after, who)

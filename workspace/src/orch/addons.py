@@ -1625,6 +1625,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
 
     registered = _registered_workspaces(root)
     by_ws: dict[str, dict[str, int]] = {}
+    recorded: dict[str, dict[str, dict]] = {}  # workspace -> add-on -> recorded launch environment
     skipped: list[str] = []
     bad = _malformed_running_entries()
     if bad:
@@ -1636,6 +1637,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
             continue
         if Path(e["workspace"]).resolve() in registered:
             by_ws.setdefault(e["workspace"], {})[e["addon"]] = e["pid"]
+            recorded.setdefault(e["workspace"], {})[e["addon"]] = e.get("env")
         else:
             skipped.append(
                 f"{e['addon']} ({Path(e['workspace']).name}) not restarted; "
@@ -1658,7 +1660,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
         with services.locked():  # one lock around every stop + start + check
             for ws in sorted(by_ws):
                 try:
-                    ok, lines = _restart_locked(services, Path(ws), by_ws[ws])
+                    ok, lines = _restart_locked(services, Path(ws), by_ws[ws], recorded.get(ws, {}))
                 except Exception as e:  # one workspace must not stop the others
                     why = services._printable(e)
                     ok, lines = (
@@ -1746,7 +1748,12 @@ def _is_up(services, root: Path, name: str, old_pid: int | None) -> bool:
     )
 
 
-def _restart_locked(services, root: Path, olds: dict[str, int]) -> tuple[list[str], list[str]]:
+def _restart_locked(
+    services,
+    root: Path,
+    olds: dict[str, int],
+    recorded: dict[str, dict] | None = None,
+) -> tuple[list[str], list[str]]:
     """Restart these add-ons of one workspace. Returns (labels restarted, lines for what went wrong)."""
     label = lambda n: f"{n} ({root.name})"  # noqa: E731
     if not (root / ".orch").is_dir():
@@ -1773,13 +1780,29 @@ def _restart_locked(services, root: Path, olds: dict[str, int]) -> tuple[list[st
     for n in sorted(names - stopped):
         why = services._printable(stops.get(n, {}).get("error") or "did not stop")
         lines.append(f"Restart {label(n)} to use the new version (stop failed: {why})")
+    # The environment: this terminal's, plus HOME from the system and ORCH_HOME (see launchenv). Nothing the
+    # service recorded is replayed (that file is writable by any process of this user); it is only compared.
+    from orch import launchenv
+
+    over, env_notes = launchenv.overrides(home())
+    used = launchenv.apply(dict(os.environ), over)
+    envs = {n: over for n in names}
+    for note in env_notes:  # once for the workspace, not per service
+        lines.append(f"{root.name}: {note}")
+    for n in sorted(names):
+        diff = launchenv.differs((recorded or {}).get(n), used)
+        if diff:
+            lines.append(
+                f"{label(n)} started with a different {'/'.join(diff)}; restarted with this terminal's "
+                f"(run orch stop, then orch start, in {root} if that is wrong)"
+            )
     errors: dict[str, str] = {}
     todo = set(stopped)
     for _attempt in range(2):  # one retry for what did not come up
         if not todo:
             break
         try:
-            rows = services.start(root, only=set(todo))
+            rows = services.start(root, only=set(todo), envs={n: envs[n] for n in todo})
         except Exception as e:
             for n in todo:
                 errors.setdefault(n, services._printable(e))

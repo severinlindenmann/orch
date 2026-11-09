@@ -566,6 +566,8 @@ def chat_id(root: Path) -> dict:
 def status(root: Path, now=None) -> dict:
     """What the dashboard shows: helper name, today, the day's texts, the strip, the History list."""
     gid = tickets.general_id(root)
+    if gid:
+        runs.check_start_timeout(root, gid)  # a Chat run that never got its agent: a message says why
     today = day_key(root, now)
     waiting = [i["id"] for i in runs.human_waiting(root, gid)] if gid else []
     return {
@@ -819,9 +821,13 @@ def can_of(flags) -> dict:
 
 
 def contacts(root: Path) -> list[dict]:
+    _dm_person()
+    return _contacts_list(root)
+
+
+def _contacts_list(root: Path) -> list[dict]:
     from orch.chat_groups import _valid_look
 
-    _dm_person()
     directory = relay._read_dir(root)
     rows = directory.get("workspaces") if isinstance(directory, dict) else None
     out = {}
@@ -916,6 +922,28 @@ def _dm_read(root: Path, ws: str) -> dict:
 
 
 DM_SEEN = 5000
+
+
+def _shown_at(peer_at, arrival: str, earlier: list) -> str:
+    """The time to DISPLAY for an inbound text: the sender's own time when it is sane (a valid instant, not more than
+    5 minutes after the arrival, not before the previous message of this thread), else the arrival time.
+    Display only: order and the 500 cap stay by arrival."""
+    try:
+        at = dt.datetime.fromisoformat(str(peer_at).replace("Z", "+00:00"))
+        at = at.replace(tzinfo=dt.UTC) if at.tzinfo is None else at.astimezone(dt.UTC)
+        arrived = dt.datetime.fromisoformat(str(arrival).replace("Z", "+00:00"))
+        arrived = arrived.replace(tzinfo=dt.UTC) if arrived.tzinfo is None else arrived.astimezone(dt.UTC)
+        if at > arrived + dt.timedelta(minutes=5) or at < arrived - dt.timedelta(hours=24) or at.year < 2000:
+            return arrival
+        for m in reversed(earlier):
+            prev = dt.datetime.fromisoformat(str(m.get("shown_at") or m.get("at")).replace("Z", "+00:00"))
+            prev = prev.replace(tzinfo=dt.UTC) if prev.tzinfo is None else prev.astimezone(dt.UTC)
+            if at < prev:
+                return arrival
+            break
+        return at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError, OverflowError):
+        return arrival
 
 
 def _dm_write(root: Path, ws: str, data: dict) -> None:
@@ -1040,13 +1068,13 @@ def dm_sync_all(root: Path, by: str | None = None) -> list[dict]:
     return contacts(root)
 
 
-def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
+def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
     # Validate storage before acquiring a lock, which itself creates directories.
     for contact in peers:
         _dm_path(root, contact["ws"])
     if (root / ".orch").is_symlink():
         raise Refused("Chat storage must not be a link.")
-    with tickets._locked(root, "chat"):
+    with tickets._locked(root, "chat", wait=wait):
         data = {}
         for c in peers:
             try:
@@ -1082,8 +1110,11 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
             data[ws]["messages"].append(
                 {
                     "id": mid,
-                    "at": tickets.now(),  # import time: a peer's clock never orders or evicts anything
+                    "at": (
+                        now := tickets.now()
+                    ),  # import time: a peer's clock never orders or evicts anything
                     "peer_at": str(msg.get("created_at") or "")[:40],
+                    "shown_at": _shown_at(msg.get("created_at"), now, data[ws]["messages"]),
                     "by": ws,
                     "text": relay.clean_untrusted(body["text"], 2000),
                     "state": "delivered",
@@ -1108,3 +1139,45 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
                     changed.add(ws)
         for ws in changed:
             _dm_write(root, ws, data[ws])
+
+
+_DM_IMPORT_LOGGED: dict[str, float] = {}  # per workspace folder: monotonic time of the last failure line
+_DM_CATCHUP: dict = {}
+_DM_CATCHUP_EVERY = 300.0
+
+
+def dm_import_on_pull(root: Path, saved: list | None = None) -> None:
+    """Called by the workspace's own relay pull (never in an agent session): inbound workspace texts reach their thread
+    within one pull cycle, whether or not anyone opens Chat. Same bounded import as `orch chat sync` (seen ids, caps,
+    link and id checks). It runs when this pull saved a workspace text, or as a catch-up every 5 minutes; waits at most 0.3 s for the chat lock
+    (a busy lock skips this cycle; the next pull imports), and a failure never disturbs the pull: it is logged at
+    most once every 10 minutes."""
+    import sys
+    import time
+
+    if tickets.agent_tool():
+        return
+    now = time.monotonic()
+    fresh = saved is None or any(
+        isinstance(m, dict) and m.get("type") == "text" and str(m.get("from", "")).startswith("ws_")
+        for m in saved
+    )
+    # no new workspace text in this pull: a cheap catch-up at most every 5 minutes, so a text that an agent session's
+    # pull saved (and could not import) is never stuck for long
+    if not fresh and now - _DM_CATCHUP.get(str(root), -_DM_CATCHUP_EVERY) < _DM_CATCHUP_EVERY:
+        return
+    _DM_CATCHUP[str(root)] = now
+    if len(_DM_CATCHUP) > 200:
+        _DM_CATCHUP.clear()
+    try:
+        peers = _contacts_list(root)
+        if peers:
+            _dm_sync_contacts(root, peers, wait=0.3)
+    except Exception as e:  # noqa: BLE001 - bookkeeping, the pull itself must go on
+        with contextlib.suppress(Exception):  # the log line is best effort: nothing in here may raise out
+            last = _DM_IMPORT_LOGGED.get(str(root))
+            if "busy" not in str(e) and (last is None or time.monotonic() - last > 600):
+                if len(_DM_IMPORT_LOGGED) > 200:
+                    _DM_IMPORT_LOGGED.clear()
+                _DM_IMPORT_LOGGED[str(root)] = time.monotonic()
+                print(f"orch: could not import workspace messages into Chat: {str(e)[:200]}", file=sys.stderr)

@@ -170,6 +170,7 @@ def _status(args, root: Path) -> None:
     tid = args.ticket
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
+    runs.check_start_timeout(root, tid)  # a start that never got an agent says why
     rec = runs.read(root, tid)
     waiting = len(runs.undelivered(root, tid))
     if not rec:

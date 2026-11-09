@@ -242,7 +242,41 @@ def test_fresh_prompt_carries_the_persons_note(proj):
     assert prompt.index("note on this ticket") < prompt.index("SKILL.md")  # read before anything else
 
 
-# ---------------------------------------------------------------- the footer
+def test_plan_first_prompt_plans_asks_one_question_and_stops(proj):
+    t = tickets.create(proj, "Online payments", "human:me", plan_first=True)
+    prompt = runs.fresh_prompt(t, [])
+    assert "Plan big work" in prompt and f"orch ticket new --parent {t['id']}" in prompt
+    assert f'orch ask {t["id"]} "Plan ready" --option "Start work" --option "Change a step"' in prompt
+    assert '--recommend "Start work"' in prompt and "Do NOT change any project file" in prompt
+    assert "Plan big work" in runs.resume_prompt(t, [], None, "claude")
+
+
+def test_plan_first_rule_holds_until_start_work_is_answered(proj):
+    plain = tickets.create(proj, "Small fix", "human:me")
+    assert "Plan ready" not in runs.fresh_prompt(plain, [])
+    t = tickets.create(
+        proj, "Online payments", "human:me", fields={"done_when": "Customers pay"}, plan_first=True
+    )
+    ready = {"id": "q1", "text": "Plan ready", "answer": None}
+    # 1. planning, and 2. the question is open
+    for qs in ([], [ready]):
+        t["questions"] = qs
+        assert "Do NOT change any project file" in runs.fresh_prompt(t, [])
+    # 3. "Change a step": re-plan, still no start
+    t["questions"] = [
+        {**ready, "answer": "Change a step"},
+        {"id": "q2", "text": "Which step, and what should change?", "answer": "Step 2 is too big"},
+    ]
+    for prompt in (runs.fresh_prompt(t, []), runs.resume_prompt(t, [], None, "claude")):
+        assert "Do NOT change any project file" in prompt and "then start" not in prompt.lower()
+    # 4. re-planned and asked again, still open
+    t["questions"].append({"id": "q3", "text": "Plan ready", "answer": None})
+    assert "Do NOT change any project file" in runs.fresh_prompt(t, [])
+    # 5. "Start work": the rule is gone and the ticket starts
+    t["questions"][2]["answer"] = "Start work"
+    started = runs.fresh_prompt(t, [])
+    assert "Do NOT change any project file" not in started and "then start" in started.lower()
+    assert "Do NOT change" not in runs.resume_prompt(t, [], None, "claude")
 
 
 def _inside(monkeypatch, proj, tid, agent="claude"):
@@ -561,3 +595,16 @@ def test_shared_folder_maybe_stale_run_does_not_count_and_claim_takes_a_folder(p
     assert rec["folder"] == str(copy.resolve())
     assert [o["ticket"] for o in sharedfolder.alive_in(proj, copy)] == [c]
     assert sharedfolder.alive_in(proj, copy, exclude_ticket=c) == []
+
+
+def test_plan_first_with_done_when_does_not_say_then_start(proj):
+    t = tickets.create(
+        proj, "Online payments", "human:me", fields={"done_when": "Customers can pay"}, plan_first=True
+    )
+    prompt = runs.fresh_prompt(t, [])
+    assert "then start" not in prompt.lower() and "done-when of the steps" in prompt
+    assert prompt.index("Do NOT change any project file") < prompt.index("Customers can pay")
+    assert "orch ticket plan" in prompt and "\\n" not in prompt
+    assert "Which step, and what should change?" in prompt
+    plain = tickets.create(proj, "Other", "human:me", fields={"done_when": "x"})
+    assert "then start" in runs.fresh_prompt(plain, []).lower()
