@@ -649,12 +649,20 @@ def send_text(
     else:
         tv = view and update and ticket and phone_view.view_for(root, ticket)
     if update and ticket and tv:
+        mid = mid or new_id()  # the fallback reuses it: the relay drops a message it already stored
         try:
             msg = _message(root, to, "text", {**body, "ticket_view": tv}, ticket, reply_to, mid)
-        except Refused:
-            if isinstance(view, dict):  # a light update without its view says nothing: refused means refused
-                raise
-            msg = _message(root, to, "text", body, ticket, reply_to, mid)
+        except Refused as e:
+            # only an explicit refusal by the relay (4xx, not 408/429) may drop the view; a timeout, 5xx or
+            # connection error is ambiguous (the relay may have stored it) and is never sent a second time
+            if isinstance(view, dict) or _unreachable(e) or getattr(e, "status", None) is None:
+                raise  # a light update without its view says nothing: refused means refused
+            try:
+                msg = _message(root, to, "text", body, ticket, reply_to, mid)
+            except Refused as e2:
+                if getattr(e2, "status", None) != 409:  # 409: the relay has this id already
+                    raise
+                raise e from None
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)
     if update and ticket and to_phone and not isinstance(view, dict):  # a light update follows nothing new

@@ -700,3 +700,47 @@ def test_a_failed_result_send_is_retried_once(proj, run, new_ticket, conn, monke
     n = len(conn.sent)
     assert phone_view.sync(proj, now=st["at"] + 200) == [tid]
     assert len([m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]) == 1
+
+
+def _failing_post(monkeypatch, status, store):
+    """The first post carrying a ticket_view fails with `status` (None = timeout); `store`: the relay kept it."""
+    from orch import relay
+    from orch.errors import Refused
+
+    real, state = relay._post_message, {"n": 0}
+
+    def post(root, raw):
+        state["n"] += 1
+        if state["n"] == 1 and b"ticket_view" in raw:
+            if store:
+                real(root, raw)
+            e = Refused("boom")
+            e.status = status
+            raise e
+        real(root, raw)
+
+    monkeypatch.setattr(relay, "_post_message", post)
+
+
+@pytest.mark.parametrize("status", [None, 500, 503, 408, 429])
+def test_view_send_that_timed_out_after_storing_is_never_sent_twice(
+    proj, run, new_ticket, conn, monkeypatch, status
+):
+    from orch import relay
+
+    tid = new_ticket("Ambiguous")
+    _failing_post(monkeypatch, status, store=True)
+    n = len(conn.sent)
+    relay.send_text(proj, "phones", "Ready", tid, "result")
+    assert len([m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]) == 1
+
+
+def test_an_explicit_view_refusal_falls_back_once_with_the_same_id(proj, run, new_ticket, conn, monkeypatch):
+    from orch import relay
+
+    tid = new_ticket("Refused view")
+    _failing_post(monkeypatch, 400, store=False)
+    n = len(conn.sent)
+    relay.send_text(proj, "phones", "Ready", tid, "result", mid="m_fixedid0000000001")
+    got = [m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]
+    assert len(got) == 1 and "ticket_view" not in got[0]["body"] and got[0]["id"] == "m_fixedid0000000001"
