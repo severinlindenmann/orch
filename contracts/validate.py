@@ -1038,8 +1038,8 @@ def hp_verify(c):
         return "forged"
     if not isinstance(p, dict) or _msgs(_w("human-proof", "payload"), p):
         return "forged"
-    if p.get("dev"):  # test-human proof: only on a dev workspace, only with its dev key, only as human:test-human
-        if not c.get("workspace_dev"):
+    if p.get("dev"):  # test-human proof: only on a workspace with a dev RECORD in the guarded home (never a file)
+        if not c.get("dev_record"):
             return "dev_on_real"
         key = c.get("dev_key")
         if not key or p["by"] != "human:test-human":
@@ -1083,6 +1083,11 @@ def hp_settle(c):
     return out
 
 
+def dev_can_mark(c):
+    """A workspace becomes dev only when a dev install creates it, and never once it has a human key."""
+    return bool(c["install_dev"] and c["creating"] and not c["has_human_key"])
+
+
 def home_ok(c):
     """Guarded orch home rule: real workspace <-> default home, test workspace <-> test home; anything else refused."""
     if c["home"] == "default":
@@ -1106,6 +1111,8 @@ def kind_human():
                 used.append(json.loads(base64.urlsafe_b64decode(call["proof"].split(".")[1] + "=="))["nonce"])
             got.append(r)
         _expect(f"human concurrent {c['name']}", got, c["results"])
+    for c in vec["dev_mark"]:
+        _expect(f"human dev_mark {c['name']}", dev_can_mark(c), c["ok"])
     for c in vec["home"]:
         _expect(f"human home {c['name']}", home_ok(c), c["ok"])
     for c in vec["settle"]:

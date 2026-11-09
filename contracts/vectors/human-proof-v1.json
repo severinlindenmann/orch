@@ -314,9 +314,9 @@
    "by_flag": null,
    "agent_env": false,
    "used_nonces": [],
-   "workspace_dev": false,
    "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
    "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "dev_record": false,
    "result": "dev_on_real"
   },
   {
@@ -328,9 +328,9 @@
    "by_flag": null,
    "agent_env": false,
    "used_nonces": [],
-   "workspace_dev": true,
    "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
    "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "dev_record": true,
    "result": "ok"
   },
   {
@@ -342,9 +342,9 @@
    "by_flag": null,
    "agent_env": false,
    "used_nonces": [],
-   "workspace_dev": true,
    "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
    "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.S5quaxL9P1dTVDNhk0hoTol-qJ3AG3-jFseuPQaU_4k",
+   "dev_record": true,
    "result": "forged"
   },
   {
@@ -356,9 +356,9 @@
    "by_flag": null,
    "agent_env": false,
    "used_nonces": [],
-   "workspace_dev": true,
    "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
    "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.cjV-_yZq2oPawrErI5lOvgdB56JypP6MEX48-3nHbH8",
+   "dev_record": true,
    "result": "forged"
   },
   {
@@ -370,10 +370,25 @@
    "by_flag": null,
    "agent_env": false,
    "used_nonces": [],
-   "workspace_dev": true,
    "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
    "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "dev_record": true,
    "result": "ok"
+  },
+  {
+   "name": "listed in the dev file but no record",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "dev_record": false,
+   "result": "dev_on_real",
+   "dev_file_lists": true
   }
  ],
  "settings": [
@@ -631,6 +646,36 @@
    "name": "test workspace, env home outside the test prefix",
    "home": "other",
    "workspace": "test",
+   "ok": false
+  }
+ ],
+ "dev_mark": [
+  {
+   "name": "dev install creating a demo workspace",
+   "install_dev": true,
+   "creating": true,
+   "has_human_key": false,
+   "ok": true
+  },
+  {
+   "name": "normal install",
+   "install_dev": false,
+   "creating": true,
+   "has_human_key": false,
+   "ok": false
+  },
+  {
+   "name": "dev install, existing workspace",
+   "install_dev": true,
+   "creating": false,
+   "has_human_key": false,
+   "ok": false
+  },
+  {
+   "name": "workspace that already has a human key",
+   "install_dev": true,
+   "creating": true,
+   "has_human_key": true,
    "ok": false
   }
  ]

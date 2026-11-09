@@ -90,12 +90,16 @@ never from the body's own label (as relay.py `_answer_by` does today).
 ## Dev mode: the test human persona (demo workspaces only)
 
 e2e drives owner-only steps in demo workspaces with a scripted test human. Its proofs carry `"dev": true` in the payload and
-are signed with a separate **dev key** (`<guarded orch home>/keys/<ws>/dev-human.key`), which the core creates only for a
-workspace whose real path is listed as dev in the host state dir (`<state dir>/orch/dev-workspaces.json`; the state dir is
-honoured only when pinned at install, like `ORCH_HOME`). The verifier: a `dev: true` proof on a workspace that is not marked dev
-→ refused (`dev_on_real`), whatever key signed it; on a dev workspace it must verify with the dev key. A real workspace never
-has a dev key, and `by` of a dev proof is always `human:test-human` (vectors `verify` "dev proof on a real workspace",
-"dev proof on a dev workspace").
+are signed with a separate **dev key** (`<guarded orch home>/keys/<ws>/dev-human.key`).
+- **Dev status is a record in the guarded orch home** (`<orch home>/dev-workspaces.json`, keyed by the workspace's real
+  path), written only by an install whose install record says *dev* (the dev kit's installer), and only at the moment it
+  **creates** a demo workspace. A workspace that already has a `human.key` can never become dev (reference `dev_can_mark`).
+- A normal install never reads `<state dir>/orch/dev-workspaces.json` or any other workspace-side or state-dir file for this;
+  the kit's file is only an input to the dev installer when it creates demo workspaces.
+- The verifier: a `dev: true` proof on a workspace without a dev record → refused (`dev_on_real`), whatever a file says
+  and whatever key signed it; on a dev workspace it must verify with the dev key and `by` must be `human:test-human`.
+  A real workspace never has a dev key (vectors `verify` "listed in the file but no record", "dev proof on a dev
+  workspace", `dev_mark`).
 
 ## A person in their own terminal
 
