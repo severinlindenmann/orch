@@ -1792,7 +1792,6 @@ ATTACH_IMAGES = {
 ATTACH_MAX = 2 * 1024 * 1024  # one attached file (the dashboard shows at most this much of a file)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
 PASTED_NAME = "note.md"
-_WIN_RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])$", re.I)
 
 
 def attach_name(hint) -> str:
@@ -1806,7 +1805,7 @@ def attach_name(hint) -> str:
     stem = stem.strip()[:80].strip(". ")
     if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
         raise Refused("That kind of file cannot be attached. Text files and pictures can.")
-    if _WIN_RESERVED.match(stem):
+    if stem.split(".")[0].lower() in _WIN_RESERVED:
         stem = "_" + stem
     return stem + "." + ext
 

@@ -1090,7 +1090,7 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     code, out, _ = run("relay", "inbox")
     assert code == 0 and "new ticket t_" in out
     ts = _tickets(run)
-    assert len(ts) == 1 and ts[0]["title"] == "Prepare the Q3 summary please"
+    assert len(ts) == 1 and ts[0]["title"] == "Prepare the Q3 summary" and ts[0]["title_auto"] is True
     ext = ts[0]["ext"]["relay"]
     assert (ext["origin"], ext["from"], ext["message"]) == ("phone", PHONE, "m_phone00000000001")
     ack = rel.sent[-1]
