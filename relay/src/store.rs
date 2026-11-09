@@ -308,6 +308,22 @@ pub fn parse_ws_list(s: &str) -> Vec<String> {
     l
 }
 
+/// Shared by workspace cards and /v1/phone/send so their allowance cannot drift.
+pub fn phone_can(c: &Connection, phone_id: &str, ws: &str) -> Value {
+    let allowed = c
+        .query_row(
+            "SELECT workspaces FROM phones WHERE id=?1",
+            [phone_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .is_some_and(|list| parse_ws_list(&list).iter().any(|w| w == ws))
+        && ws_exists(c, ws);
+    // Files must still be this phone's uploads. Tasks reach a workspace as a chat text its helper may turn into a
+    // ticket: the relay puts no separate limit on it, so tasks follows chat.
+    json!({"chat": allowed, "tasks": allowed, "files": allowed})
+}
+
 pub fn parse_list(s: &str) -> Vec<String> {
     serde_json::from_str(s).unwrap_or_default()
 }

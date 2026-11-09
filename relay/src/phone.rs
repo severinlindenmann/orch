@@ -164,6 +164,7 @@ async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
             card["open_questions"] = open.iter().filter(|m| &m.from == w).count().into();
             card["muted_until"] = store::muted_until(&c, &pid, w);
             card["mobile_mode"] = store::mobile_mode(&c, w);
+            card["can"] = store::phone_can(&c, &pid, w);
             items.push(card);
         }
     }
@@ -662,7 +663,7 @@ async fn send(
     let v = parse_body(&body)?;
     let id = {
         let c = app.db.lock().unwrap();
-        let (pid, _, ws) = auth::phone(&c, &h)?;
+        let (pid, ..) = auth::phone(&c, &h)?;
         if let Some(cid) = v["client_id"].as_str() {
             if let Some(old) = client_dup(&c, &pid, cid)? {
                 return Ok((
@@ -674,7 +675,7 @@ async fn send(
         check("send_request", &v)?;
         let to = v["to"].as_str().unwrap_or("");
         let cid = v["client_id"].as_str();
-        if !ws.iter().any(|w| w == to) || !store::ws_exists(&c, to) {
+        if store::phone_can(&c, &pid, to)["chat"] != true {
             return Err(not_allowed("This phone may not send to that workspace."));
         }
         let ticket = v["ticket"].as_str();
@@ -989,6 +990,7 @@ async fn patch_workspace(
         .into();
     card["muted_until"] = store::muted_until(&c, &pid, &wsid);
     card["mobile_mode"] = store::mobile_mode(&c, &wsid);
+    card["can"] = store::phone_can(&c, &pid, &wsid);
     Ok(Json(card))
 }
 
