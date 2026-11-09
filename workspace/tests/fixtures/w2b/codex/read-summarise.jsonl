@@ -1,0 +1,9 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000003"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"I’ll read readme.txt and summarize it in one sentence.\n"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc 'cat readme.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc 'cat readme.txt'","aggregated_output":"The deploy runs nightly at 02:00. Failures page the on-call. Rollback is one command.\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"Deployments run nightly at 02:00, failures page the on-call, and rollback takes one command."}}
+{"type":"turn.completed","usage":{"input_tokens":28460,"cached_input_tokens":26240,"cache_write_input_tokens":0,"output_tokens":76,"reasoning_output_tokens":0}}
