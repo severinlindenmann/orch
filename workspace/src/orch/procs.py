@@ -82,8 +82,8 @@ def _proc_started(pid: int) -> str | None:
 
 
 def same_start(a: str, b: str) -> bool:
-    """Two start times of one pid are the same process: equal within APPROX_SECONDS. (A reused pid with a start
-    time that close would need a full pid wraparound within 2 s.)"""
+    """Two start times of one pid are the same process: equal within APPROX_SECONDS.
+    (A reused pid that close in time would need a full pid wraparound within 2 s.)"""
     if not isinstance(a, str) or not isinstance(b, str):
         return False
     if a == b:
