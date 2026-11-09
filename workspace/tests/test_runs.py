@@ -268,14 +268,14 @@ def test_plan_first_rule_holds_until_start_work_is_answered(proj):
         {"id": "q2", "text": "Which step, and what should change?", "answer": "Step 2 is too big"},
     ]
     for prompt in (runs.fresh_prompt(t, []), runs.resume_prompt(t, [], None, "claude")):
-        assert "Do NOT change any project file" in prompt and "then start" not in prompt
+        assert "Do NOT change any project file" in prompt and "then start" not in prompt.lower()
     # 4. re-planned and asked again, still open
     t["questions"].append({"id": "q3", "text": "Plan ready", "answer": None})
     assert "Do NOT change any project file" in runs.fresh_prompt(t, [])
     # 5. "Start work": the rule is gone and the ticket starts
     t["questions"][2]["answer"] = "Start work"
     started = runs.fresh_prompt(t, [])
-    assert "Do NOT change any project file" not in started and "then start" in started
+    assert "Do NOT change any project file" not in started and "then start" in started.lower()
     assert "Do NOT change" not in runs.resume_prompt(t, [], None, "claude")
 
 
@@ -469,9 +469,9 @@ def test_plan_first_with_done_when_does_not_say_then_start(proj):
         proj, "Online payments", "human:me", fields={"done_when": "Customers can pay"}, plan_first=True
     )
     prompt = runs.fresh_prompt(t, [])
-    assert "then start" not in prompt and "done-when of the steps" in prompt
+    assert "then start" not in prompt.lower() and "done-when of the steps" in prompt
     assert prompt.index("Do NOT change any project file") < prompt.index("Customers can pay")
     assert "orch ticket plan" in prompt and "\\n" not in prompt
     assert "Which step, and what should change?" in prompt
     plain = tickets.create(proj, "Other", "human:me", fields={"done_when": "x"})
-    assert "then start" in runs.fresh_prompt(plain, [])
+    assert "then start" in runs.fresh_prompt(plain, []).lower()

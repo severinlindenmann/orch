@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, procs, syncgate, term
+from orch import config, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -35,6 +35,13 @@ STATUS_WORDS = {
 }
 OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
+TAIL_MAX = 2048
+# C0 except tab/newline, DEL, C1 and bidi overrides: never in a recorded command or output
+UNSAFE_TEXT = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+RUNS_PER_REF = 5
+RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes the runs
+SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
 PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
@@ -225,7 +232,7 @@ def _break_stale(lock: Path) -> bool:
 
 
 @contextlib.contextmanager
-def _locked(root: Path, tid: str):
+def _locked(root: Path, tid: str, wait: float = 5.0):
     """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
     Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
     the lock and checks again after taking it, so the sync step (which holds the gate and takes this same lock
@@ -237,7 +244,7 @@ def _locked(root: Path, tid: str):
     lock.parent.mkdir(parents=True, exist_ok=True)
     if gated:
         syncgate.wait_clear(root, what)
-    end = time.monotonic() + 5
+    end = time.monotonic() + wait
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -249,7 +256,7 @@ def _locked(root: Path, tid: str):
             PermissionError,
         ):  # Windows: a lock being deleted refuses with PermissionError
             if time.monotonic() > end:
-                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
+                raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             try:
                 stale = time.time() - lock.stat().st_mtime > 30
             except OSError:
@@ -258,7 +265,7 @@ def _locked(root: Path, tid: str):
             if stale and _break_stale(lock):
                 continue
             if time.monotonic() > end:
-                raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
+                raise Refused(f"Ticket {tid} is busy (retried for {wait:g} s). Try again.") from None
             time.sleep(0.02)
     try:
         if gated and syncgate.live_holder(root) is not None:  # a gate appeared while we took the lock
@@ -600,6 +607,109 @@ def create(
 def checks_done(ticket: dict) -> tuple[int, int]:
     c = ticket.get("checklist", [])
     return sum(1 for x in c if x.get("done")), len(c)
+
+
+def _latest(evs: list[dict], key: str) -> dict | None:
+    """The newest command evidence that carries `key` (a recorded run; later ones replace earlier ones)."""
+    return next((e for e in reversed(evs) if e.get("type") == "command" and e.get(key) is not None), None)
+
+
+def _ev_failed(evs: list[dict]) -> bool:
+    """A recorded failure: the newest recorded run says exit != 0. No exit recorded = unknown, never
+    failed."""
+    ev = _latest(evs, "exit")
+    return ev is not None and type(ev["exit"]) is int and ev["exit"] != 0
+
+
+def _norm_words(text: str) -> str:
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split())
+
+
+def _covered(part: str, cover: str) -> bool:
+    """One contains the other at word boundaries (the shorter one at least 3 characters)."""
+    a, b = _norm_words(part), cover
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 3 and f" {short} " in f" {long_} "
+
+
+def done_when_parts(done_when: str) -> list[str]:
+    """done_when split into its parts: one per line, ';' or sentence end. Plain and cheap on purpose."""
+    parts = []
+    for line in done_when.splitlines():
+        for chunk in line.split(";"):
+            parts += re.split(r"(?<=[.!?])\s+", chunk.strip())
+    return [p.strip() for p in parts if _norm_words(p)]
+
+
+def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> dict:
+    """Honest proof summary of a ticket. Reads files only (files_sig), runs nothing from the ticket.
+    per_item: id -> passed | failed | changed | note | missing.
+    failed = the newest recorded run (`orch check record`) has exit != 0 (also on a task not done);
+    done + any proof that is not a note = passed; done + note proof only = note; not done = missing.
+    changed (done, needs `root`): the newest recorded run has a files_sig and files_sig(root) is different now
+    (a stored flag is never trusted). The current signature is computed at most once per call, only when a
+    recorded signature exists; `cache` reuses it for a few seconds (polled pages).
+    uncovered: the parts of done_when that no task `covers` (a part is covered when a task's covers text
+    and the part contain one another, ignoring case and punctuation); one hint when done_when cannot be
+    split and nothing is linked. level: ok | note | warn | fail, so views never parse `line`."""
+    from orch import filesig
+
+    items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and isinstance(c.get("id"), str)]
+    per: dict[str, str] = {}
+    current: list = []
+
+    def moved(ev: dict) -> bool:
+        if root is None:
+            return False
+        if not current:
+            current.append(filesig.cached_sig(root) if cache else filesig.files_sig(root))
+        return current[0] is not None and current[0] != ev["files_sig"]
+
+    for c in items:
+        evs = [e for e in c.get("evidence") or [] if isinstance(e, dict)]
+        sig_ev = _latest(evs, "files_sig")
+        if _ev_failed(evs):
+            per[c["id"]] = "failed"
+        elif not c.get("done"):
+            per[c["id"]] = "missing"
+        elif sig_ev is not None and isinstance(sig_ev["files_sig"], str) and moved(sig_ev):
+            per[c["id"]] = "changed"
+        elif any(e.get("type") != "note" for e in evs):
+            per[c["id"]] = "passed"
+        else:
+            per[c["id"]] = "note" if evs else "missing"
+    done_when = ticket.get("done_when")
+    covers = [_norm_words(c["covers"]) for c in items if isinstance(c.get("covers"), str)]
+    covers = [c for c in covers if c]
+    uncovered: list[str] = []
+    if isinstance(done_when, str) and done_when.strip():
+        parts = done_when_parts(done_when)
+        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers)]
+        if not parts and not covers:
+            uncovered = ["Done when isn't linked to tasks"]
+    n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
+
+    def plural(count: int, word: str) -> str:
+        return f"{count} {word}" + ("" if count == 1 else "s")
+
+    if n["failed"]:
+        line, level = f"{plural(n['failed'], 'check')} failed", "fail"
+    elif n["changed"]:
+        line, level = "Changes haven't been checked yet", "warn"
+    elif uncovered:
+        count = len(uncovered)
+        one = count == 1 or uncovered == ["Done when isn't linked to tasks"]
+        noun = "1 part" if one else f"{count} parts"
+        line = f'{noun} of "Done when" {"has" if one else "have"} no task'
+        level = "warn"
+    elif n["passed"] or n["note"]:
+        bits = ([f"{plural(n['passed'], 'check')} passed"] if n["passed"] else []) + (
+            [plural(n["note"], "note")] if n["note"] else []
+        )
+        line, level = " · ".join(bits), "ok" if n["passed"] else "note"
+    else:
+        line, level = "No checks recorded", "note"
+    return {"per_item": per, "uncovered": uncovered, "line": line, "level": level}
 
 
 def _check_can_finish(ticket: dict) -> None:
@@ -1062,12 +1172,25 @@ def proof_label(ev: dict) -> str:
     return label
 
 
-def check_add(root: Path, tid: str, text: str, by: str) -> tuple[dict, dict]:
+def _clean_covers(covers: str | None) -> str | None:
+    """`covers`: the quoted part of done_when a task covers, 1 to 300 characters; None = not given."""
+    if covers is None:
+        return None
+    line = " ".join(covers.split())
+    if not 1 <= len(line) <= TEXT_FIELD_MAX:
+        raise Refused(f"--covers is a short quote of 'Done when' (1 to {TEXT_FIELD_MAX} characters).")
+    return line
+
+
+def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = None) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A checklist item needs text.")
+    covers = _clean_covers(covers)
 
     def op(ticket):
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
+        if covers:
+            item["covers"] = covers
         ticket["checklist"].append(item)
         add_history(ticket, by, f"Added check {item['id']}")
         return item
@@ -1094,7 +1217,64 @@ def parse_evidence(raw: str) -> dict:
         if not 1 <= len(line) <= 200 or not line.isprintable():
             raise Refused("A proof summary is one line of 1 to 200 printable characters.")
         ev["summary"] = line
+    _check_record_fields(ev)
     return ev
+
+
+def _ran_at_ok(v) -> bool:
+    if not isinstance(v, str) or not RAN_AT.fullmatch(v):
+        return False
+    try:
+        datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
+
+
+def _check_record_fields(ev: dict) -> None:
+    """Optional fields of a recorded check (`orch check record`): exit, ran_at, files_sig, output_tail.
+    Data only."""
+    if "exit" in ev and (type(ev["exit"]) is not int or not -255 <= ev["exit"] <= 255):
+        raise Refused("A recorded exit code is a whole number from -255 to 255.")
+    if "ran_at" in ev and not _ran_at_ok(ev["ran_at"]):
+        raise Refused("ran_at is a UTC time like 2026-11-09T14:30:00Z.")
+    if "files_sig" in ev and not (isinstance(ev["files_sig"], str) and SIG.fullmatch(ev["files_sig"])):
+        raise Refused("files_sig is a hex string of 16 to 128 characters.")
+    if "output_tail" in ev and not (
+        isinstance(ev["output_tail"], str) and len(ev["output_tail"]) <= TAIL_MAX
+    ):
+        raise Refused(f"output_tail is text of at most {TAIL_MAX} characters.")
+    for k in ("ref", "output_tail"):
+        if isinstance(ev.get(k), str) and UNSAFE_TEXT.search(ev[k]):
+            raise Refused(f"{k} must not contain control or direction-changing characters.")
+
+
+def _canon(entry) -> str:
+    return json.dumps(entry, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _is_run(e) -> bool:
+    return isinstance(e, dict) and e.get("type") == "command" and _ran_at_ok(e.get("ran_at"))
+
+
+def trim_runs(evidence: list) -> list:
+    """Recorded runs (command evidence with a well-formed ran_at, see _ran_at_ok): keep the newest
+    RUNS_PER_REF per command text and at most RUNS_PER_CHECK runs per check, oldest runs dropped first, so a
+    loop of `orch check record` cannot grow a ticket without bound. Order of runs: (ran_at, canonical JSON).
+    Notes and every other kind of proof are never dropped because of runs. The sync add-on's merge has the
+    same rule (orch_sync.merge.trim_runs, parity-tested) so every replica ends with the same entries."""
+    key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))  # noqa: E731
+    by_ref: dict[str, list[int]] = {}
+    for i, e in enumerate(evidence):
+        if _is_run(e):
+            by_ref.setdefault(str(e.get("ref")), []).append(i)
+    drop: set[int] = set()
+    for idx in by_ref.values():
+        idx.sort(key=key)
+        drop.update(idx[:-RUNS_PER_REF])
+    live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
+    drop.update(live[:-RUNS_PER_CHECK])  # over the cap only the oldest runs go; other proof is never touched
+    return [e for i, e in enumerate(evidence) if i not in drop]
 
 
 def _clear_doing(item: dict) -> None:
@@ -1127,20 +1307,91 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
     return apply_op(root, tid, op)
 
 
+def _output_tail(root: Path, source: str | None) -> str | None:
+    """The last TAIL_MAX characters of a plain log file inside the workspace, control characters removed. Only
+    read as text, never run. All file rules live in saferead.safe_read_tail (no stdin, no dotfiles, no
+    links)."""
+    if source is None:
+        return None
+    data = saferead.safe_read_tail(root, source, 8192)
+    return clean_untrusted(data.decode("utf-8", "replace"), 100_000)[-TAIL_MAX:]
+
+
+def check_record(
+    root: Path,
+    tid: str,
+    cid: str,
+    cmd: str,
+    exit_code: int | None,
+    output: str | None,
+    by: str,
+) -> tuple[dict, dict]:
+    """Record that a command ran for a task: ONE `command` evidence with exit, ran_at, files_sig (when
+    the folder
+    is under git) and the output tail. It only stores what the agent says; `cmd` and the output are data,
+    never
+    run. The task is not marked done (that stays `orch check done`)."""
+    from orch import filesig
+
+    line = " ".join(clean_untrusted(cmd or "", 500).split())
+    if not line:
+        raise Refused('Say what ran, e.g. --cmd "uv run pytest -q".')
+    _item(load(root, tid), cid)  # a wrong ticket or task is refused before anything is read
+    ev: dict = {"type": "command", "ref": line}
+    if exit_code is not None:
+        ev["exit"] = exit_code
+    ev["ran_at"] = now()
+    sig = filesig.files_sig(root)
+    if sig:
+        ev["files_sig"] = sig
+    tail = _output_tail(root, output)
+    if tail:
+        ev["output_tail"] = tail
+    parse_evidence(json.dumps(ev))  # same checks as every proof
+    ev["by"], ev["at"] = by, now()
+
+    def op(t):
+        item = _item(t, cid)
+        item["evidence"] = trim_runs([*item["evidence"], ev])
+        add_history(
+            t,
+            by,
+            f"Recorded a check run for {cid}" + (f" (exit {exit_code})" if exit_code is not None else ""),
+        )
+        return item
+
+    return apply_op(root, tid, op)
+
+
 def check_exists(root: Path, tid: str, cid: str) -> None:
     _item(load(root, tid), cid)
 
 
 def check_edit(
-    root: Path, tid: str, cid: str, text: str, by: str, if_revision: int | None = None, was: str | None = None
+    root: Path,
+    tid: str,
+    cid: str,
+    text: str | None,
+    by: str,
+    if_revision: int | None = None,
+    was: str | None = None,
+    covers: str | None = None,
 ) -> tuple[dict, dict]:
-    if not text.strip():
+    if text is None and covers is None:
+        raise Refused("Say the new text or --covers.")
+    if text is not None and not text.strip():
         raise Refused("A checklist item needs text.")
+    covers = _clean_covers(covers)
 
     def op(t):
         item = _item(t, cid)
-        item["text"] = text.strip()
-        add_history(t, by, f"Renamed {cid}")
+        if text is not None:
+            item["text"] = text.strip()
+            add_history(t, by, f"Renamed {cid}")
+        if covers is not None:
+            item["covers"] = covers
+            if text is None:
+                add_history(t, by, f"Linked {cid} to Done when")
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
