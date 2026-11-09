@@ -134,11 +134,13 @@ def _store(d: Path, keys: dict, admin: bool = False) -> None:
 
 
 def _is_loose(p: Path) -> bool:
+    """Loose = wider than 0600, another owner, or (Windows) an ACL beyond user and SYSTEM: humanproof.file_problem
+    decides, so its platform hook applies here too. A link or a non-file is not "loose": it stays refused."""
     try:
-        st = p.lstat()
+        why = hp.file_problem(p)
     except OSError:
         return False
-    return hp.POSIX and stat.S_ISREG(st.st_mode) and (st.st_uid != os.getuid() or bool(st.st_mode & 0o077))
+    return why is not None and why != "type"
 
 
 def _quarantine(path: Path) -> None:

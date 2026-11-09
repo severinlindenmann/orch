@@ -163,23 +163,59 @@ def guarded_home(root: Path) -> Path:
 # ---------------------------------------- folders, files, lock
 
 
+class LooseFile(Refused):
+    """A secret or integrity file with wider rights than 0600, another owner, or not a plain file. Its
+    content is never trusted: callers answer with reset_protection()."""
+
+
+# Extra per-platform checks (Windows ACL: user + SYSTEM only, from the winacl hook): path -> reason|None.
+FILE_CHECKS: list = []
+SAFE_DEFAULTS = {
+    "focus.session_typing": False,
+    "insights.share_names": False,
+    "secret.allow_get": False,
+    "conn.allow": False,
+}  # live_session and share_counts stay at the owner defaults (3C, I5): their records are dropped
+RESET_NOTICE = "orch reset its protection on this computer; please turn on again what you need."
+_SECRET_FILES = ("proofs-used.json", "delivered.json", "handoffs.json")
+
+
 def _check_dir(p: Path) -> None:
+    """A folder must be a real folder of ours. Loose rights are tightened to 0700 (no friction); a link or
+    another owner cannot be fixed and is refused."""
     try:
         st = p.lstat()
     except OSError as e:
         raise Refused(WRONG_RIGHTS) from e
     if not stat.S_ISDIR(st.st_mode):
         raise Refused(WRONG_RIGHTS)
-    if POSIX and (st.st_uid != os.getuid() or st.st_mode & 0o077):
-        raise Refused(WRONG_RIGHTS)
+    if POSIX:
+        if st.st_uid != os.getuid():
+            raise Refused(WRONG_RIGHTS)
+        if st.st_mode & 0o077:
+            p.chmod(0o700)
+
+
+def file_problem(p: Path) -> str | None:
+    """Why a secret/integrity file is loose (mode | owner | type | acl), or None. FileNotFoundError passes."""
+    st = p.lstat()
+    if not stat.S_ISREG(st.st_mode):
+        return "type"
+    if POSIX and st.st_uid != os.getuid():
+        return "owner"
+    if POSIX and st.st_mode & 0o077:
+        return "mode"
+    for chk in FILE_CHECKS:
+        why = chk(p)
+        if why:
+            return why
+    return None
 
 
 def _check_file(p: Path) -> None:
-    st = p.lstat()  # FileNotFoundError passes through: "not there" is not "wrong rights"
-    if not stat.S_ISREG(st.st_mode):
-        raise Refused(WRONG_RIGHTS)
-    if POSIX and (st.st_uid != os.getuid() or st.st_mode & 0o077):
-        raise Refused(WRONG_RIGHTS)
+    why = file_problem(p)
+    if why:
+        raise LooseFile(f"{p.name}:{why}")
 
 
 def _private_dir(p: Path, stop: Path) -> None:
@@ -205,6 +241,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
     d = home / "keys" / ws
     if create:
         home.mkdir(parents=True, exist_ok=True)
+        _check_dir(home)
         _private_dir(d.parent, home)
         try:
             d.mkdir(mode=0o700)
@@ -217,6 +254,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
         if fresh or not any(d.iterdir()):  # the binding is made only while the folder is new or empty
             _bind_new(root, d)
     else:
+        _check_dir(home)
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
     _check_binding(root, d)
@@ -308,11 +346,14 @@ def _key_lock(d: Path):
             lock.unlink()
 
 
-def _read_json(path: Path, default):
+def _read_json(root: Path, path: Path, default):
     try:
         _check_file(path)
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
+        return default
+    except LooseFile as e:  # never trusted: reset the protection, the store starts empty
+        reset_protection(root, str(e))
         return default
     except ValueError as e:
         raise Refused("A record in the orch folder is unreadable.") from e
@@ -328,7 +369,12 @@ def human_key(root: Path, create: bool = True) -> bytes:
     f = d / "human.key"
     with _key_lock(d) if create else contextlib.nullcontext():
         try:
-            _check_file(f)
+            try:
+                _check_file(f)
+            except (
+                LooseFile
+            ) as e:  # a loose key is never read: rotate it (old proofs and MACs stop verifying)
+                reset_protection(root, str(e))
             hexkey = f.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             if not create:
@@ -466,7 +512,7 @@ def verify_and_consume(root: Path, proof, op: str, target: str, by_flag: str | N
     store = d / "proofs-used.json"
     with _key_lock(d):
         try:
-            used = _read_json(store, {})
+            used = _read_json(root, store, {})
         except Refused:
             raise Refused(msg) from None
         if not isinstance(used, dict):
@@ -515,11 +561,14 @@ def _settings_path(root: Path) -> tuple[Path, str]:
     return home / "human-settings.json", hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:32]
 
 
-def _settings_load(path: Path):
+def _settings_load(root: Path, path: Path):
     """None when the file never existed; raises Refused when unreadable or damaged (N12: every widening
-    off)."""
+    off). A loose file is reset (reset_protection) and read again."""
     try:
-        _check_file(path)
+        try:
+            _check_file(path)
+        except LooseFile as e:
+            reset_protection(root, str(e))
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
@@ -538,7 +587,7 @@ def _settings_write(root: Path, setting: str, value, by: str) -> None:
     path, wkey = _settings_path(root)
     d = key_dir(root)  # creates the home; the lock lives in the workspace's key folder
     with _key_lock(d):
-        data = _settings_load(path) or {"schema": "orch.human-settings/1", "workspaces": {}}
+        data = _settings_load(root, path) or {"schema": "orch.human-settings/1", "workspaces": {}}
         data["workspaces"].setdefault(wkey, {})[setting] = {
             "value": value,
             "by": by,
@@ -558,7 +607,7 @@ def effective(root: Path, setting: str, file_value: bool) -> bool:
     default = SETTING_DEFAULTS[setting]
     try:
         path, wkey = _settings_path(root)
-        data = _settings_load(path)
+        data = _settings_load(root, path)
         rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
         rec_val = rec.get("value") if isinstance(rec, dict) else None
         if file_value is False and rec_val is not False:
@@ -567,6 +616,90 @@ def effective(root: Path, setting: str, file_value: bool) -> bool:
     except (Refused, OSError):
         return False
     return bool(file_value and (rec_val if rec_val is not None else default))
+
+
+# ------------------------------------------------------------------------------------------- reset
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def reset_protection(root: Path, reason: str) -> None:
+    """ONE response to a loose secret or integrity file (human.key, human-settings.json, proofs-used,
+    delivered, handoffs, the dev record): tighten the folders, rotate human.key (old proofs and MACs stop
+    verifying), empty the nonce/delivered/handoffs stores, put the widening settings at the safest defaults,
+    log a line with no secret and queue a one-time notice for the dashboard. Never a silent chmod of a
+    secret file. Takes no lock itself (callers may hold keys.lock)."""
+    from orch import addons
+
+    home = guarded_home(root)
+    ws = addons.workspace_id(root, create=True)
+    home.mkdir(parents=True, exist_ok=True)
+    _check_dir(home)
+    d = home / "keys" / ws
+    _private_dir(d, home)
+    _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
+    for name in _SECRET_FILES:
+        with contextlib.suppress(OSError):
+            (d / name).unlink()
+    path, wkey = _settings_path(root)
+    data = None
+    with contextlib.suppress(OSError, ValueError, Refused):
+        if file_problem(path) is None:  # a loose settings file is dropped whole, never merged
+            data = json.loads(path.read_text(encoding="utf-8"))
+    if not (
+        isinstance(data, dict)
+        and data.get("schema") == "orch.human-settings/1"
+        and isinstance(data.get("workspaces"), dict)
+    ):
+        data = {"schema": "orch.human-settings/1", "workspaces": {}}
+    data["workspaces"][wkey] = {
+        k: {"value": v, "by": "reset", "at": _now()} for k, v in SAFE_DEFAULTS.items()
+    }
+    _write_private(path, json.dumps(data, indent=2, sort_keys=True))
+    if reason.startswith("dev-workspaces"):
+        with contextlib.suppress(OSError):
+            (home / "dev-workspaces.json").unlink()
+    safe = re.sub(r"[^A-Za-z0-9_.:-]", "_", reason)[:80]  # a file name and a kind, never a value
+    with contextlib.suppress(OSError):
+        fd = os.open(home / "protection-reset.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(f"{_now()} workspace={ws} reset: {safe}\n")
+    with contextlib.suppress(OSError, ValueError):
+        nf = d / "notices.json"
+        notes = json.loads(nf.read_text(encoding="utf-8")) if nf.exists() else []
+        if not any(isinstance(n, dict) and n.get("kind") == "protection_reset" for n in notes):
+            notes.append({"kind": "protection_reset", "at": _now(), "text": RESET_NOTICE})
+            _write_private(nf, json.dumps(notes))
+
+
+def take_notices(root: Path) -> list[dict]:
+    """The one-time notices for the person (dashboard), cleared when read."""
+    try:
+        nf = key_dir(root, create=False) / "notices.json"
+        notes = json.loads(nf.read_text(encoding="utf-8"))
+        nf.unlink()
+    except (OSError, ValueError, Refused):
+        return []
+    return [n for n in notes if isinstance(n, dict)]
+
+
+def private_json(root: Path, name: str, default):
+    """Read a JSON store in the workspace's key folder (handoffs.json, ...) under the rights rule: a loose
+    file resets the protection and reads as `default`."""
+    return _read_json(root, key_dir(root, create=False) / name, default)
+
+
+def dev_record(root: Path) -> bool:
+    """Is this workspace listed in the dev record of the guarded home? A loose record is removed (reset)."""
+    try:
+        path = guarded_home(root) / "dev-workspaces.json"
+        data = _read_json(root, path, {})
+    except (Refused, OSError):
+        return False
+    ws = data.get("workspaces", data) if isinstance(data, dict) else {}
+    return isinstance(ws, dict) and os.path.realpath(root) in ws
 
 
 # ------------------------------------------------------------------------------------------- pending MAC
@@ -599,7 +732,7 @@ def pending_deliver(line: dict, delivered) -> bool:
 
 def delivered_ids(root: Path) -> set[str]:
     d = key_dir(root, create=False)
-    data = _read_json(d / "delivered.json", {"ids": []})
+    data = _read_json(root, d / "delivered.json", {"ids": []})
     ids = data.get("ids") if isinstance(data, dict) else None
     if not isinstance(ids, list):
         raise Refused("The delivered record is unreadable.")
@@ -610,7 +743,7 @@ def consume(root: Path, ids: list[str]) -> list[str]:
     """Record ids as delivered, atomically under the key lock. Returns the ids NOT delivered before."""
     d = key_dir(root)
     with _key_lock(d):
-        data = _read_json(d / "delivered.json", {"ids": []})
+        data = _read_json(root, d / "delivered.json", {"ids": []})
         have = list(data.get("ids") or []) if isinstance(data, dict) else []
         new = [i for i in dict.fromkeys(ids) if i not in have]
         if new:
@@ -622,7 +755,7 @@ def unconsume(root: Path, ids: list[str]) -> None:
     """The core took delivery back (a start hung before the agent read the input). Core-only."""
     d = key_dir(root)
     with _key_lock(d):
-        data = _read_json(d / "delivered.json", {"ids": []})
+        data = _read_json(root, d / "delivered.json", {"ids": []})
         have = list(data.get("ids") or []) if isinstance(data, dict) else []
         _write_private(d / "delivered.json", json.dumps({"ids": [i for i in have if i not in ids]}))
 
