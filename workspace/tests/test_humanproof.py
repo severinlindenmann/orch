@@ -48,9 +48,14 @@ def test_test_workspace_uses_test_home(tws):
     assert hp.guarded_home(tws) == tws.parent / "home"
 
 
-def test_normal_install_has_no_test_path(tws, monkeypatch):
+def test_normal_install_real_workspace_with_env_home_is_refused(tws, monkeypatch):
     monkeypatch.setattr(hp, "install_kind", lambda: "normal")
-    assert hp.guarded_home(tws) == tws.parent.parent / ".orch-tool"  # real workspace, env-chosen home ignored
+    acct = tws.parent.parent
+    with pytest.raises(Refused, match="don't belong together"):
+        hp.guarded_home(tws)  # real workspace + env-chosen home
+    with pytest.raises(Refused):
+        hp.human_key(tws)
+    assert not (acct / ".orch-tool").exists()  # nothing created in the account home
 
 
 def test_home_ok_refuses_other_pairings():
@@ -67,7 +72,13 @@ def test_real_workspace_with_agent_chosen_home_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setattr(hp, "install_kind", lambda: "test")
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "evil"))
-    assert hp.guarded_home(ws) == acct / ".orch-tool"  # ORCH_HOME is ignored for a real workspace
+    with pytest.raises(Refused, match="don't belong together"):
+        hp.guarded_home(ws)
+    assert not (acct / ".orch-tool").exists() and not (acct / ".orch-test" / "evil").exists()
+    monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-tool"))
+    assert hp.guarded_home(ws) == acct / ".orch-tool"  # the default home itself is fine
+    monkeypatch.delenv("ORCH_HOME")
+    assert hp.guarded_home(ws) == acct / ".orch-tool"
 
 
 def test_symlinked_prefix_is_no_test_path(tmp_path, monkeypatch):
@@ -79,7 +90,8 @@ def test_symlinked_prefix_is_no_test_path(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setattr(hp, "install_kind", lambda: "test")
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "h"))
-    assert hp.guarded_home(acct / ".orch-test" / "ws") == acct / ".orch-tool"  # a real workspace
+    with pytest.raises(Refused):  # a real workspace: the symlinked prefix is no test path
+        hp.guarded_home(acct / ".orch-test" / "ws")
 
 
 # ---------------------------------------------------------------- key and proofs

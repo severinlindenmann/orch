@@ -145,7 +145,11 @@ def guarded_home(root: Path) -> Path:
     else:
         cand = account / ".orch-tool"
         home_real = acct.rstrip("/") + "/.orch-tool"
-        if cand.exists() and os.path.realpath(cand) != os.path.realpath(home_real) or cand.is_symlink():
+        env = os.environ.get("ORCH_HOME")
+        # a real workspace pairs only with the default home: another home refuses, never a fallback
+        if env and os.path.realpath(env) != home_real:
+            raise Refused(NOT_TOGETHER)
+        if cand.is_symlink():
             raise Refused(NOT_TOGETHER)  # the default folder is a link: never followed
     if not home_ok(acct, install, real_dir, ws_real, home_real):
         raise Refused(NOT_TOGETHER)
