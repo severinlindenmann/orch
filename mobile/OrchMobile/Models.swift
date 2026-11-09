@@ -53,9 +53,7 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     var can: WorkspaceCan? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
-        guard let m = mutedUntil else { return false }
-        if m == "forever" { return true }
-        return (ISO8601DateFormatter().date(from: m)).map { $0 > now } ?? false
+        MuteRules.isMuted(mutedUntil, now: now)
     }
     /// Online while the last call is at most 5 minutes old (Presence.swift).
     func presence(now: Date = Date()) -> Presence { Presence.of(lastSeen: lastSeen, now: now) }
@@ -91,6 +89,7 @@ struct QuestionBody: Codable, Sendable, Equatable {
     /// Permission questions: what "Always" covers, shown as "Always allow <scope>".
     var scope: String? = nil
     var allowQuestion: Bool? = nil // allow_question via JSONCoding
+    var review: Bool? = nil // review via JSONCoding
     var groupRef: GroupRef? = nil // group_ref via JSONCoding
 }
 
@@ -138,6 +137,10 @@ struct Question: Codable, Sendable, Equatable, Identifiable {
     var isGroupAllow: Bool {
         message.body.allowQuestion == true && message.body.options.count == 3 &&
             Set(message.body.options) == Set(["once", "always", "no"])
+    }
+    var isReview: Bool {
+        message.body.review == true && message.body.options.count == 2 &&
+            Set(message.body.options) == Set(["accept", "changes"])
     }
     var isAllow: Bool { isGroupAllow || isLegacyAllow }
     /// Labels never change the raw option sent to the relay.
@@ -516,6 +519,8 @@ struct PhoneSettings: Codable, Sendable, Equatable {
     var swissGerman: Bool = false
     var ttsCapUsd: Double = 10
     var ttsUsedUsdMonth: Double = 0
+    var muteAllUntil: String? = nil
+    var groupMutes: [GroupMute]? = nil
     /// Read-aloud budget left this month (never below 0).
     var ttsLeftUsd: Double { max(0, ttsCapUsd - ttsUsedUsdMonth) }
 }

@@ -355,9 +355,9 @@ def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, m
 
 def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     js = webjs.all_js()
-    move = js[js.index("async function moveTicket") :]
+    move = js[js.index("function moveTicket") :]
     move = move[: move.index("function list()")]
-    assert "actRetry('ticket.patch', () => ({ticket:t.id, data:{status}, if_revision:(ticketOf(id) || t).revision})" in move
+    assert "actRetry('ticket.patch', () => ({ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision})" in move
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
     card = js[js.index("function boardCard") : js.index("function board()")]
     assert "statusItems(t, 'card', STATUS_CHOICES)" in card and "aria-label" in card  # the menu is the keyboard way to move

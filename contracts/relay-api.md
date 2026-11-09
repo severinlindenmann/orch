@@ -196,6 +196,13 @@ from (type, ref) and `rev` from the content (blob sha256, commit sha, publish id
 preview) and, for permission questions (options `Once` / `Always` / `No`), optional `scope` (shown as "Always allow
 <scope>").
 
+**Review question** (`body.review: true`): when a ticket sent to the phones enters Review, the workspace sends a normal `question` to `phones`
+with `question_id: "review-<n>"` (n = the review round, new each time the ticket enters Review), `text: "Is this done?"`, `options: ["accept", "changes"]`,
+`recommended: null`. The phone shows it only as that ticket chat's review bar, while the ticket is in Review and the question is open: Accept answers `accept`;
+Ask for changes answers the typed text (1-2000 chars, never empty). The workspace acts on an answer only if the ticket is still in Review and the
+question is the current round, once (relay: first answer wins); `accept` = the dashboard Accept, any other text = the dashboard "Ask for changes" with
+that note (a bare `changes` is nothing to send: history line only). Attributed `human:<stored name of the paired phone>` (`human:<ph id>` if it has none), from the relay-authenticated sender only, never from `body.answered_by`. Only a phone paired with this workspace may answer; a group-routed answer is refused. The relay refuses (`422`) a question with `body.review` unless `question_id` is `review-<n>`, `options` are exactly `["accept","changes"]` and there is no `scope`. The relay stores and lists it like any question but does not push it (the Ready-for-review text is the push). A stale or repeated answer is a history line only. vectors/review-question-v1.json.
+
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.
 Work updates (`body.update` on a text, message.schema.json): the relay pushes a text with `update.kind` = `result`, `question`,
