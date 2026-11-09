@@ -69,7 +69,9 @@ def _forms_one(value: str) -> set[str]:
             for variant in (base, base.replace("/", "\\/")):
                 forms.update((variant, _upper_u(variant)))
     for source in (value, *b64):
-        quoted = (quote(source, safe=""), quote(source), quote_plus(source, safe=""), quote_plus(source, safe="/"))
+        quoted = (
+            quote(source, safe=""), quote(source), quote_plus(source, safe=""), quote_plus(source, safe="/"),
+        )
         for escaped in quoted:
             forms.update((escaped, _lower_pct(escaped)))
     if "\n" in value:
