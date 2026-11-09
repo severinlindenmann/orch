@@ -35,7 +35,23 @@ from orch.errors import Refused
 ENFORCE_PENDING_MAC = False
 
 HP_MAX_LIFE = 60
-NOT_TOGETHER = "Refused: this workspace and this orch home don't belong together."
+NOT_TOGETHER = "home_pairing"  # the code, for tests and logs; people read the plain texts below
+MSG_OTHER_HOME = (
+    "This workspace uses a different orch folder than your account's. "
+    "Start orch normally (without ORCH_HOME) to approve things here."
+)
+MSG_LINKED_HOME = (
+    "orch's folder in your account is a link to somewhere else, so orch won't trust it. "
+    "Move the real folder back to {path}."
+)
+MSG_TEST_WS = "This is a test workspace; start it with its own test orch folder."
+MSG_TEST_INSTALL = "This is a test install of orch; it only works in test folders."
+
+
+class HomeRefused(Refused):
+    code = NOT_TOGETHER
+
+
 WRONG_RIGHTS = "Refused: the key folder has the wrong rights. Fix: orch doctor"
 POSIX = os.name == "posix"
 
@@ -46,7 +62,7 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act".split()
+    "run.human_input addon.act addon.add_local".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -74,6 +90,13 @@ def account_home() -> Path:
     test suite fakes, so tests never touch the real orch home."""
     from orch import addons
 
+    if _is_windows():  # the profile folder from the process token (winacl), never the environment
+        try:
+            from orch import winacl
+
+            return Path(winacl.profile_dir())
+        except (ImportError, AttributeError, OSError, Refused):
+            pass
     return addons.real_home()
 
 
@@ -82,25 +105,79 @@ def _source_tree() -> bool:
     return (here.parents[2] / "pyproject.toml").is_file() and here.parent.name == "orch"
 
 
-def install_kind() -> str:
-    """normal | dev | test. The install record sits in orch's own tool environment
-    (<sys.prefix>/orch-install.json,
-    written by the installer). No record: running from the source tree = test, anything else = normal."""
+INSTALL_KINDS = ("normal", "dev", "test")
+
+
+def install_record_path() -> Path:
+    return Path(os.path.realpath(sys.prefix)) / "orch-install.json"
+
+
+def read_install_record() -> str | None:
+    """The kind the installer wrote into orch's own tool environment, or None. The record counts only when
+    it sits in the running interpreter's environment AND its "root" is that environment's real path (an
+    old, copied or planted record, or one for another environment, is ignored). No `uv` and no environment
+    variable decides."""
+    here = Path(os.path.realpath(sys.prefix))
     try:
-        raw = saferead.read_private(Path(os.path.realpath(sys.prefix)), "orch-install.json", 4096)
+        raw = saferead.read_private(here, "orch-install.json", 4096)
         data = json.loads(raw) if raw is not None else None
-        kind = data.get("kind") if isinstance(data, dict) else None
-        if kind in ("normal", "dev", "test"):
-            return kind
     except (OSError, ValueError):
-        pass
+        return None
+    if not isinstance(data, dict) or data.get("kind") not in INSTALL_KINDS:
+        return None
+    root = data.get("root")
+    if not isinstance(root, str) or os.path.realpath(root) != str(here):
+        return None
+    return data["kind"]
+
+
+def install_record_text(kind: str, root: str | Path) -> str:
+    """The record's text, as install.sh / install.ps1 write it after `uv tool install` (orch.install/1):
+    root = the real path of the tool environment at install time."""
+    if kind not in INSTALL_KINDS:
+        raise ValueError("kind must be normal, dev or test")
+    body = {"schema": "orch.install/1", "kind": kind, "root": os.path.realpath(root)}
+    return json.dumps(body, sort_keys=True) + "\n"
+
+
+def write_install_record(env_dir: Path, kind: str) -> None:
+    """Only for the update that reinstalls the tool environment (which drops the record): it carries over the
+    kind the installer wrote, never a new one. No orch command takes a kind from its caller."""
+    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind, env_dir))
+
+
+def install_kind() -> str:
+    """normal | dev | test. The installer's record in orch's own tool environment decides; with no record a
+    source-tree run (the test suite) is `test` and any other install is `normal`."""
+    kind = read_install_record()
+    if kind:
+        return kind
     return "test" if _source_tree() else "normal"
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _parts(path: str) -> list[str]:
+    """Path components for comparing. Windows: both separators, and case-insensitive (the file system is)."""
+    if _is_windows():
+        return [x.lower() for x in str(path).replace("\\", "/").split("/") if x]
+    return [x for x in str(path).split("/") if x]
+
+
+def _same(a: str, b: str) -> bool:
+    return _parts(a) == _parts(b)
+
+
 def _under(path: str, prefix: str) -> bool:
-    """Component-wise: is `path` inside the literal `prefix` (both absolute POSIX strings)?"""
-    pp, xp = [x for x in path.split("/") if x], [x for x in prefix.split("/") if x]
+    """Component-wise: is `path` inside `prefix` (absolute paths; the prefix itself is not inside itself)?"""
+    pp, xp = _parts(path), _parts(prefix)
     return len(pp) > len(xp) and pp[: len(xp)] == xp
+
+
+def _join(account, name: str) -> str:
+    return str(account).rstrip("/\\") + "/" + name
 
 
 def home_ok(
@@ -108,12 +185,11 @@ def home_ok(
 ) -> bool:
     """Reference `home_ok` (secrets.md, vectors `home`): a real workspace pairs only with the default home, a
     test workspace (dev/test install, realpath under the literal <account home>/.orch-test) only with a
-    test home."""
-    prefix = account.rstrip("/") + "/.orch-test"
+    test home. On Windows the account home is the profile folder and components compare case-insensitively."""
+    prefix = _join(account, ".orch-test")
     active = install in ("dev", "test") and prefix_real_dir
     ws_test = active and _under(workspace_realpath, prefix)
-    default_home = account.rstrip("/") + "/.orch-tool"
-    if home_realpath == default_home:
+    if _same(home_realpath, _join(account, ".orch-tool")):
         home = "default"
     elif active and _under(home_realpath, prefix):
         home = "test"
@@ -122,13 +198,24 @@ def home_ok(
     return (not ws_test and home == "default") or (ws_test and home == "test")
 
 
+REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: a junction or symlink
+
+
+def _lstat(p: Path):
+    return p.lstat()
+
+
 def _prefix_is_real_dir(account: Path) -> bool:
-    p = account / ".orch-test"
+    """<account home>/.orch-test lstat's as a real folder (no link, no reparse point) owned by the user."""
     try:
-        st = p.lstat()
+        st = _lstat(Path(account) / ".orch-test")
     except OSError:
         return False
-    return stat.S_ISDIR(st.st_mode) and (not POSIX or st.st_uid == os.getuid())
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    if _is_windows():
+        return not getattr(st, "st_file_attributes", 0) & REPARSE
+    return st.st_uid == os.getuid()
 
 
 def guarded_home(root: Path) -> Path:
@@ -140,7 +227,7 @@ def guarded_home(root: Path) -> Path:
     install = install_kind()
     real_dir = _prefix_is_real_dir(account)
     ws_real = os.path.realpath(root)
-    ws_test = install in ("dev", "test") and real_dir and _under(ws_real, acct.rstrip("/") + "/.orch-test")
+    ws_test = install in ("dev", "test") and real_dir and _under(ws_real, _join(acct, ".orch-test"))
     if ws_test:
         env = os.environ.get("ORCH_HOME")
         cand = Path(env) if env else Path(os.environ.get("HOME", "")) / ".orch-tool"
@@ -149,17 +236,17 @@ def guarded_home(root: Path) -> Path:
         if install == "test":
             # A source-tree/test run never touches the account's real orch home (owner rule). Children of the
             # test suite (subprocess tests) reach here with the real pwd home, so this must refuse, not fake.
-            raise Refused(NOT_TOGETHER)
+            raise HomeRefused(MSG_TEST_INSTALL)
         cand = account / ".orch-tool"
-        home_real = acct.rstrip("/") + "/.orch-tool"
+        home_real = _join(acct, ".orch-tool")
         env = os.environ.get("ORCH_HOME")
         # a real workspace pairs only with the default home: another home refuses, never a fallback
-        if env and os.path.realpath(env) != home_real:
-            raise Refused(NOT_TOGETHER)
-        if cand.is_symlink():
-            raise Refused(NOT_TOGETHER)  # the default folder is a link: never followed
+        if env and not _same(os.path.realpath(env), home_real):
+            raise HomeRefused(MSG_OTHER_HOME)
+        if cand.is_symlink():  # the default folder is a link: never followed
+            raise HomeRefused(MSG_LINKED_HOME.format(path=cand))
     if not home_ok(acct, install, real_dir, ws_real, home_real):
-        raise Refused(NOT_TOGETHER)
+        raise HomeRefused(MSG_TEST_WS if ws_test else MSG_OTHER_HOME)
     return cand
 
 
@@ -687,6 +774,47 @@ def effective(root: Path, setting: str, file_value: bool) -> bool:
     except (Refused, OSError):
         return False
     return bool(file_value and (rec_val if rec_val is not None else default))
+
+
+# ------------------------------------------------------------------------------------------- launch token
+
+LAUNCH_SERVERS = ("focus", "dashboard")
+LAUNCH_LIFE = 120
+
+
+def is_test_workspace(root: Path) -> bool:
+    """A test install AND a workspace whose realpath is under the literal <account home>/.orch-test (Windows:
+    <profile folder>\\.orch-test, case-insensitive)."""
+    account = account_home()
+    return (
+        install_kind() == "test"
+        and _prefix_is_real_dir(account)
+        and _under(os.path.realpath(root), _join(account, ".orch-test"))
+    )
+
+
+def write_launch_token(root: Path, server: str) -> str:
+    """The one-time launch token of a page server (contract step 3): <key folder>/launch-<server>.token,
+    0600, single use, 120 s. Returns the token; only the person's own start/open path may use it."""
+    if server not in LAUNCH_SERVERS:
+        raise Refused("Unknown page server.")
+    d = key_dir(root)
+    token = secrets.token_urlsafe(24)
+    with _key_lock(d):
+        _write_private(
+            d / f"launch-{server}.token",
+            json.dumps({"token": token, "exp": int(time.time()) + LAUNCH_LIFE}),
+        )
+    return token
+
+
+def printable_launch_url(root: Path, server: str, base_url: str) -> str:
+    """TEST-ONLY exception to "the launch token is never printed" (human-proof.md): `orch start --no-open
+    --print-launch-url`, on a test install and a test workspace only, so the Playwright lane can open a page
+    session. Refused everywhere else."""
+    if not is_test_workspace(root):
+        raise Refused("Printing a launch link works only on a test install, in a test folder.")
+    return f"{base_url.rstrip('/')}/#launch={write_launch_token(root, server)}"
 
 
 # ------------------------------------------------------------------------------------------- reset

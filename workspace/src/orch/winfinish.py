@@ -66,7 +66,9 @@ def main():
         time.sleep(0.5)
     busy()
     try:
-        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"])
+        env = dict(os.environ)
+        env.update(job.get("env") or {})  # e.g. UV_TOOL_DIR pinned to where the person installed orch
+        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env)
     except subprocess.TimeoutExpired:
         say("RESULT fail: uv took too long. Run it again: orch update")
         return 1
@@ -75,6 +77,10 @@ def main():
         say("uv failed: " + (r.stderr or r.stdout).strip()[-1500:])
         say("RESULT fail: the reinstall failed. Run it again: orch update")
         return 1
+    if job.get("record"):  # the reinstall drops the install record: put it back
+        rpath, rtext = job["record"]
+        with open(rpath, "w", encoding="utf-8", newline="\n") as f:
+            f.write(rtext)
     if job.get("registry"):
         path, data = job["registry"]
         tmp = path + ".tmp"
@@ -164,7 +170,7 @@ def _alive(pid: int) -> bool:
 
 
 def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done: str,
-          registry: tuple[Path, str] | None = None) -> Path:  # fmt: skip
+          registry: tuple[Path, str] | None = None, extra: dict | None = None) -> Path:  # fmt: skip
     """Start the finisher detached and return its log. `then`: orch commands run afterwards (in `cwd`)."""
     base = getattr(sys, "_base_executable", None)
     if not base or Path(base).resolve().is_relative_to(Path(sys.prefix).resolve()):
@@ -182,6 +188,8 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "wait": 120,
         "uv_timeout": UV_TIMEOUT,
         "registry": [str(registry[0]), registry[1]] if registry else None,
+        "env": (extra or {}).get("env"),
+        "record": (extra or {}).get("record"),
         "then": [{"argv": [str(py), "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
         "log": str(log_path(home)),
         "done": done,
