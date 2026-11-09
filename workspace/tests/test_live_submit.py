@@ -992,3 +992,25 @@ def test_ordinary_short_output_still_types_and_the_capture_keeps_trailing_spaces
     monkeypatch.setattr(runs_live, "tmux", spy)
     runs_live._hold_reason(proj, tid, None)
     assert "-N" in seen[0] and seen[0][0] == "capture-pane"  # trailing spaces at a wrap point are kept
+
+
+def test_real_claude_captures_with_N_padding_still_say_empty_or_typed(proj, run, monkeypatch):
+    """`capture-pane -N` pads every row with spaces (after the ESC[0m that ends the hint): spaces are never
+    visible text, so the real placeholder still types and the typed prompt still holds."""
+    raw = (FIX / "placeholder-N.raw").read_text(encoding="utf-8")
+    assert any(ln.endswith("\x1b[0m" + " " * 5) or ln.endswith("   ") for ln in raw.split("\n"))  # padded
+    tid = _real("placeholder-N", monkeypatch, proj, run)
+    assert runs_live._hold_reason(proj, tid, None) is None
+    tid = _real("typed-N", monkeypatch, proj, run)
+    assert runs_live._hold_reason(proj, tid, None) == "text"
+
+
+def test_input_held_for_unsent_text_is_given_up_after_three_minutes(proj, run, monkeypatch):
+    """The hold is bounded: after DELIVER_GIVE_UP_SECONDS the input is kept (live_retry, one step)."""
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, box="a half-written note", cx=19)
+    memo, ended, t0 = {}, [], time.time()
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0) is None
+    got = runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 180, end=lambda: ended.append(1))
+    assert got == "gave_up" and ended == [1] and sent == []
+    (back,) = runs.undelivered(proj, tid)
+    assert back["live_retry"] is True
