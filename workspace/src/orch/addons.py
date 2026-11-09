@@ -391,28 +391,69 @@ def home(root: Path | None = None) -> Path:
 
 
 def registry_path() -> Path:
-    """The add-on list. On a normal install it is read from the account's default orch home ONLY: an
-    environment-chosen ORCH_HOME must not feed what is installed into orch's own tool environment."""
-    from orch import humanproof
-
-    if humanproof.install_kind() == "normal":
-        return real_home() / ".orch-tool" / "addons.json"
+    """The add-on list: home()/addons.json, always the same home as every other piece of state (running.json,
+    run/, installed.json). Reading it from a trusted ORCH_HOME is safe because registry() drops what a crafted
+    file could use: built-in entries need a shipped name, and a folder entry installs only from a snapshot at
+    the exact guarded location whose hash is on that home's person-allowed list (written by the hand-off)."""
     return home() / "addons.json"
 
 
-def registry() -> list[dict]:
-    """Installed add-ons on this machine: [{name, source, version}]. source = "built-in" or a folder path."""
+_ENTRY_KEYS = ("name", "source", "version", "approved", "hash", "folder")
+
+
+def _skip_note(name: object, why: str) -> None:
+    label = re.sub(r"[^A-Za-z0-9._-]", "?", str(name))[:40]
+    print(f"Note: the add-on list entry '{label}' was ignored: {why}.", file=sys.stderr)
+
+
+def _builtin_ok(name: str) -> bool:
+    """A built-in entry is real only when orch ships that add-on: its name is in SHIPPED_ADDONS (or, on a dev
+    or test install with a local source, its folder is inside that source's workspace-addons, no link)."""
+    if name in SHIPPED_ADDONS:
+        return True
+    from orch import humanproof
+
+    if humanproof.install_kind() not in ("dev", "test") or not _is_local(repo()):
+        return False
+    base = Path(repo()) / "workspace-addons" / name
+    return base.is_dir() and os.path.realpath(base) == os.path.abspath(base)
+
+
+def registry(ships_check: bool = True) -> list[dict]:
+    """Installed add-ons on this machine: [{name, source, version}]. source = "built-in" or a folder path.
+    Entries a crafted file could use to steer an install are dropped with a note: a bad name, a built-in that
+    orch does not ship, extra fields (only the known keys are kept)."""
     try:
         data = json.loads(registry_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     if not isinstance(data, list):
         return []
-    return [
-        e
-        for e in data
-        if isinstance(e, dict) and isinstance(e.get("name"), str) and isinstance(e.get("source"), str)
-    ]
+    out = []
+    for e in data:
+        if not (isinstance(e, dict) and isinstance(e.get("name"), str) and isinstance(e.get("source"), str)):
+            continue
+        if not NAME_RE.match(e["name"]) or e["name"] in RESERVED:
+            _skip_note(e["name"], "it is not a valid add-on name")
+            continue
+        if ships_check and e["source"] == "built-in" and not _builtin_ok(e["name"]):
+            _skip_note(e["name"], "orch does not ship it")
+            continue
+        out.append({k: e[k] for k in _ENTRY_KEYS if k in e})
+    return out
+
+
+def _tool_env_change_ok() -> None:
+    """Anything that reinstalls orch's own tool environment (update, add-on add/remove) is a person's op on
+    the account's own orch folder: on a NORMAL install with another ORCH_HOME it is refused, never run from
+    that folder's add-on list."""
+    from orch import humanproof
+
+    if humanproof.install_kind() != "normal":
+        return
+    default = real_home() / ".orch-tool"
+    if os.path.realpath(home()) != os.path.realpath(default):
+        raise humanproof.HomeRefused(humanproof.MSG_ENV_CHANGE)
 
 
 def _missing_source(e: dict) -> str | None:
@@ -424,7 +465,12 @@ def _missing_source(e: dict) -> str | None:
         if not _entry_snapshot_ok(e):
             return f"it changed since you allowed it ({e['name']})"
         return None
-    if not _local_add_ok():
+    from orch import humanproof
+
+    if humanproof.install_kind() not in (
+        "dev",
+        "test",
+    ):  # never because a hand-off is running: it allows one hash
         return "it comes from a folder, and only you can allow that (in the dashboard on this computer)"
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
 
@@ -441,7 +487,7 @@ def _no_longer_ships(e: dict) -> bool:
 
 def _current_registry() -> list[dict]:
     """The registry without built-ins that no longer ship; saved back when one was dropped."""
-    reg = registry()
+    reg = registry(ships_check=False)  # a built-in orch no longer ships is dropped below, with its own note
     keep = [e for e in reg if not _no_longer_ships(e)]
     for e in reg:
         if e not in keep:
@@ -579,6 +625,7 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
     """
     from orch import winfinish
 
+    _tool_env_change_ok()
     if not winfinish.needed():
         _install_tool(entries)
         if save:
