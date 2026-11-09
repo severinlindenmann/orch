@@ -13,17 +13,32 @@ _REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
 
+def _guard_bases() -> list[Path]:
+    """The orch homes the guard watches: ALWAYS the real account home (getpwuid), plus ORCH_TEST_GUARD_HOME's
+    when set (only tests/test_session_guard.py sets it). The override adds a location, never replaces."""
+    bases = [_REAL_HOME_FN() / ".orch-tool"]
+    extra = os.environ.get("ORCH_TEST_GUARD_HOME")
+    if extra:
+        bases.append(Path(extra) / ".orch-tool")
+    return bases
+
+
 def _snapshot_real_tool_home():
-    """{path: (size, sha256, mtime_ns)} of the real ~/.orch-tool (read only), without the fallback trace; and
+    """{path: (size, sha256, mtime_ns)} of the watched orch homes (read only), without the fallback trace; and
     the trace lines. A path that can not be read maps to None."""
-    base = _REAL_HOME_FN() / ".orch-tool"
     files, trace = {}, []
+    for base in _guard_bases():
+        _snapshot_one(base, files, trace)
+    return files, trace
+
+
+def _snapshot_one(base: Path, files: dict, trace: list) -> None:
     if base.exists():
         for p in (base, *base.rglob("*")):
             try:
                 if p.name.startswith(".fallback-trace.log"):
                     if p.name == ".fallback-trace.log" and not p.is_symlink():
-                        trace = p.read_text(encoding="utf-8", errors="replace").splitlines()
+                        trace += p.read_text(encoding="utf-8", errors="replace").splitlines()
                     continue
                 if p.is_dir() and not p.is_symlink():
                     files[str(p)] = "dir"  # a folder's mtime moves when the trace file is made or rotated
@@ -33,7 +48,6 @@ def _snapshot_real_tool_home():
                 files[str(p)] = (st.st_size, digest, st.st_mtime_ns)
             except OSError:
                 files[str(p)] = None
-    return files, trace
 
 
 _REAL_AT_START, _TRACE_AT_START = _snapshot_real_tool_home()
@@ -41,18 +55,14 @@ _PYTEST_TMP = Path(tempfile.gettempdir()).resolve()
 
 
 def _ours(line: dict) -> bool:
-    """A trace line written by this pytest session or its children: it has our pid or ppid (workers and
-    controller register theirs in the session folder), or ran in a pytest temp folder."""
-    pids = set()
+    """A trace line written by this pytest session or its children: its pid or ppid is in this session's
+    registry (the controller and every xdist worker register theirs). By pid only: a path prefix would blame
+    this run for a parallel session's lines (shared pytest-of-<user> folder)."""
     reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
-    if reg and Path(reg).exists():
-        pids = {int(x) for x in Path(reg).read_text().split()}
-    cwd = str(line.get("cwd", ""))
-    return (
-        line.get("pid") in pids
-        or line.get("ppid") in pids
-        or ("/pytest-of-" in cwd and cwd.startswith(str(_PYTEST_TMP)))
-    )
+    if not reg or not Path(reg).exists():
+        return False
+    pids = {int(x) for x in Path(reg).read_text().split() if x.isdigit()}
+    return line.get("pid") in pids or line.get("ppid") in pids
 
 
 def pytest_configure(config):
