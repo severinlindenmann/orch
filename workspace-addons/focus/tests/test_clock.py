@@ -2,7 +2,8 @@ import threading
 import time
 from datetime import datetime
 
-from orch_focus import events as ev, runfiles
+from orch_focus import events as ev
+from orch_focus import runfiles
 from orch_focus.adapters.claude import ClaudeMapper
 from orch_focus.board import Board
 from orch_focus.clock import WorkClock
@@ -61,6 +62,27 @@ def test_corrupt_clock_file_is_ignored_and_ticks_are_safe_in_threads(tmp_path):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert c.tick(TID, "worked")["worked"] <= time.time() - start + 1  # never counted twice
+
+
+def test_context_percent_from_cached_input():
+    m = ClaudeMapper("r_8k2m9z4q", TID)
+    for i, (read, new) in enumerate([(0, 1000), (900, 100)]):
+        m.feed({"type": "assistant", "message": {"id": f"m{i}", "content": [], "usage": {
+            "input_tokens": new // 2, "cache_creation_input_tokens": new - new // 2, "cache_read_input_tokens": read}}})
+    m.feed({"type": "assistant", "message": {"id": "m1", "content": [], "usage": {"input_tokens": 50, "cache_creation_input_tokens": 50, "cache_read_input_tokens": 900}}})  # same id twice: counted once
+    out = m.feed({"type": "result", "timestamp": "2026-11-09T10:00:00Z"})
+    state = next(e for e in out if e["kind"] == "run.state")
+    assert state["data"]["reused"] == 45  # 900 of 2000
+    snap = Board.from_events(out).snapshot()
+    assert snap["context"]["reused"] == 45
+    assert ev.make("r_8k2m9z4q", TID, "main", "run.state", "x", "adapter", state="idle")  # without the figure: fine
+    assert Board.from_events([]).snapshot()["context"] is None
+
+
+def test_no_figure_when_nothing_was_counted():
+    m = ClaudeMapper("r_8k2m9z4q", TID)
+    state = next(e for e in m.feed({"type": "result"}) if e["kind"] == "run.state")
+    assert "reused" not in state["data"]
 
 
 def test_saving_the_clock_does_not_look_like_a_workspace_change(tmp_path):

@@ -588,7 +588,7 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
                     return
                 try:
                     tracker.view(tid)
-                except Exception:  # noqa: BLE001 - one bad ticket must not end the ticker
+                except Exception:  # noqa: BLE001, S110 - one bad ticket must not end the ticker
                     pass
 
     threading.Thread(target=ticker, daemon=True, name="focus-clock").start()

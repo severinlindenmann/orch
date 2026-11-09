@@ -33,7 +33,7 @@ def _num(v) -> float:
 
 def _age(iso: str | None, now: float) -> float:
     try:
-        return now - datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+        return now - datetime.fromisoformat(str(iso)).timestamp()
     except (ValueError, TypeError):
         return 0.0
 
