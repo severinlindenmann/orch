@@ -100,6 +100,7 @@ def write_ready(f: Path, port: int) -> None:
 def start(root: Path, port: int | None = None) -> dict:
     """The child binds the port itself (8420, else any free one) and writes the bound port to a ready file;
     the start counts only when that port answers with this start's nonce and the child's pid."""
+    root = root.resolve()  # --dir, cwd and ORCH_ROOT name one folder
     cur = running(root)
     if cur:
         return cur
@@ -128,7 +129,7 @@ def start(root: Path, port: int | None = None) -> dict:
             stdout=out,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            env={**os.environ, "ORCH_DASHBOARD_NONCE": nonce},
+            env={**os.environ, "ORCH_ROOT": str(root.resolve()), "ORCH_DASHBOARD_NONCE": nonce},
             **kw,
         )
     try:

@@ -236,7 +236,7 @@ def test_history_says_where_a_change_came_from(proj, run, monkeypatch):
     t = tickets.create(proj, "Odd", "human:t")
     assert t["history"][0]["via"] == "cli"
     monkeypatch.setenv("ORCH_VIA", "dashboard")
-    assert "ORCH_VIA" not in runs._agent_environ()  # an agent started from the page writes as itself
+    assert "ORCH_VIA" not in runs._agent_environ(proj)  # an agent started from the page writes as itself
 
 
 @pytest.mark.parametrize(

@@ -512,6 +512,22 @@ def _set_problem(root: Path, text: str | None) -> None:
         p.unlink(missing_ok=True)
 
 
+def log_send_failure(root: Path, what: str, why: object) -> None:
+    """One line in .orch/run/relay-errors.log (machine-local, git-ignored, private; newest 200 kept) for a
+    phone send that failed and was not shown to anybody (the proposal question).
+    Never fails the caller, never printed."""
+    try:
+        p = root / ".orch" / "run" / "relay-errors.log"
+        if (root / ".orch").is_symlink() or p.parent.is_symlink() or p.is_symlink():
+            return
+        p.parent.mkdir(parents=True, exist_ok=True)
+        line = f"{tickets.now()} {what}: {' '.join(str(why).split())[:300]}"
+        have = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.is_file() else []
+        net.write_atomic(p, ("\n".join([*have, line][-200:]) + "\n").encode("utf-8"), True)
+    except (OSError, ValueError, Refused):
+        pass
+
+
 def outbox_list(root: Path) -> list[dict]:
     """Messages saved but not taken by the relay yet, oldest first: [{id, to, type, created_at}]."""
     out = []
@@ -743,16 +759,40 @@ def _send_proposal(
         "recommended": None,
         "proposal": "make_ticket",
     }
+    # LOCAL FIRST: the proposal (chat entry + dashboard Make ticket card) exists whatever the relay says. The
+    # phone question is best effort afterwards: a refusal (an older relay without the proposal rule) or an
+    # outage never reaches the helper or the person and never removes the card.
+    local = {
+        "schema": "orch.msg/1",
+        "id": mid,
+        "to": to,
+        "type": "question",
+        "created_at": tickets.now(),
+        "body": body,
+    }
+    with contextlib.suppress(Refused, OSError):
+        _record_general(root, local, text, general_body, reply_to, refs)
     rec = {"ticket": None, "question_id": body["question_id"], "to": to, "proposal": True, "title": title}
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
+    # The caller (the helper's command) always gets "sent": relay trouble is not its business; a message that
+    # is only waiting offline goes out later from the outbox, the same bytes.
     try:
-        msg = _message(root, to, "question", body, None, reply_to, mid)
-    except Refused:
+        return {**_message(root, to, "question", body, None, reply_to, mid), "sent": True, "problem": None}
+    except (
+        Refused,
+        OSError,
+    ) as e:  # a refusal, or the outbox could not be written: no card the phone never had
         _asked_edit(root, lambda asked: asked.pop(mid, None))
-        raise
-    with contextlib.suppress(Refused, OSError):  # the question is sent; a missing history line never fails it
-        _record_general(root, msg, text, general_body, reply_to, refs)
-    return msg
+        log_send_failure(root, f"proposal question {mid} to {to} failed", e)
+    try:  # the phone still hears the helper, as a plain text (no card), under the same message id
+        return {
+            **_message(root, to, "text", general_body, None, reply_to, mid),
+            "sent": True,
+            "problem": None,
+        }
+    except (Refused, OSError) as e:
+        log_send_failure(root, f"proposal text {mid} to {to} failed", e)
+        return {**local, "sent": True}
 
 
 def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:
@@ -930,8 +970,9 @@ def _set_asked(root: Path, mid: str, **fields) -> dict:
 
 
 def ack_proposal(root: Path, mid: str, made: dict) -> None:
-    """The ordinary ack ("Got it: <title>", with the new ticket and its key) that closes the phone's proposal
-    card, once, to the phone that answered (else where the question went).
+    """Closes the phone's proposal card when the DASHBOARD made the ticket first: the ordinary ack ("Got it:
+    <title>", with the new ticket and its key), once, to where the question went. When a phone's own answer
+    made it, nothing is sent: the card already shows the result ("Ticket made"), no second text.
     Only for a proposal asked on the phones."""
 
     def claim(asked):
@@ -939,7 +980,7 @@ def ack_proposal(root: Path, mid: str, made: dict) -> None:
         if not (isinstance(rec, dict) and rec.get("proposal") is True) or rec.get("acked"):
             return None
         rec["acked"] = True  # marked first: a lost ack is better than two
-        return str(rec.get("phone") or rec.get("to") or "phones")
+        return None if rec.get("phone") else str(rec.get("to") or "phones")
 
     if (target := _asked_edit(root, claim)) is None:
         return
