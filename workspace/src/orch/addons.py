@@ -1409,10 +1409,127 @@ def uninstall(root: Path, name: str) -> None:
 # ---------------------------------------------------------------- update
 
 
-def update(root: Path, project_only: bool = False, after_install: bool = False) -> list[str]:
+def _orch_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    from orch import __version__
+
+    try:
+        return version("orch-workspace")
+    except PackageNotFoundError:
+        return __version__
+
+
+def _github_api() -> str | None:
+    match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)", repo().removesuffix(".git"))
+    return f"https://api.github.com/repos/{match[1]}/{match[2]}" if match else None
+
+
+def _source_sha() -> str | None:
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    try:
+        if _is_local(repo()):
+            result = subprocess.run(
+                ["git", "-C", repo(), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5,
+            )
+            return result.stdout.strip() or None
+        api = _github_api()
+        if api:
+            request = Request(
+                f"{api}/commits/{quote(ref(), safe='')}",
+                headers={"Accept": "application/vnd.github.sha"},
+            )
+            with urlopen(request, timeout=5) as response:
+                return response.read().decode("utf-8").strip() or None
+    except Exception:  # best effort: metadata must not prevent an update
+        pass
+    return None
+
+
+def _release_title() -> str | None:
+    from urllib.request import urlopen
+
+    from orch.services import _printable
+
+    try:
+        api = _github_api()
+        if api:
+            with urlopen(f"{api}/releases/latest", timeout=5) as response:
+                release = json.load(response)
+            title = release.get("name") or release.get("body")
+            if isinstance(title, str) and title.strip():
+                return _printable(title.strip().splitlines()[0])[:100] or None
+    except Exception:  # best effort, including malformed release data
+        pass
+    return None
+
+
+def _save_installed(sha: str | None) -> None:
+    p = home() / "installed.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"sha": sha}), encoding="utf-8")
+
+
+def _update_lines(root: Path, before: dict, found: dict, sha: str | None) -> list[str]:
+    lines = []
+    old, new = before["orch"], _orch_version()
+    sha_changed = sha is not None and sha != before.get("sha")
+    if old != new or sha_changed:
+        line = f"Updating orch {old}" + (f" → {new}" if old != new else "")
+        if sha:
+            previous = f" {before['sha'][:8]}" if before.get("sha") else ""
+            line += f" ({ref()}{previous} → {sha[:8]})"
+        lines.append(line)
+    for entry in registry():
+        name = entry["name"]
+        old = before["addons"].get(name)
+        new = found.get(name, {}).get("version")
+        if old is not None and new is not None and old != new:
+            lines.append(f"Updating {name} {old} → {new}")
+    if not lines:
+        return ["orch is up to date."]
+    title = _release_title()
+    if title:
+        lines.append(title)
+    return lines
+
+
+def _restart_updated(root: Path) -> list[str]:
+    from orch import services
+
+    lines = []
+    names = {e["addon"] for e in services.running() if Path(e["workspace"]) == root.resolve()}
+    if names:
+        try:
+            services.stop(root, only=names)
+            rows = services.start(root, only=names)
+            ok = {r["addon"] for r in rows if r.get("running")} & names
+        except Exception:  # a restart failure must not hide a successful update
+            ok = set()
+        if ok:
+            lines.append(f"Restarting {', '.join(sorted(ok))}… done")
+        lines.extend(f"Restart {name} to use the new version" for name in sorted(names - ok))
+    return lines
+
+
+def update(
+    root: Path,
+    project_only: bool = False,
+    after_install: bool = False,
+    *,
+    json_output: bool = False,
+    report: list[str] | None = None,
+) -> list[str]:
     """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks.
     after_install: the install script just put a bare orch in place; put the registered add-ons back."""
     if after_install:
+        _save_installed(_source_sha())
         reg = _current_registry()
         if reg:
             names = ", ".join(e["name"] for e in reg)
@@ -1420,14 +1537,35 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
                 print("Add-ons installed again: " + names)
         return []
     if not project_only:
-        _reinstall(
-            _current_registry(),
-            save=False,
-            then=[["update", "--project-only"]],
-            root=root,
-            done="orch updated",
-        )
+        try:
+            stored = json.loads((home() / "installed.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            stored = {}
+        snapshot = {
+            "orch": _orch_version(),
+            "addons": {e["name"]: e["version"] for e in registry()},
+            "sha": stored.get("sha"),
+        }
+        before_path = home() / "update-before.json"
+        before_path.parent.mkdir(parents=True, exist_ok=True)
+        before_path.write_text(json.dumps(snapshot), encoding="utf-8")
+        try:
+            _reinstall(
+                _current_registry(),
+                save=False,
+                then=[["update", "--project-only", *(["--json"] if json_output else [])]],
+                root=root,
+                done="orch updated",
+            )
+        except BaseException:
+            before_path.unlink(missing_ok=True)  # a failed install leaves no stale snapshot
+            raise
         return []
+    before_path = home() / "update-before.json"
+    before = None
+    if before_path.exists():
+        before = json.loads(before_path.read_text(encoding="utf-8"))
+        before_path.unlink()
     done = []
     if (root / ".orch" / "harness" / "skills" / "orch").is_dir():
         from orch.init import init
@@ -1453,4 +1591,21 @@ def update(root: Path, project_only: bool = False, after_install: bool = False) 
         done.append(f"orch-{n}")
     if a:
         _save_active(root, a)
+    sha = _source_sha()
+    if before is not None:
+        lines = _update_lines(root, before, found, sha)
+        if not json_output:
+            print("\n".join(lines), flush=True)
+        if lines != ["orch is up to date."]:
+            restart_lines = _restart_updated(root)
+            if restart_lines and not json_output:
+                print("\n".join(restart_lines))
+        if report is not None:
+            report.extend(lines)
+        reg = registry()
+        for entry in reg:
+            if entry["name"] in found:
+                entry["version"] = found[entry["name"]]["version"]
+        _save_registry(reg)
+    _save_installed(sha)
     return done
