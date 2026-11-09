@@ -32,8 +32,10 @@ from orch import (
     relay,
     runs_live,
     services,
+    sharedfolder,
     term,
     tickets,
+    workcheck,
 )
 from orch import init as init_mod
 from orch.errors import Refused
@@ -213,6 +215,8 @@ def _show(t: dict, root: Path | None = None) -> str:
         cc = tickets.children_counts(tickets.list_all(root), t["id"])
         if cc["total"]:
             out.append(f"Sub-tickets: {cc['closed']} of {cc['total']} closed")
+    if root is not None and (shared := sharedfolder.line(sharedfolder.others_in_folder(root, t["id"]))):
+        out.append(shared)
     if t.get("waiting_on"):
         w = t["waiting_on"]
         if w["kind"] == "time":
@@ -353,6 +357,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
+    x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
+    x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -371,6 +377,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
         "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
+    )
+    x.add_argument(
+        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
     )
     x.add_argument(
         "--ext",
@@ -420,6 +429,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
     )
+    x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
+    x.add_argument("id")
+    x.add_argument("--goal", required=True)
+    x.add_argument("--not-included", dest="not_included")
     x = t.add_parser(
         "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
     )
@@ -638,6 +651,8 @@ def run(args: argparse.Namespace) -> None:
                 else ""
             ),
         )
+    elif cmd == "work-check":
+        workcheck.run(root, args.json)
     elif cmd == "update":
         report, notes = [], []
         done = addons.update(
@@ -676,6 +691,7 @@ def run(args: argparse.Namespace) -> None:
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
+            plan_first=args.plan_first,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -758,6 +774,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "title":
         t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
         _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "plan":
+        t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
+        _out(args, t, "Plan written.")
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         r = tickets.attach(root, args.id, args.name, data, by())
@@ -993,11 +1012,13 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
         args.on = "ticket:" + tickets.resolve(root, on[len("ticket:") :])
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, watchdog=None) -> int:
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
+        return workcheck.hook_main(argv, watchdog)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
     want_json = "--json" in argv

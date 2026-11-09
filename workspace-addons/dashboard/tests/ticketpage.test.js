@@ -274,3 +274,97 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   assert.ok(!all.some(n => n.tag === 'button' || n.tag === 'form'));
   assert.ok(all.some(n => n.children.includes('–')));
 });
+
+
+test('shared folder line is one quiet text line from the core, absent when none', () => {
+  const c = context({state:{runs:{t1:{running:true, shared_folder:{line:'"Fix login form" is also changing this folder.'}}, t2:{running:true}}}, clean:v => String(v ?? '')});
+  vm.runInContext(source.slice(source.indexOf('function sharedFolderLine(t)'), source.indexOf('const surface =')), c);
+  const on = JSON.stringify(c.sharedFolderLine({id:'t1'}));
+  assert.match(on, /Fix login form\\" is also changing this folder\./);
+  assert.doesNotMatch(on, /banner|danger|warn/);
+  assert.equal(c.sharedFolderLine({id:'t2'}), null);
+  assert.equal(c.sharedFolderLine({id:'nope'}), null);
+});
+test('plan-first waiting card answers and edits only unstarted steps', async () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
+  const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
+  let scrolled = false, focused = false;
+  const calls = [];
+  const ctx = {locks:new Set(), render(){}, refresh(){}, act:async (op,args) => { calls.push([op,args]); return {ok:true}; }, repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
+    array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '',
+    el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids),
+    card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
+    questions:t => t.questions || [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
+    main:{querySelector:() => ({scrollIntoView(){scrolled=true;},querySelector:() => ({focus(){focused=true;}})})}};
+  vm.createContext(ctx); vm.runInContext(source,ctx);
+  ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
+  vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
+  const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
+
+  t.plan_first = true; t.questions[0].text = 'Plan ready: review these steps';
+  const children = [
+    {id:'a', parent:t.id, title:'First', status:'open', revision:1, done_when:'It works'},
+    {id:'b', parent:t.id, title:'Second', status:'ready', revision:2},
+    {id:'c', parent:t.id, title:'Running', status:'active'},
+    {id:'d', parent:t.id, title:'Checked', status:'open', checklist:[{done:true}]},
+    {id:'e', parent:t.id, title:'Finished', status:'done'},
+    {id:'f', parent:t.id, title:'Removed', status:'dropped'}
+  ];
+  ctx.tickets = () => [t, ...children];
+  const buttons = tree => nodes(tree).filter(n => n.tag === 'button');
+  const find = (tree, label) => buttons(tree).find(n => n.children.includes(label));
+  let tree = ctx.detail(t);
+  assert.match(JSON.stringify(tree), /Waiting for you · work hasn't started/);
+  assert.match(JSON.stringify(tree), /Done when It works/);
+  const json = JSON.stringify(tree);
+  assert.equal((json.match(/work hasn't started/g) || []).length, 1);  // the waiting state shows once
+  assert.equal((json.match(/Needs you/g) || []).length, 0);
+  assert.equal((json.match(/"First"/g) || []).length, 1);  // each step once
+  assert.equal(nodes(tree).filter(n => n.tag === 'button' && n.children.includes('Answer')).length, 0);
+  t.note = 'Build it';
+  t.plan = {goal:'customers pay online', not_included:'refunds · subscriptions'};
+  const withGoal = JSON.stringify(ctx.detail(t));
+  assert.match(withGoal, /Goal: /); assert.match(withGoal, /customers pay online/); assert.match(withGoal, /Not included: /); assert.match(withGoal, /refunds · subscriptions/);
+  assert.doesNotMatch(JSON.stringify(ctx.detail({...t, plan:undefined})), /Goal: /);
+  delete t.note; delete t.plan;
+  assert.ok(find(tree, 'Start work')); assert.ok(find(tree, 'Change a step'));
+  assert.equal(find(tree, 'Rename'), undefined);
+  find(tree, 'Change a step').onclick();
+  tree = ctx.detail(t);
+  assert.equal(buttons(tree).filter(n => n.children.includes('Rename')).length, 2);
+  assert.equal(buttons(tree).filter(n => n.children.includes('Remove')).length, 2);
+  assert.ok(find(tree, '+ Add a step')); assert.ok(find(tree, 'Done editing'));
+  await find(tree, 'Remove').onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.patch', {ticket:'a', data:{status:'dropped'}, if_revision:1}]));
+  find(tree, 'Done editing').onclick();
+  assert.equal(find(ctx.detail(t), 'Rename'), undefined);
+  await find(tree, 'Start work').onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['answer', {ticket:t.id, question:'q1', answer:'Start work'}]));
+  for (const [plan, text, status] of [[false,'Plan ready','waiting'], [true,'Other question','waiting'], [true,'Plan ready','done']]) {
+    t.plan_first = plan; t.questions[0].text = text; t.status = status;
+    tree = ctx.detail(t);
+    assert.equal(find(tree, 'Start work'), undefined);
+    assert.equal(find(tree, 'Change a step'), undefined);
+  }
+});
+
+test('plan step dialogs rename with a revision and add under the parent', async () => {
+  const calls = [], dialogs = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children, value:attrs.value || '',
+    append(...kids) { this.children.push(...kids); }, focus() {}});
+  const c = context({h:node, act:async (op,args) => { calls.push([op,args]); return {ok:true}; },
+    dialog:() => { const value = {d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
+  c.window.orch.open = () => {};
+  c.window.orch.close = () => {};
+  c.ticketRenameStep({id:'child', title:'Before', revision:7});
+  let {d, actions} = dialogs.pop();
+  d.children[0].value = 'After';
+  await actions.children[0].onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.edit', {ticket:'child', title:'After', if_revision:7}]));
+  c.ticketAddStep({id:'parent'});
+  ({d, actions} = dialogs.pop());
+  d.children[0].value = 'New step';
+  await actions.children[0].onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.new', {title:'New step', parent:'parent'}]));
+});

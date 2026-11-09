@@ -978,3 +978,14 @@ def test_check_reopen_argv_and_refusals():
     for bad in ({"check": "bad"}, {"unexpected": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2", **bad})
+
+@pytest.mark.parametrize("value", [True, False, None])
+def test_ticket_new_plan_first(value):
+    _, flags, _ = actions._ticket_new({"title": "Plan", "plan_first": value})
+    assert ("--plan-first" in flags) is (value is True)
+
+
+@pytest.mark.parametrize("value", ["true", 1, [], {}])
+def test_ticket_new_plan_first_requires_boolean(value):
+    with pytest.raises(actions.BadRequest):
+        actions._ticket_new({"title": "Plan", "plan_first": value})

@@ -363,9 +363,13 @@ def _step(**kw):
     return c
 
 
-WONT = dict(wont_do=True, reason="Not needed", by="human:Ann", at=T2)
-DONE = dict(done=True, evidence=[{"type": "note", "ref": "sent it", "by": "agent:claude", "at": T2}],
-            by="agent:claude", at=T2)
+WONT = {"wont_do": True, "reason": "Not needed", "by": "human:Ann", "at": T2}
+DONE = {
+    "done": True,
+    "evidence": [{"type": "note", "ref": "sent it", "by": "agent:claude", "at": T2}],
+    "by": "agent:claude",
+    "at": T2,
+}
 
 
 def test_wont_do_from_a_person_syncs():
