@@ -681,25 +681,133 @@ def test_entering_review_sends_exactly_one_result_with_view(proj, run, new_ticke
     assert len([m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]) == 1
 
 
-def test_a_failed_result_send_is_retried_once(proj, run, new_ticket, conn, monkeypatch):
-    from orch import relay
-    from orch.errors import Refused
+def _results(conn, n):
+    return [m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]
 
-    tid = new_ticket("Retry me")
+
+def _prep(proj, run, new_ticket, title):
+    tid = new_ticket(title)
     run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
     st = phone_view.load_state(proj)["tickets"][tid]
     _review(proj, tid)
+    return tid, st["at"]
+
+
+def _age(proj, tid):
+    phone_view.update_state(proj, lambda s: s["results"][tid].update(at=0))
+
+
+def test_a_definitely_refused_result_is_claimed_and_sent_again(proj, run, new_ticket, conn, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    tid, at = _prep(proj, run, new_ticket, "Retry me")
     real = relay.send_text
 
     def boom(*a, **k):
-        raise Refused("down")
+        e = Refused("no")
+        e.status = 400
+        raise e
 
     monkeypatch.setattr(relay, "send_text", boom)
-    assert phone_view.sync(proj, now=st["at"] + 100) == []
+    assert phone_view.sync(proj, now=at + 100) == []
+    assert tid not in phone_view.load_state(proj).get("results", {})
     monkeypatch.setattr(relay, "send_text", real)
     n = len(conn.sent)
-    assert phone_view.sync(proj, now=st["at"] + 200) == [tid]
-    assert len([m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]) == 1
+    assert phone_view.sync(proj, now=at + 200) == [tid]
+    assert len(_results(conn, n)) == 1
+
+
+def test_crash_between_claim_and_send_sends_once_on_the_next_sync(proj, run, new_ticket, conn, monkeypatch):
+    from orch import relay
+
+    tid, at = _prep(proj, run, new_ticket, "Crash")
+    real = relay.send_text
+
+    def die(*a, **k):
+        raise KeyboardInterrupt  # the process dies after the claim
+
+    monkeypatch.setattr(relay, "send_text", die)
+    with pytest.raises(KeyboardInterrupt):
+        phone_view.sync(proj, now=at + 100)
+    rec = phone_view.load_state(proj)["results"][tid]
+    assert rec["sent"] is False
+    monkeypatch.setattr(relay, "send_text", real)
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=at + 150) == []  # inside the lease: the first pass may still be sending
+    _age(proj, tid)
+    assert phone_view.sync(proj, now=at + 200) == [tid]
+    got = _results(conn, n)
+    assert len(got) == 1 and got[0]["id"] == rec["mid"]
+    assert phone_view.sync(proj, now=at + 300) == [] and len(_results(conn, n)) == 1
+
+
+@pytest.mark.parametrize("exc", ["timeout", "oserror", "valueerror"])
+def test_ambiguous_failures_keep_the_entry_and_retry_with_the_same_id(
+    proj, run, new_ticket, conn, monkeypatch, exc
+):
+    from orch import relay
+    from orch.errors import Refused
+
+    tid, at = _prep(proj, run, new_ticket, "Ambiguous")
+    real = relay.send_text
+
+    def flaky(*a, **k):
+        real(*a, **k)  # the relay stored it
+        if exc == "timeout":
+            raise Refused("timed out")
+        raise OSError("x") if exc == "oserror" else ValueError("x")
+
+    monkeypatch.setattr(relay, "send_text", flaky)
+    n = len(conn.sent)
+    phone_view.sync(proj, now=at + 100)
+    assert phone_view.load_state(proj)["results"][tid]["sent"] is False
+    mid = phone_view.load_state(proj)["results"][tid]["mid"]
+    monkeypatch.setattr(relay, "send_text", real)
+    _age(proj, tid)
+    phone_view.sync(proj, now=at + 200)
+    got = _results(conn, n)
+    assert {m["id"] for m in got} == {mid}  # same id on both tries: the relay keeps one
+    assert phone_view.load_state(proj)["results"][tid]["sent"] is True
+
+
+def test_a_conflict_on_the_retry_counts_as_sent(proj, run, new_ticket, conn, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    tid, at = _prep(proj, run, new_ticket, "Conflict")
+
+    def conflict(*a, **k):
+        e = Refused("id used")
+        e.status = 409
+        raise e
+
+    monkeypatch.setattr(relay, "send_text", conflict)
+    assert phone_view.sync(proj, now=at + 100) == [tid]
+    assert phone_view.load_state(proj)["results"][tid]["sent"] is True
+
+
+def test_unreachable_covers_timeout_and_rate_limit():
+    from orch import relay
+    from orch.errors import Refused
+
+    for status, want in ((None, True), (408, True), (429, True), (500, True), (400, False), (409, False)):
+        e = Refused("x")
+        e.status = status
+        assert relay._unreachable(e) is want
+
+
+def test_a_stale_nonce_never_drops_a_newer_round(proj, run, new_ticket, conn):
+    tid, at = _prep(proj, run, new_ticket, "Rounds")
+    phone_view.sync(proj, now=at + 100)
+    old = dict(phone_view.load_state(proj)["results"][tid])
+    phone_view.update_state(proj, lambda s: s["results"][tid].update(nonce="newer", sent=False))
+    from orch import relay
+
+    # settle with the old nonce changes nothing
+    phone_view._send_result(proj, tid, "phones", tickets.load(proj, tid), {**old, "mid": relay.new_id()})
+    assert phone_view.load_state(proj)["results"][tid]["nonce"] == "newer"
+    assert phone_view.load_state(proj)["results"][tid]["sent"] is False
 
 
 def _failing_post(monkeypatch, status, store):
