@@ -347,7 +347,28 @@ actor MockRelay: RelayAPI {
         guard let m = (updateLog.map(\.id) + received.map(\.id)).first(where: { $0 == messageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Nothing to read aloud.") }
         return Data("ID3-mock-mp3-\(m)-\(lang ?? "en")".utf8)
     }
-    func settings() async throws -> PhoneSettings { try await check(); return phoneSettings }
+    func settings() async throws -> PhoneSettings {
+        try await check()
+        phoneSettings.groupMutes = phoneSettings.groupMutes?.filter { MuteRules.isMuted($0.mutedUntil) }
+        return phoneSettings
+    }
+    func muteAll(_ mute: Mute) async throws -> PhoneSettings {
+        try await check()
+        phoneSettings.muteAllUntil = mute.wire
+        return try await settings()
+    }
+    func setGroupMute(_ key: GroupKey, mute: Mute) async throws -> GroupMute {
+        try await check()
+        guard reachable(key.host) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        let result = GroupMute(host: key.host, id: key.id, mutedUntil: mute.wire)
+        var active = (phoneSettings.groupMutes ?? []).filter { $0.key != key && MuteRules.isMuted($0.mutedUntil) }
+        if MuteRules.isMuted(result.mutedUntil) {
+            guard active.count < 100 else { throw Self.invalid("group mutes") }
+            active.append(result)
+        }
+        phoneSettings.groupMutes = active
+        return result
+    }
     func updateSettings(_ p: SettingsPatch) async throws -> PhoneSettings {
         try await check()
         guard p.isValid else { throw Self.invalid("settings") }
