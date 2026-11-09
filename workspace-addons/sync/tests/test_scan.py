@@ -153,3 +153,25 @@ def test_pdf_and_media_with_hidden_archive_need_a_click():
                                   "tickets/t_abc123/artifacts/x.\u200b ", "me\u200b./x"])
 def test_windows_trailing_dot_space_and_colon_are_unsafe(path):
     assert [f.rule for f in scan_path(path)] == ["unsafe-path"]
+
+
+def test_repeated_json_keys_cannot_hide_a_value():
+    body = b'{"note": "' + TOKEN_P + b'", "note": "fine"}'
+    esc = b'{"n": "\\u006frp_' + TOKEN_P[5:] + b'", "n": "fine"}'
+    for path in ("tickets/t_abc123/artifacts/x.json", "tickets/t_abc123.json"):
+        assert ("secret", "orp-token") in codes(path, esc)
+        assert ("secret", "orp-token") in codes(path, body)
+    assert ("secret", "token-field") in codes("tickets/t_abc123.json", b'{"token": "abc", "token": 5}')
+    assert ("secret", "token-field") in codes("tickets/t_abc123.json", b'{"tok\\u0065n": "abc", "token": 5}')
+
+
+@pytest.mark.parametrize("sig", [b"\x1f\x8b\x08\x08", b"\x1f\x8b\x08\x00", b"BZh9", b"\xfd7zXZ\x00"])
+def test_embedded_archive_signatures_in_media(sig):
+    fs = scan_blob("tickets/t_abc123/artifacts/p.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 20 + sig + b"x")
+    assert [(f.code, f.rule) for f in fs] == [("cannot-check", "media-with-archive")]
+
+
+def test_utf16_without_bom_is_not_text():
+    raw = "hello".encode("utf-16-le")  # no BOM, has NUL bytes
+    assert [f.rule for f in scan_blob("tickets/t_abc123/artifacts/n.txt", raw)] == ["unknown-format"]
+    assert scan_blob("tickets/t_abc123/artifacts/n.txt", "hello".encode("utf-16")) == []

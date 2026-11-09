@@ -337,3 +337,19 @@ def test_backdating_cannot_steal_a_key_the_local_ticket_holds():
     theirs = tk(id="t_aaa111", key="DM1-13", created_at="2001-01-01T00:00:00Z")
     changed, _ = renumber_key_clashes({"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"])
     assert list(changed) == ["t_aaa111"]
+
+
+def test_question_answered_by_differs_only_is_symmetric():
+    def q(by, via):
+        return {"id": "q1", "text": "?", "options": [], "recommended": None, "answer": None, "answered_by": by,
+                "via": via}
+    base = tk(questions=[q(None, None)])
+    a, b = up(base, T2, questions=[q("human:A", "cli")]), up(base, T3, questions=[q("human:B", "web")])
+    assert merge_ticket(base, a, b, NOW) == merge_ticket(base, b, a, NOW)
+
+
+def test_counter_never_raises_on_garbage():
+    assert merge_counter({"last": 3}, "x", [1], ["DM1-9"])["last"] == 9
+    assert merge_counter({1: 1, "a": 2}, {"a": 3}, None)["last"] == 0
+    assert merge_counter(_nest(500), {"last": 2}, None)["last"] == 2
+    assert merge_counter({"last": True}, {"last": "9"}, {"last": [5]})["last"] == 0

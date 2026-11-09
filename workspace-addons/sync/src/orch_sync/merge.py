@@ -187,6 +187,8 @@ def _question(ctx, x0, xa, xb):
             pick, lose = (ga, gb) if ctx.a_newer else (gb, ga)
             ctx.say(f'another answer "{_short(lose["answer"])}" by {lose["answered_by"]} was replaced',
                     {"field": f"{xa.get('id')} answer", "value": lose})
+    elif ga["answer"] is None and gb["answer"] is None:
+        pick = ga if ctx.a_newer else gb  # symmetric even when only answered_by/via differ
     else:  # an answered question beats an unanswered one
         pick = gb if ga["answer"] is None else ga
     out.update(pick)
@@ -323,11 +325,16 @@ def merge_counter(base, a, b, keys=()):
         if isinstance(x, int) and isinstance(y, int) and not isinstance(x, bool):
             return max(x, y)
         return max(x, y, key=_canon)
-    out = mx(mx(base or {}, a or {}), b or {})
-    last = out.get("last", 0)
-    out["last"] = min(max([last if isinstance(last, int) and not isinstance(last, bool) else 0]
-                          + [_key_n(k) for k in keys]), MAX_COUNTER + 1)
-    return out
+    def clean(x):
+        return x if isinstance(x, dict) and not _too_deep(x) else {}
+    try:
+        out = mx(mx(clean(base), clean(a)), clean(b))
+        last = out.get("last", 0)
+        out["last"] = min(max([last if isinstance(last, int) and not isinstance(last, bool) else 0]
+                              + [_key_n(k) for k in keys]), MAX_COUNTER + 1)
+        return out
+    except Exception:  # noqa: BLE001 - e.g. unsortable keys: fall back to what the keys alone say
+        return {"last": min(max([0] + [_key_n(k) for k in keys]), MAX_COUNTER + 1)}
 
 
 def old_keys_of(ticket):

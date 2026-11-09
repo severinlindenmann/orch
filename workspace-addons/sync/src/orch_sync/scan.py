@@ -31,7 +31,7 @@ _ARCHIVE_EXT = (".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".j
 _ARCHIVE_MAGIC = (b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b", b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", b"BZh", b"\xfd7zXZ\x00")
 _MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"OggS", b"ID3", b"\x1a\x45\xdf\xa3")
 # a signature inside a "picture" means something is hidden in it (PDFs can carry compressed text: always a click)
-_EMBEDDED = (b"PK\x03\x04", b"PK\x05\x06", b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", b"\x1f\x8b\x08\x00")
+_EMBEDDED = tuple(m for m in _ARCHIVE_MAGIC if m != b"\x1f\x8b") + (b"\x1f\x8b\x08",)
 _TICKET_RE = re.compile(r"^tickets/t_[a-z0-9]{6,16}\.json$")
 
 
@@ -52,13 +52,11 @@ def _is_media(data):
 def _is_text(data):
     if b"\x00" in data[:8192] and not data.startswith((b"\xff\xfe", b"\xfe\xff")):
         return False
-    for enc in ("utf-8", "utf-16"):
-        try:
-            data.decode(enc)
-            return True
-        except UnicodeDecodeError:
-            pass
-    return False
+    try:
+        data.decode("utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
 
 
 _IGNORABLE = {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFFA0}
@@ -106,18 +104,22 @@ def scan_path(path):
     return out
 
 
+class _Pairs(list):
+    """A JSON object kept as its list of (key, value) pairs, repeated keys included."""
+
+
 def _json_hits(data, is_ticket):
     """Rule names found in the PARSED strings (keys and values) of a JSON file. Not parseable = no extra hits
     (the byte scan above already ran). Iterative walk, no recursion."""
     try:
-        doc = json.loads(data)
+        doc = json.loads(data, object_pairs_hook=_Pairs)
     except Exception:  # noqa: BLE001 - includes RecursionError on absurd nesting
         return set()
     hits, stack = set(), [doc]
     while stack:
         v = stack.pop()
-        if isinstance(v, dict):
-            for k, x in v.items():
+        if isinstance(v, _Pairs):  # every pair, so a repeated key cannot hide the first value
+            for k, x in v:
                 if is_ticket and isinstance(x, str) and norm_segment(k) == "token":
                     hits.add("token-field")
                 stack.append(k)
