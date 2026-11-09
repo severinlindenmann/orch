@@ -1,7 +1,6 @@
 """Exact-value hiding without store, filesystem, or environment access."""
 
 import base64
-import copy
 import hashlib
 import hmac
 import json
@@ -181,26 +180,37 @@ class Hider:
                 text = json.dumps(original, separators=(",", ":"), ensure_ascii=False)
             return "h-" + hmac.new(self._salt, text.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
 
+        scalars = (type(None), bool, int, float)
+
+        def hidden_key(key: Any) -> Any:
+            if type(key) not in (str, *scalars):
+                raise TypeError
+            text = key if type(key) is str else str(key)
+            return identifier(text) if self.hide_text(text) != text else key
+
         def walk(value: Any) -> Any:
-            if isinstance(value, dict):
+            kind = type(value)
+            if kind is dict:
                 result = {}
                 for key, child in value.items():
                     hidden = walk(child)
-                    new_key = key
-                    if isinstance(key, str) and self.hide_text(key) != key:
-                        new_key = identifier(key)
+                    new_key = hidden_key(key)
                     if key in identifier_fields and hidden != child:
                         hidden = identifier(child)
                     result[new_key] = hidden
                 return result
-            if isinstance(value, (list, tuple)):
-                return type(value)(walk(child) for child in value)
-            if isinstance(value, str):
+            if kind in (list, tuple):
+                return kind(walk(child) for child in value)
+            if kind is str:
                 return self.hide_text(value)
-            if isinstance(value, (int, float)):
+            if kind in (bytes, bytearray):
+                return self.hide_bytes(bytes(value))
+            if kind in (int, float):
                 hidden = self.hide_text(str(value))
                 return hidden if hidden != str(value) else value
-            return copy.deepcopy(value)
+            if kind in (type(None), bool):
+                return value
+            raise TypeError
 
         try:
             return walk(obj)

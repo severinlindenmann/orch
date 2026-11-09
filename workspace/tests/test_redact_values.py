@@ -305,3 +305,27 @@ def test_performance():
     elapsed = time.perf_counter() - start
     assert result.count("[hidden:") == 10
     assert elapsed < 1.5
+
+
+def test_json_rejects_and_hides_non_json_values():
+    hider = Hider({"token": TOKEN})
+
+    class Sneaky:
+        def __str__(self):
+            return TOKEN
+
+    assert hider.hide_json({"b": TOKEN.encode(), "ba": bytearray(b"x" + TOKEN.encode())}) == {
+        "b": MARKER.encode(), "ba": b"x" + MARKER.encode(),
+    }
+    plain = {1: None, 2.5: True, None: 0, False: [1]}
+    assert hider.hide_json(plain) == plain
+    bads = ({TOKEN}, Sneaky(), {"k": Sneaky()}, {(1, 2): 1}, {"k": {TOKEN}}, {Sneaky(): 1}, {"k": object()})
+    for bad in bads:
+        with pytest.raises(ValueError, match="Invalid hiding input") as caught:
+            hider.hide_json(bad)
+        assert TOKEN not in str(caught.value) + repr(caught.value.args)
+    digits = Hider({"d": "12345678"}, salt=b"s")
+    result = digits.hide_json({12345678: 1})
+    assert list(result) != [12345678] and "12345678" not in repr(result)
+    with pytest.raises(HidingRefused):
+        digits.hide_json({12345678: 1}, on_identifier="refuse")
