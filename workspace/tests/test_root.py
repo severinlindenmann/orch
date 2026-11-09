@@ -19,7 +19,8 @@ def _store(p):
 
 
 def _files(root):
-    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+    """{path: bytes} of every file: names alone would miss a rewritten file."""
+    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 def test_orch_root_beats_a_nested_store(proj, run, monkeypatch):
@@ -261,14 +262,17 @@ def test_a_note_names_a_stale_orch_root_but_not_inside_a_copy(proj, run, monkeyp
     assert "Note:" not in err
 
 
-def test_init_in_the_orch_root_folder_reached_through_a_symlink_is_not_refused(proj, run, monkeypatch):
+@pytest.mark.parametrize("via", ["cwd", "orch_root"])
+def test_init_in_the_orch_root_folder_reached_through_a_symlink_is_not_refused(proj, run, monkeypatch, via):
     real = _store(proj / "real")
     link = proj / "link"
     try:
         link.symlink_to(real, target_is_directory=True)
     except OSError:
         pytest.skip("no symlinks here")
-    monkeypatch.chdir(link)
-    monkeypatch.setenv("ORCH_ROOT", str(real))
+    monkeypatch.chdir(link if via == "cwd" else real)
+    monkeypatch.setenv("ORCH_ROOT", str(real if via == "cwd" else link))
+    monkeypatch.setattr(cli, "_noted", False)
     code, _, err = run("init", "--yes")
     assert code == 0, err
+    assert "Refused" not in err and "Note:" not in err

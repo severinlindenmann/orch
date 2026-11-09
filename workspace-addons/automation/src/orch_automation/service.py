@@ -70,6 +70,7 @@ def forget(root: Path, nonce: str | None) -> None:
 
 
 def start(root: Path) -> int:
+    root = root.resolve()  # --dir, cwd and ORCH_ROOT name one folder
     pid = running_pid(root)
     if pid:
         return pid
