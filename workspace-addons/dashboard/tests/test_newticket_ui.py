@@ -20,7 +20,7 @@ def test_paste_title_and_description_use_existing_create_action():
     assert "values.title = ticketTextTitle(" in js
     assert "shortText.length <= 1500" in js
     assert "inputs.text.setCustomValidity(empty ? 'What needs doing?' : '')" in js
-    assert "act('ticket.new', {title:values.title" in js
+    assert "const args = {title:values.title" in js and "act('ticket.new', args)" in js
     assert "long_text:longText" in js
     assert "files:files.map(({name, text, data})" in js
 

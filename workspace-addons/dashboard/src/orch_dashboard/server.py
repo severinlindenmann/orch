@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import threading
 import time
 from functools import partial
 from http.client import HTTPConnection
@@ -24,6 +25,7 @@ DEFAULT_PORT = 8420
 MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = 5 * 1024 * 1024  # a new ticket with a long text and up to 5 attached files
 BIG_OPS = ("ticket.new", "ticket.paste")
+_BIG_READS = threading.BoundedSemaphore(1)
 KIT = (
     "tokens.css",
     "components.css",
@@ -363,13 +365,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(415, b"send JSON", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            if not 0 < n <= MAX_BIG_BODY:
+            # The limit comes from the header (checked before the body is read); the body must say the same op.
+            claimed = self.headers.get("X-Orch-Op")
+            limit = MAX_BIG_BODY if claimed in BIG_OPS else MAX_BODY
+            if not 0 < n <= limit:
                 raise ValueError
-            raw = self.rfile.read(n)
+            if n > MAX_BODY:
+                with _BIG_READS:  # one big body in memory at a time
+                    raw = self.rfile.read(n)
+            else:
+                raw = self.rfile.read(n)
             body = json.loads(raw)
             if not isinstance(body, dict) or set(body) - {"op", "args"}:
                 raise ValueError
-            if n > MAX_BODY and body.get("op") not in BIG_OPS:
+            if claimed is not None and body.get("op") != claimed:
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")

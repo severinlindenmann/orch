@@ -814,7 +814,8 @@ def test_link_actions_are_audited(ws, monkeypatch):
 
 
 def _post_raw(base, body, headers=None):
-    return post(base, None, headers=headers, raw=json.dumps(body))
+    h = {"X-Orch-Op": body.get("op")} if isinstance(body.get("op"), str) else {}
+    return post(base, None, headers={**h, **(headers or {})}, raw=json.dumps(body))
 
 
 def test_big_body_is_allowed_only_for_a_new_ticket(act_server, act_orch):
@@ -903,3 +904,23 @@ print(json.dumps({{"name": "kept-" + name}}))
     assert r == {"saved": ["kept-note.md"], "failed": ["bad.exe"]}
     rows = [json.loads(x) for x in (tmp_path / "att.jsonl").read_text().splitlines()]
     assert rows[0][0][:5] == ["ticket", "attach", "t_abcdef", "--name", "note.md"] and rows[0][1] == "BODY"
+
+
+def test_body_limit_comes_from_the_op_header(act_server):
+    big = "x" * 40000
+    body = {"op": "ticket.new", "args": {"title": "T", "long_text": big}}
+    assert _post_raw(act_server, body, {"X-Orch-Op": None})[0] == 400  # no header: the small limit
+    assert _post_raw(act_server, body, {"X-Orch-Op": "log"})[0] == 400  # header and body disagree
+    assert _post_raw(act_server, body)[0] == 200
+
+
+def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
+    for args in (
+        {"title": "T", "long_text": "a\ud800b"},
+        {"title": "T\ud800"},
+        {"title": "T", "files": [{"name": "a.md", "text": "x\udc00"}]},
+        {"title": "T", "files": [{"name": "tool.exe", "text": "x"}]},
+        {"title": "T", "files": [{"name": "big.txt", "text": "x" * (2 * 1024 * 1024 + 1)}]},
+    ):
+        assert _post_raw(act_server, {"op": "ticket.new", "args": args})[0] == 400, args
+    assert acts(act_orch) == []  # nothing was created

@@ -42,7 +42,9 @@ def test_attach_name_is_a_safe_base_name(proj, run, hint, final):
     assert (proj / r["path"]).parent == proj / ".orch" / "tickets" / tid / "artifacts"
 
 
-@pytest.mark.parametrize("hint", ["run.sh", "page.html", "x.svg", "x.exe", "noext", ".md", "..", "a.py", ""])
+@pytest.mark.parametrize(
+    "hint", ["run.sh", "page.html", "x.svg", "x.xml", "CON", "x.exe", "noext", ".md", "..", "a.py", ""]
+)
 def test_attach_refuses_other_types(proj, run, hint):
     tid = _new(run)
     with pytest.raises(Refused):
@@ -98,3 +100,38 @@ def test_cli_attach_reads_stdin(proj, run, monkeypatch):
     monkeypatch.setattr(sys, "stdin", In())
     code, out, _ = run("ticket", "attach", tid, "--name", "../x/list.txt", "--by", "human:t", "--json")
     assert code == 0 and json.loads(out)["name"] == "list.txt"
+
+
+def test_attach_refuses_a_bad_id_and_a_link_above_artifacts(proj, run, tmp_path, monkeypatch):
+    with pytest.raises(Refused):
+        tickets.attach(proj, "../../x", "n.md", b"x", "human:t")
+    import io
+
+    monkeypatch.setattr(sys, "stdin", type("In", (), {"buffer": io.BytesIO(b"x")})())
+    code, _, err = run("ticket", "attach", "../../x", "--name", "n.md", "--by", "human:t")
+    assert code != 0
+    tid = _new(run)
+    outside = tmp_path / "outside2"
+    (outside / tid).mkdir(parents=True)
+    import shutil
+
+    shutil.rmtree(proj / ".orch" / "tickets" / tid, ignore_errors=True)
+    os.symlink(outside / tid, proj / ".orch" / "tickets" / tid)  # the ticket folder is a link
+    with pytest.raises(Refused):
+        tickets.attach(proj, tid, "n.md", b"x", "human:t")
+    assert list((outside / tid).iterdir()) == []
+
+
+def test_attach_exact_name_is_written_once(proj, run):
+    tid = _new(run)
+    a = tickets.attach(proj, tid, "", b"one", "human:t", exact="note-abc12345.md")
+    b = tickets.attach(proj, tid, "", b"two", "human:t", exact="note-abc12345.md")
+    assert b["existed"] is True and a["path"] == b["path"]
+    assert (proj / a["path"]).read_bytes() == b"one"
+    with pytest.raises(Refused):
+        tickets.attach(proj, tid, "", b"x", "human:t", exact="../evil.md")
+
+
+def test_attach_name_edges():
+    assert tickets.attach_name("CON.txt") == "_CON.txt"
+    assert tickets.attach_name(("a" * 79) + " .md").endswith("a.md")

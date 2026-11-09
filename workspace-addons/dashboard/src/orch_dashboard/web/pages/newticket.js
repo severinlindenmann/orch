@@ -1,5 +1,5 @@
 'use strict';
-const ticketFileTypes = {text:/\.(txt|md|csv|tsv|json|log|xml|yml|yaml|toml|ini)$/i, image:/\.(png|jpg|jpeg|gif|webp)$/i};
+const ticketFileTypes = {text:/\.(txt|md|csv|tsv|json|log|yml|yaml|toml|ini)$/i, image:/\.(png|jpg|jpeg|gif|webp)$/i};
 function ticketFileType(name) {
   return ticketFileTypes.text.test(name) ? 'text' : ticketFileTypes.image.test(name) ? 'image' : '';
 }
@@ -43,7 +43,7 @@ function ticketForm(t) {
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
     const zone = button('Drop files here (e.g. .md, .txt) or paste any amount of text', 'new-ticket-drop', () => picker.click());
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
-    picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.xml,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
+    picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
     const chips = el('div', 'new-ticket-files');
     const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. The agent writes the title and a short description.');
@@ -86,8 +86,11 @@ function ticketForm(t) {
           try {
             const type = ticketFileType(file.name);
             const item = {name:file.name, size:file.size, type};
-            if (type === 'text') item.text = await file.text();
-            else item.data = ticketBase64(await new Promise((resolve, reject) => {
+            if (type === 'text') {
+              const bytes = new Uint8Array(await file.arrayBuffer());
+              try { item.text = new TextDecoder('utf-8', {fatal:true}).decode(bytes); }
+              catch (_) { item.data = btoa(Array.from(bytes, b => String.fromCharCode(b)).join('')); }  // not UTF-8: orch refuses it, we do not alter it
+            } else item.data = ticketBase64(await new Promise((resolve, reject) => {
               const reader = new FileReader();
               reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error);
               reader.readAsDataURL(file);
@@ -176,7 +179,12 @@ function ticketForm(t) {
       values.note = shortText.length <= 1500 && (/[\r\n]/.test(shortText) || shortText.trim() !== values.title) ? shortText : '';
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
-        result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})});  // one write, one history line
+        const args = {title:values.title, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
+        if (JSON.stringify({op:'ticket.new', args}).length > 4900000) {  // the server takes 5 MB per request
+          error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
+          submit.disabled = false; return;
+        }
+        result = await act('ticket.new', args);  // one write, one history line
         if (result.ok) {
           if (result.state?.attached?.failed?.length) window.orch.toast('The ticket was created. Not saved: ' + result.state.attached.failed.join(', '), 'error');
           created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];

@@ -1709,8 +1709,9 @@ def artifacts_dir(root: Path, tid: str) -> Path:
 
 
 # What a person may attach to a ticket from the dashboard or the phone: plain text and pictures.
-# Never a page or a program that runs: html and scripts are not accepted.
-ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "xml", "yml", "yaml", "toml", "ini"})
+# Never a page or a program that runs: html, xml, svg and scripts are not accepted.
+# (The dashboard's actions.py mirrors these limits to refuse early; orch here is the one that decides.)
+ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "yml", "yaml", "toml", "ini"})
 ATTACH_IMAGES = {
     "png": (b"\x89PNG\r\n\x1a\n",),
     "jpg": (b"\xff\xd8\xff",),
@@ -1721,6 +1722,7 @@ ATTACH_IMAGES = {
 ATTACH_MAX = 2 * 1024 * 1024  # one attached file (the dashboard shows at most this much of a file)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
 PASTED_NAME = "note.md"
+_WIN_RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])$", re.I)
 
 
 def attach_name(hint) -> str:
@@ -1731,16 +1733,15 @@ def attach_name(hint) -> str:
     base = re.sub(r"\.{2,}", ".", base)
     stem, dot, ext = base.rpartition(".")
     ext = ext.lower()
+    stem = stem.strip()[:80].strip(". ")
     if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
         raise Refused("That kind of file cannot be attached. Text files and pictures can.")
-    return stem.strip()[:80] + "." + ext
+    if _WIN_RESERVED.match(stem):
+        stem = "_" + stem
+    return stem + "." + ext
 
 
-def attach(root: Path, tid: str, hint, data: bytes, by: str) -> dict:
-    """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
-    ' (2)', ' (3)' ...; created with O_EXCL and no link followed). Text must be UTF-8 without NUL bytes, a
-    picture must start with its type's signature. One history line says what was attached."""
-    name = attach_name(hint)
+def _check_attach(name: str, data) -> str:
     ext = name.rsplit(".", 1)[-1]
     if not isinstance(data, bytes) or not data:
         raise Refused("That file is empty.")
@@ -1756,22 +1757,83 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str) -> dict:
             data.decode("utf-8")
         except UnicodeDecodeError:
             raise Refused("That file is not plain text (UTF-8).") from None
-    d = artifacts_dir(root, tid)
+    return ext
+
+
+def _open_artifacts_fd(root: Path, tid: str) -> int:
+    """A handle on .orch/tickets/<id>/artifacts (created), every folder opened from the workspace root with
+    O_NOFOLLOW|O_DIRECTORY: a folder swapped for a link meanwhile is refused, never followed."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in (".orch", "tickets", tid, "artifacts"):
+            try:
+                nxt = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                os.mkdir(part, dir_fd=fd)
+                nxt = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        return fd
+    except OSError:
+        os.close(fd)
+        raise Refused(
+            "The artifacts folder of this ticket is a link or blocked by a file. orch will not use it."
+        ) from None
+
+
+def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
+    """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
+    ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
+    without NUL bytes, a picture must start with its type's signature. One history line says what was
+    attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
+    means it was done before (returned with existed=True, nothing written)."""
+    load(root, tid)  # the id has the shape of a ticket id and the ticket exists
+    name = attach_name(exact or hint)
+    if exact and name != exact:
+        raise Refused("That file name is not allowed.")
+    ext = _check_attach(name, data)
     stem = name[: -len(ext) - 1]
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    for n in range(1, 100):
-        final = name if n == 1 else f"{stem} ({n}).{ext}"
-        try:
-            fd = os.open(d / final, flags, 0o644)
-        except FileExistsError:
-            continue
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        break
-    else:
-        raise Refused("Too many files with that name on this ticket.")
+    wflags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    if hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd:
+        dfd = _open_artifacts_fd(root, tid)
+        opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
+        remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
+        close = lambda: os.close(dfd)  # noqa: E731
+    else:  # Windows: no handles on folders; the folders are checked one by one
+        d0 = artifacts_dir(root, tid)
+        opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
+        remove = lambda n: (d0 / n).unlink()  # noqa: E731
+        close = lambda: None  # noqa: E731
+    try:
+        for n in range(1, 100):
+            final = name if n == 1 else f"{stem} ({n}).{ext}"
+            if exact and n > 1:
+                break
+            try:
+                fd = opener(final)
+            except FileExistsError:
+                if exact:
+                    return {"name": final, "size": len(data), "path": _art_rel(tid, final), "existed": True}
+                continue
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    remove(final)
+                raise
+            break
+        else:
+            raise Refused("Too many files with that name on this ticket.")
+    finally:
+        close()
     apply_op(root, tid, lambda t: add_history(t, by, f"Attached {final}"))
-    return {"name": final, "size": len(data), "path": (d / final).relative_to(root).as_posix()}
+    return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
+
+
+def _art_rel(tid: str, name: str) -> str:
+    return f".orch/tickets/{tid}/artifacts/{name}"
 
 
 def artifacts_list(root: Path, tid: str) -> list[dict]:

@@ -24,7 +24,10 @@ from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
-MAX_FILES = 5
+MAX_FILES = 5  # incl. note.md (the page takes 4 dropped files)
+# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
+ATTACH_EXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "yml", "yaml", "toml", "ini", "png", "jpg", "jpeg", "gif", "webp"})
+ATTACH_MAX = 2 * 1024 * 1024
 LONG_NOTE = "The full text is attached as note.md. Read it, then give this ticket a short title and description."
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
@@ -93,6 +96,10 @@ def _text(v, name="text", empty=False, limit=MAX_TEXT) -> str:
         raise BadRequest(f"The {name} is too long (at most {limit} characters).")
     if "\x00" in v:
         raise BadRequest(f"The {name} has a character that is not allowed.")
+    try:
+        v.encode("utf-8")  # a lone surrogate (valid in JSON) cannot be passed on
+    except UnicodeEncodeError:
+        raise BadRequest(f"The {name} has a character that is not allowed.") from None
     return v
 
 
@@ -154,6 +161,8 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
         long_text = args.get("text") if len(args.get("text") or "") > LONG_TEXT else None
     if long_text is not None:
         out.append(("note.md", _text(long_text, "text", limit=MAX_LONG).encode("utf-8")))
+        if len(out[0][1]) > ATTACH_MAX:
+            raise BadRequest("The text is too long (at most 2 MB).")
     files = args.get("files")
     if files is None:
         return out
@@ -165,7 +174,10 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
         if len(f["name"]) > 240 or "\x00" in f["name"]:
             raise BadRequest("That file name is not allowed.")
         if isinstance(f.get("text"), str) and f.get("data") is None:
-            raw = f["text"].encode("utf-8")
+            try:
+                raw = f["text"].encode("utf-8")
+            except UnicodeEncodeError:
+                raise BadRequest("That file could not be read.") from None
         elif isinstance(f.get("data"), str) and f.get("text") is None:
             try:
                 raw = base64.b64decode(f["data"], validate=True)
@@ -173,6 +185,11 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
                 raise BadRequest("That file could not be read.") from None
         else:
             raise BadRequest("That file could not be read.")
+        ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
+        if ext not in ATTACH_EXT:
+            raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
+        if len(raw) > ATTACH_MAX:
+            raise BadRequest(f"{f['name'][:60]} is over 2 MB.")
         out.append((f["name"], raw))
     return out
 

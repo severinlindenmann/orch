@@ -25,7 +25,7 @@ class Node {
 const walk = n => [n, ...n.children.flatMap(walk)];
 function setup() {
   const body = new Node('body'), calls = [], revoked = [], toasts = [], items = [];
-  const c = {Blob, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
+  const c = {Blob, TextDecoder, Uint8Array, btoa, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
     el:(...args) => new Node(...args), document:{body, activeElement:null}, render:() => { c.renders++; }, renders:0,
     sizeText:n => n + ' B', URL:{createObjectURL:() => 'blob:test', revokeObjectURL:x => revoked.push(x)},
     FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,YQ=='; this.onload(); } },
@@ -46,7 +46,7 @@ function setup() {
 }
 test('file validation, first nonempty title, and base64 stripping', () => {
   const c = setup().c;
-  for (const ext of ['txt','md','csv','tsv','json','log','xml','yml','yaml','toml','ini','png','jpg','jpeg','gif','webp']) assert.ok(c.ticketFileType('X.' + ext.toUpperCase()));
+  for (const ext of ['txt','md','csv','tsv','json','log','yml','yaml','toml','ini','png','jpg','jpeg','gif','webp']) assert.ok(c.ticketFileType('X.' + ext.toUpperCase()));
   assert.equal(c.ticketFileError({name:'x.html',size:1}, []), 'x.html: only text files and pictures');
   assert.equal(c.ticketFileError({name:'x.md',size:2097153}, []), 'x.md is over 2 MB');
   assert.equal(c.ticketFileError({name:'x.md',size:2097152}, []), '');
@@ -86,7 +86,7 @@ test('typed long text becomes note.md and removal restores required validity', a
 });
 test('file reads finish before submission; previews and URL cleanup work', async () => {
   const s = setup();
-  await s.drop([{name:'readme.md',size:10,text:async () => '<b>raw</b>'}, {name:'photo.png',size:1}]);
+  await s.drop([{name:'readme.md',size:10,arrayBuffer:async () => new TextEncoder().encode('<b>raw</b>').buffer}, {name:'photo.png',size:1}]);
   // Drain the file-reading queue using a submit that is blocked after reads.
   walk(s.d).find(n => n.type === 'submit').disabled = true;
   await s.form.fire('submit');
@@ -145,4 +145,14 @@ test('textarea title takes priority when typed long text follows a pasted note',
   await s.form.fire('submit');
   assert.equal(s.calls[0].args.title, 'New title');
   assert.equal(s.calls[0].args.long_text, 'Original\n' + 'a'.repeat(1501) + '\n\nNew title\n' + 'b'.repeat(1501));
+});
+test('a text file that is not UTF-8 is sent as base64, unaltered; a body over 4.9 MB is refused plainly', async () => {
+  const s = setup();
+  await s.drop([{name:'latin.txt', size:3, arrayBuffer:async () => new Uint8Array([0x63, 0xe9, 0x66]).buffer}]);
+  await s.form.fire('submit');
+  assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.files)), [{name:'latin.txt', data:btoa('c\xe9f')}]);
+  const big = setup(); await big.paste('x'.repeat(1501));
+  big.input.value = 'y'.repeat(5000000); await big.input.fire('input');
+  await big.form.fire('submit');
+  assert.equal(big.calls.length, 0);
 });

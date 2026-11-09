@@ -1166,22 +1166,18 @@ def _more(n: int, what: str) -> str:
     return f"  (+{n} more {what} not shown)"
 
 
-def _long_phone_text(root: Path, tid: str, mid: str, who: str, raw: str) -> str:
-    """A long phone text is kept word for word as note.md in the ticket's files (once per message, also on a
-    retry); the history gets a short start of it and says where the rest is."""
-    st = _v3_state(root)
-    key = f"{mid}:note"
-    done = st.setdefault("saved", {}).get(key)
-    if not (done and (root / done).is_file()):
-        done = tickets.attach(
-            root, tid, tickets.PASTED_NAME, raw.encode("utf-8"), _line(who, 100) or "phone"
-        )["path"]
-        st["saved"][key] = done
-        st["saved"] = dict(list(st["saved"].items())[-V3_STATE_KEEP:])
-        _v3_save(root, st)
+def _long_phone_text(root: Path, tid: str, mid: str, who: str, raw: str, cut: bool = False) -> str:
+    """A long phone text is kept word for word as note-<hash of the message id>.md in the ticket's artifacts.
+    The file is named from the message, so a file that exists means this message was handled (a retry, a
+    crash in between): nothing is written twice. The history gets a short start and says where the rest is."""
+    tag = hashlib.sha256(mid.encode()).hexdigest()[:8]
+    done = tickets.attach(
+        root, tid, "", raw.encode("utf-8"), _line(who, 100) or "phone", exact=f"note-{tag}.md"
+    )["path"]
+    tail = f" Text cut at {len(raw)} characters." if cut else ""
     return (
         f"{_line(raw, 300)}…\n"
-        f"  (Long text, {len(raw)} characters, kept word for word in {done}. "
+        f"  (Long text, {len(raw)} characters, kept word for word in {done}.{tail} "
         "Read it, then give the ticket a short title and description.)"
     )
 
@@ -1193,9 +1189,10 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
     from orch import phone_view
 
     lines = []
-    raw_text = clean_untrusted(str(body.get("text") or ""), tickets.ATTACH_MAX // 4).strip()
+    limit = tickets.ATTACH_MAX // 4  # characters: at most 2 MB in the file
+    raw_text = clean_untrusted(str(body.get("text") or ""), limit + 1).strip()
     if len(raw_text) > tickets.LONG_TEXT:
-        lines.append(_long_phone_text(root, tid, mid, who, raw_text))
+        lines.append(_long_phone_text(root, tid, mid, who, raw_text[:limit], len(raw_text) > limit))
     else:
         text = _line(body.get("text", ""), 2000)  # one line: it cannot fake the lines orch adds below
         if text:

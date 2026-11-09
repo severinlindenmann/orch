@@ -1111,12 +1111,12 @@ def test_phone_long_text_is_kept_as_a_file_and_the_history_stays_short(proj, run
     assert code == 0 and "new ticket t_" in out
     t = _tickets(run)[0]
     assert t["title"] == "Point one."
-    kept = proj / ".orch" / "tickets" / t["id"] / "artifacts" / "note.md"
+    kept = next((proj / ".orch" / "tickets" / t["id"] / "artifacts").glob("note-*.md"))
     assert kept.read_text() == long.strip()  # word for word
     said = "\n".join(h["text"] for h in t["history"] if h.get("via") == "phone")
-    assert "note.md" in said and len(said) < 900 and "The inventory has many lines. " * 20 not in said
+    assert kept.name in said and len(said) < 900 and "The inventory has many lines. " * 20 not in said
     run("relay", "inbox")  # redelivered: no second file
-    assert [p.name for p in kept.parent.iterdir()] == ["note.md"]
+    assert [p.name for p in kept.parent.iterdir()] == [kept.name]  # named from the message: never twice
 
 
 def test_phone_text_crash_before_seen_is_idempotent(proj, run, rel, monkeypatch):
