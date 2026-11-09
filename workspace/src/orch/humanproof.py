@@ -22,6 +22,7 @@ import re
 import secrets
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -262,9 +263,26 @@ def _write_private(path: Path, text: str) -> None:
             tmp.unlink()
 
 
+_LOCKS = threading.local()
+_RESETS = 0  # count of reset_protection runs in this process: a verify that saw one is refused
+
+
+def _lock_held(d: Path) -> bool:
+    return getattr(_LOCKS, "held", {}).get(str(d), 0) > 0
+
+
 @contextlib.contextmanager
 def _key_lock(d: Path):
-    """keys.lock (O_EXCL) around read-modify-write of the nonce store, delivered ids and settings."""
+    """keys.lock (O_EXCL) around read-modify-write of the nonce store, delivered ids, settings and resets.
+    Re-entrant in the same thread (reset_protection runs inside readers that already hold it)."""
+    held = _LOCKS.__dict__.setdefault("held", {})
+    if held.get(str(d), 0) > 0:
+        held[str(d)] += 1
+        try:
+            yield
+        finally:
+            held[str(d)] -= 1
+        return
     lock = d / "keys.lock"
     end = time.monotonic() + 10
     while True:
@@ -279,9 +297,11 @@ def _key_lock(d: Path):
             if time.monotonic() > end:
                 raise Refused("The key store is busy. Try again.") from None
             time.sleep(0.02)
+    held[str(d)] = 1
     try:
         yield
     finally:
+        held.pop(str(d), None)
         with contextlib.suppress(OSError):
             lock.unlink()
 
@@ -437,42 +457,43 @@ def check_proof(
 
 
 def verify_and_consume(root: Path, proof, op: str, target: str, by_flag: str | None = None) -> str:
-    """Verify a proof against this workspace's key, spend its nonce (single use, under the key lock) and
-    return
-    `by` FROM THE PROOF. Raises Refused("Do this in the dashboard on this computer.") on any failure."""
+    """Verify a proof against this workspace's key, spend its nonce (single use), return `by` FROM THE PROOF.
+    The key and the nonce store are loaded together under keys.lock; if a protection reset happens while they
+    are read, the proof is refused (a reset never accepts a proof). Raises
+    Refused("Do this in the dashboard on this computer.") on any failure."""
     from orch import tickets
 
     msg = "Do this in the dashboard on this computer."
     try:
         d = key_dir(root, create=False)
-        key = human_key(root, create=False)
+        with _key_lock(d):
+            resets = _RESETS
+            key = human_key(root, create=False)
+            store = d / "proofs-used.json"
+            used = _read_json(root, store, {})
+            if _RESETS != resets:
+                raise Refused(msg)
+            if not isinstance(used, dict):
+                raise Refused(msg)
+            now = int(time.time())
+            used = {n: e for n, e in used.items() if isinstance(e, int) and e > now}
+            res = check_proof(
+                proof,
+                key_hex=key.hex(),
+                op=op,
+                target=target,
+                now=now,
+                by_flag=by_flag,
+                agent_env=bool(tickets.agent_tool()),
+                used_nonces=used,
+            )
+            if res != "ok":
+                raise Refused(msg)
+            p = _decode(proof.split(".")[1])
+            used[p["nonce"]] = p["exp"]
+            _write_private(store, json.dumps(used))
     except (Refused, OSError):
         raise Refused(msg) from None
-    now = int(time.time())
-    store = d / "proofs-used.json"
-    with _key_lock(d):
-        try:
-            used = _read_json(root, store, {})
-        except Refused:
-            raise Refused(msg) from None
-        if not isinstance(used, dict):
-            raise Refused(msg)
-        used = {n: e for n, e in used.items() if isinstance(e, int) and e > now}
-        res = check_proof(
-            proof,
-            key_hex=key.hex(),
-            op=op,
-            target=target,
-            now=now,
-            by_flag=by_flag,
-            agent_env=bool(tickets.agent_tool()),
-            used_nonces=used,
-        )
-        if res != "ok":
-            raise Refused(msg)
-        p = _decode(proof.split(".")[1])
-        used[p["nonce"]] = p["exp"]
-        _write_private(store, json.dumps(used))
     return p["by"]
 
 
@@ -570,48 +591,74 @@ def reset_protection(root: Path, reason: str) -> None:
     delivered, handoffs, the dev record): tighten the folders, rotate human.key (old proofs and MACs stop
     verifying), empty the nonce/delivered/handoffs stores, put the widening settings at the safest defaults,
     log a line with no secret and queue a one-time notice for the dashboard. Never a silent chmod of a
-    secret file. Takes no lock itself (callers may hold keys.lock)."""
+    secret file. Takes keys.lock itself (re-entrant: callers may already hold it). A reset never widens
+    and never accepts a proof."""
     from orch import addons
 
+    global _RESETS
     home = guarded_home(root)
     ws = addons.workspace_id(root, create=True)
     home.mkdir(parents=True, exist_ok=True)
     _check_dir(home)
     d = home / "keys" / ws
     _private_dir(d, home)
-    _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
-    for name in _SECRET_FILES:
+    with _key_lock(d):
+        _RESETS += 1
+        _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
+        for name in _SECRET_FILES:
+            with contextlib.suppress(OSError):
+                (d / name).unlink()
+        _reset_settings(root, home)
+        if reason.startswith("dev-workspaces"):
+            with contextlib.suppress(OSError):
+                (home / "dev-workspaces.json").unlink()
+        safe = re.sub(r"[^A-Za-z0-9_.:-]", "_", reason)[:80]  # a file name and a kind, never a value
         with contextlib.suppress(OSError):
-            (d / name).unlink()
+            fd = os.open(home / "protection-reset.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
+                f.write(f"{_now()} workspace={ws} reset: {safe}\n")
+        with contextlib.suppress(OSError, ValueError):
+            nf = d / "notices.json"
+            notes = json.loads(nf.read_text(encoding="utf-8")) if nf.exists() else []
+            if not any(isinstance(n, dict) and n.get("kind") == "protection_reset" for n in notes):
+                notes.append({"kind": "protection_reset", "at": _now(), "text": RESET_NOTICE})
+                _write_private(nf, json.dumps(notes))
+
+
+def _reset_settings(root: Path, home: Path) -> None:
+    """A reset only ever LOWERS: every record whose value is False (a tombstone, in any workspace) is kept
+    whatever the file's rights, anything else is dropped, and the opening settings are written False. A
+    record file that exists but cannot be read also closes live_session and share_counts (unreadable=off)."""
     path, wkey = _settings_path(root)
-    data = None
-    with contextlib.suppress(OSError, ValueError, Refused):
-        if file_problem(path) is None:  # a loose settings file is dropped whole, never merged
-            data = json.loads(path.read_text(encoding="utf-8"))
-    if not (
-        isinstance(data, dict)
-        and data.get("schema") == "orch.human-settings/1"
-        and isinstance(data.get("workspaces"), dict)
-    ):
-        data = {"schema": "orch.human-settings/1", "workspaces": {}}
-    data["workspaces"][wkey] = {
-        k: {"value": v, "by": "reset", "at": _now()} for k, v in SAFE_DEFAULTS.items()
-    }
-    _write_private(path, json.dumps(data, indent=2, sort_keys=True))
-    if reason.startswith("dev-workspaces"):
-        with contextlib.suppress(OSError):
-            (home / "dev-workspaces.json").unlink()
-    safe = re.sub(r"[^A-Za-z0-9_.:-]", "_", reason)[:80]  # a file name and a kind, never a value
-    with contextlib.suppress(OSError):
-        fd = os.open(home / "protection-reset.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(f"{_now()} workspace={ws} reset: {safe}\n")
-    with contextlib.suppress(OSError, ValueError):
-        nf = d / "notices.json"
-        notes = json.loads(nf.read_text(encoding="utf-8")) if nf.exists() else []
-        if not any(isinstance(n, dict) and n.get("kind") == "protection_reset" for n in notes):
-            notes.append({"kind": "protection_reset", "at": _now(), "text": RESET_NOTICE})
-            _write_private(nf, json.dumps(notes))
+    readable, prior = True, {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(data, dict)
+            or data.get("schema") != "orch.human-settings/1"
+            or not isinstance(data.get("workspaces"), dict)
+        ):
+            raise ValueError("shape")
+        prior = data["workspaces"]
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        readable = False
+    out: dict = {}
+    for wk, recs in prior.items():
+        if isinstance(recs, dict):
+            keep = {k: v for k, v in recs.items() if isinstance(v, dict) and v.get("value") is False}
+            if keep:
+                out[wk] = keep
+    mine = out.setdefault(wkey, {})
+    closing = dict(SAFE_DEFAULTS)
+    if not readable:
+        closing.update({"focus.live_session": False, "insights.share_counts": False})
+    for k in closing:
+        mine.setdefault(k, {"value": False, "by": "reset", "at": _now()})
+    _write_private(
+        path, json.dumps({"schema": "orch.human-settings/1", "workspaces": out}, indent=2, sort_keys=True)
+    )
 
 
 def take_notices(root: Path) -> list[dict]:
