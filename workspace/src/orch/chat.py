@@ -794,6 +794,7 @@ def can_of(flags) -> dict:
 def contacts(root: Path) -> list[dict]:
     from orch.chat_groups import _valid_look
 
+    _dm_person()
     directory = relay._read_dir(root)
     rows = directory.get("workspaces") if isinstance(directory, dict) else None
     out = {}
@@ -801,6 +802,8 @@ def contacts(root: Path) -> list[dict]:
         if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not _DM_WS.fullmatch(row["id"]):
             continue
         ws = row["id"]
+        if ws in out:
+            continue
         name = ws
         with contextlib.suppress(Exception):
             name = relay.name_of(root, ws)
@@ -811,7 +814,11 @@ def contacts(root: Path) -> list[dict]:
         }
         if lk := _valid_look(row.get("look")):
             item["look"] = lk
+        messages = sorted(_dm_read(root, ws)["messages"], key=_dm_order)[-500:]
+        item.update(count=len(messages), last_at=str(messages[-1].get("at", ""))[:40] if messages else "")
         out[ws] = item
+        if len(out) >= 500:
+            break
     return list(out.values())
 
 
@@ -846,7 +853,19 @@ def _dm_write(root: Path, ws: str, data: dict) -> None:
     net.write_json(_dm_path(root, ws), data, True)
 
 
-def dm_send(root: Path, ws: str, text: str, by: str | None = None, retry: str | None = None) -> dict:
+def _dm_person(by: str | None = None) -> None:
+    if not tickets.current_actor(by).startswith("human:") or tickets.agent_tool():
+        raise Refused("Only a person uses workspace Chat.")
+
+
+def dm_send(
+    root: Path,
+    ws: str,
+    text: str,
+    by: str | None = None,
+    retry: str | None = None,
+    client_id: str | None = None,
+) -> dict:
     if not tickets.current_actor(by).startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
     contact = _dm_contact(root, ws)
@@ -855,9 +874,22 @@ def dm_send(root: Path, ws: str, text: str, by: str | None = None, retry: str | 
     text = text.strip() if isinstance(text, str) else ""
     if not text or len(text) > 2000:
         raise Refused("A message has 1 to 2000 characters.")
-    entry = {"id": relay.new_id(), "at": tickets.now(), "by": "you", "text": text, "state": "sending"}
+    for mid in (client_id, retry):
+        if mid is not None and (not isinstance(mid, str) or not re.fullmatch(r"m_[a-z0-9]{16}", mid)):
+            raise Refused("That is not a message.")
+    text = relay.clean_untrusted(text, 2000)
+    entry = {
+        "id": client_id or relay.new_id(),
+        "at": tickets.now(),
+        "by": "you",
+        "text": text,
+        "state": "sending",
+    }
     with tickets._locked(root, "chat"):
         data = _dm_read(root, ws)
+        existing = next((m for m in data["messages"] if m.get("id") == entry["id"]), None)
+        if existing is not None:
+            return existing
         if retry is not None:
             old = next((m for m in data["messages"] if m.get("id") == retry), None)
             if not old or old.get("by") != "you" or old.get("state") != "failed":
@@ -920,26 +952,53 @@ def _dm_inbox(root: Path):
 
 
 def dm_sync(root: Path, ws: str, by: str | None = None) -> dict:
-    if not tickets.current_actor(by).startswith("human:") or tickets.agent_tool():
-        raise Refused("Only a person syncs workspace Chat.")
+    _dm_person(by)
     contact = _dm_contact(root, ws)
+    _dm_sync_contacts(root, [contact])
+    return dm_read(root, ws)
+
+
+def dm_sync_all(root: Path, by: str | None = None) -> list[dict]:
+    """Import all contacts with one bounded inbox scan."""
+    _dm_person(by)
+    peers = contacts(root)
+    _dm_sync_contacts(root, peers)
+    return contacts(root)
+
+
+def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
+    # Validate storage before acquiring a lock, which itself creates directories.
+    for contact in peers:
+        _dm_path(root, contact["ws"])
+    if (root / ".orch").is_symlink():
+        raise Refused("Chat storage must not be a link.")
     with tickets._locked(root, "chat"):
-        data = _dm_read(root, ws)
-        ids = {m.get("id") for m in data["messages"] if isinstance(m.get("id"), str)}
+        data = {c["ws"]: _dm_read(root, c["ws"]) for c in peers}
+        ids = {
+            ws: {m.get("id") for m in d["messages"] if isinstance(m.get("id"), str)} for ws, d in data.items()
+        }
+        original = {ws: [dict(m) for m in d["messages"]] for ws, d in data.items()}
+        changed = set()
         for msg in _dm_inbox(root):
-            if not isinstance(msg, dict) or msg.get("from") != ws or msg.get("type") != "text":
+            if (
+                not isinstance(msg, dict)
+                or not isinstance(msg.get("from"), str)
+                or msg["from"] not in data
+                or msg.get("type") != "text"
+            ):
                 continue
+            ws = msg["from"]
             body, mid = msg.get("body"), msg.get("id")
-            if not isinstance(body, dict) or body.get("group") or body.get("update"):
+            if not isinstance(body, dict) or "group" in body or "update" in body:
                 continue
             if (
                 not isinstance(mid, str)
                 or not re.fullmatch(r"m_[a-z0-9]{16}", mid)
-                or mid in ids
+                or mid in ids[ws]
                 or not isinstance(body.get("text"), str)
             ):
                 continue
-            data["messages"].append(
+            data[ws]["messages"].append(
                 {
                     "id": mid,
                     "at": str(msg.get("created_at") or "")[:40],
@@ -948,21 +1007,26 @@ def dm_sync(root: Path, ws: str, by: str | None = None) -> dict:
                     "state": "delivered",
                 }
             )
-            ids.add(mid)
+            ids[ws].add(mid)
+            changed.add(ws)
         sent_ids = relay.posted_ids(root)
-        for m in data["messages"]:
-            rid = m.get("relay_id")
-            if (
-                m.get("by") == "you"
-                and m.get("state") == "sending"
-                and not m.get("error")
-                and isinstance(rid, str)
-                and re.fullmatch(r"m_[a-z0-9]{16}", rid)
-                and rid in sent_ids
-            ):
-                m["state"] = "delivered"
-        _dm_write(root, ws, data)
-    return {**contact, "messages": data["messages"]}
+        for ws, thread in data.items():
+            for m in thread["messages"]:
+                rid = m.get("relay_id")
+                if (
+                    m.get("by") == "you"
+                    and m.get("state") == "sending"
+                    and not m.get("error")
+                    and isinstance(rid, str)
+                    and re.fullmatch(r"m_[a-z0-9]{16}", rid)
+                    and rid in sent_ids
+                ):
+                    m["state"] = "delivered"
+                    changed.add(ws)
+        for ws in changed:
+            data[ws]["messages"] = sorted(data[ws]["messages"], key=_dm_order)[-500:]
+            if data[ws]["messages"] != original[ws]:
+                _dm_write(root, ws, data[ws])
 
 
 def _dm_order(message: dict) -> tuple:

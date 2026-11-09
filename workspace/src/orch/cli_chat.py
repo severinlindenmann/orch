@@ -67,11 +67,13 @@ def _add_dm_parsers(sub, common):
     sub.add_parser("contacts", parents=[common], help="workspace contacts")
     p = sub.add_parser("thread", parents=[common], help="messages with a workspace")
     p.add_argument("workspace")
+    p.add_argument("--pure", action="store_true", help="read stored messages without importing")
     p = sub.add_parser("sync", parents=[common], help="import and reconcile workspace messages")
-    p.add_argument("workspace")
+    p.add_argument("workspace", nargs="?")
     p = sub.add_parser("send", parents=[common], help="send a workspace a message")
     p.add_argument("workspace")
     p.add_argument("text")
+    p.add_argument("--client-id", help="idempotent message id")
     p.add_argument("--retry", help="replace a failed message")
 
 
@@ -82,15 +84,27 @@ def _dispatch_dm(args, root):
     if args.sub == "contacts":
         data = chat.contacts(root)
         text = "\n".join(f"{c['ws']}  {c['name']}" for c in data) or "No contacts."
-    elif args.sub in ("thread", "sync"):
-        data = (
-            chat.dm_read(root, args.workspace)
-            if args.sub == "thread"
-            else chat.dm_sync(root, args.workspace, getattr(args, "by", None))
-        )
+    elif args.sub == "thread":
+        if not args.pure:
+            chat.dm_sync(root, args.workspace, getattr(args, "by", None))
+        data = chat.dm_read(root, args.workspace)
         text = "\n".join(f"{m['by']}: {m['text']}" for m in data["messages"]) or "No messages."
+    elif args.sub == "sync":
+        data = (
+            chat.dm_sync(root, args.workspace, getattr(args, "by", None))
+            if args.workspace
+            else chat.dm_sync_all(root, getattr(args, "by", None))
+        )
+        text = "Synced."
     elif args.sub == "send":
-        data = chat.dm_send(root, args.workspace, args.text, getattr(args, "by", None), retry=args.retry)
+        data = chat.dm_send(
+            root,
+            args.workspace,
+            args.text,
+            getattr(args, "by", None),
+            retry=args.retry,
+            client_id=args.client_id,
+        )
         text = {"sending": "Sending…", "delivered": "Delivered.", "failed": "Not sent."}[data["state"]]
     else:
         return False

@@ -15,7 +15,7 @@ function context(fetch) {
     CSS:{supports:() => false}, time:() => '', date:() => '', ticketOf:() => null,
     location:{hash:'#chat'}, history:{replaceState(){}}, route:() => ({kind:'chat'}), render(){},
     MutationObserver:class {observe(){}}, document:{documentElement:{}, querySelector:() => null},
-    window:{addEventListener(){}, orch:{open(){}, close:async () => {}, toast(){}}}, fetch,
+    window:{orchAct:async () => ({ok:true}), addEventListener(){}, orch:{open(){}, close:async () => {}, toast(){}}}, fetch,
     dialog:() => (dialogNode = {d:h('dialog'), actions:h('div')})});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/chat.js'), 'utf8'), c);
   c.shown = () => JSON.stringify(dialogNode.d);
