@@ -313,8 +313,10 @@ def a14(e):
         mrc, mout, merr = e.sh(["orch", "dev-mark"], cwd=ws)
         check(mrc == 0 or "already" in (mout + merr), f"orch dev-mark: {(merr or mout)[-200:]}")
         prc, proof, perr = e.sh(["orch", "dev-proof", "update", "orch"], cwd=ws)
-        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
-        rc, out, err = e.sh(["orch", "update", "--proof-stdin"], cwd=ws, timeout=600, input=proof.strip() + "\n")
+        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof: {(perr or proof)[-200:]}")
+        rc, out, err = e.sh(
+            ["orch", "update", "--proof-stdin"], cwd=ws, timeout=600, input=proof.strip() + "\n"
+        )
     check("changed on disk" in (out + err), f"update does not say 'changed on disk': {(err or out)[-300:]}")
     check(e.sh(["orch", "hello-world", "hello"], cwd=ws)[0] == 2, "update re-activated a changed add-on")
     # the user checks it and turns it on again
