@@ -1,8 +1,14 @@
 """The core write gate `.orch/run/sync.gate`: held by the sync step while it applies a merge to the live tree.
 
-Every writer of synced files (ticket lock, ticket counter, General ticket, attach, files/artifacts folders)
-calls `wait_clear` and never writes past a live gate. A gate is stale only when its holder is verifiably gone
-(pid dead, or the pid now has another start time): never a timer. The holder's own process passes.
+Lock order is GATE -> ticket lock. A writer of synced files waits for the gate BEFORE it takes the ticket lock
+and checks again after taking it (tickets._locked); the sync step, while holding the gate, takes each ticket's
+lock for every file it writes (its own thread passes the gate). So a writer is either finished before the step
+touches the file, or refused/waiting: nothing is written into a merge.
+
+A gate is stale only when its holder is verifiably not a live sync step: the process is gone, the pid has
+another start time, the pid is not an orch process, or no step record (`.orch/run/sync/step-<id>.json`,
+written by `hold` for the same pid) backs it; an unreadable or garbled gate file is stale too (a live holder
+publishes the file whole, so it never shows a partial one). Never a timer.
 """
 
 from __future__ import annotations
@@ -10,7 +16,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import secrets
+import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -19,42 +28,87 @@ from orch.errors import Refused
 
 WAIT_SECONDS = 30.0  # a writer waits this long, then says "busy" (it never breaks a live gate)
 POLL_SECONDS = 0.02
+REREAD_SECONDS = 0.05  # an unreadable gate is read once more after this, then counts as stale
 REPLACE_TRIES = 10  # Windows: a file open elsewhere refuses os.replace; retried inside the gate
 REPLACE_DELAY = 0.2
+
+_NONCE = secrets.token_hex(8)  # per process (a forked child inherits it, but has another pid)
+_STEP_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 def gate_path(root: Path) -> Path:
     return root / ".orch" / "run" / "sync.gate"
 
 
-def _read(root: Path) -> dict | None:
+def step_path(root: Path, step_id: str) -> Path:
+    return root / ".orch" / "run" / "sync" / f"step-{step_id}.json"
+
+
+def _read_file(p: Path) -> dict | None:
     try:
-        data = json.loads(gate_path(root).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # Windows: PermissionError during a replace is an OSError too
         return None
     return data if isinstance(data, dict) else None
 
 
-def _holder_gone(rec: dict) -> bool:
-    """True only when the process that wrote this gate is verifiably gone."""
-    return procs.owner_dead(f"{rec.get('pid')} {rec.get('start_time') or '-'}")
+def _read(root: Path) -> dict | None:
+    """The gate record, read once more after a short pause when it is unreadable. None = unreadable."""
+    rec = _read_file(gate_path(root))
+    if rec is None and gate_path(root).exists():
+        time.sleep(REREAD_SECONDS)
+        rec = _read_file(gate_path(root))
+    return rec
 
 
 def _is_me(rec: dict) -> bool:
-    return rec.get("pid") == os.getpid() and rec.get("start_time") == (procs.pid_started(os.getpid()) or "-")
+    """This very thread of this process holds it (not just this process: other threads must not pass)."""
+    return (
+        rec.get("pid") == os.getpid()
+        and rec.get("nonce") == _NONCE
+        and rec.get("thread") == threading.get_ident()
+    )
+
+
+def _looks_like_orch(pid: int) -> bool:
+    if os.name == "nt":
+        return True  # no cheap command line here: the step record and the start time have to do
+    try:
+        r = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+        )
+    except Exception:
+        return True  # cannot tell: do not call a holder stale on a guess about ps
+    cmd = r.stdout.strip()
+    return "orch" in cmd.lower() if cmd else True
+
+
+def _stale(root: Path, rec: dict) -> bool:
+    """True when no live sync step stands behind this record."""
+    pid, sid = rec.get("pid"), rec.get("step_id")
+    if not isinstance(pid, int) or not isinstance(sid, str) or not _STEP_RE.fullmatch(sid):
+        return True
+    start = rec.get("start_time")
+    if not isinstance(start, str) or not start:
+        return True
+    if procs.owner_dead(f"{pid} {start}"):
+        return True
+    step = _read_file(step_path(root, sid))
+    if step is None or step.get("pid") != pid:
+        return True  # a gate with no step record is a fake or a leftover
+    return not _looks_like_orch(pid)
 
 
 def live_holder(root: Path) -> dict | None:
-    """The gate record when a live process other than this one holds it, else None (no gate, stale, or ours).
-    An unreadable gate file counts as live (a holder may be mid-write): it is never ignored on a guess,
-    except that a file that stays unreadable is the writer's `busy`, not a license to write."""
-    p = gate_path(root)
-    if not p.exists():
+    """The gate record when a live sync step of another thread/process holds it, else None."""
+    if not gate_path(root).exists():
         return None
     rec = _read(root)
-    if rec is None:
-        return {"pid": None, "unreadable": True}
-    if _is_me(rec) or _holder_gone(rec):
+    if rec is None or _is_me(rec) or _stale(root, rec):
         return None
     return rec
 
@@ -64,60 +118,109 @@ def wait_clear(root: Path, what: str = "this", *, wait: float | None = None) -> 
     end = time.monotonic() + (WAIT_SECONDS if wait is None else wait)
     while live_holder(root) is not None:
         if time.monotonic() > end:
-            raise Refused(f"orch is syncing, so {what} is busy. Try again in a moment.")
+            raise busy(what)
         time.sleep(POLL_SECONDS)
 
 
+def busy(what: str) -> Refused:
+    return Refused(f"orch is syncing, so {what} is busy. Try again in a moment.")
+
+
+def _write_whole(p: Path, text: str) -> None:
+    fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _publish(p: Path, text: str) -> bool:
+    """Create the gate with its whole content; False when one exists. No reader sees a half file: write and
+    fsync a temp file, then link it (atomic create-if-absent); no links on this filesystem: O_EXCL instead."""
+    tmp = p.with_name(f"sync.gate.{secrets.token_hex(4)}.tmp")
+    try:
+        _write_whole(tmp, text)
+        try:
+            os.link(tmp, p)
+            return True
+        except FileExistsError:
+            return False
+        except OSError:
+            try:
+                _write_whole(p, text)
+                return True
+            except FileExistsError:
+                return False
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
 @contextlib.contextmanager
-def hold(root: Path, step_id: str = ""):
-    """The sync step's gate. Refused (busy) when another live process holds it; a stale gate is taken over."""
+def hold(root: Path, step_id: str = "sync"):
+    """The sync step's gate. Refused (busy) when another live step holds it; a stale gate is taken over."""
+    if not _STEP_RE.fullmatch(step_id):
+        raise Refused("A sync step id has 1 to 64 letters, digits, dots, dashes or underscores.")
     p = gate_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     me = os.getpid()
-    rec = json.dumps({"pid": me, "start_time": procs.pid_started(me) or "-", "step_id": step_id})
-    while True:
-        tmp = p.with_name(f"sync.gate.{secrets.token_hex(4)}.tmp")
-        tmp.write_text(rec, encoding="utf-8")
-        try:
-            os.link(tmp, p)  # atomic create-if-absent with complete content: no reader sees a half gate
-            break
-        except FileExistsError:
-            other = _read(root)
-            if other is not None and not _is_me(other) and not _holder_gone(other):
-                raise Refused("orch is already syncing. Try again in a moment.") from None
-            if other is not None and _is_me(other):
-                raise Refused("orch is already syncing in this process.") from None
-            _take_stale(p)
-        finally:
-            with contextlib.suppress(OSError):
-                tmp.unlink()
+    sp = step_path(root, step_id)
+    sp.parent.mkdir(parents=True, exist_ok=True)
+    sp.write_text(json.dumps({"pid": me, "step_id": step_id}), encoding="utf-8")
+    text = json.dumps(
+        {
+            "pid": me,
+            "start_time": procs.pid_started(me) or "-",
+            "nonce": _NONCE,
+            "thread": threading.get_ident(),
+            "step_id": step_id,
+        }
+    )
     try:
-        yield
+        for _ in range(5):
+            if _publish(p, text):
+                break
+            other = _read(root)
+            if other is not None and (_is_me(other) or not _stale(root, other)):
+                raise Refused("orch is already syncing. Try again in a moment.")
+            _take_stale(root)
+        else:
+            raise Refused("orch could not take the sync gate. Try again in a moment.")
+        try:
+            yield
+        finally:
+            with contextlib.suppress(OSError):  # only a gate that is ours
+                if p.read_text(encoding="utf-8") == text:
+                    procs.unlink(p)
     finally:
         with contextlib.suppress(OSError):
-            procs.unlink(p)
+            sp.unlink()
 
 
-def _take_stale(p: Path) -> None:
-    """Remove a gate whose holder is gone: rename to a name only we know (atomic, one winner), re-check what
-    we took, and put it back if a live holder had made it meanwhile."""
+def _take_stale(root: Path) -> bool:
+    """Remove a stale gate: rename it to a name only we know (atomic, one winner), re-check what we took,
+    put it back (no clobber) if a live holder had made it meanwhile."""
+    p = gate_path(root)
     mine = p.with_name(f"sync.gate.{secrets.token_hex(4)}.old")
     try:
         os.replace(p, mine)
     except OSError:
-        return
+        return False
     try:
-        try:
-            rec = json.loads(mine.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            rec = None
-        if isinstance(rec, dict) and _holder_gone(rec):
-            return
+        rec = _read_file(mine)
+        if rec is None or _stale(root, rec):
+            return True
         with contextlib.suppress(OSError):
-            os.link(mine, p)  # live or unverifiable: no-clobber put-back
+            os.link(mine, p)
+        return False
     finally:
         with contextlib.suppress(OSError):
             mine.unlink()
+
+
+def clear_stale(root: Path) -> bool:
+    """For a doctor-style repair: remove a gate no live sync step stands behind. True when one was removed."""
+    return gate_path(root).exists() and live_holder(root) is None and _take_stale(root)
 
 
 def replace(src, dst) -> None:

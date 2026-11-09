@@ -187,8 +187,10 @@ def _read_ticket(p: Path, tid: str) -> dict:
     for attempt in range(4):
         try:
             return json.loads(p.read_text(encoding="utf-8"))
-        except ValueError:
+        except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
+                if isinstance(e, PermissionError):
+                    raise
                 raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
         time.sleep(0.1)
     raise AssertionError("unreachable")
@@ -224,9 +226,17 @@ def _break_stale(lock: Path) -> bool:
 
 @contextlib.contextmanager
 def _locked(root: Path, tid: str):
-    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s)."""
+    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
+    Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
+    the lock and checks again after taking it, so the sync step (which holds the gate and takes this same lock
+    for every file it writes) never has a writer inside a file it replaces. Never waits for the gate while
+    holding the lock."""
+    gated = bool(_ID_RE.fullmatch(tid)) or tid == "key"  # chat / relay state is never synced
+    what = f"ticket {tid}" if tid != "key" else "the ticket counter"
     lock = tickets_dir(root) / f".lock-{tid}"
     lock.parent.mkdir(parents=True, exist_ok=True)
+    if gated:
+        syncgate.wait_clear(root, what)
     end = time.monotonic() + 5
     while True:
         try:
@@ -251,8 +261,8 @@ def _locked(root: Path, tid: str):
                 raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
             time.sleep(0.02)
     try:
-        if _ID_RE.fullmatch(tid) or tid == "key":  # synced files; chat / relay state is never synced
-            syncgate.wait_clear(root, f"ticket {tid}" if tid != "key" else "the ticket counter")
+        if gated and syncgate.live_holder(root) is not None:  # a gate appeared while we took the lock
+            raise syncgate.busy(what)
         yield
     finally:
         with contextlib.suppress(OSError):
@@ -1738,10 +1748,18 @@ def _too_big(name: str) -> str:
 def attach_file(
     root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
 ) -> dict:
+    """Copy a workspace file into the ticket's evidence/ folder (gate -> ticket lock held for the copy)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _attach_file(root, tid, path, title, role, summary)
+
+
+def _attach_file(
+    root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
+) -> dict:
     """Copy a workspace file into .orch/tickets/<tid>/evidence/ and return the evidence entry for it.
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
-    syncgate.wait_clear(root, f"ticket {tid}")
     if role is not None and role not in ROLES:
         raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
     if title is not None and not 1 <= len(title.strip()) <= 120:
@@ -1848,9 +1866,22 @@ def artifacts_path(root: Path, tid: str) -> Path:
 
 def files_dir(root: Path, tid: str) -> Path:
     """.orch/tickets/<id>/files/ : files people send to the ticket (from the phone), created. A link anywhere
-    on the way is refused."""
+    on the way is refused. Only the creation is guarded; to WRITE a file there use files_dir_locked."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _files_dir_raw(root, tid)
+
+
+@contextlib.contextmanager
+def files_dir_locked(root: Path, tid: str):
+    """The files folder for one write: the gate check and the ticket lock are held for the whole `with`."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        yield _files_dir_raw(root, tid)
+
+
+def _files_dir_raw(root: Path, tid: str) -> Path:
     load(root, tid)
-    syncgate.wait_clear(root, f"ticket {tid}")
     cur = root / ".orch"
     for part in ("tickets", tid, "files"):
         cur = cur / part
@@ -1864,9 +1895,15 @@ def files_dir(root: Path, tid: str) -> Path:
 
 
 def artifacts_dir(root: Path, tid: str) -> Path:
-    """The ticket's artifacts folder, created. A link anywhere on the way is refused."""
+    """The ticket's artifacts folder, created (guarded by the sync gate). A link anywhere on the way is
+    refused. Agents write files there with plain file I/O: not gated (a merge skips a changed path)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _artifacts_dir_raw(root, tid)
+
+
+def _artifacts_dir_raw(root: Path, tid: str) -> Path:
     d = artifacts_path(root, tid)
-    syncgate.wait_clear(root, f"ticket {tid}")
     cur = root / ".orch"
     for part in ("tickets", tid, "artifacts"):
         cur = cur / part
@@ -1953,13 +1990,22 @@ def _open_artifacts_fd(root: Path, tid: str) -> int:
 
 
 def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
-    """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
+    """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
+    Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
     means it was done before (returned with existed=True, nothing written)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        res = _attach_write(root, tid, hint, data, exact)
+    if not res.get("existed"):
+        apply_op(root, tid, lambda t: add_history(t, by, f"Attached {res['name']}"))
+    return res
+
+
+def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) -> dict:
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
-    syncgate.wait_clear(root, f"ticket {tid}")
     name = attach_name(exact or hint)
     if exact and name != exact:
         raise Refused("That file name is not allowed.")
@@ -1975,7 +2021,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
         names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
-        d0 = artifacts_dir(root, tid)
+        d0 = _artifacts_dir_raw(root, tid)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
         linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
@@ -2019,7 +2065,6 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
                 remove(tmp)
     finally:
         close()
-    apply_op(root, tid, lambda t: add_history(t, by, f"Attached {final}"))
     return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
 
 

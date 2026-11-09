@@ -16,16 +16,22 @@ from orch.errors import Refused
 @pytest.fixture
 def other():
     """A live process that is not us (its pid and start time go into the gate)."""
-    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "orch"])  # looks like orch
     yield p
     p.kill()
     p.wait()
 
 
-def _write_gate(root, pid, start):
+def _write_gate(root, pid, start, step=True):
     g = syncgate.gate_path(root)
     g.parent.mkdir(parents=True, exist_ok=True)
     g.write_text(json.dumps({"pid": pid, "start_time": start, "step_id": "s1"}), encoding="utf-8")
+    sp = syncgate.step_path(root, "s1")
+    sp.parent.mkdir(parents=True, exist_ok=True)
+    if step:
+        sp.write_text(json.dumps({"pid": pid, "step_id": "s1"}), encoding="utf-8")
+    else:
+        sp.unlink(missing_ok=True)
 
 
 def _live_gate(root, p):
@@ -255,3 +261,108 @@ def test_list_all_with_many_invalid_files_returns_at_once(proj):
     t0 = time.monotonic()
     assert [t["id"] for t in tickets.list_all(proj)] == [good]
     assert time.monotonic() - t0 < 1.0
+
+
+def test_fake_gates_are_ignored(proj, other):
+    """No step record behind it, a holder that is not orch, or an unreadable file: stale, never a block."""
+    tid = _ticket(proj)
+    _write_gate(proj, other.pid, procs.pid_started(other.pid), step=False)  # fake: no step record
+    assert syncgate.live_holder(proj) is None
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        _write_gate(proj, sleeper.pid, procs.pid_started(sleeper.pid))  # live pid, but not an orch process
+        assert syncgate.live_holder(proj) is None
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    for junk in ("", "{ half", "[1]"):
+        syncgate.gate_path(proj).write_text(junk)
+        assert syncgate.live_holder(proj) is None
+    tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "ok"))
+    assert syncgate.clear_stale(proj) and not syncgate.gate_path(proj).exists()
+
+
+def test_other_thread_of_the_holder_does_not_pass(proj, monkeypatch):
+    monkeypatch.setattr(syncgate, "_looks_like_orch", lambda pid: True)  # the test runner is not `orch`
+    tid = _ticket(proj)
+    syncgate.WAIT_SECONDS = 0.2
+    seen = {}
+    with syncgate.hold(proj, "step"):
+        # the sync step's own thread takes the ticket lock for the files it writes
+        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "merge"))
+
+        def other_thread():
+            try:
+                tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"))
+                seen["wrote"] = True
+            except Refused as e:
+                seen["err"] = str(e)
+
+        th = threading.Thread(target=other_thread)
+        th.start()
+        th.join(10)
+    assert "syncing" in seen.get("err", "") and "wrote" not in seen
+
+
+def test_hold_finally_only_removes_its_own_gate(proj, other):
+    with syncgate.hold(proj, "mine"):
+        syncgate.gate_path(proj).unlink()
+        _live_gate(proj, other)  # someone else's gate now sits there
+    assert json.loads(syncgate.gate_path(proj).read_text())["pid"] == other.pid
+    assert not syncgate.step_path(proj, "mine").exists()
+
+
+def test_gate_taken_right_after_the_writers_check_is_refused(proj, other, monkeypatch):
+    """TOCTOU: the gate appears after wait_clear passed: the re-check under the lock refuses the write."""
+    tid = _ticket(proj)
+    real = syncgate.wait_clear
+
+    def check_then_gate(root, what="this", **kw):
+        real(root, what, **kw)
+        _live_gate(root, other)  # the sync step takes the gate right after our check
+
+    monkeypatch.setattr(syncgate, "wait_clear", check_then_gate)
+    before = tickets.ticket_path(proj, tid).read_bytes()
+    with pytest.raises(Refused, match="syncing"):
+        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "late"))
+    assert tickets.ticket_path(proj, tid).read_bytes() == before
+    assert not (tickets.tickets_dir(proj) / f".lock-{tid}").exists()  # the lock was let go
+
+
+def test_sync_step_waits_for_a_writer_inside_the_lock(proj):
+    """The step takes the ticket lock under the gate: it cannot overlap a writer already inside."""
+    tid = _ticket(proj)
+    inside, release, order = threading.Event(), threading.Event(), []
+
+    def writer():
+        with tickets._locked(proj, tid):
+            inside.set()
+            release.wait(10)
+            order.append("writer done")
+
+    th = threading.Thread(target=writer)
+    th.start()
+    inside.wait(10)
+
+    def step():
+        with syncgate.hold(proj, "step"):
+            with tickets._locked(proj, tid):
+                order.append("step wrote")
+
+    st = threading.Thread(target=step)
+    st.start()
+    deadline = time.monotonic() + 5
+    while not syncgate.gate_path(proj).exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert order == []  # gate held, but the step is waiting for the writer's lock
+    release.set()
+    th.join(10)
+    st.join(10)
+    assert order == ["writer done", "step wrote"]
+
+
+def test_files_dir_locked_holds_the_lock_for_the_write(proj):
+    tid = _ticket(proj)
+    with tickets.files_dir_locked(proj, tid) as d:
+        assert d.is_dir() and (tickets.tickets_dir(proj) / f".lock-{tid}").exists()
+    assert not (tickets.tickets_dir(proj) / f".lock-{tid}").exists()
