@@ -500,6 +500,7 @@ function chatDmThread() {
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
         chatText('div', 'chat-bubble chat-message-text', m.text),
+        m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,
         m.by === 'you' ? h('small', {className:'chat-delivery'},
           m.state === 'failed' ? fragment('Not sent · ', chatButton('Try again', 'retry-send', {'data-id':m.id})) :
           m.state === 'delivered' ? 'Delivered to ' + clean(title) : 'Sending…') : null))),
