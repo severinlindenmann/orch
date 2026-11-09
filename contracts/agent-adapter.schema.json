@@ -137,19 +137,21 @@
               }
               ,{
                 "type": "object", "required": ["args"], "additionalProperties": false,
-                "description": "Flags kept off when the person's own tool config is stricter (unless_config: that TOML file, key and value, optionally via the active profile; then no flags and the run start says `say`), and with confine_home the tool is refused a start folder that contains the orch home.",
+                "description": "Flags kept narrower by the person's own tool config. unless_config names that TOML file (a relative name under the tool's home folder): when it sets `key` to `value`, or cannot be read safely (not a regular file, over 1 MiB, malformed), no flags are added and the run start says `say`; when it sets `approval_key` to anything but `approval_value`, approval_args are left out. A start whose flags include workspace-write is refused when the orch home is inside the start folder or a temporary folder.",
                 "properties": {
                   "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
+                  "approval_args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
                   "unless_config": {
                     "type": "object", "additionalProperties": false, "required": ["home", "file", "key", "value"],
                     "properties": {
-                      "home_env": { "type": "string", "maxLength": 64 }, "home": { "type": "string", "maxLength": 100 },
-                      "file": { "type": "string", "maxLength": 100 }, "key": { "type": "string", "maxLength": 100 },
-                      "value": { "type": "string", "maxLength": 100 }, "profile_key": { "type": "string", "maxLength": 100 },
-                      "profiles": { "type": "string", "maxLength": 100 }
+                      "home_env": { "type": "string", "maxLength": 64 },
+                      "home": { "type": "string", "maxLength": 100, "pattern": "^(?!/)(?!.*\\.\\.)[^\\\\:]+$" },
+                      "file": { "type": "string", "maxLength": 100, "pattern": "^(?!/)(?!.*\\.\\.)[^\\\\:]+$" },
+                      "key": { "type": "string", "maxLength": 100 }, "value": { "type": "string", "maxLength": 100 },
+                      "approval_key": { "type": "string", "maxLength": 100 }, "approval_value": { "type": "string", "maxLength": 100 },
+                      "profile_key": { "type": "string", "maxLength": 100 }, "profiles": { "type": "string", "maxLength": 100 }
                     }
                   },
-                  "confine_home": { "type": "boolean" },
                   "say": { "type": "string", "minLength": 1, "maxLength": 200 }
                 }
               }

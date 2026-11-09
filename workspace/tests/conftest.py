@@ -219,3 +219,10 @@ def rel(proj, run):
     srv = make_relay()
     yield srv
     srv.stop()
+
+
+@pytest.fixture
+def start_guard_off(monkeypatch):
+    """Tests that start codex with ORCH_HOME under the pytest temp folder: the temp-folder guard
+    (adapters.check_start_folder, tested in test_adapters) would refuse them."""
+    monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)

@@ -223,7 +223,8 @@ def test_flag_like_prompt_stays_after_the_separator(codex_home):
         ('sandbox_mode = "read-only"\n', True),
         ('sandbox_mode = "workspace-write"\n', False),
         ('sandbox_mode = "danger-full-access"\n', False),  # capped to workspace-write
-        ("this is [not toml", False),
+        ("this is [not toml", True),  # fail closed
+        ("\xff\xfe", True),
         ("", False),
         ('profile = "p"\nsandbox_mode = "workspace-write"\n[profiles.p]\nsandbox_mode = "read-only"\n', True),
         (
@@ -241,6 +242,77 @@ def test_a_stricter_personal_codex_setting_is_not_lifted(codex_home, proj, toml,
     assert (note == "Codex is set to read-only on this computer: it can't change files.") is stricter
 
 
+SB = ["-c", 'sandbox_mode="workspace-write"']
+APPROVAL = ["-c", 'approval_policy="never"']
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        'profile = "p"\nprofiles = "x"\n',  # profiles not a table
+        'profile = ["p"]\nprofiles = ["p"]\n',
+        'profile = "p"\n[profiles]\np = "x"\n',  # profile not a table
+        "profile = 3\nprofiles = 3\n",
+    ],
+)
+def test_odd_profile_shapes_never_raise(codex_home, proj, toml):
+    (codex_home / "config.toml").write_text(toml)
+    assert adapters.permission_args("codex", proj, "auto") == SANDBOX
+
+
+def test_unreadable_oversized_or_special_config_fails_closed(codex_home, proj):
+    cfg = codex_home / "config.toml"
+    cfg.write_text("# " + "x" * (1 << 20) + "\n")  # over 1 MiB
+    assert adapters.permission_args("codex", proj, "auto") == []
+    cfg.unlink()
+    cfg.mkdir()  # not a regular file
+    assert adapters.permission_args("codex", proj, "auto") == []
+    assert adapters.permission_note("codex", proj, "auto")
+    if hasattr(os, "mkfifo"):
+        cfg.rmdir()
+        os.mkfifo(cfg)  # would block a read forever
+        assert adapters.permission_args("codex", proj, "auto") == []
+    if os.name != "nt" and os.geteuid() != 0:
+        cfg.unlink()
+        cfg.write_text("")
+        cfg.chmod(0)
+        try:
+            assert adapters.permission_args("codex", proj, "auto") == []
+        finally:
+            cfg.chmod(0o600)
+
+
+@pytest.mark.parametrize("policy", ["untrusted", "on-request", "on-failure"])
+def test_a_personal_approval_policy_is_kept(codex_home, proj, policy):
+    (codex_home / "config.toml").write_text(f'approval_policy = "{policy}"\n')
+    assert adapters.permission_args("codex", proj, "auto") == SB
+    assert adapters.permission_note("codex", proj, "auto") is None
+    (codex_home / "config.toml").write_text('approval_policy = "never"\n')
+    assert adapters.permission_args("codex", proj, "auto") == SB + APPROVAL
+    (codex_home / "config.toml").write_text(f'profile = "p"\n[profiles.p]\napproval_policy = "{policy}"\n')
+    assert adapters.permission_args("codex", proj, "auto") == SB
+
+
+def test_person_state_is_computed_once_per_start(codex_home, proj, monkeypatch):
+    calls = []
+    real = adapters.person_state
+    monkeypatch.setattr(adapters, "person_state", lambda r: calls.append(1) or real(r))
+    monkeypatch.setattr(
+        "orch.addons.home", lambda root=None: Path(sys.prefix)
+    )  # outside the start and temp folders
+    st = adapters.person_for("codex", proj)
+    adapters.check_start_folder("codex", proj, st)
+    adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "person": st}, proj)
+    adapters.permission_note("codex", proj, None, st)
+    assert len(calls) == 1
+
+
+def test_adapter_data_cannot_point_the_config_outside_the_tool_home(codex_home, proj):
+    for home, file in (("/etc", "config.toml"), (".codex", "../x.toml"), ("..", "x")):
+        rule = {"home": home, "file": file, "key": "sandbox_mode", "value": "read-only"}
+        assert adapters.person_state(rule) == {"strict": True, "approval": True}
+
+
 def test_missing_codex_config_gets_the_sandbox(codex_home, proj):
     assert (
         adapters.permission_args("codex", proj, "ask") == SANDBOX
@@ -248,16 +320,66 @@ def test_missing_codex_config_gets_the_sandbox(codex_home, proj):
     )
 
 
-def test_codex_refuses_to_start_where_orch_home_is_inside(proj, monkeypatch, tmp_path_factory):
-    monkeypatch.setenv("ORCH_HOME", str(proj / "oh"))
+def test_codex_refuses_to_start_where_orch_home_is_inside(codex_home, proj, monkeypatch, tmp_path_factory):
     monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
     with pytest.raises(Refused, match="Start it from a smaller folder") as e:
         adapters.check_start_folder("codex", proj)
     assert str(proj) not in str(e.value)
-    monkeypatch.setattr("orch.addons.home", lambda root=None: tmp_path_factory.mktemp("elsewhere"))
-    adapters.check_start_folder("codex", proj)  # outside: fine
+    # a mixed-case spelling of the same folder (case-insensitive filesystems) is the same folder
+    if (proj / "oh").exists() or (proj / "oh").mkdir():
+        pass
+    sw = Path(str(proj).swapcase())
+    if sw.exists() and os.path.samefile(sw, proj):
+        monkeypatch.setattr("orch.addons.home", lambda root=None: sw / "oh")
+        with pytest.raises(Refused):
+            adapters.check_start_folder("codex", proj)
+
+    # unknown ORCH_HOME fails closed
+
+    armed = []
+    real_args = adapters.permission_args
+
+    def args_then_arm(*a, **k):  # config.permissions reads the home too: only the guard's own lookup fails
+        out = real_args(*a, **k)
+        armed.append(1)
+        return out
+
+    def boom(root=None):
+        if armed:
+            raise Refused("x")
+        return proj / "oh"
+
+    monkeypatch.setattr(adapters, "permission_args", args_then_arm)
+    monkeypatch.setattr("orch.addons.home", boom)
+    with pytest.raises(Refused, match="cannot tell"):
+        adapters.check_start_folder("codex", proj)
+    # a read-only person: no workspace-write, nothing to guard
+    armed.clear()
+    (codex_home / "config.toml").write_text('sandbox_mode = "read-only"\n')
+    adapters.check_start_folder("codex", proj)
+
+
+def test_codex_refuses_an_orch_home_in_a_temp_folder(codex_home, proj, monkeypatch, tmp_path_factory):
+    import tempfile
+
+    outside = tmp_path_factory.mktemp("elsewhere")
+    root = tmp_path_factory.mktemp("rootdir")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(outside.parent))
+    monkeypatch.setattr("orch.addons.home", lambda r=None: outside / "oh")
+    with pytest.raises(Refused, match="temporary folder"):
+        adapters.check_start_folder("codex", root)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(root / "nothere"))
+    monkeypatch.setattr("orch.addons.home", lambda r=None: Path.home() / ".orch-test-nope")
+    if not str(Path.home().resolve()).startswith(("/tmp", "/private/tmp")):
+        adapters.check_start_folder("codex", root)
+
+
+def test_the_guard_is_code_not_data(codex_home, proj, monkeypatch):
+    # workspace-write in the flags triggers the guard whatever the data says; other tools are not checked
     monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
-    adapters.check_start_folder("claude", proj)  # only tools kept to their folder are checked
+    with pytest.raises(Refused):
+        adapters.check_start_folder("codex", proj)
+    adapters.check_start_folder("claude", proj)
 
 
 def test_agents_without_a_mapping_ignore_the_mode(proj):

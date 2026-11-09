@@ -14,8 +14,10 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -177,7 +179,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         return _PLACEHOLDER.sub(sub, item)
 
     out = [fill(i) for i in items]
-    extra: list[str] = permission_args(name, root, v.get("permissions"))
+    extra: list[str] = permission_args(name, root, v.get("permissions"), v.get("person"))
     if mode == "oneshot":
         if v.get("stream") and sect.get("stream_args"):
             extra += sect["stream_args"]
@@ -205,11 +207,17 @@ def _help_text(binary: str) -> str:
     return (r.stdout or "") + (r.stderr or "")
 
 
-def permission_args(name: str, root: Path | None = None, mode: str | None = None) -> list[str]:
+def permission_args(
+    name: str, root: Path | None = None, mode: str | None = None, person: Mapping | None = None
+) -> list[str]:
     """The tool's flags for the workspace's permission mode (ask | auto | full), from the adapter's
     `permissions`. An agent without that data (a generic command) gets none: it ignores the mode.
-    Codex maps every mode to workspace-write (exec cannot ask): ask/auto/full never widen it beyond that;
-    a stricter personal setting (read-only in its config) is left alone (no flags).
+    Codex maps every mode to workspace-write + approval never (exec cannot ask): ask/auto/full never widen it
+    beyond that. orch only narrows: a personal config (CODEX_HOME or ~/.codex config.toml, active profile)
+    that sets read-only, or cannot be read safely, gets no flags; a personal approval_policy other than
+    never is kept. System/managed config and a project .codex/config.toml are not read: codex applies
+    them itself.
+    person: the result of person_state (read once per start); read here when left out.
     An entry may depend on the installed tool: `if_help_has` (its --help text), else `else`."""
     a = load(name, root)
     table = a.get("permissions")
@@ -220,65 +228,118 @@ def permission_args(name: str, root: Path | None = None, mode: str | None = None
         return []
     if isinstance(entry, list):
         return list(entry)
-    if _person_is_stricter(entry.get("unless_config")):
+    st = person if person is not None else person_state(entry.get("unless_config"))
+    if st["strict"]:
         return []  # never lift a stricter personal setting
-    if "if_help_has" not in entry:
-        return list(entry["args"])
-    binary = (a.get("detect") or {}).get("binary")
-    path = shutil.which(binary) if binary else None
-    if path and entry["if_help_has"] in _help_text(path):
-        return list(entry["args"])
-    return list(entry.get("else") or [])
+    if "if_help_has" in entry:
+        binary = (a.get("detect") or {}).get("binary")
+        path = shutil.which(binary) if binary else None
+        if not (path and entry["if_help_has"] in _help_text(path)):
+            return list(entry.get("else") or [])
+    return list(entry["args"]) + ([] if st["approval"] else list(entry.get("approval_args") or []))
 
 
-def _person_is_stricter(rule) -> bool:
-    """True when the person's own tool config (TOML; CODEX_HOME or ~/.codex, and the active profile) sets
-    rule["key"] to rule["value"]. A missing or malformed file counts as not set."""
+_MAX_CONFIG = 1 << 20
+
+
+def person_state(rule) -> dict:
+    """What the person's own tool config says, read once: {strict, approval}. strict = it sets rule key to
+    rule value (read-only), or the file cannot be trusted (fail closed: not a regular file, over 1 MiB,
+    unreadable or malformed). Only a missing file means "not set". approval = it sets approval_key to
+    anything but approval_value (that setting is kept, not overridden)."""
+    st = {"strict": False, "approval": False}
     if not rule:
-        return False
-    base = Path(os.environ.get(rule.get("home_env") or "") or Path.home() / rule["home"])
+        return st
+    closed = {"strict": True, "approval": True}
+    home, file = str(rule["home"]), str(rule["file"])
+    if any(Path(x).is_absolute() or ".." in Path(x).parts for x in (home, file)):
+        return closed
+    base = Path(os.environ.get(rule.get("home_env") or "") or Path.home() / home)
+    path = base / file
     try:
-        doc = tomllib.loads((base / rule["file"]).read_text(encoding="utf-8"))
+        info = path.stat()
+    except FileNotFoundError:
+        return st
+    except OSError:
+        return closed
+    if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_CONFIG:
+        return closed
+    try:
+        with open(path, "rb") as f:
+            doc = tomllib.loads(f.read(_MAX_CONFIG + 1).decode("utf-8"))
     except (OSError, ValueError):
-        return False
+        return closed
     tables = [doc]
     prof = doc.get(rule.get("profile_key") or "")
-    sub = (doc.get(rule.get("profiles") or "") or {}).get(prof) if isinstance(prof, str) else None
+    profiles = doc.get(rule.get("profiles") or "")
+    sub = profiles.get(prof) if isinstance(prof, str) and isinstance(profiles, dict) else None
     if isinstance(sub, dict):
         tables.insert(0, sub)  # the profile wins over the top level
     for t in tables:
         if rule["key"] in t:
-            return t[rule["key"]] == rule["value"]
-    return False
+            st["strict"] = t[rule["key"]] == rule["value"]
+            break
+    ak = rule.get("approval_key")
+    for t in tables:
+        if ak and ak in t:
+            st["approval"] = t[ak] != rule.get("approval_value")
+            break
+    return st
 
 
-def permission_note(name: str, root: Path | None = None, mode: str | None = None) -> str | None:
+def permission_note(
+    name: str, root: Path | None = None, mode: str | None = None, person: Mapping | None = None
+):
     """One line for the run start when the person's own setting keeps the tool stricter than orch's mode."""
     table = load(name, root).get("permissions") or {}
     entry = table.get(mode or config.permissions(root))
-    if isinstance(entry, dict) and entry.get("say") and _person_is_stricter(entry.get("unless_config")):
-        return entry["say"]
-    return None
+    if not (isinstance(entry, dict) and entry.get("say")):
+        return None
+    st = person if person is not None else person_state(entry.get("unless_config"))
+    return entry["say"] if st["strict"] else None
 
 
-def check_start_folder(name: str, root: Path) -> None:
-    """A tool kept to its start folder (permissions entry `confine_home`) must not start where ORCH_HOME is
-    inside that folder: it could then write permissions.json, add-ons and the human-choice markers."""
-    table = load(name, root).get("permissions") or {}
-    entry = table.get(config.permissions(root))
-    if not (isinstance(entry, dict) and entry.get("confine_home")) or permission_args(name, root) == []:
+def person_for(name: str, root: Path | None = None, mode: str | None = None) -> dict | None:
+    """person_state for this agent and mode (None when the adapter has no such rule): read once per start."""
+    entry = (load(name, root).get("permissions") or {}).get(mode or config.permissions(root))
+    return person_state(entry.get("unless_config")) if isinstance(entry, dict) else None
+
+
+def _inside(inner: Path, outer: Path) -> bool:
+    """inner is outer or below it (same file, so case-insensitive filesystems and links cannot hide it)."""
+    for p in (inner, *inner.parents):
+        try:
+            if os.path.samefile(p, outer):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def check_start_folder(name: str, root: Path, person: Mapping | None = None) -> None:
+    """A start whose flags include workspace-write (code, not data: no adapter can drop it) is refused when
+    ORCH_HOME is inside the start folder or a temporary folder the sandbox may write: the agent could then
+    write permissions.json, add-ons and the human-choice markers. Fails closed when ORCH_HOME is unknown."""
+    if not any("workspace-write" in x for x in permission_args(name, root, None, person)):
         return
     from orch import addons
 
+    label = load(name, root)["label"]
     try:
         h = addons.home(root).resolve()
     except Refused:
-        return
+        raise Refused(f"orch cannot tell where its own folder is, so {label} was not started.") from None
     r = root.resolve()
-    if h == r or r in h.parents:
+    if _inside(h, r):
         raise Refused(
-            f"{load(name, root)['label']} could write orch's own settings if it started here "
+            f"{label} could write orch's own settings if it started here "
             "(orch's folder is inside this one). Start it from a smaller folder. Nothing was started."
+        )
+    temps = {Path(tempfile.gettempdir()), Path("/tmp")} if os.name != "nt" else {Path(tempfile.gettempdir())}
+    if any(t.exists() and _inside(h, t.resolve()) for t in temps):
+        raise Refused(
+            f"{label} could write orch's own settings (orch's folder is in a temporary folder). "
+            "Move it to your home folder. Nothing was started."
         )
 
 

@@ -113,7 +113,7 @@ def test_no_git_same_layout_without_exclude(proj, run):
     assert (proj / ".agents/skills/orch/SKILL.md").is_file() and (proj / "CLAUDE.local.md").is_file()
 
 
-def test_the_orch_block_is_in_the_start_prompt_of_a_non_claude_agent(proj, run):
+def test_the_orch_block_is_in_the_start_prompt_of_a_non_claude_agent(proj, run, start_guard_off):
     from orch import harness, runs
 
     assert run("init")[0] == 0
@@ -433,7 +433,7 @@ def test_share_off_removes_an_agents_md_only_when_orch_made_it(proj, run):
     assert not (proj / "AGENTS.md").exists()
 
 
-def test_a_long_orch_block_never_cuts_the_ticket_out_of_the_prompt(proj, run):
+def test_a_long_orch_block_never_cuts_the_ticket_out_of_the_prompt(proj, run, start_guard_off):
     import json
 
     from orch import harness, runs

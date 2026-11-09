@@ -831,7 +831,8 @@ def plan(
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
-    adapters.check_start_folder(name, root)
+    person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
+    adapters.check_start_folder(name, root, person)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
     if sid and adapters.transcript_exists(name, sid, root) is False:
@@ -842,6 +843,7 @@ def plan(
         "session": sid,
         "orch_hooks_file": hooks_file,
         "stream": mode == "oneshot",
+        "person": person,
     }
     argv = None
     resumed = False
@@ -890,6 +892,7 @@ def plan(
         "stdin": v["prompt"] if a["prompt_via"] == "stdin" and mode == "oneshot" else None,
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
+        "note": adapters.permission_note(name, root, None, person),
     }
 
 
@@ -962,9 +965,8 @@ def start(
     )
     try:
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
-        note = adapters.permission_note(name, root)
-        if note:
-            notes.append(note)
+        if p.get("note"):
+            notes.append(p["note"])
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
