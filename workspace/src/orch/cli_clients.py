@@ -470,7 +470,7 @@ def run_relay(args, root: Path, out) -> None:
             args,
             "relay.connect",
             _host(args.url),
-            label=f"Connect to {_host(args.url)}?",
+            parts={"host": humanproof.part(_host(args.url))},
         ).startswith("human:"):
             raise Refused(humanproof.AGENT_REFUSED)
         who, line = relay.connect(root, args.url, args.workspace, args.token)
@@ -598,7 +598,11 @@ def run_relay(args, root: Path, out) -> None:
             args,
             "relay.allow",
             f"{args.id}:{mode}",
-            label=f"Allow {relay.name_of(root, msg.get('from'))} to start \u201c{task}\u201d ({mode})?",
+            parts={
+                "peer": humanproof.part(relay.name_of(root, msg.get("from"))),
+                "task": humanproof.part(task),
+                "mode": mode,
+            },
         ).startswith("human:"):
             raise Refused(humanproof.AGENT_REFUSED)
         m = relay.give_allow(root, args.id, mode)

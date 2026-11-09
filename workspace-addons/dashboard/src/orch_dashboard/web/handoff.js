@@ -9,9 +9,47 @@
   // ONE element in the page layout (right under the top bar, above the page), never floating over the page: it
   // can not cover the review bar or any other action. One request = one sentence and two buttons; several =
   // "2 requests waiting" that opens a list, each row with its own buttons. Plain words only: the sentence comes
-  // from orch with {value} where the person's own text goes (shown as text, never as markup or JSON).
+  // from orch as structured parts; the person's own text is a separate "Exact text" block.
   var open = false;
-  function sentence(i) { return String(i.label || "Do this?").split("{value}").join(String(i.value || "")); }
+  // One FIXED template per op. Every untrusted fragment (a title, a question, a path, a host, a name) goes into its
+  // own <span> with textContent: nothing is ever substituted into a string, so a title that says "{value}" or
+  // carries quotes can only ever be shown as itself. The exact text the person approves is a separate block.
+  function cap(t) { t = String(t == null ? "" : t).replace(/\s+/g, " ").replace(/[\u201c\u201d\u201e\u00ab\u00bb"]/g, "'"); return t.length > 120 ? t.slice(0, 120) + "\u2026" : t; }
+  function q(t) { var s = el("span"); s.className = "ho-part"; s.style.fontWeight = "600"; s.textContent = "\u201c" + cap(t) + "\u201d"; return s; }
+  function plain(t) { var s = el("span"); s.style.fontWeight = "600"; s.textContent = cap(t); return s; }
+  function say(parts) {  // [string | element]...
+    var s = el("span"); s.className = "ho-sentence"; s.style.cssText = "flex:1;min-width:200px";
+    parts.forEach(function (p) { s.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
+    return s;
+  }
+  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
+  var TEMPLATES = {
+    "ticket.answer": function (p) { return ["Answer to ", q(p.question), " on ", q(p.title), "?"]; },
+    "ticket.verdict": function (p) {
+      if (p.status) { var w = STATUS[p.status] || STATUS.back; return [w[0], q(p.title), w[1] + (p.also && p.also.length ? " (it also changes: " + p.also.map(cap).join(", ") + ")" : "")]; }
+      return ["Send ", q(p.title), " back with a note?"];
+    },
+    "run.human_input": function (p) { return ["Send a message to the agent on ", q(p.title), "?"]; },
+    "chat.send": function (p) { return p.thread ? ["Send a message to ", plain(p.thread), "?"] : ["Send a message in Chat?"]; },
+    "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
+    "update": function (p) { return ["Update orch from ", plain(p.source), "?"]; },
+    "relay.connect": function (p) { return ["Connect to ", plain(p.host), "?"]; },
+    "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
+    "addon.add_local": function (p) { return ["Add the add-on from ", plain(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
+  };
+  function sentence(i) {
+    var p = i.parts && typeof i.parts === "object" ? i.parts : {};
+    var f = TEMPLATES[i.op];
+    return say(f ? f(p) : ["Do something on this computer?"]);
+  }
+  function exact(i) {  // the exact text that will be sent, never merged into the sentence
+    if (!i.value) return null;
+    var d = el("div"); d.className = "ho-exact"; d.style.cssText = "flex-basis:100%;margin-top:4px";
+    var l = el("div", "Exact text:", "meta"); l.style.cssText = "font-size:12px;opacity:.75";
+    var pre = el("pre"); pre.textContent = String(i.value); pre.style.cssText = "margin:2px 0 0;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font:13px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto";
+    d.appendChild(l); d.appendChild(pre);
+    return d;
+  }
   function buttons(i) {
     var row = el("span", "", "ho-btns");
     var ok = el("button", "Continue", "btn primary"), no = el("button", "Not now", "btn");
@@ -49,8 +87,9 @@
     var small = el("span", "Requested by a command", "meta"); small.style.cssText = "flex-basis:100%;font-size:12px;opacity:.75";
     head.appendChild(small);
     if (items.length === 1) {
-      var t = el("span", sentence(items[0])); t.style.cssText = "flex:1;min-width:200px;white-space:pre-wrap";
-      head.appendChild(t); head.appendChild(buttons(items[0])); b.appendChild(head); return;
+      head.appendChild(sentence(items[0])); head.appendChild(buttons(items[0])); b.appendChild(head);
+      var x1 = exact(items[0]); if (x1) b.appendChild(x1);
+      return;
     }
     var sum = el("span", items.length + " requests waiting"); sum.style.cssText = "flex:1;font-weight:600";
     var tog = el("button", open ? "Hide" : "Show", "btn"); tog.type = "button"; tog.setAttribute("aria-expanded", String(open));
@@ -58,8 +97,9 @@
     head.appendChild(sum); head.appendChild(tog); b.appendChild(head);
     if (open) items.forEach(function (i) {
       var r = el("div"); r.style.cssText = "display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;border-top:1px solid var(--border);padding-top:8px";
-      var t = el("span", sentence(i)); t.style.cssText = "flex:1;min-width:200px;white-space:pre-wrap";
-      r.appendChild(t); r.appendChild(buttons(i)); b.appendChild(r);
+      r.appendChild(sentence(i)); r.appendChild(buttons(i));
+      var x = exact(i); if (x) r.appendChild(x);
+      b.appendChild(r);
     });
   }
   function poll() {

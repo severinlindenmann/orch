@@ -320,3 +320,21 @@ def test_update_result_is_shown_to_a_session_once(live):
     ck = session(root, port)
     assert get(ck) == {"state": "failed", "reason": "The server said no."}
     assert get(ck) == {}  # once
+
+
+def test_the_listing_sends_structured_parts_and_the_exact_value_never_a_sentence_or_the_command(live):
+    root, port = live
+    hp.request_handoff(
+        root,
+        "ticket.answer",
+        "t_a:q1",
+        "",
+        "Blue {value}",
+        argv=["answer", "t_a", "q1", "--", "Blue {value}"],
+        parts={"title": "T {value}", "question": "Which"},
+    )
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
+    item = json.loads(c.getresponse().read())[0]
+    assert item["parts"] == {"title": "T {value}", "question": "Which"} and item["value"] == "Blue {value}"
+    assert "argv" not in item and "label" not in item

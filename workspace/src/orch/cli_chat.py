@@ -55,7 +55,7 @@ def dispatch(args, root: Path) -> bool:
             args,
             "chat.make_ticket",
             args.message_id,
-            label="Make a ticket from this Chat conversation?",
+            parts={},
             value=args.title or "",
         )
         r = chat.make_ticket(root, args.message_id, args.title, who)
@@ -72,7 +72,7 @@ def dispatch(args, root: Path) -> bool:
             args,
             "chat.send",
             "general",
-            label=f"Send \u201c{humanproof.TEXT_HOLE}\u201d to Chat?",
+            parts={},
             value=args.text,
         )
         r = chat.say(root, args.text, who, new=args.new, proven=who.startswith("human:"))
@@ -136,7 +136,7 @@ def _dispatch_dm(args, root):
             args,
             "chat.send",
             args.workspace,
-            label=f"Send \u201c{humanproof.TEXT_HOLE}\u201d to {_ws_name(root, args.workspace)}?",
+            parts={"thread": humanproof.part(_ws_name(root, args.workspace))},
             value=args.text,
         )
         data = chat.dm_send(
