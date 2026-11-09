@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, procs, term
+from orch import config, procs, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -167,7 +167,7 @@ def next_key(root: Path) -> str:
         tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
         try:
             tmp.write_text(json.dumps({"last": n}) + "\n", encoding="utf-8")
-            os.replace(tmp, p)
+            syncgate.replace(tmp, p)
         finally:
             tmp.unlink(missing_ok=True)
     return f"{code}-{n}"
@@ -177,7 +177,27 @@ def load(root: Path, tid: str) -> dict:
     p = ticket_path(root, tid)
     if not p.exists():
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
-    return json.loads(p.read_text(encoding="utf-8"))
+    return _read_ticket(p, tid)
+
+
+def _read_ticket(p: Path, tid: str) -> dict:
+    """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
+    may be swapping the file in), then reported as "being updated". Read-only: a reader never rewrites,
+    quarantines or deletes a file."""
+    for attempt in range(4):
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
+            if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
+                if isinstance(e, PermissionError):
+                    raise
+                raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
+        time.sleep(0.1)
+    raise AssertionError("unreachable")
+
+
+def _root_of(p: Path) -> Path:
+    return p.parent.parent.parent  # <root>/.orch/tickets/<file>
 
 
 def _break_stale(lock: Path) -> bool:
@@ -206,9 +226,17 @@ def _break_stale(lock: Path) -> bool:
 
 @contextlib.contextmanager
 def _locked(root: Path, tid: str):
-    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s)."""
+    """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
+    Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
+    the lock and checks again after taking it, so the sync step (which holds the gate and takes this same lock
+    for every file it writes) never has a writer inside a file it replaces. Never waits for the gate while
+    holding the lock."""
+    gated = bool(_ID_RE.fullmatch(tid)) or tid == "key"  # chat / relay state is never synced
+    what = f"ticket {tid}" if tid != "key" else "the ticket counter"
     lock = tickets_dir(root) / f".lock-{tid}"
     lock.parent.mkdir(parents=True, exist_ok=True)
+    if gated:
+        syncgate.wait_clear(root, what)
     end = time.monotonic() + 5
     while True:
         try:
@@ -233,6 +261,8 @@ def _locked(root: Path, tid: str):
                 raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
             time.sleep(0.02)
     try:
+        if gated and syncgate.live_holder(root) is not None:  # a gate appeared while we took the lock
+            raise syncgate.busy(what)
         yield
     finally:
         with contextlib.suppress(OSError):
@@ -359,7 +389,9 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = json.loads(p.read_text(encoding="utf-8"))
+                t = json.loads(
+                    p.read_text(encoding="utf-8")
+                )  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
             if include_general or not (isinstance(t, dict) and t.get("general") is True):
@@ -1753,6 +1785,15 @@ def _too_big(name: str) -> str:
 def attach_file(
     root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
 ) -> dict:
+    """Copy a workspace file into the ticket's evidence/ folder (gate -> ticket lock held for the copy)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _attach_file(root, tid, path, title, role, summary)
+
+
+def _attach_file(
+    root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
+) -> dict:
     """Copy a workspace file into .orch/tickets/<tid>/evidence/ and return the evidence entry for it.
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
@@ -1862,7 +1903,21 @@ def artifacts_path(root: Path, tid: str) -> Path:
 
 def files_dir(root: Path, tid: str) -> Path:
     """.orch/tickets/<id>/files/ : files people send to the ticket (from the phone), created. A link anywhere
-    on the way is refused."""
+    on the way is refused. Only the creation is guarded; to WRITE a file there use files_dir_locked."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _files_dir_raw(root, tid)
+
+
+@contextlib.contextmanager
+def files_dir_locked(root: Path, tid: str):
+    """The files folder for one write: the gate check and the ticket lock are held for the whole `with`."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        yield _files_dir_raw(root, tid)
+
+
+def _files_dir_raw(root: Path, tid: str) -> Path:
     load(root, tid)
     cur = root / ".orch"
     for part in ("tickets", tid, "files"):
@@ -1877,7 +1932,14 @@ def files_dir(root: Path, tid: str) -> Path:
 
 
 def artifacts_dir(root: Path, tid: str) -> Path:
-    """The ticket's artifacts folder, created. A link anywhere on the way is refused."""
+    """The ticket's artifacts folder, created (guarded by the sync gate). A link anywhere on the way is
+    refused. Agents write files there with plain file I/O: not gated (a merge skips a changed path)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        return _artifacts_dir_raw(root, tid)
+
+
+def _artifacts_dir_raw(root: Path, tid: str) -> Path:
     d = artifacts_path(root, tid)
     cur = root / ".orch"
     for part in ("tickets", tid, "artifacts"):
@@ -1965,11 +2027,34 @@ def _open_artifacts_fd(root: Path, tid: str) -> int:
 
 
 def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
-    """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
+    """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
+    Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
     means it was done before (returned with existed=True, nothing written)."""
+    ticket_path(root, tid)
+    with _locked(root, tid):
+        res = _attach_write(root, tid, hint, data, exact)
+    text = f"Attached {res['name']}"
+    if res.get("existed"):
+        # done before: only the history line may be missing (an earlier call was refused as busy after the
+        # file was written); add it if it is not there
+        apply_op(
+            root,
+            tid,
+            lambda t: (
+                NO_WRITE
+                if any(h.get("text") == text for h in t.get("history", []))
+                else add_history(t, by, text)
+            ),
+        )
+    else:
+        apply_op(root, tid, lambda t: add_history(t, by, text))
+    return res
+
+
+def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None) -> dict:
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
     name = attach_name(exact or hint)
     if exact and name != exact:
@@ -1986,7 +2071,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
         names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
-        d0 = artifacts_dir(root, tid)
+        d0 = _artifacts_dir_raw(root, tid)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
         linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
@@ -2030,7 +2115,6 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
                 remove(tmp)
     finally:
         close()
-    apply_op(root, tid, lambda t: add_history(t, by, f"Attached {final}"))
     return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
 
 
