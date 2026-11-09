@@ -158,3 +158,20 @@ def test_bad_ticket_id_reads_no_run_file(proj, run, new_ticket, monkeypatch):
     monkeypatch.setattr(tickets.Path, "is_file", lambda self: opened.append(str(self)) or False)
     assert tickets.doing_stale(proj, t, t["checklist"][0]) is False
     assert opened == []
+
+
+def test_covers_add_edit_and_show(proj, run, validate, new_ticket):
+    tid = new_ticket("Export invoices")
+    assert run("check", "add", tid, "Add button", "--covers", "A CSV  download button")[0] == 0
+    run("check", "add", tid, "Phone layout")
+    t = read(proj, tid)
+    validate(t)
+    assert t["checklist"][0]["covers"] == "A CSV download button" and "covers" not in t["checklist"][1]
+    assert run("check", "edit", tid, "c2", "--covers", "works on the phone")[0] == 0
+    t = read(proj, tid)
+    validate(t)
+    assert t["checklist"][1]["covers"] == "works on the phone" and t["checklist"][1]["text"] == "Phone layout"
+    assert run("check", "edit", tid, "c2")[0] == 2  # nothing to change
+    assert run("check", "add", tid, "x", "--covers", "y" * 301)[0] == 2
+    code, out, _ = run("ticket", "show", tid)
+    assert code == 0 and "Proof: No checks recorded" in out

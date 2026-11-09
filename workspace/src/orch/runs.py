@@ -713,12 +713,22 @@ def _description_plan(ticket: dict) -> list[str]:
 
 
 def _done_when_plan(ticket: dict) -> list[str]:
-    if not ticket.get("done_when") or ticket.get("checklist"):
+    if not ticket.get("done_when"):
         return []
+    covers = 'Give each task `--covers "<the part of Done when it covers, quoted>"` so every part has a task.'
+    if ticket.get("checklist"):
+        if any(c.get("covers") for c in ticket["checklist"]):
+            return []
+        return [
+            "The person described what should be true when it is done: "
+            f"{_clip(ticket['done_when'], 2000)}. Link each existing task to the part it covers with "
+            f'`orch check edit {ticket["id"]} <task id> --covers "<quote>"`, '
+            "and add a task for any part that has none."
+        ]
     return [
         "The person described what should be true when it is done: "
         f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
-        "(one check per thing that must be true), then start."
+        f"(one check per thing that must be true). {covers} Then start."
     ]
 
 
