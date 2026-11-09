@@ -308,19 +308,28 @@ pub fn parse_ws_list(s: &str) -> Vec<String> {
     l
 }
 
-/// Shared by workspace cards and /v1/phone/send so their allowance cannot drift.
+/// The workspace list of a phone row (the one parse `auth::phone` uses too).
+pub fn phone_list(c: &Connection, phone_id: &str) -> Vec<String> {
+    c.query_row(
+        "SELECT workspaces FROM phones WHERE id=?1",
+        [phone_id],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .map(|l| parse_ws_list(&l))
+    .unwrap_or_default()
+}
+
+/// The one send rule: `ws` is on the phone's list (`list` = what `auth::phone` returned) and exists.
+/// /v1/phone/send decides with this (a bool, never JSON); the display `can` is built from it.
+pub fn phone_may_send(c: &Connection, list: &[String], ws: &str) -> bool {
+    list.iter().any(|w| w == ws) && ws_exists(c, ws)
+}
+
+/// Display only (a UI hint, never authorization): `files` is NOT a file permission, uploads are checked in send.
+/// Tasks reach a workspace as a chat text its helper may turn into a ticket, so tasks follows chat.
 pub fn phone_can(c: &Connection, phone_id: &str, ws: &str) -> Value {
-    let allowed = c
-        .query_row(
-            "SELECT workspaces FROM phones WHERE id=?1",
-            [phone_id],
-            |r| r.get::<_, String>(0),
-        )
-        .ok()
-        .is_some_and(|list| parse_ws_list(&list).iter().any(|w| w == ws))
-        && ws_exists(c, ws);
-    // Files must still be this phone's uploads. Tasks reach a workspace as a chat text its helper may turn into a
-    // ticket: the relay puts no separate limit on it, so tasks follows chat.
+    let allowed = phone_may_send(c, &phone_list(c, phone_id), ws);
     json!({"chat": allowed, "tasks": allowed, "files": allowed})
 }
 

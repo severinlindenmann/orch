@@ -663,7 +663,7 @@ async fn send(
     let v = parse_body(&body)?;
     let id = {
         let c = app.db.lock().unwrap();
-        let (pid, ..) = auth::phone(&c, &h)?;
+        let (pid, _, ws) = auth::phone(&c, &h)?;
         if let Some(cid) = v["client_id"].as_str() {
             if let Some(old) = client_dup(&c, &pid, cid)? {
                 return Ok((
@@ -675,7 +675,7 @@ async fn send(
         check("send_request", &v)?;
         let to = v["to"].as_str().unwrap_or("");
         let cid = v["client_id"].as_str();
-        if store::phone_can(&c, &pid, to)["chat"] != true {
+        if !store::phone_may_send(&c, &ws, to) {
             return Err(not_allowed("This phone may not send to that workspace."));
         }
         let ticket = v["ticket"].as_str();

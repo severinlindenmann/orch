@@ -1017,3 +1017,22 @@ async fn phone_can_is_scoped_to_pairing_and_returned_by_patch() {
     assert_eq!(orch_relay::store::phone_can(&c, &a.0, &ws1.id), denied);
     assert_eq!(orch_relay::store::phone_can(&c, &b.0, &ws2.id), can);
 }
+
+#[tokio::test]
+async fn phone_send_is_refused_after_the_workspace_is_deleted() {
+    let t = start().await;
+    let ws1 = t.add_ws("One").await;
+    let a = t.pair_phone(&[&ws1]).await;
+    let send = json!({"to": ws1.id, "text": "hello"});
+    let (status, body) = t
+        .phone(&a, "POST", "/v1/phone/send", Some(send.clone()))
+        .await;
+    assert_eq!(status, 201, "{body}");
+    {
+        let c = t.app.db.lock().unwrap();
+        c.execute("DELETE FROM workspaces WHERE id=?1", [&ws1.id])
+            .unwrap();
+    }
+    let (status, body) = t.phone(&a, "POST", "/v1/phone/send", Some(send)).await;
+    assert_eq!(status, 403, "{body}");
+}

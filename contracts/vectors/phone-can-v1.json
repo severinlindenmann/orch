@@ -73,6 +73,81 @@
         ],
         "next": null
       }
+    },
+    {
+      "name": "can-extra-key",
+      "ok": false,
+      "response": {
+        "items": [
+          {
+            "id": "ws_pilatus001",
+            "name": "Pilatus",
+            "description": "",
+            "tags": [],
+            "online": false,
+            "last_seen": null,
+            "open_questions": 0,
+            "muted_until": null,
+            "icon": null,
+            "color": null,
+            "can": {
+              "chat": true,
+              "files": true,
+              "tasks": true,
+              "admin": true
+            }
+          }
+        ],
+        "next": null
+      }
+    },
+    {
+      "name": "can-non-bool",
+      "ok": false,
+      "response": {
+        "items": [
+          {
+            "id": "ws_pilatus001",
+            "name": "Pilatus",
+            "description": "",
+            "tags": [],
+            "online": false,
+            "last_seen": null,
+            "open_questions": 0,
+            "muted_until": null,
+            "icon": null,
+            "color": null,
+            "can": {
+              "chat": "yes",
+              "files": true,
+              "tasks": true
+            }
+          }
+        ],
+        "next": null
+      }
+    },
+    {
+      "name": "can-null",
+      "ok": false,
+      "response": {
+        "items": [
+          {
+            "id": "ws_pilatus001",
+            "name": "Pilatus",
+            "description": "",
+            "tags": [],
+            "online": false,
+            "last_seen": null,
+            "open_questions": 0,
+            "muted_until": null,
+            "icon": null,
+            "color": null,
+            "can": null
+          }
+        ],
+        "next": null
+      }
     }
   ]
 }
