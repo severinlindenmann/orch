@@ -201,6 +201,8 @@ const addonLabel = a => a?.dashboard?.label || a?.label || a?.name || 'Add-on';
 function pageFrame(r) {
   const src = '/addon/' + r.id + '/' + r.path;
   const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
+  if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
   return fragment(frame);
 }
 function addonTab(id) {

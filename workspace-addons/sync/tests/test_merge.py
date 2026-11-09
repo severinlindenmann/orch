@@ -355,6 +355,56 @@ def test_counter_never_raises_on_garbage():
     assert merge_counter({"last": True}, {"last": "9"}, {"last": [5]})["last"] == 0
 
 
+# ---- Won't do: a person's decision (human `by`); done vs won't do is one side wholesale
+
+def _step(**kw):
+    c = {"id": "c1", "text": "Email finance", "done": False, "evidence": []}
+    c.update(kw)
+    return c
+
+
+WONT = {"wont_do": True, "reason": "Not needed", "by": "human:Ann", "at": T2}
+DONE = {
+    "done": True,
+    "evidence": [{"type": "note", "ref": "sent it", "by": "agent:claude", "at": T2}],
+    "by": "agent:claude",
+    "at": T2,
+}
+
+
+def test_wont_do_from_a_person_syncs():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])
+    for x, y in ((a, base), (base, a)):
+        out = merge_ticket(base, x, y, NOW)
+        assert out["checklist"][0]["wont_do"] is True and out["checklist"][0]["reason"] == "Not needed"
+        assert list(SCHEMA.iter_errors(out)) == []
+
+
+def test_wont_do_without_a_human_by_is_dropped():
+    base = tk(checklist=[_step()])
+    for by in ("agent:claude", None):
+        item = _step(wont_do=True, reason="sneaky", **({"by": by, "at": T2} if by else {}))
+        a = up(base, T2, checklist=[item])
+        for x, y in ((a, base), (base, a)):
+            c = merge_ticket(base, x, y, NOW)["checklist"][0]
+            assert "wont_do" not in c and "reason" not in c
+
+
+def test_done_vs_wont_do_is_one_side_wholesale():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])
+    b = up(base, T3, checklist=[_step(**DONE)])
+    for x, y in ((a, b), (b, a)):
+        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        assert c == _step(**DONE)  # b is newer: its item, no mixed fields
+        assert list(SCHEMA.iter_errors(merge_ticket(base, x, y, NOW))) == []
+    a2 = up(base, T3, checklist=[_step(**WONT)])
+    b2 = up(base, T2, checklist=[_step(**DONE)])
+    for x, y in ((a2, b2), (b2, a2)):
+        assert merge_ticket(base, x, y, NOW)["checklist"][0] == _step(**WONT)
+
+
 def test_two_recorded_runs_of_the_same_command_are_both_kept():
     run = lambda at, code: {"type": "command", "ref": "pytest -q", "ran_at": at, "exit": code, "at": at}
     first, second = run("2026-11-09T10:00:00Z", 1), run("2026-11-09T11:00:00Z", 0)
@@ -433,3 +483,22 @@ def test_core_and_merge_trim_runs_identically(monkeypatch):
     assert merge._canon(odd) == tickets._canon(odd)
     for case in (hostile + many, ties, ties + hostile + many, notes + many + ties, many[:3]):
         assert tickets.trim_runs(list(case)) == merge.trim_runs(list(case))
+
+
+def test_one_sided_forged_wont_do_is_dropped():
+    base = tk(checklist=[_step()])
+    forged = _step(wont_do=True, reason="x", by="agent:claude", at=T2)
+    new_item = _step(id="c2", text="New", wont_do=True, by="agent:claude")
+    a = up(base, T2, checklist=[forged, new_item])  # edited-vs-unchanged and a one-sided new item
+    for x, y in ((a, base), (base, a)):
+        for c in merge_ticket(base, x, y, NOW)["checklist"]:
+            assert "wont_do" not in c and "reason" not in c
+
+
+def test_conflict_pick_with_done_and_no_evidence_is_not_done():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])
+    b = up(base, T3, checklist=[_step(done=True, evidence=[])])
+    for x, y in ((a, b), (b, a)):
+        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        assert c["done"] is False

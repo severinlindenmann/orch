@@ -34,8 +34,22 @@ def calls(act_orch):
 
 
 def acts(act_orch):
-    return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"]) and c[:2] not in (["run", "status"], ["ticket", "list"], ["config", "get"], ["look", "show"], ["chat", "status"])
-            and c[:2] != ["look", "shared-pages"] and not (c[1:2] == ["profile"] and c[-1] == "--json")]
+    return [
+        c
+        for c in calls(act_orch)
+        if c[0] not in ("addon", "needs", "status", "agents")
+        and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
+        and c[:2]
+        not in (
+            ["run", "status"],
+            ["ticket", "list"],
+            ["config", "get"],
+            ["look", "show"],
+            ["chat", "status"],
+        )
+        and c[:2] != ["look", "shared-pages"]
+        and not (c[1:2] == ["profile"] and c[-1] == "--json")
+    ]
 
 
 def test_foreign_or_missing_origin_and_wrong_host_are_refused(act_server, act_orch):
@@ -93,8 +107,14 @@ def test_argv_snapshot_per_op(act_server, act_orch):
     me = "human:" + re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
     common = ["--by", me, "--json"]
     cases = [
-        ({"op": "chat.say", "args": {"text": "Fish", "new": True}}, ["chat", "say", "--new", *common, "--", "Fish"]),
-        ({"op": "chat.make_ticket", "args": {"id": "m_abcdefghij"}}, ["chat", "make-ticket", "m_abcdefghij", *common]),
+        (
+            {"op": "chat.say", "args": {"text": "Fish", "new": True}},
+            ["chat", "say", "--new", *common, "--", "Fish"],
+        ),
+        (
+            {"op": "chat.make_ticket", "args": {"id": "m_abcdefghij"}},
+            ["chat", "make-ticket", "m_abcdefghij", *common],
+        ),
         (
             {"op": "answer", "args": {"ticket": "t_abcdef", "question": "q1", "answer": "Yes"}},
             ["answer", "t_abcdef", "q1", "--via", "dashboard", *common, "--", "Yes"],
@@ -397,9 +417,15 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
         for body, want in cases:
             code, text, _ = post(base, body)
             assert code == 200, (body, text)
-            last = [c for c in calls(act_orch) if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
-                    and c[0] not in ("needs", "status", "agents") and c[:2] not in (["config", "get"], ["chat", "status"])
-                    and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"]) and c[0] != "look"][-1]
+            last = [
+                c
+                for c in calls(act_orch)
+                if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
+                and c[0] not in ("needs", "status", "agents")
+                and c[:2] not in (["config", "get"], ["chat", "status"])
+                and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
+                and c[0] != "look"
+            ][-1]
             assert last == want, body
         n = len(calls(act_orch))
         bad = [
@@ -599,8 +625,14 @@ def test_check_set_ticks_and_reopens_with_a_fixed_note(act_server, act_orch):
     for op, args in bad:
         assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
     assert acts(act_orch) == []
-    assert post(act_server, {"op": "check.set", "args": {"ticket": "t_abcdef", "check": "c1", "done": True}})[0] == 200
-    assert post(act_server, {"op": "check.set", "args": {"ticket": "t_abcdef", "check": "c1", "done": False}})[0] == 200
+    assert (
+        post(act_server, {"op": "check.set", "args": {"ticket": "t_abcdef", "check": "c1", "done": True}})[0]
+        == 200
+    )
+    assert (
+        post(act_server, {"op": "check.set", "args": {"ticket": "t_abcdef", "check": "c1", "done": False}})[0]
+        == 200
+    )
     done, reopen = acts(act_orch)[-2:]
     assert done[:4] == ["check", "done", "t_abcdef", "c1"] and "--note=Ticked off in the dashboard" in done
     assert reopen[:4] == ["check", "reopen", "t_abcdef", "c1"]
@@ -618,7 +650,12 @@ def test_relay_send_runs_orch_relay_send_with_the_text_after_dashes(act_server, 
     for op, args in bad:
         assert post(act_server, {"op": op, "args": args})[0] == 400, (op, args)
     assert acts(act_orch) == []
-    assert post(act_server, {"op": "message.send", "args": {"workspace": "ws_1", "text": "--file /etc/passwd"}})[0] == 200
+    assert (
+        post(act_server, {"op": "message.send", "args": {"workspace": "ws_1", "text": "--file /etc/passwd"}})[
+            0
+        ]
+        == 200
+    )
     sent = acts(act_orch)[-1]
     assert sent[:3] == ["relay", "send", "ws_1"] and sent[-2:] == ["--", "--file /etc/passwd"]
 
@@ -709,7 +746,7 @@ def test_workflow_state_defaults_off_and_reads_core_config(ws):
     assert load_settings(ws, None)["agents_may_finish"] is True
 
 
-def test_human_review_done_and_workflow_reach_core_even_when_server_was_started_by_agent(
+def test_human_review_done_is_refused_without_a_proof_and_workflow_reaches_core_when_server_was_started_by_agent(
     ws, tmp_path, monkeypatch
 ):
     import sys
@@ -735,9 +772,12 @@ def test_human_review_done_and_workflow_reach_core_even_when_server_was_started_
         "ticket.patch",
         {"ticket": t["id"], "data": {"status": "done"}, "if_revision": t["revision"]},
     )
-    assert code == 200, text
-    saved = json.loads(p.read_text())
-    assert saved["status"] == "done" and saved["history"][-1]["by"].startswith("human:")
+    # Looks good is a person's verdict (H1): the real core refuses it without the page session's proof, even
+    # with a fake command path here (no proof is minted for a test fake). It must NOT be downgraded to the
+    # agent's "moved to Review" because the server was started by an agent: it is refused outright.
+    assert code == 422 and "dashboard on this computer" in text, text
+    assert json.loads(p.read_text())["status"] == "review"
+    # (the proven click is covered end to end by workspace/tests/test_human_proof_page_e2e.py)
     code, text, _ = actions.run_op(ws, str(command), "workflow.set", {"on": True})
     assert code == 200, text
     assert config.agents_may_finish(ws) is True
@@ -754,7 +794,9 @@ def test_share_state_is_read_from_agents_md_only(ws):
     from orch_dashboard.data import load_settings
 
     assert load_settings(ws, None)["share"] is False
-    (ws / "AGENTS.md").write_text("# Team\n<!-- orch:begin share -->\nx\n<!-- orch:end share -->\n", encoding="utf-8")
+    (ws / "AGENTS.md").write_text(
+        "# Team\n<!-- orch:begin share -->\nx\n<!-- orch:end share -->\n", encoding="utf-8"
+    )
     assert load_settings(ws, None)["share"] is True
 
 
@@ -769,53 +811,92 @@ def test_ask_for_changes_is_one_op_with_only_a_ticket_and_a_note():
 
 
 def test_link_commands_and_validation():
-    common = ['--by', actions.actor(), '--json']
-    assert actions.build_argv('link.extend', {'id': 'f_abc123', 'days': 7}) == ['publish', 'extend', 'f_abc123', '--days', '7', *common]
-    assert actions.build_argv('link.stop', {'id': 'f_abc123'}) == ['publish', 'delete', 'f_abc123', *common]
-    for op, args in [('link.stop', {'id': 'app'}), ('link.stop', {'id': 'f_a', 'extra': 1})] + [('link.extend', {'id': 'f_a', 'days': n}) for n in (0, 91, True, '7')]:
+    common = ["--by", actions.actor(), "--json"]
+    assert actions.build_argv("link.extend", {"id": "f_abc123", "days": 7}) == [
+        "publish",
+        "extend",
+        "f_abc123",
+        "--days",
+        "7",
+        *common,
+    ]
+    assert actions.build_argv("link.stop", {"id": "f_abc123"}) == ["publish", "delete", "f_abc123", *common]
+    for op, args in [("link.stop", {"id": "app"}), ("link.stop", {"id": "f_a", "extra": 1})] + [
+        ("link.extend", {"id": "f_a", "days": n}) for n in (0, 91, True, "7")
+    ]:
         with pytest.raises(actions.BadRequest):
             actions.build_argv(op, args)
 
 
 def test_links_fail_closed(ws, monkeypatch):
     from orch_dashboard import data
-    monkeypatch.setattr(data, 'run_orch', lambda *a, **kw: None)
-    with pytest.raises(actions.BadRequest, match='Sharing is not set up here.'):
-        actions.run_op(ws, 'orch', 'link.stop', {'id': 'f_a'})
+
+    monkeypatch.setattr(data, "run_orch", lambda *a, **kw: None)
+    with pytest.raises(actions.BadRequest, match="Sharing is not set up here."):
+        actions.run_op(ws, "orch", "link.stop", {"id": "f_a"})
 
 
 def test_addon_repeat_and_copy_argv():
-    common = ['--by', actions.actor(), '--json', '--', 't_abcdef']
-    assert actions.build_argv('addon.act', {"addon": 'automation', "verb": 'repeat', "target": 't_abcdef', "value": 'every day at 9'}) == ['automation', 'act', 'repeat', '--value=every day at 9', *common]
-    assert actions.build_argv('addon.act', {"addon": 'automation', "verb": 'copy', "target": 't_abcdef'}) == ['automation', 'act', 'copy', *common]
-    for verb, value in [('copy', 'daily'), ('repeat', 'x' * 201), ('repeat', '')]:
+    common = ["--by", actions.actor(), "--json", "--", "t_abcdef"]
+    assert actions.build_argv(
+        "addon.act",
+        {"addon": "automation", "verb": "repeat", "target": "t_abcdef", "value": "every day at 9"},
+    ) == ["automation", "act", "repeat", "--value=every day at 9", *common]
+    assert actions.build_argv("addon.act", {"addon": "automation", "verb": "copy", "target": "t_abcdef"}) == [
+        "automation",
+        "act",
+        "copy",
+        *common,
+    ]
+    for verb, value in [("copy", "daily"), ("repeat", "x" * 201), ("repeat", "")]:
         with pytest.raises(actions.BadRequest):
-            actions.build_argv('addon.act', {"addon": 'automation', "verb": verb, "target": 't_abcdef', "value": value})
+            actions.build_argv(
+                "addon.act", {"addon": "automation", "verb": verb, "target": "t_abcdef", "value": value}
+            )
 
 
-@pytest.mark.parametrize('who', [None, {}, {'error': 'No connection'}, {'id': ''}])
+@pytest.mark.parametrize("who", [None, {}, {"error": "No connection"}, {"id": ""}])
 def test_link_auth_refuses_unreadable_identity(ws, monkeypatch, who):
     from orch_dashboard import data
-    monkeypatch.setattr(data, 'run_orch', lambda binary, args, root: [{'name': 'publish', 'active': True}] if args[0] == 'addon' else who)
-    with pytest.raises(actions.BadRequest, match='Sharing is not set up here.'):
-        actions.run_op(ws, 'orch', 'link.stop', {'id': 'f_a'})
+
+    monkeypatch.setattr(
+        data,
+        "run_orch",
+        lambda binary, args, root: [{"name": "publish", "active": True}] if args[0] == "addon" else who,
+    )
+    with pytest.raises(actions.BadRequest, match="Sharing is not set up here."):
+        actions.run_op(ws, "orch", "link.stop", {"id": "f_a"})
 
 
 def test_link_actions_are_audited(ws, monkeypatch):
     import subprocess
-    monkeypatch.setattr(actions, 'publish_connected', lambda *a: True)
-    monkeypatch.setattr(actions, 'human_env', lambda *a: {})
-    monkeypatch.setattr(actions.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(a, 0, '{}', ''))
-    for op, args in [('link.extend', {'id': 'f_a', 'days': 7}), ('link.stop', {'id': 'f_a'})]:
-        assert actions.run_op(ws, 'orch', op, args)[0] == 200
-    rows = [json.loads(line) for line in (ws / '.orch/run/dashboard/actions.log').read_text().splitlines()]
-    assert [(r['op'], r['id'], r.get('days')) for r in rows] == [('link.extend', 'f_a', 7), ('link.stop', 'f_a', None)]
+
+    monkeypatch.setattr(actions, "publish_connected", lambda *a: True)
+    monkeypatch.setattr(actions, "human_env", lambda *a: {})
+    monkeypatch.setattr(
+        actions.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "{}", "")
+    )
+    for op, args in [("link.extend", {"id": "f_a", "days": 7}), ("link.stop", {"id": "f_a"})]:
+        assert actions.run_op(ws, "orch", op, args)[0] == 200
+    rows = [json.loads(line) for line in (ws / ".orch/run/dashboard/actions.log").read_text().splitlines()]
+    assert [(r["op"], r["id"], r.get("days")) for r in rows] == [
+        ("link.extend", "f_a", 7),
+        ("link.stop", "f_a", None),
+    ]
 
 
 def test_chat_new_and_make_ticket_validation():
-    assert actions.OPS["chat.say"]({"text":"hi", "new":True}) == (["chat", "say"], ["--new"], ["hi"])
-    assert actions.OPS["chat.make_ticket"]({"id":"m_abcdefghij"}) == (["chat", "make-ticket", "m_abcdefghij"], [], [])
-    for op, args in [("chat.say", {"text":"hi", "new":"yes"}), ("chat.make_ticket", {"id":"--help"}), ("chat.make_ticket", {"id":"m_abcdefghij", "by":"agent:x"})]:
+    assert actions.OPS["chat.say"]({"text": "hi", "new": True}) == (["chat", "say"], ["--new"], ["hi"])
+    assert actions.OPS["chat.make_ticket"]({"id": "m_abcdefghij"}) == (
+        ["chat", "make-ticket", "m_abcdefghij"],
+        [],
+        [],
+    )
+    for op, args in [
+        ("chat.say", {"text": "hi", "new": "yes"}),
+        ("chat.make_ticket", {"id": "--help"}),
+        ("chat.make_ticket", {"id": "m_abcdefghij", "by": "agent:x"}),
+    ]:
         with pytest.raises(actions.BadRequest):
             actions.OPS[op](args)
 
@@ -965,6 +1046,53 @@ def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
                 {"setup": "x" * 501}, {"mode": "off", "max": 2}, {}, {"mode": "off", "extra": 1}):
         with pytest.raises(BadRequest):
             build_argv("copies.set", bad)
+
+
+def test_check_wont_do_argv():
+    common = ["--by", actions.actor(), "--json"]
+    args = {"ticket": "t_abcdef", "check": "c1"}
+    for reason in (None, "", "  ", "--not an option", "x" * 200):
+        supplied = args if reason is None else {**args, "reason": reason}
+        flags = [f"--reason={reason}"] if reason and reason.strip() else []
+        assert actions.build_argv("check.wont_do", supplied) == [
+            "check",
+            "wont-do",
+            "t_abcdef",
+            "c1",
+            *flags,
+            *common,
+        ]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"reason": "x" * 201},
+        {"reason": 12},
+        {"reason": "a\nb"},
+        {"reason": "\x00"},
+        {"unexpected": True},
+        {"check": "bad"},
+    ],
+)
+def test_check_wont_do_refuses_bad_args(extra):
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("check.wont_do", {"ticket": "t_abcdef", "check": "c1", **extra})
+
+
+def test_check_reopen_argv_and_refusals():
+    common = ["--by", actions.actor(), "--json"]
+    assert actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2"}) == [
+        "check",
+        "reopen",
+        "t_abcdef",
+        "c2",
+        *common,
+    ]
+    for bad in ({"check": "bad"}, {"unexpected": 1}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2", **bad})
+
 
 @pytest.mark.parametrize("value", [True, False, None])
 def test_ticket_new_plan_first(value):

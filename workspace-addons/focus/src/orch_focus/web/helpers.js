@@ -3,6 +3,7 @@
   const plainFileName = name => String(name || '').split('/').pop().replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^./, c => c.toUpperCase());
   const cleanOutcome = value => String(value || '').replace(/\b\d+(?:\.\d+)?\s*(?:[KMGT]?i?B|bytes?)\b/gi, '').replace(/^[\s✓✔·—,:;-]+|[\s·—,:;-]+$/g, '').replace(/\s+/g, ' ').trim();
   function outcome(c) {
+    if (c.wont_do) return "Won't do";
     const ev = (c.evidence || []).slice(-1)[0];
     const text = ev && (cleanOutcome(ev.summary) || cleanOutcome(ev.text) || (ev.type === 'note' ? cleanOutcome(ev.ref) : ''));
     return text || (c.done ? 'Completed.' : c.state === 'doing' ? 'Working on this task.' : 'Not started yet.');

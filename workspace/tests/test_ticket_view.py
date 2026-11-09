@@ -907,3 +907,24 @@ def test_permanent_refusals_are_claimed_at_most_three_times(proj, run, new_ticke
     for i in range(8):
         phone_view.sync(proj, now=at + 100 * (i + 1))
     assert len(attempts) == phone_view.RESULT_MAX_CLAIMS
+
+
+def test_view_carries_wont_do_and_counts_it(proj, run, new_ticket):
+    code, out, _ = run("ticket", "new", "Q3 export", "--json", "--by", "human:tester")
+    tid = json.loads(out)["id"]
+    for text in ("Read", "Email finance", "Archive"):
+        run("check", "add", tid, text)
+    run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
+    run("check", "wont-do", tid, "c2", "--reason", "Not needed", "--by", "human:tester")
+    view = phone_view.build(proj, tickets.load(proj, tid), [])
+    assert view["checklist"] == [
+        {"text": "Read", "done": True},
+        {"text": "Email finance", "done": False, "wont_do": True, "reason": "Not needed"},
+        {"text": "Archive", "done": False},
+    ]
+    assert (view["done"], view["wont_do"], view["total"]) == (
+        1,
+        1,
+        3,
+    )  # never "2 of 3 done" for a declined step
+    assert_valid(view)
