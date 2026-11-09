@@ -735,6 +735,23 @@ function ticketParts(t, children) {
   });
   return card('parts', 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [!children.length ? emptyRow('No steps yet.') : null, children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'meta'}, child.key || ''), h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
+// One honest line about the proof (computed by the core as t.proof): a mark, the line, and the detail behind "Details".
+const PROOF_MARK = {passed:['ok', '✓'], failed:['bad', '×'], changed:['warn', '!'], note:['none', 'i'], missing:['none', '–']};
+const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No proof yet'};
+function ticketProofLine(t) {
+  const p = t.proof;
+  if (!p || typeof p.line !== 'string' || !p.line) return null;
+  const per = p.per_item && typeof p.per_item === 'object' ? p.per_item : {};
+  const level = /failed/.test(p.line) ? 'bad' : array(p.uncovered).length || /haven't been checked/.test(p.line) ? 'warn' : p.line === 'No checks recorded' ? 'none' : 'ok';
+  const mark = {ok:'✓', bad:'×', warn:'!', none:'–'}[level];
+  const rows = array(t.checklist).map(task => { const [cls, glyph] = PROOF_MARK[per[task.id]] || PROOF_MARK.missing;
+    return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing)); });
+  return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
+    h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
+    array(p.uncovered).length ? h('p', {className:'meta'}, array(p.uncovered)[0]) : null,
+    rows.length && !snapshot ? h('details', {className:'ticket-proof-details'}, h('summary', {}, 'Details'), h('ul', {}, rows)) : null);
+}
+
 function ticketDoneLine(t) {
   if (t.status !== 'done') return null;
   const event = array(t.history).slice().reverse().find(e => /(?:->|to) done\b|^Done\b/i.test(e.text || '') || e.kind === 'done');
@@ -768,7 +785,7 @@ function detail(t) {
       h('p', {className:'meta'}, 'Next step · Your review'),
       h('h2', {}, agent + ' finished' + (file ? ': ' + clean(window.DashHelpers.plainFileName(file.name)) : '')),
       at ? h('p', {className:'meta'}, 'Completed ' + window.DashHelpers.stamp(at, Date.now())) : null,
-      ticketReviewTile(t, file), snapshot ? null : ticketChangesEditor(t)) : null;
+      ticketReviewTile(t, file), ticketProofLine(t), snapshot ? null : ticketChangesEditor(t)) : null;
     if (openQuestions.length || review) next = [openQuestions.length ? ticketQuestion(t, openQuestions[0], true) : null, review];
     else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start agent', 'primary', () => act('run.start', {ticket:t.id})));
   }
@@ -779,7 +796,7 @@ function detail(t) {
     parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
-    ticketStepper(t, run), ticketDoneLine(t)),
+    ticketStepper(t, run), ticketDoneLine(t), t.status === 'review' ? null : ticketProofLine(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
       !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),

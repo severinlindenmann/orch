@@ -76,3 +76,11 @@ def test_ticket_details_and_readonly_multiline():
         "actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision})"
         in js
     )
+
+
+def test_tickets_carry_the_core_proof_line():
+    from orch_dashboard.data import add_proof_state
+
+    t = {"checklist": [{"id": "c1", "text": "a", "done": True, "evidence": [{"type": "command", "ref": "x"}]}]}
+    add_proof_state([t])
+    assert t["proof"]["line"] == "1 check passed" and t["proof"]["per_item"] == {"c1": "passed"}

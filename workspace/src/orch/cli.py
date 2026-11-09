@@ -141,6 +141,7 @@ def _show(t: dict, root: Path | None = None) -> str:
     )
     if n and d == n:
         out.append(f"✓ All done · {n} of {n}")
+    out.append(f"Proof: {tickets.proof_state(t)['line']}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
         out.append("  ".join(extra))
@@ -390,10 +391,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = c.add_parser("add", parents=[common])
     x.add_argument("id")
     x.add_argument("text")
-    x = c.add_parser("edit", parents=[common], help="rename a task")
+    x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
+    x = c.add_parser("edit", parents=[common], help="rename a task or link it to a part of Done when")
     x.add_argument("id")
     x.add_argument("check")
-    x.add_argument("text")
+    x.add_argument("text", nargs="?")
+    x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x.add_argument("--was", metavar="TEXT", help="refused when the task text is no longer this")
     x = c.add_parser("move", parents=[common], help="put a task after another")
@@ -680,12 +683,14 @@ def run(args: argparse.Namespace) -> None:
             + (f" until {t['waiting_on']['until']}" if args.until else f" on {args.on}"),
         )
     elif cmd == "check" and sub == "add":
-        t, c = tickets.check_add(root, args.id, args.text, by())
+        t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":
-            t, c = tickets.check_edit(root, args.id, args.check, args.text, who, args.if_revision, args.was)
+            t, c = tickets.check_edit(
+                root, args.id, args.check, args.text, who, args.if_revision, args.was, args.covers
+            )
             msg = f"{c['id']} renamed."
         elif sub == "move":
             t, c = tickets.check_move(root, args.id, args.check, args.after, who)

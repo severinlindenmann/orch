@@ -35,6 +35,7 @@ STATUS_WORDS = {
 }
 OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
+COVERS_MAX = 300
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
 PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
@@ -567,6 +568,61 @@ def checks_done(ticket: dict) -> tuple[int, int]:
     return sum(1 for x in c if x.get("done")), len(c)
 
 
+def _ev_failed(ev: dict) -> bool:
+    """A recorded failure: the proof explicitly says exit != 0. No exit recorded = unknown, never failed."""
+    code = ev.get("exit")
+    return isinstance(code, int) and not isinstance(code, bool) and code != 0
+
+
+def proof_state(ticket: dict) -> dict:
+    """Honest proof summary of a ticket, pure (no I/O).
+    per_item: id -> passed | failed | changed | note | missing.
+    done + a failed recorded exit = failed; done + any proof that is not a note = passed;
+    done + note proof only = note; not done = missing. `changed` is reserved for recorded checks whose
+    files changed since (set by B8, `stale`). uncovered: one hint when done_when is set and no task has
+    `covers`. line: the one-line summary."""
+    items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and isinstance(c.get("id"), str)]
+    per: dict[str, str] = {}
+    for c in items:
+        evs = [e for e in c.get("evidence") or [] if isinstance(e, dict)]
+        if not c.get("done"):
+            per[c["id"]] = "missing"
+        elif any(_ev_failed(e) for e in evs):
+            per[c["id"]] = "failed"
+        elif any(e.get("stale") is True for e in evs):
+            per[c["id"]] = "changed"
+        elif any(e.get("type") != "note" for e in evs):
+            per[c["id"]] = "passed"
+        else:
+            per[c["id"]] = "note" if evs else "missing"
+    done_when = ticket.get("done_when")
+    linked = any(isinstance(c.get("covers"), str) and c["covers"].strip() for c in items)
+    uncovered = (
+        ["Done when isn't linked to tasks"]
+        if isinstance(done_when, str) and done_when.strip() and not linked
+        else []
+    )
+    n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
+
+    def plural(count: int, word: str) -> str:
+        return f"{count} {word}" + ("" if count == 1 else "s")
+
+    if n["failed"]:
+        line = f"{plural(n['failed'], 'check')} failed"
+    elif n["changed"]:
+        line = "Changes haven't been checked yet"
+    elif uncovered:
+        line = '1 part of "Done when" has no task'
+    elif n["passed"] or n["note"]:
+        bits = ([f"{plural(n['passed'], 'check')} passed"] if n["passed"] else []) + (
+            [plural(n["note"], "note")] if n["note"] else []
+        )
+        line = " · ".join(bits)
+    else:
+        line = "No checks recorded"
+    return {"per_item": per, "uncovered": uncovered, "line": line}
+
+
 def _check_can_finish(ticket: dict) -> None:
     open_ = [c["id"] for c in ticket["checklist"] if not c.get("done")]
     if open_:
@@ -976,12 +1032,25 @@ def proof_label(ev: dict) -> str:
     return label
 
 
-def check_add(root: Path, tid: str, text: str, by: str) -> tuple[dict, dict]:
+def _clean_covers(covers: str | None) -> str | None:
+    """`covers`: the quoted part of done_when a task covers, 1 to 300 characters; None = not given."""
+    if covers is None:
+        return None
+    line = " ".join(covers.split())
+    if not 1 <= len(line) <= COVERS_MAX:
+        raise Refused(f"--covers is a short quote of 'Done when' (1 to {COVERS_MAX} characters).")
+    return line
+
+
+def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = None) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A checklist item needs text.")
+    covers = _clean_covers(covers)
 
     def op(ticket):
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
+        if covers:
+            item["covers"] = covers
         ticket["checklist"].append(item)
         add_history(ticket, by, f"Added check {item['id']}")
         return item
@@ -1046,15 +1115,30 @@ def check_exists(root: Path, tid: str, cid: str) -> None:
 
 
 def check_edit(
-    root: Path, tid: str, cid: str, text: str, by: str, if_revision: int | None = None, was: str | None = None
+    root: Path,
+    tid: str,
+    cid: str,
+    text: str | None,
+    by: str,
+    if_revision: int | None = None,
+    was: str | None = None,
+    covers: str | None = None,
 ) -> tuple[dict, dict]:
-    if not text.strip():
+    if text is None and covers is None:
+        raise Refused("Say the new text or --covers.")
+    if text is not None and not text.strip():
         raise Refused("A checklist item needs text.")
+    covers = _clean_covers(covers)
 
     def op(t):
         item = _item(t, cid)
-        item["text"] = text.strip()
-        add_history(t, by, f"Renamed {cid}")
+        if text is not None:
+            item["text"] = text.strip()
+            add_history(t, by, f"Renamed {cid}")
+        if covers is not None:
+            item["covers"] = covers
+            if text is None:
+                add_history(t, by, f"Linked {cid} to Done when")
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
