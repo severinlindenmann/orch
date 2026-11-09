@@ -142,15 +142,38 @@ function board() {
   });
   return h('div', {className:'board', 'data-key':'board'}, snapshot ? null : h('p', {className:'board-hint'}, 'Drag a card to move it, or use its ⋯ menu'), h('div', {className:'board-track'}, cols));
 }
-async function moveTicket(id, status) {
+const movePending = new Map();
+// Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
+function moveTicket(id, status, undoing = false) {
   const t = ticketOf(id), lock = 'status-' + id;
-  if (!t || t.status === status || snapshot || locks.has(lock) || changeUnavailable()) return;
+  if (!t || t.status === status || snapshot || locks.has(lock) || changeUnavailable()) return Promise.resolve();
+  const previous = t.status, revision = t.revision;
   locks.add(lock);
-  const result = await actRetry('ticket.patch', () => ({ticket:t.id, data:{status}, if_revision:(ticketOf(id) || t).revision}), () => { const now = ticketOf(id); return !!now && now.status === t.status; });
-  locks.delete(lock);
-  render();
+  const set = value => { state.tickets = state.tickets.map(x => x.id === id ? {...x, status:value} : x); };
+  document.querySelectorAll('[data-key="ticket-' + id + '"],[data-key="family-' + id + '"]').forEach(n => n.classList.add('status-leaving'));
+  set(status);
+  const unfade = () => document.querySelectorAll('.status-leaving').forEach(n => n.classList.remove('status-leaving'));
+  const fade = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160)).then(() => { unfade(); render(); });
   const label = STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
-  window.orch.toast(result.ok ? 'Moved to ' + label : changeError(result), result.ok ? 'ok' : 'error');
+  const toast = window.orch.toast(undoing ? 'Moved back' : 'Moved to ' + label, 'ok');
+  if (!undoing && toast?.querySelector) {
+    const undo = h('button', {type:'button', className:'btn ghost sm', 'data-action':'undo-move'}, 'Undo');
+    undo.addEventListener('click', async () => { toast.remove(); await movePending.get(id); moveTicket(id, previous, true); });
+    toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
+  }
+  const run = (async () => {
+    let result;
+    try { result = await actRetry('ticket.patch', () => ({ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision}), () => { const now = ticketOf(id); return !!now && now.status === previous; }); }
+    catch (err) { result = {ok:false, status:0, text:String(err?.message || err)}; }
+    await fade;
+    locks.delete(lock);
+    if (!result.ok) { set(previous); toast?.remove?.(); window.orch.toast(changeError(result), 'error'); }
+    unfade();
+    render();
+  })();
+  movePending.set(id, run);
+  run.finally(() => { if (movePending.get(id) === run) movePending.delete(id); });
+  return run;
 }
 function list() {
   const visible = filteredTickets();

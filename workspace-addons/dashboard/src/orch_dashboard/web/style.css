@@ -312,7 +312,7 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .mm-sw:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform .15s}
 .mm-toggle[aria-checked=true] .mm-sw{background:var(--brand)}
 .mm-toggle[aria-checked=true] .mm-sw:after{transform:translateX(12px);background:var(--on-brand)}
-.topbar>.mm-toggle+.btn.primary{margin-left:0}
+.topbar>.mm-toggle:not([hidden])+.btn.primary{margin-left:0}
 .mm-bar{margin:0;border-radius:0;border-width:0 0 1px}
 .mm-bar[hidden]{display:none}
 .mm-bar.live{background:var(--success-soft);border-color:var(--success)}

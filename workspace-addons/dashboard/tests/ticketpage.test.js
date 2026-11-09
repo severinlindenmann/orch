@@ -87,10 +87,26 @@ test('the review buttons show whenever the status is Review, an open question fi
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
   vm.createContext(ctx); vm.runInContext(source, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
-  assert.match(text, /Looks good/);
+  assert.match(text, /Accept/);
   assert.match(text, /Ask for changes/);
-  assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
-  assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
+  assert.ok(text.indexOf('Which colour?') < text.indexOf('Accept'), 'the question comes first');
+  assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Accept/);
+  ctx.state.settings = {agents:[{name:'claude', label:'Claude', chosen:true}]};
+  vm.runInContext("artifactData.set('t_test', {at:Date.now(), data:{files:[{name:'next-steps.html', size:24576, mtime:'2026-11-09T07:30:00Z'}]}})", ctx);
+  const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
+  const all = nodes(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]}));
+  const review = all.find(n => n.attrs.className === 'card next-step');
+  const reviewText = JSON.stringify(review);
+  assert.match(reviewText, /Claude finished: Next steps/);
+  assert.equal((reviewText.match(/Next steps/g) || []).length, 2, 'title once, tile once, no preview box');
+  assert.doesNotMatch(reviewText, /Completed\.|ticket-preview|ticket-result/);
+  const tile = nodes(review).find(n => n.attrs.className === 'ticket-review-tile');
+  assert.match(JSON.stringify(tile), /Next steps/);
+  assert.doesNotMatch(JSON.stringify(tile), /\.html/);
+  assert.match(JSON.stringify(tile), /Page · 24 KB/);
+  assert.equal(nodes(tile).filter(n => n.tag === 'button').length, 1);
+  assert.ok(nodes(review).some(n => n.children.some(c => typeof c === 'string' && c.startsWith('Completed '))));
+
 });
 test('Copy ticket and Repeat show in the ticket menu only when the repeats add-on is on', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
@@ -134,7 +150,7 @@ test('task outcomes and result cards use plain text without sizes', () => {
   assert.equal(helpers.outcome({done:true,evidence:[]}), 'Completed.');
   assert.equal(helpers.outcome({done:true,evidence:[ev]}), 'Seating plan');
   const c = context({clean:String, ticketActor:() => 'Claude', ticketPreviewTile:() => 'preview', ticketButton:l => l, previewFile(){}, snapshot:false, state:{}});
-  vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function ticketArtifactPreview')), c);
+  vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function artifactsPanel')), c);
   const card = c.ticketResultCard({id:'t_test'}, ev);
   const text = JSON.stringify(card);
   assert.match(text, /ticket-result/);

@@ -251,8 +251,11 @@
     },
     "question": {
       "type": "object", "required": ["question_id", "text", "options"],
+      "if": { "required": ["review"] },
+      "then": { "properties": { "question_id": { "pattern": "^review-" }, "options": { "const": ["accept", "changes"] } }, "not": { "required": ["scope"] } },
       "properties": {
-        "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" },
+        "question_id": { "type": "string", "pattern": "^(q[0-9]{1,4}|review-[0-9]{1,4})$", "description": "q<n> = a question of the ticket; review-<n> = the review question of round n (review: true)." },
+        "review": { "const": true, "description": "Optional marker: the review question \"Is this done?\" of a ticket in Review (options accept, changes). The phone shows it only as that ticket chat's review bar, never as a question card." },
         "title": { "type": "string", "description": "Ticket title, for the phone card" },
         "text": { "type": "string", "minLength": 1 },
         "options": { "type": "array", "items": { "type": "string" } },
@@ -268,7 +271,7 @@
     "answer": {
       "type": "object", "required": ["question_id", "answer", "answered_by"],
       "properties": {
-        "question_id": { "type": "string", "pattern": "^q[0-9]{1,4}$" },
+        "question_id": { "type": "string", "pattern": "^(q[0-9]{1,4}|review-[0-9]{1,4})$" },
         "answer": { "type": "string", "minLength": 1 },
         "answered_by": { "type": "string", "pattern": "^(agent|human):.{1,64}$" },
         "client_id": { "$ref": "#/$defs/client_id", "description": "Set by the relay on phone answers (POST /v1/phone/answer)." }

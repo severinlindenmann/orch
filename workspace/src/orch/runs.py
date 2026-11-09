@@ -725,10 +725,15 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     out = [
         f"Work on orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.",
         "Read .agents/skills/orch/SKILL.md first, then follow it for this ticket.",
-        f'Before you start, add one task per piece of work: orch check add {tid} "<task>". '
+        f'Before you start, use orch check add {tid} "<task>" for one task per piece of the person\'s '
+        "work, in plain words (no ids, paths or commands). "
         f"Mark the task you work on with orch check start {tid} <task id> and finish each with proof: "
         f'orch check done {tid} <task id> --summary "<what came out, one line>" --note "<what you did>". '
-        f'When you stop, write where things stand: orch ticket summary {tid} "<summary>".',
+        f'When you stop, use orch ticket summary {tid} "<what was done and what is left>"'
+        " in plain words.",
+        "When the ticket reaches Review, orch sends its summary and files to the person by itself: "
+        "add no task for that and don't write that it was sent. "
+        "Answering a person's message is still your job.",
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]

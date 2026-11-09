@@ -617,16 +617,44 @@ def reference_views(root: Path, ticket: dict) -> list[dict]:
     return out
 
 
+def _without_delivery(text: str, *, task: bool = False) -> str:
+    """Remove only whole result-delivery sentences or a whole phone-delivery task."""
+    destination = r"(?:back )?to (?:the |your )?phones?(?: via (?:the )?relay)?"
+    if task and re.fullmatch(
+        rf"(?:send|deliver) (?:the |your )?results? {destination}[.!?]?", text.strip(), re.I
+    ):
+        return ""
+    cleaned = re.sub(
+        rf"(^|(?<=[.!?])\s+|\n+)(?:the )?results? (?:was |were |is )?"
+        rf"(?:sent|delivered) {destination}(?:[.!?](?=\s|$)|$)",
+        "",
+        text,
+        flags=re.I,
+    )
+    return cleaned.strip() if cleaned != text else text
+
+
+def _shown_checklist(ticket: dict) -> list[dict]:
+    return [
+        dict(c, text=text)
+        for c in ticket.get("checklist") or []
+        if (text := _without_delivery(c.get("text", ""), task=True)) or not c.get("text")
+    ]
+
+
 def shown_summary(ticket: dict) -> str:
     """The line the phone shows on top of the ticket chat: the summary, else the ticket's note (what the
     person asked for), so a fresh ticket made on the dashboard never shows an empty chat. Secrets cut."""
-    text = str(ticket.get("summary") or "").strip() or str(ticket.get("note") or "").strip()
+    summary = str(ticket.get("summary") or "").strip()
+    note = str(ticket.get("note") or "").strip()
+    summary = _without_delivery(summary)
+    text = summary or note
     return _clip(redact(text), 200) if text else ""
 
 
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
-    checklist = ticket.get("checklist") or []
-    done, total = tickets.checks_done(ticket)
+    checklist = _shown_checklist(ticket)
+    done, total = tickets.checks_done({"checklist": checklist})
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
@@ -634,7 +662,7 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
             continue
         pl = _phone_line(root, h)
         raw = pl[2] if pl else str(h.get("text", ""))
-        text = _clip(tickets.history_line(raw, checklist), 1000)
+        text = _clip(tickets.history_line(raw, ticket.get("checklist") or []), 1000)
         if not text:
             continue
         at = str(h.get("at") or "")
@@ -889,8 +917,8 @@ def result_text(ticket: dict) -> str:
     """The pushed "it is finished" text: the title, then where things stand."""
     word = "Ready for your review" if ticket.get("status") == "review" else "Done"
     text = f"{word}: {_clip(ticket.get('title', ''), 120)}"
-    if ticket.get("summary"):
-        text += f"\n{_clip(ticket['summary'], 400)}"
+    if summary := _without_delivery(ticket.get("summary") or ""):
+        text += f"\n{_clip(summary, 400)}"
     return text
 
 
@@ -943,7 +971,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     update_state(root, claim)
     sent = []
     for tid, to, t, finished, before, claimed in due:
-        done, total = tickets.checks_done(t)
+        done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
         try:
             if finished:
                 relay.send_text(root, to, result_text(t), tid, "result")
@@ -973,6 +1001,91 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             with contextlib.suppress(Refused):
                 update_state(root, undo)
     return sent
+
+
+def sync_reviews(root: Path) -> list[str]:
+    """fb8: a ticket that enters Review sends the phones ONE review question ("Is this done?", options
+    accept / changes, relay.send_review_question); the round (review-<n>) is open while the ticket stays in
+    Review. A ticket that leaves Review (dashboard, CLI, an answer) closes its round: the question is stale
+    and the next time it enters Review is a new round. Nothing goes out without a paired phone.
+    Returns the ticket ids sent."""
+    from orch import relay
+
+    phones = _paired(root)
+    due: list[tuple[str, dict, int, str]] = []
+
+    def claim(state):
+        rv = state.setdefault("reviews", {})
+        for t in tickets.list_all(root):
+            tid, rec = t["id"], rv.get(t["id"])
+            if t.get("status") == "review" and t.get("general") is not True:
+                if phones and not (rec and rec.get("open")):
+                    n = int((rec or {}).get("round", 0)) + 1
+                    mid = relay.new_id()  # the round is bound to this message: only an answer to it counts
+                    rv[tid] = {"round": n, "open": True, "msg": mid}
+                    due.append((tid, t, n, mid))
+            elif rec and rec.get("open"):
+                rec["open"] = False
+
+    update_state(root, claim)
+    sent = []
+    for tid, t, n, mid in due:
+        try:
+            relay.send_review_question(root, t, n, mid)
+            sent.append(tid)
+        except (
+            Refused,
+            OSError,
+        ):  # not sent: the round is burned (review-n is never used twice), next pull retries
+
+            def undo(st, tid=tid, n=n, mid=mid):
+                rec = st.get("reviews", {}).get(tid)
+                if rec and rec.get("round") == n and rec.get("msg") == mid:
+                    rec["open"] = False
+
+            with contextlib.suppress(Refused):
+                update_state(root, undo)
+    return sent
+
+
+def close_rounds(root: Path, tid: str) -> None:
+    """The ticket left Review: its open review round is stale at once (called by tickets.apply_op under the
+    ticket lock, before the new status is written). Reads first: without phones nothing is written."""
+    rec = load_state(root).get("reviews", {}).get(tid)
+    if not (isinstance(rec, dict) and rec.get("open")):
+        return
+
+    def op(st):
+        r = st.get("reviews", {}).get(tid)
+        if r:
+            r["open"] = False
+
+    update_state(root, op)
+
+
+def close_review(root: Path, tid: str, n, msg_id) -> bool:
+    """Close review round n of a ticket (compare and set), only for an answer to the round's own question
+    message. True only for the call that closed it: the one answer that may act. A closed, older, unknown
+    or other-message round is False."""
+    won = []
+
+    def op(st):
+        rec = st.get("reviews", {}).get(tid)
+        if rec and rec.get("open") and rec.get("round") == n and msg_id and rec.get("msg") == msg_id:
+            rec["open"] = False
+            won.append(True)
+
+    update_state(root, op)
+    return bool(won)
+
+
+def reopen_review(root: Path, tid: str, n, msg_id) -> None:
+    def op(st):
+        rec = st.get("reviews", {}).get(tid)
+        if rec and rec.get("round") == n and rec.get("msg") == msg_id:
+            rec["open"] = True
+
+    update_state(root, op)
 
 
 NEW_TEXT = "Ticket on your workspace"
@@ -1011,7 +1124,7 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
     for ph in phones:
         have = set(done_for.get(ph, []))
         for t in [t for t in open_[:OPEN_MAX] if t["id"] not in have]:
-            done, total = tickets.checks_done(t)
+            done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
             text = f"Tasks: {done} of {total} done" if total else NEW_TEXT
             try:
                 relay.send_text(root, ph, text, t["id"], "note", view=True)

@@ -36,6 +36,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
             token_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_call_at INTEGER, used INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS phone_mutes(phone TEXT NOT NULL, ws TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY(phone, ws));
+        CREATE TABLE IF NOT EXISTS phone_mute_all(phone TEXT PRIMARY KEY, until INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS phone_group_mutes(phone TEXT NOT NULL, host TEXT NOT NULL, grp TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY(phone, host, grp));
         CREATE TABLE IF NOT EXISTS phone_settings(phone TEXT PRIMARY KEY, speak TEXT NOT NULL DEFAULT 'auto',
             swiss_german INTEGER NOT NULL DEFAULT 0, tts_cap_usd REAL NOT NULL DEFAULT 10,
             tts_used_usd REAL NOT NULL DEFAULT 0, tts_month TEXT NOT NULL DEFAULT '');
@@ -584,6 +586,20 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         [],
     )?;
     c.execute("DELETE FROM phone_mutes WHERE until>=0 AND until<?1", [at])?;
+    c.execute(
+        "DELETE FROM phone_mute_all WHERE until>=0 AND until<?1",
+        [at],
+    )?;
+    c.execute(
+        "DELETE FROM phone_group_mutes WHERE until>=0 AND until<?1",
+        [at],
+    )?;
+    for t in ["phone_mute_all", "phone_group_mutes"] {
+        c.execute(
+            &format!("DELETE FROM {t} WHERE phone NOT IN (SELECT id FROM phones)"),
+            [],
+        )?;
+    }
     // Phone uploads never named in a sent text go after 24 hours.
     let mut st = c.prepare(
         "SELECT id FROM blobs WHERE created_at<?1 OR (uploader LIKE 'ph\\_%' ESCAPE '\\' AND created_at<?2
@@ -605,17 +621,7 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
 /// Mute marker for "forever" in `phone_mutes.until`.
 pub const MUTE_FOREVER: i64 = -1;
 
-/// `muted_until` of a workspace for a phone: `null`, a time, or `"forever"`.
-pub fn muted_until(c: &Connection, pid: &str, ws: &str) -> Value {
-    let u: Option<i64> = c
-        .query_row(
-            "SELECT until FROM phone_mutes WHERE phone=?1 AND ws=?2",
-            [pid, ws],
-            |r| r.get(0),
-        )
-        .optional()
-        .ok()
-        .flatten();
+fn mute_value(u: Option<i64>) -> Value {
     match u {
         Some(MUTE_FOREVER) => "forever".into(),
         Some(t) if t > now() => fmt_time(t).into(),
@@ -623,9 +629,137 @@ pub fn muted_until(c: &Connection, pid: &str, ws: &str) -> Value {
     }
 }
 
-/// True when phone `pid` muted workspace `ws` (forever, or until a time in the future).
+/// `muted_until` of a workspace for a phone: `null`, a time, or `"forever"`.
+pub fn muted_until(c: &Connection, pid: &str, ws: &str) -> Value {
+    mute_value(
+        c.query_row(
+            "SELECT until FROM phone_mutes WHERE phone=?1 AND ws=?2",
+            [pid, ws],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten(),
+    )
+}
+
+/// `mute_all_until` of a phone: `null`, a time, or `"forever"`.
+pub fn mute_all_until(c: &Connection, pid: &str) -> Value {
+    mute_value(
+        c.query_row(
+            "SELECT until FROM phone_mute_all WHERE phone=?1",
+            [pid],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten(),
+    )
+}
+
+/// `muted_until` of one group (host, id) for a phone.
+pub fn group_muted_until(c: &Connection, pid: &str, host: &str, grp: &str) -> Value {
+    mute_value(
+        c.query_row(
+            "SELECT until FROM phone_group_mutes WHERE phone=?1 AND host=?2 AND grp=?3",
+            [pid, host, grp],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten(),
+    )
+}
+
+/// Delete mute all and every group mute of a phone (signout, phone removed).
+pub fn forget_phone_mutes(c: &Connection, pid: &str) {
+    for sql in [
+        "DELETE FROM phone_mute_all WHERE phone=?1",
+        "DELETE FROM phone_group_mutes WHERE phone=?1",
+    ] {
+        let _ = c.execute(sql, [pid]);
+    }
+}
+
+/// Delete a phone's group mutes of host `ws` (the workspace left its list, or was deleted).
+pub fn forget_group_mutes_of(c: &Connection, pid: &str, ws: &str) {
+    let _ = c.execute(
+        "DELETE FROM phone_group_mutes WHERE phone=?1 AND host=?2",
+        [pid, ws],
+    );
+}
+
+/// Active group mutes of a phone for hosts still on its list, `[{host, id, muted_until}]`.
+pub fn group_mutes(c: &Connection, pid: &str) -> Vec<Value> {
+    let on_list = phone_workspaces(c, pid);
+    let Ok(mut st) =
+        c.prepare("SELECT host,grp,until FROM phone_group_mutes WHERE phone=?1 ORDER BY host,grp")
+    else {
+        return vec![];
+    };
+    st.query_map([pid], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get(2)?))
+    })
+    .map(|rows| {
+        rows.flatten()
+            .filter(|(h, ..)| on_list.contains(h))
+            .filter_map(|(h, g, u)| {
+                let m = mute_value(Some(u));
+                (!m.is_null()).then(|| json!({"host": h, "id": g, "muted_until": m}))
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Drop expired group mutes of a phone (keeps the table and the 100 cap honest).
+pub fn purge_group_mutes(c: &Connection, pid: &str) {
+    let _ = c.execute(
+        "DELETE FROM phone_group_mutes WHERE phone=?1 AND until<>?2 AND until<=?3",
+        params![pid, MUTE_FOREVER, now()],
+    );
+}
+
+/// True when phone `pid` must get no push for anything: mute all, or the workspace `ws` muted
+/// (forever, or until a time in the future).
 pub fn is_muted(c: &Connection, pid: &str, ws: &str) -> bool {
-    !muted_until(c, pid, ws).is_null()
+    !mute_all_until(c, pid).is_null() || !muted_until(c, pid, ws).is_null()
+}
+
+/// The whole push decision for one phone and one message from workspace `ws` (relay-api.md "Muted").
+pub fn push_muted(c: &Connection, pid: &str, ws: &str, body: &Value) -> bool {
+    push_muted_at(c, pid, ws, body, now())
+}
+
+/// `push_muted` at instant `at` (the contract vector replays fixed clocks): a mute is active when it is
+/// `"forever"` or ends after `at`.
+pub fn push_muted_at(c: &Connection, pid: &str, ws: &str, body: &Value, at: i64) -> bool {
+    let active = |sql: &str, args: &[&str]| -> bool {
+        c.query_row(sql, rusqlite::params_from_iter(args), |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional()
+        .ok()
+        .flatten()
+        .is_some_and(|u| u == MUTE_FOREVER || u > at)
+    };
+    if active("SELECT until FROM phone_mute_all WHERE phone=?1", &[pid])
+        || active(
+            "SELECT until FROM phone_mutes WHERE phone=?1 AND ws=?2",
+            &[pid, ws],
+        )
+    {
+        return true;
+    }
+    ["group", "group_ref"].iter().any(|k| {
+        match (body[*k]["host"].as_str(), body[*k]["id"].as_str()) {
+            (Some(h), Some(g)) => active(
+                "SELECT until FROM phone_group_mutes WHERE phone=?1 AND host=?2 AND grp=?3",
+                &[pid, h, g],
+            ),
+            _ => false,
+        }
+    })
 }
 
 /// Current calendar month (UTC) as `YYYY-MM`: the key of `phone_settings.tts_month`.
@@ -656,7 +790,8 @@ pub fn phone_settings(c: &Connection, pid: &str) -> Value {
     let (speak, swiss, cap, used, month) =
         row.unwrap_or(("auto".into(), false, 10.0, 0.0, String::new()));
     let used = if month == month_key(now()) { used } else { 0.0 };
-    json!({"speak": speak, "swiss_german": swiss, "tts_cap_usd": num(cap), "tts_used_usd_month": num(used)})
+    json!({"speak": speak, "swiss_german": swiss, "tts_cap_usd": num(cap), "tts_used_usd_month": num(used),
+        "mute_all_until": mute_all_until(c, pid), "group_mutes": group_mutes(c, pid)})
 }
 
 /// Mobile mode of a workspace as phones see it: `{on, since, ends_at, machine}` (the last three `null` when off).

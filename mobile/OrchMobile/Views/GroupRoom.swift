@@ -27,7 +27,7 @@ struct GroupRoomView: View {
                             }
                             TimelineView(.periodic(from: .now, by: 30)) { context in
                                 ForEach(GroupRoomRules.thinking(group: group, now: context.date), id: \.self) { ws in
-                                    group.memberText(ws, suffix: " helper is thinking…").themeFont(13).foregroundStyle(Theme.muted)
+                                    group.memberText(ws, suffix: " is thinking…").themeFont(13).foregroundStyle(Theme.muted)
                                 }
                             }
                         }.padding(16)
@@ -68,6 +68,11 @@ struct GroupRoomView: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
+            TimelineView(.everyMinute) { context in
+                ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: context.date), groupStyle: true) { mute in
+                    Task { await model.setGroupMute(key, mute) }
+                }
+            }
             Button { members = true } label: {
                 Image(systemName: "info.circle").frame(width: 44, height: 44)
                     .background(Theme.surface2, in: Circle())
@@ -91,7 +96,7 @@ struct GroupRoomView: View {
                     switch message.sender {
                     case .host(let ws), .member(let ws), .person(let ws):
                         GroupMemberBadge(group: group, ws: ws, size: 24)
-                        group.memberText(ws, suffix: " helper").themeFont(13).foregroundStyle(Theme.muted)
+                        group.memberText(ws, suffix: "").themeFont(13).foregroundStyle(Theme.muted)
                     default:
                         Text(senderName(message.sender, group: group)).themeFont(13).foregroundStyle(Theme.muted)
                     }

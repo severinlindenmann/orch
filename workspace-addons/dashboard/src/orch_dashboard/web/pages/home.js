@@ -48,11 +48,11 @@ function needRow(row, newest, questionCount = 1) {
   return h('div', {className:'card-row home-need', 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
     t ? ticketTitle(t, true) : h('h3', {}, clean(row.title)),
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null, h('p', {}, clean(window.DashHelpers.plainWhy(question, 'The agent'))),
-    h('p', {className:'meta'}, 'Next step · ', options.length ? 'Choose an answer' : choice.label), actions, t ? parentLine(t) : null);
+    actions, t ? parentLine(t) : null);
 }
 function startFailedRow(t, sf) {
   return h('div', {className:'card-row home-need', 'data-key':'start-failed-' + t.id}, ticketTitle(t, true),
-    h('p', {}, clean(sf.text)), h('p', {className:'meta'}, 'Next step · Try again'),
+    h('p', {}, clean(sf.text)),
     snapshot ? null : h('div', {className:'row'}, button('Retry', 'outline sm', async () => {
       if (changeUnavailable()) return;
       const result = await act('run.start', {ticket:t.id});
@@ -70,8 +70,7 @@ function workingRow(t) {
 }
 function resultRow(t) {
   return h('div', {className:'card-row home-result', 'data-key':'ticket-' + t.id}, ticketTitle(t),
-    h('p', {className:'meta'}, 'Next step · Read the result, then mark done'),
-    h('div', {className:'row'}, h('a', {className:'btn outline sm', href:href(t.id)}, 'Open result'), snapshot ? null : button('Mark done', 'outline sm', () => moveTicket(t.id, 'done'))));
+    h('div', {className:'row'}, h('a', {className:'btn outline sm', href:href(t.id)}, 'Open result'), snapshot ? null : button('Mark done', 'outline sm', () => moveTicket(t.id, 'done')), snapshot ? null : button('Send back', 'outline sm', () => moveTicket(t.id, 'active'))));
 }
 function messageTicket(text) {
   if (snapshot) return;
@@ -103,8 +102,18 @@ function homeNeeds(rows) {
   }
   return [...groups.values()];
 }
+let needsOpen = false;
+// Three or more items fold into one row; Show all opens the full list.
+function needsFold(rows, count) {
+  const oldest = rows.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))[0]?.row;
+  const t = oldest && ticketOf(oldest.ticket);
+  const text = !oldest ? 'Some tickets did not start' : clean(window.DashHelpers.plainWhy(array(t?.questions).find(q => q.id === oldest.answer?.question)?.text || oldest.title || oldest.text, 'The agent'));
+  return h('div', {className:'card-row home-need needs-fold', 'data-key':'needs-fold'},
+    h('div', {className:'row'}, h('p', {className:'grow'}, h('span', {className:'meta'}, 'Oldest · '), text), button('Show all', 'outline sm', () => { needsOpen = true; render(); })));
+}
 function home() {
   const needs = needsList(), groupedNeeds = homeNeeds(needs), all = tickets();
+  if (groupedNeeds.length < 3) needsOpen = false;
   const failed = all.map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const review = sorted(all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)));
@@ -122,7 +131,7 @@ function home() {
   const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
   return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + (needs.length + failed.length) + (needs.length + failed.length === 1 ? ' question for you · ' : ' questions for you · ') + agent + ' is working on ' + working.length + (working.length === 1 ? ' ticket' : ' tickets')), banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      homeSection('needs-you', 'Needs you (' + (groupedNeeds.length + failed.length) + ')', groupedNeeds.length + failed.length ? [...groupedNeeds.map(({row, count}) => needRow(row, newest, count)), ...failed.map(([t, sf]) => startFailedRow(t, sf))] : emptyRow('Nothing needs you right now.')),
+      homeSection('needs-you', 'Needs you (' + (groupedNeeds.length + failed.length) + ')', groupedNeeds.length + failed.length >= 3 && !needsOpen ? needsFold(groupedNeeds, groupedNeeds.length + failed.length) : groupedNeeds.length + failed.length ? [...groupedNeeds.map(({row, count}) => needRow(row, newest, count)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), groupedNeeds.length + failed.length >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null] : emptyRow('Nothing needs you right now.')),
       homeSection('working-now', 'Working now', working.length ? working.map(workingRow) : emptyRow('No tickets are being worked on.')),
       homeSection('check-result', 'Check result (' + review.length + ')', review.length ? review.map(resultRow) : emptyRow('No results to check.')),
       h('div', {className:'card card-row', 'data-key':'everything-else'}, h('span', {className:'grow muted'}, 'Everything else (' + all.filter(t => activeTicket(t) && !used.has(t.id)).length + ')'), h('a', {className:'btn ghost sm', href:'#tickets'}, 'View Tickets →'))),

@@ -54,3 +54,22 @@ def test_open_takes_a_ticket_key(ws, capsys):
         assert out["url"].endswith("/t/t_inv7c2ab")
     finally:
         service.stop(ws)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.name == "nt", reason="ps is POSIX")
+def test_stop_finds_a_service_started_under_another_language(ws, monkeypatch):
+    """fb20: started under one Mac language, stopped under another -> still stopped, record removed."""
+    monkeypatch.setenv("LC_ALL", "de_CH.UTF-8")
+    monkeypatch.setenv("LANG", "de_CH.UTF-8")
+    cur = service.start(ws)
+    try:
+        monkeypatch.setenv("LC_ALL", "en_US.UTF-8")
+        monkeypatch.setenv("LANG", "en_US.UTF-8")
+        assert service.stop(ws) == "stopped"
+        assert not (service._dir(ws) / "server.json").exists()
+    finally:
+        try:
+            os.kill(cur["pid"], 15)
+        except OSError:
+            pass

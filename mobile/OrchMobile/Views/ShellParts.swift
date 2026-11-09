@@ -26,11 +26,12 @@ struct ShellAvatar: View {
 
 struct ShellBadge: View {
     let count: Int
+    var muted = false
     var body: some View {
         if count > 0 {
             Text(count > 99 ? "99+" : "\(count)").themeFont(12, .semibold)
-                .foregroundStyle(Theme.onBrand).padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Theme.brand, in: Capsule(style: .continuous)).accessibilityLabel("\(count) unread")
+                .foregroundStyle(muted ? Theme.muted : Theme.onBrand).padding(.horizontal, 6).padding(.vertical, 3)
+                .background(muted ? Theme.surface3 : Theme.brand, in: Capsule(style: .continuous)).accessibilityLabel("\(count) unread")
         }
     }
 }
