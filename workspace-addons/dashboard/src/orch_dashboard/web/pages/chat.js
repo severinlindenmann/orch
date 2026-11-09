@@ -379,3 +379,174 @@ new MutationObserver(() => {
   if (!previous || (previous.near && previous.stamp !== stamp)) log.scrollTop = log.scrollHeight;
   chatScroll.set(log, {stamp, near:log.scrollHeight - log.scrollTop - log.clientHeight < 80});
 }).observe(document.documentElement, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class']});
+
+// Workspace DMs are a separate layer, so group/Chat changes can merge independently.
+const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, error:false, lastFetch:-Infinity, timer:null};
+const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
+const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
+function chatDmMessages(ws) {
+  const saved = chatObjects(chatDm.threads.get(ws)?.messages), ids = new Set(saved.map(m => m.id));
+  return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
+}
+async function chatDmLoad() {
+  if (snapshot || route().kind !== 'chat' || chatDm.loading) return;
+  const delay = 5000 - (Date.now() - chatDm.lastFetch);
+  if (delay > 0) {
+    if (!chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, delay);
+    return;
+  }
+  if (chatDm.timer) { clearTimeout(chatDm.timer); chatDm.timer = null; }
+  chatDm.lastFetch = Date.now();
+  chatDm.loading = true;
+  const ws = chatUi.open;
+  try {
+    const response = await fetch('/api/chat/contacts');
+    if (!response.ok) throw new Error('Contacts');
+    const contacts = await response.json();
+    if (!Array.isArray(contacts)) throw new Error('Contacts');
+    chatDm.contacts = chatObjects(contacts).filter(c => chatDmId(c.ws));
+    if (chatDmId(ws) && chatDmContact(ws)) {
+      const synced = await window.orchAct('chat.sync_ws', {workspace:ws});
+      if (!synced?.ok) throw new Error('Sync');
+      const response = await fetch('/api/chat/thread/' + ws);
+      if (!response.ok) throw new Error('Thread');
+      const thread = await response.json();
+      if (!Array.isArray(thread?.messages)) throw new Error('Thread');
+      chatDm.threads.set(ws, thread);
+      const stored = new Set(thread.messages.map(m => m.id));
+      chatDm.pending.set(ws, array(chatDm.pending.get(ws)).filter(m => !stored.has(m.id)));
+    }
+    chatDm.error = false;
+  } catch { chatDm.error = true; }
+  finally {
+    chatDm.loading = false;
+    if (route().kind === 'chat') {
+      render();
+      if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
+    }
+  }
+}
+function chatDmRoute() {
+  const ws = location.hash.slice(6);
+  if (chatDmId(ws)) { chatUi.open = ws; chatUi.listOpen = false; chatUi.day = null; }
+  if (route().kind === 'chat') { render(); chatDmLoad(); }
+}
+window.addEventListener('hashchange', chatDmRoute);
+window.addEventListener('orch:state', chatDmRoute);
+window.addEventListener('DOMContentLoaded', chatDmRoute);
+
+const chatListWithoutDm = chatList;
+chatList = function () {
+  const list = chatListWithoutDm();
+  if (!snapshot) list.prepend(chatButton('New chat', 'contacts', {'data-key':'new-chat'}));
+  const rows = chatDm.contacts.filter(c => chatDmMessages(c.ws).length || chatUi.open === c.ws);
+  if (rows.length) {
+    list.append(h('h2', {}, 'Workspaces'));
+    rows.filter(c => c.name.toLowerCase().includes(chatUi.search.toLowerCase())).forEach(c => {
+      const last = chatDmMessages(c.ws).at(-1);
+      list.append(h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-dm', 'data-id':c.ws, 'data-key':'row-' + c.ws,
+        'aria-current':chatUi.open === c.ws ? 'true' : null}, chatAvatar(c),
+        h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', last?.text || ''))));
+    });
+  }
+  if (chatDmId(chatUi.open)) list.querySelector('[data-id="chat"]')?.removeAttribute('aria-current');
+  return list;
+};
+function chatDmContacts() {
+  const {d, actions} = dialog('Contacts', 'dialog');
+  d.classList.add('chat-page', 'chat-contacts');
+  for (const c of chatDm.contacts) {
+    const can = c.can || {}, allowed = can.chat || can.tasks || can.files;
+    const row = h('button', {type:'button', className:'chat-contact', disabled:!allowed}, chatText('strong', '', c.name),
+      h('span', {className:'chat-member-chips'},
+        can.chat ? chatText('small', 'chat-member-chip', can.files ? 'Can read and send messages and files' : 'Can read and send messages') : null,
+        can.files && !can.chat ? chatText('small', 'chat-member-chip', 'Files') : null,
+        can.tasks ? chatText('small', 'chat-member-chip', 'Give tasks') : null,
+        !allowed ? chatText('small', 'chat-member-chip', 'No access') : null));
+    row.addEventListener('click', async () => { await window.orch.close(d); chatDmSelect(c.ws); });
+    d.append(row);
+  }
+  if (!chatDm.contacts.length) d.append(chatText('p', 'chat-muted', chatDm.error ? 'Could not load contacts.' : 'No contacts.'));
+  d.append(actions); window.orch.open(d);
+}
+function chatDmSelect(ws) {
+  if (!chatDmId(ws)) return;
+  chatUi.open = ws; chatUi.listOpen = false; chatUi.sheet = null;
+  location.hash = '#chat/' + ws; render(); chatDmLoad();
+  chatFocus('[data-key="chat-title"]');
+}
+function chatDmThread() {
+  const ws = chatUi.open, c = chatDmContact(ws), title = c?.name || 'Workspace', messages = chatDmMessages(ws);
+  const draft = chatUi.drafts[ws] || '';
+  return h('div', {className:'chat-main', 'data-key':'dm-' + ws},
+    h('header', {className:'chat-thread-head'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}), h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
+    chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
+    h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, messages.map(m =>
+      h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
+        chatText('div', 'chat-bubble chat-message-text', m.text),
+        m.by === 'you' ? h('small', {className:'chat-delivery'},
+          m.state === 'failed' ? fragment('Not sent · ', chatButton('Try again', 'retry-send', {'data-id':m.id})) :
+          m.state === 'delivered' ? 'Delivered to ' + clean(title) : 'Sending…') : null))),
+    !snapshot && c?.can?.chat ? h('form', {className:'chat-compose', 'data-key':'form-' + ws},
+      h('textarea', {rows:1, maxLength:2000, className:'chat-draft', 'data-key':'draft-' + ws, 'data-chat-input':'draft', 'data-thread':ws,
+        'aria-label':'Message ' + title, placeholder:'Message ' + title}, draft),
+      h('button', {type:'submit', className:'chat-button chat-primary', disabled:chatUi.sending.has(ws) || !draft.trim()}, 'Send')) : null);
+}
+const chatPageWithoutDm = chatPage;
+chatPage = function () {
+  if (!chatDmId(chatUi.open)) return chatPageWithoutDm();
+  const page = h('section', {className:'chat-page' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, chatList(), chatDmThread());
+  page.addEventListener('click', chatClick); page.addEventListener('input', chatInput); page.addEventListener('keydown', chatKeydown);
+  page.addEventListener('submit', e => { e.preventDefault(); chatSend(); });
+  return fragment(page);
+};
+const chatClickWithoutDm = chatClick;
+chatClick = async function (event) {
+  const control = event.target.closest('[data-chat-action]');
+  if (!control || control.disabled) return;
+  const action = control.dataset.chatAction;
+  if (action === 'contacts') { await chatDmLoad(); return chatDmContacts(); }
+  if (action === 'select-dm') return chatDmSelect(control.dataset.id);
+  if (action === 'retry-dm') return chatDmLoad();
+  if (action === 'retry-send') {
+    const message = chatDmMessages(chatUi.open).find(m => m.id === control.dataset.id);
+    if (message?.state === 'failed') return chatDmSend(message.text, message.id);
+    return;
+  }
+  if (action === 'select' || action === 'history') {
+    // Update the hash without a second selection event that could discard the chosen group.
+    history.replaceState(null, '', '#chat');
+  }
+  return chatClickWithoutDm(event);
+};
+const chatSendWithoutDm = chatSend;
+chatSend = async function () {
+  if (!chatDmId(chatUi.open)) return chatSendWithoutDm();
+  const text = (chatUi.drafts[chatUi.open] || '').trim();
+  if (text) return chatDmSend(text);
+};
+async function chatDmSend(text, retryId) {
+  const ws = chatUi.open;
+  if (snapshot || !chatDmContact(ws)?.can?.chat || chatUi.sending.has(ws) || !text || text.length > 2000) return;
+  const pending = chatDm.pending.get(ws) || [];
+  const entry = {id:'local-' + Date.now(), by:'you', text, state:'sending'};
+  pending.push(entry); chatDm.pending.set(ws, pending);
+  if (retryId) {
+    chatDm.pending.set(ws, pending.filter(m => m.id !== retryId));
+    const saved = chatDm.threads.get(ws);
+    if (saved) saved.messages = saved.messages.filter(m => m.id !== retryId);
+  } else {
+    chatUi.drafts[ws] = '';
+    const field = document.querySelector('.chat-page .chat-draft');
+    if (field) { field.value = ''; field.style.height = ''; }
+  }
+  chatUi.sending.add(ws); render();
+  try {
+    const result = await window.orchAct('chat.send_ws', {workspace:ws, text, ...(/^m_[a-z0-9]{16}$/.test(retryId || '') ? {retry:retryId} : {})});
+    const saved = result?.state?.chat_dm_result;
+    if (result?.ok && saved?.id) Object.assign(entry, saved);
+    else entry.state = 'failed';
+  } catch { entry.state = 'failed'; }
+  finally { chatUi.sending.delete(ws); render(); }
+  await chatDmLoad();
+}
