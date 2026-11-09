@@ -1578,17 +1578,40 @@ def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str]
     return lines, restart
 
 
-def _restart_updated() -> list[str]:
-    """Restart EVERY service ORCH_HOME's running.json records (all workspaces), whoever runs the update and
-    whatever its cwd or HOME: an update replaces the code of all of them. One lock around the whole thing."""
+def _registered_workspaces(root: Path | None) -> set[Path]:
+    """The workspaces the person set up on this machine: the one `orch update` runs in, and every workspace
+    with a consent record (written when the person turned an add-on on there). Resolved paths."""
+    out: set[Path] = set()
+    if root is not None:
+        out.add(root.resolve())
+    for rec in _consents():
+        w = rec.get("workspace")
+        if isinstance(w, str):
+            out.add(Path(w).resolve())
+    return out
+
+
+def _restart_updated(root: Path | None = None) -> list[str]:
+    """Restart the services ORCH_HOME's running.json records, whoever runs the update and whatever its cwd or
+    HOME: an update replaces the code of all of them. Only registered workspaces (see above): any other entry
+    is listed, never touched. One lock around the whole thing."""
     from orch import services
 
+    registered = _registered_workspaces(root)
     by_ws: dict[str, dict[str, int]] = {}
+    skipped: list[str] = []
     for e in services.running():
-        if services.pid_alive(e.get("pid")):
+        if not services.pid_alive(e.get("pid")):
+            continue
+        if Path(e["workspace"]).resolve() in registered:
             by_ws.setdefault(e["workspace"], {})[e["addon"]] = e["pid"]
+        else:
+            skipped.append(
+                f"{e['addon']} ({Path(e['workspace']).name}) not restarted; "
+                f"run orch start in {e['workspace']}"
+            )
     if not by_ws:
-        return []
+        return skipped
     import signal
     import threading
 
@@ -1626,7 +1649,7 @@ def _restart_updated() -> list[str]:
     finally:
         if old_hup is not None:
             signal.signal(signal.SIGHUP, old_hup)
-    return ([f"Restarted: {', '.join(done)}"] if done else []) + bad
+    return ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
 
 
 def _output_failure_proof() -> None:
@@ -1828,7 +1851,7 @@ def update(
         lines, _changed = _update_lines(before, found, sha)
         if not json_output:
             _say("\n".join(lines))
-        restart_lines = _restart_updated()  # whatever changed: what runs is the old install
+        restart_lines = _restart_updated(root)  # whatever changed: what runs is the old install
         if restart_lines and not json_output:
             _say("\n".join(restart_lines))
         if report is not None:

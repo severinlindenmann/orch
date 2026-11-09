@@ -71,7 +71,9 @@ def test_unchanged_versions_still_restart_what_runs(proj, run, source, monkeypat
     """A develop install keeps the version number but replaces the code: running services restart anyway."""
     source["next"] = {}
     called = []
-    monkeypatch.setattr(addons, "_restart_updated", lambda: called.append(1) or ["Restarted: dashboard (x)"])
+    monkeypatch.setattr(
+        addons, "_restart_updated", lambda root=None: called.append(1) or ["Restarted: dashboard (x)"]
+    )
     code, out, err = run("update")
     assert code == 0, err
     assert out == "orch is up to date.\nRestarted: dashboard (x)\n" and called == [1]
@@ -95,6 +97,8 @@ class Fleet:
         monkeypatch.setattr(services, "pid_alive", lambda pid: pid != 999)
         monkeypatch.setattr(services, "running", self.running)
         monkeypatch.setattr(addons, "_same_user", lambda pid: True)
+        self.registered = [{"workspace": str(w), "name": "dashboard"} for w in self.ws]  # consent records
+        monkeypatch.setattr(addons, "_consents", lambda: self.registered)
         self.forged = set()  # (workspace, addon): live pid that is NOT the add-on's server
         monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}, "focus": {}})
         monkeypatch.setattr(services, "_call", self.call)
@@ -326,7 +330,7 @@ def test_only_full_hex_shas(bad):
 
 def test_sha_only_change_shows_and_restarts(proj, run, source, monkeypatch):  # noqa: F811
     source["next"] = {"sha": B40}  # same versions, sha moved
-    monkeypatch.setattr(addons, "_restart_updated", lambda: [])
+    monkeypatch.setattr(addons, "_restart_updated", lambda root=None: [])
     code, out, err = run("update")
     assert code == 0, err
     assert out.startswith("Updating orch 0.9.3 (main")
@@ -514,3 +518,18 @@ def test_one_unverified_service_is_skipped_but_the_verified_sibling_restarts(pro
 def test_other_users_process_is_not_verified(monkeypatch):
     monkeypatch.setattr(addons.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "0\n"})())
     assert addons._same_user(1234) is False
+
+
+def test_unregistered_workspace_is_listed_but_never_touched(proj, tmp_path, monkeypatch):  # noqa: F811
+    """A verified-looking service in a folder the person never set up (no consent record, not the cwd
+    workspace) is not stopped and not started."""
+    f = Fleet(tmp_path, monkeypatch)
+    f.registered = [r for r in f.registered if r["workspace"] == str(f.ws[0])]  # Rigi is not registered
+    lines = addons._restart_updated()
+    assert not [c for c in f.calls if c[1] == "Rigi"]
+    assert f"dashboard (Rigi) not restarted; run orch start in {f.ws[1]}" in lines
+    assert "Restarted: dashboard (Pilatus), focus (Pilatus)" in lines
+    # the workspace `orch update` runs in counts as registered
+    f.calls.clear()
+    assert addons._restart_updated(f.ws[1])[0].startswith("Restarted: dashboard (Pilatus)")
+    assert ("stop", "Rigi", {"dashboard", "focus"}) in f.calls
