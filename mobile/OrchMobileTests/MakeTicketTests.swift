@@ -68,6 +68,28 @@ final class MakeTicketTests: XCTestCase {
     }
 
     @MainActor
+    func testPushTapRoutesMakeTicketToGeneralAndNormalQuestionToTicket() async {
+        let previous = UserDefaults.standard.object(forKey: "mockMakeTicket")
+        UserDefaults.standard.set(true, forKey: "mockMakeTicket")
+        defer { UserDefaults.standard.set(previous, forKey: "mockMakeTicket") }
+        Keychain.delete()
+        defer { Keychain.delete() }
+        let model = AppModel(useMock: true, voiceMode: .scripted)
+        model.openSampleInvite()
+        await model.connect(phoneName: "Make ticket routing test")
+        await model.finishSetup(allowNotifications: false)
+        await model.refresh()
+
+        model.openQuestion(messageId: "m_maketicket00001")
+        XCTAssertEqual(model.path, [.workspace("ws_pilatus001"), .general("ws_pilatus001")])
+        XCTAssertEqual(model.focusedQuestion, "m_maketicket00001")
+
+        model.openQuestion(messageId: "m_q1date0ts0000001")
+        XCTAssertEqual(model.path, [.workspace("ws_pilatus001"), .ticket(workspace: "ws_pilatus001", ticket: "t_7k3f9q")])
+        XCTAssertEqual(model.focusedQuestion, "m_q1date0ts0000001")
+    }
+
+    @MainActor
     func testOpenQuestionCountExcludesMakeTicket() async {
         let previous = UserDefaults.standard.object(forKey: "mockMakeTicket")
         UserDefaults.standard.set(true, forKey: "mockMakeTicket")

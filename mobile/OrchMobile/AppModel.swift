@@ -643,6 +643,10 @@ final class AppModel {
     }
     private func route(to q: Question) {
         let ws = q.message.from
+        if q.isMakeTicket {
+            path = [.workspace(ws), .general(ws)]
+            return
+        }
         path = q.message.ticket.map { [.workspace(ws), .ticket(workspace: ws, ticket: $0)] } ?? [.workspace(ws)]
     }
 
