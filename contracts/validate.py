@@ -5,7 +5,7 @@ phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (ve
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
-With kinds (activity, secrets, jobs, blocks, inventory, addon-manifest, screen, counts, proposal) only those draft-02 checks run.
+With kinds (activity, secrets, jobs, blocks, inventory, addon-manifest, screen, counts, human, proposal) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -841,7 +841,7 @@ def kind_screen():
         if "joined" in c:
             _expect(f"screen control_mode {c['name']} joined", "".join(x.get("data", "") for x in got), c["joined"])
     for c in vec["utf8_split"]:
-        got = scr_from_control([("%output %0 ").encode() + bytes.fromhex(h) for h in c["chunks_hex"]])
+        got = scr_from_control([b"%output %0 " + bytes.fromhex(h) for h in c["chunks_hex"]])
         _expect(f"screen utf8_split {c['name']}", [x["data"] for x in got if x["type"] == "output"], c["data"])
     for c in vec["takeover"]:
         _expect(f"screen takeover {c['name']}", scr_takeover(c), c["result"])
