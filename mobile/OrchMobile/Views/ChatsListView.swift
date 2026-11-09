@@ -260,7 +260,7 @@ struct ChatsListView: View {
     }
 
     private var composeSheet: some View {
-        let names = Dictionary(uniqueKeysWithValues: model.workspaces.map { ($0.id, WorkspaceAlias.name(for: $0)) })
+        let names = Dictionary(model.workspaces.map { ($0.id, WorkspaceAlias.name(for: $0)) }, uniquingKeysWith: { first, _ in first }) // relay data: never trap on a duplicate id
         let contacts = ContactList.rows(model.workspaces, query: contactQuery, names: names)
         return VStack(alignment: .leading, spacing: 20) {
             HStack {
