@@ -581,9 +581,32 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         STAY_IN_ORCH,
         "Your conversation is cleared every day at 04:00; keep important context in the conversation.",
     ]
+    moved = last_moved(root)
+    if moved:
+        out.append(
+            f'The person\'s last Open agent talk became ticket {moved["key"]} "{moved["title"]}" ({moved["id"]}). '
+            "If their new message is about that work, answer from the ticket (orch ticket show) and note anything new "
+            f'with: orch log {moved["id"]} "<text>". Do not offer another ticket for it; offer one only for a '
+            "different subject."
+        )
     if news:
         out.append("New since you last looked:\n" + news)
     return "\n\n".join(out)[:12000]
+
+
+def last_moved(root: Path) -> dict | None:
+    """The ticket the person's newest Chat conversation moved to (today or yesterday), else None."""
+    today = dt.date.fromisoformat(day_key(root))
+    for n in range(2):
+        for m in reversed(_read_day(root, (today - dt.timedelta(days=n)).isoformat())["messages"]):
+            moved = m.get("moved_to")
+            if isinstance(moved, dict) and moved.get("id") and moved.get("key"):
+                return {
+                    "id": str(moved["id"]),
+                    "key": phone_view._clip(str(moved["key"]), 20),
+                    "title": phone_view._clip(str(moved.get("title") or ""), 120).replace('"', "'"),
+                }
+    return None
 
 
 # ---------------------------------------------------------------- the helper's role (enforced here, not in the prompt)

@@ -41,3 +41,13 @@ test('moved conversation renders its banner and header ticket link', () => {
   assert.match(thread, /Open ticket/);
   assert.match(JSON.stringify(c.chatHeader(null, false)), /FS-1/);
 });
+test('the helper is shown by the workspace name only, no "helper" suffix', () => {
+  const c = context();
+  c.state.workspace = 'pilatus'; c.state.chat.helper = 'pilatus helper';
+  c.state.chat.messages = [{id:'m1', by:'ws_x', text:'Hi', at:'2026-11-09T10:00:00Z'}];
+  const thread = JSON.stringify(c.chatThread(null, null));
+  assert.match(thread, /Pilatus/);
+  assert.doesNotMatch(thread, /[Pp]ilatus helper/);
+  assert.match(JSON.stringify(c.chatThinking('Pilatus', true)), /Pilatus is thinking/);
+  assert.doesNotMatch(JSON.stringify(c.chatThinking('Pilatus', true)), /helper/);
+});

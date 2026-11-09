@@ -1109,3 +1109,15 @@ def test_make_ticket_person_title_is_never_overwritten(proj):
     assert t["title"] == "My own title" and not t.get("title_auto")
     with pytest.raises(Refused):
         tickets.set_auto_title(proj, t["id"], "Agent title", "agent:x")
+
+
+def test_helper_prompt_names_the_ticket_the_last_talk_became(proj):
+    chat.record(proj, "p1", "you", "dashboard", "Build fish", convo_start=True)
+    chat.record(proj, "pr", WS, "helper", "Ready?", refs=[{"kind": "proposal", "title": "Fish page"}])
+    made = chat.make_ticket(proj, "pr", by="human:me")
+    gid = tickets.ensure_general(proj, "human:me")
+    prompt = chat.helper_prompt(proj, tickets.load(proj, gid), [], "")
+    assert made["key"] in prompt and made["ticket"] in prompt and "Do not offer another ticket" in prompt
+    other = proj / "other"
+    other.mkdir()
+    assert chat.last_moved(other) is None
