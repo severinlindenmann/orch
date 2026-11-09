@@ -9,9 +9,15 @@ from orch import agentsdata
 
 def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     base = json.loads((agentsdata.agents_dir() / "base.json").read_bytes())
+    filled = {"capabilities"}  # filled by W2b 1.9 (capability flags); the others stay empty until their slice
     for name in agentsdata.FRAGMENTS:
-        assert json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes()) == {}
-    assert agentsdata.load() == base
+        part = json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes())
+        assert (part != {}) if name in filled else (part == {})
+    merged = agentsdata.load()
+    assert {k: v for k, v in merged.items() if k != "adapters"} == {
+        k: v for k, v in base.items() if k != "adapters"
+    }
+    assert merged["adapters"].keys() == base["adapters"].keys()
     assert {p.name for p in agentsdata.agents_dir().iterdir()} == {
         "base.json",
         "deny.json",
