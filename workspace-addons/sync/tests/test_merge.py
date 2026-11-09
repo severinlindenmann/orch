@@ -534,7 +534,7 @@ def test_only_well_formed_runs_count_and_each_check_is_capped():
     side = [{"id": "c1", "text": "x", "done": False, "evidence": odd + runs}]
     m = merge_ticket(base, up(base, T2, checklist=side), up(base, T3), NOW)
     ev = m["checklist"][0]["evidence"]
-    assert len(ev) == 50 and not any(e in ev for e in odd)  # over the cap the notes go first, then old runs
+    assert all(e in ev for e in odd) and len([e for e in ev if e in runs]) == 45  # only runs are capped
     assert runs[-1] in ev
 
 
@@ -557,7 +557,7 @@ def test_core_and_merge_trim_runs_identically(monkeypatch):
     ]
     ties = [run(ref, "2026-11-09T10:00:00Z", exit=i) for i, ref in enumerate("abcdefgh" * 8)]
     many = [run("r", f"2026-11-09T11:00:{i:02d}Z", exit=i) for i in range(9)]
-    notes = [{"type": "note", "ref": f"n{i}"} for i in range(55)]
+    notes = [{"type": "note", "ref": f"n{i}"} for i in range(75)]
     odd = {"type": "note", "ref": "Grüße 日本語 \u2603", "z": [1, {"b": 2, "a": 3}]}
     assert merge._canon(odd) == tickets._canon(odd)
     for case in (hostile + many, ties, ties + hostile + many, notes + many + ties, many[:3]):

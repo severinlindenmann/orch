@@ -177,7 +177,7 @@ def _order(items, base_ids, key=None):
 
 
 RUNS_PER_REF = 5  # the rule below is the core's tickets.trim_runs (parity-tested), so replicas converge
-RUNS_PER_CHECK = 50
+RUNS_PER_CHECK = 45
 _RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 
@@ -196,8 +196,8 @@ def _is_run(e) -> bool:
 
 
 def trim_runs(evidence: list) -> list:
-    """Same as orch.tickets.trim_runs: newest 5 runs per command text, at most 50 entries (oldest notes first,
-    then older runs), the newest run is never dropped, run order (ran_at, canonical JSON)."""
+    """Same as orch.tickets.trim_runs: newest 5 runs per command text and at most 45 runs per check (oldest
+    runs first); notes and other proof are never dropped; run order (ran_at, canonical JSON)."""
     key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))
     by_ref = {}
     for i, e in enumerate(evidence):
@@ -208,13 +208,7 @@ def trim_runs(evidence: list) -> list:
         idx.sort(key=key)
         drop.update(idx[:-RUNS_PER_REF])
     live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
-    over = len(evidence) - len(drop) - RUNS_PER_CHECK
-    if over > 0:  # notes and other proof first (oldest first), then older runs; the newest run always stays
-        others = [i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop]
-        drop.update(others[:over])
-        over -= min(over, len(others))
-    if over > 0:
-        drop.update(live[:-1][:over])
+    drop.update(live[:-RUNS_PER_CHECK])  # over the cap only the oldest runs go; other proof is never touched
     return [e for i, e in enumerate(evidence) if i not in drop]
 
 

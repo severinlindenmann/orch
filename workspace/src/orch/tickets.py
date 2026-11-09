@@ -41,7 +41,7 @@ TAIL_MAX = 2048
 UNSAFE_TEXT = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 RUNS_PER_REF = 5
-RUNS_PER_CHECK = 50
+RUNS_PER_CHECK = 45
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
@@ -1174,11 +1174,10 @@ def _is_run(e) -> bool:
 
 def trim_runs(evidence: list) -> list:
     """Recorded runs (command evidence with a well-formed ran_at, see _ran_at_ok): keep the newest
-    RUNS_PER_REF per command text and at most RUNS_PER_CHECK evidence entries in all, so a loop of
-    `orch check record` cannot grow a ticket without bound. Order of runs: (ran_at, canonical JSON).
-    Over the cap, the oldest notes and other proof go first, then older runs; the newest run is never dropped
-    (the one just recorded stays). Notes never push runs out. The sync add-on's merge has the same rule
-    (orch_sync.merge.trim_runs, parity-tested) so every replica ends with the same entries."""
+    RUNS_PER_REF per command text and at most RUNS_PER_CHECK runs per check, oldest runs dropped first, so a
+    loop of `orch check record` cannot grow a ticket without bound. Order of runs: (ran_at, canonical JSON).
+    Notes and every other kind of proof are never dropped because of runs. The sync add-on's merge has the
+    same rule (orch_sync.merge.trim_runs, parity-tested) so every replica ends with the same entries."""
     key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))  # noqa: E731
     by_ref: dict[str, list[int]] = {}
     for i, e in enumerate(evidence):
@@ -1189,13 +1188,7 @@ def trim_runs(evidence: list) -> list:
         idx.sort(key=key)
         drop.update(idx[:-RUNS_PER_REF])
     live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
-    over = len(evidence) - len(drop) - RUNS_PER_CHECK
-    if over > 0:  # notes and other proof first (oldest first), then older runs; the newest run always stays
-        others = [i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop]
-        drop.update(others[:over])
-        over -= min(over, len(others))
-    if over > 0:
-        drop.update(live[:-1][:over])
+    drop.update(live[:-RUNS_PER_CHECK])  # over the cap only the oldest runs go; other proof is never touched
     return [e for i, e in enumerate(evidence) if i not in drop]
 
 

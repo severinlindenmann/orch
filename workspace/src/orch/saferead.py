@@ -101,10 +101,13 @@ def _open_checked(name: str, kw: dict, check: str | None = None) -> tuple[int, o
                 named.st_dev,
                 named.st_ino,
             )
-        if not ok:
-            os.close(fd)
-            return None
     except OSError:
+        os.close(fd)
+        return None
+    except BaseException:
+        os.close(fd)
+        raise
+    if not ok:
         os.close(fd)
         return None
     return fd, st

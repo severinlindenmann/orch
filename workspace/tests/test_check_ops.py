@@ -455,9 +455,11 @@ def test_files_sig_does_not_read_through_a_swapped_folder(repo, tmp_path, monkey
             saferead.os, "pread", lambda fd, n, o: read.append(real_pread(fd, n, o)) or read[-1]
         )
     # control (non-vacuous): the spy does see a normal file being read
-    assert saferead.file_state(repo.resolve(), "a.txt", 1000, [10_000]).startswith("F:")
+    filesig._HASHES.clear()  # the cache would hide the reads
+    assert filesig.files_sig(repo)  # the real path reads the files: the spy must see them
     assert any(b"one" in chunk for chunk in read)
     read.clear()
+    filesig._HASHES.clear()
     after = filesig.files_sig(repo)
     assert after != before and not any(b"secret" in chunk for chunk in read)  # never read through the link
     budget = [10_000]
@@ -474,27 +476,29 @@ def test_runs_and_entries_are_capped_per_check():
         for i in range(5)
     ]
     out = tickets.trim_runs(evs)
-    assert len(out) == 50 and not any(e in out for e in evs[:10])  # notes go first, then the oldest runs
+    assert all(e in out for e in evs[:10]) and len(out) == 10 + 45  # notes stay, only runs are capped
     assert evs[-1] in out
     assert [e["ran_at"] for e in out if e["ref"].startswith("cmd")] == sorted(
         e["ran_at"] for e in out if e["ref"].startswith("cmd")
     )
 
 
-def test_cap_drops_notes_first_and_never_the_newest_run():
+def test_cap_applies_to_runs_only_and_keeps_the_newest():
     stamp = lambda i: f"2026-11-09T10:{i // 60:02d}:{i % 60:02d}Z"  # noqa: E731
-    runs = [{"type": "command", "ref": f"c{i}", "ran_at": stamp(i)} for i in range(5)]
-    newest = {"type": "command", "ref": "latest", "ran_at": "2026-11-09T23:00:00Z"}
-    notes = [{"type": "note", "ref": f"n{i}"} for i in range(60)]
-    out = tickets.trim_runs([*notes, *runs, newest])
-    assert len(out) == 50 and newest in out and all(r in out for r in runs)  # notes went, runs stayed
-    assert notes[10] not in out and notes[-1] in out
-    many = [{"type": "note", "ref": f"n{i}"} for i in range(70)]
-    only = tickets.trim_runs([*many, *runs, newest])
-    assert len(only) == 50 and newest in only
-    runs_only = [{"type": "command", "ref": f"r{i}", "ran_at": stamp(i)} for i in range(60)]
-    kept = tickets.trim_runs(runs_only)
-    assert len(kept) == 50 and runs_only[-1] in kept and runs_only[0] not in kept
+    notes = [{"type": "note", "ref": f"n{i}"} for i in range(70)]
+    runs = [{"type": "command", "ref": f"r{i}", "ran_at": stamp(i)} for i in range(60)]
+    out = tickets.trim_runs([*notes, *runs])
+    assert all(n in out for n in notes)  # notes are never dropped because of runs
+    kept = [e for e in out if e["type"] == "command"]
+    assert (
+        len(kept) == 45
+        and runs[-1] in kept
+        and runs[0] not in kept
+        and runs[14] not in kept
+        and runs[15] in kept
+    )
+    five = [{"type": "command", "ref": "same", "ran_at": stamp(i)} for i in range(9)]
+    assert tickets.trim_runs(five) == five[-5:]
 
 
 def test_anchor_refuses_empty_parts_and_a_fifo_log_never_blocks(proj):
@@ -503,9 +507,22 @@ def test_anchor_refuses_empty_parts_and_a_fifo_log_never_blocks(proj):
     assert saferead.file_state(proj.resolve(), "", 10, [10]) == "?"
     if sys.platform != "win32":
         os.mkfifo(proj / "x.log")
-        with pytest.raises(tickets.Refused):
-            saferead.safe_read_tail(proj, "x.log", 100)  # O_NONBLOCK: returns at once, then refused
-        assert saferead.file_state(proj.resolve(), "x.log", 10, [10]).startswith("S:")
+        import threading
+
+        out = {}
+
+        def attempt():
+            try:
+                saferead.safe_read_tail(proj, "x.log", 100)
+            except tickets.Refused:
+                out["tail"] = "refused"
+            out["state"] = saferead.file_state(proj.resolve(), "x.log", 10, [10])
+
+        th = threading.Thread(target=attempt, daemon=True)
+        th.start()
+        th.join(2)
+        assert not th.is_alive(), "a FIFO blocked the reader"  # a regression fails here instead of hanging CI
+        assert out == {"tail": "refused", "state": out["state"]} and out["state"].startswith("S:")
 
 
 def test_fallback_check_wants_the_path_itself_to_be_the_file(proj, tmp_path):
@@ -518,3 +535,39 @@ def test_fallback_check_wants_the_path_itself_to_be_the_file(proj, tmp_path):
     got = saferead._open_checked(str(real), {}, str(real))
     assert got is not None
     os.close(got[0])
+
+
+def test_open_checked_closes_the_fd_when_a_stat_fails(proj, monkeypatch):
+    f = proj / "f.txt"
+    f.write_text("x", encoding="utf-8")
+    closed, opened = [], []
+
+    class Os:
+        """saferead.os with a failing fstat and every open/close recorded (the real os stays untouched)."""
+
+        def __init__(self, exc):
+            self.exc = exc
+
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+        def open(self, *a, **k):
+            opened.append(os.open(*a, **k))
+            return opened[-1]
+
+        def close(self, fd):
+            closed.append(fd)
+            os.close(fd)
+
+        def fstat(self, fd):
+            raise self.exc
+
+    monkeypatch.setattr(saferead, "os", Os(OSError("boom")))
+    assert saferead._open_checked(str(f), {}) is None
+    assert opened and closed == opened
+    opened.clear()
+    closed.clear()
+    monkeypatch.setattr(saferead, "os", Os(ValueError("odd")))
+    with pytest.raises(ValueError):
+        saferead._open_checked(str(f), {})
+    assert opened and closed == opened
