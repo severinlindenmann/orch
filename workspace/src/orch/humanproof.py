@@ -203,6 +203,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
         home.mkdir(parents=True, exist_ok=True)
         _private_dir(d, home)
     else:
+        _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
     return d
 
