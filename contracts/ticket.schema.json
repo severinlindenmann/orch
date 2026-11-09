@@ -67,7 +67,7 @@
       "required": ["type", "ref"],
       "properties": {
         "type": { "enum": ["pr", "commit", "file", "url", "command", "note"] },
-        "ref": { "type": "string", "minLength": 1, "description": "PR URL, commit hash, file path (a copied file lives in the gitignored .orch/tickets/<id>/evidence/), URL, the command line, or the note text" },
+        "ref": { "type": "string", "minLength": 1, "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*$", "description": "PR URL, commit hash, file path (a copied file lives in the gitignored .orch/tickets/<id>/evidence/), URL, the command line, or the note text" },
         "text": { "type": "string", "description": "Optional short result, e.g. '42 passed'" },
         "title": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional short name shown instead of ref." },
         "summary": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. One plain line: what came out of the step. Shown on the task row." },
@@ -75,7 +75,7 @@
         "exit": { "type": "integer", "minimum": -255, "maximum": 255, "description": "Optional, command evidence recorded with `orch check record`: the exit code. Data only: orch never runs the command." },
         "ran_at": { "$ref": "#/$defs/time", "description": "Optional, recorded command: when it ran." },
         "files_sig": { "type": "string", "pattern": "^[0-9a-f]{16,128}$", "description": "Optional, recorded command: fingerprint of the work folder at that time (git folders only). A different fingerprint now = 'changes haven't been checked yet'." },
-        "output_tail": { "type": "string", "maxLength": 2048, "description": "Optional, recorded command: the last 2 kB of its output, control characters removed. Text only." },
+        "output_tail": { "type": "string", "maxLength": 2048, "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*$", "description": "Optional, recorded command: the last 2 kB of its output, control characters removed. Text only." },
         "at": { "$ref": "#/$defs/time" },
         "by": { "$ref": "#/$defs/who" }
       }

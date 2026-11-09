@@ -37,7 +37,9 @@ OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 COVERS_MAX = 300
 TAIL_MAX = 2048
-RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+# C0 except tab/newline, DEL, C1 and bidi overrides: never in a recorded command or output
+UNSAFE_TEXT = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+RUNS_PER_REF = 5
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
@@ -1106,12 +1108,22 @@ def parse_evidence(raw: str) -> dict:
     return ev
 
 
+def _ran_at_ok(v) -> bool:
+    if not isinstance(v, str):
+        return False
+    try:
+        datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
+
+
 def _check_record_fields(ev: dict) -> None:
     """Optional fields of a recorded check (`orch check record`): exit, ran_at, files_sig, output_tail.
     Data only."""
     if "exit" in ev and (type(ev["exit"]) is not int or not -255 <= ev["exit"] <= 255):
-        raise Refused("A recorded exit code is a whole number.")
-    if "ran_at" in ev and not (isinstance(ev["ran_at"], str) and RAN_AT.fullmatch(ev["ran_at"])):
+        raise Refused("A recorded exit code is a whole number from -255 to 255.")
+    if "ran_at" in ev and not _ran_at_ok(ev["ran_at"]):
         raise Refused("ran_at is a UTC time like 2026-11-09T14:30:00Z.")
     if "files_sig" in ev and not (isinstance(ev["files_sig"], str) and SIG.fullmatch(ev["files_sig"])):
         raise Refused("files_sig is a hex string of 16 to 128 characters.")
@@ -1119,6 +1131,26 @@ def _check_record_fields(ev: dict) -> None:
         isinstance(ev["output_tail"], str) and len(ev["output_tail"]) <= TAIL_MAX
     ):
         raise Refused(f"output_tail is text of at most {TAIL_MAX} characters.")
+    for k in ("ref", "output_tail"):
+        if isinstance(ev.get(k), str) and UNSAFE_TEXT.search(ev[k]):
+            raise Refused(f"{k} must not contain control or direction-changing characters.")
+
+
+def trim_runs(evidence: list) -> list:
+    """Recorded runs (command evidence with ran_at): keep the newest RUNS_PER_REF per command text, so a
+    loop of
+    `orch check record` cannot grow a ticket without bound. Other evidence is never dropped. Same rule in
+    the sync
+    add-on's merge, so replicas converge."""
+    runs: dict[str, list[int]] = {}
+    for i, e in enumerate(evidence):
+        if isinstance(e, dict) and e.get("type") == "command" and isinstance(e.get("ran_at"), str):
+            runs.setdefault(str(e.get("ref")), []).append(i)
+    drop = set()
+    for idx in runs.values():
+        idx.sort(key=lambda i: (evidence[i]["ran_at"], i))
+        drop.update(idx[:-RUNS_PER_REF])
+    return [e for i, e in enumerate(evidence) if i not in drop]
 
 
 def _clear_doing(item: dict) -> None:
@@ -1196,7 +1228,7 @@ def check_record(
 
     def op(t):
         item = _item(t, cid)
-        item["evidence"].append(ev)
+        item["evidence"] = trim_runs([*item["evidence"], ev])
         add_history(
             t,
             by,

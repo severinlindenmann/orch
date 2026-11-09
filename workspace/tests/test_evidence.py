@@ -290,6 +290,30 @@ def test_evidence_record_fields_are_typed():
         {"files_sig": "a" * 200},
         {"output_tail": 5},
         {"output_tail": "x" * 2049},
+        {"ran_at": "2026-99-99T99:00:00Z"},
+        {"output_tail": "a\x1b[31mb"},
+        {"output_tail": "a\x00b"},
+        {"output_tail": "a\x85b"},
+        {"output_tail": "a\u202eb"},
+        {"ref": "pytest \u2066 x"},
+        {"ref": "bell\x07"},
     ):
         with pytest.raises(tickets.Refused):
             tickets.parse_evidence(json.dumps({"type": "command", "ref": "x", **bad}))
+
+
+def test_record_keeps_the_newest_five_runs_per_command(proj, run, tid):
+    for n in range(8):
+        tickets_run = run("check", "record", tid, "c1", "--cmd", "pytest -q", "--exit", str(n % 2))
+        assert tickets_run[0] == 0
+    run("check", "record", tid, "c1", "--cmd", "ruff check")
+    evs = read(proj, tid)["checklist"][0]["evidence"]
+    assert len([e for e in evs if e["ref"] == "pytest -q"]) == 5 and len(evs) == 6
+    assert [e for e in evs if e["ref"] == "pytest -q"][-1]["exit"] == 1  # the newest stays
+
+
+def test_trim_runs_leaves_other_proof_alone():
+    note = {"type": "note", "ref": "n"}
+    runs = [{"type": "command", "ref": "x", "ran_at": f"2026-11-09T10:00:0{i}Z"} for i in range(7)]
+    out = tickets.trim_runs([note, *runs, {"type": "command", "ref": "no ran_at"}])
+    assert note in out and len(out) == 1 + 5 + 1 and runs[0] not in out and runs[-1] in out
