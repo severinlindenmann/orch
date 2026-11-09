@@ -47,7 +47,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "proof.js", "helpers.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -712,6 +712,8 @@ CLOCK_EVERY = 10.0  # seconds between the server's own looks at tickets whose cl
 
 
 class _Server(ThreadingHTTPServer):
+    request_queue_size = 128  # a page loads a dozen files at once; the default backlog of 5 resets connections
+
     def server_close(self):
         if hasattr(self, "ticker_stop"):
             self.ticker_stop.set()

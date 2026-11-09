@@ -386,7 +386,10 @@ def general_id(root: Path) -> str | None:
 
 def ensure_general(root: Path, by: str) -> str:
     """The General ticket (flag general: true, no display key so no number is used up), made once."""
+    from orch import harness
+
     if tid := general_id(root):
+        harness.protect_local(root)  # older workspaces: the Chat ticket file stays out of git from now on
         return tid
     t = now()
     ticket = {
@@ -403,6 +406,7 @@ def ensure_general(root: Path, by: str) -> str:
         "history": [{"at": t, "by": by, "via": "cli", "text": "Created", "chat_message": False}],
     }
     save(root, ticket)
+    harness.protect_local(root)
     return ticket["id"]
 
 

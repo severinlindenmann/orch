@@ -10,6 +10,7 @@ local instruction file (named in agents.json); all of them are listed in .git/in
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -237,7 +238,36 @@ ORCH_IGNORE = [
     "local/",
     "chat/",
     "tickets/*/evidence/",
+    "tickets/.lock-*",  # per-ticket write locks
 ]
+
+
+def _general_lines(root: Path) -> list[str]:
+    """The hidden General (Chat) ticket keeps the person's private Chat history: its file is local too.
+    Its id is random, so the line is the exact file name. Only a safe file STEM is ever written (never the
+    JSON's own id field, which an agent could fill with newlines or globs), and a file git already tracks
+    is left alone (the team owns it)."""
+    import re
+
+    out: list[str] = []
+    try:
+        d = root / ".orch" / "tickets"
+        for f in sorted(d.glob("t_*.json")):
+            stem = f.stem
+            if f.is_symlink() or not re.fullmatch(r"t_[a-z0-9]{6,16}", stem):
+                continue
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict) or data.get("general") is not True or data.get("id") != stem:
+                continue
+            if _tracked(root, f".orch/tickets/{f.name}"):
+                continue  # already committed by the team: ignoring it would change nothing
+            out.append(f"tickets/{stem}.json")
+    except OSError:
+        return []
+    return out
 
 
 def _tracked(root: Path, rel: str) -> bool:
@@ -451,7 +481,8 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
     """Keep secrets and other local files out of git. Fails closed: when neither .orch/.gitignore nor
     .git/info/exclude can be written, it refuses (so no secret is stored unprotected). `lines` are the
     extra root-relative patterns for the exclude block (links, local instruction files)."""
-    text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ORCH_IGNORE) + "\n"
+    ignore = [*ORCH_IGNORE, *_general_lines(root)]
+    text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ignore) + "\n"
     ok = False
     try:
         p = root / ".orch" / ".gitignore"
@@ -466,7 +497,7 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
     except (Refused, OSError, UnicodeDecodeError):
         pass
     try:
-        core = [".orch/" + ln.rstrip("/") + ("/" if ln.endswith("/") else "") for ln in ORCH_IGNORE[1:]]
+        core = [".orch/" + ln.rstrip("/") + ("/" if ln.endswith("/") else "") for ln in ignore[1:]]
         if exclude_set(root, "core", list(dict.fromkeys([*core, *(lines or [])]))):
             ok = True
     except (Refused, OSError, UnicodeDecodeError):

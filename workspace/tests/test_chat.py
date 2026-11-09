@@ -838,6 +838,35 @@ def test_every_new_history_line_carries_the_flag(proj):
     assert [e["chat_message"] for e in t["history"]] == [False, True]
 
 
+def test_chat_ticket_and_locks_stay_out_of_git(proj, run):
+    """Privacy: the General ticket holds the Chat history; neither it nor the .lock-* files may show in git."""
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True, env=env)
+    code, _, _ = run("chat", "say", "Privat", "--json", "--by", "human:marco")
+    assert code == 0
+    gid = tickets.general_id(proj)
+    assert (proj / ".orch" / "tickets" / f"{gid}.json").is_file()
+    out = subprocess.run(
+        ["git", "status", "--porcelain", "-uall"], cwd=proj, capture_output=True, text=True, env=env
+    ).stdout
+    assert ".orch/tickets" not in out, out
+
+
+def test_hostile_general_id_never_reaches_the_ignore_file(proj, run):
+    from orch import harness
+
+    d = proj / ".orch" / "tickets"
+    d.mkdir(parents=True)
+    bad = {"schema": "orch.ticket/1", "id": "t_x\n!secrets/", "general": True, "title": "General"}
+    (d / "t_abcdef.json").write_text(json.dumps(bad))  # id differs from the file stem
+    (d / "t_ghijkl.json").write_text(json.dumps({**bad, "id": "t_ghijkl"}))  # a good one
+    assert harness._general_lines(proj) == ["tickets/t_ghijkl.json"]
+    (d / "t_x\n!secrets.json").write_text(json.dumps({**bad, "id": "t_x\n!secrets"}))
+    assert harness._general_lines(proj) == ["tickets/t_ghijkl.json"]
+
+
 @pytest.mark.parametrize("sub", ["make-ticket", "say", "contacts", "thread", "send"])
 def test_guard_refuses_person_chat_commands(proj, monkeypatch, sub):
     from types import SimpleNamespace

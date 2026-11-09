@@ -1,0 +1,40 @@
+$ bash /tmp/fx/demo.sh
+[31mred[39m [1m[32mbold green[0m [38;5;208morange256[39m [38;2;10;200;250mtruecolor[39m [4munder[0m
+part1 part2 part3
+ä ö ü ß 😀 👩‍💻 ┌──┬──┐ │ ✓│ │ └──┴──┘ 日本語
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+1
+2
+3
+4
+5
+$ less /tmp/fx/doc.txt
+$ echo after-less
+after-less
+$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

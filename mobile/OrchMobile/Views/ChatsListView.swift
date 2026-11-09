@@ -170,7 +170,7 @@ struct ChatsListView: View {
     }
 
     @ViewBuilder private var attentionCards: some View {
-        let questions = model.questions.filter { !$0.isReview && model.answers[$0.id] == nil }
+        let questions = model.questions.filter { !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil }
         if !questions.isEmpty && (filter == "All" || filter == "Needs you") {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Needs you · \(questions.count)").themeFont(13, .semibold).foregroundStyle(Theme.warn)

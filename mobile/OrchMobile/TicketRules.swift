@@ -7,14 +7,14 @@ extension ConversationRules {
 
     static func openPosition(of id: String, in items: [ConvItem]) -> (n: Int, of: Int)? {
         let open = items.indices.filter {
-            items[$0].kind == .question && items[$0].answer == nil && !isStale(index: $0, in: items)
+            items[$0].kind == .question && items[$0].question?.isMakeTicket != true && items[$0].answer == nil && !isStale(index: $0, in: items)
         }
         guard let position = open.firstIndex(where: { items[$0].id == id }) else { return nil }
         return (position + 1, open.count)
     }
 
     static func answeredText(in items: [ConvItem]) -> String? {
-        let questions = items.indices.filter { items[$0].kind == .question && !isStale(index: $0, in: items) }
+        let questions = items.indices.filter { items[$0].kind == .question && items[$0].question?.isMakeTicket != true && !isStale(index: $0, in: items) }
         guard !questions.isEmpty else { return nil }
         let answered = questions.filter { items[$0].answer != nil }.count
         return "\(answered) of \(questions.count) answered"

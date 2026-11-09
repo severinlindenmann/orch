@@ -398,8 +398,33 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False) -> dict
     return {"id": mid, "ticket": gid, "day": entry["day"], "sent": bool(sent)}
 
 
+def proposal_state(root: Path, mid: str) -> str:
+    """Where the proposal in Chat message `mid` stands: "open" (nobody made it), "making" (started, not finished:
+    a retry finishes the same ticket), "made", or "gone" (no such proposal in the last days)."""
+    today = dt.date.fromisoformat(day_key(root))
+    for n in range(4):
+        for m in _read_day(root, (today - dt.timedelta(days=n)).isoformat())["messages"]:
+            if m.get("id") == mid:
+                if not any(r.get("kind") == "proposal" for r in m.get("refs", [])):
+                    return "gone"
+                if m.get("making"):
+                    return "making"
+                done = m.get("moved_to") or any(r.get("made") for r in m.get("refs", []))
+                return "made" if done else "open"
+    return "gone"
+
+
 def make_ticket(root: Path, mid: str, title: str | None = None, by: str | None = None) -> dict:
-    """Move a proposed conversation into a normal ticket, once, on the person's click."""
+    """Move a proposed conversation into a normal ticket, once, on the person's click. When the proposal was
+    also asked on the phones (relay-api.md 'Ticket proposal question') the phones get the ordinary ack, which
+    closes their card, whichever side made it."""
+    result = _make_ticket(root, mid, title, by)
+    with contextlib.suppress(Refused, OSError, ValueError):
+        relay.ack_proposal(root, mid, result)
+    return result
+
+
+def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None = None) -> dict:
     who = tickets.current_actor(by)
     if tickets.agent_tool() or not who.startswith("human:"):
         raise Refused("Only a person makes a ticket from Chat.")
@@ -578,6 +603,8 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         "the person clicks Make ticket on the dashboard. When the person writes from their phone (the message came via the phone), never tell them to tap or click Make ticket: the phone has no such card yet; say you can make a ticket for this and that it is one click in the dashboard, and still add the proposal card. You may write notes and answer questions. You never sign, approve, "
         "publish, close, drop or delete anything, and you never answer a permission question: those are for "
         "the person.",
+        "Never mention failures, refusals, retries or how anything was sent: if a card may not have shown, "
+        "do not propose it again on your own; only if the person asks, and then in the very same words.",
         STAY_IN_ORCH,
         "Your conversation is cleared every day at 04:00; keep important context in the conversation.",
     ]
