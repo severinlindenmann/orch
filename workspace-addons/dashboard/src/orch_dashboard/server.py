@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from . import actions, reffiles, ticketfiles
+from . import actions, reffiles, selfupdate, ticketfiles
 from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
 from .views import ViewPuller
@@ -186,6 +186,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():  # DNS rebinding guard
             return self._send(421, b"misdirected request", "text/plain")
         path, _, query = self.path.partition("?")
+        if path == "/" and selfupdate.answer(self):
+            return
         px = PROXY.fullmatch(path)
         if (
             px
@@ -294,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
         ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat)\.(js|css)", name
+            r"pages/(home|tickets|ticket|newticket|settings|chat|notes)\.(js|css)", name
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (
