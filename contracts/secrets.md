@@ -64,9 +64,8 @@ What Level 1 does:
   test workspace by design.
 - POSIX: folders 0700 and files 0600, checked on every read; looser rights, another owner, or a symlink anywhere on the path
   → refused (`Refused: the key folder has the wrong rights. Fix: orch doctor`). Windows: an ACL with only the user and
-  SYSTEM, set at creation, checked the same way. **Until that ACL is implemented the key store fails closed on Windows:
-  every key operation refuses ("Keys can't be stored safely on Windows yet. Coming soon."), nothing is written, and the
-  relay refresh skips the admin keys and never falls back to the workspace.**
+  SYSTEM, set at creation, checked the same way.
+  (orch.winacl; the ACL is set before any secret is written). A loose key file is set aside, never trusted.
 - *Implementing slice 1.1 must* bind `.orch/.local-id` to the workspace's real path in the guarded orch home and refuse a
   mismatch (the id file is workspace-writable).
 - Writes: new file + rename, under `keys.lock` (O_EXCL). Read once per command; never cached on disk elsewhere.
