@@ -270,6 +270,8 @@ def test_init_in_the_orch_root_folder_reached_through_a_symlink_is_not_refused(p
         link.symlink_to(real, target_is_directory=True)
     except OSError:
         pytest.skip("no symlinks here")
+    # via="cwd": on POSIX getcwd() returns the resolved path, so this case mostly pins "a cwd given through a
+    # link still works"; the unresolved-string case is the orch_root one (ORCH_ROOT=str(link)).
     monkeypatch.chdir(link if via == "cwd" else real)
     monkeypatch.setenv("ORCH_ROOT", str(real if via == "cwd" else link))
     monkeypatch.setattr(cli, "_noted", False)
