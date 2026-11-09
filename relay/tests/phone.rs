@@ -1087,7 +1087,13 @@ async fn review_marker_needs_the_review_format() {
     }
 }
 
-fn proposal_msg(from: &str, id: &str, qid: &str, opts: Value, extra: Value) -> Value {
+fn proposal_msg(
+    from: &str,
+    id: &str,
+    qid: &str,
+    opts: serde_json::Value,
+    extra: serde_json::Value,
+) -> serde_json::Value {
     let mut body = json!({"question_id": qid, "title": "Rename field X", "text": "Ready. Shall I make this a ticket?",
         "options": opts, "recommended": null, "proposal": "make_ticket"});
     for (k, v) in extra.as_object().cloned().unwrap_or_default() {
@@ -1104,10 +1110,20 @@ async fn proposal_question_is_quiet_ticketless_and_answerable() {
     let p = t.pair_phone(&[&a]).await;
     push_on(&t, &p).await;
     let id = mid();
-    let m = proposal_msg(&a.id, &id, &format!("proposal-{id}"), json!(["make", "not_now"]), json!({"when": "2026-12-01"}));
+    let m = proposal_msg(
+        &a.id,
+        &id,
+        &format!("proposal-{id}"),
+        json!(["make", "not_now"]),
+        json!({"when": "2026-12-01"}),
+    );
     let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
     assert_eq!(s, 201, "{v}");
-    assert_eq!(t.push.sent.lock().unwrap().len(), 0, "no push for a ticket proposal");
+    assert_eq!(
+        t.push.sent.lock().unwrap().len(),
+        0,
+        "no push for a ticket proposal"
+    );
     let (_, qs) = t.phone(&p, "GET", "/v1/phone/questions", None).await;
     assert_eq!(qs["items"][0]["message"]["body"]["proposal"], "make_ticket");
     let (s, v) = t
