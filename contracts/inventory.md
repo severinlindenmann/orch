@@ -43,7 +43,9 @@ Both entries of a name are listed; the loser has `shadowed: true`. Insights show
   A connection without an entry has **no** action allowed in orch-started runs; the Used tab and Insights show "Not allowed
   by this workspace" with a one-click Allow (writes the entry, with a `conn.allow` proof). An `allow` entry an agent writes into
   `.orch/mcp.json` by hand counts only when it matches a grant the core recorded with a proof (`<orch home>/human-settings.json`,
-  key `conn.allow.<name>`); otherwise the action stays not allowed. The adapter turns the list into the agent tool's own allowed
+  key `conn.allow.<name>`); otherwise the action stays not allowed. When a person narrows the list in the file, the core
+  narrows the grant to match (grant := grant ∩ file), so editing it back later does not restore the removed actions
+  (reference `inv_settle_allow`, vectors `allow_settle`). The adapter turns the list into the agent tool's own allowed
   tools list; a call outside it is a `denial` event.
 - `orch conn list --json` → `$defs/conn_page` (all sources, `shadowed` marked). `orch conn show <name> [--source S] --json` →
   one `$defs/connection`. `orch conn allow <name> <action>… | --all [--off] --json` → the updated connection (a person only:

@@ -74,6 +74,8 @@ keyed by the workspace's real path like `permissions.json` (`$defs/settings_reco
   **tombstone** record (`value: false`) the first time it sees the lowered value.
 - **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
   on, `share_counts` on (owner decisions 3C, I5); everything else off.
+For list values (connection allow lists) a narrower file narrows the record (`grant ∩ file`), the list form of a
+tombstone (inventory.md).
 So an agent that edits `session_typing = true` changes nothing, and once a person switched `share_counts` or `live_session`
 off, an agent editing the file back to on changes nothing either. Reference `hp_settle`, vectors `settle`.
 

@@ -733,6 +733,26 @@ def inv_allowed(c):
     return sorted(expand(entry) & expand(grant) & set(actions))
 
 
+def inv_settle_allow(c):
+    """Allow list over time: a proof sets file and grant; a file edit sets the file and NARROWS the grant to file ∩ grant
+    (a list tombstone), never widens it. Effective after each event = file ∩ grant ∩ known actions."""
+    actions = set(c["actions"])
+
+    def expand(x):
+        return set(actions) if x == "*" else set(x or [])
+
+    file_val, grant, out = None, None, []
+    for ev in c["events"]:
+        if ev["by"] == "proof":
+            file_val = grant = ev["value"]
+        else:
+            file_val = ev["value"]
+            if grant is not None:
+                grant = sorted(expand(grant) & expand(file_val))
+        out.append(sorted(expand(file_val) & expand(grant) & actions) if grant is not None else [])
+    return out
+
+
 def kind_inventory():
     vi, vm, vp = _w("inventory", "inventory"), _w("inventory", "mcp_file"), _w("inventory", "conn_page")
     _core_clean("inventory")
@@ -748,6 +768,8 @@ def kind_inventory():
         _expect(f"inventory precedence {c['name']}", inv_winners(c["kind"], c["entries"]), c["winners"])
     for c in vec["classify"]:
         _expect(f"inventory classify {c['name_case']}", inv_classify(c), c["source"])
+    for c in vec["allow_settle"]:
+        _expect(f"inventory allow_settle {c['name']}", inv_settle_allow(c), c["effective"])
     for c in vec["allowed"]:
         _expect(f"inventory allowed {c['name']}", inv_allowed(c), c["allowed"])
 

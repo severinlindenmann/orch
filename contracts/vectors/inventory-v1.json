@@ -400,5 +400,140 @@
    "from_harness_settings": true,
    "source": "harness"
   }
+ ],
+ "allow_settle": [
+  {
+   "name": "grant [a,b], file narrowed to [a], then edited back to [a,b]",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "proof",
+     "value": [
+      "a",
+      "b"
+     ]
+    },
+    {
+     "by": "file",
+     "value": [
+      "a"
+     ]
+    },
+    {
+     "by": "file",
+     "value": [
+      "a",
+      "b"
+     ]
+    }
+   ],
+   "effective": [
+    [
+     "a",
+     "b"
+    ],
+    [
+     "a"
+    ],
+    [
+     "a"
+    ]
+   ]
+  },
+  {
+   "name": "grant all, file narrowed to [b], then '*' again",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "proof",
+     "value": "*"
+    },
+    {
+     "by": "file",
+     "value": [
+      "b"
+     ]
+    },
+    {
+     "by": "file",
+     "value": "*"
+    }
+   ],
+   "effective": [
+    [
+     "a",
+     "b",
+     "c"
+    ],
+    [
+     "b"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "name": "file only, no grant",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "file",
+     "value": "*"
+    }
+   ],
+   "effective": [
+    []
+   ]
+  },
+  {
+   "name": "narrow then a new proof widens",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "proof",
+     "value": [
+      "a"
+     ]
+    },
+    {
+     "by": "file",
+     "value": []
+    },
+    {
+     "by": "proof",
+     "value": [
+      "a",
+      "c"
+     ]
+    }
+   ],
+   "effective": [
+    [
+     "a"
+    ],
+    [],
+    [
+     "a",
+     "c"
+    ]
+   ]
+  }
  ]
 }
