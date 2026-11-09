@@ -1086,3 +1086,121 @@ async fn review_marker_needs_the_review_format() {
         assert_eq!(s, 422, "{qid}: {v}");
     }
 }
+
+fn proposal_msg(
+    from: &str,
+    id: &str,
+    qid: &str,
+    opts: serde_json::Value,
+    extra: serde_json::Value,
+) -> serde_json::Value {
+    let mut body = json!({"question_id": qid, "title": "Rename field X", "text": "Ready. Shall I make this a ticket?",
+        "options": opts, "recommended": null, "proposal": "make_ticket"});
+    for (k, v) in extra.as_object().cloned().unwrap_or_default() {
+        body[k] = v;
+    }
+    json!({"schema": "orch.msg/1", "id": id, "from": from, "to": "phones", "type": "question",
+        "created_at": "2026-11-09T10:00:00Z", "body": body})
+}
+
+#[tokio::test]
+async fn proposal_question_is_pushed_ticketless_and_answerable() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    push_on(&t, &p).await;
+    let id = mid();
+    let m = proposal_msg(
+        &a.id,
+        &id,
+        &format!("proposal-{id}"),
+        json!(["make", "not_now"]),
+        json!({"when": "2026-12-01"}),
+    );
+    let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(
+        t.push.sent.lock().unwrap().len(),
+        1,
+        "pushed like a normal reply"
+    );
+    let (_, qs) = t.phone(&p, "GET", "/v1/phone/questions", None).await;
+    assert_eq!(qs["items"][0]["message"]["body"]["proposal"], "make_ticket");
+    let (s, v) = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"client_id": "89844c7d-c056-4358-96fa-0029ddda285e", "question_message_id": id, "answer": "make"})),
+        )
+        .await;
+    assert_eq!(s, 201, "{v}");
+    // the relay-built answer has no ticket and the copied question_id; a second phone answer is refused
+    let inbox = t.inbox(&a).await;
+    let ans = inbox
+        .iter()
+        .find(|m| m["type"] == "answer")
+        .unwrap()
+        .clone();
+    assert!(ans.get("ticket").is_none_or(|x| x.is_null()), "{ans}");
+    assert_eq!(ans["body"]["question_id"], format!("proposal-{id}"));
+    let (s, v) = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"client_id": "caff3c95-72c7-41aa-9eaf-dfbdf8c28d86", "question_message_id": id, "answer": "not_now"})),
+        )
+        .await;
+    assert_eq!((s, v["error"].as_str()), (409, Some("already_answered")));
+}
+
+#[tokio::test]
+async fn a_workspace_cannot_answer_a_proposal() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let b = t.add_ws("B").await;
+    let _p = t.pair_phone(&[&a]).await;
+    let id = mid();
+    let m = proposal_msg(
+        &a.id,
+        &id,
+        &format!("proposal-{id}"),
+        json!(["make", "not_now"]),
+        json!({}),
+    );
+    assert_eq!(t.call(&a, "POST", "/v1/messages", Some(m)).await.0, 201);
+    let ans = json!({"schema": "orch.msg/1", "id": mid(), "from": b.id, "to": a.id, "type": "answer", "reply_to": id,
+        "created_at": "2026-11-09T10:00:00Z", "body": {"question_id": format!("proposal-{id}"), "answer": "make", "answered_by": "human:x"}});
+    let (s, v) = t.call(&b, "POST", "/v1/messages", Some(ans)).await;
+    assert_eq!(s, 403, "{v}");
+}
+
+#[tokio::test]
+async fn proposal_marker_needs_the_proposal_format() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let _p = t.pair_phone(&[&a]).await;
+    let long = "x".repeat(121);
+    for case in 0..9 {
+        let id = mid();
+        let own = format!("proposal-{id}");
+        let mut m = proposal_msg(&a.id, &id, &own, json!(["make", "not_now"]), json!({}));
+        match case {
+            0 => m["body"]["options"] = json!(["make", "not now"]),
+            1 => m["body"]["question_id"] = json!(format!("proposal-{}", mid())),
+            2 => m["body"]["proposal"] = json!("delete_all"),
+            3 => m["body"]["title"] = json!(long),
+            4 => m["ticket"] = json!("t_7k3f9q"),
+            5 => m["body"]["scope"] = json!("x"),
+            6 => m["body"]["proposal"] = json!(null),
+            7 => m["body"]["proposal"] = json!(""),
+            _ => {
+                // the id prefix without the marker
+                m["body"].as_object_mut().unwrap().remove("proposal");
+            }
+        }
+        let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+        assert_eq!(s, 422, "case {case}: {v}");
+    }
+}

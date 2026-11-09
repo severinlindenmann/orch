@@ -200,7 +200,7 @@ final class AppModel {
     }
     /// The "Got it" line the workspace sent for a text of this phone.
     func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
-    var openQuestionCount: Int { questions.filter { !$0.isReview && answers[$0.id] == nil }.count }
+    var openQuestionCount: Int { questions.filter { !$0.isReview && !$0.isMakeTicket && answers[$0.id] == nil }.count }
 
     // MARK: Onboarding
 
@@ -643,6 +643,10 @@ final class AppModel {
     }
     private func route(to q: Question) {
         let ws = q.message.from
+        if q.isMakeTicket {
+            path = [.workspace(ws), .general(ws)]
+            return
+        }
         path = q.message.ticket.map { [.workspace(ws), .ticket(workspace: ws, ticket: $0)] } ?? [.workspace(ws)]
     }
 

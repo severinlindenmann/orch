@@ -1,0 +1,325 @@
+{
+  "about": "Ticket proposal question (relay-api.md 'Ticket proposal question'). valid: shapes that validate against message.schema.json AND pass the relay. invalid: shapes the relay refuses (422). cases: a phone answer and what the workspace must do; state: made = the proposal already became a ticket (dashboard first) or was already answered. do: make (one ticket + ack), not_now (history line only), nothing (history line only).",
+  "phone": "ph_iphone0001 is paired and named \"iPhone\" (attribution = human:<that name>).",
+  "valid": [
+    {
+      "name": "plain",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000001",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:40:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000001",
+          "title": "Rename field X to source_id",
+          "text": "Ready. Shall I make this a ticket?",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": "make_ticket"
+        }
+      }
+    },
+    {
+      "name": "with-date",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000002",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:41:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000002",
+          "title": "Book the offsite",
+          "text": "Shall I make a ticket?",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": "make_ticket",
+          "when": "2026-12-01"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "options-wrong",
+      "why": "options must be exactly make, not_now",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000003",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:42:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000003",
+          "title": "T",
+          "text": "x",
+          "options": [
+            "make",
+            "not now"
+          ],
+          "recommended": null,
+          "proposal": "make_ticket"
+        }
+      }
+    },
+    {
+      "name": "question-id-not-own-id",
+      "why": "question_id must be proposal-<the message's own id>",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000004",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:43:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000009",
+          "title": "T",
+          "text": "x",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": "make_ticket"
+        }
+      }
+    },
+    {
+      "name": "other-marker-value",
+      "why": "proposal must be make_ticket",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000005",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:44:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000005",
+          "title": "T",
+          "text": "x",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": "delete_all"
+        }
+      }
+    },
+    {
+      "name": "title-too-long",
+      "why": "title is 1-120 chars",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000006",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:45:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000006",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "text": "x",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": "make_ticket"
+        }
+      }
+    },
+    {
+      "name": "with-ticket",
+      "why": "the message has no ticket",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000007",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "ticket": "t_m2p8xz",
+        "created_at": "2026-11-09T10:46:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000007",
+          "title": "T",
+          "text": "x",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": "make_ticket"
+        }
+      }
+    },
+    {
+      "name": "with-scope",
+      "why": "no scope",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000008",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:47:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000008",
+          "title": "T",
+          "text": "x",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": "make_ticket",
+          "scope": "y"
+        }
+      }
+    },
+    {
+      "name": "prefix-without-marker",
+      "why": "a question_id starting with proposal- needs the marker",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000009",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:50:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000009",
+          "text": "x",
+          "options": [
+            "a"
+          ],
+          "recommended": null
+        },
+        "ticket": "t_m2p8xz"
+      }
+    },
+    {
+      "name": "null-marker",
+      "why": "proposal must be make_ticket",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_pr00000000000010",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "question",
+        "created_at": "2026-11-09T10:50:00Z",
+        "body": {
+          "question_id": "proposal-m_pr00000000000010",
+          "title": "T",
+          "text": "x",
+          "options": [
+            "make",
+            "not_now"
+          ],
+          "recommended": null,
+          "proposal": null
+        }
+      }
+    }
+  ],
+  "question_id": "proposal-m_pr00000000000001",
+  "cases": [
+    {
+      "name": "make",
+      "state": {
+        "made": false
+      },
+      "answer": "make",
+      "from": "ph_iphone0001",
+      "do": "make",
+      "by": "human:iPhone"
+    },
+    {
+      "name": "make-case-and-space",
+      "state": {
+        "made": false
+      },
+      "answer": " Make ",
+      "from": "ph_iphone0001",
+      "do": "make",
+      "by": "human:iPhone"
+    },
+    {
+      "name": "not-now",
+      "state": {
+        "made": false
+      },
+      "answer": "not_now",
+      "from": "ph_iphone0001",
+      "do": "not_now",
+      "by": "human:iPhone"
+    },
+    {
+      "name": "make-twice",
+      "state": {
+        "made": true
+      },
+      "answer": "make",
+      "from": "ph_iphone0001",
+      "do": "nothing"
+    },
+    {
+      "name": "make-after-dashboard",
+      "state": {
+        "made": true,
+        "by": "dashboard"
+      },
+      "answer": "make",
+      "from": "ph_iphone0001",
+      "do": "nothing"
+    },
+    {
+      "name": "other-word",
+      "state": {
+        "made": false
+      },
+      "answer": "sure",
+      "from": "ph_iphone0001",
+      "do": "nothing"
+    },
+    {
+      "name": "from-subscriber",
+      "state": {
+        "made": false
+      },
+      "answer": "make",
+      "from": "sub_abc12345",
+      "do": "nothing"
+    },
+    {
+      "name": "from-other-workspace",
+      "state": {
+        "made": false
+      },
+      "answer": "make",
+      "from": "ws_other00001",
+      "do": "nothing"
+    },
+    {
+      "name": "unpaired-phone",
+      "state": {
+        "made": false
+      },
+      "answer": "make",
+      "from": "ph_stranger01",
+      "do": "nothing"
+    }
+  ]
+}
