@@ -566,6 +566,8 @@ def chat_id(root: Path) -> dict:
 def status(root: Path, now=None) -> dict:
     """What the dashboard shows: helper name, today, the day's texts, the strip, the History list."""
     gid = tickets.general_id(root)
+    if gid:
+        runs.check_start_timeout(root, gid)  # a Chat run that never got its agent: a message says why
     today = day_key(root, now)
     waiting = [i["id"] for i in runs.human_waiting(root, gid)] if gid else []
     return {
