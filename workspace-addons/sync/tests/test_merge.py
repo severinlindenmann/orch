@@ -513,3 +513,25 @@ def test_hostile_ran_at_does_not_crash_and_runs_are_capped():
     assert [e.get("exit") for e in m2["checklist"][0]["evidence"]] == [
         e.get("exit") for e in m["checklist"][0]["evidence"]
     ]
+
+
+def test_only_well_formed_runs_count_and_each_check_is_capped():
+    base = tk(checklist=[{"id": "c1", "text": "x", "done": False, "evidence": []}])
+    odd = [
+        {"type": "command", "ref": "pytest", "ran_at": f"bad{i}", "at": f"2026-11-09T09:00:{i:02d}Z"}
+        for i in range(8)
+    ]
+    runs = [
+        {
+            "type": "command",
+            "ref": f"c{c}",
+            "ran_at": f"2026-11-09T10:{c:02d}:{i:02d}Z",
+            "at": f"2026-11-09T10:{c:02d}:{i:02d}Z",
+        }
+        for c in range(15)
+        for i in range(5)
+    ]
+    side = [{"id": "c1", "text": "x", "done": False, "evidence": odd + runs}]
+    m = merge_ticket(base, up(base, T2, checklist=side), up(base, T3), NOW)
+    ev = m["checklist"][0]["evidence"]
+    assert len(ev) == 50 and all(e in ev for e in odd)  # not-runs are never trimmed; the oldest runs go first

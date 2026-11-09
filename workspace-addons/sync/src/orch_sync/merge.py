@@ -176,6 +176,13 @@ def _order(items, base_ids, key=None):
 
 
 RUNS_PER_REF = 5  # same rule as the core's tickets.trim_runs, so every replica ends with the same entries
+RUNS_PER_CHECK = 50
+_RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+def _is_run(e) -> bool:
+    ran = e.get("ran_at")
+    return e.get("type") == "command" and isinstance(ran, str) and _RAN_AT.fullmatch(ran) is not None
 
 
 def _evidence(*lists):
@@ -192,12 +199,18 @@ def _evidence(*lists):
     out = sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e)))
     runs = {}
     for i, e in enumerate(out):
-        if e.get("type") == "command" and isinstance(e.get("ran_at"), str):
+        if _is_run(e):
             runs.setdefault(str(e.get("ref")), []).append(i)
     drop = set()
     for idx in runs.values():
         idx.sort(key=lambda i: (out[i]["ran_at"], i))
         drop.update(idx[:-RUNS_PER_REF])
+    kept = sorted(
+        (i for idx in runs.values() for i in idx if i not in drop), key=lambda i: (out[i]["ran_at"], i)
+    )
+    over = len(out) - len(drop) - RUNS_PER_CHECK
+    if over > 0:
+        drop.update(kept[:over])
     return [e for i, e in enumerate(out) if i not in drop]
 
 

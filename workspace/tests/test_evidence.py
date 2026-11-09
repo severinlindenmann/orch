@@ -291,6 +291,8 @@ def test_evidence_record_fields_are_typed():
         {"output_tail": 5},
         {"output_tail": "x" * 2049},
         {"ran_at": "2026-99-99T99:00:00Z"},
+        {"ran_at": "2026-11-09T10:00:00+00:00"},
+        {"ran_at": "2026-11-09T10:00:00Z\n"},
         {"output_tail": "a\x1b[31mb"},
         {"output_tail": "a\x00b"},
         {"output_tail": "a\x85b"},
@@ -317,3 +319,19 @@ def test_trim_runs_leaves_other_proof_alone():
     runs = [{"type": "command", "ref": "x", "ran_at": f"2026-11-09T10:00:0{i}Z"} for i in range(7)]
     out = tickets.trim_runs([note, *runs, {"type": "command", "ref": "no ran_at"}])
     assert note in out and len(out) == 1 + 5 + 1 and runs[0] not in out and runs[-1] in out
+
+
+def test_record_cleans_c1_and_direction_characters_from_output(proj, run, tid):
+    (proj / "o.log").write_text("ok\x85 line\u202e rtl\u2066 iso\x1b[0m end\n", encoding="utf-8")
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "o.log")[0] == 0
+    tail = read(proj, tid)["checklist"][0]["evidence"][0]["output_tail"]
+    assert tail == "ok line rtl iso[0m end\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need POSIX")
+def test_record_refuses_a_path_through_a_linked_folder(proj, run, tid, tmp_path):
+    outside = tmp_path.parent / (tmp_path.name + "_out")
+    outside.mkdir()
+    (outside / "log.txt").write_text("secret", encoding="utf-8")
+    (proj / "lnk").symlink_to(outside)
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "lnk/log.txt")[0] == 2

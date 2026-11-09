@@ -6,7 +6,8 @@ that are stored or hashed (`orch check record --output`, files_sig). Enforced he
 refused)
   and the same device/inode as the path had a moment before (a swap in between is refused);
 - reads come from that handle and are bounded (a tail by pread, a hash in chunks up to a limit).
-Special files (FIFO, device, socket, directory) are never read: a hash counts only their type.
+Special files (FIFO, device, socket, directory, and so a submodule folder) are never read: a hash counts only
+their type.
 `safe_read_tail` adds the name rules for `--output`: only plain log files inside the workspace."""
 
 from __future__ import annotations
@@ -23,7 +24,21 @@ _FLAGS = (
     os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
 )
 CHUNK = 64 * 1024
-SECRETISH = ("*key*", "*secret*", "*token*", "*.pem", "*.p12", "*.pfx", "*password*", "*credential*")
+SECRETISH = (
+    "*key*",
+    "*secret*",
+    "*token*",
+    "*.pem",
+    "*.p8",
+    "*.p12",
+    "*.pfx",
+    "*.kdbx",
+    "*password*",
+    "*credential*",
+    "id_rsa*",
+    "id_ed25519*",
+    "id_ecdsa*",
+)
 _NO = "The output file must be a plain log file inside this workspace."
 
 
@@ -90,6 +105,8 @@ def safe_read_tail(root: Path, path: str, limit: int) -> bytes:
         raise Refused(_NO)
     fd, st = opened
     try:
+        if Path(os.path.realpath(real)) != real:  # a folder on the way was swapped for a link meanwhile
+            raise Refused(_NO)
         want = min(limit, st.st_size)
         if hasattr(os, "pread"):
             return os.pread(fd, want, st.st_size - want) if want else b""
@@ -99,12 +116,15 @@ def safe_read_tail(root: Path, path: str, limit: int) -> bytes:
         os.close(fd)
 
 
-def file_state(path: Path, hash_limit: int, budget: list[int]) -> str:
+def file_state(path: Path, hash_limit: int, budget: list[int], root: Path | None = None) -> str:
     """A short string for the file as it is now, for files_sig. Regular single-name file: sha256 of up to
     `hash_limit` bytes (streamed) + size (+ mtime when it is bigger than the limit). Link: its target text.
     Anything else: its type only. `budget[0]` is the bytes that may still be read; spent, it becomes -1
     (caller: None)."""
     try:
+        if root is not None:  # a folder on the way swapped for a link to somewhere else: not ours to read
+            if not Path(os.path.realpath(path.parent)).is_relative_to(Path(os.path.realpath(root))):
+                return "?"
         st = os.lstat(path)
     except OSError:
         return "?"
@@ -118,9 +138,9 @@ def file_state(path: Path, hash_limit: int, budget: list[int]) -> str:
     if not stat.S_ISREG(mode):
         return "S:" + oct(stat.S_IFMT(mode))
     if st.st_nlink != 1:
-        return f"H:{exe}:{st.st_size}:{st.st_mtime_ns}"
+        return f"H:{exe}:{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}"
     if st.st_size > hash_limit:
-        return f"B:{exe}:{st.st_size}:{st.st_mtime_ns}"
+        return f"B:{exe}:{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}"
     if budget[0] < st.st_size:
         budget[0] = -1
         return "?"

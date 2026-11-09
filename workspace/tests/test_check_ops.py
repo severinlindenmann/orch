@@ -3,11 +3,12 @@
 import json
 import os
 import subprocess
+import sys
 import time
 
 import pytest
 
-from orch import filesig, tickets
+from orch import filesig, saferead, tickets
 
 
 def read(proj, tid):
@@ -373,6 +374,7 @@ def test_files_sig_content_not_index(repo):
     assert filesig.files_sig(repo) not in (a, b)  # a deleted file is
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="fifo, symlink and hard link need POSIX")
 def test_files_sig_special_files_never_block_or_read(repo, tmp_path):
     a = filesig.files_sig(repo)
     os.mkfifo(repo / "pipe")
@@ -392,3 +394,75 @@ def test_files_sig_special_files_never_block_or_read(repo, tmp_path):
         assert filesig.files_sig(repo) is None  # read budget spent
     finally:
         filesig.MAX_READ = monkey
+
+
+def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
+    repo = proj
+    _git(repo, "init", "-q")
+    (repo / "a.txt").write_text("one\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-q", "-m", "first")
+    good = filesig.files_sig(repo)
+    marker = proj.parent / (proj.name + "_ENVMARK")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", f"touch {marker}")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", f"'core.fsmonitor={marker}'")
+    monkeypatch.setenv("GIT_DIR", str(proj.parent / "no-such-git-dir"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(proj.parent))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(proj.parent / "no-index"))
+    monkeypatch.setenv("GIT_EXEC_PATH", str(proj.parent / "no-exec"))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", "/")
+    assert filesig.files_sig(repo) == good and good
+    assert not marker.exists()
+    seen = []
+    real = subprocess.run
+    monkeypatch.setattr(filesig.subprocess, "run", lambda a, **k: seen.append(k["env"]) or real(a, **k))
+    filesig.files_sig(repo)
+    assert seen and all(not any(k.startswith("GIT_") and k != "GIT_OPTIONAL_LOCKS" for k in e) for e in seen)
+
+
+def test_files_sig_sees_an_edit_with_the_old_mtime(repo):
+    big = repo / "big.bin"
+    big.write_bytes(b"a" * (filesig.HASH_LIMIT + 10))  # above the hash limit: size + times only
+    old = big.stat()
+    first = filesig.files_sig(repo)
+    time.sleep(0.02)
+    big.write_bytes(b"b" * (filesig.HASH_LIMIT + 10))  # same size
+    os.utime(big, ns=(old.st_atime_ns, old.st_mtime_ns))  # `touch -d`: the old mtime back
+    assert filesig.files_sig(repo) != first  # ctime still moved
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need POSIX")
+def test_files_sig_does_not_read_through_a_swapped_folder(repo, tmp_path, monkeypatch):
+    (repo / "sub").mkdir()
+    (repo / "sub" / "f.txt").write_text("inside\n", encoding="utf-8")
+    _git(repo, "add", "sub/f.txt")
+    _git(repo, "commit", "-q", "-m", "sub")
+    before = filesig.files_sig(repo)
+    outside = tmp_path.parent / (tmp_path.name + "_outside")
+    outside.mkdir()
+    (outside / "f.txt").write_text("secret\n", encoding="utf-8")
+    (repo / "sub" / "f.txt").unlink()
+    (repo / "sub").rmdir()
+    (repo / "sub").symlink_to(outside)
+    opened = []
+    real = saferead._open_regular
+    monkeypatch.setattr(saferead, "_open_regular", lambda p: opened.append(str(p)) or real(p))
+    after = filesig.files_sig(repo)
+    assert after != before and not any(str(outside) in p or "sub/f.txt" in p for p in opened)
+
+
+def test_runs_and_files_are_capped_per_check():
+    stamp = lambda i: f"2026-11-09T{i // 3600:02d}:{i % 3600 // 60:02d}:{i % 60:02d}Z"  # noqa: E731
+    evs = [{"type": "note", "ref": f"n{i}"} for i in range(10)]
+    evs += [
+        {"type": "command", "ref": f"cmd{c}", "ran_at": stamp(c * 100 + i)}
+        for c in range(20)
+        for i in range(5)
+    ]
+    out = tickets.trim_runs(evs)
+    assert len(out) == 50 and all(e in out for e in evs[:10])  # notes stay, the oldest runs go
+    assert [e["ran_at"] for e in out if e["ref"].startswith("cmd")] == sorted(
+        e["ran_at"] for e in out if e["ref"].startswith("cmd")
+    )

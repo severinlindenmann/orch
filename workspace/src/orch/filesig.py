@@ -13,7 +13,8 @@ Design (git folders only; no git, a timeout, a cap or an error means None = no s
   The index (staged or not, committed or not) does not count, only what is in the folder now: `git add` or
   `git commit` alone is not a change. Left out: `.orch/`, `.git`, node_modules, .venv, __pycache__, dist,
   build.
-  File hashes are cached by (path, size, mtime_ns, ino)."""
+  A submodule folder (or any directory) counts as its type only: nothing inside it is read.
+  File hashes are cached by (path, size, mtime_ns, ctime_ns, ino)."""
 
 from __future__ import annotations
 
@@ -91,11 +92,11 @@ def _state(root: Path, rel: str, budget: list[int]) -> str:
         st = os.lstat(full)
     except OSError:
         return "?"
-    key = (str(full), st.st_size, st.st_mtime_ns, st.st_ino)
+    key = (str(full), st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
     hit = _HASHES.get(key)
     if hit is not None:
         return hit
-    state = saferead.file_state(full, HASH_LIMIT, budget)
+    state = saferead.file_state(full, HASH_LIMIT, budget, root)
     if "?" not in state:
         if len(_HASHES) > 50_000:
             _HASHES.clear()

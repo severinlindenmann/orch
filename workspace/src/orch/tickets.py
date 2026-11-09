@@ -39,7 +39,9 @@ COVERS_MAX = 300
 TAIL_MAX = 2048
 # C0 except tab/newline, DEL, C1 and bidi overrides: never in a recorded command or output
 UNSAFE_TEXT = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 RUNS_PER_REF = 5
+RUNS_PER_CHECK = 50
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
@@ -1135,7 +1137,7 @@ def parse_evidence(raw: str) -> dict:
 
 
 def _ran_at_ok(v) -> bool:
-    if not isinstance(v, str):
+    if not isinstance(v, str) or not RAN_AT.fullmatch(v):
         return False
     try:
         datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ")
@@ -1163,19 +1165,27 @@ def _check_record_fields(ev: dict) -> None:
 
 
 def trim_runs(evidence: list) -> list:
-    """Recorded runs (command evidence with ran_at): keep the newest RUNS_PER_REF per command text, so a
-    loop of
-    `orch check record` cannot grow a ticket without bound. Other evidence is never dropped. Same rule in
-    the sync
-    add-on's merge, so replicas converge."""
+    """Recorded runs (command evidence with a well-formed ran_at): keep the newest RUNS_PER_REF per
+    command text
+    and at most RUNS_PER_CHECK evidence entries in all (oldest runs go first), so a loop of `orch check
+    record`
+    cannot grow a ticket without bound. Other evidence is never dropped. Same rule in the sync add-on's merge,
+    so replicas converge."""
     runs: dict[str, list[int]] = {}
     for i, e in enumerate(evidence):
-        if isinstance(e, dict) and e.get("type") == "command" and isinstance(e.get("ran_at"), str):
+        if isinstance(e, dict) and e.get("type") == "command" and _ran_at_ok(e.get("ran_at")):
             runs.setdefault(str(e.get("ref")), []).append(i)
-    drop = set()
+    drop: set[int] = set()
     for idx in runs.values():
         idx.sort(key=lambda i: (evidence[i]["ran_at"], i))
         drop.update(idx[:-RUNS_PER_REF])
+    kept = [
+        i for i in sorted((i for idx in runs.values() for i in idx), key=lambda i: (evidence[i]["ran_at"], i))
+    ]
+    kept = [i for i in kept if i not in drop]
+    over = len(evidence) - len(drop) - RUNS_PER_CHECK
+    if over > 0:
+        drop.update(kept[:over])
     return [e for i, e in enumerate(evidence) if i not in drop]
 
 
