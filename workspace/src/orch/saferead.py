@@ -74,6 +74,8 @@ def _anchor(root: Path, parts: tuple[str, ...]) -> tuple[str, dict, int | None]:
     """(name, kwargs, dir fd to close) to act on the last part so that nothing outside root can be reached.
     Without dir_fd (Windows) the folder's real path is checked to be inside root instead; callers then
     compare the opened handle with the real path (`_open_checked(check=...)`). Raises OSError."""
+    if not parts:
+        raise OSError("no file name")
     if _DIRFD:
         fd = _walk(root, parts[:-1])
         return parts[-1], {"dir_fd": fd}, fd
@@ -94,7 +96,11 @@ def _open_checked(name: str, kw: dict, check: str | None = None) -> tuple[int, o
         ok = stat.S_ISREG(st.st_mode) and st.st_nlink == 1
         if ok and check is not None:  # no dir_fd: the handle must be the file the real path names
             real = os.stat(os.path.realpath(check))
-            ok = (st.st_dev, st.st_ino) == (real.st_dev, real.st_ino)
+            named = os.lstat(check)  # the path itself must be that regular file, not a link to one
+            ok = stat.S_ISREG(named.st_mode) and (st.st_dev, st.st_ino) == (real.st_dev, real.st_ino) == (
+                named.st_dev,
+                named.st_ino,
+            )
         if not ok:
             os.close(fd)
             return None
@@ -161,13 +167,11 @@ def safe_read_tail(root: Path, path: str, limit: int) -> bytes:
 
 
 def file_state(root: Path, rel: str, hash_limit: int, budget: list[int]) -> str:
-    """A short string for the file root/rel (rel as git lists it, `/` separated), for files_sig. Regular
-    single-name file: sha256 of up to `hash_limit` bytes (streamed) + size (+ mtime and ctime when it is
-    bigger
-    than the limit). Link: its target text. Anything else (also a folder, so a submodule): its type only.
-    Nothing outside root is ever touched (see `_walk`). `budget[0]` is the bytes that may still be read;
-    spent,
-    it becomes -1 (the caller then gives up)."""
+    """A short string for the file root/rel (rel as git lists it, `/` separated), for files_sig.
+    Regular single-name file: sha256 of up to `hash_limit` bytes (streamed) + size (+ mtime and ctime when it
+    is bigger than the limit). Link: its target text. Anything else (also a folder, so a submodule): its type
+    only. Nothing outside root is ever touched (see `_walk`). `budget[0]` is the bytes that may still be
+    read; spent, it becomes -1 (the caller then gives up)."""
     parts = tuple(p for p in rel.split("/") if p)
     if not parts:
         return "?"

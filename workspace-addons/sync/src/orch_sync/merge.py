@@ -196,8 +196,8 @@ def _is_run(e) -> bool:
 
 
 def trim_runs(evidence: list) -> list:
-    """Same as orch.tickets.trim_runs: newest 5 runs per command text, at most 50 entries, the newest run
-    is never dropped, run order (ran_at, canonical JSON)."""
+    """Same as orch.tickets.trim_runs: newest 5 runs per command text, at most 50 entries (oldest notes first,
+    then older runs), the newest run is never dropped, run order (ran_at, canonical JSON)."""
     key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))
     by_ref = {}
     for i, e in enumerate(evidence):
@@ -209,12 +209,12 @@ def trim_runs(evidence: list) -> list:
         drop.update(idx[:-RUNS_PER_REF])
     live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
     over = len(evidence) - len(drop) - RUNS_PER_CHECK
+    if over > 0:  # notes and other proof first (oldest first), then older runs; the newest run always stays
+        others = [i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop]
+        drop.update(others[:over])
+        over -= min(over, len(others))
     if over > 0:
-        older = live[:-1]
-        drop.update(older[:over])
-        over -= min(over, len(older))
-    if over > 0:
-        drop.update([i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop][:over])
+        drop.update(live[:-1][:over])
     return [e for i, e in enumerate(evidence) if i not in drop]
 
 

@@ -448,8 +448,16 @@ def test_files_sig_does_not_read_through_a_swapped_folder(repo, tmp_path, monkey
     (repo / "sub").rmdir()
     (repo / "sub").symlink_to(outside)
     read = []
-    real = os.read
-    monkeypatch.setattr(saferead.os, "read", lambda fd, n: read.append(real(fd, n)) or read[-1])
+    real_read, real_pread = os.read, getattr(os, "pread", None)
+    monkeypatch.setattr(saferead.os, "read", lambda fd, n: read.append(real_read(fd, n)) or read[-1])
+    if real_pread:
+        monkeypatch.setattr(
+            saferead.os, "pread", lambda fd, n, o: read.append(real_pread(fd, n, o)) or read[-1]
+        )
+    # control (non-vacuous): the spy does see a normal file being read
+    assert saferead.file_state(repo.resolve(), "a.txt", 1000, [10_000]).startswith("F:")
+    assert any(b"one" in chunk for chunk in read)
+    read.clear()
     after = filesig.files_sig(repo)
     assert after != before and not any(b"secret" in chunk for chunk in read)  # never read through the link
     budget = [10_000]
@@ -466,19 +474,47 @@ def test_runs_and_entries_are_capped_per_check():
         for i in range(5)
     ]
     out = tickets.trim_runs(evs)
-    assert len(out) == 50 and all(e in out for e in evs[:10])  # notes stay, the oldest runs go
+    assert len(out) == 50 and not any(e in out for e in evs[:10])  # notes go first, then the oldest runs
+    assert evs[-1] in out
     assert [e["ran_at"] for e in out if e["ref"].startswith("cmd")] == sorted(
         e["ran_at"] for e in out if e["ref"].startswith("cmd")
     )
 
 
-def test_cap_never_drops_the_newest_run_and_notes_go_last():
+def test_cap_drops_notes_first_and_never_the_newest_run():
     stamp = lambda i: f"2026-11-09T10:{i // 60:02d}:{i % 60:02d}Z"  # noqa: E731
-    old_runs = [{"type": "command", "ref": f"c{i}", "ran_at": stamp(i)} for i in range(5)]
+    runs = [{"type": "command", "ref": f"c{i}", "ran_at": stamp(i)} for i in range(5)]
     newest = {"type": "command", "ref": "latest", "ran_at": "2026-11-09T23:00:00Z"}
     notes = [{"type": "note", "ref": f"n{i}"} for i in range(60)]
-    out = tickets.trim_runs([*notes, *old_runs, newest])
-    assert len(out) == 50 and newest in out and not any(r in out for r in old_runs)
-    assert out[0] == notes[11] and notes[10] not in out  # runs went first, then the oldest notes
-    only = tickets.trim_runs([*notes, newest])
-    assert newest in only and len(only) == 50
+    out = tickets.trim_runs([*notes, *runs, newest])
+    assert len(out) == 50 and newest in out and all(r in out for r in runs)  # notes went, runs stayed
+    assert notes[10] not in out and notes[-1] in out
+    many = [{"type": "note", "ref": f"n{i}"} for i in range(70)]
+    only = tickets.trim_runs([*many, *runs, newest])
+    assert len(only) == 50 and newest in only
+    runs_only = [{"type": "command", "ref": f"r{i}", "ran_at": stamp(i)} for i in range(60)]
+    kept = tickets.trim_runs(runs_only)
+    assert len(kept) == 50 and runs_only[-1] in kept and runs_only[0] not in kept
+
+
+def test_anchor_refuses_empty_parts_and_a_fifo_log_never_blocks(proj):
+    with pytest.raises(OSError):
+        saferead._anchor(proj.resolve(), ())
+    assert saferead.file_state(proj.resolve(), "", 10, [10]) == "?"
+    if sys.platform != "win32":
+        os.mkfifo(proj / "x.log")
+        with pytest.raises(tickets.Refused):
+            saferead.safe_read_tail(proj, "x.log", 100)  # O_NONBLOCK: returns at once, then refused
+        assert saferead.file_state(proj.resolve(), "x.log", 10, [10]).startswith("S:")
+
+
+def test_fallback_check_wants_the_path_itself_to_be_the_file(proj, tmp_path):
+    real = proj / "real.txt"
+    real.write_text("x", encoding="utf-8")
+    if sys.platform != "win32":
+        (proj / "link.txt").symlink_to(real)
+        got = saferead._open_checked(str(proj / "link.txt"), {}, str(proj / "link.txt"))
+        assert got is None  # O_NOFOLLOW or the lstat check: never a link
+    got = saferead._open_checked(str(real), {}, str(real))
+    assert got is not None
+    os.close(got[0])

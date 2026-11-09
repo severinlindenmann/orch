@@ -1176,10 +1176,9 @@ def trim_runs(evidence: list) -> list:
     """Recorded runs (command evidence with a well-formed ran_at, see _ran_at_ok): keep the newest
     RUNS_PER_REF per command text and at most RUNS_PER_CHECK evidence entries in all, so a loop of
     `orch check record` cannot grow a ticket without bound. Order of runs: (ran_at, canonical JSON).
-    Over the cap, older runs go first; the newest run is never dropped (the one just recorded stays); only
-    when nothing but that run and other proof is left, the oldest other entries go. The sync add-on's merge
-    has the same rule (orch_sync.merge.trim_runs, parity-tested) so every replica ends with the same
-    entries."""
+    Over the cap, the oldest notes and other proof go first, then older runs; the newest run is never dropped
+    (the one just recorded stays). Notes never push runs out. The sync add-on's merge has the same rule
+    (orch_sync.merge.trim_runs, parity-tested) so every replica ends with the same entries."""
     key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))  # noqa: E731
     by_ref: dict[str, list[int]] = {}
     for i, e in enumerate(evidence):
@@ -1191,12 +1190,12 @@ def trim_runs(evidence: list) -> list:
         drop.update(idx[:-RUNS_PER_REF])
     live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
     over = len(evidence) - len(drop) - RUNS_PER_CHECK
+    if over > 0:  # notes and other proof first (oldest first), then older runs; the newest run always stays
+        others = [i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop]
+        drop.update(others[:over])
+        over -= min(over, len(others))
     if over > 0:
-        older = live[:-1]
-        drop.update(older[:over])
-        over -= min(over, len(older))
-    if over > 0:
-        drop.update([i for i in range(len(evidence)) if not _is_run(evidence[i]) and i not in drop][:over])
+        drop.update(live[:-1][:over])
     return [e for i, e in enumerate(evidence) if i not in drop]
 
 
