@@ -22,6 +22,14 @@ connection shows the program's base name (`npx`, `uvx`, `gdrive-mcp`) or, for ht
 | Connection | `workspace` > `admin` > `harness` | `.orch/mcp.json` (`$defs/mcp_file`); admin: the relay refresh, stored in the key folder (`<orch home>/keys/<ws>/connections.json`, because admin configs may carry keys); harness: the agent tool's own settings (listed, read only, never changed) |
 | Key | `workspace` > `admin` | the key store (secrets.md) |
 
+**How a source is decided (P1: anything unproven is `workspace`).** A skill or connection is `admin` only when its name and
+version match an item of the last relay refresh as recorded by the core in the trusted orch home (not the workspace's
+`.orch-shared` marker, which anyone can write); `builtin` only when its content hash equals the one in the manifest shipped
+with the installed orch; `marketplace` only when name and hash match the official public marketplace index (a private or local
+add-on is `workspace`); `harness` only when orch read it from the agent tool's own settings. A folder named `orch-x` that orch
+did not ship is `workspace`. Since `workspace` and `harness` names stay hidden at the admin (usage-counts.md), a spoofed marker
+or name never sends an own name out. Reference `inv_classify`, vectors `classify`.
+
 Both entries of a name are listed; the loser has `shadowed: true`. Insights shows both with the active one marked.
 
 ## Connections

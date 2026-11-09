@@ -703,6 +703,20 @@ def inv_winners(kind, entries):
     return dict(sorted(best.items()))
 
 
+def inv_classify(c):
+    """Source of a skill/connection found on disk; everything unproven is workspace."""
+    name, version = c["name"], c["version"]
+    if c.get("from_harness_settings"):
+        return "harness"
+    if [name, version] in c["refresh_items"]:
+        return "admin"
+    if c["shipped"].get(name) == version:
+        return "builtin"
+    if c["marketplace_index"].get(name) == version:
+        return "marketplace"
+    return "workspace"
+
+
 def inv_allowed(c):
     """Allowed actions of one connection: the .orch/mcp.json entry counts only where it matches the proof-made grant
     (human-proof.md); no entry or no grant = nothing allowed (P1)."""
@@ -729,6 +743,8 @@ def kind_inventory():
         _expect(f"inventory conn_version {c['name']}", inv_conn_version(c["server"]), c["version"])
     for c in vec["precedence"]:
         _expect(f"inventory precedence {c['name']}", inv_winners(c["kind"], c["entries"]), c["winners"])
+    for c in vec["classify"]:
+        _expect(f"inventory classify {c['name_case']}", inv_classify(c), c["source"])
     for c in vec["allowed"]:
         _expect(f"inventory allowed {c['name']}", inv_allowed(c), c["allowed"])
 
