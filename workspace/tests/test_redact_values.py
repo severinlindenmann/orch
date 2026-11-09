@@ -336,3 +336,29 @@ def test_json_rejects_and_hides_non_json_values():
     assert list(result) != [12345678] and "12345678" not in repr(result)
     with pytest.raises(HidingRefused):
         digits.hide_json({12345678: 1}, on_identifier="refuse")
+
+
+def test_stream_one_byte_feeds_are_fast_and_equal():
+    rng = random.Random(7)
+    tokens = ["".join(rng.choices(string.ascii_letters + string.digits, k=40)) for _ in range(20)]
+    needles = {f"k{i}": token for i, token in enumerate(tokens)}
+    needles["sa"] = {"type": "service_account", "private_key": "-----BEGIN\n" + "AbCd" * 800 + "\n-----END\n"}
+    hider = Hider(needles)
+    assert len(hider._text) > 100
+    filler = "".join(rng.choices(string.ascii_letters + " \n", k=1024 * 1024 - 400))
+    key = needles["sa"]["private_key"]
+    text = filler[:1000] + tokens[3] + filler[1000:50000] + key[:100] + filler[50000:]
+    text += base64.b64encode(tokens[5].encode()).decode()
+    expected = hider.hide_text(text)
+    assert tokens[3] not in expected
+    for binary in (False, True):
+        source = text.encode() if binary else text
+        stream = HidingStream(hider, binary=binary)
+        parts = []
+        start = time.perf_counter()
+        for i in range(len(source)):
+            parts.append(stream.feed(source[i:i + 1]))
+        parts.append(stream.close())
+        elapsed = time.perf_counter() - start
+        assert source[:0].join(parts) == (expected.encode() if binary else expected)
+        assert elapsed < 4, elapsed

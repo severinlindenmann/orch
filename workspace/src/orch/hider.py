@@ -226,6 +226,9 @@ class HidingStream:
         self._buf = b"" if binary else ""
         self._holdback = max((len(n) for n, _ in self._needles), default=1) - 1
         self._closed = False
+        self._parts: list[Any] = []
+        self._new = 0
+        self._quantum = max(64, self._holdback // 2) if self._needles else 0
 
     def __repr__(self) -> str:
         return f"HidingStream(closed={self._closed})"
@@ -243,14 +246,27 @@ class HidingStream:
             raise ValueError("Hiding stream is closed")
         if type(chunk) is not type(self._buf):
             raise TypeError("Invalid hiding chunk")
-        self._buf += chunk
+        # Tiny chunks are coalesced: scanning runs once enough new data has arrived, never per byte.
+        # The output is the same as scanning each chunk (the holdback already delays the tail).
+        self._parts.append(chunk)
+        self._new += len(chunk)
+        if self._new < self._quantum:
+            return self._buf[:0]
+        return self._scan()
+
+    def _scan(self) -> Any:
+        self._buf = self._buf[:0].join([self._buf, *self._parts])
+        self._parts.clear()
+        self._new = 0
         out, end = _hide_upto(self._buf, self._needles, max(0, len(self._buf) - self._holdback))
         self._buf = self._buf[end:]
         return out
 
     def close(self) -> Any:
         self._closed = True
-        out, _ = _hide_upto(self._buf, self._needles, len(self._buf))
+        buf = self._buf[:0].join([self._buf, *self._parts])
+        self._parts.clear()
+        out, _ = _hide_upto(buf, self._needles, len(buf))
         self._buf = self._buf[:0]
         return out
 
