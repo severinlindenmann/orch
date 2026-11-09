@@ -286,17 +286,18 @@
 
   function renderTasks(v) {
     const checks = v.ticket.checklist;
-    const doing = checks.findIndex(c => !c.done && c.state === 'doing');
+    const doing = checks.findIndex(c => !c.done && !c.wont_do && c.state === 'doing');
     if (sel >= checks.length) sel = Math.max(0, checks.length - 1);
-    const key = keyOf([checks.map(c => [c.id, c.text, c.done, c.state, evText(c)]), sel, v.run.running]);
+    const key = keyOf([checks.map(c => [c.id, c.text, c.done, c.wont_do, c.reason, c.state, evText(c)]), sel, v.run.running]);
     if (key === els.tasks.dataset.k) return;
     els.tasks.dataset.k = key;
     els.tasks.replaceChildren(...checks.flatMap((c, i) => {
-      const cls = c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
+      const cls = c.wont_do ? 'wont' : c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
       const row = h('button', {class: 'fx-task ' + cls, 'data-task': String(i), 'aria-current': String(i === (sel === 0 && doing >= 0 && !els.tasks.dataset.picked ? doing : sel))},
-        h('span', {class: 'st', icon: c.done ? 'check' : false}), h('span', {}, h('span', {class: 'tt', text: c.text}), h('span', {class: 'sub', text: evText(c)})));
+        h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: c.text}), h('span', {class: 'sub', text: evText(c)})));
       row.addEventListener('click', () => { sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(view); });
-      const out = [row];
+      const reason = c.wont_do && c.reason && h('details', {class: 'fx-task-reason meta'}, h('summary', {text: 'Reason'}), h('span', {text: c.reason}));
+      const out = [reason ? h('div', {}, row, reason) : row];
       if (els.tasks.dataset.picked && i === sel) out.push(taskTools(c, i, checks));
       return out;
     }));
@@ -316,7 +317,13 @@
       }),
       i > 0 && btn('Move up', () => res(act('check.move', {ticket: TID, check: checks[i - 1].id, after: c.id}))),
       i < checks.length - 1 && btn('Move down', () => res(act('check.move', {...base, after: checks[i + 1].id}))),
-      c.done && btn('Open again', () => res(act('check.reopen', base))),
+      !c.done && !c.wont_do && btn("Won't do", () => {
+        const input = h('input', {class: 'input', placeholder: 'Reason (optional)', 'aria-label': 'Reason (optional)', maxlength: '200'});
+        const form = h('form', {class: 'fx-task-edit'}, input, h('button', {class: 'btn primary xs', text: 'Save'}));
+        form.addEventListener('submit', e => { e.preventDefault(); res(act('check.wont_do', {...base, reason: input.value.trim()})); form.remove(); });
+        tools.after(form); input.focus();
+      }),
+      (c.done || c.wont_do) && btn('Open again', () => res(act('check.reopen', base))),
       btn('Remove', () => res(act('check.remove', base), 'Removed. It stays in the history.')));
     return tools;
   }
@@ -334,6 +341,7 @@
     let m;
     if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
+    if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
@@ -370,7 +378,7 @@
         h('p', {class: 'meta', text: 'Next step · Start ' + els.agent.textContent}), h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent})));
       return;
     }
-    const story = checks.filter(c => c.done || c.state === 'doing');
+    const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
     const heading = asking ? 'Before the question' : v.state === 'done' ? 'Work completed' : v.run.running ? 'The work is taking shape' : 'Work so far';
     const nodes = [h('h2', {text: heading})];
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
@@ -420,7 +428,7 @@
   function renderProof(v) {
     proof.setPageKey(v.page_key);
     proof.setAgent(v.run.label);
-    const done = v.ticket.checklist.filter(c => c.done);
+    const done = v.ticket.checklist.filter(c => c.done && !c.wont_do);
     const list = [];
     for (const c of done) for (const ev of c.evidence || []) list.push({c, ev});
     const key = keyOf([v.ticket.status, v.ticket.closed_at, v.ticket.history, v.run.label, list]);

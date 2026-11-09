@@ -297,6 +297,17 @@ def _check_set(a):
     return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
 
 
+def _check_wont_do(a):
+    _only(a, ("ticket", "check", "reason"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    reason = _text(a.get("reason", ""), "reason", empty=True, limit=200).strip()
+    if "\n" in reason or "\r" in reason:
+        raise BadRequest("The reason must be one line.")
+    return ["check", "wont-do", _tid(a.get("ticket")), cid], [f"--reason={reason}"] if reason else [], []
+
+
 def _ref_add(a):
     _only(a, ("ticket", "target"))
     return ["ref", "add", _tid(a.get("ticket"))], [], [_text(a.get("target"), "reference")]
@@ -495,6 +506,7 @@ OPS = {
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
+    "check.wont_do": _check_wont_do,
     "run.start": _run_start,
     "run.stop": _run_stop,
     "addon.start": _addon_start,

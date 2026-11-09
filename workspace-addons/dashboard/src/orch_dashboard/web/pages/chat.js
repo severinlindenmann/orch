@@ -186,7 +186,7 @@ function chatSharedTicket(g) {
   if (!ticket) return null;
   return h('details', {className:'chat-shared-ticket', 'data-key':'shared-ticket'}, h('summary', {}, chatText('small', '', 'From ' + chatHost(g) + ' · ' + clean(ticket.key)), chatText('strong', '', ticket.title), chatText('span', 'chat-status', ticket.status)),
     chatText('p', '', ticket.summary), ticket.question?.text ? chatText('p', '', ticket.question.text) : null,
-    h('ul', {}, chatObjects(ticket.checklist).slice(0, 6).map(item => h('li', {}, h('span', {'aria-hidden':'true'}, item.done ? '☑ ' : '☐ '), h('span', {className:'chat-sr'}, item.done ? 'done: ' : 'open: '), clean(item.text)))));
+    h('ul', {}, chatObjects(ticket.checklist).slice(0, 6).map(item => h('li', {}, h('span', {'aria-hidden':'true'}, item.wont_do ? '– ' : window.DashHelpers.resolved(item) ? '☑ ' : '☐ '), h('span', {className:'chat-sr'}, item.wont_do ? "Won't do: " : window.DashHelpers.resolved(item) ? 'done: ' : 'open: '), clean(item.text)))));
 }
 function chatThread(g, archived) {
   const messages = chatObjects(archived ? archived.messages : g ? g.messages : chatConversation());

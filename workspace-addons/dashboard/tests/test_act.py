@@ -948,3 +948,23 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
     ):
         assert _post_raw(act_server, {"op": "ticket.new", "args": args})[0] == 400, args
     assert acts(act_orch) == []  # nothing was created
+
+
+def test_check_wont_do_argv():
+    common = ["--by", actions.actor(), "--json"]
+    args = {"ticket": "t_abcdef", "check": "c1"}
+    for reason in (None, "", "  ", "--not an option", "x" * 200):
+        supplied = args if reason is None else {**args, "reason": reason}
+        flags = [f"--reason={reason}"] if reason and reason.strip() else []
+        assert actions.build_argv("check.wont_do", supplied) == [
+            "check", "wont-do", "t_abcdef", "c1", *flags, *common
+        ]
+
+
+@pytest.mark.parametrize("extra", [
+    {"reason": "x" * 201}, {"reason": 12}, {"reason": "a\nb"},
+    {"reason": "\x00"}, {"unexpected": True}, {"check": "bad"},
+])
+def test_check_wont_do_refuses_bad_args(extra):
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("check.wont_do", {"ticket": "t_abcdef", "check": "c1", **extra})
