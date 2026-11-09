@@ -62,6 +62,19 @@ enum ConversationRules {
         total > 0 ? "\(done) of \(total) steps done" : ""
     }
 
+    static func summaryRepeatsResult(_ summary: String, in items: [ConvItem]) -> Bool {
+        func normalized(_ text: String) -> String {
+            text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        }
+        let summary = normalized(summary)
+        guard !summary.isEmpty else { return false }
+        return items.contains { item in
+            guard item.label == "Result" else { return false }
+            let text = normalized(item.text)
+            return !text.isEmpty && (text.contains(summary) || summary.contains(text))
+        }
+    }
+
     /// General only: acks (a workspace text with `reply_to`) naming a ticket for a General text of this phone.
     static func startedChips(messages: [PhoneMessage], workspace: String, key: (String) -> String?) -> [StartedChip] {
         let generalAt = Dictionary(messages.filter { $0.fromPhone && $0.workspaceId == workspace && $0.message.body.general == true }.map { ($0.id, $0.message.createdAt) },
@@ -193,6 +206,11 @@ struct ConversationView: View {
                 }
                 if historyDay == nil {
                 ToolbarItem(placement: .topBarTrailing) {
+                    ChatMuteButton(name: workspaceName, muted: model.workspace(resolved.workspace)?.isMuted(now: now) ?? false) { mute in
+                        Task { await model.setMute(resolved.workspace, mute) }
+                    }
+                }.chatCircleBackground()
+                ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                         headerIcon("info.circle")
                     }.buttonStyle(.plain).accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
@@ -321,7 +339,7 @@ struct ConversationView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    if let topicSummary {
+                    if let topicSummary, !ConversationRules.summaryRepeatsResult(topicSummary, in: items) {
                         NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                             Text(topicSummary).themeFont(15).foregroundStyle(Theme.muted).lineLimit(3)
                                 .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
@@ -485,7 +503,7 @@ struct TicketStatusChip: View {
 }
 
 // iOS 26 otherwise joins adjacent toolbar actions in one glass pill.
-private extension ToolbarItem {
+extension ToolbarItem {
     @ToolbarContentBuilder func chatCircleBackground() -> some ToolbarContent {
         if #available(iOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) }
         else { self }

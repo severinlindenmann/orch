@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import threading
 import time
 from functools import partial
 from http.client import HTTPConnection
@@ -21,7 +22,10 @@ from .events import Revisions
 from .views import ViewPuller
 
 DEFAULT_PORT = 8420
-MAX_BODY = 16384
+MAX_BODY = 16384  # every action but the ones below
+MAX_BIG_BODY = 5 * 1024 * 1024  # a new ticket with a long text and up to 5 attached files
+BIG_OPS = ("ticket.new", "ticket.paste")
+_BIG_READS = threading.BoundedSemaphore(1)
 KIT = (
     "tokens.css",
     "components.css",
@@ -69,6 +73,8 @@ def _sandboxed(csp: str | None) -> bool:
             }
             return not bad & {t.lower() for t in tok[1:]}
     return False
+
+
 PROXY_MAX_REPLY = 4 * 1024 * 1024
 
 
@@ -209,7 +215,9 @@ class Handler(BaseHTTPRequestHandler):
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
         if path == "/api/links":
-            return self._send(200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json")
+            return self._send(
+                200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
+            )
         if path == "/api/state":
             return self._send(
                 200,
@@ -277,7 +285,9 @@ class Handler(BaseHTTPRequestHandler):
             name.startswith("kit/") and name[4:] in KIT
         ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
-        if re.fullmatch(r"pages/(home|tickets|ticket|newticket|settings|chat)\.(js|css)", name):  # the page modules
+        if re.fullmatch(
+            r"pages/(home|tickets|ticket|newticket|settings|chat)\.(js|css)", name
+        ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (
             "index.html",
@@ -361,10 +371,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(415, b"send JSON", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            if not 0 < n <= MAX_BODY:
+            # The limit comes from the header (checked before the body is read); the body must say the same op.
+            claimed = self.headers.get("X-Orch-Op")
+            limit = MAX_BIG_BODY if claimed in BIG_OPS else MAX_BODY
+            if not 0 < n <= limit:
                 raise ValueError
-            body = json.loads(self.rfile.read(n))
+            if n > MAX_BODY:
+                with _BIG_READS:  # one big body in memory at a time
+                    raw = self.rfile.read(n)
+            else:
+                raw = self.rfile.read(n)
+            body = json.loads(raw)
             if not isinstance(body, dict) or set(body) - {"op", "args"}:
+                raise ValueError
+            if claimed is not None and body.get("op") != claimed:
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
@@ -392,6 +412,13 @@ class Handler(BaseHTTPRequestHandler):
             and isinstance(extra.get("changes"), list)
         ):  # refresh
             state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
+        if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
+            att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
+            state["attached"] = {
+                "id": str(extra.get("id"))[:40],
+                "saved": [str(x)[:100] for x in att.get("saved", [])[:10]],
+                "failed": [str(x)[:100] for x in att.get("failed", [])[:10]],
+            }
         self._send(200, json.dumps(state).encode(), "application/json")
 
 

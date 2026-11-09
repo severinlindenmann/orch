@@ -18,6 +18,10 @@ def add_parsers(sub, common) -> None:
     x.add_argument("day", help="YYYY-MM-DD")
     x = s.add_parser("say", parents=[common], help="a person writes in Chat from the dashboard")
     x.add_argument("text")
+    x.add_argument("--new", action="store_true", help="start a new conversation")
+    x = s.add_parser("make-ticket", parents=[common], help="make a ticket from a Chat proposal")
+    x.add_argument("message_id")
+    x.add_argument("--title")
 
 
 def _out(args, data, text: str) -> None:
@@ -40,12 +44,15 @@ def dispatch(args, root: Path) -> bool:
     elif args.sub == "day":
         d = chat.read_day(root, args.day)
         _out(args, d, "\n".join(f"{m['by']}: {m['text']}" for m in d["messages"]) or "Nothing on that day.")
+    elif args.sub == "make-ticket":
+        r = chat.make_ticket(root, args.message_id, args.title, getattr(args, "by", None))
+        _out(args, r, r["key"])
     elif args.sub == "say":
         if tickets.agent_tool():
             raise Refused(
                 "Only a person writes as themselves in Chat. Use: orch relay send ... --ticket <chat>."
             )
-        r = chat.say(root, args.text, getattr(args, "by", None))
+        r = chat.say(root, args.text, getattr(args, "by", None), new=args.new)
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
         )

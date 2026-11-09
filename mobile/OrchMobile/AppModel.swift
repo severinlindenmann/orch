@@ -511,6 +511,26 @@ final class AppModel {
         guard patch.isValid else { return }
         do { settings = try await client.updateSettings(patch); message = nil } catch { handle(error) }
     }
+    func muteAll(_ mute: Mute) async {
+        do { settings = try await client.muteAll(mute); message = nil } catch { handle(error) }
+    }
+    func setGroupMute(_ key: GroupKey, _ mute: Mute) async {
+        do {
+            let result = try await client.setGroupMute(key, mute: mute)
+            var groups = (settings.groupMutes ?? []).filter { $0.key != key }
+            if MuteRules.isMuted(result.mutedUntil) { groups.append(result) }
+            settings.groupMutes = groups
+            message = nil
+        } catch { handle(error) }
+    }
+    func isMutedAll(now: Date = Date()) -> Bool { MuteRules.isMuted(settings.muteAllUntil, now: now) }
+    func isGroupMuted(_ key: GroupKey, now: Date = Date()) -> Bool {
+        (settings.groupMutes ?? []).contains { $0.key == key && MuteRules.isMuted($0.mutedUntil, now: now) }
+    }
+    func notificationsMuted(workspace: String, group: GroupKey? = nil, now: Date = Date()) -> Bool {
+        MuteRules.isMuted(all: settings.muteAllUntil, workspace: self.workspace(workspace)?.mutedUntil,
+                          group: group, groups: settings.groupMutes ?? [], now: now)
+    }
     func setMute(_ workspaceId: String, _ mute: Mute) async {
         do {
             let w = try await client.setMute(workspace: workspaceId, mute: mute)

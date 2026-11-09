@@ -196,3 +196,28 @@ def test_evidence_path_that_is_a_file_gets_plain_refusal(proj, run, tid):
     (proj / "f.txt").write_text("x")
     code, _, err = run("check", "done", tid, "c1", "--file", "f.txt")
     assert code == 2 and "blocked by a file" in err
+
+
+def test_summary_is_stored_on_the_proof(proj, run, validate, tid):
+    (proj / "r.txt").write_text("ok")
+    assert run("check", "done", tid, "c1", "--file", "r.txt", "--summary", "Connected  as Dev Team.")[0] == 0
+    assert run("check", "done", tid, "c2", "--note", "seen", "--summary", "Sent.")[0] == 0
+    t = read(proj, tid)
+    validate(t)
+    assert t["checklist"][0]["evidence"][0]["summary"] == "Connected as Dev Team."
+    assert t["checklist"][1]["evidence"][0]["summary"] == "Sent."
+
+
+def test_summary_too_long_is_refused(proj, run, tid):
+    assert run("check", "done", tid, "c1", "--note", "seen", "--summary", "x" * 201)[0] == 2
+
+
+def test_summary_is_printable_one_line_and_on_one_proof(proj, run, tid):
+    (proj / "r.txt").write_text("ok")
+    for bad in ("   ", "red \x1b[31mtext", "bell\x07"):
+        assert run("check", "done", tid, "c1", "--note", "n", "--summary", bad)[0] == 2
+        assert run("check", "done", tid, "c1", "--file", "r.txt", "--summary", bad)[0] == 2
+    assert not (proj / ".orch" / "tickets" / tid / "evidence").exists()  # nothing was copied
+    assert run("check", "done", tid, "c1", "--note", "n", "--pr", "PR #1", "--summary", "Done.")[0] == 0
+    evs = read(proj, tid)["checklist"][0]["evidence"]
+    assert [e.get("summary") for e in evs] == ["Done.", None]

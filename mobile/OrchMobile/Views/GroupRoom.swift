@@ -68,6 +68,11 @@ struct GroupRoomView: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
+            TimelineView(.everyMinute) { context in
+                ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: context.date), groupStyle: true) { mute in
+                    Task { await model.setGroupMute(key, mute) }
+                }
+            }
             Button { members = true } label: {
                 Image(systemName: "info.circle").frame(width: 44, height: 44)
                     .background(Theme.surface2, in: Circle())
@@ -187,6 +192,7 @@ struct GroupTaskView: View {
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m).stroke(Theme.borderStrong))
+            .accessibilityElement(children: .contain)   // one card element; the id stays on it, not on every child
             .accessibilityIdentifier("group-task-\(task.delegate)")
     }
 }

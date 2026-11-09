@@ -48,6 +48,9 @@
     "note": { "type": "string", "maxLength": 2000, "description": "Optional. Free note from people, shown on the ticket. Plain text." },
     "done_when": { "type": "string", "maxLength": 2000, "description": "Optional. What people want to be true when the ticket is done. Plain text." },
     "summary": { "type": "string", "maxLength": 200, "description": "Optional. Where things stand, one or two plain sentences, kept current by whoever works on it. Used to start a fresh agent session." },
+    "description": { "type": "string", "maxLength": 2000, "description": "Optional. What the ticket is about, written by an agent from the person's text (orch ticket title --description). Never the person's words: shown and sent to agents as the agent's description, with description_by." },
+    "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
+    "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
     "sessions": {
       "type": "array",
@@ -67,6 +70,7 @@
         "ref": { "type": "string", "minLength": 1, "description": "PR URL, commit hash, file path (a copied file lives in the gitignored .orch/tickets/<id>/evidence/), URL, the command line, or the note text" },
         "text": { "type": "string", "description": "Optional short result, e.g. '42 passed'" },
         "title": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional short name shown instead of ref." },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. One plain line: what came out of the step. Shown on the task row." },
         "role": { "enum": ["result", "check", "support"], "description": "Optional. result = what was asked for; check = proof it works; support = anything else." },
         "at": { "$ref": "#/$defs/time" },
         "by": { "$ref": "#/$defs/who" }

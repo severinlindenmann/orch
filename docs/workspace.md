@@ -112,6 +112,7 @@ questions and answers, history. Relay and publish ship in the same package as bu
 |---|---|
 | `orch init [--code XY]` | Sets up the project folder, asks which agent to use, sets the ticket key code. Safe to run again |
 | `orch ticket new\|list\|show\|tree\|edit\|summary\|status\|wait\|patch` | Tickets. `done` is refused while a ticked task lacks proof |
+| `orch ticket attach <id> --name <hint>` | Keeps a text file or picture (read from stdin, at most 2 MB) with the ticket in `artifacts/`. orch picks the file name; the dashboard uses it for a long pasted text (`note.md`) and dropped files |
 | `orch check add\|edit\|move\|remove\|reopen\|start\|stop\|done` | Tasks and proof |
 | `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
 | `orch ref add\|list\|rm`, `orch ticket set`, `orch log`, `orch ext set\|unset` | References (URLs, tickets, artifacts and files; kind from the active add-ons, else the known-sites table, else Reference), add-on fields, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
