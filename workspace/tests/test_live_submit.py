@@ -843,6 +843,27 @@ def test_a_scrolled_up_pane_says_so_and_orch_leaves_copy_mode_after_half_a_minut
     assert runs_live.deliver(proj, tid) == 1 and sent[-2:] == [runs_live.notice_line(tid, False), "Enter"]
 
 
+def test_a_pane_scrolled_up_with_nobody_attached_is_released_after_half_a_minute(proj, run, monkeypatch):
+    """Lane C: the person closed the terminal with the pane in copy mode; no client: nobody reads."""
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, mode="1")
+    assert screen["activity"] == []  # list-clients prints nothing
+    assert runs_live.deliver(proj, tid) == 0 and sent == []
+    rec = runs.read(proj, tid)
+    rec["hold"]["since"] = runs._iso(time.time() - runs_live.COPY_MODE_CANCEL_SECONDS - 1)
+    runs._write(proj, rec)
+    assert runs_live.deliver(proj, tid) == 0 and sent == ["cancel"]
+
+
+@pytest.mark.parametrize("answer", [(1, "oops"), (1, "1.0\nnot-a-number\n"), (2, "")])
+def test_an_unreadable_client_list_never_cancels(proj, run, monkeypatch, answer):
+    """tmux failed or its answer cannot be read: 0 (never cancel), unlike "no client attached"."""
+    code, out = answer
+    monkeypatch.setattr(
+        runs_live, "tmux", lambda root, *a, **k: subprocess.CompletedProcess(a, code, out, "")
+    )
+    assert runs_live._client_idle(proj, "t_abc123xyz") == 0.0
+
+
 # ---------------------------------------------------------------- real Claude Code captures (fixtures)
 
 FIX = __import__("pathlib").Path(__file__).parent / "fixtures" / "claude_prompt"
@@ -904,7 +925,7 @@ def test_the_real_tmux_accepts_the_one_call_read_and_the_client_target(proj, run
     start(tid)
     assert runs_live._hold_reason(proj, tid, None) is None  # an empty box, no dialog, not scrolled
     assert runs_live.tmux(proj, "list-clients", "-t", runs_live.target(tid)).returncode == 0
-    assert runs_live._client_idle(proj, tid) == 0.0  # nobody attached: unknown, never cancels
+    assert runs_live._client_idle(proj, tid) == float("inf")  # nobody attached: idle for good
 
 
 def _hold(proj, run, monkeypatch, pane, boxed, cy=None, alt="0", cursor="1", cx=0, width=200):
@@ -1014,6 +1035,56 @@ def test_input_held_for_unsent_text_is_given_up_after_three_minutes(proj, run, m
     assert got == "gave_up" and ended == [1] and sent == []
     (back,) = runs.undelivered(proj, tid)
     assert back["live_retry"] is True
+
+
+@_tmux
+@pytest.mark.slow
+def test_a_real_detached_pane_in_copy_mode_is_released_and_gets_the_notice(proj, run, tui, monkeypatch):
+    """A real tmux pane left in copy mode with no client attached: the hold shows, orch leaves copy mode after
+    the quiet time (polled on state), and the notice goes in."""
+    start, out = tui
+    tid = _ticket(run)
+    start(tid)
+    runs.pending_add(proj, tid, "human:lume", "message", "Please add a rain plan.")
+    assert runs_live.tmux(proj, "copy-mode", "-t", runs_live.target(tid)).returncode == 0
+
+    def in_mode():
+        r = runs_live.tmux(proj, "display-message", "-p", "-t", runs_live.target(tid), "#{pane_in_mode}")
+        return r.stdout.strip() == "1"
+
+    assert in_mode()
+    assert runs_live.deliver(proj, tid) == 0 and runs.read(proj, tid)["hold"]["why"] == "scrolled"
+    monkeypatch.setattr(runs_live, "COPY_MODE_CANCEL_SECONDS", 1.0)  # the same rule, a shorter wait
+    _until(lambda: (runs_live.deliver(proj, tid) or True) and not in_mode(), "released from copy mode", 30)
+    _until(lambda: runs_live.deliver(proj, tid) or _got(out, "submit"), "the notice is typed", 30)
+    _until(lambda: _got(out, "submit"), "the notice is submitted", 30)
+    assert _got(out, "submit") == [runs_live.notice_line(tid, False)]
+
+
+def test_a_list_clients_call_that_times_out_or_cannot_run_never_cancels(proj, monkeypatch):
+    """A timeout is a failure (0, never cancel), not an empty answer (inf, release): fail closed."""
+
+    def boom(exc):
+        def fake(root, *a, **k):
+            raise exc
+
+        return fake
+
+    for exc in (subprocess.TimeoutExpired("tmux", 3), FileNotFoundError("tmux")):
+        monkeypatch.setattr(runs_live, "tmux", boom(exc))
+        assert runs_live._client_idle(proj, "t_abc123xyz") == 0.0
+
+
+def test_the_client_list_covers_the_whole_tmux_server(proj, monkeypatch):
+    seen = []
+
+    def fake(root, *a, **k):
+        seen.append(a)
+        return subprocess.CompletedProcess(a, 0, f"{time.time() - 100}\n{time.time() - 2}\n", "")
+
+    monkeypatch.setattr(runs_live, "tmux", fake)
+    assert runs_live._client_idle(proj, "t_abc123xyz") < 10  # the newest of all clients counts
+    assert "-t" not in seen[0]
 
 
 def test_run_status_json_says_why_a_run_waits(proj, run, monkeypatch, capsys):

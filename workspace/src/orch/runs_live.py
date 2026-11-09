@@ -441,14 +441,25 @@ def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
 
 
 def _client_idle(root: Path, tid: str) -> float:
-    """Seconds since ANY client attached to the session last pressed a key (the newest one counts); 0 when
-    unknown or nobody is attached: orch leaves copy mode only for a pane nobody has touched for a while."""
-    r = tmux(root, "list-clients", "-t", target(tid), "-F", "#{client_activity}", timeout=QUICK)
+    """Seconds since ANY client of the orch tmux server last pressed a key (the newest counts). No client at
+    all is idle for good (inf): a pane left scrolled up after the person closed the terminal must be
+    released. 0 (never cancel) only when tmux fails, times out, or its answer cannot be read."""
+    # the whole server (one per workspace), not one session: a grouped or linked session shows the same
+    # pane, and any client of it counts. A call that times out or cannot run is a failure, never "none".
     try:
-        newest = max(float(x) for x in r.stdout.split())
+        r = tmux(root, "list-clients", "-F", "#{client_activity}", timeout=QUICK)
+    except (subprocess.TimeoutExpired, OSError):
+        return 0.0
+    if r.returncode != 0:
+        return 0.0
+    words = r.stdout.split()
+    if not words:
+        return float("inf")
+    try:
+        newest = max(float(x) for x in words)
     except ValueError:
         return 0.0
-    return max(0.0, time.time() - newest) if r.returncode == 0 else 0.0
+    return max(0.0, time.time() - newest)
 
 
 def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:
