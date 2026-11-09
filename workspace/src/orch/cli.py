@@ -315,6 +315,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
     )
     x.add_argument(
+        "--plan-first", action="store_true", help="the agent makes a plan and waits for you before work starts"
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -571,6 +574,7 @@ def run(args: argparse.Namespace) -> None:
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
+            plan_first=args.plan_first,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(

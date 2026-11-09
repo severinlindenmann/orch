@@ -51,6 +51,7 @@
     "description": { "type": "string", "maxLength": 2000, "description": "Optional. What the ticket is about, written by an agent from the person's text (orch ticket title --description). Never the person's words: shown and sent to agents as the agent's description, with description_by." },
     "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
+    "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
     "sessions": {
       "type": "array",

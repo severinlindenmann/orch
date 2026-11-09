@@ -366,3 +366,18 @@ def test_ask_refuses_curly_apostrophe_and_natural_language_machine_key(proj, run
     assert run("ask", new_ticket(), "What\u2019s your password?")[0] == 2
     base = ["ask", new_ticket(), "Retry?", "--kind", "scheduler:failure", "--action"]
     assert run(*base, '{"key": "paste your API key"}')[0] == 2
+
+
+def test_ticket_new_plan_first_flag(proj, run):
+    code, out, _ = run("ticket", "new", "Big work", "--plan-first", "--json", "--by", "human:tester")
+    assert code == 0
+    assert json.loads(out)["plan_first"] is True
+    assert read(proj, json.loads(out)["id"])["plan_first"] is True
+    plain = json.loads(run("ticket", "new", "Small", "--json", "--by", "human:tester")[1])
+    assert "plan_first" not in plain
+
+
+def test_plan_first_is_not_a_patchable_field(proj, new_ticket):
+    tid = new_ticket()
+    with pytest.raises(tickets.Refused):
+        tickets.clean_field("plan_first", "true")

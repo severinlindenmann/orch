@@ -242,6 +242,23 @@ def test_fresh_prompt_carries_the_persons_note(proj):
     assert prompt.index("note on this ticket") < prompt.index("SKILL.md")  # read before anything else
 
 
+def test_plan_first_prompt_plans_asks_one_question_and_stops(proj):
+    t = tickets.create(proj, "Online payments", "human:me", plan_first=True)
+    prompt = runs.fresh_prompt(t, [])
+    assert "Plan big work" in prompt and f"orch ticket new --parent {t['id']}" in prompt
+    assert f'orch ask {t["id"]} "Plan ready" --option "Start work" --option "Change a step"' in prompt
+    assert '--recommend "Start work"' in prompt and "Do NOT change any project file" in prompt
+    assert "Plan big work" in runs.resume_prompt(t, [], None, "claude")
+
+
+def test_plan_first_prompt_is_absent_without_the_flag_and_after_the_question(proj):
+    plain = tickets.create(proj, "Small fix", "human:me")
+    assert "Plan ready" not in runs.fresh_prompt(plain, [])
+    t = tickets.create(proj, "Online payments", "human:me", plan_first=True)
+    t["questions"] = [{"id": "q1", "text": "Plan ready", "answer": "Start work"}]
+    assert "Plan ready" not in runs.fresh_prompt(t, [])
+
+
 # ---------------------------------------------------------------- the footer
 
 

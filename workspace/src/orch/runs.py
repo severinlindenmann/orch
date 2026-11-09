@@ -720,6 +720,27 @@ def _done_when_plan(ticket: dict) -> list[str]:
     ]
 
 
+PLAN_READY = "Plan ready"  # the one question of a "Show plan first" ticket (the dashboard looks for this text)
+
+
+def _plan_first_plan(ticket: dict) -> list[str]:
+    """"Show plan first": plan, ask once, stop. Not again once that question exists (answered or open)."""
+    if not ticket.get("plan_first") or any(
+        str(q.get("text", "")).startswith(PLAN_READY) for q in ticket.get("questions") or []
+    ):
+        return []
+    tid = ticket["id"]
+    return [
+        "The person chose to see the plan first. Do NOT change any project file yet. Make the plan as in the "
+        "skill section 'Plan big work': this ticket is the parent (goal and what is not included), one "
+        "sub-ticket per step with its own done-when (`orch ticket new --parent "
+        f"{tid}`), in order. Then ask exactly ONE question: "
+        f'orch ask {tid} "{PLAN_READY}" --option "Start work" --option "Change a step" '
+        '--recommend "Start work", and stop. Start the steps only after the answer is "Start work"; '
+        "if the answer asks for a change, change the steps, then ask again."
+    ]
+
+
 def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     tid = ticket["id"]
     out = [
@@ -748,6 +769,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
             "title is a placeholder: a title a person wrote is never changed.",
         )
     out[1:1] = _done_when_plan(ticket)
+    out.extend(_plan_first_plan(ticket))
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("description"):  # written by an agent, from the person's text: not the person's words
@@ -794,6 +816,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
     parts.extend(_done_when_plan(ticket))
+    parts.extend(_plan_first_plan(ticket))
     return "\n\n".join(parts)[:12000]
 
 
