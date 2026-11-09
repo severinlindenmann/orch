@@ -292,7 +292,7 @@ HOLD_WORDS = {
 _PROMPT_GLYPH = re.compile(r"^\s*[>\u276f\u203a]\s?")
 _ANSI = re.compile(r"\x1b\[([0-9;:?]*)([A-Za-z])")
 # INVARIANT (fb18, third review): orch types its notice only into a prompt box PROVEN empty: no characters at
-# all, or exactly the tool's own hint style as captured from a real Claude Code (tests/fixtures/claude_prompt:
+# all, or exactly the tool's own hint style as captured from the real tool (tests/fixtures/ prompt captures:
 # `ESC[2m` text `ESC[0m` on the default colour, cursor on the first character). Any other colour, attribute,
 # unknown or colon escape, or doubt holds. There is no colour guessing (no grey bands).
 _HINT_PLAIN = {"39", "0", "", "22"}  # codes around a hint that change nothing visible
