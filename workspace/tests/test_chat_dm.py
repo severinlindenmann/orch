@@ -15,8 +15,8 @@ MID = "m_abcdefghijklmnop"
 
 @pytest.fixture(autouse=True)
 def _fresh_import_timers():
-    """The pull import keeps a catch-up timer and a log window per workspace folder in module state: every test starts
-    and ends with none, so no test depends on another (or on xdist's order)."""
+    """The pull import keeps a catch-up timer and a log window per workspace folder in module state.
+    Every test starts and ends with none, so no test depends on another (or on xdist's order)."""
     chat._DM_CATCHUP.clear()
     chat._DM_IMPORT_LOGGED.clear()
     yield
@@ -780,3 +780,15 @@ def test_failure_log_window_works_when_the_monotonic_clock_is_small(tmp_path, mo
     clock["t"] = 700.0  # a new window
     chat.dm_import_on_pull(tmp_path, None)
     assert capsys.readouterr().err.count("could not import") == 1
+
+
+def test_the_failure_handler_itself_never_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    monkeypatch.setattr(chat, "_contacts_list", lambda root: (_ for _ in ()).throw(RuntimeError("boom")))
+    import builtins
+
+    monkeypatch.setattr(builtins, "print", lambda *a, **k: (_ for _ in ()).throw(OSError("stderr closed")))
+    monkeypatch.setattr(chat, "_DM_IMPORT_LOGGED", {"x": "not a number"} | {str(tmp_path): "bad"})
+    chat.dm_import_on_pull(tmp_path, None)  # a broken log state and a closed stderr: still no exception
+    chat.dm_import_on_pull(tmp_path, [{"type": "text", "from": OTHER}])
+    assert isinstance(chat._DM_IMPORT_LOGGED, dict)
