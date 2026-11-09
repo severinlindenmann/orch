@@ -918,6 +918,8 @@ async fn patch_settings(
     let c = app.db.lock().unwrap();
     let (pid, ..) = auth::phone(&c, &h)?;
     check("settings_patch_request", &v)?;
+    // parse before any write: a bad time must not leave the other fields half saved
+    let mute_all = v.get("mute_all_until").map(mute_until).transpose()?;
     c.execute(
         "INSERT OR IGNORE INTO phone_settings(phone) VALUES(?1)",
         [&pid],
@@ -940,8 +942,8 @@ async fn patch_settings(
             params![pid, n],
         )?;
     }
-    if let Some(m) = v.get("mute_all_until") {
-        match mute_until(m)? {
+    if let Some(m) = mute_all {
+        match m {
             Some(u) => c.execute(
                 "INSERT INTO phone_mute_all(phone,until) VALUES(?1,?2) ON CONFLICT(phone) DO UPDATE SET until=?2",
                 params![pid, u],
@@ -977,17 +979,18 @@ async fn patch_group(
     axum::extract::Path((host, gid)): axum::extract::Path<(String, String)>,
     body: Bytes,
 ) -> Res<Json<Value>> {
-    let v = parse_body(&body)?;
     let c = app.db.lock().unwrap();
     let (pid, _, ws) = auth::phone(&c, &h)?;
-    if !ws.contains(&host) {
-        return Err(not_found("No such workspace."));
-    }
+    let v = parse_body(&body)?;
     check("group_mute_request", &v)?;
     if !valid_group_id(&gid) {
         return Err(invalid("Not a group id."));
     }
     let until = mute_until(&v["muted_until"])?;
+    // Unmuting is allowed for any host (also one that left the list); muting needs a host on the list.
+    if until.is_some() && !ws.contains(&host) {
+        return Err(not_found("Not found."));
+    }
     store::purge_group_mutes(&c, &pid);
     match until {
         Some(u) => {
@@ -1080,6 +1083,7 @@ async fn delete_workspace(
         "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
         params![pid, wsid],
     )?;
+    store::forget_group_mutes_of(&c, &pid, &wsid);
     // The workspace can no longer reach this phone: it refreshes its phone list.
     store::bump_and_hint(&c, &app.key, std::slice::from_ref(&wsid))?;
     Ok(StatusCode::NO_CONTENT)
@@ -1146,6 +1150,7 @@ async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<J
     list.extend(added.iter().cloned());
     let tx = c.unchecked_transaction()?;
     for w in &added {
+        store::forget_group_mutes_of(&c, &pid, w);
         c.execute(
             "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
             params![pid, w],
@@ -1179,8 +1184,9 @@ async fn signout(State(app): State<AppState>, h: HeaderMap) -> Res<StatusCode> {
     let (pid, _, ws) = auth::phone(&c, &h)?;
     c.execute(
         "UPDATE phones SET token_hash=NULL, apns_token=NULL WHERE id=?1",
-        [pid],
+        [&pid],
     )?;
+    store::forget_phone_mutes(&c, &pid);
     // Its workspaces no longer list this phone.
     store::bump_and_hint(&c, &app.key, &ws)?;
     Ok(StatusCode::NO_CONTENT)

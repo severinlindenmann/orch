@@ -586,6 +586,20 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         [],
     )?;
     c.execute("DELETE FROM phone_mutes WHERE until>=0 AND until<?1", [at])?;
+    c.execute(
+        "DELETE FROM phone_mute_all WHERE until>=0 AND until<?1",
+        [at],
+    )?;
+    c.execute(
+        "DELETE FROM phone_group_mutes WHERE until>=0 AND until<?1",
+        [at],
+    )?;
+    for t in ["phone_mute_all", "phone_group_mutes"] {
+        c.execute(
+            &format!("DELETE FROM {t} WHERE phone NOT IN (SELECT id FROM phones)"),
+            [],
+        )?;
+    }
     // Phone uploads never named in a sent text go after 24 hours.
     let mut st = c.prepare(
         "SELECT id FROM blobs WHERE created_at<?1 OR (uploader LIKE 'ph\\_%' ESCAPE '\\' AND created_at<?2
@@ -657,8 +671,27 @@ pub fn group_muted_until(c: &Connection, pid: &str, host: &str, grp: &str) -> Va
     )
 }
 
-/// Active group mutes of a phone, `[{host, id, muted_until}]`.
+/// Delete mute all and every group mute of a phone (signout, phone removed).
+pub fn forget_phone_mutes(c: &Connection, pid: &str) {
+    for sql in [
+        "DELETE FROM phone_mute_all WHERE phone=?1",
+        "DELETE FROM phone_group_mutes WHERE phone=?1",
+    ] {
+        let _ = c.execute(sql, [pid]);
+    }
+}
+
+/// Delete a phone's group mutes of host `ws` (the workspace left its list, or was deleted).
+pub fn forget_group_mutes_of(c: &Connection, pid: &str, ws: &str) {
+    let _ = c.execute(
+        "DELETE FROM phone_group_mutes WHERE phone=?1 AND host=?2",
+        [pid, ws],
+    );
+}
+
+/// Active group mutes of a phone for hosts still on its list, `[{host, id, muted_until}]`.
 pub fn group_mutes(c: &Connection, pid: &str) -> Vec<Value> {
+    let on_list = phone_workspaces(c, pid);
     let Ok(mut st) =
         c.prepare("SELECT host,grp,until FROM phone_group_mutes WHERE phone=?1 ORDER BY host,grp")
     else {
@@ -669,6 +702,7 @@ pub fn group_mutes(c: &Connection, pid: &str) -> Vec<Value> {
     })
     .map(|rows| {
         rows.flatten()
+            .filter(|(h, ..)| on_list.contains(h))
             .filter_map(|(h, g, u)| {
                 let m = mute_value(Some(u));
                 (!m.is_null()).then(|| json!({"host": h, "id": g, "muted_until": m}))

@@ -212,3 +212,175 @@ async fn routes_and_end_to_end_push() {
         422
     );
 }
+
+fn count(t: &T, table: &str) -> i64 {
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn leaving_the_list_frees_group_mutes_and_signout_clears_the_rest() {
+    let t = start().await;
+    let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
+    let p = t.pair_phone(&[&a, &b]).await;
+    let mute = |host: String, i: usize| {
+        let path = format!("/v1/phone/groups/{host}/grp_t_grp{i:03}");
+        (path, json!({"muted_until": "forever"}))
+    };
+    for i in 0..60 {
+        for h in [&a.id, &b.id] {
+            let (path, body) = mute(h.clone(), i);
+            let r = t.phone(&p, "PATCH", &path, Some(body)).await;
+            if i < 50 {
+                assert_eq!(r.0, 200);
+            }
+        }
+    }
+    // 100 held (cap), the rest refused
+    let (_, v) = t.phone(&p, "GET", "/v1/phone/settings", None).await;
+    assert_eq!(v["group_mutes"].as_array().unwrap().len(), 100);
+    // phone removes A: its group mutes are gone, the cap is free again
+    assert_eq!(
+        t.phone(
+            &p,
+            "DELETE",
+            &format!("/v1/phone/workspaces/{}", a.id),
+            None
+        )
+        .await
+        .0,
+        204
+    );
+    let (_, v) = t.phone(&p, "GET", "/v1/phone/settings", None).await;
+    let gm = v["group_mutes"].as_array().unwrap();
+    assert_eq!(gm.len(), 50);
+    assert!(gm.iter().all(|g| g["host"] == b.id.as_str()));
+    // unmuting a host that left the list is allowed, muting is not
+    let path = format!("/v1/phone/groups/{}/grp_t_grp000", a.id);
+    let r = t
+        .phone(&p, "PATCH", &path, Some(json!({"muted_until": null})))
+        .await;
+    assert_eq!(r.0, 200);
+    let r = t
+        .phone(&p, "PATCH", &path, Some(json!({"muted_until": "forever"})))
+        .await;
+    assert_eq!(r.0, 404);
+    // admin re-adds A: no old mutes come back
+    let (s, _) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", p.0),
+            Some(json!({"workspaces": [a.id, b.id]})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let (_, v) = t.phone(&p, "GET", "/v1/phone/settings", None).await;
+    assert!(v["group_mutes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|g| g["host"] == b.id.as_str()));
+    // admin unticks B: B's mutes are deleted from the table
+    let (s, _) = t
+        .admin_json(
+            "PATCH",
+            &format!("/admin/api/phones/{}", p.0),
+            Some(json!({"workspaces": [a.id]})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(count(&t, "phone_group_mutes"), 0);
+    // mute all + a group mute, then signout clears both
+    t.phone(
+        &p,
+        "PATCH",
+        "/v1/phone/settings",
+        Some(json!({"mute_all_until": "forever"})),
+    )
+    .await;
+    let (path, body) = mute(a.id.clone(), 1);
+    t.phone(&p, "PATCH", &path, Some(body)).await;
+    assert_eq!(
+        (count(&t, "phone_mute_all"), count(&t, "phone_group_mutes")),
+        (1, 1)
+    );
+    assert_eq!(t.phone(&p, "POST", "/v1/phone/signout", None).await.0, 204);
+    assert_eq!(
+        (count(&t, "phone_mute_all"), count(&t, "phone_group_mutes")),
+        (0, 0)
+    );
+    // deleting a phone clears them too
+    let q = t.pair_phone(&[&a]).await;
+    t.phone(
+        &q,
+        "PATCH",
+        "/v1/phone/settings",
+        Some(json!({"mute_all_until": "forever"})),
+    )
+    .await;
+    assert_eq!(count(&t, "phone_mute_all"), 1);
+    let (s, _) = t
+        .admin_json("DELETE", &format!("/admin/api/phones/{}", q.0), None)
+        .await;
+    assert_eq!(s, 204);
+    assert_eq!(count(&t, "phone_mute_all"), 0);
+}
+
+#[tokio::test]
+async fn bad_mute_time_saves_nothing_and_mobile_mode_pushes_obey_mute_all() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let r = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/push",
+            Some(json!({"apns_token": "abcdef01", "sandbox": true})),
+        )
+        .await;
+    assert_eq!(r.0, 204);
+    // L1: a time the schema lets through but the calendar refuses changes nothing
+    let r = t
+        .phone(
+            &p,
+            "PATCH",
+            "/v1/phone/settings",
+            Some(json!({"speak": "always", "mute_all_until": "2030-02-30T10:00:00Z"})),
+        )
+        .await;
+    assert_eq!(r.0, 422);
+    let (_, v) = t.phone(&p, "GET", "/v1/phone/settings", None).await;
+    assert_eq!(v["speak"], "auto");
+    // M3: mute all silences the Mobile-mode "unreachable" push too
+    t.phone(
+        &p,
+        "PATCH",
+        "/v1/phone/settings",
+        Some(json!({"mute_all_until": "forever"})),
+    )
+    .await;
+    let on = json!({"mobile_mode": {"on": true, "since": util::fmt_time(util::now()),
+        "ends_at": util::fmt_time(util::now() + 43_200), "machine": "Acme PC"}});
+    t.call(&a, "POST", "/v1/heartbeat", Some(on)).await;
+    t.push.sent.lock().unwrap().clear();
+    orch_relay::mobile::sweep(&t.app, util::now() + 400).await;
+    assert!(t.push.sent.lock().unwrap().is_empty());
+    // control: without mute all the same sweep pushes (new lease, fresh heartbeat)
+    t.phone(
+        &p,
+        "PATCH",
+        "/v1/phone/settings",
+        Some(json!({"mute_all_until": null})),
+    )
+    .await;
+    let on = json!({"mobile_mode": {"on": true, "since": util::fmt_time(util::now()),
+        "ends_at": util::fmt_time(util::now() + 43_200), "machine": "Acme PC"}});
+    t.call(&a, "POST", "/v1/heartbeat", Some(on)).await;
+    orch_relay::mobile::sweep(&t.app, util::now() + 400).await;
+    assert!(!t.push.sent.lock().unwrap().is_empty());
+}
