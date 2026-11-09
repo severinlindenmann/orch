@@ -24,7 +24,7 @@ DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 KEY_RE = re.compile(r"\b[A-Z0-9]{2,4}-[1-9][0-9]{0,8}\b")
 MAX_DAY_MESSAGES = 2000
 MAX_TEXT = 20000  # Chat keeps 20000 characters (contract section 5)
-REF_KINDS = ("ticket", "reference", "file")
+REF_KINDS = ("ticket", "reference", "file", "proposal")
 # a file card names a file inside the workspace; never under .orch/ or .git/, never a key, token or login file
 _NOT_FILES = re.compile(
     r"(^|/)(\.orch|\.git|\.ssh|\.gnupg|\.aws|\.kube|\.docker|secrets)(/|$)"
@@ -127,6 +127,10 @@ def clean_refs(root: Path, refs) -> list[dict]:
                         "added_by": by,
                     }
                 )
+        elif kind == "proposal":
+            title = str(r.get("title") or "").strip()
+            if title:
+                out.append({"kind": "proposal", "title": phone_view._clip(title, 120), "added_by": by})
         elif kind == "reference":
             url = phone_view.safe_url(str(r.get("url") or ""))
             if url:
@@ -273,11 +277,14 @@ def record(
     reply_to: str | None = None,
     phone: str | None = None,
     refs: list[dict] | None = None,
+    convo_start: bool = False,
 ) -> dict:
     """Add one Chat text to its day's file (once per message id). by: "you" or the workspace id."""
     at = at or tickets.now()
     day = day_key(root, at)
     entry: dict = {"id": mid, "at": at, "by": by, "via": via, "text": str(text)[:MAX_TEXT], "day": day}
+    if convo_start:
+        entry["convo_start"] = True
     if reply_to:
         entry["reply_to"] = reply_to
     if phone:
@@ -290,6 +297,11 @@ def record(
         d = _read_day(root, day)
         if any(m.get("id") == mid for m in d["messages"]):
             return next(m for m in d["messages"] if m.get("id") == mid)
+        if by == "you" and not convo_start:
+            latest = next(iter(days(root)), None)
+            previous = _read_day(root, latest["day"])["messages"][-1] if latest else None
+            if previous and previous.get("moved_to"):
+                entry["convo_start"] = True
         d["messages"] = [*d["messages"], entry][-MAX_DAY_MESSAGES:]
         net.write_json(_day_path(root, day), d, True)
     return entry
@@ -362,7 +374,7 @@ def cut_session(root: Path, tid: str, now=None) -> bool:
 # ---------------------------------------------------------------- what the person writes in the dashboard
 
 
-def say(root: Path, text: str, by: str | None = None) -> dict:
+def say(root: Path, text: str, by: str | None = None, new: bool = False) -> dict:
     """The person writes in Chat from the dashboard: kept in the day file and the General history as theirs
     (by "you", via dashboard), queued as human input so the automation host starts the helper, and sent to
     the paired phones (only when a relay is connected: otherwise it stays local)."""
@@ -374,7 +386,7 @@ def say(root: Path, text: str, by: str | None = None) -> dict:
         raise Refused("Only a person writes as themselves in Chat.")
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
-    entry = record(root, mid, "you", "dashboard", text)
+    entry = record(root, mid, "you", "dashboard", text, convo_start=new)
     tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, "dashboard", chat=True))
     runs.pending_add(root, gid, who, "message", text, "dashboard", "p_" + mid[2:])
     sent = None
@@ -383,6 +395,60 @@ def say(root: Path, text: str, by: str | None = None) -> dict:
             root, "phones", text, None, None, None, general=True, sender="you", via="dashboard", mid=mid
         )
     return {"id": mid, "ticket": gid, "day": entry["day"], "sent": bool(sent)}
+
+
+def make_ticket(root: Path, mid: str, title: str | None = None, by: str | None = None) -> dict:
+    """Move a proposed conversation into a normal ticket, once, on the person's click."""
+    who = tickets.current_actor(by)
+    if tickets.agent_tool() or not who.startswith("human:"):
+        raise Refused("Only a person makes a ticket from Chat.")
+    with tickets._locked(root, "chat"):
+        documents = [_read_day(root, row["day"]) for row in reversed(days(root))]
+        entries = [m for d in documents for m in d["messages"]]
+        end = next((i for i in range(len(entries) - 1, -1, -1) if entries[i].get("id") == mid), None)
+        if end is None:
+            raise Refused("That Chat message was not found.")
+        message = entries[end]
+        proposals = [r for r in message.get("refs", []) if r.get("kind") == "proposal"]
+        if not proposals:
+            raise Refused("That Chat message has no ticket proposal.")
+        made = message.get("moved_to") or next((r["made"] for r in proposals if r.get("made")), None)
+        if made:
+            t = tickets.load(root, made["id"])
+            return {"ticket": t["id"], "key": t["key"], "title": t["title"]}
+        start = next((i for i in range(end, -1, -1) if entries[i].get("convo_start")), 0)
+        conversation = entries[start : end + 1]
+        helper = helper_name(root)
+        note = "\n\n".join(
+            ("You" if m.get("by") == "you" else helper) + ": " + m.get("text", "") for m in conversation
+        )
+        # Ticket notes have a 2000-character schema limit; history below keeps every complete text.
+        t = tickets.create(
+            root, title if title is not None else proposals[0]["title"], who, fields={"note": note[:2000]}
+        )
+
+        def copy_history(ticket):
+            for m in conversation:
+                tickets.add_history(
+                    ticket,
+                    who if m.get("by") == "you" else "agent:" + helper,
+                    m.get("text", ""),
+                    m.get("via"),
+                )
+                ticket["history"][-1]["at"] = m.get("at", ticket["history"][-1]["at"])
+
+        tickets.apply_op(root, t["id"], copy_history)
+        moved = {"id": t["id"], "key": t["key"], "title": t["title"]}
+        for m in conversation:
+            m["moved_to"] = moved
+            for ref in m.get("refs", []):
+                if ref.get("kind") == "proposal":
+                    ref["made"] = {"id": t["id"], "key": t["key"]}
+        moved_entries = {id(m) for m in conversation}
+        for d in documents:
+            if any(id(m) in moved_entries for m in d["messages"]):
+                net.write_json(_day_path(root, d["day"]), d, True)
+        return {"ticket": t["id"], "key": t["key"], "title": t["title"]}
 
 
 # ---------------------------------------------------------------- dashboard data
@@ -466,11 +532,13 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         "--reply-to <message id>. "
         "Add --ref ticket:<KEY> for a ticket you made or opened, --ref reference:<url> or --ref file:<path> "
         "for something you point to: they show as cards.",
-        "You may make tickets (orch ticket new), write notes and answer questions. You never sign, approve, "
+        "When the person has told you enough to make a ticket, ask 'Ready. Shall I make this a ticket?' "
+        "and add --ref proposal:<short ticket title>. Never make the ticket yourself in this talk: "
+        "the person clicks Make ticket. You may write notes and answer questions. You never sign, approve, "
         "publish, close, drop or delete anything, and you never answer a permission question: those are for "
         "the person.",
         STAY_IN_ORCH,
-        "Your conversation is cleared every day at 04:00; keep nothing you need in your head: make a ticket.",
+        "Your conversation is cleared every day at 04:00; keep important context in the conversation.",
     ]
     if news:
         out.append("New since you last looked:\n" + news)

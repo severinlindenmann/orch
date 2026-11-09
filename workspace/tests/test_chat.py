@@ -823,3 +823,108 @@ def test_every_new_history_line_carries_the_flag(proj):
     tickets.add_history(t, "agent:x", "note")
     tickets.add_history(t, "human:me", "hi", chat=True)
     assert [e["chat_message"] for e in t["history"]] == [False, True]
+
+
+@pytest.mark.parametrize("sub", ["make-ticket", "say"])
+def test_guard_refuses_person_chat_commands(proj, monkeypatch, sub):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(chat, "is_helper", lambda root: True)
+    with pytest.raises(Refused):
+        chat.guard(proj, SimpleNamespace(cmd="chat", sub=sub))
+
+
+def test_proposal_kept_and_clipped(proj):
+    cards = chat.clean_refs(
+        proj, [{"kind": "proposal", "title": "x" * 150}, {"kind": "proposal", "title": " "}]
+    )
+    assert len(cards) == 1
+    assert cards[0]["kind"] == "proposal" and len(cards[0]["title"]) <= 120
+    assert cards[0]["added_by"] == "person"
+
+
+def test_make_ticket_convo_across_days_idempotent(proj):
+    chat.record(proj, "old", "you", "dashboard", "Unrelated", at="2026-11-07T12:00:00Z")
+    chat.record(
+        proj, "start", "you", "dashboard", "Build fish page", at="2026-11-08T12:00:00Z", convo_start=True
+    )
+    chat.record(
+        proj,
+        "proposal",
+        WS,
+        "helper",
+        "Ready. Shall I make this a ticket?",
+        at="2026-11-09T12:00:00Z",
+        refs=[{"kind": "proposal", "title": "Fish page"}],
+    )
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert chat.make_ticket(proj, "proposal", title="Ignored", by="human:me") == result
+    t = tickets.load(proj, result["ticket"])
+    assert t["title"] == "Fish page" and t["status"] == "open"
+    assert "You: Build fish page" in t["note"] and "Unrelated" not in t["note"]
+    assert len([t for t in tickets.list_all(proj) if t["title"] == "Fish page"]) == 1
+    assert any(h["text"] == "Build fish page" and not h.get("chat_message") for h in t["history"])
+    for day in ("2026-11-08", "2026-11-09"):
+        assert chat.read_day(proj, day)["messages"][0]["moved_to"]["id"] == t["id"]
+    assert "moved_to" not in chat.read_day(proj, "2026-11-07")["messages"][0]
+    assert chat.read_day(proj, "2026-11-09")["messages"][0]["refs"][0]["made"]["id"] == t["id"]
+    assert not runs.running(proj, t["id"])
+    assert not runs.human_waiting(proj, t["id"])
+
+
+@pytest.mark.parametrize("actor,tool", [("agent:test", False), ("human:me", True)])
+def test_make_ticket_agent_refused(proj, monkeypatch, actor, tool):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: tool)
+    with pytest.raises(Refused, match="Only a person makes a ticket from Chat"):
+        chat.make_ticket(proj, "missing", by=actor)
+
+
+def test_convo_say_new(proj, run):
+    code, out, _ = run("chat", "say", "--new", "Fish", "--by", "human:me", "--json")
+    assert code == 0, out
+    assert chat.read_day(proj, json.loads(out)["day"])["messages"][-1]["convo_start"] is True
+
+
+def test_make_ticket_cli_title_and_next_convo(proj, run):
+    chat.record(
+        proj,
+        "m_proposal0000001",
+        WS,
+        "helper",
+        "Ready?",
+        refs=[{"kind": "proposal", "title": "Fish"}],
+        convo_start=True,
+    )
+    code, out, err = run(
+        "chat", "make-ticket", "m_proposal0000001", "--title", "Fish page", "--by", "human:me", "--json"
+    )
+    assert code == 0, err
+    result = json.loads(out)
+    assert result["title"] == "Fish page"
+    next_entry = chat.record(proj, "next", "you", "phone", "Another idea")
+    assert next_entry["convo_start"] is True
+    assert "moved_to" not in next_entry
+
+
+def test_make_ticket_requires_proposal(proj):
+    chat.record(proj, "plain", "you", "dashboard", "Hi")
+    for mid in ("missing", "plain"):
+        with pytest.raises(Refused):
+            chat.make_ticket(proj, mid, by="human:me")
+
+
+def test_proposal_relay_cli(proj, monkeypatch):
+    from orch import cli, cli_clients, relay
+
+    captured = {}
+
+    def send(*args, **kwargs):
+        captured.update(kwargs)
+        return {"id": "m_test00000000001", "to": "phones"}
+
+    monkeypatch.setattr(relay, "send_text", send)
+    args = cli.build_parser(show_all=True).parse_args(
+        ["relay", "send", "phones", "Ready?", "--ref", "proposal:Fish page"]
+    )
+    cli_clients.run_relay(args, proj, lambda *args: None)
+    assert captured["refs"] == [{"kind": "proposal", "title": "Fish page"}]

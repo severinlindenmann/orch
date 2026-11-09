@@ -321,6 +321,8 @@ function dialog(title, cls = 'dialog', lock = '') {
   document.body.append(d);
   return {d, actions};
 }
+document.getElementById('open-agent').hidden = snapshot;
+document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
 const toggle = document.getElementById('menu-toggle');

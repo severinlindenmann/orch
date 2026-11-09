@@ -134,3 +134,6 @@
 @media(prefers-reduced-motion:reduce){
   .chat-page *,.chat-page *:before,.chat-page *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
+
+.chat-page .chat-ticket-link{gap:6px}
+.chat-page .chat-bubble > .btn.outline{min-height:44px;margin-top:10px}

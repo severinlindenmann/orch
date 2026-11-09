@@ -91,6 +91,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
     me = "human:" + re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
     common = ["--by", me, "--json"]
     cases = [
+        ({"op": "chat.say", "args": {"text": "Fish", "new": True}}, ["chat", "say", "--new", *common, "--", "Fish"]),
+        ({"op": "chat.make_ticket", "args": {"id": "m_abcdefghij"}}, ["chat", "make-ticket", "m_abcdefghij", *common]),
         (
             {"op": "answer", "args": {"ticket": "t_abcdef", "question": "q1", "answer": "Yes"}},
             ["answer", "t_abcdef", "q1", "--via", "dashboard", *common, "--", "Yes"],
@@ -806,3 +808,11 @@ def test_link_actions_are_audited(ws, monkeypatch):
         assert actions.run_op(ws, 'orch', op, args)[0] == 200
     rows = [json.loads(line) for line in (ws / '.orch/run/dashboard/actions.log').read_text().splitlines()]
     assert [(r['op'], r['id'], r.get('days')) for r in rows] == [('link.extend', 'f_a', 7), ('link.stop', 'f_a', None)]
+
+
+def test_chat_new_and_make_ticket_validation():
+    assert actions.OPS["chat.say"]({"text":"hi", "new":True}) == (["chat", "say"], ["--new"], ["hi"])
+    assert actions.OPS["chat.make_ticket"]({"id":"m_abcdefghij"}) == (["chat", "make-ticket", "m_abcdefghij"], [], [])
+    for op, args in [("chat.say", {"text":"hi", "new":"yes"}), ("chat.make_ticket", {"id":"--help"}), ("chat.make_ticket", {"id":"m_abcdefghij", "by":"agent:x"})]:
+        with pytest.raises(actions.BadRequest):
+            actions.OPS[op](args)
