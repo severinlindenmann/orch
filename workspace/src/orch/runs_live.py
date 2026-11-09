@@ -1217,11 +1217,16 @@ def start_waiting(root: Path) -> None:
             runs.start(root, tid, by, mode="live")
 
 
+def hold_text(rec: dict) -> str | None:
+    """The plain reason a live run waits before orch types into its window, or None when nothing holds it."""
+    return HOLD_WORDS.get((rec.get("hold") or {}).get("why"))
+
+
 def line(rec: dict, root: Path | None = None) -> str:
     """One plain sentence about a live run, for `orch run status`."""
     state = (rec.get("live") or {}).get("state", "starting")
-    if (rec.get("hold") or {}).get("why") in HOLD_WORDS:
-        return HOLD_WORDS[rec["hold"]["why"]]
+    if hold_text(rec):
+        return hold_text(rec)
     if (rec.get("live") or {}).get("why"):
         return rec["live"]["why"]
     words = {

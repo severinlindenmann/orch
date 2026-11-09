@@ -1014,3 +1014,23 @@ def test_input_held_for_unsent_text_is_given_up_after_three_minutes(proj, run, m
     assert got == "gave_up" and ended == [1] and sent == []
     (back,) = runs.undelivered(proj, tid)
     assert back["live_retry"] is True
+
+
+def test_run_status_json_says_why_a_live_run_waits_and_drops_it_when_it_clears(proj, run, monkeypatch, capsys):
+    """fb18 (hold-why): `orch run status --json` carries `hold` = the core's words; gone once the hold clears."""
+    import json
+
+    from orch import cli
+
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, box="commit the pptx skill too", cx=27)
+    assert runs_live.deliver(proj, tid) == 0
+
+    def status():
+        capsys.readouterr()
+        cli.main(["run", "status", tid, "--json"])
+        return json.loads(capsys.readouterr().out)
+
+    assert status()["hold"] == runs_live.HOLD_WORDS["text"]
+    screen["box"] = ""
+    assert runs_live.deliver(proj, tid) == 1
+    assert "hold" not in status()
