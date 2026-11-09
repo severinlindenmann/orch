@@ -15,6 +15,7 @@ import fnmatch
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import secrets
@@ -1483,8 +1484,12 @@ def _sha_or_none(v: object) -> str | None:
 def _write_atomic(p: Path, text: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, p)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, p)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _stored_sha() -> str | None:
@@ -1507,7 +1512,10 @@ def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
     path = home() / "update-before.json"
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):  # unreadable or not UTF-8: broken, delete it
+        path.unlink(missing_ok=True)
         return None
     try:
         d = json.loads(raw)
@@ -1516,6 +1524,7 @@ def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
             and isinstance(d.get("nonce"), str)
             and isinstance(d.get("root"), str)
             and isinstance(d.get("time"), (int, float))
+            and math.isfinite(d["time"])
             and isinstance(d.get("orch"), str)
             and isinstance(d.get("addons"), dict)
             and all(isinstance(k, str) and isinstance(v, str) for k, v in d["addons"].items())
@@ -1578,16 +1587,26 @@ def _restart_updated(root: Path) -> list[str]:
     if not names:
         return lines
     try:
-        services.stop(root, only=names)
-        rows = services.start(root, only=names)
+        stops = {r["addon"]: r for r in services.stop(root, only=names)}
     except Exception as e:  # a restart failure must not hide a successful update
         why = services._printable(e)
-        return [f"{n} stopped, start it with: orch start ({why})" for n in sorted(names)]
+        return [f"Restart {n} to use the new version (stop failed: {why})" for n in sorted(names)]
+    stopped = {n for n in names if stops.get(n, {}).get("stopped")}
+    for n in sorted(names - stopped):
+        why = services._printable(stops.get(n, {}).get("error") or "did not stop")
+        lines.append(f"Restart {n} to use the new version (stop failed: {why})")
+    if not stopped:
+        return lines
+    try:
+        rows = services.start(root, only=stopped)
+    except Exception as e:
+        why = services._printable(e)
+        return lines + [f"{n} stopped, start it with: orch start ({why})" for n in sorted(stopped)]
     by = {r["addon"]: r for r in rows}
-    ok = sorted(n for n in names if by.get(n, {}).get("running"))
+    ok = sorted(n for n in stopped if by.get(n, {}).get("running"))
     if ok:
-        lines.append(f"Restarting {', '.join(ok)}… done")
-    for n in sorted(names - set(ok)):
+        lines.insert(0, f"Restarting {', '.join(ok)}… done")
+    for n in sorted(stopped - set(ok)):
         why = services._printable(by.get(n, {}).get("error", "")) if by.get(n, {}).get("error") else ""
         lines.append(f"{n} stopped, start it with: orch start" + (f" ({why})" if why else ""))
     return lines

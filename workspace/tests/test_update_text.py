@@ -67,7 +67,7 @@ def test_unchanged_does_not_restart(proj, run, source, monkeypatch):  # noqa: F8
     assert out == "orch is up to date.\n"
 
 
-@pytest.mark.parametrize("failure", [None, "row", "stop", "start"])
+@pytest.mark.parametrize("failure", [None, "row", "stop", "stoprow", "start"])
 def test_restart_only_running_here(proj, run, source, monkeypatch, failure):  # noqa: F811
     (proj / ".orch").mkdir(exist_ok=True)
     monkeypatch.setattr(services, "pid_alive", lambda pid: pid != 999)
@@ -87,29 +87,48 @@ def test_restart_only_running_here(proj, run, source, monkeypatch, failure):  # 
         calls.append(("stop", root, only))
         if failure == "stop":
             raise RuntimeError("stop failed")
+        return [
+            {"addon": "dashboard", "stopped": True},
+            {
+                "addon": "focus",
+                "stopped": failure != "stoprow",
+                **({"error": "busy"} if failure == "stoprow" else {}),
+            },
+        ]
 
     def start(root, only=None):
         calls.append(("start", root, only))
         if failure == "start":
             raise RuntimeError("start failed")
-        return [{"addon": "dashboard", "running": True}, {"addon": "focus", "running": failure != "row"}]
+        rows = [{"addon": "dashboard", "running": True}, {"addon": "focus", "running": failure != "row"}]
+        return [r for r in rows if r["addon"] in only]
 
     monkeypatch.setattr(services, "stop", stop)
     monkeypatch.setattr(services, "start", start)
     code, out, err = run("update")
     assert code == 0, err
-    assert calls == [
-        (c, proj, {"dashboard", "focus"}) for c in (["stop"] if failure == "stop" else ["stop", "start"])
-    ]
-    if failure:
-        assert "focus stopped, start it with: orch start" in out
-        assert "Restart focus to use" not in out
-    if failure == "row":
-        assert "Restarting dashboard… done\n" in out
-    elif failure is None:
+    both = {"dashboard", "focus"}
+    expect = {
+        None: [("stop", both), ("start", both)],
+        "row": [("stop", both), ("start", both)],
+        "start": [("stop", both), ("start", both)],
+        "stop": [("stop", both)],
+        "stoprow": [("stop", both), ("start", {"dashboard"})],  # focus did not stop: not started again
+    }[failure]
+    assert calls == [(c, proj, o) for c, o in expect]
+    if failure is None:
         assert "Restarting dashboard, focus… done\n" in out
+    elif failure == "row":
+        assert "Restarting dashboard… done\n" in out
+        assert "focus stopped, start it with: orch start" in out
+    elif failure == "stoprow":
+        assert "Restarting dashboard… done\n" in out
+        assert "Restart focus to use the new version (stop failed: busy)" in out
+        assert "focus stopped" not in out
+    elif failure == "stop":
+        assert "Restart dashboard to use the new version (stop failed: stop failed)" in out
     else:
-        assert "dashboard stopped, start it with: orch start" in out
+        assert "dashboard stopped, start it with: orch start (start failed)" in out
         assert "… done" not in out
 
 
@@ -268,3 +287,26 @@ def test_helper_may_not_update(proj, run, monkeypatch):  # noqa: F811
     _helper(proj, monkeypatch)
     for argv in (("update", "--project-only"), ("update", "--project-only", "--update-nonce", "x")):
         assert run(*argv)[0] == 2, argv
+
+
+def test_non_utf8_or_nonfinite_snapshot_is_deleted(proj, run, source):  # noqa: F811
+    path = addons.home() / "update-before.json"
+    path.write_bytes(b"\xff\xfe\x00bad")
+    assert run("update", "--project-only", "--update-nonce", "n1")[1] == "Refreshed: nothing\n"
+    assert not path.exists()
+    _snap(proj)
+    path.write_text(path.read_text().replace(path.read_text().split('"time": ')[1].split(",")[0], "NaN"))
+    assert run("update", "--project-only", "--update-nonce", "n1")[1] == "Refreshed: nothing\n"
+    assert not path.exists()
+
+
+def test_atomic_write_cleans_tmp_on_failure(tmp_path, monkeypatch):
+    import os
+
+    def boom(a, b):
+        raise OSError("x")
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(OSError):
+        addons._write_atomic(tmp_path / "f.json", "{}")
+    assert list(tmp_path.iterdir()) == []
