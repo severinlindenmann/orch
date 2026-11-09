@@ -9,7 +9,7 @@ import pytest
 from fakes import WS
 from test_relay_client import msg
 
-from orch import phone_view, relay, runs, tickets
+from orch import phone_view, runs, tickets
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
@@ -17,7 +17,9 @@ PHONE = "ph_iphone0001"
 
 @pytest.fixture
 def conn(proj, run, rel):
-    rel.snapshot["workspaces"]["phones"] = [{"id": PHONE, "name": "iPhone", "online": True, "last_seen": None}]
+    rel.snapshot["workspaces"]["phones"] = [
+        {"id": PHONE, "name": "iPhone", "online": True, "last_seen": None}
+    ]
     assert run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)[0] == 0
     return rel
 
@@ -216,7 +218,11 @@ def test_vector_cases(proj, run, new_ticket, conn):
             msg(
                 mid,
                 "answer",
-                {"question_id": q["body"]["question_id"], "answer": case["answer"], "answered_by": "human:iPhone"},
+                {
+                    "question_id": q["body"]["question_id"],
+                    "answer": case["answer"],
+                    "answered_by": "human:iPhone",
+                },
                 frm=case["from"],
                 ticket=tid,
                 reply_to=q["id"],
@@ -252,8 +258,14 @@ def test_a_round_is_bound_to_its_own_message(proj, run, new_ticket, conn):
     phone_view.sync_reviews(proj)
     (q,) = review_questions(conn)
     conn.inbox.append(
-        msg("m_ans0000000000099", "answer", {"question_id": "review-1", "answer": "accept", "answered_by": "human:x"},
-            frm=PHONE, ticket=tid, reply_to="m_other00000000001")
+        msg(
+            "m_ans0000000000099",
+            "answer",
+            {"question_id": "review-1", "answer": "accept", "answered_by": "human:x"},
+            frm=PHONE,
+            ticket=tid,
+            reply_to="m_other00000000001",
+        )
     )
     run("relay", "inbox")
     assert status(run, tid)["status"] == "review"
@@ -265,7 +277,7 @@ def test_an_unpaired_phone_and_group_messages_are_refused(proj, run, new_ticket,
     phone_view.sync_reviews(proj)
     (q,) = review_questions(conn)
     answer(conn, q, "accept", frm="ph_stranger01")
-    mid = answer(conn, q, "accept", n=2)
+    answer(conn, q, "accept", n=2)
     conn.inbox[-1]["body"]["group"] = {"id": "grp_x"}
     run("relay", "inbox")
     assert status(run, tid)["status"] == "review"

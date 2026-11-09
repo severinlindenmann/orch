@@ -188,8 +188,6 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
 /// Largest `body.ticket_view` the relay keeps: compact UTF-8 JSON bytes (message.schema.json).
 pub const MAX_TICKET_VIEW: usize = 16384;
 
-/// `body.ticket_view` (schema-checked already): at most 16 KB, and every attachment blob is one the sender
-/// uploaded, with its size. A blob of someone else answers exactly like a missing one (no existence oracle).
 /// body.review marks the review question (relay-api.md): question_id review-<n>, options exactly
 /// accept and changes, no scope. Anything else with the marker is refused, so no other question can
 /// show up as a review bar.
@@ -215,6 +213,8 @@ fn check_review_question(msg: &Value) -> Res<()> {
     }
 }
 
+/// `body.ticket_view` (schema-checked already): at most 16 KB, and every attachment blob is one the sender
+/// uploaded, with its size. A blob of someone else answers exactly like a missing one (no existence oracle).
 fn check_ticket_view(c: &Connection, sender: &str, msg: &Value) -> Res<()> {
     let view = &msg["body"]["ticket_view"];
     if view.is_null() {

@@ -848,7 +848,9 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
     mid = str(msg.get("reply_to"))
     if not phone_view.close_review(root, tid, n, mid):
         with contextlib.suppress(Refused):
-            tickets.note_history(root, tid, by, "A review answer from the phone came too late and was ignored", via)
+            tickets.note_history(
+                root, tid, by, "A review answer from the phone came too late and was ignored", via
+            )
         return f"not applied to {tid}: not the current review", None
     try:
         if ans.casefold() == "accept":
@@ -858,7 +860,9 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
         return f"asked for changes on {tid} (via {via})", tid
     except Refused as e:
         with contextlib.suppress(Refused):
-            tickets.note_history(root, tid, by, "A review answer from the phone was not used: " + str(e)[:120], via)
+            tickets.note_history(
+                root, tid, by, "A review answer from the phone was not used: " + str(e)[:120], via
+            )
         return f"not applied to {tid}: {e}", None
     except BaseException:
         phone_view.reopen_review(root, tid, n, mid)

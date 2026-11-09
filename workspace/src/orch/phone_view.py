@@ -968,7 +968,10 @@ def sync_reviews(root: Path) -> list[str]:
         try:
             relay.send_review_question(root, t, n, mid)
             sent.append(tid)
-        except (Refused, OSError):  # not sent: the round is burned (review-n is never used twice), next pull retries
+        except (
+            Refused,
+            OSError,
+        ):  # not sent: the round is burned (review-n is never used twice), next pull retries
 
             def undo(st, tid=tid, n=n, mid=mid):
                 rec = st.get("reviews", {}).get(tid)
@@ -982,7 +985,7 @@ def sync_reviews(root: Path) -> list[str]:
 
 def close_rounds(root: Path, tid: str) -> None:
     """The ticket left Review: its open review round is stale at once (called by tickets.apply_op under the
-    ticket lock, before the new status is written). Reads first, so a workspace without phones writes nothing."""
+    ticket lock, before the new status is written). Reads first: without phones nothing is written."""
     rec = load_state(root).get("reviews", {}).get(tid)
     if not (isinstance(rec, dict) and rec.get("open")):
         return
