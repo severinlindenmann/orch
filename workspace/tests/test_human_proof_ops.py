@@ -864,3 +864,45 @@ def test_a_content_swap_before_the_click_is_refused(ws, run, monkeypatch):
     proof = _proof(ws, item["op"], item["target"])
     code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
     assert code == 2 and "args" not in seen  # the proof was for the other content
+
+
+# ------------------------------------------------------------------ unusable key folder: nothing looks saved
+
+
+def test_chat_say_with_an_unusable_key_folder_writes_nothing(ws, run, monkeypatch):
+    from orch import chat
+
+    monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)
+    proof = _proof(ws, "chat.send", "general")
+    code, out, err = _cli(run, monkeypatch, proof, "chat", "say", "Hello team", "--json")
+    assert code == 2 and "Not saved" in out + err
+    day = chat.read_day(ws, chat.day_key(ws))
+    assert day["messages"] == []  # no chat line that looks saved while the error says it is not
+    assert (
+        not [t for t in tickets.list_tickets(ws) if t.get("general")]
+        if hasattr(tickets, "list_tickets")
+        else True
+    )
+
+
+def test_a_phone_text_with_an_unusable_key_folder_retries_then_tells_the_phone(ws, monkeypatch):
+    from orch import chat, relay
+
+    monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)
+    sent = []
+    monkeypatch.setattr(relay, "send_text", lambda root, to, text, **k: sent.append((to, text, k)) or {})
+    msg = {
+        "id": "m_phonetext00000001",
+        "from": "ph_abcdefghij",
+        "type": "text",
+        "body": {"text": "hi", "general": True},
+    }
+    with pytest.raises(relay.Transient):  # tried again on the next pulls, not marked seen
+        relay._phone_text(ws, msg, final=False)
+    assert sent == []
+    note, tid = relay._phone_text(ws, msg, final=True)  # the last try: a plain reply, nothing written
+    assert "not saved" in note and len(sent) == 1
+    to, text, kw = sent[0]
+    assert to == "ph_abcdefghij" and "Not saved on the computer" in text and "Try again shortly" in text
+    assert kw["reply_to"] == msg["id"]
+    assert chat.read_day(ws, chat.day_key(ws))["messages"] == []

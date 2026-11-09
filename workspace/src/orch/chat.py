@@ -385,6 +385,7 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False, proven:
     who = tickets.current_actor(by)
     if not who.startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
+    runs.require_signing(root)  # before ANY line is written: a refusal must leave nothing that looks saved
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
     entry = record(root, mid, "you", "dashboard", text, convo_start=new)

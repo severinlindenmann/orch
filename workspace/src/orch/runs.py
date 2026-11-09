@@ -395,6 +395,10 @@ def _pending_proof(root: Path, tid: str):
         return None
 
 
+class Unsigned(Refused):
+    """A person's input could not be signed (no usable key folder): nothing was saved."""
+
+
 UNSIGNED = (
     "Not saved: orch can't check who you are on this computer right now (its protected folder can't be "
     "used), so your message would never reach the agent. Close orch and start it again; if it keeps "
@@ -408,7 +412,7 @@ def require_signing(root: Path) -> None:
     from orch import humanproof
 
     if humanproof.ENFORCE_PENDING_MAC and _pending_proof(root, "") is None:
-        raise Refused(UNSIGNED)
+        raise Unsigned(UNSIGNED)
 
 
 def _mac_line(root: Path, tid: str, item: dict) -> None:
@@ -422,7 +426,7 @@ def _mac_line(root: Path, tid: str, item: dict) -> None:
     if proof:
         item["mac"] = humanproof.pending_mac(proof[0], proof[1], tid, item)
     elif humanproof.ENFORCE_PENDING_MAC:
-        raise Refused(UNSIGNED)
+        raise Unsigned(UNSIGNED)
 
 
 def _mac_valid(root: Path, tid: str, item: dict, key_ws) -> bool:
