@@ -1,5 +1,10 @@
-"""Windows user+SYSTEM ACL for the guarded home (#405), simulated on POSIX with real icacls /save output
-captured on Windows 11 (standard user). The flag winacl._windows and the icacls runner are replaced."""
+"""Windows user+SYSTEM ACL for the guarded home (#405), simulated on POSIX with the ACEs the real Win32 API
+returned on Windows 11 (standard user). The flag winacl._windows and the API seams are replaced; any child
+process (icacls, whoami) fails the test."""
+
+import inspect
+import os
+import subprocess
 
 import pytest
 
@@ -9,71 +14,85 @@ from orch.errors import Refused
 
 SID = "S-1-5-21-2313884086-3657026201-3636488430-1002"
 OTHER = "S-1-5-21-2313884086-3657026201-3636488430-1003"
-# real: icacls <file> /save out.txt after /inheritance:r /grant:r *SID:(F) *S-1-5-18:(F)
-FILE_OK = f"k.key\nD:PAI(A;;FA;;;SY)(A;;FA;;;{SID})\n"
-DIR_OK = f"acltest\nD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;{SID})\n"
-# real: a fresh file in the profile: inherits user, SYSTEM, Administrators
-INHERITED = f"k.key\nD:AI(A;ID;FA;;;SY)(A;ID;FA;;;BA)(A;ID;FA;;;{SID})\n"
+SY = "S-1-5-18"
+FA = 0x1F01FF
+# What the Win32 API returned for a real file/folder after set_private as a standard user on Windows 11
+# (icacls showed: SYSTEM:(F) and WINDEV\user:(F), SDDL D:PAI(A;;FA;;;SY)(A;;FA;;;<user>))
+FILE_OK = (True, [(0, 0, FA, SY), (0, 0, FA, SID)])
+DIR_OK = (True, [(0, 3, FA, SY), (0, 3, FA, SID)])
+# a fresh file in the profile: inherits user, SYSTEM, Administrators
+INHERITED = (False, [(0, 0x10, FA, SY), (0, 0x10, FA, "S-1-5-32-544"), (0, 0x10, FA, SID)])
 BAD = {
-    "users": f"x\nD:PAI(A;;FA;;;SY)(A;;FA;;;{SID})(A;;0x1200a9;;;BU)\n",
-    "everyone": f"x\nD:PAI(A;;FA;;;SY)(A;;FA;;;{SID})(A;;FA;;;WD)\n",
-    "admins": f"x\nD:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{SID})\n",
-    "other user": f"x\nD:PAI(A;;FA;;;SY)(A;;FA;;;{SID})(A;;FA;;;{OTHER})\n",
+    "users": (True, [*FILE_OK[1], (0, 0, 0x1200A9, "S-1-5-32-545")]),
+    "everyone": (True, [*FILE_OK[1], (0, 0, FA, "S-1-1-0")]),
+    "admins": (True, [*FILE_OK[1], (0, 0, FA, "S-1-5-32-544")]),
+    "other user": (True, [*FILE_OK[1], (0, 0, FA, OTHER)]),
     "inherits": INHERITED,
-    "inherits unprotected": f"x\nD:AI(A;;FA;;;SY)(A;;FA;;;{SID})\n",
-    "read only user": f"x\nD:PAI(A;;FA;;;SY)(A;;FR;;;{SID})\n",
-    "deny": f"x\nD:PAI(D;;FA;;;BU)(A;;FA;;;SY)(A;;FA;;;{SID})\n",
-    "no user": "x\nD:PAI(A;;FA;;;SY)\n",
-    "empty": "x\nD:PAI\n",
-    "no dacl": "x\nO:SY\n",
-    "garbage": "x\nD:PAI(A;;FA;;;SY)junk(A;;FA;;;S-1-5-21-1-2-3-4)\n",
-    "short ace": f"x\nD:PAI(A;;FA;;SY)(A;;FA;;;{SID})\n",
-    "nothing": "",
+    "inherits unprotected": (False, FILE_OK[1]),
+    "inherited ace on protected": (True, [(0, 0x10, FA, SY), (0, 0x10, FA, SID)]),
+    "read only user": (True, [(0, 0, FA, SY), (0, 0, 0x120089, SID)]),
+    "deny": (True, [(1, 0, FA, "?"), *FILE_OK[1]]),
+    "no user": (True, [(0, 0, FA, SY)]),
+    "empty": (True, []),
+    "odd ace flags": (True, [(0, 0x40, FA, SY), (0, 0, FA, SID)]),
 }
 
 
 @pytest.fixture
 def win(monkeypatch):
     calls = []
-    state = {"sddl": FILE_OK, "rc": 0, "attrs": 0}
+    state = {"dacl": FILE_OK, "attrs": 0, "err": None, "set_err": None}
 
-    def fake_icacls(args):
-        calls.append(list(args))
-        if "/save" in args:
-            if state["rc"] == 0:
-                out = args[args.index("/save") + 1]
-                with open(out, "wb") as f:
-                    f.write(state["sddl"].encode("utf-16"))
-            return state["rc"], ""
-        return state["rc"], "Successfully processed 1 files; Failed processing 0 files"
+    def read(p):
+        calls.append(("read", str(p)))
+        if state["err"]:
+            raise state["err"]
+        return state["dacl"]
+
+    def write(p, is_dir, sid):
+        calls.append(("write", str(p), is_dir, sid))
+        if state["set_err"]:
+            raise state["set_err"]
+
+    def no_process(*a, **k):
+        pytest.fail("a child process was started (PATH/cwd lookup of icacls or whoami)")
 
     monkeypatch.setattr(winacl, "_windows", lambda: True)
-    monkeypatch.setattr(winacl, "_run_icacls", fake_icacls)
-    monkeypatch.setattr(winacl, "_whoami", lambda: f'"windev\\user","{SID}"\n')
-    monkeypatch.setattr(winacl, "_sid_cache", None)
+    monkeypatch.setattr(winacl, "_read_dacl", read)
+    monkeypatch.setattr(winacl, "_write_dacl", write)
+    monkeypatch.setattr(winacl, "_sid_cache", SID)
     monkeypatch.setattr(winacl, "_attrs", lambda p: state["attrs"])
+    monkeypatch.setattr(subprocess, "run", no_process)
+    monkeypatch.setattr(subprocess, "Popen", no_process)
+    monkeypatch.setattr(os, "system", no_process)
     state["calls"] = calls
     return state
 
 
+def test_no_subprocess_in_module():
+    assert not hasattr(winacl, "subprocess")
+    assert "import subprocess" not in inspect.getsource(winacl)
+
+
 def test_posix_is_a_no_op(tmp_path, monkeypatch):
-    monkeypatch.setattr(winacl, "_run_icacls", lambda a: pytest.fail("icacls on POSIX"))
+    monkeypatch.setattr(winacl, "_read_dacl", lambda p: pytest.fail("api on POSIX"))
+    monkeypatch.setattr(winacl, "_write_dacl", lambda *a: pytest.fail("api on POSIX"))
     winacl.set_private(tmp_path, True)
     winacl.check_private(tmp_path)
     winacl.no_reparse(tmp_path)
 
 
 def test_owner_and_system_only_ok(win, tmp_path):
-    f = tmp_path / "k.key"
-    f.write_text("x")
-    winacl.check_private(f)
-    win["sddl"] = DIR_OK
+    winacl.check_private(tmp_path / "k.key")
+    win["dacl"] = DIR_OK
+    winacl.check_private(tmp_path)
+    win["dacl"] = (True, [(0, 0, FA, SID)])  # user only is still private
     winacl.check_private(tmp_path)
 
 
 @pytest.mark.parametrize("name", sorted(BAD))
 def test_extra_or_odd_rights_are_refused(win, tmp_path, name):
-    win["sddl"] = BAD[name]
+    win["dacl"] = BAD[name]
     with pytest.raises(Refused, match="not private to you"):
         winacl.check_private(tmp_path)
 
@@ -92,27 +111,25 @@ def test_reparse_point_refused_anywhere_on_the_path(win, tmp_path, monkeypatch):
     winacl.no_reparse(f)
 
 
-def test_icacls_failure_refused(win, tmp_path):
-    win["rc"] = 5
+def test_api_failure_refused(win, tmp_path):
+    win["err"] = winacl._no("Windows would not tell its rights")
     with pytest.raises(Refused, match="would not tell"):
         winacl.check_private(tmp_path)
+    win["err"] = OSError("boom")  # any surprise, not only Refused
+    with pytest.raises(Refused, match="would not tell"):
+        winacl.check_private(tmp_path)
+    win["set_err"] = RuntimeError("boom")
     with pytest.raises(Refused, match="would not set"):
         winacl.set_private(tmp_path, True)
 
 
-def test_icacls_missing_refused(win, tmp_path, monkeypatch):
-    def boom(args):
-        raise winacl._no("Windows would not tell its rights")
+def test_attribute_check_failure_refused(win, tmp_path, monkeypatch):
+    def bad(p):
+        raise PermissionError(p)
 
-    monkeypatch.setattr(winacl, "_run_icacls", boom)
+    monkeypatch.setattr(winacl, "_attrs", bad)
     with pytest.raises(Refused):
-        winacl.check_private(tmp_path)
-
-
-def test_unknown_account_refused(win, tmp_path, monkeypatch):
-    monkeypatch.setattr(winacl, "_whoami", lambda: "garbage")
-    with pytest.raises(Refused, match="account"):
-        winacl.check_private(tmp_path)
+        winacl.no_reparse(tmp_path)
 
 
 def test_missing_path_is_not_wrong_rights(win, tmp_path, monkeypatch):
@@ -124,20 +141,17 @@ def test_missing_path_is_not_wrong_rights(win, tmp_path, monkeypatch):
         winacl.check_private(tmp_path / "nope")
 
 
-def test_set_private_argv_list_with_sids_and_inheritance_removed(win, tmp_path):
-    win["sddl"] = DIR_OK
+def test_set_private_writes_user_and_system_then_verifies(win, tmp_path):
+    win["dacl"] = DIR_OK
     winacl.set_private(tmp_path, True)
-    cmd = win["calls"][0]
-    assert cmd[0] == str(tmp_path) and "/inheritance:r" in cmd
-    assert f"*{SID}:(OI)(CI)(F)" in cmd and "*S-1-5-18:(OI)(CI)(F)" in cmd
-    win["sddl"] = FILE_OK
+    assert win["calls"] == [("write", str(tmp_path), True, SID), ("read", str(tmp_path))]
+    win["dacl"] = FILE_OK
     winacl.set_private(tmp_path / "f", False)
-    assert f"*{SID}:(F)" in win["calls"][-2]
-    assert win["calls"][-1][1] == "/save"  # verified right after setting
+    assert win["calls"][-2][2] is False
 
 
 def test_set_private_refuses_when_result_not_private(win, tmp_path):
-    win["sddl"] = INHERITED
+    win["dacl"] = INHERITED
     with pytest.raises(Refused):
         winacl.set_private(tmp_path, True)
 
@@ -159,21 +173,21 @@ def tws(tmp_path, monkeypatch):
 
 
 def test_humanproof_sets_and_checks_acl_on_every_file(win, tws):
-    win["sddl"] = FILE_OK
+    win["dacl"] = FILE_OK
     key = hp.human_key(tws)
     assert len(key) == 32
-    sets = [c for c in win["calls"] if "/grant:r" in c]
-    assert any("human.key" in c[0] for c in sets) or any(".tmp" in c[0] for c in sets)
-    assert any(c[0].endswith("keys") for c in sets)  # the key folders too
+    sets = [c[1] for c in win["calls"] if c[0] == "write"]
+    assert any(".human.key" in x and x.endswith(".tmp") for x in sets)
+    assert any(x.endswith("keys") for x in sets)  # the key folders too
     n = len(win["calls"])
     assert hp.human_key(tws, create=False) == key
     assert len(win["calls"]) > n  # read-back checks the rights again
 
 
 def test_humanproof_refuses_a_loose_key_on_read(win, tws):
-    win["sddl"] = FILE_OK
+    win["dacl"] = FILE_OK
     hp.human_key(tws)
-    win["sddl"] = BAD["admins"]
+    win["dacl"] = BAD["admins"]
     with pytest.raises(Refused, match="not private"):
         hp.human_key(tws, create=False)
 
