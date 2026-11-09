@@ -552,3 +552,16 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv), cmd
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
+
+
+def test_flags_that_are_not_bad_words_still_pass():
+    for ok in (
+        ["branch", "--show-current"],
+        ["log", "--no-textconv"],
+        ["diff", "--name-only"],
+        ["status", "--porcelain"],
+        ["ls-files", "-z"],
+        ["worktree", "add", "--force", "p"],
+        ["log", "--", "--textconv"],
+    ):
+        assert safegit.refusal(ok) is None, ok

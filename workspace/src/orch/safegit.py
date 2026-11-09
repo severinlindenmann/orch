@@ -263,7 +263,10 @@ def refusal(args: list[str]) -> str | None:
     if k >= len(args):
         return None
     cmd, rest = args[k], args[k + 1 :]
-    if any(a in _BAD_WORDS or a.split("=", 1)[0] in _BAD_WORDS for a in rest):
+    allflags = [a.split("=", 1)[0] for a in (rest[: rest.index("--")] if "--" in rest else rest)]
+    if any(
+        a.startswith("--") and len(a) >= 4 and any(w.startswith(a) for w in _BAD_WORDS) for a in allflags
+    ):  # abbreviations too
         return "git: options that run external programs (--ext-diff, --textconv, --filters, ...) are refused"
     if cmd not in ALLOWED:
         return f"git {cmd} is not one of the git commands orch runs"
