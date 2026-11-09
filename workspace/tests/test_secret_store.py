@@ -425,12 +425,12 @@ def test_a_real_workspace_with_another_orch_home_is_refused(acct, monkeypatch, t
     other = tmp_path / "elsewhere"
     other.mkdir()
     monkeypatch.setenv("ORCH_HOME", str(other))
-    with pytest.raises(Refused, match="don't belong together"):
+    with pytest.raises(hp.HomeRefused):
         keystore.add(ws, "k", "token", TOKEN)
-    with pytest.raises(Refused, match="don't belong together"):
+    with pytest.raises(hp.HomeRefused):
         keystore.set_admin(ws, {"a": TOKEN})
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))  # a test home is no fallback either
-    with pytest.raises(Refused, match="don't belong together"):
+    with pytest.raises(hp.HomeRefused):
         keystore.add(ws, "k", "token", TOKEN)
     assert not any(other.iterdir()) and not (acct / ".orch-tool").exists()
     assert not (acct / ".orch-test" / "home").exists()
@@ -451,7 +451,7 @@ def test_a_real_workspace_uses_the_default_home_in_the_account_not_a_real_one(ac
 
 def test_a_test_workspace_with_the_default_home_is_refused(tws, acct, monkeypatch):
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-tool"))
-    with pytest.raises(Refused, match="don't belong together"):
+    with pytest.raises(hp.HomeRefused):
         keystore.add(tws, "k", "token", TOKEN)
     assert not (acct / ".orch-tool").exists()
 
@@ -539,7 +539,7 @@ def test_admin_keys_are_refused_when_the_home_does_not_pair_and_empty_is_a_no_op
     monkeypatch.setenv("ORCH_HOME", str(elsewhere))
     skipped: list[str] = []
     relay._admin_keys(ws, {}, skipped)  # nothing to store, nothing refused
-    with pytest.raises(Refused, match="don't belong together") as e:
+    with pytest.raises(hp.HomeRefused) as e:
         relay._admin_keys(ws, {"DB_URL": "pg://db.example/prod"}, skipped)
     assert "pg://db.example/prod" not in str(e.value)
     assert not any(elsewhere.iterdir()) and not (acct / ".orch-tool").exists()
@@ -569,7 +569,7 @@ def test_a_refresh_with_keys_and_an_unpaired_home_changes_nothing(acct, monkeypa
         "workspaces": {"workspaces": [{"id": "ws_x", "name": "X"}], "phones": []},
     }
     monkeypatch.setattr(relay, "_api", lambda *a, **k: (200, snap))
-    with pytest.raises(Refused, match="don't belong together"):
+    with pytest.raises(hp.HomeRefused):
         relay.refresh(ws)
     assert not (ws / ".agents").exists()  # no skill, no workspaces.json
     sec = ws / ".orch" / "secrets"
