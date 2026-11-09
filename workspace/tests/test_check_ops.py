@@ -226,9 +226,9 @@ def test_files_sig_without_git_or_on_timeout(proj, repo, monkeypatch):
     def slow(*a, **k):
         raise subprocess.TimeoutExpired("git", 3)
 
-    monkeypatch.setattr(filesig.subprocess, "run", slow)
-    assert filesig.files_sig(repo) is None
-    monkeypatch.undo()
+    with monkeypatch.context() as m:  # (undo() would also drop the autouse isolated ORCH_HOME)
+        m.setattr(filesig.subprocess, "run", slow)
+        assert filesig.files_sig(repo) is None
     monkeypatch.setattr(filesig, "MAX_FILES", 2)
     (repo / "u1").write_text("1")
     (repo / "u2").write_text("2")
@@ -303,7 +303,9 @@ def test_record_and_proof_state_never_execute(repo, run, new_ticket, monkeypatch
     seen = []
 
     def only_git(argv, *a, **k):
-        assert isinstance(argv, list) and argv[0] == "git" and not k.get("shell"), argv
+        assert (
+            isinstance(argv, list) and os.path.basename(argv[0]) in ("git", "git.exe") and not k.get("shell")
+        ), argv
         assert not any("PWNED" in x or "rm -rf" in x for x in argv), argv
         seen.append(argv)
         return real_popen(argv, *a, **k)
@@ -396,6 +398,14 @@ def test_files_sig_special_files_never_block_or_read(repo, tmp_path):
         filesig.MAX_READ = monkey
 
 
+OURS = {
+    "GIT_TERMINAL_PROMPT",
+    "GIT_EDITOR",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_ASKPASS",
+}  # set by safegit, not inherited
+
+
 def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     repo = proj
     _git(repo, "init", "-q")
@@ -419,7 +429,7 @@ def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     real = subprocess.run
     monkeypatch.setattr(filesig.subprocess, "run", lambda a, **k: seen.append(k["env"]) or real(a, **k))
     filesig.files_sig(repo)
-    assert seen and all(not any(k.startswith("GIT_") and k != "GIT_OPTIONAL_LOCKS" for k in e) for e in seen)
+    assert seen and all(not any(k.startswith("GIT_") and k not in OURS for k in e) for e in seen)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="st_ctime is the creation time on Windows")

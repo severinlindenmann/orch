@@ -44,7 +44,7 @@ from orch import addons
 
 # Modules that still start git themselves. MUST SHRINK TO ZERO: each moves onto safegit. filesig.py (B8) and
 # B9's work-check join this list until they migrate.
-LEGACY = ("addons.py", "harness.py", "filesig.py")
+LEGACY = ()
 
 IDENTITY = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits orch makes (bring-back)
 EMPTY_TREE = {  # by `rev-parse --show-object-format`
@@ -390,6 +390,19 @@ def driver_args(
                 return None
             pairs.append((f"merge.{m[4]}.driver", false))
     return pairs
+
+
+def hardened(cwd: Path, root: Path | None = None) -> tuple[list[str], dict[str, str]] | None:
+    """For the few read-only callers that still start git themselves and need bytes or a plain return code
+    (harness.py, filesig.py): (argv prefix, environment) with the same hardening as run(): absolute git found
+    by the avoid rules, no hooks, no fsmonitor, no untracked cache, no network, no editor, no optional locks,
+    sanitized PATH, no GIT_* variable. Use only for rev-parse, ls-files, check-ignore (they run no filters).
+    None = no trusted git: treat as "git is not installed". They move onto run() in B11b."""
+    true = trivial("true", cwd, root)
+    exe = git_exe(cwd, root)
+    if true is None or exe is None:
+        return None
+    return [exe, *base_args(true, True)], env(cwd, root, true)
 
 
 def run(

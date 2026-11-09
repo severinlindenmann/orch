@@ -172,14 +172,16 @@ def start_text(root: Path) -> str:
 
 def _git_exclude(root: Path) -> tuple[Path, str] | None:
     """(.git/info/exclude, path of the project below the git top folder) or None when this is no git repo."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    h = _hardened(root)
+    if h is None:
+        return None
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
+            [*h[0], "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
             cwd=root,
             capture_output=True,
             text=True,
-            env=env,
+            env=h[1],
             timeout=10,
             check=True,
         ).stdout.splitlines()
@@ -276,12 +278,15 @@ def _tracked(root: Path, rel: str) -> bool:
             return False  # plain folder (or no git program there): nothing can be tracked
     except Refused:
         return True  # cannot tell: treat the file as the team's
-    env = _git_env()
+    h = _hardened(root)
+    if h is None:
+        return True  # no trusted git: cannot tell, treat the file as the team's
+    env = h[1]
     try:
         return (
             subprocess.run(
                 [
-                    "git",
+                    *h[0],
                     "ls-files",
                     "--error-unmatch",
                     "--",
@@ -298,6 +303,13 @@ def _tracked(root: Path, rel: str) -> bool:
         return True  # cannot tell: treat the file as the team's
 
 
+def _hardened(cwd: Path):
+    """safegit.hardened (imported late: safegit needs addons, addons needs this module)."""
+    from orch import safegit
+
+    return safegit.hardened(cwd)
+
+
 def _git_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["LC_ALL"] = "C"
@@ -307,12 +319,15 @@ def _git_env() -> dict[str, str]:
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""
+    h = _hardened(root)
     try:
+        if h is None:
+            raise FileNotFoundError("git")  # no trusted git program: the same as none installed
         r = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            [*h[0], "rev-parse", "--is-inside-work-tree"],
             cwd=root,
             capture_output=True,
-            env=_git_env(),
+            env=h[1],
             timeout=10,
         )
     except FileNotFoundError:
@@ -333,12 +348,15 @@ def _in_git_repo(root: Path) -> bool:
 
 
 def _ignored(root: Path, rel: str) -> bool:
+    h = _hardened(root)
+    if h is None:
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
     try:
         r = subprocess.run(
-            ["git", "check-ignore", "-q", "--", rel],
+            [*h[0], "check-ignore", "-q", "--", rel],
             cwd=root,
             capture_output=True,
-            env=_git_env(),
+            env=h[1],
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -404,10 +422,13 @@ def check_private_path(root: Path, path: Path) -> None:
     if not _in_git_repo(root):
         return
     rel = path.absolute().relative_to(root.absolute()).as_posix()
+    h = _hardened(root)
+    if h is None:
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
     try:
         t = subprocess.run(
             [
-                "git",
+                *h[0],
                 "ls-files",
                 "--error-unmatch",
                 "--",
@@ -415,7 +436,7 @@ def check_private_path(root: Path, path: Path) -> None:
             ],  # .ORCH/... tracked is this file too
             cwd=root,
             capture_output=True,
-            env=_git_env(),
+            env=h[1],
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError):

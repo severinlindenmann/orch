@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from orch import addons, safegit, worktrees
+from orch.errors import Refused
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "orch"
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX shell stubs")
@@ -748,3 +749,38 @@ def test_a_project_python_is_not_a_trusted_trivial_command_on_windows(tmp_path):
     assert safegit._python_trivial("true", tmp_path, tmp_path).startswith(f'"{sys.executable}"')
     inside = Path(sys.executable).parent
     assert safegit._python_trivial("true", inside, inside) is None
+
+
+def test_the_legacy_callers_never_run_a_workspace_git_hook_or_fsmonitor(proj, monkeypatch):
+    """files_sig and harness (_in_git_repo, _tracked, _ignored, _git_exclude, check_private_path) use the
+    hardened git: a fake `git` in a PATH entry inside the workspace, a repo hook and an fsmonitor command
+    never run."""
+    from orch import filesig, harness
+
+    r = proj
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("x\n")
+    (r / ".orch").mkdir()
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+    marker = proj.parent / (proj.name + "_LEGACY")
+    for name in ("post-checkout", "reference-transaction", "pre-commit", "post-index-change"):
+        sh(r / ".git" / "hooks" / name, f"touch {marker}.{name}")
+    plain_git(r, "config", "core.fsmonitor", f"touch {marker}.fsmonitor; echo")
+    (r / "bin").mkdir()
+    sh(r / "bin" / "git", f"touch {marker}.fakegit")
+    sh(r / "bin" / "true", f"touch {marker}.faketrue")
+    real = _exe(proj.parent)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(r / "bin"), str(real.parent), "/usr/bin", "/bin"]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    (r / "new.txt").write_text("n\n")
+    assert filesig.files_sig(r)
+    assert harness._in_git_repo(r) is True
+    assert harness._tracked(r, "a.txt") is True
+    harness._ignored(r, "new.txt")
+    assert harness._git_exclude(r) is not None
+    with pytest.raises(Refused):  # not ignored here: refused after asking the hardened git
+        harness.check_private_path(r, r / ".orch" / "local" / "x.json")
+    assert list(marker.parent.glob(marker.name + "*")) == []
