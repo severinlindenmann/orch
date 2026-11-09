@@ -144,3 +144,45 @@ def act_server(ws, act_orch):
     yield f"http://127.0.0.1:{srv.server_address[1]}"
     srv.shutdown()
     srv.server_close()
+
+
+# --- No server outlives its test (0909 leak fix) ------------------------------------------------
+# Every `python -m orch_dashboard` process the tests start is recorded through its Popen handle and killed
+# at teardown by its exact PID (it is our own child, never a pid read from a file). At the end of the
+# session any such process still alive fails the run.
+_STARTED: list = []
+
+
+@pytest.fixture(autouse=True)
+def _reap_started_servers(monkeypatch):
+    import contextlib
+    import os
+    import signal
+    import subprocess
+
+    real = subprocess.Popen
+
+    class Recording(real):
+        def __init__(self, args, *a, **kw):
+            super().__init__(args, *a, **kw)
+            if isinstance(args, (list, tuple)) and "orch_dashboard" in [str(x) for x in args]:
+                _STARTED.append(self)
+
+    monkeypatch.setattr(subprocess, "Popen", Recording)
+    before = len(_STARTED)
+    yield
+    for p in _STARTED[before:]:
+        if p.poll() is None:
+            try:
+                os.kill(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            p.wait(timeout=10)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    alive = [p.pid for p in _STARTED if p.poll() is None]
+    if alive:
+        print(f"\nLEAK: orch_dashboard servers started by the tests are still alive: {alive}")
+        session.exitstatus = 1

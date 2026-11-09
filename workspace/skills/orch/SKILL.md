@@ -140,6 +140,7 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
 **End of every run**
 
     orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters
+    orch ticket outcome <id> --changed "<what changed>" --why "<why>" [--not-included "<what was left out>"]   # each at most 300 characters; shown on the Notes page
     orch ticket status <id> done                         # only when every step has proof
 
 When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.

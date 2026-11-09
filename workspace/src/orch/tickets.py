@@ -977,6 +977,43 @@ def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     return apply_op(root, tid, lambda t: _set_field(t, "summary", text))[0]
 
 
+# Short plain-text fields on a ticket (outcome parts); the schema maxLength matches.
+TEXT_FIELD_MAX = 300
+OUTCOME_KEYS = ("changed", "why", "not_included")
+
+
+def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
+    """What changed and why (outcome). Given parts replace theirs, empty clears one. No history line."""
+    clean = {}
+    for k, v in parts.items():
+        if k not in OUTCOME_KEYS:
+            raise Refused(f"An outcome has only: {', '.join(OUTCOME_KEYS)}.")
+        if v is None:
+            continue
+        if not isinstance(v, str):
+            raise Refused(f"{k} must be text.")
+        v = v.strip()
+        if len(v) > TEXT_FIELD_MAX:
+            raise Refused(f"'{k}' is at most {TEXT_FIELD_MAX} characters.")
+        clean[k] = v
+    if not clean:
+        raise Refused("Say what to record: --changed, --why or --not-included.")
+
+    def op(ticket):
+        out = dict(ticket.get("outcome") or {})
+        for k, v in clean.items():
+            if v:
+                out[k] = v
+            else:
+                out.pop(k, None)
+        if out:
+            ticket["outcome"] = out
+        else:
+            ticket.pop("outcome", None)
+
+    return apply_op(root, tid, op)[0]
+
+
 def _next_id(items: list[dict], prefix: str) -> str:
     nums = [int(i["id"][1:]) for i in items if re.fullmatch(prefix + r"[0-9]+", str(i.get("id", "")))]
     return f"{prefix}{max(nums, default=0) + 1}"
