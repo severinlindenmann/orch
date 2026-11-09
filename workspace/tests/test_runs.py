@@ -428,3 +428,80 @@ def test_claim_started_survives_stop_and_second_claim(proj, new_ticket, run):
     second = runs.claim(proj, tid, "agent:test", "claude", pid=os.getpid())
     assert tickets.load(proj, tid)["started"] is True
     runs.release(proj, tid, second["run"])
+
+
+# ---- B4: "X is also changing this folder" (a hint computed from the run records, never a lock)
+
+
+def _two_runs(proj, new_ticket):
+    a, b = new_ticket("Update footer links"), new_ticket("Fix login form")
+    runs.claim(proj, a, "agent:x", "claude", pid=os.getpid())
+    runs.claim(proj, b, "agent:y", "codex", pid=os.getpid())
+    return a, b
+
+
+def test_shared_folder_two_alive_runs_see_each_other(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    assert sharedfolder.others_in_folder(proj, a) == [
+        {"ticket": b, "title": "Fix login form", "agent": "codex"}
+    ]
+    assert sharedfolder.others_in_folder(proj, b)[0]["ticket"] == a
+    assert sharedfolder.line(sharedfolder.others_in_folder(proj, a)) == (
+        '"Fix login form" is also changing this folder.'
+    )
+
+
+def test_shared_folder_dead_run_or_no_run_says_nothing(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    _edit(proj, b, pid=_dead_pid(), pid_started=None)
+    assert sharedfolder.others_in_folder(proj, a) == []
+    assert sharedfolder.others_in_folder(proj, b) == []  # this ticket's own run is gone
+    assert sharedfolder.line([]) is None
+
+
+def test_shared_folder_different_folder_says_nothing(proj, new_ticket, tmp_path):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    other = tmp_path / "copy"
+    other.mkdir()
+    _edit(proj, b, folder=str(other))
+    assert sharedfolder.others_in_folder(proj, a) == []
+
+
+def test_shared_folder_resolved_and_symlinked_paths_are_equal(proj, new_ticket, tmp_path):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    link = tmp_path / "link"
+    link.symlink_to(proj)
+    _edit(proj, b, folder=str(link))
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+    rec = json.loads(runs.record_path(proj, b).read_text(encoding="utf-8"))
+    del rec["folder"]  # an older record: started in the root
+    runs.record_path(proj, b).write_text(json.dumps(rec), encoding="utf-8")
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+
+
+def test_shared_folder_several_others_are_counted(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, _ = _two_runs(proj, new_ticket)
+    runs.claim(proj, new_ticket("Third"), "agent:z", "claude", pid=os.getpid())
+    assert sharedfolder.line(sharedfolder.others_in_folder(proj, a)) == (
+        "2 other agents are also changing this folder."
+    )
+
+
+def test_shared_folder_in_show_and_run_status(proj, new_ticket, run):
+    a, _ = _two_runs(proj, new_ticket)
+    code, out, _ = run("ticket", "show", a)
+    assert code == 0 and '"Fix login form" is also changing this folder.' in out
+    code, out, _ = run("run", "status", a, "--json")
+    assert json.loads(out)["shared_folder"]["line"].endswith("is also changing this folder.")
+    c = new_ticket("Alone")
+    assert "also changing" not in run("ticket", "show", c)[1]

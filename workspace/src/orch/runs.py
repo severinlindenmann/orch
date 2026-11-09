@@ -318,7 +318,9 @@ def new_run_id() -> str:
     return "r_" + "".join(secrets.choice(_ALPHA) for _ in range(8))
 
 
-def _new_record(tid: str, by: str, agent: str, mode: str, ticket: dict, reason: str | None) -> dict:
+def _new_record(
+    tid: str, by: str, agent: str, mode: str, ticket: dict, reason: str | None, root: Path | None = None
+) -> dict:
     t = tickets.now()
     rec = {
         "schema": "orch.run/1",
@@ -327,6 +329,7 @@ def _new_record(tid: str, by: str, agent: str, mode: str, ticket: dict, reason: 
         "by": by,
         "agent": agent,
         "mode": mode,
+        "folder": str(Path(root).resolve()) if root else None,
         "tmux": None,
         "pid": None,
         "pid_started": None,
@@ -582,7 +585,7 @@ def claim(
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
         _drop_start_prompts_locked(root, tid)
-        rec = _new_record(tid, by, agent, mode, ticket, reason)
+        rec = _new_record(tid, by, agent, mode, ticket, reason, root)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):

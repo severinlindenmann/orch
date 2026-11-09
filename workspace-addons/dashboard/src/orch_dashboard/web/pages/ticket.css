@@ -90,3 +90,5 @@
 .ref-pick[aria-pressed=true]{box-shadow:inset 0 0 0 1px var(--border-strong)}
 .ref-pick .key{color:var(--text-muted);font-size:12px}
 .ref-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.ticket-page .shared-folder{margin:6px 2px 0;font-size:13px}
