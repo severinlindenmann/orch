@@ -96,7 +96,8 @@
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
         "state": { "const": "doing", "description": "Optional. 'doing' = someone works on this item now (by, at say who and since when). Absent = not started or done (see done)." },
         "by": { "$ref": "#/$defs/who" },
-        "at": { "$ref": "#/$defs/time" }
+        "at": { "$ref": "#/$defs/time" },
+        "covers": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Optional. The part of the ticket's done_when this task covers, quoted in plain words. Used for the 'Done when' coverage line; absent = the task is not linked to a part." }
       },
       "if": { "properties": { "done": { "const": true } } },
       "then": { "properties": { "evidence": { "minItems": 1 } } },
