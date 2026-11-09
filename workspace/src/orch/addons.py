@@ -1586,29 +1586,61 @@ def _restart_updated(root: Path) -> list[str]:
     }
     if not names:
         return lines
+    import signal
+
+    # The caller may be one of the services we stop (e.g. the dashboard started this update): its pipes close
+    # with it. Ignore the signals that would end this process between stop and start.
+    for sig in ("SIGPIPE", "SIGHUP"):
+        if hasattr(signal, sig):
+            signal.signal(getattr(signal, sig), signal.SIG_IGN)
+    try:
+        with services.locked():  # one lock around stop + start + check: no other orch start/stop in between
+            return _restart_locked(services, root, names)
+    except Exception as e:  # a restart failure must not hide a successful update
+        why = services._printable(e)
+        return [f"Restart {n} to use the new version ({why})" for n in sorted(names)]
+
+
+def _is_up(services, root: Path, name: str) -> bool:
+    return any(
+        e.get("addon") == name and Path(e["workspace"]) == root and services.pid_alive(e.get("pid"))
+        for e in services.running()
+    )
+
+
+def _restart_locked(services, root: Path, names: set[str]) -> list[str]:
+    lines = []
     try:
         stops = {r["addon"]: r for r in services.stop(root, only=names)}
-    except Exception as e:  # a restart failure must not hide a successful update
+    except Exception as e:
         why = services._printable(e)
         return [f"Restart {n} to use the new version (stop failed: {why})" for n in sorted(names)]
     stopped = {n for n in names if stops.get(n, {}).get("stopped")}
     for n in sorted(names - stopped):
         why = services._printable(stops.get(n, {}).get("error") or "did not stop")
         lines.append(f"Restart {n} to use the new version (stop failed: {why})")
-    if not stopped:
-        return lines
-    try:
-        rows = services.start(root, only=stopped)
-    except Exception as e:
-        why = services._printable(e)
-        return lines + [f"{n} stopped, start it with: orch start ({why})" for n in sorted(stopped)]
-    by = {r["addon"]: r for r in rows}
-    ok = sorted(n for n in stopped if by.get(n, {}).get("running"))
+    errors: dict[str, str] = {}
+    todo = set(stopped)
+    for _attempt in range(2):  # one retry for what did not come up
+        if not todo:
+            break
+        try:
+            rows = services.start(root, only=set(todo))
+        except Exception as e:
+            errors = {n: services._printable(e) for n in todo}
+            continue
+        by = {r["addon"]: r for r in rows}
+        for n in list(todo):
+            if by.get(n, {}).get("running") and _is_up(services, root, n):
+                todo.discard(n)
+                errors.pop(n, None)
+            elif by.get(n, {}).get("error"):
+                errors[n] = services._printable(by[n]["error"])
+    ok = sorted(stopped - todo)
     if ok:
         lines.insert(0, f"Restarting {', '.join(ok)}… done")
-    for n in sorted(stopped - set(ok)):
-        why = services._printable(by.get(n, {}).get("error", "")) if by.get(n, {}).get("error") else ""
-        lines.append(f"{n} stopped, start it with: orch start" + (f" ({why})" if why else ""))
+    for n in sorted(todo):
+        lines.append(f"{n} stopped, start it with: orch start" + (f" ({errors[n]})" if n in errors else ""))
     return lines
 
 
