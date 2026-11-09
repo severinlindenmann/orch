@@ -100,6 +100,7 @@ _STARTED: list = []
 
 @pytest.fixture(autouse=True)
 def _reap_started_servers(monkeypatch):
+    import contextlib
     import os
     import signal
     import subprocess
@@ -121,10 +122,8 @@ def _reap_started_servers(monkeypatch):
                 os.kill(p.pid, signal.SIGKILL)
             except OSError:
                 pass
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             p.wait(timeout=10)
-        except Exception:
-            pass
 
 
 def pytest_sessionfinish(session, exitstatus):
