@@ -1,0 +1,16 @@
+{
+ "name": "file dot env",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "file",
+    "path": "app/.env"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

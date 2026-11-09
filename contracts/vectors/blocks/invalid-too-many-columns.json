@@ -1,0 +1,70 @@
+{
+ "name": "too many columns",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "table",
+    "columns": [
+     {
+      "key": "c0",
+      "label": "C0"
+     },
+     {
+      "key": "c1",
+      "label": "C1"
+     },
+     {
+      "key": "c2",
+      "label": "C2"
+     },
+     {
+      "key": "c3",
+      "label": "C3"
+     },
+     {
+      "key": "c4",
+      "label": "C4"
+     },
+     {
+      "key": "c5",
+      "label": "C5"
+     },
+     {
+      "key": "c6",
+      "label": "C6"
+     },
+     {
+      "key": "c7",
+      "label": "C7"
+     },
+     {
+      "key": "c8",
+      "label": "C8"
+     },
+     {
+      "key": "c9",
+      "label": "C9"
+     },
+     {
+      "key": "c10",
+      "label": "C10"
+     },
+     {
+      "key": "c11",
+      "label": "C11"
+     },
+     {
+      "key": "c12",
+      "label": "C12"
+     }
+    ],
+    "rows": []
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

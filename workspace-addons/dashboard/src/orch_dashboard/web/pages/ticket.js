@@ -786,6 +786,18 @@ function ticketPlan(t, q, children) {
       editing ? [ticketButton('+ Add a step', 'ghost', () => ticketAddStep(t)),
         ticketButton('Done editing', 'ghost', () => { ticketPlanEditing.delete(t.id); render(); })] : null));
 }
+const NOTE_LABELS = [['changed', 'Changed'], ['why', 'Why'], ['not_included', 'Not in this ticket']];
+function outcomeOf(t) {
+  const o = t && typeof t.outcome === 'object' && t.outcome ? t.outcome : {};
+  return Object.fromEntries(NOTE_LABELS.filter(([key]) => typeof o[key] === 'string' && o[key].trim()).map(([key]) => [key, o[key].trim()]));
+}
+// Done tickets: what changed and why (outcome, written by the agent or a person). Absent outcome = no card.
+function ticketOutcomeCard(t) {
+  const o = outcomeOf(t);
+  if (t.status !== 'done' || !Object.keys(o).length) return null;
+  return h('section', {className:'card ticket-outcome', 'data-key':'outcome-' + t.id}, h('div', {className:'card-h'}, h('h2', {}, 'What changed and why')),
+    h('dl', {className:'why'}, NOTE_LABELS.filter(([key]) => o[key]).flatMap(([key, label]) => [h('dt', {}, label), h('dd', {className:'preserve-lines'}, clean(o[key]))])));
+}
 function ticketDoneLine(t) {
   if (t.status !== 'done') return null;
   const event = array(t.history).slice().reverse().find(e => /(?:->|to) done\b|^Done\b/i.test(e.text || '') || e.kind === 'done');
@@ -835,7 +847,7 @@ function detail(t) {
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
       !fresh && !planQ && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !planQ && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),
-      panel('overview', [t.description ? h('p', {className:'muted preserve-lines', 'data-key':'description'}, clean(t.description), ' ', h('small', {className:'meta'}, '— written by ' + ticketActor(t.description_by))) : null, t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, !planQ && (children.length || (!parent && !t.parent)) ? ticketParts(t, children) : null, ticketFiles(t), tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
+      panel('overview', [t.description ? h('p', {className:'muted preserve-lines', 'data-key':'description'}, clean(t.description), ' ', h('small', {className:'meta'}, '— written by ' + ticketActor(t.description_by))) : null, t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, ticketOutcomeCard(t), !planQ && (children.length || (!parent && !t.parent)) ? ticketParts(t, children) : null, ticketFiles(t), tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
       panel('tasks', tasksCard('tasks')),
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),

@@ -1,0 +1,129 @@
+[
+ {
+  "v": 1,
+  "seq": 1,
+  "type": "hello",
+  "ticket": "t_inv7c2",
+  "run": "r_8k2m01",
+  "cols": 120,
+  "rows": 40,
+  "at": "2026-11-16T09:20:00Z",
+  "typing_switch": false,
+  "takeover": null
+ },
+ {
+  "v": 1,
+  "seq": 2,
+  "type": "snapshot",
+  "cols": 120,
+  "rows": 40,
+  "alt": false,
+  "cursor": {
+   "x": 2,
+   "y": 3,
+   "visible": true
+  },
+  "data": "$ bash /tmp/fx/demo.sh\r\n\u001b[31mred\u001b[0m\r\n$ "
+ },
+ {
+  "v": 1,
+  "seq": 3,
+  "type": "output",
+  "data": "export PS1='$ '; clear\r\n\u001b[?2004l\r"
+ },
+ {
+  "v": 1,
+  "seq": 4,
+  "type": "output",
+  "data": "\u001b[H\u001b[J"
+ },
+ {
+  "v": 1,
+  "seq": 5,
+  "type": "output",
+  "data": "\u001b[?2004h$ "
+ },
+ {
+  "v": 1,
+  "seq": 6,
+  "type": "output",
+  "data": "bash /tmp/fx/demo.sh\r\n\u001b[?2004l\r"
+ },
+ {
+  "v": 1,
+  "seq": 7,
+  "type": "output",
+  "data": "\u001b[31mred\u001b[0m \u001b[1;32mbold green\u001b[0m \u001b[38;5;208morange256\u001b[0m \u001b[38;2;10;200;250mtruecolor\u001b[0m \u001b[4munder\u001b[0m\r\npart1"
+ },
+ {
+  "v": 1,
+  "seq": 8,
+  "type": "output",
+  "data": " part2"
+ },
+ {
+  "v": 1,
+  "seq": 9,
+  "type": "output",
+  "data": " part3\r\nä ö ü ß 😀 👩‍💻 ┌──┬──┐ │ ✓│ │ └──┴──┘ 日本語\r\n"
+ },
+ {
+  "v": 1,
+  "seq": 10,
+  "type": "output",
+  "data": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+ },
+ {
+  "v": 1,
+  "seq": 11,
+  "type": "output",
+  "data": "\r\n"
+ },
+ {
+  "v": 1,
+  "seq": 12,
+  "type": "output",
+  "data": "1\r\n2\r\n3\r\n4\r\n5\r\n"
+ },
+ {
+  "v": 1,
+  "seq": 13,
+  "type": "output",
+  "data": "\u001b[?2004h$ "
+ },
+ {
+  "v": 1,
+  "seq": 14,
+  "type": "output",
+  "data": "less /tmp/fx/doc.txt\r\n\u001b[?2004l\r"
+ },
+ {
+  "v": 1,
+  "seq": 15,
+  "type": "takeover",
+  "state": "held",
+  "by": "human:severin",
+  "since": "2026-11-16T09:21:00Z",
+  "expires_at": "2026-11-16T09:23:00Z"
+ },
+ {
+  "v": 1,
+  "seq": 16,
+  "type": "takeover",
+  "state": "released",
+  "by": "human:severin",
+  "reason": "idle"
+ },
+ {
+  "v": 1,
+  "seq": 17,
+  "type": "ping",
+  "at": "2026-11-16T09:25:00Z"
+ },
+ {
+  "v": 1,
+  "seq": 18,
+  "type": "end",
+  "reason": "run-ended"
+ }
+]

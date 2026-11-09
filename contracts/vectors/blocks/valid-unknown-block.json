@@ -1,0 +1,32 @@
+{
+ "name": "unknown block",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "summary",
+    "text": "Before"
+   },
+   {
+    "type": "heatmap",
+    "cells": [
+     [
+      1,
+      2
+     ]
+    ]
+   },
+   {
+    "type": "summary",
+    "text": "After"
+   }
+  ]
+ },
+ "valid": true,
+ "shows": [
+  "Before",
+  "After"
+ ],
+ "fallback": 1
+}

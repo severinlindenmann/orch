@@ -403,3 +403,32 @@ def test_ticket_plan_goes_in_its_own_field_not_the_note(proj, run):
     assert got["plan"] == {"goal": "Pay online", "not_included": "refunds", "by": "agent:claude"}
     assert got["note"] == "My words"
     assert run("ticket", "plan", t["id"], "--goal", "x" * 501, "--by", "agent:claude")[0] != 0
+
+
+def test_outcome_set_merge_and_clear(proj, run, new_ticket):
+    tid = new_ticket()
+    code = run("ticket", "outcome", tid, "--changed", "Added CSV export.", "--why", "Finance needs it")[0]
+    assert code == 0
+    assert read(proj, tid)["outcome"] == {"changed": "Added CSV export.", "why": "Finance needs it"}
+    assert run("ticket", "outcome", tid, "--not-included", "PDF")[0] == 0
+    assert read(proj, tid)["outcome"]["changed"] == "Added CSV export."
+    assert read(proj, tid)["outcome"]["not_included"] == "PDF"
+    assert run("ticket", "outcome", tid, "--changed", "", "--why", "", "--not-included", "")[0] == 0
+    assert "outcome" not in read(proj, tid)
+
+
+def test_outcome_refuses_long_and_empty(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("ticket", "outcome", tid, "--why", "x" * 301)[0] != 0
+    assert run("ticket", "outcome", tid)[0] != 0
+    assert "outcome" not in read(proj, tid)
+
+
+def test_outcome_shown_by_show_on_done_only(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("ticket", "outcome", tid, "--changed", "Added CSV export.")[0] == 0
+    assert "Changed: Added CSV export." not in run("ticket", "show", tid)[1]
+    t = read(proj, tid)
+    t["status"] = "done"
+    (proj / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(t), encoding="utf-8")
+    assert "Changed: Added CSV export." in run("ticket", "show", tid)[1]

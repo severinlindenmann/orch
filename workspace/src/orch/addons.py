@@ -40,7 +40,7 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
     "orch core ticket check log ask answer ref ext wait addon addons update init publish relay config help "
-    "version view start stop status run needs agents".split()
+    "version view start stop status run needs agents record job secret conn screen type".split()
 )
 ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt".split()
@@ -1578,21 +1578,71 @@ def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str]
     return lines, restart
 
 
-def _restart_updated(root: Path) -> list[str]:
+def _registered_workspaces(root: Path | None) -> set[Path]:
+    """The workspaces the person set up on this machine: the one `orch update` runs in, and every workspace
+    with a consent record (written when the person turned an add-on on there). Resolved paths. A consent
+    record outlives an add-on turned off, so that folder stays registered: harmless, only live pids that the
+    add-on itself verified are ever touched."""
+    out: set[Path] = set()
+    if root is not None:
+        out.add(root.resolve())
+    for rec in _consents():
+        w = rec.get("workspace")
+        if isinstance(w, str):
+            out.add(Path(w).resolve())
+    return out
+
+
+def _malformed_running_entries() -> int:
+    """Entries of running.json that are not usable (not an object, or workspace/addon/pid missing/wrong)."""
     from orch import services
 
-    lines = []
     try:
-        root = services._workspace_root(root).resolve()  # the same root start/stop use
-    except Refused:
-        return lines
-    names = {
-        e["addon"]
-        for e in services.running()
-        if Path(e["workspace"]) == root and services.pid_alive(e.get("pid"))
-    }
-    if not names:
-        return lines
+        data = json.loads(services.running_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(data, list):
+        return 1
+    return sum(
+        not (
+            isinstance(e, dict)
+            and isinstance(e.get("workspace"), str)
+            and isinstance(e.get("addon"), str)
+            and isinstance(e.get("pid"), int)
+        )
+        for e in data
+    )
+
+
+RESTART_BY_HAND = "run orch stop, then orch start, in"  # `orch start` alone leaves a running add-on as it is
+
+
+def _restart_updated(root: Path | None = None) -> list[str]:
+    """Restart the services ORCH_HOME's running.json records, whoever runs the update and whatever its cwd or
+    HOME: an update replaces the code of all of them. Only registered workspaces (see above): any other entry
+    is listed, never touched. One lock around the whole thing."""
+    from orch import services
+
+    registered = _registered_workspaces(root)
+    by_ws: dict[str, dict[str, int]] = {}
+    skipped: list[str] = []
+    bad = _malformed_running_entries()
+    if bad:
+        skipped.append(
+            f"{bad} unreadable entr{'y' if bad == 1 else 'ies'} in the list of running services ignored"
+        )
+    for e in services.running():
+        if not services.pid_alive(e.get("pid")):
+            continue
+        if Path(e["workspace"]).resolve() in registered:
+            by_ws.setdefault(e["workspace"], {})[e["addon"]] = e["pid"]
+        else:
+            skipped.append(
+                f"{e['addon']} ({Path(e['workspace']).name}) not restarted; "
+                f"{RESTART_BY_HAND} {e['workspace']}"
+            )
+    if not by_ws:
+        return skipped
     import signal
     import threading
 
@@ -1603,15 +1653,34 @@ def _restart_updated(root: Path) -> list[str]:
     if hasattr(signal, "SIGHUP") and threading.current_thread() is threading.main_thread():
         old_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
     _output_failure_proof()
+    done, bad = [], []
     try:
-        with services.locked():  # one lock around stop + start + check: no other orch start/stop in between
-            return _restart_locked(services, root, names)
-    except Exception as e:  # a restart failure must not hide a successful update
+        with services.locked():  # one lock around every stop + start + check
+            for ws in sorted(by_ws):
+                try:
+                    ok, lines = _restart_locked(services, Path(ws), by_ws[ws])
+                except Exception as e:  # one workspace must not stop the others
+                    why = services._printable(e)
+                    ok, lines = (
+                        [],
+                        [
+                            f"Restart {n} ({Path(ws).name}) to use the new version ({why})"
+                            for n in sorted(by_ws[ws])
+                        ],
+                    )
+                done += ok
+                bad += lines
+    except Exception as e:  # e.g. the lock timed out
         why = services._printable(e)
-        return [f"Restart {n} to use the new version ({why})" for n in sorted(names)]
+        return [
+            f"Restart {n} ({Path(w).name}) to use the new version ({why})"
+            for w in sorted(by_ws)
+            for n in sorted(by_ws[w])
+        ]
     finally:
         if old_hup is not None:
             signal.signal(signal.SIGHUP, old_hup)
+    return ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
 
 
 def _output_failure_proof() -> None:
@@ -1635,24 +1704,75 @@ def _say(text: str) -> None:
         _output_failure_proof()
 
 
-def _is_up(services, root: Path, name: str) -> bool:
+def _same_user(pid: int) -> bool:
+    """The process belongs to this user (POSIX; Windows keeps the add-on's own checks)."""
+    if os.name == "nt":
+        return True
+    try:
+        r = subprocess.run(
+            ["ps", "-o", "uid=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.stdout.strip() == str(os.getuid())
+
+
+def _unverified(services, root: Path, name: str, pid: int) -> str | None:
+    """Why this recorded service can not be trusted, or None. The add-on's own `status` is the proof: it
+    checks its record, the pid and its start time, the command line (this add-on's module for this folder) and
+    the nonce challenge on its port, and names the pid. Also: same user, add-on active here."""
+    if not isinstance(pid, int) or not services.pid_alive(pid) or not _same_user(pid):
+        return "can't verify"
+    try:
+        m = services._services(root).get(name)
+        if m is None:
+            return "can't verify"
+        res = services._call(root, name, m, "status")
+    except Exception:  # noqa: BLE001 - a forged folder must not break the update
+        return "can't verify"
+    if res.get("running") is not True or res.get("pid") != pid:
+        return "can't verify"
+    return None
+
+
+def _is_up(services, root: Path, name: str, old_pid: int | None) -> bool:
+    """Running again under a NEW pid (the old process is gone)."""
     return any(
-        e.get("addon") == name and e["workspace"] == str(root) and services.pid_alive(e.get("pid"))
+        e.get("addon") == name
+        and e["workspace"] == str(root)
+        and e.get("pid") != old_pid
+        and services.pid_alive(e.get("pid"))
         for e in services.running()
     )
 
 
-def _restart_locked(services, root: Path, names: set[str]) -> list[str]:
-    lines = []
+def _restart_locked(services, root: Path, olds: dict[str, int]) -> tuple[list[str], list[str]]:
+    """Restart these add-ons of one workspace. Returns (labels restarted, lines for what went wrong)."""
+    label = lambda n: f"{n} ({root.name})"  # noqa: E731
+    if not (root / ".orch").is_dir():
+        return [], [
+            f"Restart {label(n)} to use the new version (workspace folder is gone)" for n in sorted(olds)
+        ]
+    # running.json is only a hint (anything under ORCH_HOME may write it): act on a service only after the
+    # add-on itself verified it live, and never start a workspace whose service was not verified.
+    lines, names = [], set()
+    for n in sorted(olds):
+        why = _unverified(services, root, n, olds[n])
+        if why:
+            lines.append(f"{label(n)} not restarted ({why}); {RESTART_BY_HAND} {root}")
+        else:
+            names.add(n)
+    if not names:
+        return [], lines
     try:
         stops = {r["addon"]: r for r in services.stop(root, only=names)}
     except Exception as e:
         why = services._printable(e)
-        return [f"Restart {n} to use the new version (stop failed: {why})" for n in sorted(names)]
+        return [], [f"Restart {label(n)} to use the new version (stop failed: {why})" for n in sorted(names)]
     stopped = {n for n in names if stops.get(n, {}).get("stopped")}
     for n in sorted(names - stopped):
         why = services._printable(stops.get(n, {}).get("error") or "did not stop")
-        lines.append(f"Restart {n} to use the new version (stop failed: {why})")
+        lines.append(f"Restart {label(n)} to use the new version (stop failed: {why})")
     errors: dict[str, str] = {}
     todo = set(stopped)
     for _attempt in range(2):  # one retry for what did not come up
@@ -1666,17 +1786,16 @@ def _restart_locked(services, root: Path, names: set[str]) -> list[str]:
             continue
         by = {r["addon"]: r for r in rows}
         for n in list(todo):
-            if by.get(n, {}).get("running") and _is_up(services, root, n):
+            if by.get(n, {}).get("running") and _is_up(services, root, n, olds[n]):
                 todo.discard(n)
                 errors.pop(n, None)
             elif by.get(n, {}).get("error"):
                 errors.setdefault(n, services._printable(by[n]["error"]))
-    ok = sorted(stopped - todo)
-    if ok:
-        lines.insert(0, f"Restarting {', '.join(ok)}… done")
     for n in sorted(todo):
-        lines.append(f"{n} stopped, start it with: orch start" + (f" ({errors[n]})" if n in errors else ""))
-    return lines
+        lines.append(
+            f"{label(n)} stopped, start it with: orch start" + (f" ({errors[n]})" if n in errors else "")
+        )
+    return [label(n) for n in sorted(stopped - todo)], lines
 
 
 def update(
@@ -1687,6 +1806,7 @@ def update(
     json_output: bool = False,
     report: list[str] | None = None,
     nonce: str | None = None,
+    notes: list[str] | None = None,
 ) -> list[str]:
     """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks.
     after_install: the install script just put a bare orch in place; put the registered add-ons back."""
@@ -1760,15 +1880,16 @@ def update(
         _save_active(root, a)
     sha = _source_sha()
     if before is not None:
-        lines, restart = _update_lines(before, found, sha)
+        lines, _changed = _update_lines(before, found, sha)
         if not json_output:
             _say("\n".join(lines))
-        if restart:
-            restart_lines = _restart_updated(root)
-            if restart_lines and not json_output:
-                _say("\n".join(restart_lines))
+        restart_lines = _restart_updated(root)  # whatever changed: what runs is the old install
+        if restart_lines and not json_output:
+            _say("\n".join(restart_lines))
         if report is not None:
             report.extend(lines)
+        if notes is not None:
+            notes.extend(restart_lines)  # for --json: restarted, skipped and failed services
         reg = registry()
         for entry in reg:
             if entry["name"] in found:

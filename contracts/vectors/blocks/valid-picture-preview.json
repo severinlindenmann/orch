@@ -1,0 +1,21 @@
+{
+ "name": "picture preview",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "agent",
+  "blocks": [
+   {
+    "type": "file",
+    "path": "reports/chart.png",
+    "label": "Chart",
+    "size": 20480,
+    "preview": "image"
+   }
+  ]
+ },
+ "valid": true,
+ "shows": [
+  "Chart"
+ ],
+ "fallback": 0
+}

@@ -1,0 +1,28 @@
+[
+ {
+  "v": 1,
+  "seq": 1,
+  "type": "hello",
+  "ticket": "t_inv7c2",
+  "run": "r_8k2m01",
+  "cols": 120,
+  "rows": 40,
+  "at": "2026-11-16T09:20:00Z",
+  "typing_switch": false,
+  "takeover": null
+ },
+ {
+  "v": 1,
+  "seq": 3,
+  "type": "snapshot",
+  "cols": 120,
+  "rows": 40,
+  "alt": false,
+  "cursor": {
+   "x": 2,
+   "y": 3,
+   "visible": true
+  },
+  "data": "$ bash /tmp/fx/demo.sh\r\n\u001b[31mred\u001b[0m\r\n$ "
+ }
+]
