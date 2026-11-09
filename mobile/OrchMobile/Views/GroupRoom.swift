@@ -187,6 +187,7 @@ struct GroupTaskView: View {
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m).stroke(Theme.borderStrong))
+            .accessibilityElement(children: .contain)   // one card element; the id stays on it, not on every child
             .accessibilityIdentifier("group-task-\(task.delegate)")
     }
 }
