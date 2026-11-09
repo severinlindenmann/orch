@@ -748,5 +748,5 @@ def load_chat_contacts(root: Path, orch_bin: str | None) -> list | None:
 def load_chat_thread(root: Path, orch_bin: str | None, ws: str) -> dict | None:
     if not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         return None
-    data = run_orch(orch_bin, ["chat", "thread", ws, "--pure", "--json"], root)
+    data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
     return data if isinstance(data, dict) else None

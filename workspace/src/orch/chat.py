@@ -814,12 +814,33 @@ def contacts(root: Path) -> list[dict]:
         }
         if lk := _valid_look(row.get("look")):
             item["look"] = lk
-        messages = sorted(_dm_read(root, ws)["messages"], key=_dm_order)[-500:]
-        item.update(count=len(messages), last_at=str(messages[-1].get("at", ""))[:40] if messages else "")
+        count, last_at = _dm_summary(root, ws)
+        item.update(count=count, last_at=last_at)
         out[ws] = item
         if len(out) >= 500:
             break
     return list(out.values())
+
+
+_DM_SUMMARY: dict = {}  # path -> ((mtime_ns, size), (count, last_at)): a GET does not parse every thread again
+
+
+def _dm_summary(root: Path, ws: str) -> tuple[int, str]:
+    path = _dm_path(root, ws)
+    try:
+        st = path.stat()
+    except OSError:
+        return 0, ""
+    key = (st.st_mtime_ns, st.st_size)
+    hit = _DM_SUMMARY.get(str(path))
+    if hit and hit[0] == key:
+        return hit[1]
+    messages = _dm_read(root, ws)["messages"][-500:]
+    value = (len(messages), str(messages[-1].get("at", ""))[:40] if messages else "")
+    if len(_DM_SUMMARY) > 2000:
+        _DM_SUMMARY.clear()
+    _DM_SUMMARY[str(path)] = (key, value)
+    return value
 
 
 def _dm_contact(root: Path, ws: str) -> dict:
@@ -849,7 +870,7 @@ def _dm_read(root: Path, ws: str) -> dict:
 
 
 def _dm_write(root: Path, ws: str, data: dict) -> None:
-    data["messages"] = sorted(data["messages"], key=_dm_order)[-500:]
+    data["messages"] = data["messages"][-500:]
     net.write_json(_dm_path(root, ws), data, True)
 
 
@@ -889,7 +910,10 @@ def dm_send(
         data = _dm_read(root, ws)
         existing = next((m for m in data["messages"] if m.get("id") == entry["id"]), None)
         if existing is not None:
-            return existing
+            # idempotent only for MY OWN message with the same text; a peer's imported id (or other text) is refused
+            if existing.get("by") == "you" and existing.get("text") == text:
+                return existing
+            raise Refused("That message id is already used.")
         if retry is not None:
             old = next((m for m in data["messages"] if m.get("id") == retry), None)
             if not old or old.get("by") != "you" or old.get("state") != "failed":
@@ -915,7 +939,7 @@ def dm_send(
 def dm_read(root: Path, ws: str) -> dict:
     contact = _dm_contact(root, ws)
     data = _dm_read(root, ws)
-    return {**contact, "messages": sorted(data["messages"], key=_dm_order)[-500:]}
+    return {**contact, "messages": data["messages"][-500:]}
 
 
 def dm_thread(root: Path, ws: str) -> dict:
@@ -1001,7 +1025,8 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
             data[ws]["messages"].append(
                 {
                     "id": mid,
-                    "at": str(msg.get("created_at") or "")[:40],
+                    "at": tickets.now(),  # import time: a peer's clock never orders or evicts anything
+                    "peer_at": str(msg.get("created_at") or "")[:40],
                     "by": ws,
                     "text": relay.clean_untrusted(body["text"], 2000),
                     "state": "delivered",
@@ -1024,15 +1049,6 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
                     m["state"] = "delivered"
                     changed.add(ws)
         for ws in changed:
-            data[ws]["messages"] = sorted(data[ws]["messages"], key=_dm_order)[-500:]
+            data[ws]["messages"] = data[ws]["messages"][-500:]
             if data[ws]["messages"] != original[ws]:
                 _dm_write(root, ws, data[ws])
-
-
-def _dm_order(message: dict) -> tuple:
-    try:
-        at = dt.datetime.fromisoformat(str(message.get("at", "")).replace("Z", "+00:00"))
-        at = at.replace(tzinfo=dt.UTC) if at.tzinfo is None else at.astimezone(dt.UTC)
-    except ValueError:
-        at = dt.datetime.min.replace(tzinfo=dt.UTC)
-    return at, str(message.get("id", ""))

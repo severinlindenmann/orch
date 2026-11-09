@@ -131,7 +131,7 @@ def test_workspace_dm_reads_and_endpoints(ws, orch, monkeypatch):
     assert data.load_chat_contacts(ws, orch) == [contact]
     assert data.load_chat_thread(ws, orch, contact["ws"])["messages"] == []
     assert data.load_chat_thread(ws, orch, "../secret") is None
-    assert calls == [["chat", "contacts", "--json"], ["chat", "thread", contact["ws"], "--pure", "--json"]]
+    assert calls == [["chat", "contacts", "--json"], ["chat", "thread", contact["ws"], "--json"]]
     srv = make_server(ws, 0, orch_bin=orch)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"

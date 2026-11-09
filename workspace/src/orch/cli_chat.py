@@ -67,7 +67,7 @@ def _add_dm_parsers(sub, common):
     sub.add_parser("contacts", parents=[common], help="workspace contacts")
     p = sub.add_parser("thread", parents=[common], help="messages with a workspace")
     p.add_argument("workspace")
-    p.add_argument("--pure", action="store_true", help="read stored messages without importing")
+    p.add_argument("--sync", action="store_true", help="import new messages first (writes)")
     p = sub.add_parser("sync", parents=[common], help="import and reconcile workspace messages")
     p.add_argument("workspace", nargs="?")
     p = sub.add_parser("send", parents=[common], help="send a workspace a message")
@@ -85,7 +85,7 @@ def _dispatch_dm(args, root):
         data = chat.contacts(root)
         text = "\n".join(f"{c['ws']}  {c['name']}" for c in data) or "No contacts."
     elif args.sub == "thread":
-        if not args.pure:
+        if args.sync:
             chat.dm_sync(root, args.workspace, getattr(args, "by", None))
         data = chat.dm_read(root, args.workspace)
         text = "\n".join(f"{m['by']}: {m['text']}" for m in data["messages"]) or "No messages."
