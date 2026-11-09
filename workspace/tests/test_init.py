@@ -864,3 +864,135 @@ def test_without_git_a_fresh_copy_is_ours(proj, monkeypatch, tmp_path_factory):
     assert harness._is_ours_copy(dest, proj) is True
     (proj / ".git").mkdir()  # a repo that cannot be checked: never ours
     assert harness._is_ours_copy(dest, proj) is False
+
+
+# ---------------------------------------------------------------- claude_settings (work-check hooks)
+
+
+def _local_settings(proj):
+    import json
+
+    return json.loads((proj / ".claude/settings.local.json").read_text(encoding="utf-8"))
+
+
+def _ours(doc, event):
+    return [
+        h
+        for g in doc["hooks"][event]
+        for h in g["hooks"]
+        if h["command"].endswith("orch work-check --hook claude")
+    ]
+
+
+def test_claude_settings_created_with_both_hooks(proj, run):
+    code, out, _ = run("init")
+    assert code == 0 and "Reminder" in out
+    doc = _local_settings(proj)
+    for event in ("SessionStart", "UserPromptSubmit"):
+        (h,) = _ours(doc, event)
+        assert h["type"] == "command" and h["timeout"] == 5
+        assert h["command"].startswith(sys.executable.replace(" ", "\\ ")) or sys.executable in h["command"]
+    if sys.platform != "win32":
+        assert ((proj / ".claude/settings.local.json").stat().st_mode & 0o777) == 0o600
+
+
+def test_claude_settings_merge_keeps_other_keys_and_mode(proj, run):
+    import json
+
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    mine = {
+        "permissions": {"allow": ["Bash(ls:*)"]},
+        "hooks": {
+            "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "echo mine"}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": "echo stop"}]}],
+        },
+        "env": {"A": "b"},
+    }
+    f.write_text(json.dumps(mine), encoding="utf-8")
+    os.chmod(f, 0o640)
+    assert run("init")[0] == 0
+    doc = _local_settings(proj)
+    assert doc["permissions"] == mine["permissions"] and doc["env"] == mine["env"]
+    assert doc["hooks"]["Stop"] == mine["hooks"]["Stop"]
+    assert doc["hooks"]["UserPromptSubmit"][0] == mine["hooks"]["UserPromptSubmit"][0]
+    assert len(_ours(doc, "UserPromptSubmit")) == 1 and len(_ours(doc, "SessionStart")) == 1
+    if sys.platform != "win32":
+        assert (f.stat().st_mode & 0o777) == 0o640
+
+
+def test_claude_settings_idempotent(proj, run):
+    run("init")
+    first = (proj / ".claude/settings.local.json").read_bytes()
+    run("init")
+    run("init")
+    assert (proj / ".claude/settings.local.json").read_bytes() == first
+    doc = _local_settings(proj)
+    assert len(_ours(doc, "UserPromptSubmit")) == 1
+
+
+def test_claude_settings_refreshes_an_old_path(proj, run):
+    import json
+
+    from orch import claude_settings
+
+    (proj / ".claude").mkdir()
+    old = {
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "/old/py -P -m orch work-check --hook claude"}]}
+            ]
+        }
+    }
+    (proj / ".claude/settings.local.json").write_text(json.dumps(old), encoding="utf-8")
+    run("init")
+    (h,) = _ours(_local_settings(proj), "SessionStart")
+    assert h["command"] == claude_settings.hook_command()
+
+
+@pytest.mark.parametrize(
+    "text", ["{not json", "[1, 2]", '{"hooks": []}', '{"hooks": {"Stop": 1, "UserPromptSubmit": "x"}}']
+)
+def test_claude_settings_malformed_left_untouched_with_one_warning(proj, run, text):
+    (proj / ".claude").mkdir()
+    f = proj / ".claude/settings.local.json"
+    f.write_text(text, encoding="utf-8")
+    code, out, _ = run("init")
+    assert code == 0 and f.read_text(encoding="utf-8") == text
+    assert out.count("left it as it is") == 1
+
+
+def test_claude_settings_not_written_without_claude(proj, run, monkeypatch):
+    monkeypatch.setattr(adapters, "detect", lambda: [])
+    run("init")
+    assert not (proj / ".claude").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink")
+def test_claude_settings_link_is_not_written_through(proj, run, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside") / "s.json"
+    outside.write_text("{}", encoding="utf-8")
+    (proj / ".claude").mkdir()
+    os.symlink(outside, proj / ".claude/settings.local.json")
+    code, out, _ = run("init")
+    assert code == 0 and outside.read_text(encoding="utf-8") == "{}" and "left it as it is" in out
+
+
+def test_claude_settings_in_git_exclude(proj, run):
+    _git_repo(proj)
+    run("init")
+    assert ".claude/settings.local.json" in (proj / ".git/info/exclude").read_text(encoding="utf-8")
+    assert ".claude/settings.local.json" not in _git(proj, "status", "--porcelain")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix quoting")
+def test_claude_settings_command_is_quoted(monkeypatch):
+    import shlex
+
+    from orch import claude_settings
+
+    nasty = "/tmp/a b/$(touch x);y'z/py"
+    monkeypatch.setattr(sys, "executable", nasty)
+    cmd = claude_settings.hook_command()
+    assert shlex.split(cmd) == [nasty, "-P", "-m", "orch", "work-check", "--hook", "claude"]
+    assert cmd.endswith(" -P -m orch work-check --hook claude")

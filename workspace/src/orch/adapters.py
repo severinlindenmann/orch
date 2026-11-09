@@ -183,6 +183,11 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         pats = allow_patterns(v.get("allow"))
         if pats and a["capabilities"]["permission_retry"] and sect.get("allow_args"):
             extra += [x.replace("{allow}", ",".join(pats)) for x in sect["allow_args"]]
+    if mode == "oneshot" and sect.get("settings_args"):  # the reminder hooks, inline (no file to clean up)
+        doc = reminder_doc(name, root)
+        if doc:
+            blob = json.dumps(doc, separators=(",", ":"))
+            extra += [x.replace("{reminder_json}", blob) for x in sect["settings_args"]]
     if extra:
         at = out.index("--") if "--" in out else len(out)
         out[at:at] = extra
@@ -253,12 +258,28 @@ def permission_retry(name: str, root: Path | None = None) -> bool:
     return bool(load(name, root)["capabilities"]["permission_retry"])
 
 
+REMINDER_TIMEOUT = 5  # seconds; the reminder hook must never hold up a turn
+
+
+def reminder_doc(name: str, root: Path | None = None) -> dict | None:
+    """The reminder hooks (`reminder_hooks` in agents.json) as the tool's settings, or None."""
+    rh = load(name, root).get("reminder_hooks")
+    if not rh:
+        return None
+    return {
+        "hooks": {
+            event: [{"hooks": [{"type": "command", "command": cmd, "timeout": REMINDER_TIMEOUT}]}]
+            for event, cmd in rh.items()
+        }
+    }
+
+
 def hooks_doc(name: str, run_id: str, root: Path | None = None) -> dict | None:
     """The tool's hook settings for one live run (for .orch/run/hooks-<run>.json)."""
     hooks = load(name, root).get("hooks")
     if not hooks:
         return None
-    return {
+    doc = {
         "hooks": {
             event: [
                 {
@@ -273,6 +294,12 @@ def hooks_doc(name: str, run_id: str, root: Path | None = None) -> dict | None:
             for event, cmd in hooks.items()
         }
     }
+    for event, groups in ((reminder_doc(name, root) or {}).get("hooks") or {}).items():
+        if event in doc["hooks"]:  # same event, one more command after the run-event one
+            doc["hooks"][event][0]["hooks"] += groups[0]["hooks"]
+        else:
+            doc["hooks"][event] = groups
+    return doc
 
 
 def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None) -> str:

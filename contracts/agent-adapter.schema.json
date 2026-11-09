@@ -19,7 +19,7 @@
   "$defs": {
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
     "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" },
-    "arg": { "type": "string", "pattern": "^([^{}]|\\{(prompt|session|new_session|orch_hooks_file|allow)\\})*$" },
+    "arg": { "type": "string", "pattern": "^([^{}]|\\{(prompt|session|new_session|orch_hooks_file|allow|reminder_json)\\})*$" },
     "argv": {
       "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/arg" },
       "if": { "contains": { "type": "string", "pattern": "\\{prompt\\}" } },
@@ -53,7 +53,8 @@
             "fresh": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "const": "{command}" }] },
             "resume": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "type": "null" }], "description": "null = cannot resume: every run starts fresh from the ticket and its summary." },
             "stream_args": { "$ref": "#/$defs/argv", "description": "Optional. Added for a machine-readable event stream." },
-            "allow_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to retry with a tool allowed ({allow})." }
+            "allow_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to retry with a tool allowed ({allow})." },
+            "settings_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to pass the reminder hooks inline ({reminder_json} = the tool's settings JSON built from reminder_hooks)." }
           }
         },
         "live": {
@@ -132,6 +133,11 @@
             { "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" }, "additionalProperties": { "type": "string", "pattern": "^orch run event --kind [a-z-]{1,24}$" } }
           ],
           "description": "Tool hook event -> the orch command it runs. orch writes them into a per-run file ({orch_hooks_file})."
+        },
+        "reminder_hooks": {
+          "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
+          "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z]{1,16}$" },
+          "description": "Optional. Tool hook event -> `orch work-check --hook <tool>`: one plain line at the start of a turn when files changed and no ticket is active. Added to the per-run hooks file (live) and passed inline by oneshot.settings_args. The command always exits 0."
         },
         "session": {
           "type": "object", "required": ["id"], "additionalProperties": false,
