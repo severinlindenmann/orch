@@ -408,3 +408,22 @@ def test_fresh_view_refetches_once_per_change(server, fake_orch, ws):
     (ws / ".orch/tickets/t_new00002.json").write_text("{}")
     assert req(server, "GET", fresh)[0] == 200
     assert len(calls(fake_orch)) > n2  # a change refetches, however young the cache
+
+
+def test_run_send_argv_parses_on_every_python(tmp_path):
+    """fb14: `orch run send <ticket> --by .. --json -- <text>` failed with "unrecognized arguments: -- <text>" on
+    Python 3.11 (an optional positional after the ticket is taken early). The ticket must follow the options."""
+    argv = actions.build_argv("run.send", {"ticket": TID, "text": "can you mark all tickets as done"})
+    assert argv[:2] == ["run", "send"] and argv[2] != TID
+    assert argv[-3:] == ["--", TID, "can you mark all tickets as done"]
+    import argparse
+
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true")
+    common.add_argument("--by")
+    top = argparse.ArgumentParser()
+    x = top.add_subparsers(dest="cmd").add_parser("run").add_subparsers(dest="sub").add_parser("send", parents=[common])
+    x.add_argument("ticket")
+    x.add_argument("text", nargs="?")
+    ns = top.parse_args(argv)
+    assert (ns.ticket, ns.text) == (TID, "can you mark all tickets as done")
