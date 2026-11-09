@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -17,6 +18,11 @@ def _out(args, data, text: str) -> None:
 def add_parsers(sub, common) -> None:
     x = sub.add_parser("start", parents=[common], help="start the add-ons that run in the background here")
     x.add_argument("--no-open", action="store_true", help="do not open the dashboard in the browser")
+    x.add_argument(
+        "--print-launch-url",
+        action="store_true",
+        help=argparse.SUPPRESS,  # test installs only: print a one-time page link (for browser tests)
+    )
     x = sub.add_parser(
         "stop", parents=[common], help="stop them (asks which workspace when you are outside one)"
     )
@@ -65,8 +71,22 @@ def _pick(running: list[dict]) -> list[Path]:
     raise Refused(f"'{ans}' is not on the list. Nothing was stopped.")
 
 
+def _print_launch_urls(root: Path, rows: list[dict]) -> None:
+    from orch import humanproof
+
+    for r in rows:
+        base = services.local_url(r.get("url"))
+        if base and r.get("addon") in humanproof.LAUNCH_SERVERS:
+            print(f"launch {r['addon']}: {humanproof.printable_launch_url(root, r['addon'], base)}")
+
+
 def _services_cmd(args, root: Path) -> None:
     if args.cmd == "start":
+        if args.print_launch_url:  # refuse before anything starts
+            from orch import humanproof
+
+            if not humanproof.is_test_workspace(root):
+                raise Refused("--print-launch-url works only on a test install, in a test folder.")
         rows = services.start(root)
         if args.json:
             print(json.dumps({"workspace": str(root.resolve()), "addons": rows}, indent=2))
@@ -76,8 +96,11 @@ def _services_cmd(args, root: Path) -> None:
             print(f"Started in {root.name}:")
             print("\n".join(_service_line(r) for r in rows))
             print("Stop: orch stop")
+        if args.print_launch_url:
+            _print_launch_urls(root, rows)
         url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
-        if url and not args.no_open and not args.json and term.is_terminal(sys.stdout):
+        opens = not args.no_open and not args.print_launch_url and not args.json
+        if url and opens and term.is_terminal(sys.stdout):
             import webbrowser
 
             webbrowser.open(url)

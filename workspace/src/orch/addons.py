@@ -11,6 +11,7 @@ AGENTS block, tab and background process. Leftover files or ext data never activ
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import hashlib
 import importlib.util
@@ -98,8 +99,41 @@ def _install_origin() -> dict:
     return {}
 
 
+_ENV_SOURCE_PROVEN = False
+
+
+@contextlib.contextmanager
+def trusted_env_source():
+    """Inside the person-gated `orch update` (its proof verified): ORCH_REPO / ORCH_REF count there too."""
+    global _ENV_SOURCE_PROVEN
+    prev, _ENV_SOURCE_PROVEN = _ENV_SOURCE_PROVEN, True
+    try:
+        yield
+    finally:
+        _ENV_SOURCE_PROVEN = prev
+
+
+def _env_source_ok() -> bool:
+    """ORCH_REPO / ORCH_REF choose where code is installed from: an agent could aim them at its own code. They
+    count only on a dev or test install, or inside the person-gated `orch update`."""
+    from orch import humanproof
+
+    return _ENV_SOURCE_PROVEN or humanproof.install_kind() in ("dev", "test")
+
+
+def _src_env(name: str) -> str | None:
+    return os.environ.get(name) if _env_source_ok() else None
+
+
+def ignored_source_note() -> str | None:
+    """Plain words for a person whose ORCH_REPO / ORCH_REF are set but not honoured on this install."""
+    if _env_source_ok() or not (os.environ.get("ORCH_REPO") or os.environ.get("ORCH_REF")):
+        return None
+    return "Note: ORCH_REPO / ORCH_REF are ignored on this install; orch installs from its official source."
+
+
 def repo() -> str:
-    return os.environ.get("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
+    return _src_env("ORCH_REPO") or _install_origin().get("repo") or DEFAULT_REPO
 
 
 _REF_OK = re.compile(r"[A-Za-z0-9._/-]+")
@@ -108,7 +142,7 @@ _REF_OK = re.compile(r"[A-Za-z0-9._/-]+")
 def ref() -> str:
     """The branch, tag or commit to install. Checked like a git ref name: in a zip URL a '../' or '#' could
     point at another repository or folder (git+ took it as a revision only)."""
-    r = os.environ.get("ORCH_REF") or _install_origin().get("ref") or "main"
+    r = _src_env("ORCH_REF") or _install_origin().get("ref") or "main"
     if not _REF_OK.fullmatch(r) or ".." in r or r.startswith(("-", "/")) or r.endswith((".lock", "/")):
         raise Refused(f"'{r}' is not a branch, tag or commit name orch can install from (check ORCH_REF).")
     return r
@@ -118,7 +152,7 @@ def _is_local(r: str) -> bool:
     """A source is a folder ONLY when ORCH_REPO is set explicitly to an absolute existing folder, or orch
     itself was installed from that folder. The default GitHub URL is never a path (a relative folder named
     like it must not count)."""
-    if "ORCH_REPO" in os.environ:
+    if _src_env("ORCH_REPO") is not None:
         return r == os.environ["ORCH_REPO"] and Path(r).is_absolute() and Path(r).is_dir()
     o = _install_origin()
     return bool(o.get("local")) and r == o["repo"] and Path(r).is_dir()
@@ -429,7 +463,13 @@ def _tool_args(entries: list[dict]) -> list[str]:
 
 
 def _install_tool(entries: list[dict]) -> None:
+    from orch import humanproof
+
+    kind = humanproof.read_install_record()  # the reinstall drops the record: carry the installer's kind over
+    env = Path(sys.prefix)
     run_uv(_tool_args(entries))
+    if kind and ((env / "bin").exists() or (env / "Scripts").exists()):
+        humanproof.write_install_record(env, kind)
 
 
 def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str) -> bool:
@@ -1180,6 +1220,9 @@ def reexec(args: list[str]) -> None:
 
 def add(root: Path, source: str, yes: bool = False, project_only: bool = False) -> None:
     """Install (if needed) and turn on in this workspace. `source` = built-in name or ./folder."""
+    note = ignored_source_note()
+    if note:
+        print(note, file=sys.stderr)
     if project_only:
         if not consented(root, source):
             raise Refused(not_on_message(root, source))

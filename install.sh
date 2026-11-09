@@ -1,6 +1,7 @@
 #!/bin/sh
 # orch installer (macOS / Linux): installs uv if missing, then orch.
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
+# ORCH_INSTALL_KIND=test|dev (given by the person running this installer) marks a test or dev install; default normal.
 set -eu
 ORIG_PATH="$PATH"
 if ! command -v uv >/dev/null 2>&1; then
@@ -28,7 +29,16 @@ else
     *) SPEC="git+$R@$REF#subdirectory=workspace" ;;
   esac
 fi
+KIND="${ORCH_INSTALL_KIND:-normal}"
+case "$KIND" in
+  normal|dev|test) ;;
+  *) echo "ORCH_INSTALL_KIND must be normal, dev or test." >&2; exit 1 ;;
+esac
 uv tool install --reinstall --refresh "$SPEC"
+# The install record (orch-install.json) is written here, by this installer, into orch's own tool environment.
+# No orch command writes it: an agent cannot make its own workspace a test or dev install.
+TOOL_DIR="$(uv tool dir)/orch-workspace"
+printf '{"kind": "%s", "schema": "orch.install/1"}\n' "$KIND" > "$TOOL_DIR/orch-install.json"
 BIN="$HOME/.local/bin"
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$BIN")"
