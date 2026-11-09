@@ -35,8 +35,8 @@ def lab(proj, monkeypatch):
     """Own env: the fake agents log what reaches them; the workspace's tmux server is removed at the end."""
     log = proj.parent / f"{proj.name}-agent.log"
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
-    # Children (the wrapper, the fake agent) must find the approval store, and they only trust an ORCH_HOME under
-    # the real account home: so this lab uses the real home's own temp folder (removed at the end).
+    # Children (the wrapper, the fake agent) must find the approval store, and they only trust an
+    # ORCH_HOME under the real account home: so this lab uses its own temp folder there (removed at the end).
     from conftest import _REAL_HOME_FN
 
     base = _REAL_HOME_FN() / ".orch-test"
