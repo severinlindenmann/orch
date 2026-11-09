@@ -90,7 +90,7 @@ const OrchBlocks = (() => {
     if (label) node.dataset.label = label;
     return true;
   }
-  // "Send a message" (a list row): a visible button on the row. The DOM carries only the peer id (checked here).
+  // "Send a message" opens its workspace thread in Chat via messageSend. The DOM carries only the checked peer id.
   const PEER = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
   function sendButton(it) {
     const a = arr(it.actions).find(x => x && x.action && x.action.op === 'message.send' && x.action.args && PEER.test(String(x.action.args.workspace)));

@@ -27,6 +27,10 @@
     const text = parts.join(' and ') + (q + r === 1 ? ' needs' : ' need') + ' your look.';
     return text[0].toUpperCase() + text.slice(1);
   }
-  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, attentionText};
+  /* Why a live run waits before orch types into its window: the core's own words, only while the run runs. */
+  function holdText(v) {
+    return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+  }
+  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, attentionText, holdText};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -93,6 +93,81 @@ def test_chat_say_goes_through_the_act_fence(act_server, act_orch):
     ):
         assert post(act_server, body, h)[0] in (400, 403, 421), h
     assert post(act_server, {}, raw="x", headers={"Content-Type": "text/plain"})[0] == 415
-    assert [c for c in acts(act_orch) if c[:2] != ["chat", "status"]] == []  # nothing reached the orch command
+    assert [
+        c for c in acts(act_orch) if c[:2] != ["chat", "status"]
+    ] == []  # nothing reached the orch command
     assert post(act_server, body)[0] == 200  # the page itself (same origin, JSON) can write
     assert [c[:2] for c in acts(act_orch) if c[:2] != ["chat", "status"]] == [["chat", "say"]]
+
+
+# Workspace DMs keep the same action fence and CLI-only reads.
+def test_workspace_dm_action_validation():
+    ws = "ws_abcdefghij"
+    argv = actions.build_argv("chat.send_ws", {"workspace": ws, "text": "--literal"})
+    assert argv[:3] == ["chat", "send", ws]
+    assert argv[-2:] == ["--", "--literal"]
+    for args in (
+        {"workspace": "ph_abcdefghij", "text": "hi"},
+        {"workspace": "../x", "text": "hi"},
+        {"workspace": ws, "text": "x" * 2001},
+        {"workspace": ws, "text": ""},
+        {"workspace": ws, "text": "hi", "by": "agent:x"},
+    ):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("chat.send_ws", args)
+
+
+def test_workspace_dm_reads_and_endpoints(ws, orch, monkeypatch):
+    from orch_dashboard import data
+
+    contact = {"ws": "ws_abcdefghij", "name": "Home", "can": {"chat": True, "tasks": False, "files": True}}
+    calls = []
+
+    def command(binary, argv, root):
+        calls.append(argv)
+        return [contact] if argv[1] == "contacts" else {**contact, "messages": []}
+
+    monkeypatch.setattr(data, "run_orch", command)
+    assert data.load_chat_contacts(ws, orch) == [contact]
+    assert data.load_chat_thread(ws, orch, contact["ws"])["messages"] == []
+    assert data.load_chat_thread(ws, orch, "../secret") is None
+    assert calls == [["chat", "contacts", "--json"], ["chat", "thread", contact["ws"], "--json"]]
+    srv = make_server(ws, 0, orch_bin=orch)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        assert json.loads(urllib.request.urlopen(base + "/api/chat/contacts").read()) == [contact]
+        assert (
+            json.loads(urllib.request.urlopen(base + "/api/chat/thread/" + contact["ws"]).read())["ws"]
+            == contact["ws"]
+        )
+        for bad in ("ph_abcdefghij", "ws_short", "../secret"):
+            with pytest.raises(urllib.error.HTTPError):
+                urllib.request.urlopen(base + "/api/chat/thread/" + bad)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.mark.parametrize("operation,command", [("chat.send_ws", "send"), ("chat.sync_ws", "sync")])
+def test_dm_actions_go_through_the_act_fence(act_server, act_orch, operation, command):
+    from .test_act import acts, post
+
+    body = {"op": operation, "args": {"workspace": "ws_abcdefghij"}}
+    if command == "send":
+        body["args"]["text"] = "from a web page"
+    port = act_server.rsplit(":", 1)[1]
+    for h in (
+        {"Origin": "https://evil.example"},
+        {"Origin": "null"},
+        {"Origin": None},
+        {"Host": "evil.example:" + port},
+        {"Sec-Fetch-Site": "cross-site"},
+    ):
+        assert post(act_server, body, h)[0] in (400, 403, 421), h
+    assert post(act_server, {}, raw="x", headers={"Content-Type": "text/plain"})[0] == 415
+    assert [
+        c for c in acts(act_orch) if c[:2] != ["chat", "status"]
+    ] == []  # nothing reached the orch command
+    assert post(act_server, body)[0] == 200  # the page itself (same origin, JSON) can write
+    assert [c[:2] for c in acts(act_orch) if c[:2] != ["chat", "status"]] == [["chat", command]]

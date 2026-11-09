@@ -375,3 +375,7 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
   .fx.rail-closed .fx-rail>:not(.fx-add-task){display:none}
   .fx.rail-closed .fx-add-task{margin-top:0;padding:0}
 }
+
+.fx-live[data-hold]{flex:0 1 auto;min-width:0;max-width:100%}
+.fx-live[data-hold] [role=status]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.fx-live[data-hold] .t{display:none}

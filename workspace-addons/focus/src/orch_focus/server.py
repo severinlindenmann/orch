@@ -415,6 +415,7 @@ class Tracker:
             "attention": bool(attention),
             "why": str((claim.get("live") or {}).get("why") or "")[:400] if attention else "",
             "live": claim.get("mode") == "live",
+            "hold": " ".join(str(status["hold"]).split())[:200] if running and isinstance(status.get("hold"), str) else "",
             "board": board,
             "events": for_display(events[-60:]),
             "done": sum(1 for c in checks if c.get("done")),

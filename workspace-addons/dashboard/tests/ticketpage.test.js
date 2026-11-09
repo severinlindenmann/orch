@@ -220,3 +220,15 @@ test('task proof chips: only plain evidence files and http(s) links get a chip, 
   const task = {done:true, evidence:[{type:'file', ref:base + 'a.md', summary:'Connected as Dev Team.'}, {type:'file', ref:base + 'b.png'}]};
   assert.equal(helpers.outcome(task), 'Connected as Dev Team.');
 });
+
+test('agent bar shows the hold reason as plain text and hides it when absent', () => {
+  const c = context({state:{runs:{t1:{running:true, state:'alive', hold:"Waiting: clear the text in the agent's window.", claim:{agent:'claude', mode:'live'}}}, settings:null}, liveLinkFor:() => null, ticketWarmth:() => null, name:v => v, clean:v => String(v ?? '')});
+  vm.runInContext(source.slice(source.indexOf('function agentBar(t)'), source.indexOf('const surface =')), c);
+  const bar = JSON.stringify(c.agentBar({id:'t1', checklist:[{state:'doing', text:'Writing the plan'}]}));
+  assert.match(bar, /Waiting: clear the text in the agent's window\./);
+  assert.doesNotMatch(bar, /Writing the plan/);
+  c.state.runs.t1.hold = undefined;
+  const bare = JSON.stringify(c.agentBar({id:'t1', checklist:[{state:'doing', text:'Writing the plan'}]}));
+  assert.match(bare, /Writing the plan/);
+  assert.doesNotMatch(bare, /Waiting:/);
+});
