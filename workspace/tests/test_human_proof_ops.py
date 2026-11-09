@@ -526,3 +526,18 @@ def test_dismiss_removes_the_secret_too(ws, run):
     assert list(hp.key_dir(ws).glob("handoff-*.secret"))
     hp.handoff_drop(ws, hp.handoffs(ws)[0]["id"])
     assert not list(hp.key_dir(ws).glob("handoff-*.secret"))
+
+
+def test_browser_opens_only_for_a_newly_queued_item_and_at_most_every_30_s(ws, run, monkeypatch):
+    opened = []
+    monkeypatch.setattr(hp, "open_browser", lambda url: opened.append(url) or True)
+    monkeypatch.setattr(hp.term, "is_terminal", lambda f: True)
+    monkeypatch.setattr(
+        "orch.services.workspace_rows", lambda root: [{"addon": "dashboard", "url": "http://127.0.0.1:9"}]
+    )
+    tid, q = _ask(ws, run)
+    run("answer", tid, q, "A", "--by", "human:pat", "--json")  # new: opens
+    run("answer", tid, q, "A", "--by", "human:pat", "--json")  # same request again: no new browser
+    tid2, q2 = _ask(ws, run)
+    run("answer", tid2, q2, "B", "--by", "human:pat", "--json")  # new, but within 30 s: no browser
+    assert len(opened) == 1 and "#launch=" in opened[0]

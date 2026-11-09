@@ -293,7 +293,7 @@ def _loose_setup(tws):
     hp._write_private(home / "dev-workspaces.json", json.dumps({"workspaces": {os.path.realpath(tws): {}}}))
     hp.record_set(tws, "focus.session_typing", True, "human:pat")
     assert hp.effective(tws, "focus.session_typing", True) is True
-    assert hp.dev_record(tws) is True
+    assert hp.dev_workspace(tws) is True
     return key, old, d, home
 
 
@@ -303,7 +303,7 @@ READERS = {
     "proofs-used.json": lambda tws: hp.verify_and_consume(tws, "hp1.x.y", "run.takeover", TID),
     "delivered.json": lambda tws: hp.delivered_ids(tws),
     "handoffs.json": lambda tws: hp.private_json(tws, "handoffs.json", {}),
-    "dev-workspaces.json": lambda tws: hp.dev_record(tws),
+    "dev-workspaces.json": lambda tws: hp.dev_workspace(tws),
 }
 
 
@@ -330,7 +330,7 @@ def test_loose_secret_file_resets_protection(tws, name):
     assert name in log and key.hex() not in log and hp.human_key(tws).hex() not in log
     assert oct((home / "human-settings.json").stat().st_mode & 0o777) == "0o600"
     if name == "dev-workspaces.json":
-        assert hp.dev_record(tws) is False
+        assert hp.dev_workspace(tws) is False
 
 
 def test_wrong_type_is_loose_too(tws):

@@ -167,15 +167,20 @@ def test_mobile_mode_palette_has_aa_contrast():
     css = (WEB / "style.css").read_text().split("/* v3-pages: switcher + mobile mode */")[1]
 
     def luminance(hex_color):
-        channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
-        linear = [c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4 for c in channels]
-        return sum(c * weight for c, weight in zip(linear, (.2126, .7152, .0722)))
+        channels = [int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+        linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return sum(c * weight for c, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
 
-    for ink, background in [("#e8eaed", "#164b43"), ("#9aa3ad", "#102925"),
-                            ("#e8eaed", "#102925"), ("#123b35", "#bce9dc"),
-                            ("#123b35", "#e3f5ef"), ("#365e56", "#e3f5ef")]:
+    for ink, background in [
+        ("#e8eaed", "#164b43"),
+        ("#9aa3ad", "#102925"),
+        ("#e8eaed", "#102925"),
+        ("#123b35", "#bce9dc"),
+        ("#123b35", "#e3f5ef"),
+        ("#365e56", "#e3f5ef"),
+    ]:
         low, high = sorted([luminance(ink), luminance(background)])
-        ratio = (high + .05) / (low + .05)
+        ratio = (high + 0.05) / (low + 0.05)
         assert ratio >= 4.5
         assert f"{ratio:.2f}:1" in css
     assert "body.mobile-mode-on" in css

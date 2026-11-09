@@ -717,17 +717,6 @@ def private_json(root: Path, name: str, default):
     return _read_json(root, key_dir(root, create=False) / name, default)
 
 
-def dev_record(root: Path) -> bool:
-    """Is this workspace listed in the dev record of the guarded home? A loose record is removed (reset)."""
-    try:
-        path = guarded_home(root) / "dev-workspaces.json"
-        data = _read_json(root, path, {})
-    except (Refused, OSError):
-        return False
-    ws = data.get("workspaces", data) if isinstance(data, dict) else {}
-    return isinstance(ws, dict) and os.path.realpath(root) in ws
-
-
 # ------------------------------------------------------------------------------------------- pending MAC
 
 
@@ -766,7 +755,8 @@ def delivered_ids(root: Path) -> set[str]:
 
 
 def consume(root: Path, ids: list[str]) -> list[str]:
-    """Record ids as delivered, atomically under the key lock. Returns the ids NOT delivered before."""
+    """Record ids as delivered, atomically under the key lock. Returns the ids NOT delivered before. Only the
+    newest 5000 ids are kept; an input older than that is no longer remembered."""
     d = key_dir(root)
     with _key_lock(d):
         data = _read_json(root, d / "delivered.json", {"ids": []})
@@ -940,7 +930,8 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
     """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
     by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
     The item holds the command to run once the person clicks. Best effort: a failure here only means the item
-    is missing. Returns True when queued. The exact value the person will see is the value that runs: it must
+    is missing. Returns True when newly queued, "dup" when the same request already waits, False when not
+    queued. The exact value the person will see is the value that runs: it must
     be one of the command's own words (checked here and again when the page takes the item)."""
     heads = HANDOFF_HEADS.get(op, ())
     if not isinstance(argv, list) or not any(argv[: len(h)] == list(h) for h in heads):
@@ -958,7 +949,7 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
                 i for i in items if i.get("op") == op and i.get("target") == target and i.get("argv") == argv
             ]
             if same and token is None:
-                return True
+                return "dup"  # already waiting: no new item, no new browser
             items = [i for i in items if i not in same]  # a new pairing replaces the same request (new token)
             if sum(1 for i in items if i.get("op") == op) >= HANDOFF_PER_OP:
                 return False
@@ -974,7 +965,7 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
                     "id": hid,
                     "op": op,
                     "target": target,
-                    "label": label[:120],
+                    "label": label[:300],
                     "value": value,
                     "argv": argv,
                     "at": now,
@@ -1047,7 +1038,24 @@ def handoff_drop(root: Path, hid: str) -> None:
         pass
 
 
-def _dashboard_note(root: Path) -> str:
+OPEN_EVERY = 30  # seconds: the browser is opened at most this often for hand-offs
+
+
+def _may_open(root: Path) -> bool:
+    """Rate limit for opening the browser: one stamp file in the key folder, by its modification time."""
+    try:
+        stamp = key_dir(root) / "handoff-open.stamp"
+        now = time.time()
+        with contextlib.suppress(OSError):
+            if now - stamp.stat().st_mtime < OPEN_EVERY:
+                return False
+        _write_private(stamp, "x")
+        return True
+    except (Refused, OSError):
+        return False
+
+
+def _dashboard_note(root: Path, open_ok: bool = True) -> str:
     """After a hand-off: open the dashboard on a desktop (launch token in the URL
     fragment, never printed) and say in plain words what to click. No token is ever returned or printed."""
     url = None
@@ -1058,7 +1066,7 @@ def _dashboard_note(root: Path) -> str:
         url = services.local_url(row.get("url")) if row else None
     except Exception:  # noqa: BLE001 - the note is best effort
         url = None
-    if url and term.is_terminal(sys.stdout):
+    if url and open_ok and term.is_terminal(sys.stdout) and _may_open(root):
         open_browser(launch_url(root, "dashboard", url))
         return f"Opened the dashboard ({url}): press Continue to send this to the agent."
     if url:
@@ -1083,9 +1091,10 @@ def person_by(root: Path, args, op: str, target: str, *, label: str = "", value:
     if explicit and explicit.startswith("agent:"):
         return tickets.current_actor(explicit)
     clean = _clean_argv(CURRENT_ARGV) if argv is None else argv
-    if not request_handoff(root, op, target, label, value, clean):
+    queued = request_handoff(root, op, target, label, value, clean)
+    if not queued:
         raise Refused(HANDOFF)
-    raise Refused(_dashboard_note(root))
+    raise Refused(_dashboard_note(root, open_ok=queued is True))
 
 
 # ------------------------------------------------------------------------------------------- launch token
@@ -1095,7 +1104,7 @@ LAUNCH_LIFE = 30  # seconds: the token is single use and dies on the first page 
 
 def write_launch_token(root: Path, server: str) -> str | None:
     """The one-time token that bootstraps a page session: <key folder>/launch-<server>.token (0600, once,
-    120 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
+    30 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
     printed or logged."""
     if server not in ("focus", "dashboard"):
         return None

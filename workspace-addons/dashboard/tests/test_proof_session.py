@@ -189,18 +189,32 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer mints
 
 
-def test_one_time_notice_is_shown_once_with_the_core_text(live):
+def test_one_time_notice_is_shown_once_with_the_core_text_and_only_to_a_session(live):
     root, port = live
     d = hp.key_dir(root)
     hp._write_private(
         d / "notices.json", json.dumps([{"kind": "protection_reset", "at": "x", "text": hp.RESET_NOTICE}])
     )
 
-    def get():
+    def get(cookie=None):
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        c.request("GET", "/api/notices", headers={"Host": f"127.0.0.1:{port}"})
+        h = {"Host": f"127.0.0.1:{port}", **({"Cookie": cookie} if cookie else {})}
+        c.request("GET", "/api/notices", headers=h)
         return json.loads(c.getresponse().read())
 
-    first = get()
+    assert get() == []  # a curl without a session does not consume it
+    ck = session(root, port)
+    first = get(ck)
     assert first and first[0]["text"] == hp.RESET_NOTICE[:600]
-    assert get() == []  # once
+    assert get(ck) == []  # once
+
+
+def test_dismiss_needs_a_session(live):
+    root, port = live
+    hp.request_handoff(root, "ticket.answer", "t_a:q1", "L", "x", argv=["answer", "t_a", "q1", "--", "x"])
+    hid = hp.handoffs(root)[0]["id"]
+    assert post(port, "/api/act", {"op": "handoff.dismiss", "args": {"id": hid}})[0] == 403
+    assert hp.handoffs(root)  # still there
+    ck = session(root, port)
+    assert post(port, "/api/act", {"op": "handoff.dismiss", "args": {"id": hid}}, {"Cookie": ck})[0] == 200
+    assert hp.handoffs(root) == []

@@ -216,10 +216,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found", "text/plain")
             m = hmac.new(self.nonce.encode(), c.encode(), hashlib.sha256).hexdigest()
             return self._send(200, json.dumps({"pid": os.getpid(), "mac": m}).encode(), "application/json")
-        if path == "/api/notices":  # read once: the core clears them when read
+        if (
+            path == "/api/notices"
+        ):  # read once, and only by a page with a session (a curl must not consume it)
             from . import handoff
 
-            return self._send(200, json.dumps(handoff.notices(self.root)).encode(), "application/json")
+            ok = self.session is not None and self.session.authed(self.headers)
+            items = handoff.notices(self.root) if ok else []
+            return self._send(200, json.dumps(items).encode(), "application/json")
         if path == "/api/handoffs":  # pending requests from a terminal; same-origin only (checked above)
             from . import handoff
 
@@ -460,6 +464,8 @@ class Handler(BaseHTTPRequestHandler):
 
                 hid = (body.get("args") or {}).get("id")
                 if body["op"] == "handoff.dismiss":
+                    if mint is None:  # only a page with a session may dismiss the person's requests
+                        raise actions.NeedsPerson("Open the dashboard from this computer to do this.")
                     handoff.dismiss(self.root, hid)
                     return self._send(200, b"{}", "application/json")
                 code, text = handoff.confirm(
