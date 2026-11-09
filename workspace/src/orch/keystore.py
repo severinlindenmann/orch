@@ -28,7 +28,6 @@ import json
 import logging
 import os
 import re
-import stat
 import time
 import tomllib
 from pathlib import Path
@@ -98,7 +97,7 @@ def _load(d: Path, admin: bool = False) -> dict:
     source that does not belong in that file: Refused (fail closed), never a guess."""
     fname, src = ("admin-keys.json", "admin") if admin else ("keys.json", "workspace")
     try:
-        hp._check_file(d / fname)
+        _check_file(d / fname)
         raw = json.loads((d / fname).read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
@@ -133,9 +132,19 @@ def _store(d: Path, keys: dict, admin: bool = False) -> None:
 # file is deleted by exact path when no name in it still needs re-entry, or when the key is removed.
 
 
+def _check_file(p: Path) -> None:
+    """humanproof's rights check, with the key store's own plain words (a loose file was set aside before this
+    is reached; what is left here is a link or a non-file)."""
+    try:
+        hp._check_file(p)
+    except hp.LooseFile:
+        raise Refused(hp.WRONG_RIGHTS) from None
+
+
 def _is_loose(p: Path) -> bool:
-    """Loose = wider than 0600, another owner, or (Windows) an ACL beyond user and SYSTEM: humanproof.file_problem
-    decides, so its platform hook applies here too. A link or a non-file is not "loose": it stays refused."""
+    """Loose = wider than 0600, another owner, or (Windows) an ACL beyond user and SYSTEM: the verdict is
+    humanproof.file_problem, so its platform hook applies here too. A link or a non-file is not "loose":
+    it stays refused."""
     try:
         why = hp.file_problem(p)
     except OSError:
@@ -314,7 +323,7 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
             if _is_loose(fpath):
                 _quarantine(fpath)
             try:
-                hp._check_file(fpath)
+                _check_file(fpath)
                 old_bytes = fpath.read_bytes()
             except FileNotFoundError:
                 pass
@@ -400,7 +409,7 @@ def get_value(root: Path, name: str):
         if _file_needs_reentry(d, name):
             raise gone
         try:
-            hp._check_file(d / "files" / name)
+            _check_file(d / "files" / name)
             return (d / "files" / name).read_bytes()
         except FileNotFoundError:
             raise Refused("The key file is missing.") from None
@@ -601,7 +610,7 @@ def read_profiles(root: Path) -> dict:
     if d is None:
         return {}
     try:
-        hp._check_file(d / "profiles.toml")
+        _check_file(d / "profiles.toml")
         raw = tomllib.loads((d / "profiles.toml").read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
@@ -641,7 +650,7 @@ def record_read(root: Path, record: str) -> dict | None:
     d = _existing_dir(root)
     if d is None:
         return None
-    data = hp._read_json(_record_path(d, record), None)
+    data = hp._read_json(root, _record_path(d, record), None)
     if data is not None and not isinstance(data, dict):
         raise Refused("A record in the orch folder is unreadable.")
     return data

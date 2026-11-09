@@ -274,13 +274,12 @@ def test_folders_are_0700_and_files_0600(tws):
 
 
 @posix_only
-def test_a_loose_folder_or_a_link_refuses_every_read(tws):
+def test_a_loose_folder_is_tightened_and_a_link_refuses_every_read(tws):
     keystore.add(tws, "k", "token", TOKEN)
     d = hp.key_dir(tws)
     os.chmod(d, 0o755)
-    with pytest.raises(Refused, match="wrong rights"):
-        keystore.list_keys(tws)
-    os.chmod(d, 0o700)
+    assert [i["name"] for i in keystore.list_keys(tws)] == ["k"]  # folders may be tightened
+    assert _mode(d) == 0o700
     real = d / "keys.json"
     moved = d / "keys.real"
     real.rename(moved)
