@@ -43,18 +43,14 @@ _PYTEST_TMP = Path(tempfile.gettempdir()).resolve()
 
 
 def _ours(line: dict) -> bool:
-    """A trace line written by this pytest session or its children: it has our pid or ppid (workers and
-    controller register theirs in the session folder), or ran in a pytest temp folder."""
-    pids = set()
+    """A trace line written by this pytest session or its children: its pid or ppid is in this session's
+    registry (the controller and every xdist worker register theirs). By pid only: a path prefix would blame
+    this run for a parallel session's lines (shared pytest-of-<user> folder)."""
     reg = os.environ.get("ORCH_TEST_SESSION_PIDS")
-    if reg and Path(reg).exists():
-        pids = {int(x) for x in Path(reg).read_text().split()}
-    cwd = str(line.get("cwd", ""))
-    return (
-        line.get("pid") in pids
-        or line.get("ppid") in pids
-        or ("/pytest-of-" in cwd and cwd.startswith(str(_PYTEST_TMP)))
-    )
+    if not reg or not Path(reg).exists():
+        return False
+    pids = {int(x) for x in Path(reg).read_text().split() if x.isdigit()}
+    return line.get("pid") in pids or line.get("ppid") in pids
 
 
 def pytest_configure(config):
