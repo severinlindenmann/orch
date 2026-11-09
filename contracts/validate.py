@@ -150,11 +150,21 @@ from datetime import datetime, timedelta
 SELECT = sys.argv[1:]
 
 
+_W_REG = []
+
+
 def _w(name, defname=None):
+    """Validator for one schema (or one of its $defs); refs to other contract schemas resolve by file name."""
+    if not _W_REG:
+        reg = Registry()
+        for f in sorted(HERE.glob("*.schema.json")):
+            doc = _expand(json.loads(f.read_text()))
+            reg = reg.with_resource(doc.get("$id", f.name), Resource.from_contents(doc))
+        _W_REG.append(reg)
     schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text()))
     if defname:
-        schema = {"$ref": f"#/$defs/{defname}", "$defs": schema["$defs"]}
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+        schema = {"$id": schema["$id"], "$ref": f"#/$defs/{defname}", "$defs": schema["$defs"]}
+    return Draft202012Validator(schema, format_checker=FormatChecker(), registry=_W_REG[0])
 
 
 def _examples(folder, errfn):
@@ -545,10 +555,117 @@ def kind_blocks():
             fails.append(f"vectors/blocks: needs at least one {prefix}* fixture")
 
 
+
+# --- jobs (job-events.md) --------------------------------------------------------------------------------------------
+JOB_FINAL = ("ok", "failed", "cancelled", "lost")
+JOB_EVENT_CAP = 2000
+PROGRESS_RE = (re.compile(r"^\s*(\d+)\s*/\s*(\d+)\b"), re.compile(r"^\s*(\d{1,3}(?:\.\d+)?)\s*%"))
+
+
+def job_replay(events, binding, cap=JOB_EVENT_CAP):
+    """Apply input events of one job in order: [result per event], final state. result = 'ok' or a refusal code."""
+    state, steps, results, stored = None, {}, [], 0
+    for ev in events:
+        t = ev["type"]
+        if ev.get("job", binding["job"]) != binding["job"] or ev.get("run", binding["run"]) != binding["run"]:
+            results.append("other_run")
+            continue
+        if t == "lost":
+            if state == "running" and ev.get("by") == "orch":
+                state = "lost"
+                results.append("ok")
+            else:
+                results.append("ended" if state in JOB_FINAL else "not_allowed")
+            continue
+        if ev.get("by") is not None:
+            results.append("not_allowed")
+            continue
+        if state is None and t != "start":
+            results.append("not_started")
+            continue
+        if state in JOB_FINAL:
+            results.append("ended")
+            continue
+        if t == "start" and state is not None:
+            results.append("already_started")
+            continue
+        if stored >= cap:
+            results.append("cap")
+            continue
+        if t == "step":
+            prev = steps.get(ev["step"])
+            if prev in ("done", "failed", "skipped"):
+                results.append("step_finished")
+                continue
+            steps[ev["step"]] = ev["state"]
+        if t == "progress" and ev.get("total") is not None and ev["done"] > ev["total"]:
+            results.append("invalid")
+            continue
+        if t == "start":
+            state = "running"
+        if t == "end":
+            state = ev["status"]
+        stored += 1
+        results.append("ok")
+    return results, state
+
+
+def job_is_lost(c):
+    if c["state"] != "running":
+        return False
+    quiet = _t(c["now"]) - _t(c["last_event_at"]) >= timedelta(minutes=c.get("quiet_minutes", 10))
+    return bool(quiet or c.get("process_gone") or c.get("run_ended"))
+
+
+def job_progress_from_line(line):
+    m = PROGRESS_RE[0].match(line)
+    if m:
+        done, total = int(m.group(1)), int(m.group(2))
+        return {"done": done, "total": total} if total > 0 and done <= total else None
+    m = PROGRESS_RE[1].match(line)
+    if m and float(m.group(1)) <= 100:
+        return {"done": float(m.group(1)), "total": 100, "unit": "%"}
+    return None
+
+
+def _job_stream_errors(v, doc):
+    if not isinstance(doc, list) or not doc:
+        return ["needs a non-empty list of events (one job)"]
+    errs = [m for ev in doc for m in _msgs(v, ev)]
+    if errs:
+        return errs
+    res, _ = job_replay(doc, {"job": doc[0]["job"], "run": doc[0]["run"]})
+    if [s for s in [ev["seq"] for ev in doc]] != list(range(1, len(doc) + 1)):
+        return ["seq must be 1, 2, 3 ... in a stored stream"]
+    bad = [r for r in res if r != "ok"]
+    return [f"stream breaks the state rules: {bad[0]}"] if bad else []
+
+
+def kind_jobs():
+    v, vi = _w("job-event"), _w("job-event", "input")
+    _core_clean("job-event")
+    _examples("job-event", lambda d: _job_stream_errors(v, d))
+    _examples("job-input", lambda d: _msgs(vi, d))
+    vec = _vec("jobs-v1.json")
+    for c in vec["replay"]:
+        for ev in c["events"]:
+            if ev["type"] != "lost" and not ev.get("by"):
+                for m in _msgs(vi, ev):
+                    fails.append(f"jobs replay {c['name']}: input not valid: {m}")
+        res, state = job_replay(c["events"], c["binding"], c.get("cap", JOB_EVENT_CAP))
+        _expect(f"jobs replay {c['name']} results", res, c["results"])
+        _expect(f"jobs replay {c['name']} state", state, c["state"])
+    for c in vec["lost"]:
+        _expect(f"jobs lost {c['name']}", job_is_lost(c), c["lost"])
+    for c in vec["progress_pattern"]:
+        _expect(f"jobs progress_pattern {c['line']!r}", job_progress_from_line(c["line"]), c["progress"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
     "secrets": kind_secrets,
+    "jobs": kind_jobs,
     "blocks": kind_blocks,
 }
 
