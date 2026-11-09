@@ -579,13 +579,13 @@ def test_capture_is_an_allowlist_without_tokens(monkeypatch):
     for k, v in {
         "HOME": "/h", "PATH": "/usr/bin", "LANG": "de_CH.UTF-8", "LC_ALL": "C", "TMPDIR": "/t",
         "ORCH_HOME": "/o", "ORCH_TICKET": "t_1", "ORCH_RUN": "r_1", "ORCH_VIA": "x",
-        "ANTHROPIC_API_KEY": "sk-secret", "CLAUDE_CODE_OAUTH_TOKEN": "tok", "CLAUDE_CONFIG_DIR": "/c",
+        "ANTHROPIC_API_KEY": "sk-secret", "CLAUDE_CODE_OAUTH_TOKEN": "tok", "XDG_CONFIG_HOME": "/c",
         "GH_TOKEN": "g", "SHELL": "/bin/zsh",
     }.items():  # fmt: skip
         monkeypatch.setenv(k, v)
     got = launchenv.capture(root=Path("/w"))
     assert got["HOME"] == "/h" and got["PATH"] == "/usr/bin" and got["LC_ALL"] == "C"
-    assert got["ORCH_HOME"] == "/o" and got["ORCH_ROOT"] == "/w" and got["CLAUDE_CONFIG_DIR"] == "/c"
+    assert got["ORCH_HOME"] == "/o" and got["ORCH_ROOT"] == "/w" and got["XDG_CONFIG_HOME"] == "/c"
     for k in (
         "ORCH_TICKET",
         "ORCH_RUN",
@@ -662,12 +662,12 @@ def test_call_starts_the_process_with_the_recorded_environment(proj, monkeypatch
     monkeypatch.setattr(services.subprocess, "run", fake_run)
     monkeypatch.setenv("HOME", "/caller/home")
     monkeypatch.setenv("PATH", "/caller/path")
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/caller/claude")  # the service had none
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/caller/cfg")  # the service had none
     services._call(
         proj, "dashboard", {"run": "orch_dashboard"}, "start", {"HOME": "/svc/home", "PATH": "/svc/bin"}
     )
     assert seen["HOME"] == "/svc/home" and seen["PATH"] == "/svc/bin"
-    assert "CLAUDE_CONFIG_DIR" not in seen  # not inherited from the caller
+    assert "XDG_CONFIG_HOME" not in seen  # not inherited from the caller
     assert seen["ORCH_ROOT"] == str(proj.resolve())
 
 
@@ -744,3 +744,15 @@ def test_locale_values_are_checked():
         {"LANG": "en_US.UTF-8", "LC_ALL": "$(evil)"}, root=Path("/w"), workspaces=set(), orch_home=Path("/o")
     )
     assert ok["LANG"] == "en_US.UTF-8" and bad == ["LC_ALL"]
+
+
+def test_login_folder_variables_come_from_the_adapter_registry(tmp_path, monkeypatch):
+    from orch import adapters, launchenv
+
+    names = adapters.config_dir_envs()
+    assert names and all(launchenv.allowed(n) for n in names)  # recorded without launchenv naming any tool
+    n = sorted(names)[0]
+    monkeypatch.setenv(n, str(tmp_path))
+    assert launchenv.capture()[n] == str(tmp_path)
+    ok, bad = launchenv.validate({n: "relative"}, root=tmp_path, workspaces=set(), orch_home=tmp_path)
+    assert bad == [n]  # and checked like any folder

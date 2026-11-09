@@ -7,7 +7,7 @@ user, so it is checked again at restart: a variable that fails its check is take
 and one line says so.
 
 Recorded: HOME, PATH, TMPDIR, LANG, LC_*, ORCH_* (not the actor/run markers), and the folders the agent tools
-keep their login in (CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*). Tokens and API keys are never recorded."""
+keep their login in (the adapters' `dir_env` variables, XDG_*). Tokens and API keys are never recorded."""
 
 from __future__ import annotations
 
@@ -21,10 +21,10 @@ from pathlib import Path
 # what orch installs or who is acting: they are never carried from a record.
 NAMES = (
     "HOME", "PATH", "TMPDIR", "LANG", "ORCH_HOME", "ORCH_ROOT",
-    "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME",
 )  # fmt: skip
 PREFIXES = ("LC_",)
-DIRS = frozenset({"CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR"})
+DIRS = frozenset({"XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR"})
 MAX = 4096
 
 
@@ -36,7 +36,8 @@ def allowed(name: str) -> bool:
     two lists cannot drift apart)."""
     from orch import adapters
 
-    return (name in NAMES or name.startswith(PREFIXES)) and name in adapters.human_environ({name: ""})
+    listed = name in NAMES or name.startswith(PREFIXES) or name in adapters.config_dir_envs()
+    return listed and name in adapters.human_environ({name: ""})
 
 
 def capture(env: dict[str, str] | None = None, root: Path | None = None) -> dict[str, str]:
@@ -108,6 +109,8 @@ def validate(
     rec: dict[str, str], *, root: Path, workspaces: set[Path], orch_home: Path
 ) -> tuple[dict[str, str], list[str]]:
     """(the recorded variables that passed, the names that did not). ORCH_ROOT is always the verified root."""
+    from orch import adapters
+
     ok: dict[str, str] = {}
     bad: list[str] = []
     for k, v in clean(rec).items():
@@ -128,7 +131,7 @@ def validate(
             continue  # replaced below with the verified root
         elif k == "ORCH_HOME":
             why = None if Path(v).resolve() == orch_home.resolve() else "not this orch folder"
-        elif k in DIRS:
+        elif k in DIRS or k in adapters.config_dir_envs():
             why = unsafe_dir(v, workspaces, allow_temp=(k == "TMPDIR"))
         if why:
             bad.append(k)

@@ -439,6 +439,26 @@ def detect() -> list[dict]:
 RUN_ENV = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")
 
 
+def config_dir_envs() -> frozenset[str]:
+    """The variables that move a tool's config/login folder (the registry's `dir_env` entries). A restart of
+    a background service keeps them, so the tool still finds its login."""
+    found: set[str] = set()
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            v = node.get("dir_env")
+            if isinstance(v, str) and v:
+                found.add(v)
+            for x in node.values():
+                walk(x)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    walk(_registry())
+    return frozenset(found)
+
+
 def human_environ(environ: Mapping[str, str]) -> dict:
     """environ without anything that says "an agent is running": every tool's detect variables and the run's
     ORCH_AGENT/RUN/TICKET/VIA. Used for what a person (a page click) or orch itself (a restart) starts, so
