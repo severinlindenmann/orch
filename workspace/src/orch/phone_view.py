@@ -550,7 +550,8 @@ def pair_previews(atts: list[dict]) -> list[dict]:
     for a in atts:
         if id(a) in moved:
             continue
-        is_page = a.get("kind") == "file" and a.get("id") and str(a.get("name", "")).lower().endswith((".html", ".htm"))
+        page_name = str(a.get("name", "")).lower().endswith((".html", ".htm"))
+        is_page = a.get("kind") == "file" and a.get("id") and page_name
         pic = pictures.get(stem(a)) if is_page else None
         if pic is not None and "preview" not in a:
             a["preview"] = pic["id"]

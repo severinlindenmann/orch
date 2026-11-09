@@ -116,8 +116,8 @@ async fn ticket_view_vector_cases_stored_or_refused() {
         .collect();
     assert_eq!(
         stored.len(),
-        6,
-        "full, minimal, at-cap, ready-started and the two light views are stored"
+        7,
+        "full, minimal, at-cap, page-with-preview, ready-started and the two light views are stored"
     );
     assert!(
         stored
