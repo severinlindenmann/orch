@@ -48,12 +48,12 @@
     },
     "delivered_at": {
       "$ref": "#/$defs/time",
-      "description": "Set once the agent got it. Not covered by mac and not authority: delivery is deduped by line id in a record in the guarded orch home (human-proof.md), so removing delivered_at never re-delivers."
+      "description": "Informational only, not covered by mac: consumed line ids are recorded under the key lock in core-owned storage in the guarded orch home (human-proof.md), checked and written atomically on consume, so removing delivered_at or re-appending a consumed line never delivers it again."
     },
     "mac": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_-]{43}$",
-      "description": "Optional. base64url HMAC-SHA256 with this workspace's human key (guarded orch home) over the canonical JSON of {workspace, ticket, line without mac and delivered_at}, written by the core when it accepted a person's input with a proof (page) or from its own relay client (phone). Verified on every read; without a valid mac the line is an agent's. delivered_at is not covered."
+      "description": "Optional. base64url HMAC-SHA256 with this workspace's human key (guarded orch home) over 'pending1.' + workspace id + '.' + ticket id + '.' + canonical JSON of the line without mac, delivered_at and human (sort_keys, separators , :). Written by the core when it accepted a person's input with a proof or from its own phone channel; verified on every read; without a valid mac the line is an agent's."
     },
     "human": {
       "type": "boolean",

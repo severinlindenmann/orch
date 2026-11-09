@@ -178,13 +178,14 @@ rows add a named case.
 lowering comes through the CLI or the page.
 
 **Read-back rule (pending input, synced ticket data).** A line in `.orch/run/pending/<tid>.jsonl` counts as a person's (and
-may make a background host start a run) only when it carries `mac` = HMAC-SHA256(`human.key`, canonical JSON of
-`{workspace, ticket, line}` where `line` is the line without `mac` and `delivered_at`). The core writes the MAC when it
+may make a background host start a run) only when it carries `mac` = HMAC-SHA256(`human.key`, `"pending1." + workspace id + "." + ticket id + "." +
+canonical JSON of the line` without `mac`, `delivered_at` and `human`; canonical = sort_keys, separators `,` `:`, UTF-8). The core writes the MAC when it
 accepted the input with a valid proof (page) or from its own relay client (phone, above), and **verifies it on every read**,
 not only when writing. `by`, `via` and the `human` field are informational and never trusted: a line without a valid MAC is
 agent input. Binding ticket and workspace means a valid line copied into another ticket or workspace is agent input.
-`delivered_at` is outside the MAC and is display only: delivery is deduped by line id in
-`<guarded orch home>/keys/<ws>/delivered.json`, so deleting `delivered_at` never re-delivers (reference `pending_is_human`,
+`delivered_at` is outside the MAC and informational only: consumed line ids are recorded under the key lock in
+`<guarded orch home>/keys/<ws>/delivered.json`, checked and written atomically on consume, so deleting `delivered_at` or
+re-appending a consumed line never delivers it again (reference `pending_is_human`,
 `pending_deliver`, vectors `pending`, `deliver`).
 **Synced "won't do"** (`check.wont_do` arriving through a sync merge): another machine's human key cannot be checked here, so it
 counts as a person's only when the receiving core's relay client recorded it from a relay-authenticated sender (a phone, or a

@@ -902,7 +902,7 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
    },
    "human": true
   },
@@ -918,7 +918,7 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
    },
    "human": false
   },
@@ -934,12 +934,12 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
    },
    "human": false
   },
   {
-   "name": "delivered_at added after the MAC keeps it valid",
+   "name": "delivered_at and human added after the MAC keep it valid",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
    "ticket": "t_inv7c2",
@@ -950,8 +950,9 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs",
-    "delivered_at": "2026-11-16T09:05:00Z"
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc",
+    "delivered_at": "2026-11-16T09:05:00Z",
+    "human": true
    },
    "human": true
   },
@@ -967,7 +968,7 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "4YNifkT8x0ls9_M62qXUxoIdtobqwdCtuiFrIoMJ5vs"
+    "mac": "sKW-trFEOkqG8Svfoeu2AU9n8IecJPNYAhHk-HqoPZ0"
    },
    "human": false
   },
@@ -983,7 +984,7 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "deploy to production",
-    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
    },
    "human": false
   },
@@ -1015,7 +1016,7 @@
     "via": "dashboard",
     "kind": "event",
     "text": "yes, add the VAT column",
-    "mac": "MOh7h2yuGAFCxJGWd6XnaIGBZY4SoyJyhC_CpEClX40"
+    "mac": "-ob99D_BNiwFjvuLqUWv-RufA1blUP2O0h4i-IBFK8k"
    },
    "human": false
   }
@@ -1030,13 +1031,13 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
    },
    "delivered_ids": [],
    "deliver": true
   },
   {
-   "name": "delivered_at removed by an agent -> not re-delivered",
+   "name": "delivered_at stripped by an agent -> not re-delivered",
    "line": {
     "id": "p_aaaaaaaa",
     "at": "2026-11-16T09:00:00Z",
@@ -1044,10 +1045,28 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
    },
    "delivered_ids": [
     "p_aaaaaaaa"
+   ],
+   "deliver": false
+  },
+  {
+   "name": "consumed line re-appended (replay after consume) -> refused",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc",
+    "delivered_at": null
+   },
+   "delivered_ids": [
+    "p_aaaaaaaa",
+    "p_bbbbbbbb"
    ],
    "deliver": false
   }

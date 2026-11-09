@@ -1106,9 +1106,9 @@ def hp_settle(c):
 
 
 def _pending_mac(key, workspace, ticket, line):
-    body = {"workspace": workspace, "ticket": ticket, "line": {k: x for k, x in line.items() if k not in ("mac", "delivered_at")}}
-    raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    return _b64u(hmac.new(bytes.fromhex(key), raw, hashlib.sha256).digest())
+    canon = json.dumps({k: x for k, x in line.items() if k not in ("mac", "delivered_at", "human")}, sort_keys=True,
+                       separators=(",", ":"), ensure_ascii=False)
+    return _b64u(hmac.new(bytes.fromhex(key), f"pending1.{workspace}.{ticket}.{canon}".encode(), hashlib.sha256).digest())
 
 
 def pending_is_human(c):
