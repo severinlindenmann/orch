@@ -396,8 +396,9 @@ def _pending_proof(root: Path, tid: str):
 
 
 UNSIGNED = (
-    "Not saved: orch can't check who you are on this computer right now (its key folder can't be used), "
-    "so your message would never reach the agent. Fix: orch doctor"
+    "Not saved: orch can't check who you are on this computer right now (its protected folder can't be "
+    "used), so your message would never reach the agent. Close orch and start it again; if it keeps "
+    "happening, the protected folder has wrong rights: orch resets its protection on the next start."
 )
 
 

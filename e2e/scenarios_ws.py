@@ -38,14 +38,18 @@ def w0(e):
     """The REAL one-liner from GitHub raw (ref from E2E_INSTALL_REF, default develop) in a bare HOME without uv."""
     ref = os.environ.get("E2E_INSTALL_REF", "develop")
     home = e.tmp / "w0home"
-    (home / "proj").mkdir(parents=True)
-    # its own tool home under the REAL home (the only place orch trusts), never the real ~/.orch-tool
+    home.mkdir(parents=True)
+    # like lane C's test network: a TEST install, and the workspace + tool home under <real home>/.orch-test
+    # (never the real ~/.orch-tool); the harness marks the demo workspace dev, then the test human proves updates
     real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
-    ohome = real / f".orch-e2e-w0-{os.getpid()}"
+    base = real / ".orch-test" / f"e2e-w0-{os.getpid()}"
+    ohome = base / "home"
+    (base / "proj").mkdir(parents=True)
     ohome.mkdir()
-    e.cleanup.append(lambda: shutil.rmtree(ohome, ignore_errors=True))
+    e.cleanup.append(lambda: shutil.rmtree(base, ignore_errors=True))
     env = {"HOME": str(home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "USER": "e2e", "LANG": "C.UTF-8", "TERM": "dumb",
-           "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref, "ORCH_HOME": str(ohome), "ORCH_HOME_STRICT": "1"}
+           "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref, "ORCH_HOME": str(ohome), "ORCH_HOME_STRICT": "1",
+           "ORCH_INSTALL_KIND": "test"}
     url = f"https://raw.githubusercontent.com/severinlindenmann/orch/{ref}/install.sh"
 
     def run(cmd, cwd=None, timeout=600, input=None):
@@ -59,9 +63,11 @@ def w0(e):
     env["PATH"] = f"{home}/.local/bin:{env['PATH']}"
     rc, out, err = run(["orch", "--version"])
     check(rc == 0 and "orch" in out.lower(), f"orch --version: {out!r} {err[-200:]}")
-    proj = home / "proj"
+    proj = base / "proj"
     rc, out, err = run(["orch", "init"], cwd=proj)
     check(rc == 0 and (proj / ".orch/tickets").is_dir(), f"orch init: {err[-200:]}")
+    rc, out, err = run(["orch", "dev-mark"], cwd=proj)  # the harness marks the demo workspace dev (before any key)
+    check(rc == 0, f"orch dev-mark: {(err or out)[-200:]}")
     skill = proj / ".agents/skills/orch/SKILL.md"
     skill.write_text("tampered\n")
     rc, out, err = run(["orch", "update"], cwd=proj)

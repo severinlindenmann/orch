@@ -259,7 +259,8 @@ def test_launch_token_is_single_use_and_expires(ws):
     t = hp.write_launch_token(ws, "focus")
     assert hp.consume_launch_token(ws, "focus", t) is True
     assert hp.consume_launch_token(ws, "focus", t) is False
-    assert hp.write_launch_token(ws, "mine") is None  # a local add-on never gets one
+    with pytest.raises(Refused):
+        hp.write_launch_token(ws, "mine")  # a local add-on never gets one
 
 
 def test_page_session_headers(ws):
@@ -636,7 +637,12 @@ def test_an_unusable_key_folder_refuses_visibly_and_saves_nothing(ws, run, monke
     proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
     monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)  # key folder unusable at write time
     code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")
-    assert code == 2 and "Not saved" in out + err and "key folder" in out + err
+    assert (
+        code == 2
+        and "Not saved" in out + err
+        and "start it again" in out + err
+        and "orch doctor" not in out + err
+    )
     assert tickets.load(ws, tid)["questions"][0].get("answer") is None  # not half done
     # Send back: the note is not queued without a MAC either, and the ticket stays in Review
     rid = _review_ticket(ws, run)
@@ -810,3 +816,25 @@ def test_a_folder_addon_needs_a_click_and_runs_inside_trusted_local_add(ws, run,
     seen.clear()
     code, out, err = run("addon", "add", str(folder), "--yes", "--json")
     assert code == 2 and "args" not in seen
+
+
+def test_dev_mark_cli_is_narrow_and_marks_once(ws, run, monkeypatch):
+    fresh = ws.parent / "demo2"
+    (fresh / ".orch").mkdir(parents=True)
+    monkeypatch.chdir(fresh)
+    monkeypatch.setenv("ORCH_RUN", "r_1")  # an orch-started agent context: refused
+    assert run("dev-mark")[0] == 2 and not hp.dev_workspace(fresh)
+    monkeypatch.delenv("ORCH_RUN")
+    assert run("dev-mark", "--by", "agent:x")[0] == 2
+    assert run("dev-mark")[0] == 0 and hp.dev_workspace(fresh)
+    assert "marked this workspace as dev" in (hp.key_dir(fresh) / "dev-proof.log").read_text()
+    # a workspace that already has a human key can never become dev
+    other = ws.parent / "demo3"
+    (other / ".orch").mkdir(parents=True)
+    monkeypatch.chdir(other)
+    hp.human_key(other)
+    assert run("dev-mark")[0] == 2 and not hp.dev_workspace(other)
+    # not under ~/.orch-test: refused
+    monkeypatch.chdir(ws.parent.parent)
+    (ws.parent.parent / ".orch").mkdir(exist_ok=True)
+    assert run("dev-mark")[0] == 2

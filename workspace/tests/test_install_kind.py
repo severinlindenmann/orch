@@ -150,8 +150,10 @@ def test_launch_url_on_a_test_install(tws):
     url = hp.printable_launch_url(tws, "focus", "http://127.0.0.1:8123")
     token = url.split("#launch=")[1]
     assert url.startswith("http://127.0.0.1:8123/#launch=")
-    rec = json.loads((hp.key_dir(tws) / "launch-focus.token").read_text())
-    assert rec["token"] == token and 0 < rec["exp"] - __import__("time").time() <= hp.LAUNCH_LIFE
+    tok, exp = (hp.key_dir(tws) / "launch-focus.token").read_text().split()  # the ONE format: token, expiry
+    assert (
+        tok == token and 0 < int(exp) - __import__("time").time() <= hp.LAUNCH_LIFE and hp.LAUNCH_LIFE == 30
+    )
     assert oct((hp.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
 
 

@@ -1181,7 +1181,7 @@ def write_launch_token(root: Path, server: str) -> str | None:
     30 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
     printed or logged."""
     if server not in LAUNCH_SERVERS:
-        return None
+        raise Refused("Unknown page server.")  # a local or marketplace add-on never gets a launch token
     try:
         d = key_dir(root)
         token = secrets.token_urlsafe(24)
@@ -1257,7 +1257,10 @@ def open_browser(url: str) -> bool:
 
 def launch_url(root: Path, server: str, url: str) -> str:
     """`url` with a fresh launch token in the fragment, for the code that opens the browser for a person."""
-    token = write_launch_token(root, server)
+    try:
+        token = write_launch_token(root, server)
+    except Refused:
+        return url  # not a page server: no token
     return f"{url}#launch={token}" if token else url
 
 
@@ -1330,9 +1333,38 @@ def dev_proof_cli(root: Path, op: str, target: str, by_flag: str | None = None) 
         raise Refused(no)
     if op not in DEV_PROOF_OPS:
         raise Refused(no)
+    if op == "update":  # the target is the resolved source (what this install would update from)
+        from orch import addons
+
+        target = update_target(addons.repo(), addons.ref())
     proof = mint_dev(root, op, target)
     with contextlib.suppress(Refused, OSError):
         fd = os.open(key_dir(root) / "dev-proof.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(f"{_now()} dev:test-human minted op={op}\n")
     return proof
+
+
+def dev_mark_cli(root: Path, by_flag: str | None = None) -> None:
+    """`orch dev-mark` (hidden): the e2e harness marks a demo workspace dev, right after creating it. Same
+    narrow gate as dev_proof_cli (test install, under ~/.orch-test, no orch-started agent context) and
+    dev_can_mark: a workspace with a human.key can never become dev. Defence in depth (Level 1)."""
+    from orch import tickets
+
+    no = "This workspace cannot be marked as a dev workspace."
+    if not is_test_workspace(root):
+        raise Refused(no)
+    if any(os.environ.get(k) for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")) or tickets.agent_tool():
+        raise Refused(no)
+    if by_flag and by_flag.startswith("agent:"):
+        raise Refused(no)
+    dev_mark(root)
+    with contextlib.suppress(Refused, OSError):
+        fd = os.open(key_dir(root) / "dev-proof.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(f"{_now()} dev:test-human marked this workspace as dev\n")
+
+
+def update_target(repo: str, ref: str) -> str:
+    """The proof target of `update`: the resolved source, hashed (a target is letters, digits and `_.:@-`)."""
+    return "orch@" + hashlib.sha256(f"{repo}@{ref}".encode()).hexdigest()[:32]

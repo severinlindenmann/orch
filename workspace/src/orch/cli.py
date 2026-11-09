@@ -289,7 +289,7 @@ def _visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "dev-proof"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "dev-proof", "dev-mark"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -366,6 +366,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )  # e2e test human (dev workspaces)
     d.add_argument("op")
     d.add_argument("target")
+    sub.add_parser("dev-mark", parents=[common], help=argparse.SUPPRESS)  # e2e: mark a demo workspace dev
 
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
@@ -659,21 +660,29 @@ def run(args: argparse.Namespace) -> None:
                 else ""
             ),
         )
+    elif cmd == "dev-mark":
+        humanproof.dev_mark_cli(root, getattr(args, "by", None))
+        _out(args, {"ok": True}, "Marked as a dev workspace.")
     elif cmd == "dev-proof":
         # The e2e test human (humanproof.dev_proof_cli: test install, ~/.orch-test, allowlisted ops, no agent
         # context). Printed on stdout, to be piped into `<command> --proof-stdin`.
         print(humanproof.dev_proof_cli(root, args.op, args.target, getattr(args, "by", None)))
     elif cmd == "update":
-        proven_update = False
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
+            # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official channel or
+            # the one the install came from) and is part of what the person approves AND of the proof's target,
+            # so a proof for one source never installs another (an agent cannot aim a click at its own fork).
+            repo, ref = addons.repo(), addons.ref()
             if not humanproof.person_by(
-                root, args, "update", "orch", label="Update orch to the latest version"
+                root,
+                args,
+                "update",
+                humanproof.update_target(repo, ref),
+                label=f"Update orch from {repo}@{ref}",
             ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
-            proven_update = True
         report, notes = [], []
-        # ORCH_REPO / ORCH_REF (where the code comes from) count only inside a person-gated update
-        with addons.trusted_env_source() if proven_update else contextlib.nullcontext():
+        if True:
             done = addons.update(
                 root,
                 args.project_only,
