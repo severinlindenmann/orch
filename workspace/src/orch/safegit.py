@@ -35,8 +35,10 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import signal
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -279,21 +281,56 @@ def _spawn(*a, **k):
 STDERR_KEEP = 64 * 1024
 
 
-def _kill(p) -> None:
-    """Kill git and everything it started (POSIX: its process group; the child holds the pipes otherwise)."""
-    try:
-        if os.name != "nt":
-            os.killpg(p.pid, 9)
-        else:
+def _kill(p, lock) -> None:
+    """Kill git and everything it started. POSIX: SIGKILL to its process group (it has its own session; the
+    children would keep the pipes open), only while git is not yet reaped, so a reused pid is never hit.
+    Windows: `taskkill /T /F` (the process tree). Best effort."""
+    with lock:
+        if p.returncode is not None:
+            return
+        try:
+            pid = getattr(p, "pid", None)
+            if os.name != "nt" and isinstance(pid, int) and pid > 1:
+                os.killpg(pid, signal.SIGKILL)
+            elif os.name == "nt":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
             p.kill()
-    except OSError:
-        p.kill()
+        except OSError:
+            pass
+
+
+def _wait(p, timeout) -> bool:
+    """Wait until git has exited WITHOUT reaping it (POSIX waitid + WNOWAIT), so the process group can still
+    be killed safely afterwards. True = exited, False = still running at the timeout."""
+    pid = getattr(p, "pid", None)
+    if os.name == "nt" or not isinstance(pid, int) or pid <= 1:
+        try:
+            p.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            return False
+    end = time.monotonic() + timeout
+    delay = 0.001
+    while True:
+        if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None:
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(delay)
+        delay = min(delay * 2, 0.02)
 
 
 def _stream(argv, cwd, env_, timeout, data, max_bytes):
     """(rc, stdout, stderr) reading stdout WHILE git runs: past `max_bytes` the child is killed at once
     (rc TOO_LONG); on timeout it is killed and subprocess.TimeoutExpired is raised. stderr is drained on a
-    thread and only its first STDERR_KEEP bytes are kept, so a chatty git cannot fill the pipe or memory."""
+    thread and only its first STDERR_KEEP bytes are kept, so a chatty git cannot fill the pipe or memory.
+    When git has ended, its whole process group is killed anyway (a leftover child holding the pipe cannot
+    hang us or feed us late data). If a reader is still alive after that, the call FAILS (124): output is
+    only returned once every reader is finished. Windows gap: no Job object; the tree is killed with
+    `taskkill /T /F`, and a reader that outlives that fails the call the same way."""
     p = _spawn(
         argv,
         cwd=cwd,
@@ -302,7 +339,9 @@ def _stream(argv, cwd, env_, timeout, data, max_bytes):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=os.name != "nt",  # own process group: a kill also reaches git's children
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
     )
+    lock = threading.Lock()
     out = bytearray()
     err = bytearray()
     over = threading.Event()
@@ -315,7 +354,7 @@ def _stream(argv, cwd, env_, timeout, data, max_bytes):
             out.extend(chunk)
             if max_bytes is not None and len(out) > max_bytes:
                 over.set()
-                _kill(p)
+                _kill(p, lock)
                 return
 
     def pump_err():
@@ -338,21 +377,26 @@ def _stream(argv, cwd, env_, timeout, data, max_bytes):
         threads.append(threading.Thread(target=feed, daemon=True))
     for t in threads:
         t.start()
+    exited = False
     try:
-        p.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill(p)
-        p.wait()
-        raise
+        exited = _wait(p, timeout)
     finally:
+        _kill(p, lock)  # always: also after a normal exit, before git is reaped (no pid reuse)
+        with lock:
+            p.wait()
         for t in threads:
-            t.join(5)  # a grandchild that keeps the pipe open cannot hold us longer than this
-        if not any(t.is_alive() for t in threads):  # (close would block behind a reader still waiting)
+            t.join(5)
+        stuck = any(t.is_alive() for t in threads)
+        if not stuck:  # (close would block behind a reader still waiting)
             for f in (p.stdout, p.stderr):
                 try:
                     f.close()
                 except OSError:
                     pass
+    if not exited:
+        raise subprocess.TimeoutExpired(argv, timeout)
+    if stuck:
+        return 124, b"", "git's output did not end: orch dropped it"
     if over.is_set():
         return TOO_LONG, b"", f"git printed more than {max_bytes} bytes"
     return p.returncode, bytes(out), bytes(err).decode("utf-8", "replace").strip()
@@ -446,6 +490,7 @@ ALLOWED = {
     "merge", "commit", "add", "rm", "reset", "stash", "check-ignore",
 }  # fmt: skip
 # (check-ignore reads ignore rules only: no content, no filters; --stdin is refused below)
+_CHECK_IGNORE_OK = {"-q", "--quiet", "-v", "--verbose", "-n", "--non-matching", "--no-index"}
 _WORKTREE_OK = {"add", "remove", "prune", "list"}
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
@@ -487,8 +532,10 @@ def refusal(args: list[str]) -> str | None:
         return "git worktree: only add, remove, prune and list are run"
     if cmd == "stash" and not (rest and rest[0] in ("list", "show")):
         return "git stash: only list and show are run"
-    if cmd == "check-ignore" and any(a.split("=", 1)[0] in ("--stdin", "-z") for a in flags):
-        return "git check-ignore: only paths given in the argument list are run"
+    if cmd == "check-ignore" and not (
+        set(flags) <= _CHECK_IGNORE_OK
+    ):  # exact names: no abbreviations, bundles
+        return "git check-ignore: only -q, -v, -n, --no-index and paths from the argument list are run"
     if cmd == "config" and not any(a in _CONFIG_READ for a in flags):
         return "git config: orch only reads the configuration"
     if cmd in _NO_MODES or cmd == "add":

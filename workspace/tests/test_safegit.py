@@ -295,6 +295,8 @@ def _fold(node, env) -> set[str] | None:
         return {node.value} if isinstance(node.value, str) else None
     if isinstance(node, ast.Name):
         return env.get(node.id)
+    if isinstance(node, ast.NamedExpr):
+        return _fold(node.value, env)
     if isinstance(node, ast.IfExp):
         a, b = _fold(node.body, env), _fold(node.orelse, env)
         return (a | b) if a is not None and b is not None else (a or b)
@@ -312,23 +314,39 @@ def _fold(node, env) -> set[str] | None:
     return None
 
 
+def _assigned(n, env):
+    """(name, value-node) pairs bound by one statement: `x = v`, `x: T = v`, `(x := v)`, `a, b = v1, v2`."""
+    if isinstance(n, ast.Assign):
+        for t in n.targets:
+            if isinstance(t, ast.Name):
+                yield t.id, n.value
+            elif isinstance(t, (ast.Tuple, ast.List)) and isinstance(n.value, (ast.Tuple, ast.List)):
+                for tt, vv in zip(t.elts, n.value.elts, strict=False):
+                    if isinstance(tt, ast.Name):
+                        yield tt.id, vv
+    elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+        yield n.target.id, n.value
+    elif isinstance(n, ast.NamedExpr) and isinstance(n.target, ast.Name):
+        yield n.target.id, n.value
+
+
 def _bindings(tree) -> dict[str, set[str]]:
-    """name -> constant strings of every `name = <constant expr>` in the module (any scope)."""
+    """name -> constant strings of every constant binding in the module (any scope), until stable."""
     env: dict[str, set[str]] = {}
     for _ in range(8):
         changed = False
         for n in ast.walk(tree):
-            if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) for t in n.targets):
-                val = _fold(n.value, env)
-                if val is None:
-                    continue
-                for t in n.targets:
-                    if isinstance(t, ast.Name) and not val <= env.get(t.id, set()):
-                        env[t.id] = env.get(t.id, set()) | val
-                        changed = True
+            for name, node in _assigned(n, env):
+                val = _fold(node, env)
+                if val is not None and not val <= env.get(name, set()):
+                    env[name] = env.get(name, set()) | val
+                    changed = True
         if not changed:
             break
     return env
+
+
+_GIT_PART = re.compile(r"[/\\]git(\.exe)?$", re.IGNORECASE)  # a path ending in git (a bare "git" is no path)
 
 
 def _is_git(node, env) -> bool:
@@ -342,7 +360,12 @@ def git_path_builders(source: str) -> list[int]:
     cannot tie that to git). Flagged: a constant that can be "git"/"git.exe" (a literal, "gi" + "t", an
     f-string, `"git.exe" if nt else "git"`, or a name bound to one, transitively) used in os.path.join,
     Path(...), .joinpath, `/` or shutil.which; any use of safegit internals (git_exe, _exes, hardened) as a
-    call, attribute, import, alias or getattr string; and find_exe("git") also through an import alias."""
+    call, attribute, import, alias or getattr string; and find_exe("git") also through an import alias.
+    Also: any string constant (or f-string part) that ends in `/git`, `\\git` or `/git.exe` (f"{d}/git",
+    "%s/git" % d), `x + "git"` and `sep.join([..., "git"])`.
+    A guardrail, not a boundary. Known false positives: names are tracked per module, not per scope (a global
+    `x = "git"` taints every `x` in the file), and any attribute or call NAMED hardened / *git_exe* is flagged
+    whatever object it belongs to. Known gaps: a path built from data that is not a constant in the file."""
     tree = ast.parse(source)
     env = _bindings(tree)
     find_aliases = {"find_exe"}
@@ -355,7 +378,14 @@ def git_path_builders(source: str) -> list[int]:
                 if a.name == "find_exe":
                     find_aliases.add(a.asname or a.name)
     for n in ast.walk(tree):
-        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div) and _is_git(n.right, env):
+        if (
+            isinstance(n, ast.Constant)
+            and isinstance(n.value, str)
+            and _GIT_PART.search(n.value)
+            and (n.value.lower() not in ("git", "git.exe") and True)
+        ):
+            bad.append(n.lineno)
+        elif isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Div, ast.Add)) and _is_git(n.right, env):
             bad.append(n.lineno)
         elif isinstance(n, ast.Attribute) and n.attr in _INTERNALS:
             bad.append(n.lineno)
@@ -364,6 +394,10 @@ def git_path_builders(source: str) -> list[int]:
             last = name.rsplit(".", 1)[-1]
             args = [*n.args, *[k.value for k in n.keywords]]
             if (name in _JOINERS or last == "joinpath") and any(_is_git(a, env) for a in args):
+                bad.append(n.lineno)
+            elif last == "join" and any(
+                isinstance(a, (ast.List, ast.Tuple)) and any(_is_git(e, env) for e in a.elts) for a in args
+            ):
                 bad.append(n.lineno)
             elif "git_exe" in last or last in _INTERNALS:
                 bad.append(n.lineno)
@@ -440,6 +474,14 @@ def _run(root, args):
         "from orch import safegit\nsafegit._exes.clear()",
         "from orch import safegit\nsafegit.hardened(cwd)",
         'from orch.safegit import find_exe as fe\nfe("git", set())',
+        'import os\np = f"{d}/git"',
+        'import os\np = "%s/git" % d',
+        'import os\np = d + os.sep + "git"',
+        'p = "/".join([d, "git.exe"])',
+        'import os\nn: str = "git"\nos.path.join(d, n)',  # annotated assignment
+        'import os\nos.path.join(d, (n := "git"))',  # walrus
+        'import os\na, b = "git", "x"\nos.path.join(d, a)',  # tuple unpacking
+        'import os\np = "C:\\\\tools\\\\git.exe"',
     ],
 )
 def test_the_lint_flags_every_way_of_finding_git(src):
@@ -1051,36 +1093,90 @@ def _fake_exe(tmp_path, body):
     return d
 
 
-def test_run_bytes_kills_git_as_soon_as_the_cap_is_passed(proj, tmp_path, monkeypatch):
-    """A git that would print far more than the cap (and then hang) is stopped while it prints."""
+def _gone(pidf, wait=3.0):
+    """The recorded (grand)child is dead: kill(pid, 0) fails. Polls a moment (the kernel reaps it async)."""
     import time
 
-    pidf = tmp_path.parent / (tmp_path.name + "_pid")
-    d = _fake_exe(tmp_path, f"echo $$ > {pidf}; yes x | head -c 50000000; sleep 30")
+    pid = int(pidf.read_text())
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="process groups: POSIX")
+
+
+@posix_only
+def test_run_bytes_kills_git_and_its_child_as_soon_as_the_cap_is_passed(proj, tmp_path, monkeypatch):
+    """A git that would print far more than the cap (and then hang) is stopped while it prints, and so is
+    the child it started."""
+    import time
+
+    gpid = tmp_path.parent / (tmp_path.name + "_gpid")
+    d = _fake_exe(tmp_path, f"sleep 30 & echo $! > {gpid}; yes x | head -c 50000000; wait")
     monkeypatch.setenv("PATH", os.pathsep.join([str(d), "/usr/bin", "/bin"]))
     monkeypatch.setattr(safegit, "_exes", {})
     t = time.monotonic()
     rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 20, max_bytes=100_000)
     assert rc == safegit.TOO_LONG and out == b"" and time.monotonic() - t < 10
-    pid = int(pidf.read_text())
-    time.sleep(0.3)
-    with pytest.raises(OSError):
-        os.kill(pid, 0)  # the child is gone
+    assert _gone(gpid)  # the grandchild too
 
 
-def test_run_bytes_kills_git_on_timeout(proj, tmp_path, monkeypatch):
+@posix_only
+def test_run_bytes_kills_git_and_its_child_on_timeout(proj, tmp_path, monkeypatch):
     import time
 
-    pidf = tmp_path.parent / (tmp_path.name + "_pid")
-    d = _fake_exe(tmp_path, f"echo $$ > {pidf}; sleep 30")
+    gpid = tmp_path.parent / (tmp_path.name + "_gpid")
+    d = _fake_exe(tmp_path, f"sleep 30 & echo $! > {gpid}; wait")
     monkeypatch.setenv("PATH", os.pathsep.join([str(d), "/usr/bin", "/bin"]))
     monkeypatch.setattr(safegit, "_exes", {})
     t = time.monotonic()
     rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 1)
     assert rc == 124 and time.monotonic() - t < 10
-    time.sleep(0.3)
-    with pytest.raises(OSError):
-        os.kill(int(pidf.read_text()), 0)
+    assert _gone(gpid)
+
+
+@posix_only
+def test_a_child_left_behind_by_a_finished_git_is_killed_and_the_output_kept(proj, tmp_path, monkeypatch):
+    """git exits at once but a background child still holds the pipes: no hang, no late data, child killed."""
+    import time
+
+    gpid = tmp_path.parent / (tmp_path.name + "_gpid")
+    d = _fake_exe(tmp_path, f"sleep 30 & echo $! > {gpid}; printf hi")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(d), "/usr/bin", "/bin"]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    t = time.monotonic()
+    rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 20)
+    assert (rc, out) == (0, b"hi") and time.monotonic() - t < 10
+    assert _gone(gpid)
+
+
+@posix_only
+def test_output_is_never_returned_while_a_reader_is_still_running(proj, monkeypatch):
+    """If a reader outlives its join, the call fails (124) and no partial data is returned as success."""
+    real = safegit.threading.Thread
+
+    class Stuck(real):
+        def join(self, timeout=None):  # pretend the reader never finishes
+            pass
+
+        def is_alive(self):
+            return True
+
+    monkeypatch.setattr(safegit.threading, "Thread", Stuck)
+    plain_git(proj, "init", "-q")
+    rc, out, err = safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj, 10)
+    assert rc == 124 and out == b"" and "did not end" in err
+
+
+@pytest.mark.parametrize("bad", [["--std"], ["--stdi"], ["-qz"], ["-z"], ["--stdin"], ["-q", "-e"], ["-p"]])
+def test_check_ignore_takes_only_listed_options(proj, bad):
+    assert safegit.run_bytes(["check-ignore", *bad, "--", "x"], proj)[0] == safegit.REFUSED
 
 
 def test_check_ignore_is_allowed_with_paths_only(proj):
