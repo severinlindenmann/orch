@@ -11,10 +11,10 @@ their type.
 `safe_read_tail` adds the name rules for `--output`: only plain log files inside the workspace.
 
 Windows (no dir_fd, no O_NOFOLLOW) has ONE shared open path for all three readers (`_anchor`,
-`_open_windows`): every folder from the root down is checked to be no reparse point, DOS device names and stream names are
-refused, the file is opened with CreateFileW (FILE_FLAG_OPEN_REPARSE_POINT) and the handle must be a disk file
-with one name, the same file index as the path's lstat, and the final path we meant. Known deviation from
-POSIX: a file may be OPENED through a junction that was swapped in after the folder check (there is no dir_fd
+`_open_windows`): every folder from the root down is checked to be no reparse point, DOS device names and
+stream names are refused, the file is opened with CreateFileW (FILE_FLAG_OPEN_REPARSE_POINT) and the handle
+must be a disk file with one name, the same file index as the path's lstat, and the final path we meant.
+Known deviation from POSIX: a file may be OPENED through a junction that was swapped in after the folder check (there is no dir_fd
 to prevent it), but it is never READ: the final-path check refuses the handle before any byte is read."""
 
 from __future__ import annotations
