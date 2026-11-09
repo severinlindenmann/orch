@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
             "/v1/phone/workspaces/:id",
             patch(patch_workspace).delete(delete_workspace),
         )
+        .route("/v1/phone/groups/:host/:id", patch(patch_group))
         .route("/v1/phone/questions", get(questions))
         .route("/v1/phone/answer", post(answer))
         .route("/v1/phone/send", post(send))
@@ -493,12 +494,13 @@ async fn blob(
 
 const MSG_SCHEMA_ID: &str = "https://orch.severin.io/contracts/message.schema.json";
 const PHONE_SCHEMA_ID: &str = "https://orch.severin.io/contracts/phone-api.schema.json";
-const DEFS: [&str; 6] = [
+const DEFS: [&str; 7] = [
     "heartbeat_request",
     "control_request",
     "send_request",
     "answer_request",
     "settings_patch_request",
+    "group_mute_request",
     "workspace_patch_request",
 ];
 
@@ -938,7 +940,83 @@ async fn patch_settings(
             params![pid, n],
         )?;
     }
+    if let Some(m) = v.get("mute_all_until") {
+        match mute_until(m)? {
+            Some(u) => c.execute(
+                "INSERT INTO phone_mute_all(phone,until) VALUES(?1,?2) ON CONFLICT(phone) DO UPDATE SET until=?2",
+                params![pid, u],
+            )?,
+            None => c.execute("DELETE FROM phone_mute_all WHERE phone=?1", [&pid])?,
+        };
+    }
     Ok(Json(store::phone_settings(&c, &pid)))
+}
+
+/// A `muted_until` / `mute_all_until` value: a future UTC time, `"forever"`, or off (`null`, a past time).
+fn mute_until(v: &Value) -> Res<Option<i64>> {
+    Ok(match v {
+        Value::String(s) if s == "forever" => Some(store::MUTE_FOREVER),
+        Value::String(s) => {
+            let t = time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339)
+                .map_err(|_| {
+                    invalid("A mute time must be a UTC time like 2026-11-06T22:00:00Z.")
+                })?;
+            Some(t.unix_timestamp()).filter(|t| *t > now())
+        }
+        _ => None,
+    })
+}
+
+/// Most active group mutes one phone may hold.
+const MAX_GROUP_MUTES: usize = 100;
+
+/// `PATCH /v1/phone/groups/<host ws>/<grp id>`: mute or unmute one group for this phone (no push while muted).
+async fn patch_group(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Path((host, gid)): axum::extract::Path<(String, String)>,
+    body: Bytes,
+) -> Res<Json<Value>> {
+    let v = parse_body(&body)?;
+    let c = app.db.lock().unwrap();
+    let (pid, _, ws) = auth::phone(&c, &h)?;
+    if !ws.contains(&host) {
+        return Err(not_found("No such workspace."));
+    }
+    check("group_mute_request", &v)?;
+    if !valid_group_id(&gid) {
+        return Err(invalid("Not a group id."));
+    }
+    let until = mute_until(&v["muted_until"])?;
+    store::purge_group_mutes(&c, &pid);
+    match until {
+        Some(u) => {
+            let known = !store::group_muted_until(&c, &pid, &host, &gid).is_null();
+            if !known && store::group_mutes(&c, &pid).len() >= MAX_GROUP_MUTES {
+                return Err(invalid("Too many muted groups (at most 100)."));
+            }
+            c.execute(
+                "INSERT INTO phone_group_mutes(phone,host,grp,until) VALUES(?1,?2,?3,?4) ON CONFLICT(phone,host,grp) DO UPDATE SET until=?4",
+                params![pid, host, gid, u],
+            )?
+        }
+        None => c.execute(
+            "DELETE FROM phone_group_mutes WHERE phone=?1 AND host=?2 AND grp=?3",
+            params![pid, host, gid],
+        )?,
+    };
+    Ok(Json(
+        json!({"host": host, "id": gid, "muted_until": store::group_muted_until(&c, &pid, &host, &gid)}),
+    ))
+}
+
+/// `grp_t_` + 6..16 lowercase letters or digits (chat-groups.schema.json).
+fn valid_group_id(id: &str) -> bool {
+    id.strip_prefix("grp_t_").is_some_and(|r| {
+        (6..=16).contains(&r.len())
+            && r.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    })
 }
 
 /// `PATCH /v1/phone/workspaces/<ws>`: mute or unmute a workspace for this phone (no push while muted).
@@ -955,17 +1033,7 @@ async fn patch_workspace(
         return Err(not_found("No such workspace."));
     }
     check("workspace_patch_request", &v)?;
-    let until: Option<i64> = match &v["muted_until"] {
-        Value::String(s) if s == "forever" => Some(store::MUTE_FOREVER),
-        Value::String(s) => {
-            let t = time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339)
-                .map_err(|_| {
-                    invalid("`muted_until` must be a UTC time like 2026-11-06T22:00:00Z.")
-                })?;
-            Some(t.unix_timestamp()).filter(|t| *t > now())
-        }
-        _ => None,
-    };
+    let until = mute_until(&v["muted_until"])?;
     match until {
         Some(u) => c.execute(
             "INSERT INTO phone_mutes(phone,ws,until) VALUES(?1,?2,?3) ON CONFLICT(phone,ws) DO UPDATE SET until=?3",
@@ -1162,7 +1230,7 @@ pub async fn push_message(app: &AppState, q: &Value) {
                 store::parse_ws_list(w).contains(&from) && (to == "phones" || &to == id)
             })
             // Muted: no push for anything from that workspace (stored and listed as usual).
-            .filter(|(.., id)| !store::is_muted(&c, id, &from))
+            .filter(|(.., id)| !store::push_muted(&c, id, &from, &q["body"]))
             // L2: texts are always stored; only the push is skipped when the budget is used up.
             .filter(|(.., id)| {
                 !is_text
