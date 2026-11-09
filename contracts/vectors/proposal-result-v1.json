@@ -1,5 +1,5 @@
 {
-  "about": "Ticket proposal result (relay-api.md 'Ticket proposal result'). valid / invalid: texts that pass / fail message.schema.json. body.text is REQUIRED and is the canonical line derived from the result: made -> 'Ticket made: <key>', refused -> \"Couldn't make the ticket\", decided -> 'Already decided' or, with a key, 'Ticket made: <key>'. New phones hide the bubble and fold the result into the card by reply_to; old phones show the plain line. relay: what the relay answers (expect = HTTP status; 200 = identical duplicate) given state: the proposal is m_pr00000000000001 (a make_ticket question ws_pilatus001 sent to phones), answered_by = phones whose answer for it the relay stored, results = proposal_result messages already stored for it; m_qq00000000000001 is an ordinary question and m_tt00000000000001 a text of ws_pilatus001, m_pr0000other00001 a proposal of ws_other00001. A relay implementation replays every entry against the relay itself, not only the schema. cases: what the workspace does after a phone answer (authorised = a paired phone answered, not group-routed; state open|made|gone|answered_make|answered_not_now|result_recorded; send = the proposal_result body or null; to = phones or the answering ph_; got_it_ack = whether the ordinary Got it ack is sent). phone: the card a phone shows after the events (a result event applies only to the proposal the phone asked about; made is final for one reply_to).",
+  "about": "Ticket proposal result (relay-api.md 'Ticket proposal result'). valid / invalid: texts that pass / fail message.schema.json. body.text is REQUIRED and is the canonical line derived from the result: made -> 'Ticket made: <key>', refused -> \"Couldn't make the ticket\", decided -> 'Already decided' or, with a key, 'Ticket made: <key>'. New phones hide the bubble and fold the result into the card by reply_to; old phones show the plain line. relay: what the relay answers (expect = HTTP status; 200 = identical duplicate) given state: the proposal is m_pr00000000000001 (a make_ticket question ws_pilatus001 sent to phones), answered_by = phones whose answer for it the relay stored, results = proposal_result messages already stored for it; m_qq00000000000001 is an ordinary question and m_tt00000000000001 a text of ws_pilatus001, m_pr0000other00001 a proposal of ws_other00001. A relay implementation replays every entry against the relay itself, not only the schema. cases: what the workspace does after a phone answer (authorised = a paired phone answered, not group-routed; state open|made|gone|answered_make|answered_not_now|result_recorded; send = the proposal_result body or null; to = phones or the answering ph_; got_it_ack = whether the ordinary Got it ack is sent). phone: the card a phone shows after the events (a result event applies only to the proposal the phone asked about; made is final for one reply_to). answered_by (relay state) = the phone whose answer for the proposal the relay stored: the relay keeps only the FIRST answer per question (a second one, from any phone, is 409 already_answered on POST /v1/phone/answer), so only that phone gets refused/decided. A case with skipped: true sends nothing because a keyed decided would repeat the made broadcast that phone already got. Exact bytes of body.text: ASCII apostrophe U+0027 in Couldn't, no trailing period, one ASCII space after the colon.",
   "phone_ids": {
     "ph_iphone0001": "iPhone",
     "ph_iphone0002": "iPad"
@@ -1067,15 +1067,16 @@
       "via": "POST /v1/phone/send",
       "request": {
         "to": "ws_pilatus001",
-        "client_id": "c_000000000001",
+        "client_id": "6f1c2a3e-1b2c-4d5e-8f90-123456789abc",
         "text": "x",
         "proposal_result": {
           "result": "made",
           "key": "DM1-12"
         }
       },
-      "expect": 422,
-      "why": "phone texts never carry proposal_result; the relay builds phone texts and refuses the field (phone-api.schema.json send_request)"
+      "expect": 201,
+      "why": "send_request has no such field: it is ignored. The relay builds the phone text from the known fields only, so the stored message has no proposal_result (and nothing a phone sends can be one)",
+      "stored_body_lacks": "proposal_result"
     },
     {
       "name": "text-names-another-key",
@@ -1176,12 +1177,11 @@
       "from": "ph_iphone0002",
       "authorised": true,
       "state": "answered_make",
-      "send": {
-        "result": "decided",
-        "key": "DM1-12"
-      },
-      "to": "ph_iphone0002",
-      "key": "DM1-12"
+      "send": null,
+      "to": null,
+      "key": "DM1-12",
+      "skipped": true,
+      "why": "made was already broadcast to every phone including this one: a keyed decided would show the ticket twice on an old phone, so the workspace skips it. (Unreachable through the relay today, which stores only the first answer per question; kept for a workspace reading answers from any source)"
     },
     {
       "name": "make-after-not-now",
