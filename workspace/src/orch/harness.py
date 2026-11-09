@@ -237,7 +237,20 @@ ORCH_IGNORE = [
     "local/",
     "chat/",
     "tickets/*/evidence/",
+    "tickets/.lock-*",  # per-ticket write locks
 ]
+
+
+def _general_lines(root: Path) -> list[str]:
+    """The hidden General (Chat) ticket keeps the person's private Chat history: its file is local too.
+    Its id is random, so the pattern is the exact file name, found when the file exists."""
+    try:
+        from orch import tickets
+
+        gid = tickets.general_id(root)
+    except Exception:  # noqa: BLE001 - unreadable tickets must never stop the protection itself
+        return []
+    return [f"tickets/{gid}.json"] if gid else []
 
 
 def _tracked(root: Path, rel: str) -> bool:
@@ -451,7 +464,8 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
     """Keep secrets and other local files out of git. Fails closed: when neither .orch/.gitignore nor
     .git/info/exclude can be written, it refuses (so no secret is stored unprotected). `lines` are the
     extra root-relative patterns for the exclude block (links, local instruction files)."""
-    text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ORCH_IGNORE) + "\n"
+    ignore = [*ORCH_IGNORE, *_general_lines(root)]
+    text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ignore) + "\n"
     ok = False
     try:
         p = root / ".orch" / ".gitignore"
@@ -466,7 +480,7 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
     except (Refused, OSError, UnicodeDecodeError):
         pass
     try:
-        core = [".orch/" + ln.rstrip("/") + ("/" if ln.endswith("/") else "") for ln in ORCH_IGNORE[1:]]
+        core = [".orch/" + ln.rstrip("/") + ("/" if ln.endswith("/") else "") for ln in ignore[1:]]
         if exclude_set(root, "core", list(dict.fromkeys([*core, *(lines or [])]))):
             ok = True
     except (Refused, OSError, UnicodeDecodeError):

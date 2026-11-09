@@ -64,8 +64,12 @@ class App(BaseHTTPRequestHandler):
         self.send(303, headers={"Location": f"{BASE}/"})
 
 
+class _Server(ThreadingHTTPServer):
+    request_queue_size = 128  # the default backlog of 5 resets connections when a page loads many files
+
+
 def make_server(port: int) -> ThreadingHTTPServer:
-    return ThreadingHTTPServer(("127.0.0.1", port), App)
+    return _Server(("127.0.0.1", port), App)
 
 
 if __name__ == "__main__":

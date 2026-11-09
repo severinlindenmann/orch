@@ -368,3 +368,10 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-group-done .row h2{margin:0}
 .fx-group-done input[type=search]{max-width:260px}
 .fx-none{padding:12px 16px;margin:0}
+
+/* fb16: "Add a task" is always visible, also at phone width where the task list is folded */
+@media(max-width:720px){
+  .fx.rail-closed .fx-rail{display:flex;visibility:visible;opacity:1;pointer-events:auto;padding:8px 12px;border-bottom:1px solid var(--border);max-height:none;overflow:visible}
+  .fx.rail-closed .fx-rail>:not(.fx-add-task){display:none}
+  .fx.rail-closed .fx-add-task{margin-top:0;padding:0}
+}

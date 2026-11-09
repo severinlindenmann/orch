@@ -427,3 +427,8 @@ def test_run_send_argv_parses_on_every_python(tmp_path):
     x.add_argument("text", nargs="?")
     ns = top.parse_args(argv)
     assert (ns.ticket, ns.text) == (TID, "can you mark all tickets as done")
+
+
+def test_listen_backlog_is_large(server):
+    # the default backlog of 5 resets connections when a page loads many files at once (blank Focus page)
+    assert server.request_queue_size >= 128

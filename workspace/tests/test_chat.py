@@ -836,3 +836,19 @@ def test_every_new_history_line_carries_the_flag(proj):
     tickets.add_history(t, "agent:x", "note")
     tickets.add_history(t, "human:me", "hi", chat=True)
     assert [e["chat_message"] for e in t["history"]] == [False, True]
+
+
+def test_chat_ticket_and_locks_stay_out_of_git(proj, run):
+    """Privacy: the General ticket holds the Chat history; neither it nor the .lock-* files may show in git."""
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True, env=env)
+    code, _, _ = run("chat", "say", "Privat", "--json", "--by", "human:marco")
+    assert code == 0
+    gid = tickets.general_id(proj)
+    assert (proj / ".orch" / "tickets" / f"{gid}.json").is_file()
+    out = subprocess.run(
+        ["git", "status", "--porcelain", "-uall"], cwd=proj, capture_output=True, text=True, env=env
+    ).stdout
+    assert ".orch/tickets" not in out, out

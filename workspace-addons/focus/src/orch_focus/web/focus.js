@@ -429,7 +429,7 @@
     const files = list.filter(x => x.ev.type !== 'note');
     const primary = files[files.length - 1] || list[list.length - 1];
     const content = h('div', {class: 'fx-results'}, h('h2', {text: v.state === 'done' ? 'Work completed' : list.length ? 'Ready for your look' : 'No results yet'}),
-      h('p', {class: 'meta', text: list.length ? v.ticket.title : 'Results will appear here when a task is done.'}));
+      list.length ? null : h('p', {class: 'meta', text: 'Results will appear here when a task is done.'}));  // the title is in the header: shown once
     const completed = window.FocusHelpers.completedAt(v.ticket);
     if (v.state === 'done' && completed) content.append(h('p', {class: 'meta', text: 'Completed ' + stamp(completed).replace(/ (\d\d:)/, ' at $1')}));
     if (primary) content.append(proof.tile(primary, from => proof.open(list, list.indexOf(primary), from)));
