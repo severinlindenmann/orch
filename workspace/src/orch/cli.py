@@ -669,9 +669,9 @@ def run(args: argparse.Namespace) -> None:
         print(humanproof.dev_proof_cli(root, args.op, args.target, getattr(args, "by", None)))
     elif cmd == "update":
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
-            # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official channel or
-            # the one the install came from) and is part of what the person approves AND of the proof's target,
-            # so a proof for one source never installs another (an agent cannot aim a click at its own fork).
+            # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official
+            # channel or the one the install came from). It is part of what the person approves AND of the
+            # proof's target, so a proof for one source never installs another (no aiming a click at a fork).
             repo, ref = addons.repo(), addons.ref()
             if not humanproof.person_by(
                 root,
@@ -682,16 +682,15 @@ def run(args: argparse.Namespace) -> None:
             ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
         report, notes = [], []
-        if True:
-            done = addons.update(
-                root,
-                args.project_only,
-                args.after_install,
-                json_output=args.json,
-                report=report,
-                nonce=args.update_nonce,
-                notes=notes,
-            )
+        done = addons.update(
+            root,
+            args.project_only,
+            args.after_install,
+            json_output=args.json,
+            report=report,
+            nonce=args.update_nonce,
+            notes=notes,
+        )
         if args.after_install:
             pass
         elif args.project_only and (args.json or not report):

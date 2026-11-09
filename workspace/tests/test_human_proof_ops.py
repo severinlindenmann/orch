@@ -778,18 +778,44 @@ def test_dm_reads_and_sync_need_no_proof_and_confer_no_person_input(ws, run):
 # ------------------------------------------------------------------ update/ORCH_REF and folder add-ons
 
 
-def test_a_proven_update_honours_orch_ref_and_an_unproven_addon_add_does_not(ws, run, monkeypatch):
+def test_update_source_is_resolved_first_shown_and_part_of_the_proof(ws, run, monkeypatch):
+    """Normal install: ORCH_REPO / ORCH_REF set by an agent are ignored; the card shows the official source
+    and the proof target is that source, so a proof for another source does not verify."""
     from orch import addons
 
+    monkeypatch.setattr(addons, "_env_source_ok", lambda: False)  # a normal install (no env override)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REPO", "https://github.com/evil/fork")
+    monkeypatch.setenv("ORCH_REF", "evil")
     seen = {}
-    monkeypatch.setattr(addons, "update", lambda *a, **k: seen.update(update=addons._ENV_SOURCE_PROVEN) or [])
-    monkeypatch.setattr(addons, "add", lambda *a, **k: seen.update(add=addons._ENV_SOURCE_PROVEN))
-    tid = "orch"
-    code, out, err = _cli(run, monkeypatch, _proof(ws, "update", tid), "update", "--json")
+    monkeypatch.setattr(
+        addons, "update", lambda *a, **k: seen.update(repo=addons.repo(), ref=addons.ref()) or []
+    )
+    code, out, err = run("update", "--by", "human:pat", "--json")
+    assert code == 2
+    card = hp.handoffs(ws)[0]
+    official = f"{addons.DEFAULT_REPO}@main"
+    assert official in card["label"] and "evil" not in card["label"]
+    assert card["target"] == hp.update_target(addons.DEFAULT_REPO, "main")
+    # a proof for the fork's source does not verify for this update
+    bad = _proof(ws, "update", hp.update_target("https://github.com/evil/fork", "evil"))
+    code, out, err = _cli(run, monkeypatch, bad, "update", "--json")
+    assert code == 2 and "repo" not in seen
+    # the proof for the shown source runs, and installs from exactly that source (the env is still ignored)
+    good = _proof(ws, "update", card["target"])
+    code, out, err = _cli(run, monkeypatch, good, "update", "--json")
     assert code == 0, out + err
-    assert seen["update"] is True  # ORCH_REPO / ORCH_REF count inside the person-gated update only
-    run("addon", "add", "relay", "--yes")
-    assert seen["add"] is False
+    assert seen == {"repo": addons.DEFAULT_REPO, "ref": "main"}
+
+
+def test_dev_and_test_installs_keep_the_env_override_for_e2e(ws, run, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setenv("ORCH_REPO", "https://github.com/lane-c/test")
+    monkeypatch.setenv("ORCH_REF", "e2e")
+    run("update", "--by", "human:pat", "--json")  # test install: the override counts
+    assert "lane-c/test@e2e" in hp.handoffs(ws)[0]["label"]
+    assert addons.repo() == "https://github.com/lane-c/test"
 
 
 def test_a_folder_addon_needs_a_click_and_runs_inside_trusted_local_add(ws, run, monkeypatch):
