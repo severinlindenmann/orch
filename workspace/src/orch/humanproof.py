@@ -143,6 +143,10 @@ def guarded_home(root: Path) -> Path:
         cand = Path(env) if env else Path(os.environ.get("HOME", "")) / ".orch-tool"
         home_real = os.path.realpath(cand)
     else:
+        if install == "test":
+            # A source-tree/test run never touches the account's real orch home (owner rule). Children of the
+            # test suite (subprocess tests) reach here with the real pwd home, so this must refuse, not fake.
+            raise Refused(NOT_TOGETHER)
         cand = account / ".orch-tool"
         home_real = acct.rstrip("/") + "/.orch-tool"
         env = os.environ.get("ORCH_HOME")
