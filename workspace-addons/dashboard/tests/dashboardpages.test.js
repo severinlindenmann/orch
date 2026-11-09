@@ -97,11 +97,11 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
   assert.equal(c.privateCard({}), null);
   assert.equal(c.privateCard({git_private:{count:0, lines:[], pending:[]}}), null);
-  const settings = {git_private:{count:2, lines:['<b>Two files.</b>'], pending:[{name:'mine', command:'run <x>'}]}};
+  const settings = {git_private:{count:2, lines:['<b>Two files.</b>'], pending:[{name:'mine', showable:true, adapter:'generic', command:'run <x>', interactive:'live x', prompt:'stdin', key:'a'.repeat(64)}]}};
   const card = c.privateCard(settings);
   assert.deepEqual(nodes(card, n => n.textContent != null).map(n => n.textContent),
     ['Private files are in your team repo', '<b>Two files.</b>', 'Move to private',
-     'This workspace asks to run a command', 'run <x>', 'Allow on this computer']);
+     'This workspace asks to run a command', 'Agent: mine\nAdapter: generic\nCommand: run <x>\nLive command: live x\nPrompt: stdin', 'Allow on this computer']);
   const buttons = nodes(card, n => n.tag === 'button');
   assert.deepEqual(buttons.map(b => b.attrs['data-action']), ['private-move', 'private-allow']);
   vm.runInContext("settingsBusy.add('private')", c);

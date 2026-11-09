@@ -431,8 +431,13 @@ def _private_move(a):
 
 
 def _private_allow(a):
-    _only(a, ())
-    return ["private", "allow"], [], []
+    """Allow ONE settings command, bound to what the person saw: the name and the key (hash) of the entry."""
+    _only(a, ("name", "key"))
+    if not (isinstance(a.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", a["name"])):
+        raise BadRequest("Pick the agent.")
+    if not (isinstance(a.get("key"), str) and re.fullmatch(r"[0-9a-f]{64}", a["key"])):
+        raise BadRequest("Look at the command again.")
+    return ["private", "allow", a["name"], "--key", a["key"]], [], []
 
 
 def _config_agent_test(a):

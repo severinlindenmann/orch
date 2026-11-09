@@ -35,6 +35,8 @@ def add_parsers(sub, common) -> None:
     sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     pv = sub.add_parser("private", parents=[common], help=argparse.SUPPRESS)
     pv.add_argument("state", nargs="?", choices=("status", "move", "allow"), default="status")
+    pv.add_argument("name", nargs="?", help="allow: the agent name shown by orch private")
+    pv.add_argument("--key", help="allow: the key shown by orch private (binds the yes to what you saw)")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
     g.add_argument("key", nargs="?", choices=KEYS)
@@ -301,10 +303,15 @@ def private_lines(root: Path) -> list[str]:
             harness.private_words(s),
             "Move to private: removes them from the team repo, keeps your files (orch private move).",
         ]
-    out += [
-        f"This workspace asks to run `{p['command']}`. Allow on this machine: orch private allow"
-        for p in config.pending_agents(root)
-    ]
+    for p in config.pending_agents(root):
+        shown = "; ".join(f"{k}: {p[k]}" for k in ("adapter", "command", "interactive", "prompt") if p[k])
+        if p["showable"]:
+            out.append(
+                f"This workspace asks to run an agent '{p['name']}' ({shown}). "
+                f"Allow on this machine: orch private allow {p['name']} --key {p['key']}"
+            )
+        else:
+            out.append(f"This workspace names an agent '{p['name']}' with a command too long to show; it is not run.")
     return out
 
 
@@ -316,8 +323,10 @@ def _private(args, root: Path) -> None:
     if args.state == "allow":
         if tickets.agent_tool():
             raise Refused("Only a person can allow a command to run on this computer.")
-        done = config.allow_agent(root)
-        _out(args, {"allowed": done}, f"Allowed on this computer: {', '.join(done)}." if done else "Nothing to allow.")
+        if not args.name or not args.key:
+            raise Refused("Say which one: orch private allow <name> --key <key> (orch private shows both).")
+        done = config.allow_agent(root, args.name, args.key)
+        _out(args, {"allowed": [done]}, f"Allowed on this computer: {done}.")
         return
     if args.state == "move":
         if tickets.agent_tool():

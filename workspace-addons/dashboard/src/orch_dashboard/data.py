@@ -515,9 +515,15 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         if isinstance(private_lines, list) else [],
         "agent_command_ignored": private.get("agent_command_ignored") is True,
         "pending": [
-            {"name": str(x.get("name"))[:40], "command": str(x.get("command"))[:300]}
+            {
+                "name": str(x.get("name")),
+                "key": str(x.get("key")),
+                "showable": x.get("showable") is True,
+                **{k: x[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(x.get(k), str)},
+            }
             for x in (private.get("pending_agents") if isinstance(private.get("pending_agents"), list) else [])[:5]
-            if isinstance(x, dict)
+            if isinstance(x, dict) and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", str(x.get("name")))
+            and re.fullmatch(r"[0-9a-f]{64}", str(x.get("key")))
         ],
     }
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")

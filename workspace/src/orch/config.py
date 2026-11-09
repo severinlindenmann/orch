@@ -99,23 +99,40 @@ def _raw_entries(root: Path) -> dict[str, dict]:
     return out
 
 
+SHOW_MAX = 500  # an entry with a longer field cannot be shown in full, so it cannot be approved
+
+
 def pending_agents(root: Path) -> list[dict]:
-    """Entries of this workspace's settings that name a command nobody approved here: [{name, command}]."""
-    return [
-        {"name": n, "command": (e.get("command") or e.get("interactive") or "")[:500]}
-        for n, e in _raw_entries(root).items()
-        if not agent_approved(root, n, e)
-    ]
-
-
-def allow_agent(root: Path, name: str | None = None) -> list[str]:
-    """Approve the pending commands (one name, or all) as they are now. A person only (the caller checks)."""
-    done = []
+    """Entries of this workspace's settings that name a command nobody approved here. Every field the approval
+    covers is returned in full, plus `key` (the hash the approval is bound to) and `showable`."""
+    out = []
     for n, e in _raw_entries(root).items():
-        if (name is None or n == name) and not agent_approved(root, n, e):
-            approve_agent(root, n, e)
-            done.append(n)
-    return done
+        if agent_approved(root, n, e):
+            continue
+        fields = {k: e.get(k) for k in ("adapter", "command", "interactive", "prompt")}
+        out.append(
+            {
+                "name": n,
+                **fields,
+                "key": _entry_key(root, n, e),
+                "showable": all(len(v) <= SHOW_MAX for v in fields.values() if isinstance(v, str)),
+            }
+        )
+    return out
+
+
+def allow_agent(root: Path, name: str, key: str) -> str:
+    """Approve exactly ONE entry, and only if it is still what was shown (its key matches now). A person only
+    (the caller checks). Never approves several entries."""
+    e = _raw_entries(root).get(name) if isinstance(name, str) else None
+    if e is None:
+        raise Refused("That agent is not in this workspace's settings (any more). Please look again.")
+    if not isinstance(key, str) or _entry_key(root, name, e) != key:
+        raise Refused("That command changed since you looked. Please look again.")
+    if any(len(v) > SHOW_MAX for v in e.values() if isinstance(v, str)):
+        raise Refused("That command is too long to show in full, so it cannot be allowed here.")
+    approve_agent(root, name, e)
+    return name
 
 
 def untrusted_note(root: Path) -> str | None:
@@ -123,7 +140,8 @@ def untrusted_note(root: Path) -> str | None:
     p = pending_agents(root)
     if not p:
         return None
-    return f"This workspace asks to run `{p[0]['command']}`. Allow on this machine to use it: orch private allow"
+    c = p[0]["command"] or p[0]["interactive"] or ""
+    return f"This workspace asks to run `{c[:200]}`. Allow it on this machine first: orch private"
 
 
 def _builtin_names() -> set[str]:

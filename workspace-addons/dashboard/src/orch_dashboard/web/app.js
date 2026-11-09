@@ -452,13 +452,14 @@ main.addEventListener('click', async event => {
   }
   if (action === 'private-allow') {
     if (settingsBusy.has('private')) return;
-    const cmd = array(state.settings?.git_private?.pending)[0]?.command || '';
+    const p = array(state.settings?.git_private?.pending).find(x => x.name === control.dataset.name);
+    if (!p || !p.showable) return;
     const send = async () => {
-      const result = await settingsSend('private.allow', {}, 'private');
+      const result = await settingsSend('private.allow', {name:p.name, key:p.key}, 'private');
       if (result.ok) window.orch.toast('Allowed on this computer.', 'ok');
       return result;
     };
-    settingsConfirm('Allow this command?', cmd, 'preserve-lines', 'Allow', send);
+    settingsConfirm('Allow this command?', pendingText(p), 'preserve-lines scroll-all', 'Allow', send);  // in full, never behind Details
     return;
   }
   if (action === 'private-move') {

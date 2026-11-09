@@ -51,6 +51,8 @@ function shareCard(settings) {
 }
 // The CLI hint stays out of the page: a missing sign-in is said in plain words.
 const plainTest = reason => /not logged in|\/login/i.test(String(reason || '')) ? 'The agent is not signed in yet.' : reason;
+// Every field the approval covers, in full (name, adapter, command, interactive, prompt).
+const pendingText = p => [['Agent', p.name], ['Adapter', p.adapter], ['Command', p.command], ['Live command', p.interactive], ['Prompt', p.prompt]].filter(r => r[1]).map(r => r[0] + ': ' + r[1]).join('\n');
 function privateCard(settings) {
   const info = settings.git_private;
   const pending = array(info?.pending);
@@ -60,9 +62,9 @@ function privateCard(settings) {
     info.count > 0 ? h('div', {className:'card'}, h('div', {className:'card-row'}, h('div', {className:'grow'},
       settingsText('h3', {}, 'Private files are in your team repo'), settingsText('p', {className:'meta'}, lines[0])),
       snapshot ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-move', 'data-key':'settings-private-move', disabled:settingsBusy.has('private')}, 'Move to private'))) : null,
-    pending.length ? h('div', {className:'card'}, h('div', {className:'card-row'}, h('div', {className:'grow'},
-      settingsText('h3', {}, 'This workspace asks to run a command'), settingsText('p', {className:'meta mono'}, pending[0].command)),
-      snapshot ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-allow', 'data-key':'settings-private-allow', disabled:settingsBusy.has('private')}, 'Allow on this computer'))) : null);
+    ...pending.map(p => h('div', {className:'card', 'data-key':'settings-private-pending-' + p.name}, h('div', {className:'card-row'}, h('div', {className:'grow'},
+      settingsText('h3', {}, 'This workspace asks to run a command'), p.showable ? settingsText('pre', {className:'meta mono preserve-lines'}, pendingText(p)) : settingsText('p', {className:'meta'}, 'The command is too long to show, so it is not run.')),
+      snapshot || !p.showable ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-allow', 'data-name':p.name, 'data-key':'settings-private-allow-' + p.name, disabled:settingsBusy.has('private')}, 'Allow on this computer')))));
 }
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'}, h('h2', {className:'set-sub'}, 'Workflow'),

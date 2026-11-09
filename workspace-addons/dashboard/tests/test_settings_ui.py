@@ -147,3 +147,14 @@ def test_settings_git_private(ws, monkeypatch):
         assert result == (default if reply is not replies[-1] else {
             "count": 3, "lines": ["x" * 300, "two", "three", "ignored"], "agent_command_ignored": True,
             "pending": []})
+
+
+def test_settings_pending_carries_every_hashed_field_in_full(ws, monkeypatch):
+    from orch_dashboard import data
+
+    row = {"name": "mine", "key": "a" * 64, "showable": True, "adapter": "generic",
+           "command": "c" * 450, "interactive": "live", "prompt": "stdin"}
+    bad = {"name": "Bad Name", "key": "a" * 64, "command": "x"}
+    monkeypatch.setattr(data, "run_orch", lambda b, a, r: {"count": 0, "lines": [], "pending_agents": [row, bad]}
+                        if a == ["private", "--json"] else None)
+    assert data.load_settings(ws, "orch")["git_private"]["pending"] == [row]
