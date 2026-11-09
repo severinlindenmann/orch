@@ -371,6 +371,12 @@ for np in NEW_PHONE_PATHS:
     if np not in _seen_new:
         fails.append(f"review/relay-api: needs an example for {np}")
 
+canvec = json.loads((HERE / "vectors" / "phone-can-v1.json").read_text())
+for case in canvec["workspaces"]:
+    errs = phone_errors("workspaces_response", case["response"])
+    if bool(errs) == case["ok"]:
+        fails.append(f"phone-can vector {case['name']}: expected {'ok' if case['ok'] else 'refused'}, got {errs[0].message if errs else 'valid'}")
+
 pvec = json.loads((HERE / "vectors" / "phone-v3-v1.json").read_text())
 
 

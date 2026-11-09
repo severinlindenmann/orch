@@ -150,7 +150,7 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append(f"Done when: {t['done_when']}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
-        out.append(f"Part of: {p['title']} ({p['id']})" if p else f"Part of: {t['parent']} (parent missing)")
+        out.append(f"Step of: {p['title']} ({p['id']})" if p else f"Step of: {t['parent']} (parent missing)")
     if root is not None:
         cc = tickets.children_counts(tickets.list_all(root), t["id"])
         if cc["total"]:
@@ -416,6 +416,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         x.add_argument(f"--{k}", metavar="TEXT", help=f"proof: a {k}")
     x.add_argument("--title", help="short name of the proof")
     x.add_argument("--role", help="result, check or support")
+    x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
 
     x = sub.add_parser("log", parents=[common], help="add a history entry")
     x.add_argument("id")
@@ -564,7 +565,7 @@ def run(args: argparse.Namespace) -> None:
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
         )
-        part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
+        part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,
             t,
@@ -697,14 +698,15 @@ def run(args: argparse.Namespace) -> None:
         _out(args, c, msg)
     elif cmd == "check":
         extra = {k: getattr(args, k) for k in ("title", "role") if getattr(args, k)}
-        shorthand = [
-            json.dumps({"type": k, "ref": getattr(args, k), **extra})
-            for k in ("command", "note", "pr", "commit", "url")
-            if getattr(args, k)
-        ]
+        # the summary says what came out of the step: it goes on ONE proof (the file, else the first one)
+        kinds = [k for k in ("command", "note", "pr", "commit", "url") if getattr(args, k)]
+        shorthand = [json.dumps({"type": k, "ref": getattr(args, k), **extra}) for k in kinds]
+        if args.summary and shorthand and not args.file:
+            shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
-            shorthand.append(json.dumps(tickets.attach_file(root, args.id, args.file, args.title, args.role)))
+            attached = tickets.attach_file(root, args.id, args.file, args.title, args.role, args.summary)
+            shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
         ev = c["evidence"][-1]
         copied = args.file and tickets.proof_present(root, ev)

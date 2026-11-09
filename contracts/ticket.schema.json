@@ -70,6 +70,7 @@
         "ref": { "type": "string", "minLength": 1, "description": "PR URL, commit hash, file path (a copied file lives in the gitignored .orch/tickets/<id>/evidence/), URL, the command line, or the note text" },
         "text": { "type": "string", "description": "Optional short result, e.g. '42 passed'" },
         "title": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional short name shown instead of ref." },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. One plain line: what came out of the step. Shown on the task row." },
         "role": { "enum": ["result", "check", "support"], "description": "Optional. result = what was asked for; check = proof it works; support = anything else." },
         "at": { "$ref": "#/$defs/time" },
         "by": { "$ref": "#/$defs/who" }

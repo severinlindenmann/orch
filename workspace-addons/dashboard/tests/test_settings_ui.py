@@ -27,7 +27,7 @@ def test_repeat_uses_only_presets_and_open_tickets():
     assert "['every day at 9', 'every weekday at 9', 'every monday at 9', 'every hour']" in src
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
     assert "{addon:addonName || route().id, verb, target:ticket.value}" in src
-    assert "if (verb === 'repeat') args.value = preset.value;" in src
+    assert "if (!once) args.value = preset.value;" in src
     assert "await act('addon.act', args)" in src
     assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 
@@ -74,7 +74,8 @@ function node(tag, attrs = {}) {
     setAttribute() {}, focus() {}};
   return n;
 }
-global.h = (tag, attrs, ...kids) => { const n = node(tag, attrs); n.append(...kids); return n; };
+const selects = [];
+global.h = (tag, attrs, ...kids) => { const n = node(tag, attrs); n.append(...kids); if (tag === 'select') selects.push(n); return n; };
 global.el = tag => node(tag);
 global.button = (text, cls, fn) => { const n = node('button', {text, onclick:fn}); controls.push(n); return n; };
 global.Option = function(text, value) { return {text, value}; };
@@ -87,11 +88,17 @@ global.window = {orch:{open() {}, close:async () => {}, toast() {}}};
 global.act = async (op, args) => { calls.push({op, args}); return {ok:true}; };
 loadAddon = async () => {};
 (async () => {
-  repeatsDialog('repeat');
+  repeatsDialog();
+  assert.equal(selects.at(-1).options[0].text, 'Just once, now');
+  assert.equal(selects.at(-1).value, 'once');
+  selects.at(-1).value = 'every day at 9';
   await controls.at(-1).onclick();
   assert.deepEqual(calls.pop(), {op:'addon.act', args:{addon:'automation', verb:'repeat', target:'t_open', value:'every day at 9'}});
-  repeatsDialog('copy');
+  repeatsDialog();
+  selects.at(-1).value = 'once';
   await controls.at(-1).onclick();
+  repeatsDialog('t_open', 'automation');
+  assert.equal(selects.at(-1).value, 'every day at 9');
   assert.deepEqual(calls.pop(), {op:'addon.act', args:{addon:'automation', verb:'copy', target:'t_open'}});
   global.el = tag => Object.assign(node(tag), {value:'A reply'});
   for (const reply of [undefined, 'msg_123']) {

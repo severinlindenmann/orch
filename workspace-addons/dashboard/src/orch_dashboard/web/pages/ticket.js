@@ -380,7 +380,8 @@ const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).m
   .sort((a, b) => (Date.parse(b.ev.at) || 0) - (Date.parse(a.ev.at) || 0));
 const referenceRows = t => array(t.refs).filter(r => r && (['ticket', 'artifact', 'file'].includes(r.kind) || webLinks(t).includes(r))).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 const linkRows = t => referenceRows(t);
-const artifactCount = t => (artifactData.get(t.id)?.data?.files?.length || 0) + proofRows(t).length + linkRows(t).length;
+const artifactProofs = t => proofRows(t).filter(({ev}) => evidenceFile(t, ev) || (ev.type || ev.kind) === 'note');
+const artifactCount = t => (artifactData.get(t.id)?.data?.files?.length || 0) + artifactProofs(t).length + linkRows(t).length;
 // Artifacts tab: all reference kinds, newest first.
 function linkGroups(links) {
   const groups = new Map();
@@ -392,7 +393,7 @@ function linkGroups(links) {
   return [...groups].sort(([a], [b]) => Number(a === 'References') - Number(b === 'References'));
 }
 // Preview text is cached by file revision; snapshot copies never request local files.
-const ticketPreviewText = new Map();
+const ticketPreviewText = new Map(), ticketPreviewDone = new Map(), ticketPreviewPending = new Set();
 function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
@@ -413,24 +414,44 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
     finally { await reader.cancel(); }
     return {text:text.slice(0, 2048).split('\n').slice(0, 8).join('\n')};
   }).catch(() => null));
-  ticketPreviewText.get(key).then(data => {
+  // A finished preview is drawn at once: the page redraws often, and a tile filled later would be thrown away.
+  const fill = data => {
     if (data?.blob) {
       const src = URL.createObjectURL(data.blob), img = h('img', {src, alt:title, loading:'lazy'});
       img.onload = img.onerror = () => URL.revokeObjectURL(src); tile.append(img);
     } else if (data?.text) tile.append(h('pre', {}, data.text));
-  });
+  };
+  if (ticketPreviewDone.has(key)) fill(ticketPreviewDone.get(key));
+  else if (!ticketPreviewPending.has(key)) {  // one redraw per file, however often the page redraws meanwhile
+    ticketPreviewPending.add(key);
+    ticketPreviewText.get(key).then(data => { ticketPreviewDone.set(key, data); ticketPreviewPending.delete(key); fill(data); if (route().kind === 'ticket') render(); });
+  }
   return tile;
 }
+// A real artifact: its name, what kind it is, a preview and Open. A proof without a file shows no "Completed" filler.
+const KIND_WORD = [[/\.(png|jpe?g|gif|webp)$/i, 'Picture'], [/\.(csv|tsv)$/i, 'Table'], [/\.md$/i, 'Note'], [/\.html?$/i, 'Page'], [/\.(js|py|css|json|xml|ya?ml|toml|ini)$/i, 'Code'], [/\.(txt|log)$/i, 'Text file']];
+const kindWord = fileName => KIND_WORD.find(([re]) => re.test(fileName))?.[1] || 'File';
+const evidenceFile = (t, ev) => {
+  const prefix = '.orch/tickets/' + t.id + '/evidence/', ref = String(ev.ref || '');
+  if ((ev.type || ev.kind) !== 'file' || ev.missing || !ref.startsWith(prefix)) return null;
+  const name = ref.slice(prefix.length);  // the server checks again; a path that climbs or is not plain never gets a chip
+  if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
+  return {name, mtime:ev.at};
+};
 function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   const helpers = window.DashHelpers;
-  const title = helpers.cleanOutcome(ev.title) || (file || (ev.type || ev.kind) === 'file' ? helpers.plainFileName(file?.name || ev.ref) : helpers.cleanOutcome(ev.summary)) || 'Result';
-  const summary = helpers.cleanOutcome(ev.summary) || helpers.cleanOutcome(ev.text) || 'Completed.';
+  const name = file ? file.name.split('/').pop() : '';
+  const title = clean(ev.title) || name || helpers.cleanOutcome(ev.summary) || 'Note';
+  const summary = helpers.cleanOutcome(ev.summary);
   const at = ev.at || file?.mtime;
-  return h('article', {className:'card ticket-result'}, h('h3', {}, clean(title)), h('p', {}, clean(summary)),
-    at ? h('time', {className:'meta', datetime:at}, helpers.stamp(at, Date.now())) : null,
-    file ? ticketPreviewTile(t, file, kind) : h('div', {className:'ticket-preview'}, h('p', {}, clean(summary))),
-    file && !snapshot ? ticketButton('Open', 'outline', () => previewFile(t.id, kind, file.name)) : null,
-    file && kind === 'artifacts' ? ticketShareButton(t, file) : null);
+  const who = ev.by ? ticketActor(ev.by) : '';
+  const meta = [who, at ? helpers.stamp(at, Date.now()) : ''].filter(Boolean).join(' · ');
+  return h('article', {className:'card ticket-result'},
+    h('div', {className:'row between'}, h('h3', {}, clean(title)), h('span', {className:'meta'}, file ? kindWord(file.name) : 'Note')),
+    summary && summary !== title ? h('p', {}, clean(summary)) : null,
+    meta ? h('p', {className:'meta'}, at ? h('time', {datetime:at}, meta) : meta) : null,
+    file ? ticketPreviewTile(t, file, kind) : h('div', {className:'ticket-preview'}, h('p', {}, clean(helpers.cleanOutcome(ev.text) || helpers.cleanOutcome(ev.ref) || summary))),
+    file && !snapshot ? h('div', {className:'row'}, ticketButton('Open', 'outline', () => previewFile(t.id, kind, file.name)), kind === 'artifacts' ? ticketShareButton(t, file) : null) : null);
 }
 // "Share with group": only on a ticket that hosts an open group. A file orch could not check for passwords comes
 // back with a plain line; the person is asked once and the same click repeats with confirm.
@@ -461,16 +482,11 @@ function ticketReviewTile(t, file) {
     snapshot ? null : ticketButton('Open', 'outline', () => previewFile(t.id, 'artifacts', file.name)));
 }
 function artifactsPanel(t) {
-  const files = array(artifactData.get(t.id)?.data?.files), proofs = proofRows(t), links = linkRows(t);
+  const files = array(artifactData.get(t.id)?.data?.files), proofs = artifactProofs(t), links = linkRows(t);
   if (!files.length && !proofs.length && !links.length) return h('div', {className:'card artifacts-empty'}, h('h2', {}, 'Nothing here yet'), h('p', {className:'meta'}, 'Results and references from this ticket show up here.'));
   return h('div', {className:'stack artifact-stack'}, h('h2', {}, 'Artifacts'),
     files.map(file => ticketResultCard(t, {}, file, 'artifacts')),
-    proofs.map(({ev}) => {
-      const prefix = '.orch/tickets/' + t.id + '/evidence/';
-      const ref = String(ev.ref || '');
-      const file = (ev.type || ev.kind) === 'file' && !ev.missing && ref.startsWith(prefix) ? {name:ref.slice(prefix.length), mtime:ev.at} : null;
-      return ticketResultCard(t, ev, file);
-    }),
+    proofs.map(({ev}) => ticketResultCard(t, ev, evidenceFile(t, ev))),
     links.length ? h('section', {}, h('h2', {}, 'References'), links.map(l => linkRow(t, l, false))) : null);
 }
 function ticketFiles(t) {
@@ -515,6 +531,17 @@ function focusTicketAnswer() {
   const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea');
   target?.focus({preventScroll:true});
 }
+// A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
+function taskProofChips(t, task) {
+  const chips = array(task.evidence).map(ev => {
+    const kind = ev.type || ev.kind, file = evidenceFile(t, ev), label = proofLabel(ev);
+    if (file && !snapshot) return h('button', {type:'button', className:'chip proof-chip', title:'Open', onclick:() => previewFile(t.id, 'evidence', file.name)}, clean(ev.title || file.name.split('/').pop()));
+    if (file) return h('span', {className:'chip proof-chip'}, clean(ev.title || file.name.split('/').pop()));
+    if (['pr', 'url'].includes(kind) && /^https?:\/\//i.test(String(ev.ref || ''))) return h('a', {className:'chip proof-chip', href:safeHref(ev.ref), target:'_blank', rel:'noopener noreferrer'}, label);
+    return null;
+  }).filter(Boolean);
+  return chips.length ? h('div', {className:'task-proofs row'}, chips.slice(0, 4)) : null;
+}
 function taskRows(t) {
   return array(t.checklist).map((task, i) => {
     const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
@@ -523,7 +550,8 @@ function taskRows(t) {
     if (!snapshot && task.id) mark.onclick = () => toggleTask(t.id, task.id);
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
       h('div', {className:'grow'}, h('h3', {}, task.state === 'doing' && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Agent is working', 'aria-label':'Agent is working'}) : null, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
-        h('p', {className:'meta task-proof'}, task.state === 'doing' && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task))));
+        h('p', {className:'meta task-proof'}, task.state === 'doing' && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
+        taskProofChips(t, task)));
   });
 }
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
@@ -693,9 +721,9 @@ function ticketQuestion(t, q, next = false) {
 // "PIL-2 · Title": the key says which ticket, the title what it is.
 const partName = p => (typeof p.key === 'string' && p.key ? p.key + ' · ' : '') + clean(p.title);
 function ticketParts(t, children) {
-  const add = snapshot ? null : ticketButton('+ Add a part', 'ghost add-row', () => {
-    const {d, actions} = dialog('What is this part about?');
-    const input = h('input', {className:'input', 'aria-label':'What is this part about?', maxlength:200});
+  const add = snapshot ? null : ticketButton('+ Add a step', 'ghost add-row', () => {
+    const {d, actions} = dialog('What is this step about?');
+    const input = h('input', {className:'input', 'aria-label':'What is this step about?', maxlength:200});
     const send = ticketButton('Add', 'primary', async () => {
       const title = input.value.trim(); if (!title || send.disabled) return;
       send.disabled = true;
@@ -705,7 +733,7 @@ function ticketParts(t, children) {
     input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
     actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
   });
-  return card('parts', 'Parts', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' parts done', [!children.length ? emptyRow('No parts yet.') : null, children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'meta'}, child.key || ''), h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  return card('parts', 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [!children.length ? emptyRow('No steps yet.') : null, children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'meta'}, child.key || ''), h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 function ticketDoneLine(t) {
   if (t.status !== 'done') return null;
@@ -746,9 +774,9 @@ function detail(t) {
   }
   const menu = snapshot ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? ticketButton('Reopen', 'menu-item', () => moveTicket(t.id, 'active'), {role:'menuitem'}) : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
-      repeatsAddon() ? [ticketButton('Copy ticket', 'menu-item', () => copyTicket(t), {role:'menuitem', 'data-key':'ticket-copy'}), ticketButton('Repeat…', 'menu-item', () => repeatsDialog('repeat', t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
+      repeatsAddon() ? [ticketButton('Copy ticket', 'menu-item', () => copyTicket(t), {role:'menuitem', 'data-key':'ticket-copy'}), ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id}, h('header', {className:'stack ticket-heading'},
-    parent ? h('a', {href:href(parent.id), className:'muted'}, 'Part of ' + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t)),
@@ -760,7 +788,7 @@ function detail(t) {
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),
     h('div', {className:'stack ticket-side'}, h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-      h('dl', {className:'ticket-details ed-list'}, field('Part of', parent ? h('a', {href:href(parent.id)}, partName(parent)) : h('span', {className:'muted'}, 'No parent ticket')), field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
+      h('dl', {className:'ticket-details ed-list'}, field('Step of', parent ? h('a', {href:href(parent.id)}, partName(parent)) : h('span', {className:'muted'}, 'No parent ticket')), field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
 }
 
 const MULTILINE = ['note', 'done_when'];
