@@ -165,8 +165,9 @@ def test_gate_held_by_another_process_blocks_subprocess_writer(proj):
         child.wait()
 
 
-def test_reader_retries_invalid_json_and_never_rewrites(proj):
+def test_reader_retries_invalid_json_and_never_rewrites(proj, other):
     tid = _ticket(proj)
+    _live_gate(proj, other)  # retries happen only while a sync gate is live
     p = tickets.ticket_path(proj, tid)
     good = p.read_text()
     p.write_text("{ half")
@@ -183,9 +184,12 @@ def test_reader_retries_invalid_json_and_never_rewrites(proj):
         assert tickets.load(proj, tid)["id"] == tid  # retried until the swap landed
     finally:
         th.join()
+    syncgate.gate_path(proj).unlink()
     p.write_text("{ still broken")
+    t0 = time.monotonic()
     with pytest.raises(Refused, match="being updated"):
         tickets.load(proj, tid)
+    assert time.monotonic() - t0 < 0.2  # no gate held: no retry delay
     assert p.read_text() == "{ still broken"  # read-only: not rewritten, quarantined or deleted
     assert tickets.list_all(proj) == []
     assert not list(p.parent.glob("*.bad*")) and p.exists()
@@ -242,3 +246,12 @@ def test_replace_retries_on_windows_only(tmp_path, monkeypatch):
     with pytest.raises(PermissionError):
         syncgate.replace(a, b)
     assert len(calls) == syncgate.REPLACE_TRIES
+
+
+def test_list_all_with_many_invalid_files_returns_at_once(proj):
+    good = _ticket(proj)
+    for i in range(50):
+        (tickets.tickets_dir(proj) / f"t_bad{i:04d}x.json").write_text("{ nope")
+    t0 = time.monotonic()
+    assert [t["id"] for t in tickets.list_all(proj)] == [good]
+    assert time.monotonic() - t0 < 1.0

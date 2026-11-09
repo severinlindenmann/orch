@@ -181,16 +181,21 @@ def load(root: Path, tid: str) -> dict:
 
 
 def _read_ticket(p: Path, tid: str) -> dict:
-    """Read a ticket file. Invalid JSON is retried (3x, 100 ms: a sync step may be swapping the file in), then
-    reported as "being updated". Read-only: a reader never rewrites, quarantines or deletes a file."""
+    """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
+    may be swapping the file in), then reported as "being updated". Read-only: a reader never rewrites,
+    quarantines or deletes a file."""
     for attempt in range(4):
         try:
             return json.loads(p.read_text(encoding="utf-8"))
         except ValueError:
-            if attempt == 3:
+            if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
                 raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
         time.sleep(0.1)
     raise AssertionError("unreachable")
+
+
+def _root_of(p: Path) -> Path:
+    return p.parent.parent.parent  # <root>/.orch/tickets/<file>
 
 
 def _break_stale(lock: Path) -> bool:
@@ -374,8 +379,10 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = _read_ticket(p, p.stem)
-            except (OSError, Refused):
+                t = json.loads(
+                    p.read_text(encoding="utf-8")
+                )  # no retry: a listing never stalls on a bad file
+            except (OSError, ValueError):
                 continue
             if include_general or not (isinstance(t, dict) and t.get("general") is True):
                 out.append(t)
