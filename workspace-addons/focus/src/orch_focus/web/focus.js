@@ -128,6 +128,7 @@
         }))] : []));
     }
     loadProcs(); setInterval(loadProcs, 5000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadProcs(); });
     const help = helpPanel(); root.append(help);
     const helpButton = root.querySelector('[data-act=help]');
     const toggle = on => { help.hidden = !on; (on ? help.querySelector('button') : helpButton).focus(); };

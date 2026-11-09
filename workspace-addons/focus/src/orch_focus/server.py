@@ -69,6 +69,7 @@ class Tracker:
     def __init__(self, root: Path, orch_bin: str | None):
         self.root, self.orch_bin = root, orch_bin
         self.lock = threading.Lock()
+        self.plock = threading.Lock()  # started + pins: handler threads change them together
         self.seen_sig = ""
         self.tickets: dict[str, dict] = {}
         self.status_cache: dict[str, tuple[float, dict]] = {}
@@ -156,10 +157,11 @@ class Tracker:
         self.ticket_cache.pop(tid, None)
 
     def forget_started(self, tid: str) -> None:
-        if self.started.pop(tid, None) is not None:
-            self._save_started()
-        if self.pins.pop(tid, None) is not None:
-            self._save_pins()
+        with self.plock:
+            if self.started.pop(tid, None) is not None:
+                self._save_started()
+            if self.pins.pop(tid, None) is not None:
+                self._save_pins()
 
     # ---- processes Focus started: listed, and stopped only after they are proven to be the ones Focus started ----
     def _pins_file(self) -> Path:
@@ -206,8 +208,9 @@ class Tracker:
         pin = self.pins.get(tid)
         if pin and pin.get("run") == run:
             return pin["pid"] == pid and pin["start"] == start
-        self.pins[tid] = {"run": run, "pid": pid, "start": start}
-        self._save_pins()
+        with self.plock:
+            self.pins[tid] = {"run": run, "pid": pid, "start": start}
+            self._save_pins()
         return True
 
     def procs(self) -> list[dict]:
