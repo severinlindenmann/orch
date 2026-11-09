@@ -167,7 +167,8 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
   stream with its last cursor after a drop; the core never relies on the reader keeping up (it drops a slow reader with
   `error` code `busy` after 1 MB of unread output).
 - **Proof-holding servers never use `ORCH_BIN` or PATH.** A page server that holds `human.key` (human-proof.md) runs the
-  core as its own `sys.executable -m orch` (absolute path) for every call, so an inherited or planted `ORCH_BIN` or PATH
+  core as its own `sys.executable -I -m orch` (absolute path, isolated mode: `PYTHONPATH`, `PYTHONHOME` and the user site are
+  ignored) for every call, so an inherited or planted `ORCH_BIN` or PATH
   never receives a proof, typed text or a key value. `ORCH_BIN` is honoured only by the test harness, never by these servers.
 - **A fake orch for tests: `ORCH_BIN`.** Other add-on code calls `$ORCH_BIN` (set by the core for every add-on run, falling back to
   `orch` on PATH). Tests point it at the fake (`workspace/tests/fakes/orch_fake.py`, slice 0.8), which replays the contract

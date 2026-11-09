@@ -245,7 +245,7 @@
    "result": "expired"
   },
   {
-   "name": "orch_home_env: key from an ORCH_HOME the agent owns",
+   "name": "orch_home_env: a real workspace with an env-chosen home",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "op": "run.takeover",
    "target": "t_inv7c2",
@@ -594,6 +594,44 @@
     "ok",
     "replayed"
    ]
+  }
+ ],
+ "home": [
+  {
+   "name": "real workspace, default home",
+   "home": "default",
+   "workspace": "real",
+   "ok": true
+  },
+  {
+   "name": "test workspace, test home (env -i HOME=~/.orch-test/...)",
+   "home": "test",
+   "workspace": "test",
+   "ok": true
+  },
+  {
+   "name": "real workspace, agent sets ORCH_HOME under the test prefix",
+   "home": "test",
+   "workspace": "real",
+   "ok": false
+  },
+  {
+   "name": "real workspace, agent sets HOME elsewhere",
+   "home": "other",
+   "workspace": "real",
+   "ok": false
+  },
+  {
+   "name": "test workspace without a test home (would touch the real home)",
+   "home": "default",
+   "workspace": "test",
+   "ok": false
+  },
+  {
+   "name": "test workspace, env home outside the test prefix",
+   "home": "other",
+   "workspace": "test",
+   "ok": false
   }
  ]
 }

@@ -1083,6 +1083,15 @@ def hp_settle(c):
     return out
 
 
+def home_ok(c):
+    """Guarded orch home rule: real workspace <-> default home, test workspace <-> test home; anything else refused."""
+    if c["home"] == "default":
+        return c["workspace"] == "real"
+    if c["home"] == "test":
+        return c["workspace"] == "test"
+    return False
+
+
 def kind_human():
     vs = _w("human-proof", "settings_record")
     _examples("human-settings", lambda d: _msgs(vs, d))
@@ -1097,6 +1106,8 @@ def kind_human():
                 used.append(json.loads(base64.urlsafe_b64decode(call["proof"].split(".")[1] + "=="))["nonce"])
             got.append(r)
         _expect(f"human concurrent {c['name']}", got, c["results"])
+    for c in vec["home"]:
+        _expect(f"human home {c['name']}", home_ok(c), c["ok"])
     for c in vec["settle"]:
         _expect(f"human settle {c['name']}", hp_settle(c), c["effective"])
     if set(SETTING_DEFAULTS) != set(json.loads((HERE / "vectors" / "human-proof-v1.json").read_text())["settings"]):

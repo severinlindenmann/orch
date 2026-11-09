@@ -1,5 +1,10 @@
 # Human-only actions: proof from the human channel (invariant H1)
 
+**Threat-model boundary (owner decision R1: Level 1, no OS sandbox).** An agent runs as the same OS user and can always read
+or write anything that user can. **Goal:** no agent can act as the person *through orch's own interfaces*: flags,
+environment, workspace files, the local page, the relay client. **Non-goal:** an agent that patches the orch install, edits
+orch-home files directly, or traces processes; such findings go to "Level 2 later" (human-proof.md), not into these contracts.
+
 **H1. A human-only action needs proof from the human channel, never caller-asserted flags or environment.**
 `--by human:…`, `--from local-page`, "no agent tool in the environment" and a terminal on stdin are information, not proof:
 an agent can pass any flag, scrub its environment (`env -i`) and run inside a terminal (its own tmux pane).
@@ -21,8 +26,8 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 
 ## The proof
 
-1. **Human key.** The core creates `<trusted orch home>/keys/<workspace local id>/human.key` (secrets.md, Trusted orch home:
-   never chosen by `HOME` or `ORCH_HOME` unless pinned; the nonce store and `human-settings.json` live there too) (32 random bytes, hex, 0600, in the key
+1. **Human key.** The core creates `<guarded orch home>/keys/<workspace local id>/human.key` (secrets.md, Guarded orch home:
+   a real workspace never uses an env-chosen home; the nonce store and `human-settings.json` live there too) (32 random bytes, hex, 0600, in the key
    folder of secrets.md, under its rights checks and the agent deny rules). It is never put in argv, in any environment
    variable, in the workspace or in a log.
 2. **Who holds it.** Only the page servers a person starts (Focus, dashboard) read it, at start, into memory. They refuse
@@ -30,7 +35,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    get a cleaned environment as today).
 3. **Page session.** The session cookie is bootstrapped only from a **one-time launch token**: when a person starts or
    opens the page (`orch start`, the dashboard's Open button, the CLI hand-off below), the core writes a random token to
-   `<trusted orch home>/keys/<ws>/launch-<server>.token` (0600, single use, 120 s) and opens the browser at
+   `<guarded orch home>/keys/<ws>/launch-<server>.token` (0600, single use, 120 s) and opens the browser at
    `http://127.0.0.1:<port>/#launch=<token>` (a URL fragment, never sent in a request line or logged). The page posts it
    once to `/session`; the server compares it with the file, deletes the file, and sets the cookie (`HttpOnly;
    SameSite=Strict; Path=/`, new on every server start). A first GET without a token gets a read-only page and no cookie.
@@ -62,7 +67,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 
 Every switch that widens what can happen (`[focus] live_session`, `[focus] session_typing`, `[insights] share_counts`,
 `[insights] share_names`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
-`profiles.toml` / `.orch/mcp.json` as named, and the core also keeps a record in `<trusted orch home>/human-settings.json`,
+`profiles.toml` / `.orch/mcp.json` as named, and the core also keeps a record in `<guarded orch home>/human-settings.json`,
 keyed by the workspace's real path like `permissions.json` (`$defs/settings_record`).
 - Setting a value **with a proof** writes the file and the record.
 - **Lowering** (turning something off, sharing less) works from the file or the CLI without a proof, and the core writes a
@@ -85,7 +90,7 @@ never from the body's own label (as relay.py `_answer_by` does today).
 ## Dev mode: the test human persona (demo workspaces only)
 
 e2e drives owner-only steps in demo workspaces with a scripted test human. Its proofs carry `"dev": true` in the payload and
-are signed with a separate **dev key** (`<trusted orch home>/keys/<ws>/dev-human.key`), which the core creates only for a
+are signed with a separate **dev key** (`<guarded orch home>/keys/<ws>/dev-human.key`), which the core creates only for a
 workspace whose real path is listed as dev in the host state dir (`<state dir>/orch/dev-workspaces.json`; the state dir is
 honoured only when pinned at install, like `ORCH_HOME`). The verifier: a `dev: true` proof on a workspace that is not marked dev
 → refused (`dev_on_real`), whatever key signed it; on a dev workspace it must verify with the dev key. A real workspace never
@@ -131,6 +136,15 @@ rows add a named case.
 
 The rows from `ticket.verdict` down exist in v2 today and still trust `--by human:` / person detection: making them check a
 proof is **W2b slice 1.0a** (tracked follow-up); this contract is its spec.
+
+## Level 2 later (consciously left out)
+
+- Direct reads of `human.key`, `dev-human.key`, launch tokens or the key store by an agent (same OS user).
+- Editing orch-home records (`human-settings.json`, `proposals.json`, the relay record, the dev record, the nonce store).
+- Patching the orch install, its Python environment, or tracing orch processes.
+- An agent scripting HTTP against the local page with a token it read from the orch home.
+- Phone verdicts signed with a device key enrolled at pairing and pinned in the orch home (today the relay channel proves them).
+- An OS sandbox for agents (Level 2 epic, owner decision R1).
 
 ## Honest limit (Level 1, owner decision R1)
 

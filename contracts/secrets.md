@@ -11,6 +11,9 @@ boundaries, encodings and error text; `get` rules; name resolution). T0: `… co
 
 ## Honest threat model (owner decision R1: Level 1, no OS sandbox)
 
+The boundary of human-proof.md applies (goal: no acting as the person through orch's own interfaces; non-goal: direct
+tampering with orch-home files or the install).
+
 Level 1 **stops accidents and leaks**: a key pasted into a chat, printed in a log, written into the record, synced to a cloud
 drive with the workspace, committed to git, shown on a page or sent to the phone. It **does not stop an agent that
 deliberately searches the disk**: an agent runs as the same user and can read the key folder despite deny rules, can run
@@ -29,23 +32,35 @@ What Level 1 does:
 ## Where
 
 ```
-<orch home>/keys/                         0700. <orch home> = the trusted orch home (below)
+<orch home>/keys/                         0700. <orch home> = the guarded orch home of the workspace (below)
   <workspace local id>/                   0700, one folder per workspace (.orch/.local-id); a copy or clone has none
     keys.json                             0600, $defs/keys_file: {"schema": "orch.keys/1", "keys": {"<name>": {type, source, value|file, added_at}}}
     files/<name>                          0600, key-file values (≤ 1 MB)
     profiles.toml                         0600, $defs/profiles: names only
 ```
 
-- **Trusted orch home.** Everything that guards keys and human proofs (the key store, the hider, `human.key`, the nonce
-  store, `human-settings.json`) resolves the orch home from the account database (`pwd.getpwuid(os.getuid()).pw_dir` +
-  `/.orch-tool`; Windows: the profile folder from the OS, not `%USERPROFILE%`), never from `HOME` or `ORCH_HOME`. `ORCH_HOME`
-  counts for these only when it equals the value pinned at install in the default home (`<pw home>/.orch-tool/home.pin`);
-  otherwise it is ignored for them (and a note goes to stderr). An agent that sets `ORCH_HOME` or `HOME` to a folder it owns
-  therefore gets neither its own key, nor an empty store that counts as a hider.
+- **Guarded orch home (decision N11, rationale below).** The key store, the hider, `human.key`, the nonce store,
+  `human-settings.json`, `proposals.json`, the relay record and the dev record live in the *guarded home* of a workspace:
+  - a **real workspace** (its real path is not under a test prefix) uses only the account's default home,
+    `<account home>/.orch-tool`, where the account home comes from the account database (`pwd.getpwuid`; Windows: the
+    profile folder from the OS), never from `HOME` or `ORCH_HOME`;
+  - a **test workspace** (its real path is under a test prefix) uses only a home that is also under a test prefix
+    (`ORCH_HOME`, else `HOME/.orch-tool`);
+  - any other pairing (a real workspace with an env home elsewhere, a test workspace with the default home, an env home
+    outside every test prefix) → guarded operations are refused (`Refused: this workspace and this orch home don't belong
+    together.`); there is no silent fallback in either direction.
+  Test prefixes: `<account home>/.orch-test/`, plus prefixes named in the install record of a dev install (inside the orch
+  tool env, written by the dev kit's installer). Reference `home_ok`, vectors `home` (human-proof-v1).
+  **Rationale.** Tests and e2e must keep isolating with `env -i HOME=~/.orch-test/… ORCH_HOME=…` and must never read or write
+  the real `~/.orch-tool` (owner rule): they do, because their workspaces live under the test prefix too, and the check needs no
+  read of the real home. An agent working in a real workspace cannot gain person authority by setting `HOME` or `ORCH_HOME`: a
+  non-default home never holds or accepts a real workspace's proof key, key store, settings or nonces. **It does not stop**
+  an agent that edits files in the default orch home or the install record directly (out of the boundary above), or one that
+  makes its own fake workspace under `~/.orch-test/` (that only gives it power over that fake workspace).
 - POSIX: folders 0700 and files 0600, checked on every read; looser rights, another owner, or a symlink anywhere on the path
   → refused (`Refused: the key folder has the wrong rights. Fix: orch doctor`). Windows: an ACL with only the user and
   SYSTEM, set at creation, checked the same way.
-- *Implementing slice 1.1 must* bind `.orch/.local-id` to the workspace's real path in the trusted orch home and refuse a
+- *Implementing slice 1.1 must* bind `.orch/.local-id` to the workspace's real path in the guarded orch home and refuse a
   mismatch (the id file is workspace-writable).
 - Writes: new file + rename, under `keys.lock` (O_EXCL). Read once per command; never cached on disk elsewhere.
 - **Sources.** `workspace` = added by a person on this computer. `admin` = assigned by the relay admin and written by

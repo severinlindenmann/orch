@@ -57,7 +57,7 @@ proposed|tested --reject--> rejected      tested --send to admin--> sent_to_admi
 any open state --skill changed meanwhile--> stale
 ```
 
-- **The diff is bound.** When the tests run, the core records `change_sha256` in the trusted orch home
+- **The diff is bound.** When the tests run, the core records `change_sha256` in the guarded orch home
   (`<orch home>/keys/<ws>/proposals.json`, the workspace copy can be edited). The Accept screen shows the **full diff** (every
   file, before and after), not only `plain`, and the page mints the `checkup.accept` proof for target
   `<id>@<change_sha256 hex>`. Accept recomputes the hash of the stored change and refuses (`changed`) when it differs from the

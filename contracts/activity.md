@@ -52,8 +52,8 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   (vectors `hook_entry`). *Implementing slice 1.7 must* also bind the call to the run (`ORCH_RUN` plus the run's per-run hook
   file token) and drop lines for another run.
 - **Fail closed.** The writer takes a value hider as a required argument; there is no default and no pass-through. A hider is
-  "registered" only when it was built from this workspace's key store in the **trusted orch home** (secrets.md, Where: resolved
-  from the account database, never from an environment variable unless it equals the value pinned at install). An empty store
+  "registered" only when it was built from this workspace's key store in its **guarded orch home** (secrets.md, Where: a real
+  workspace only with the account's default home, a test workspace only with a test home; any other pairing refuses). An empty store
   in the trusted home is fine (no keys, nothing to hide, the generic secret patterns of `phone_view.redact` still run); a store
   in an untrusted home never counts. Without a registered hider the writer refuses (`RecordRefused`, exit 2
   `Refused: recording is off until key hiding is ready.`) and nothing is written.

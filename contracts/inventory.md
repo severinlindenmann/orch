@@ -23,7 +23,7 @@ connection shows the program's base name (`npx`, `uvx`, `gdrive-mcp`) or, for ht
 | Key | `workspace` > `admin` | the key store (secrets.md) |
 
 **How a source is decided (P1: anything unproven is `workspace`).** A skill or connection is `admin` only when its name and
-version match an item of the last relay refresh as recorded by the core in the trusted orch home (not the workspace's
+version match an item of the last relay refresh as recorded by the core in the guarded orch home (not the workspace's
 `.orch-shared` marker, which anyone can write); `builtin` only when its content hash equals the one in the manifest shipped
 with the installed orch; `marketplace` only when name and hash match the official public marketplace index (a private or local
 add-on is `workspace`); `harness` only when orch read it from the agent tool's own settings. A folder named `orch-x` that orch
