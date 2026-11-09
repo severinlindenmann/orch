@@ -214,6 +214,9 @@ def apply_copy_files(root: Path, work: Path) -> None:
             continue
         for n in _harness_skill_names(root):
             harness.check_harness(root, sk / n)
+            if harness.is_link(work / where / n) and not harness._same(work / where / n, sk / n):
+                refused = refused or Refused(f"{work / where / n} is a link to somewhere else.")
+                continue
             try:
                 harness.link_skill(work, where, n, sk / n)
             except Refused as e:

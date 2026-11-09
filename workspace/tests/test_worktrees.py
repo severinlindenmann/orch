@@ -638,3 +638,81 @@ def test_codex_in_a_copy_gets_exactly_the_workspace_store_as_writable(repo):
     assert runs.store_access(fresh, "generic", repo, copy) == fresh  # no store_args declared
     claude = ["claude", "-p", "x"]
     assert runs.store_access(claude, "claude", repo, copy) == claude
+
+
+def test_store_access_is_refused_for_a_linked_store_a_non_copy_and_a_prompt_word(repo, tmp_path):
+    copy = Path(worktrees.create(repo, repo.tids[0])["path"])
+    fresh = ["codex", "exec", "--json", "--", "please exec this"]
+    out = runs.store_access(fresh, "codex", repo, copy)
+    assert out[2:4] == ["--add-dir", str((repo / ".orch").resolve())] and out[-1] == "please exec this"
+    # a prompt that only contains the word, and no template word before `--`: untouched
+    assert runs.store_access(["codex", "--json", "--", "exec"], "codex", repo, copy) == [
+        "codex",
+        "--json",
+        "--",
+        "exec",
+    ]
+    # a folder that is not a copy orch made (a decoy inside the worktrees folder)
+    decoy = copy.parent / "t_decoy9"
+    decoy.mkdir()
+    assert runs.store_access(fresh, "codex", repo, decoy) == fresh
+    assert runs.store_access(fresh, "codex", repo, tmp_path) == fresh
+
+
+def test_store_access_never_hands_out_a_linked_store(proj, new_ticket, tmp_path):
+    git(proj, "init", "-q")
+    git(proj, "config", "user.email", "t@t")
+    git(proj, "config", "user.name", "t")
+    (proj / "f").write_text("x")
+    git(proj, "add", "-A")
+    git(proj, "commit", "-qm", "i")
+    t = new_ticket("T")
+    config.set_copies_mode(proj, "always")
+    folder, _ = _route(proj, t)
+    assert folder != proj
+    real = tmp_path.parent / f"{tmp_path.name}_realstore"
+    (proj / ".orch").rename(real)
+    (proj / ".orch").symlink_to(real, target_is_directory=True)
+    fresh = ["codex", "exec", "--json", "--", "x"]
+    assert runs.store_access(fresh, "codex", proj, folder) == fresh
+
+
+def test_a_forged_registry_path_cannot_point_a_ticket_at_another_copy(repo):
+    a, b = repo.tids
+    ea = worktrees.create(repo, a)
+    eb = worktrees.create(repo, b)
+    reg = json.loads((repo / ".orch/run/worktrees.json").read_text())
+    reg["tickets"][a]["paths"][0]["path"] = eb["path"]
+    (repo / ".orch/run/worktrees.json").write_text(json.dumps(reg))
+    assert not worktrees._mine(repo, a, worktrees.registry(repo)[a]["paths"][0])
+    assert worktrees._mine(repo, b, worktrees.registry(repo)[b]["paths"][0])
+    config.set_copies_mode(repo, "always")
+    folder, _ = _route(repo, a)
+    assert Path(eb["path"]).resolve() not in (folder.resolve(), *folder.resolve().parents)
+    assert ea["path"]
+
+
+def test_legacy_ticket_work_paths_are_stripped_on_rewrite(repo):
+    a, _ = repo.tids
+    tickets.apply_op(
+        repo, a, lambda t: t.__setitem__("work", {"folders": [{"path": "/home/x/y", "branch": "orch/old"}]})
+    )
+    config.set_copies_mode(repo, "always")
+    _route(repo, a)
+    w = tickets.load(repo, a)["work"]["folders"]
+    assert all("path" not in f for f in w) and len(w) == 2
+
+
+def test_a_committed_link_in_the_skill_folder_is_not_followed(repo, tmp_path):
+    (repo / ".orch" / "harness" / "skills" / "orch").mkdir(parents=True)
+    (repo / ".orch" / "harness" / "skills" / "orch" / "SKILL.md").write_text("# orch\n")
+    out = tmp_path / "elsewhere"
+    out.mkdir()
+    (repo / ".agents" / "skills").mkdir(parents=True)
+    (repo / ".agents" / "skills" / "orch").symlink_to(out, target_is_directory=True)
+    git(repo, "add", "-f", ".agents")
+    git(repo, "commit", "-qm", "l")
+    a, _ = repo.tids
+    config.set_copies_mode(repo, "always")
+    f, notes = _route(repo, a)
+    assert f != repo and list(out.iterdir()) == []

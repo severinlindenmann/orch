@@ -7,19 +7,24 @@ sandbox and permission mode. So every call here:
 
 * drops every GIT_* variable of the caller (a hook's GIT_DIR must not aim us at another repository; only what
   this module sets is passed), and sets GIT_TERMINAL_PROMPT=0;
-* uses `-c core.hooksPath=<orch home>/empty-hooks`, a folder orch owns and keeps empty (repo hooks never
-  run: reference-transaction on branch changes, post-checkout, ...), `core.fsmonitor=false`,
-  `core.untrackedCache=false`, `protocol.allow=never` (no network), `core.longpaths=true` (Windows);
-* adds `--no-optional-locks` to read-only calls;
-* is an argv list with a timeout, never a shell.
+* runs hooks from a path that does not exist (`core.hooksPath` = a fresh name inside the orch home, never
+  created: git runs no hooks), so repo hooks (reference-transaction, post-checkout, ...) never run;
+* turns off `core.fsmonitor` and the untracked cache, `protocol.allow=never` (no network), `core.longpaths`
+  (Windows), signing (`commit.gpgSign`, `tag.gpgSign`: no `gpg.program` of the repo runs), `core.sshCommand`,
+  `credential.helper`, and `diff.external`; diff-like commands (diff, log, show) get `--no-ext-diff
+  --no-textconv`;
+* neutralizes every filter driver (clean/smudge/process) and merge driver the repository's configuration
+  defines (git has no wildcard: they are enumerated with `git config --includes --get-regexp`, which runs
+  nothing), and where git is new enough (2.40) reads no attributes from the branch at all
+  (`--attr-source=<empty tree>`). FAIL CLOSED: if the enumeration fails or times out, the operation is refused
+  (rc 125), never run with the repository's own drivers. `filters=False` is only for calls that touch no file
+  content (rev-parse, config, worktree list);
+* adds `--no-optional-locks` to read-only calls, takes an argv list and a timeout, never a shell;
+* runs one absolute `git` found on the PATH (no current folder, nothing inside the workspace, the copy or any
+  orch worktrees folder), cached per set of such folders.
 
-`filter_args(cwd)` neutralizes clean/smudge/process filter drivers (git has no wildcard): for every driver
-the repository's config defines it passes `-c filter.<d>.smudge= ... required=false`. Every `run` does
-it unless
-`filters=False` is passed for a call that never reads file content.
-
-tests/test_safegit.py has a lint: no other module under workspace/src/orch starts `git` itself, except the
-files listed in LEGACY, which still do and are to be migrated.
+tests/test_safegit.py has an AST lint: no other module under workspace/src/orch may start git itself, except
+LEGACY, which must shrink to zero.
 """
 
 from __future__ import annotations
@@ -27,77 +32,79 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
+import uuid
 from pathlib import Path
 
 from orch import addons
 
-# Modules that still start git themselves (to migrate; each one runs in the person's own workspace only).
-# filesig.py (B8) and work-check (B9) join this list until they migrate after they merge.
+# Modules that still start git themselves. MUST SHRINK TO ZERO: each moves onto safegit. filesig.py (B8) and
+# B9's work-check join this list until they migrate.
 LEGACY = ("addons.py", "harness.py")
 
 IDENTITY = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits orch makes (bring-back)
-_DRIVER = re.compile(r"^filter\.(.+)\.(smudge|clean|process)$")
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 TIMEOUT = 60
+REFUSED = 125  # rc: orch would not run this git call (could not check the repository's drivers)
+_DRIVER = re.compile(r"^(filter\.(.+)\.(smudge|clean|process)|merge\.(.+)\.driver)$")
+_DIFFLIKE = {"diff", "log", "show"}
+
+_exes: dict[frozenset, str | None] = {}
+_version: tuple[int, int] | None = None
+_lock = threading.Lock()
 
 
-_exe: str | None = None
+# ---------------------------------------------------------------- which git
 
 
 def _inside(path: str, folder: str) -> bool:
-    a, b = os.path.normcase(os.path.realpath(path)), os.path.normcase(os.path.realpath(folder))
-    try:
-        return os.path.commonpath([a, b]) == b
-    except ValueError:  # another drive
-        return False
+    """`path` is in `folder`: by its name or where it really is (links resolved); commonpath."""
+    b = os.path.normcase(os.path.realpath(folder))
+    for a in (os.path.normcase(os.path.realpath(path)), os.path.normcase(os.path.abspath(path))):
+        try:
+            if os.path.commonpath([a, b]) == b:
+                return True
+        except ValueError:  # another drive
+            pass
+    return False
 
 
-def _avoid(cwd: Path) -> list[str]:
-    out = [str(cwd)]
+def _avoid(cwd: Path, root: Path | None) -> frozenset:
+    out = {str(cwd)}
+    if root is not None:
+        out.add(str(root))
+    homes = list(addons.home_candidates())
     try:
-        out.append(str(addons.home() / "worktrees"))
-    except Exception:  # noqa: BLE001 - no usable orch home: only the folder itself is avoided
+        homes.append(addons.home(root))
+    except Exception:  # noqa: BLE001 - no usable orch home: the candidates above are enough
         pass
-    return out
+    out.update(str(h / "worktrees") for h in homes)
+    return frozenset(out)
 
 
-def git_exe(cwd: Path) -> str | None:
-    """The one git program orch runs: found ONCE on the PATH, as an absolute path, cached. Not shutil.which
-    (on Windows it also looks in the current folder, so a committed git.exe would run). Only absolute PATH
-    entries count, only `git.exe` on Windows (never .cmd/.bat: they go through cmd.exe), and never an entry
-    inside the folder we work in or the orch copies folder. A cached path inside `cwd` is refused as well."""
-    global _exe
-    if _exe is None:
+def git_exe(cwd: Path, root: Path | None = None) -> str | None:
+    """The one git program orch runs: an absolute path found on the PATH. Not shutil.which (on Windows it also
+    looks in the current folder, so a committed git.exe would run). Only absolute PATH entries count, only
+    `git.exe` on Windows (never .cmd/.bat: they go through cmd.exe), and never one inside the folder we work
+    in, the workspace root, or any orch worktrees folder. Cached per set of those folders."""
+    avoid = _avoid(cwd, root)
+    with _lock:
+        if avoid in _exes:
+            return _exes[avoid]
         name = "git.exe" if os.name == "nt" else "git"
+        found = None
         for d in os.environ.get("PATH", "").split(os.pathsep):
             if not d or d == "." or not os.path.isabs(d):
                 continue
             p = os.path.join(d, name)
-            if os.path.isfile(p) and os.access(p, os.X_OK) and not any(_inside(p, a) for a in _avoid(cwd)):
-                _exe = p
+            if os.path.isfile(p) and os.access(p, os.X_OK) and not any(_inside(p, a) for a in avoid):
+                found = p
                 break
-    if _exe is None or any(_inside(_exe, a) for a in _avoid(cwd)):
-        return None
-    return _exe
+        _exes[avoid] = found
+        return found
 
 
-def empty_hooks() -> Path:
-    """<orch home>/empty-hooks: made if missing, emptied if anything was put in it (orch's own folder)."""
-    d = addons.home() / "empty-hooks"
-    d.mkdir(parents=True, exist_ok=True)
-    for p in d.iterdir():
-        try:
-            if p.is_dir() and not p.is_symlink():
-                for q in p.rglob("*"):
-                    if q.is_file() or q.is_symlink():
-                        q.unlink()
-                for q in sorted(p.rglob("*"), reverse=True):
-                    q.rmdir()
-                p.rmdir()
-            else:
-                p.unlink()
-        except OSError:
-            pass
-    return d
+# ---------------------------------------------------------------- arguments
 
 
 def env() -> dict[str, str]:
@@ -107,20 +114,29 @@ def env() -> dict[str, str]:
     return e
 
 
+def _no_hooks() -> str:
+    """A path that does not exist: as core.hooksPath git runs no hooks. Fresh per call, never created."""
+    return (addons.home() / "no-hooks" / uuid.uuid4().hex).as_posix()
+
+
 def base_args(read_only: bool = False) -> list[str]:
-    hooks = empty_hooks().as_posix()
     out = [
-        "-c", f"core.hooksPath={hooks}",
+        "-c", f"core.hooksPath={_no_hooks()}",
         "-c", "core.fsmonitor=false",
         "-c", "core.untrackedCache=false",
         "-c", "protocol.allow=never",
         "-c", "core.longpaths=true",
+        "-c", "commit.gpgSign=false",
+        "-c", "tag.gpgSign=false",
+        "-c", "core.sshCommand=",
+        "-c", "credential.helper=",
+        "-c", "diff.external=",
     ]  # fmt: skip
     return ["--no-optional-locks", *out] if read_only else out
 
 
-def _raw(argv: list[str], cwd: Path, timeout: float, data: bytes | None = None):
-    exe = git_exe(cwd)
+def _raw(argv: list[str], cwd: Path, timeout: float, data: bytes | None = None, root: Path | None = None):
+    exe = git_exe(cwd, root)
     if exe is None:
         return 127, "", "git is not installed (or only found inside the project, which orch does not run)"
     argv = [exe, *argv[1:]]
@@ -141,31 +157,39 @@ def _raw(argv: list[str], cwd: Path, timeout: float, data: bytes | None = None):
     )
 
 
-def filter_args(cwd: Path, timeout: float = TIMEOUT) -> list[str]:
-    """`-c filter.<d>.smudge= ...` for every filter driver this repository's configuration defines."""
+def version(cwd: Path, root: Path | None = None) -> tuple[int, int]:
+    global _version
+    if _version is None:
+        rc, out, _ = _raw(["git", "--version"], cwd, 10, None, root)
+        m = re.search(r"(\d+)\.(\d+)", out)
+        _version = (int(m[1]), int(m[2])) if rc == 0 and m else (0, 0)
+    return _version
+
+
+def driver_args(cwd: Path, timeout: float = TIMEOUT, root: Path | None = None) -> list[str] | None:
+    """`-c filter.<d>.smudge= ...` and `-c merge.<d>.driver=` for every driver this repository's configuration
+    defines; None when that could not be found out (the caller refuses)."""
     rc, out, _ = _raw(
-        [
-            "git",
-            *base_args(True),
-            "config",
-            "--includes",
-            "--null",
-            "--get-regexp",
-            r"^filter\..*\.(smudge|clean|process)$",
-        ],
-        cwd,
-        timeout,
-    )
-    names: set[str] = set()
-    if rc == 0:
-        for rec in out.split("\0"):
-            m = _DRIVER.match(rec.split("\n", 1)[0].strip())
-            if m:
-                names.add(m.group(1))
+        ["git", *base_args(True), "config", "--includes", "--null", "--get-regexp",
+         r"^(filter\..*\.(smudge|clean|process)|merge\..*\.driver)$"],
+        cwd, timeout, None, root,
+    )  # fmt: skip
+    if rc == 1:  # git config: no match = nothing defined
+        return []
+    if rc != 0:
+        return None
     args: list[str] = []
-    for d in sorted(names):
-        args += ["-c", f"filter.{d}.smudge=", "-c", f"filter.{d}.clean=", "-c", f"filter.{d}.process=",
-                 "-c", f"filter.{d}.required=false"]  # fmt: skip
+    seen: set[str] = set()
+    for rec in out.split("\0"):
+        m = _DRIVER.match(rec.split("\n", 1)[0].strip())
+        if not m or m[0] in seen:
+            continue
+        seen.add(m[0])
+        if m[2]:
+            args += ["-c", f"filter.{m[2]}.smudge=", "-c", f"filter.{m[2]}.clean=", "-c",
+                     f"filter.{m[2]}.process=", "-c", f"filter.{m[2]}.required=false"]  # fmt: skip
+        else:
+            args += ["-c", f"merge.{m[4]}.driver="]
     return args
 
 
@@ -178,10 +202,22 @@ def run(
     read_only: bool = False,
     filters: bool = True,
     strip: bool = True,
+    root: Path | None = None,
 ) -> tuple[int, str, str]:
     """(exit code, stdout, stderr) of git `args` in `cwd`, hardened as the module says. rc 127: git missing,
-    124: timeout. `filters` (default on): neutralize the repository's filter drivers (status, diff, add,
-    checkout and merge all run them). Off only for calls that touch no file content (rev-parse, config)."""
-    argv = ["git", *base_args(read_only), *(filter_args(cwd, timeout) if filters else []), *args]
-    rc, out, err = _raw(argv, cwd, timeout, data)
+    124: timeout, 125: refused (the repository's drivers could not be listed). `root`: the workspace root (its
+    folder is never searched for the git program)."""
+    top: list[str] = []  # options before the subcommand
+    extra: list[str] = []
+    if filters:
+        found = driver_args(cwd, timeout, root)
+        if found is None:
+            return REFUSED, "", "orch could not check this repository's filters, so it did not run git here"
+        extra = found
+        if version(cwd, root) >= (2, 40):
+            top = [f"--attr-source={EMPTY_TREE}"]  # the branch's .gitattributes is not read at all
+    sub = list(args)
+    if sub and sub[0] in _DIFFLIKE:
+        sub[1:1] = ["--no-ext-diff", "--no-textconv"]
+    rc, out, err = _raw(["git", *top, *base_args(read_only), *extra, *sub], cwd, timeout, data, root)
     return rc, out.strip() if strip else out, err

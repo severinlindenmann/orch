@@ -36,6 +36,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path, PurePosixPath
 
@@ -57,7 +58,7 @@ _WS8 = re.compile(r"[0-9a-f]{8}")
 # ---------------------------------------------------------------- git, as argv lists only
 
 
-_deadline: float | None = None  # set by _create: all its git calls together stay inside CREATE_BUDGET
+_ctx = threading.local()  # per thread: .deadline (end of this _create's git budget) and .root
 
 
 def _git(
@@ -70,9 +71,10 @@ def _git(
 ):
     """safegit.run, the one way orch runs git here (no hooks, no filters, safe env, absolute git, timeout).
     Inside _create the timeout is also capped by what is left of the creation budget."""
-    if _deadline is not None:
-        timeout = max(1.0, min(timeout, _deadline - time.monotonic()))
-    return safegit.run(args, cwd, timeout, data=data, strip=strip, **kw)
+    deadline = getattr(_ctx, "deadline", None)
+    if deadline is not None:
+        timeout = max(1.0, min(timeout, deadline - time.monotonic()))
+    return safegit.run(args, cwd, timeout, data=data, strip=strip, root=getattr(_ctx, "root", None), **kw)
 
 
 # ---------------------------------------------------------------- where copies live
@@ -222,6 +224,18 @@ def is_orch_copy(path: Path) -> bool:
     return False
 
 
+def _mine(root: Path, ticket: str, e: dict) -> bool:
+    """This registry entry is THE copy of this ticket: its path is exactly path_for(this workspace, ticket)
+    (resolved), it is there, and it is a copy orch made. A forged registry line cannot point ticket A at the
+    copy of ticket B or of another workspace."""
+    try:
+        want = path_for(addons.workspace_id(root) or "", ticket, addons.home(root))
+        p = Path(e["path"])
+        return p.resolve() == want.resolve() and p.is_dir() and is_orch_copy(p)
+    except (Refused, OSError, RuntimeError, KeyError):
+        return False
+
+
 def workdir_for(root: Path, rec: dict | None) -> Path:
     """The folder a run works in: its record's `folder` when that is a copy of this workspace, else the root.
     A path that is not one of this machine's copies (a synced record, an edited file) is ignored."""
@@ -246,7 +260,7 @@ def workdir_for(root: Path, rec: dict | None) -> Path:
 def _repo(root: Path) -> tuple[Path, str, str] | None:
     """(git top folder, the workspace's path below it, HEAD commit) or None: no git, no commit, or git
     unhappy."""
-    rc, out, _ = _git(["rev-parse", "--show-toplevel"], root, read_only=True)
+    rc, out, _ = _git(["rev-parse", "--show-toplevel"], root, read_only=True, filters=False)
     if rc != 0 or not out:
         return None
     top = Path(out).resolve()  # git prints forward slashes, also on Windows
@@ -254,7 +268,7 @@ def _repo(root: Path) -> tuple[Path, str, str] | None:
         rel = root.resolve().relative_to(top).as_posix()
     except ValueError:
         return None
-    rc, head, _ = _git(["rev-parse", "--verify", "HEAD^{commit}"], root, read_only=True)
+    rc, head, _ = _git(["rev-parse", "--verify", "HEAD^{commit}"], root, read_only=True, filters=False)
     if rc != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", head):
         return None
     return top, ("" if rel == "." else rel), head
@@ -265,19 +279,18 @@ def _drop_partial(top: Path, dest: Path, branch: str, made_branch: bool) -> None
     _git(["worktree", "remove", "--force", str(dest)], top)
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)  # dest is the path_for() path we just made, nothing else
-    _git(["worktree", "prune"], top)
+    _git(["worktree", "prune"], top, filters=False)
     if made_branch:
-        _git(["branch", "-D", branch], top)
+        _git(["branch", "-D", branch], top, filters=False)
 
 
 def _create(root: Path, ticket: str) -> tuple[dict | None, str]:
     """Make the copy of this ticket within CREATE_BUDGET seconds of git time (see _create_inner)."""
-    global _deadline
-    _deadline = time.monotonic() + CREATE_BUDGET
+    _ctx.deadline, _ctx.root = time.monotonic() + CREATE_BUDGET, root
     try:
         return _create_inner(root, ticket)
     finally:
-        _deadline = None
+        _ctx.deadline = _ctx.root = None
 
 
 def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
@@ -310,11 +323,15 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     except OSError as e:
         return None, f"orch cannot make the copy folder: {e}"
     if dest.exists() or dest.is_symlink():
-        _git(["worktree", "prune"], top)  # a copy somebody deleted by hand is still on git's list
+        _git(
+            ["worktree", "prune"], top, filters=False
+        )  # a copy somebody deleted by hand is still on git's list
         if dest.exists() or dest.is_symlink():
             return None, "That copy folder is already there."
     branch = f"orch/{ticket}"
-    rc, _, _ = _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], top, read_only=True)
+    rc, _, _ = _git(
+        ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], top, read_only=True, filters=False
+    )
     made_branch = rc != 0
     add = [
         "worktree",
@@ -322,7 +339,7 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         "--no-checkout",
     ]  # no checkout: the project's tracked .orch must never land in it
     add += ["-b", branch, str(dest), "HEAD"] if made_branch else [str(dest), branch]
-    rc, _, err = _git(add, top, GIT_ADD_TIMEOUT)
+    rc, _, err = _git(add, top, GIT_ADD_TIMEOUT, filters=False)
     if rc != 0:
         _drop_partial(top, dest, branch, made_branch)
         return None, f"git could not make the copy: {err.splitlines()[-1] if err else 'unknown error'}"
@@ -337,7 +354,11 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         if how == "ls":
             pathspec = f"{rel}/.orch" if rel else ".orch"
             rc, listed, err = _git(
-                ["--literal-pathspecs", "ls-files", "-z", "--", pathspec], dest, strip=False, read_only=True
+                ["--literal-pathspecs", "ls-files", "-z", "--", pathspec],
+                dest,
+                strip=False,
+                read_only=True,
+                filters=False,
             )
             if rc != 0:
                 break
@@ -371,7 +392,7 @@ def create(root: Path, ticket: str) -> dict | None:
     "also changing this folder" line."""
     with start_lock(root):
         ent = (registry(root).get(ticket) or {"paths": []})["paths"]
-        if ent and Path(ent[0]["path"]).is_dir() and is_orch_copy(Path(ent[0]["path"])):
+        if ent and _mine(root, ticket, ent[0]):
             return ent[0]
         entry, why = _create(root, ticket)
         if entry is None:
@@ -478,6 +499,7 @@ def _record_on_ticket(root: Path, ticket: str, entry: dict) -> None:
             for f in work.get("folders") or []
             if isinstance(f, dict) and (f.get("branch"), f.get("host")) != (entry["branch"], host)
         ]
+        folders = [{k: v for k, v in f.items() if k != "path"} for f in folders]  # a legacy local path goes
         rec = {"branch": entry["branch"], "base": entry["base"], "sub": entry.get("sub") or "", "host": host}
         work["folders"] = [rec, *folders]
 
@@ -505,7 +527,7 @@ def route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
     reg = registry(root).get(ticket)
     if reg:
         for e in reg["paths"]:
-            if Path(e["path"]).is_dir() and is_orch_copy(Path(e["path"])):
+            if _mine(root, ticket, e):
                 return work_dir(e), [], []
         # registered but gone from the disk: make it again below (same path, same branch)
     mode = config.copies_mode(root)

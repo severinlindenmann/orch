@@ -914,21 +914,34 @@ def plan(
 
 
 def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> list[str] | None:
-    """A tool sandboxed to its working folder (adapter `store_args`) cannot reach the workspace's store from a
-    separate copy, so every `orch` write of the agent would fail: the adapter's words go into the argv with
-    exactly <root>/.orch as the extra writable folder, nothing else (never the whole workspace, never the orch
-    home). Not in a copy: unchanged."""
-    sa = (adapters.load(name, root).get("store_args")) if argv else None
-    if not sa or sa["after"] not in argv:
+    """A tool sandboxed to its working folder (a built-in adapter's `store_args`) cannot reach the workspace's
+    store from a separate copy, so every `orch` write of the agent would fail: `--add-dir <root>/.orch` goes
+    into the argv, nothing else (never the whole workspace, never the orch home). Only when `work` is a copy
+    orch made; the store must be a real folder inside the root (a link would hand out its target); the word
+    it follows is looked for only in the leading words (before `--`, where the prompt starts)."""
+    from orch import worktrees
+
+    if not argv:
+        return argv
+    a = adapters.load(name, root)
+    sa = a.get("store_args")
+    if not sa or a["adapter"] not in adapters.builtin_names() or sa.get("args") != ["--add-dir", "{store}"]:
         return argv
     try:
-        if Path(work).resolve() == Path(root).resolve():
+        if not worktrees.is_orch_copy(Path(work)):
             return argv
-    except OSError:
+        store = Path(root) / ".orch"
+        real = store.resolve(strict=True)
+        if store.is_symlink() or not real.is_dir():
+            return argv
+        real.relative_to(Path(root).resolve())
+    except (OSError, ValueError):
         return argv
-    store = str(Path(root).resolve() / ".orch")
-    i = argv.index(sa["after"]) + 1
-    return [*argv[:i], *[x.replace("{store}", store) for x in sa["args"]], *argv[i:]]
+    head = argv[: argv.index("--")] if "--" in argv else argv
+    if sa["after"] not in head[:4]:
+        return argv
+    i = head.index(sa["after"]) + 1
+    return [*argv[:i], "--add-dir", str(real), *argv[i:]]
 
 
 # ---------------------------------------------------------------- start

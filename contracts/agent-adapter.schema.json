@@ -35,10 +35,10 @@
         "label": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Shown to people. \"{name}\" = the user's entry name." },
         "store_args": {
           "type": "object", "additionalProperties": false, "required": ["after", "args"],
-          "description": "Optional. For a tool that is sandboxed to its working folder: when the agent works in a separate copy of the project, these words are inserted into the oneshot argv right after the word `after`, so the workspace's own store (.orch) stays writable. {store} = <workspace>/.orch, nothing wider.",
+          "description": "Optional, built-in adapters only (orch ignores it elsewhere). For a tool sandboxed to its working folder: when the agent works in a separate copy of the project, `--add-dir <workspace>/.orch` is inserted into the oneshot argv after the template word `after`, so the workspace's own store stays writable. Nothing else is allowed here: exactly `--add-dir` and `{store}` once.",
           "properties": {
             "after": { "type": "string", "minLength": 1, "maxLength": 64 },
-            "args": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "maxLength": 64, "pattern": "^(--?[A-Za-z][A-Za-z0-9-]*|\\{store\\})$" } }
+            "args": { "const": ["--add-dir", "{store}"] }
           }
         },
         "detect": {
