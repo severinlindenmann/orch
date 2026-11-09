@@ -33,10 +33,44 @@ def read(root: Path) -> dict:
         raise Refused(f"{p} is not valid TOML ({e}). Fix it, or remove the line you added last.") from None
 
 
+def agent_config_untrusted(root: Path) -> bool:
+    """True when `.orch/config.toml` is tracked by git (somebody committed it) or git cannot say: its agent
+    command is never run then (a teammate's commit must not decide what runs on this machine)."""
+    from orch import harness
+
+    return harness._tracked(root, ".orch/config.toml")
+
+
+def untrusted_note(root: Path) -> str | None:
+    """The one line saying why a committed agent command is ignored; None when nothing was ignored."""
+    cfg = read(root)
+    named = (cfg.get("workspace") or {}).get("agent")
+    custom = any(
+        e.get("command") or e.get("interactive")
+        for e in (cfg.get("agents") or {}).values()
+        if isinstance(e, dict)
+    )
+    custom = custom or (isinstance(named, str) and named not in _builtin_names())
+    if not custom or not agent_config_untrusted(root):
+        return None
+    return "The agent command in .orch/config.toml is ignored: that file is committed to git. Using your own default."
+
+
+def _builtin_names() -> set[str]:
+    from orch import adapters
+
+    return set(adapters.builtin_names())
+
+
 def agent_name(root: Path) -> str | None:
-    """The agent that does the work here ([workspace] agent), or None when nobody chose."""
+    """The agent that does the work here ([workspace] agent), or None when nobody chose. A committed
+    config.toml may only name a built-in agent."""
     v = (read(root).get("workspace") or {}).get("agent")
-    return v if isinstance(v, str) and v else None
+    if not (isinstance(v, str) and v):
+        return None
+    if v not in _builtin_names() and agent_config_untrusted(root):
+        return None
+    return v
 
 
 PERMISSION_MODES = ("ask", "auto", "full")
@@ -159,6 +193,8 @@ def set_code(root: Path, value: str) -> str:
 def agent_entries(root: Path) -> dict[str, dict]:
     """The user's [agents.<name>] entries, only well-formed ones."""
     out = {}
+    if agent_config_untrusted(root):
+        return out  # a committed file never supplies a command
     for name, e in (read(root).get("agents") or {}).items():
         if isinstance(e, dict) and NAME_RE.match(name) and isinstance(e.get("adapter"), str):
             out[name] = {

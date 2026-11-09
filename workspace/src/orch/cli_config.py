@@ -33,6 +33,8 @@ def add_parsers(sub, common) -> None:
     t.add_argument("name")
     sh = sub.add_parser("share", parents=[common], help=argparse.SUPPRESS)
     sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
+    pv = sub.add_parser("private", parents=[common], help=argparse.SUPPRESS)
+    pv.add_argument("state", nargs="?", choices=("status", "move"), default="status")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
     g.add_argument("key", nargs="?", choices=KEYS)
@@ -280,7 +282,57 @@ def _share(args, root: Path) -> None:
     )
 
 
+def private_lines(root: Path) -> list[str]:
+    """The git notes for `orch status` / `orch private`: what the team repo holds, the next step, a committed
+    agent command that is ignored. [] when there is nothing to say."""
+    from orch import harness
+
+    s = harness.private_summary(root)
+    out = []
+    if s["files"]:
+        out += [
+            harness.private_words(s),
+            "Move to private: removes them from the team repo, keeps your files (orch private move).",
+        ]
+    if (why := config.untrusted_note(root)) and s["config_tracked"]:
+        out.append(why)
+    return out
+
+
+def _private(args, root: Path) -> None:
+    """`orch private [status|move]`: personal files that the team repo already tracks. `move` is a person's
+    action (git rm --cached; nothing is committed, the files stay)."""
+    from orch import harness
+
+    if args.state == "move":
+        if tickets.agent_tool():
+            raise Refused("Only a person can move these files out of the team repo.")
+        moved = harness.move_to_private(root)
+        if args.json:
+            print(json.dumps({"moved": len(moved)}))
+        else:
+            print(
+                f"Moved {len(moved)} file{'s' if len(moved) != 1 else ''} out of the team repo. Your files stay here. "
+                "Commit the removal when you are ready; older commits keep their copies."
+                if moved
+                else "Nothing to move."
+            )
+        return
+    s = harness.private_summary(root)
+    data = {
+        "committed": s["counts"],
+        "count": len(s["files"]),
+        "config_tracked": s["config_tracked"],
+        "agent_command_ignored": config.untrusted_note(root) is not None,
+        "lines": private_lines(root),
+    }
+    _out(args, data, "\n".join(data["lines"]) or "Nothing personal is committed in the team repo.")
+
+
 def dispatch(args, root: Path) -> bool:
+    if args.cmd == "private":
+        _private(args, root)
+        return True
     if args.cmd == "agents":
         if getattr(args, "sub", None) == "test":
             raise SystemExit(_test(args, root))

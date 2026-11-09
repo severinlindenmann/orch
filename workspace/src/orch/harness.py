@@ -239,6 +239,12 @@ ORCH_IGNORE = [
     "chat/",
     "tickets/*/evidence/",
     "tickets/.lock-*",  # per-ticket write locks
+    # Personal by default (9 Nov): tickets (history, phone texts, artifacts, the Chat ticket), the counter and the
+    # per-person settings stay out of a team repo. Fixed patterns only, never derived from data.
+    "tickets/",
+    "ticket-counter.json",
+    "config.toml",
+    "addons.json",
 ]
 
 
@@ -435,6 +441,81 @@ def glob_escape(text: str) -> str:
 
 
 SKILL_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+# What `orch private` looks at: the personal files a team repo should not hold (paths relative to the project).
+PRIVATE_FILES = (
+    (".orch/tickets", "tickets"),
+    (".orch/ticket-counter.json", "ticket-counter.json"),
+    (".orch/config.toml", "config.toml"),
+    (".orch/addons.json", "addons.json"),
+)
+
+
+def tracked_private(root: Path) -> list[str]:
+    """The personal orch files that git already tracks in this folder's repo (project-relative, sorted, at most
+    2000). [] outside a git repo or when git cannot say (the warning is advice; the trust check is `_tracked`)."""
+    try:
+        if not _in_git_repo(root):
+            return []
+    except Refused:
+        return []
+    try:
+        r = subprocess.run(
+            ["git", "ls-files", "-z", "--", *[f":(icase,literal){rel}" for rel, _ in PRIVATE_FILES]],
+            cwd=root,
+            capture_output=True,
+            env=_git_env(),
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if r.returncode != 0:
+        return []
+    names = sorted({n for n in r.stdout.decode("utf-8", "replace").split("\0") if n})
+    return names[:2000]
+
+
+def private_summary(root: Path) -> dict:
+    """{"files": [...], "counts": {"tickets": 3, "config.toml": 1}, "config_tracked": bool}: what the team repo holds."""
+    files = tracked_private(root)
+    counts: dict[str, int] = {}
+    for f in files:
+        low = f.lower()
+        for rel, label in PRIVATE_FILES:
+            if low == rel or low.startswith(rel + "/"):
+                counts[label] = counts.get(label, 0) + 1
+                break
+    return {"files": files, "counts": counts, "config_tracked": _tracked(root, ".orch/config.toml")}
+
+
+def private_words(summary: dict) -> str:
+    """One plain line: what is committed."""
+    parts = []
+    for label, n in summary["counts"].items():
+        parts.append(f"{n} ticket file{'s' if n != 1 else ''}" if label == "tickets" else label)
+    return "Committed in your team repo: " + ", ".join(parts) + "."
+
+
+def move_to_private(root: Path) -> list[str]:
+    """A person's click: `git rm --cached` for the tracked personal files. The files stay on disk; nothing is
+    committed (the removal is the person's to commit); older commits keep their copies. Returns the paths."""
+    files = tracked_private(root)
+    if not files:
+        return []
+    protect_local(root)  # the ignore rules first, so the files do not turn into "new files" afterwards
+    for i in range(0, len(files), 200):
+        chunk = files[i : i + 200]
+        r = subprocess.run(
+            ["git", "rm", "--cached", "-q", "--ignore-unmatch", "--", *[f":(literal){f}" for f in chunk]],
+            cwd=root,
+            capture_output=True,
+            env=_git_env(),
+            timeout=60,
+        )
+        if r.returncode != 0:
+            raise Refused("git could not remove the files from the team repo. Nothing else was changed.")
+    return files
 
 
 def safe_skill_name(name: str) -> bool:
