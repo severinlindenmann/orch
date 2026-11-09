@@ -4,6 +4,8 @@ description: Track every piece of work as an orch ticket with a step list, proof
 ---
 # orch: tickets with proof
 
+Chat helper exception: in Chat, propose a ticket with `--ref proposal:<short ticket title>` and let the person click Make ticket. Never run `orch ticket new` from Chat; the work recipes below apply outside Chat.
+
 One ticket per piece of work, in `.orch/tickets/<id>.json`. Every command takes `--json`.
 Each ticket has an id (`t_7k3f9q`) and a short key people use (`DM1-12`). Wherever `<id>` is written below, the key
 works too, any case: `orch check add DM1-12 "<step>"`. Say the key when you talk to a person.

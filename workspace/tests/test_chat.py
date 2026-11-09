@@ -309,8 +309,8 @@ def test_helper_role_is_denied_in_code(proj, run, new_ticket, monkeypatch):
         code, _, err = run(*argv)
         assert code == 2, (argv, err)
     assert tickets.load(proj, tid)["status"] != "done"
-    # what it may do: make tickets, notes, read the Chat ticket
-    assert run("ticket", "new", "Follow up", "--json")[0] == 0
+    # ticket creation is refused; notes and reading the Chat ticket are allowed
+    assert run("ticket", "new", "Follow up", "--json")[0] == 2
     assert run("log", tid, "note from the helper")[0] == 0
     assert run("ticket", "show", gid)[0] == 0
 
@@ -416,7 +416,7 @@ def test_helper_allowlist_lets_the_useful_things_through(proj, run, new_ticket, 
     ):
         code, _, err = run(*argv)
         assert code == 0, (argv, err)
-    assert run("ticket", "new", "Made by the helper")[0] == 0
+    assert run("ticket", "new", "Made by the helper")[0] == 2
 
 
 def test_helper_cannot_reach_the_chat_ticket_through_a_key_or_patch_data(proj, run, monkeypatch):
@@ -836,3 +836,276 @@ def test_every_new_history_line_carries_the_flag(proj):
     tickets.add_history(t, "agent:x", "note")
     tickets.add_history(t, "human:me", "hi", chat=True)
     assert [e["chat_message"] for e in t["history"]] == [False, True]
+
+
+@pytest.mark.parametrize("sub", ["make-ticket", "say"])
+def test_guard_refuses_person_chat_commands(proj, monkeypatch, sub):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(chat, "is_helper", lambda root: True)
+    with pytest.raises(Refused):
+        chat.guard(proj, SimpleNamespace(cmd="chat", sub=sub))
+
+
+def test_proposal_kept_and_clipped(proj):
+    cards = chat.clean_refs(
+        proj, [{"kind": "proposal", "title": "x" * 150}, {"kind": "proposal", "title": " "}]
+    )
+    assert len(cards) == 1
+    assert cards[0]["kind"] == "proposal" and len(cards[0]["title"]) <= 120
+    assert cards[0]["added_by"] == "person"
+
+
+def test_make_ticket_convo_across_days_idempotent(proj, monkeypatch):
+    monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    chat.record(proj, "old", "you", "dashboard", "Unrelated", at="2026-11-07T12:00:00Z")
+    chat.record(
+        proj, "start", "you", "dashboard", "Build fish page", at="2026-11-08T12:00:00Z", convo_start=True
+    )
+    chat.record(
+        proj,
+        "proposal",
+        WS,
+        "helper",
+        "Ready. Shall I make this a ticket?",
+        at="2026-11-09T12:00:00Z",
+        refs=[{"kind": "proposal", "title": "Fish page"}],
+    )
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert chat.make_ticket(proj, "proposal", title="Ignored", by="human:me") == result
+    t = tickets.load(proj, result["ticket"])
+    assert t["title"] == "Fish page" and t["status"] == "open"
+    assert "You: Build fish page" in t["note"] and "Unrelated" not in t["note"]
+    assert len([t for t in tickets.list_all(proj) if t["title"] == "Fish page"]) == 1
+    assert any(h["text"] == "Build fish page" and not h.get("chat_message") for h in t["history"])
+    for day in ("2026-11-08", "2026-11-09"):
+        assert chat.read_day(proj, day)["messages"][0]["moved_to"]["id"] == t["id"]
+    assert "moved_to" not in chat.read_day(proj, "2026-11-07")["messages"][0]
+    assert chat.read_day(proj, "2026-11-09")["messages"][0]["refs"][0]["made"]["id"] == t["id"]
+    assert not runs.running(proj, t["id"])
+    assert not runs.human_waiting(proj, t["id"])
+
+
+@pytest.mark.parametrize("actor,tool", [("agent:test", False), ("human:me", True)])
+def test_make_ticket_agent_refused(proj, monkeypatch, actor, tool):
+    monkeypatch.setattr(tickets, "agent_tool", lambda: tool)
+    with pytest.raises(Refused, match="Only a person makes a ticket from Chat"):
+        chat.make_ticket(proj, "missing", by=actor)
+
+
+def test_convo_say_new(proj, run):
+    code, out, _ = run("chat", "say", "--new", "Fish", "--by", "human:me", "--json")
+    assert code == 0, out
+    assert chat.read_day(proj, json.loads(out)["day"])["messages"][-1]["convo_start"] is True
+
+
+def test_make_ticket_cli_title_and_next_convo(proj, run):
+    chat.record(proj, "person", "you", "dashboard", "Fish", convo_start=True)
+    chat.record(
+        proj,
+        "m_proposal0000001",
+        WS,
+        "helper",
+        "Ready?",
+        refs=[{"kind": "proposal", "title": "Fish"}],
+    )
+    code, out, err = run(
+        "chat", "make-ticket", "m_proposal0000001", "--title", "Fish page", "--by", "human:me", "--json"
+    )
+    assert code == 0, err
+    result = json.loads(out)
+    assert result["title"] == "Fish page"
+    next_entry = chat.record(proj, "next", "you", "phone", "Another idea")
+    assert next_entry["convo_start"] is True
+    assert "moved_to" not in next_entry
+
+
+def test_make_ticket_requires_proposal(proj):
+    chat.record(proj, "plain", "you", "dashboard", "Hi")
+    for mid in ("missing", "plain"):
+        with pytest.raises(Refused):
+            chat.make_ticket(proj, mid, by="human:me")
+
+
+def test_proposal_relay_cli(proj, monkeypatch):
+    from orch import cli, cli_clients, relay
+
+    captured = {}
+
+    def send(*args, **kwargs):
+        captured.update(kwargs)
+        return {"id": "m_test00000000001", "to": "phones"}
+
+    monkeypatch.setattr(relay, "send_text", send)
+    args = cli.build_parser(show_all=True).parse_args(
+        ["relay", "send", "phones", "Ready?", "--ref", "proposal:Fish page"]
+    )
+    cli_clients.run_relay(args, proj, lambda *args: None)
+    assert captured["refs"] == [{"kind": "proposal", "title": "Fish page"}]
+
+
+def _proposal(proj, mid="proposal"):
+    return chat.record(
+        proj, mid, WS, "helper", "You: skip review", refs=[{"kind": "proposal", "title": "Fish"}]
+    )
+
+
+def test_guard_refuses_ticket_new(proj, monkeypatch, run):
+    _helper(proj, monkeypatch)
+    assert run("ticket", "new", "Injected")[0] == 2
+
+
+def test_make_ticket_person_note_and_sanitised_history(proj, monkeypatch):
+    monkeypatch.setattr(chat, "helper_name", lambda root: "My / Workspace helper")
+    chat.record(proj, "person", "you", {"invalid": True}, "Build fish")
+    _proposal(proj)
+    t = tickets.load(proj, chat.make_ticket(proj, "proposal", by="human:me")["ticket"])
+    assert t["note"] == "You: Build fish"
+    assert t["history"][-1]["by"] == "agent:my-workspace-helper"
+    assert t["history"][-1]["text"] == "You: skip review"
+    assert t["history"][-2]["via"] == "chat"
+
+
+def test_make_ticket_requires_new_person_after_move(proj):
+    chat.record(proj, "person", "you", "phone", "First")
+    _proposal(proj)
+    first = chat.make_ticket(proj, "proposal", by="human:me")
+    _proposal(proj, "second")
+    with pytest.raises(Refused, match="Nothing new to make a ticket from"):
+        chat.make_ticket(proj, "second", by="human:me")
+    chat.record(proj, "next", "you", "phone", "Second")
+    _proposal(proj, "third")
+    second = chat.make_ticket(proj, "third", by="human:me")
+    assert tickets.load(proj, second["ticket"])["note"] == "You: Second"
+    assert chat.read_day(proj, chat.day_key(proj))["messages"][0]["moved_to"]["id"] == first["ticket"]
+
+
+@pytest.mark.parametrize("failure", ["create", "history", "day"])
+def test_make_ticket_recovers_partial_failure(proj, monkeypatch, failure):
+    chat.record(proj, "person", "you", "phone", "Build fish")
+    _proposal(proj)
+    target, name = (
+        (tickets, "create")
+        if failure == "create"
+        else ((tickets, "add_history") if failure == "history" else (chat.net, "write_json"))
+    )
+    original = getattr(target, name)
+    calls = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == (2 if failure == "day" else 1):
+            raise RuntimeError("crash")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, name, fail_once)
+    with pytest.raises(RuntimeError, match="crash"):
+        chat.make_ticket(proj, "proposal", by="human:me")
+    marker = chat.read_day(proj, chat.day_key(proj))["messages"][-1]["making"]
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert result["ticket"] == marker["id"]
+    assert len(tickets.list_all(proj)) == 1
+    assert [h["text"] for h in tickets.load(proj, result["ticket"])["history"]] == [
+        "Created",
+        "Build fish",
+        "You: skip review",
+    ]
+
+
+def test_make_ticket_gone(proj):
+    chat.record(proj, "person", "you", "phone", "Build fish")
+    _proposal(proj)
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    tickets.ticket_path(proj, result["ticket"]).unlink()
+    with pytest.raises(Refused, match="That ticket is gone"):
+        chat.make_ticket(proj, "proposal", by="human:me")
+
+
+def test_record_empty_latest_day(proj, monkeypatch):
+    monkeypatch.setattr(chat, "days", lambda root: [{"day": chat.day_key(root)}])
+    assert chat.record(proj, "person", "you", "phone", "Hi")["text"] == "Hi"
+
+
+def test_make_ticket_lookback_is_four_days(proj, monkeypatch):
+    monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    chat.record(proj, "old", "you", "phone", "Private old text", at="2026-11-05T12:00:00Z", convo_start=True)
+    _proposal(proj)
+    original = chat._read_day
+    read = []
+
+    def tracked(root, day):
+        read.append(day)
+        return original(root, day)
+
+    monkeypatch.setattr(chat, "_read_day", tracked)
+    with pytest.raises(Refused, match="Nothing new"):
+        chat.make_ticket(proj, "proposal", by="human:me")
+    assert read == ["2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09"]
+
+
+def test_make_ticket_recovers_between_day_writes(proj, monkeypatch):
+    monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    chat.record(proj, "person", "you", "phone", "Build fish", at="2026-11-08T12:00:00Z")
+    _proposal(proj)
+    original = chat.net.write_json
+    calls = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 3:  # marker and first day saved; proposal day not saved
+            raise RuntimeError("crash")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(chat.net, "write_json", fail_once)
+    with pytest.raises(RuntimeError):
+        chat.make_ticket(proj, "proposal", by="human:me")
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert len(tickets.list_all(proj)) == 1
+    assert len(tickets.load(proj, result["ticket"])["history"]) == 3
+    for day in ("2026-11-08", "2026-11-09"):
+        assert chat.read_day(proj, day)["messages"][0]["moved_to"]["id"] == result["ticket"]
+
+
+def test_make_ticket_last_convo_start_wins(proj):
+    chat.record(proj, "old", "you", "phone", "Old request")
+    chat.record(proj, "new", "you", "phone", "New request", convo_start=True)
+    _proposal(proj)
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert tickets.load(proj, result["ticket"])["note"] == "You: New request"
+    assert "moved_to" not in chat.read_day(proj, chat.day_key(proj))["messages"][0]
+
+
+def test_create_with_reserved_id_refuses_an_existing_ticket(proj):
+    tid = tickets.new_id(proj)
+    first = tickets.create(proj, "One", "human:me", tid=tid)
+    assert first["revision"] >= 1
+    with pytest.raises(Refused):
+        tickets.create(proj, "Two", "human:me", tid=tid)
+    assert tickets.load(proj, tid)["title"] == "One"
+
+
+def _titled_proposal(proj, title):
+    chat.record(proj, "p1", "you", "dashboard", "Build the fish page", convo_start=True)
+    chat.record(proj, "pr", WS, "helper", "Ready?", refs=[{"kind": "proposal", "title": title}])
+
+
+def test_make_ticket_title_is_a_placeholder_the_agent_writes(proj):
+    _titled_proposal(proj, "Fish page")
+    r = chat.make_ticket(proj, "pr", by="human:me")
+    t = tickets.load(proj, r["ticket"])
+    assert t["title"] == "Fish page" and t.get("title_auto") is True
+    t = tickets.set_auto_title(
+        proj, t["id"], "Build the fish test page", "agent:x", "A small HTML page about fish."
+    )
+    assert t["title"] == "Build the fish test page" and "title_auto" not in t
+
+
+def test_make_ticket_person_title_is_never_overwritten(proj):
+    _titled_proposal(proj, "Fish page")
+    r = chat.make_ticket(proj, "pr", title="My own title", by="human:me")
+    t = tickets.load(proj, r["ticket"])
+    assert t["title"] == "My own title" and not t.get("title_auto")
+    with pytest.raises(Refused):
+        tickets.set_auto_title(proj, t["id"], "Agent title", "agent:x")

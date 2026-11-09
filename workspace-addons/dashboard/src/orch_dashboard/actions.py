@@ -342,8 +342,16 @@ def _log(a):
 
 def _chat_say(a):
     """The person writes in Chat (history by "you", via dashboard; the background host starts the helper)."""
-    _only(a, ("text",))
-    return ["chat", "say"], [], [_text(a.get("text"))]
+    _only(a, ("text", "new"))
+    return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+
+
+def _chat_make_ticket(a):
+    _only(a, ("id",))
+    mid = a.get("id")
+    if not isinstance(mid, str) or not re.fullmatch(r"m_[a-z0-9]{10,64}", mid):
+        raise BadRequest("That is not a message id.")
+    return ["chat", "make-ticket", mid], [], []
 
 
 def _run_start(a):
@@ -484,6 +492,7 @@ OPS = {
     "ticket.edit": _ticket_edit,
     "log": _log,
     "chat.say": _chat_say,
+    "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
     "run.start": _run_start,

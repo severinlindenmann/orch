@@ -503,10 +503,15 @@ def create(
     parent: str | None = None,
     ext: dict[str, dict] | None = None,
     fields: dict | None = None,
+    *,
+    tid: str | None = None,
     title_auto: bool = False,
 ) -> dict:
     """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
-    writes the real one (`orch ticket title`). The flag clears when anyone sets the title."""
+    writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
+    tid lets callers persist a reserved id before this write."""
+    if tid is not None:
+        ticket_path(root, tid)  # validate before using the id in a lock path
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
@@ -518,7 +523,7 @@ def create(
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
-        "id": new_id(root),
+        "id": tid if tid is not None else new_id(root),
         "key": next_key(root),
         "title": title,
         "status": "open",
@@ -545,7 +550,11 @@ def create(
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
-    save(root, ticket)
+    if tid is not None and ticket_path(root, tid).exists():
+        raise Refused("That ticket already exists.")
+    save(
+        root, ticket
+    )  # under the ticket lock; it also refuses an id that appeared meanwhile (revision differs)
     return ticket
 
 

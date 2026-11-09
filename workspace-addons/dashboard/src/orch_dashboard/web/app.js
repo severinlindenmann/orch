@@ -328,6 +328,8 @@ function dialog(title, cls = 'dialog', lock = '') {
 }
 document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
+document.getElementById('open-agent').hidden = snapshot;
+document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 const toggle = document.getElementById('menu-toggle');
 toggle.addEventListener('click', () => {
   const open = toggle.getAttribute('aria-expanded') !== 'true';
