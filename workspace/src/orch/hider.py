@@ -1,4 +1,8 @@
-"""Exact-value hiding without store, filesystem, or environment access."""
+"""Exact-value hiding without store, filesystem, or environment access.
+
+Slice 1.5 note: error writers must never capture frame locals (tracebacks with locals, sentry/rich locals,
+pytest -l): the needle values and forms live in locals of this module while a Hider is built or used.
+"""
 
 import base64
 import hashlib
@@ -9,6 +13,7 @@ import secrets
 import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from threading import RLock
 from typing import Any, TypeVar
 from urllib.parse import quote, quote_plus
@@ -124,9 +129,13 @@ def _drop_prefix(text: _Data, needles: tuple[tuple[_Data, _Data], ...]) -> _Data
 class Hider:
     """Precomputed forms; names are public labels and values are confidential."""
 
-    def __init__(self, needles: dict[str, str | dict | list], *, salt: bytes | None = None):
+    def __init__(
+        self, needles: dict[str, str | dict | list], *, salt: bytes | None = None, _testing: bool = False
+    ):
+        """`salt` and `_testing` are are tests-only: a known salt allows offline guessing."""
         try:
-            if not isinstance(needles, dict) or (salt is not None and not isinstance(salt, bytes)):
+            bad_salt = salt is not None and (not _testing or not isinstance(salt, bytes))
+            if not isinstance(needles, dict) or bad_salt:
                 raise TypeError
             forms: dict[str, str] = {}
             for name, value in needles.items():
@@ -299,11 +308,19 @@ class HidingStream:
 
 _lock = RLock()
 _registered: Hider | None = None
+_override: ContextVar[Hider | None] = ContextVar("orch_hider_override", default=None)
+
+
+def _check(h: Any) -> Hider:
+    if not isinstance(h, Hider):
+        raise TypeError("Expected a Hider")
+    if not h._text:
+        raise ValueError("Empty hider")  # an empty hider hides nothing and must never count as registered
+    return h
 
 
 def register_hider(h: Hider) -> None:
-    if not isinstance(h, Hider):
-        raise TypeError("Expected a Hider")
+    _check(h)
     global _registered
     with _lock:
         _registered = h
@@ -316,6 +333,9 @@ def unregister_hider() -> None:
 
 
 def current_hider() -> Hider:
+    override = _override.get()
+    if override is not None:
+        return override
     with _lock:
         if _registered is None:
             raise NoHiderError()
@@ -324,12 +344,9 @@ def current_hider() -> Hider:
 
 @contextmanager
 def use_hider(h: Hider) -> Iterator[Hider]:
-    global _registered
-    with _lock:
-        previous = _registered
-        register_hider(h)
+    """Test-only: a hider for the current context (ContextVar, safe across threads and tasks)."""
+    token = _override.set(_check(h))
     try:
         yield h
     finally:
-        with _lock:
-            _registered = previous
+        _override.reset(token)

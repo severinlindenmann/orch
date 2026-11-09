@@ -185,7 +185,7 @@ def test_cut():
 
 
 def test_json():
-    hider = Hider({"token": TOKEN, "digits": "12345678"}, salt=b"fixed")
+    hider = Hider({"token": TOKEN, "digits": "12345678"}, salt=b"fixed", _testing=True)
     original = {"ordinary": [TOKEN, (TOKEN, 123456789, 12345678.25)], "safe": {"x": 7}, "bool": True}
     result = hider.hide_json(original)
     assert result == {
@@ -223,7 +223,7 @@ def test_registration():
     assert issubclass(NoHiderError, Refused)
     with pytest.raises(NoHiderError):
         current_hider()
-    first, second = Hider({}), Hider({"token": TOKEN})
+    first, second = Hider({"first": "first-token-0123"}), Hider({"token": TOKEN})
     register_hider(first)
     with use_hider(second):
         assert current_hider() is second
@@ -331,7 +331,7 @@ def test_json_rejects_and_hides_non_json_values():
         with pytest.raises(ValueError, match="Invalid hiding input") as caught:
             hider.hide_json(bad)
         assert TOKEN not in str(caught.value) + repr(caught.value.args)
-    digits = Hider({"d": "12345678"}, salt=b"s")
+    digits = Hider({"d": "12345678"}, salt=b"s", _testing=True)
     result = digits.hide_json({12345678: 1})
     assert list(result) != [12345678] and "12345678" not in repr(result)
     with pytest.raises(HidingRefused):
@@ -381,3 +381,41 @@ def test_normalisation_and_escape_variants():
         forms.add(quote(variant))  # default safe="/"
     for form in forms:
         assert hider.hide_text("x" + form + "y") == "x" + MARKER + "y", form
+
+
+def test_empty_hider_and_salt_rules():
+    for empty in (Hider({}), Hider({"short": "1234567"})):
+        with pytest.raises(ValueError, match="Empty hider"):
+            register_hider(empty)
+        with pytest.raises(ValueError, match="Empty hider"), use_hider(empty):
+            pass
+    with pytest.raises(NoHiderError):
+        current_hider()
+    with pytest.raises(ValueError):
+        Hider({"token": TOKEN}, salt=b"known")  # salt only with the tests flag
+    assert Hider({"token": TOKEN}, salt=b"known", _testing=True).names == ("token",)
+
+
+def test_use_hider_is_per_context():
+    import threading
+
+    first, second = Hider({"a": "first-token-0123"}), Hider({"b": "second-token-456"})
+    seen = {}
+    entered, release = threading.Event(), threading.Event()
+
+    def worker():
+        with use_hider(second):
+            entered.set()
+            release.wait(5)
+            seen["worker"] = current_hider()
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    entered.wait(5)
+    with use_hider(first):
+        release.set()
+        thread.join(5)
+        assert current_hider() is first
+    assert seen["worker"] is second
+    with pytest.raises(NoHiderError):
+        current_hider()
