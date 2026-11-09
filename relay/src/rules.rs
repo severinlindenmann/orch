@@ -36,6 +36,9 @@ pub fn ticket_key(v: &Value) -> Option<&str> {
 
 /// A `key` that is not a valid display key is dropped (never stored, listed or pushed); the message itself is kept.
 pub fn clean_ticket_key(msg: &mut Value) {
+    if msg["body"].get("proposal_result").is_some() {
+        return;
+    }
     if msg.get("key").is_some() && ticket_key(&msg["key"]).is_none() {
         if let Some(o) = msg.as_object_mut() {
             o.remove("key");
@@ -87,6 +90,9 @@ fn kind_of(typ: &str) -> Option<(usize, &'static str)> {
 pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res<Value> {
     let typ = msg["type"].as_str().unwrap_or("").to_string();
     let to = msg["to"].as_str().unwrap_or("").to_string();
+    if typ == "text" {
+        check_proposal_result(c, key, sender, &msg)?;
+    }
     if let Some((idx, label)) = kind_of(&typ) {
         if to == "phones" || valid_id(&to, "ph_", 10) {
             if idx != 0 {
@@ -184,6 +190,99 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         }
         _ => Err(forbidden("Only the relay makes this kind of message.")),
     }
+}
+
+/// Validate proposal results before generic routing so malformed routes are always 422.
+fn check_proposal_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res<()> {
+    let body = &msg["body"];
+    let Some(result) = body.get("proposal_result") else {
+        return Ok(());
+    };
+    let kind = result["result"].as_str().unwrap_or("");
+    let display = result.get("key").and_then(ticket_key);
+    let fields_ok = result.as_object().is_some_and(|o| {
+        o.keys()
+            .all(|k| matches!(k.as_str(), "result" | "key" | "reason"))
+    }) && (result.get("key").is_none() || display.is_some());
+    let canonical = match kind {
+        "made" if display.is_some() && result.get("reason").is_none() => {
+            format!("Ticket made: {}", display.unwrap())
+        }
+        "refused"
+            if result.get("key").is_none()
+                && matches!(
+                    result["reason"].as_str(),
+                    Some("needs_person" | "unavailable")
+                ) =>
+        {
+            "Couldn't make the ticket".into()
+        }
+        "decided" if result.get("reason").is_none() => display
+            .map(|k| format!("Ticket made: {k}"))
+            .unwrap_or_else(|| "Already decided".into()),
+        _ => return Err(invalid("Invalid proposal result.")),
+    };
+    let to = msg["to"].as_str().unwrap_or("");
+    if !fields_ok
+        || body["text"].as_str() != Some(canonical.as_str())
+        || !body.as_object().is_some_and(|o| o.len() == 2)
+        || ["ticket", "key", "general"]
+            .iter()
+            .any(|k| msg.get(k).is_some())
+        || !msg["reply_to"]
+            .as_str()
+            .is_some_and(|id| valid_id(id, "m_", 16))
+        || (kind == "made" && to != "phones")
+        || (kind != "made" && !valid_id(to, "ph_", 10))
+    {
+        return Err(invalid(
+            "Invalid proposal result shape, text or destination.",
+        ));
+    }
+    let rid = msg["reply_to"].as_str().unwrap();
+    let q = get_msg(c, rid)?
+        .filter(|q| q.from == sender)
+        .ok_or_else(|| not_found("The message you reply to does not exist."))?;
+    if q.typ != "question" || open_payload(key, &q).0["proposal"] != "make_ticket" {
+        return Err(not_allowed("That is not your ticket proposal question."));
+    }
+    if to != "phones" {
+        if !store::phone_reaches(c, to, sender) {
+            let from_name = store::ws_name(c, sender).unwrap_or_default();
+            return Err(not_allowed(format!(
+                "That phone is not paired with {from_name}. In the relay admin, open Phones and tick {from_name} for this phone (or add the phone there), then run `orch relay refresh`."
+            )));
+        }
+        let answered = c
+            .query_row(
+                "SELECT 1 FROM messages WHERE reply_to=?1 AND type='answer' AND from_addr=?2",
+                [rid, to],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !answered {
+            return Err(not_allowed("That phone did not answer this proposal."));
+        }
+    }
+    if kind != "decided" {
+        let mut st = c.prepare(&format!(
+            "SELECT {} FROM messages WHERE reply_to=?1 AND type='text' AND from_addr=?2",
+            store::MSG_COLS
+        ))?;
+        for row in st.query_map([rid, sender], store::msg_from_row)? {
+            let (body, _) = open_payload(key, &row?);
+            if matches!(
+                body["proposal_result"]["result"].as_str(),
+                Some("made" | "refused")
+            ) {
+                return Err(conflict(
+                    "This proposal already has a made or refused result.",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Largest `body.ticket_view` the relay keeps: compact UTF-8 JSON bytes (message.schema.json).
