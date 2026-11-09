@@ -36,16 +36,18 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
-from orch import addons, config, harness, runs, sharedfolder, tickets
+from orch import addons, config, harness, runs, safegit, sharedfolder, tickets
 from orch.errors import Refused
 
 REGISTRY = Path(".orch") / "run" / "worktrees.json"
 LOCK_ID = "_copies"  # runs.locked(root, LOCK_ID): the workspace-level "decide + create + claim" lock
 LOCK_WAIT = 150.0  # a worktree of a big repo can take a while; the lock timeout must outlast GIT_ADD_TIMEOUT
-GIT_TIMEOUT = 60
-GIT_ADD_TIMEOUT = 120
+GIT_TIMEOUT = 20
+GIT_ADD_TIMEOUT = 60
+CREATE_BUDGET = 100.0  # all git time of one _create; LOCK_WAIT must stay above it
 SETUP_TIMEOUT = 600
 ID_ARGS = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits made by orch (bring-back)
 _TID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -55,31 +57,22 @@ _WS8 = re.compile(r"[0-9a-f]{8}")
 # ---------------------------------------------------------------- git, as argv lists only
 
 
+_deadline: float | None = None  # set by _create: all its git calls together stay inside CREATE_BUDGET
+
+
 def _git(
-    args: list[str], cwd: Path, timeout: float = GIT_TIMEOUT, data: bytes | None = None, strip: bool = True
+    args: list[str],
+    cwd: Path,
+    timeout: float = GIT_TIMEOUT,
+    data: bytes | None = None,
+    strip: bool = True,
+    **kw,
 ):
-    """(exit code, stdout, stderr) of `git -c core.longpaths=true <args>`. Never a shell; GIT_* of the caller
-    dropped (a hook's GIT_DIR must not point us at the wrong repo). A missing git or a timeout is rc 127
-    / 124."""
-    argv = ["git", "-c", "core.longpaths=true", *args]
-    try:
-        p = subprocess.run(
-            argv,
-            cwd=cwd,
-            capture_output=True,
-            input=data,
-            env=harness._git_env(),
-            timeout=timeout,
-            check=False,
-        )
-    except FileNotFoundError:
-        return 127, "", "git is not installed"
-    except subprocess.TimeoutExpired:
-        return 124, "", f"git {args[0]} took longer than {int(timeout)} s"
-    except OSError as e:
-        return 127, "", str(e)
-    out = p.stdout.decode("utf-8", "surrogateescape")
-    return p.returncode, out.strip() if strip else out, p.stderr.decode("utf-8", "replace").strip()
+    """safegit.run, the one way orch runs git here (no hooks, no filters, safe env, absolute git, timeout).
+    Inside _create the timeout is also capped by what is left of the creation budget."""
+    if _deadline is not None:
+        timeout = max(1.0, min(timeout, _deadline - time.monotonic()))
+    return safegit.run(args, cwd, timeout, data=data, strip=strip, **kw)
 
 
 # ---------------------------------------------------------------- where copies live
@@ -228,7 +221,7 @@ def workdir_for(root: Path, rec: dict | None) -> Path:
 def _repo(root: Path) -> tuple[Path, str, str] | None:
     """(git top folder, the workspace's path below it, HEAD commit) or None: no git, no commit, or git
     unhappy."""
-    rc, out, _ = _git(["rev-parse", "--show-toplevel"], root)
+    rc, out, _ = _git(["rev-parse", "--show-toplevel"], root, read_only=True)
     if rc != 0 or not out:
         return None
     top = Path(out).resolve()  # git prints forward slashes, also on Windows
@@ -236,7 +229,7 @@ def _repo(root: Path) -> tuple[Path, str, str] | None:
         rel = root.resolve().relative_to(top).as_posix()
     except ValueError:
         return None
-    rc, head, _ = _git(["rev-parse", "--verify", "HEAD^{commit}"], root)
+    rc, head, _ = _git(["rev-parse", "--verify", "HEAD^{commit}"], root, read_only=True)
     if rc != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", head):
         return None
     return top, ("" if rel == "." else rel), head
@@ -253,6 +246,16 @@ def _drop_partial(top: Path, dest: Path, branch: str, made_branch: bool) -> None
 
 
 def _create(root: Path, ticket: str) -> tuple[dict | None, str]:
+    """Make the copy of this ticket within CREATE_BUDGET seconds of git time (see _create_inner)."""
+    global _deadline
+    _deadline = time.monotonic() + CREATE_BUDGET
+    try:
+        return _create_inner(root, ticket)
+    finally:
+        _deadline = None
+
+
+def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     """Make the copy of this ticket (lock held by the caller). (registry entry, "") or (None, why)."""
     wid = addons.workspace_id(root, create=True)
     try:
@@ -286,7 +289,7 @@ def _create(root: Path, ticket: str) -> tuple[dict | None, str]:
         if dest.exists() or dest.is_symlink():
             return None, "That copy folder is already there."
     branch = f"orch/{ticket}"
-    rc, _, _ = _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], top)
+    rc, _, _ = _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], top, read_only=True)
     made_branch = rc != 0
     add = [
         "worktree",
@@ -309,14 +312,14 @@ def _create(root: Path, ticket: str) -> tuple[dict | None, str]:
         if how == "ls":
             pathspec = f"{rel}/.orch" if rel else ".orch"
             rc, listed, err = _git(
-                ["--literal-pathspecs", "ls-files", "-z", "--", pathspec], dest, strip=False
+                ["--literal-pathspecs", "ls-files", "-z", "--", pathspec], dest, strip=False, read_only=True
             )
             if rc != 0:
                 break
             if not listed:
                 continue
             data = listed.encode("utf-8", "surrogateescape")
-        rc, _, err = _git(argv, dest, GIT_ADD_TIMEOUT, data)
+        rc, _, err = _git(argv, dest, GIT_ADD_TIMEOUT, data, filters=argv[0] == "checkout-index")
         if rc != 0:
             break
     if rc != 0:

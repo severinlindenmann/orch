@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import adapters, addons, config, harness, runs, tickets, worktrees
+from orch import adapters, addons, config, harness, runs, safegit, tickets, worktrees
 from orch.errors import Refused
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="uses shell-free POSIX stubs")
@@ -193,11 +193,12 @@ def test_git_is_always_called_with_an_argv_list_and_long_paths(repo, monkeypatch
         seen.append((argv, k))
         return real(argv, *a, **k)
 
-    monkeypatch.setattr(worktrees.subprocess, "run", spy)
+    monkeypatch.setattr(safegit.subprocess, "run", spy)
     worktrees.create(repo, repo.tids[0])
     assert seen
     for argv, kw in seen:
-        assert isinstance(argv, list) and argv[:3] == ["git", "-c", "core.longpaths=true"]
+        assert isinstance(argv, list) and os.path.isabs(argv[0]) and "core.longpaths=true" in argv
+        assert "core.fsmonitor=false" in argv and any(a.startswith("core.hooksPath=") for a in argv)
         assert not kw.get("shell") and kw.get("timeout")
         assert "GIT_DIR" not in (kw.get("env") or {})
 
