@@ -47,15 +47,19 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 7. **Streams.** One proof covers one command process: `orch run type --proof-stdin` takes the lock and accepts the keys that
    follow on the same stdin until it exits; a new process needs a new proof.
 
-## Widening settings
+## Settings: records and tombstones
 
-Settings that widen what can happen (`[focus] session_typing = true`, `[insights] share_names = true`, enabling `get` on a
-key profile) live in `.orch/config.toml` / `profiles.toml` as named, but a widening value counts only when the core also has
-a matching record set with a proof: `<orch home>/human-settings.json`, keyed by the workspace's real path like
-`permissions.json` (`$defs/settings_record`). Effective value = the file's value AND the record's (`hp_effective`). An agent
-that edits `config.toml` to `session_typing = true` changes nothing. Lowering (turning a switch off, sharing less) works from
-the file or the CLI without a proof (safe direction, as for `workspace.permissions`). Defaults owner-decided as on
-(`live_session = true`, `share_counts = true`) need no record.
+Every switch that widens what can happen (`[focus] live_session`, `[focus] session_typing`, `[insights] share_counts`,
+`[insights] share_names`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
+`profiles.toml` / `.orch/mcp.json` as named, and the core also keeps a record in `<trusted orch home>/human-settings.json`,
+keyed by the workspace's real path like `permissions.json` (`$defs/settings_record`).
+- Setting a value **with a proof** writes the file and the record.
+- **Lowering** (turning something off, sharing less) works from the file or the CLI without a proof, and the core writes a
+  **tombstone** record (`value: false`) the first time it sees the lowered value.
+- **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
+  on, `share_counts` on (owner decisions 3C, I5); everything else off.
+So an agent that edits `session_typing = true` changes nothing, and once a person switched `share_counts` or `live_session`
+off, an agent editing the file back to on changes nothing either. Reference `hp_settle`, vectors `settle`.
 
 ## Human-only actions in the draft-02 contracts
 

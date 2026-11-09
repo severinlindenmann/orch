@@ -14,7 +14,7 @@ T0: `… contracts/validate.py screen`.
 ## Switches (owner decision 3C)
 
 `.orch/config.toml` `[focus] live_session = true` and `[focus] session_typing = false` for a new workspace. `session_typing = true`
-counts only with a settings record made through a `focus.settings` proof (human-proof.md, Widening settings): an agent editing
+counts only with a settings record made through a `focus.settings` proof (human-proof.md, Settings: records and tombstones): an agent editing
 the file cannot turn typing on. The relay admin
 can lock live sessions off for all its workspaces (usage-counts.md, policy `live_session: "locked_off"`). **Off means off:**
 the core refuses `orch run screen` and `orch run type` (exit 2, `code: switched_off` / `locked_by_admin`), not only the tab.

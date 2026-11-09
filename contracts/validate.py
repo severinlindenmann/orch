@@ -929,7 +929,6 @@ def kind_counts():
 
 # --- human proof (human-proof.md, invariant H1) ----------------------------------------------------------------------
 HP_MAX_LIFE = 60
-WIDENING = {"focus.session_typing": True, "insights.share_names": True}
 
 
 def _b64u(b):
@@ -975,13 +974,25 @@ def hp_verify(c):
     return "ok"
 
 
-def hp_effective(c):
-    """A widening value counts only with a matching settings record; lowering always works."""
-    file_val = c["file"]
-    if c["setting"] in WIDENING and file_val == WIDENING[c["setting"]]:
-        rec = c.get("record")
-        return file_val if rec is not None and rec == file_val else (not file_val)
-    return file_val
+SETTING_DEFAULTS = {"focus.live_session": True, "focus.session_typing": False, "insights.share_counts": True,
+                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False}
+
+
+def hp_settle(c):
+    """Effective value after each event. file:v = someone edited the file; proof:v = a person set it with a proof (the core
+    writes file and record). Lowering in the file writes a tombstone record (false). Effective = file AND (record, or the
+    default when no record ever existed)."""
+    default = SETTING_DEFAULTS[c["setting"]]
+    file_val, record, out = default, None, []
+    for ev in c["events"]:
+        if ev["by"] == "proof":
+            file_val = record = ev["value"]
+        else:
+            file_val = ev["value"]
+            if ev["value"] is False:
+                record = False
+        out.append(bool(file_val and (record if record is not None else default)))
+    return out
 
 
 def kind_human():
@@ -990,8 +1001,10 @@ def kind_human():
     vec = _vec("human-proof-v1.json")
     for c in vec["verify"]:
         _expect(f"human verify {c['name']}", hp_verify(c), c["result"])
-    for c in vec["effective"]:
-        _expect(f"human effective {c['name']}", hp_effective(c), c["effective"])
+    for c in vec["settle"]:
+        _expect(f"human settle {c['name']}", hp_settle(c), c["effective"])
+    if set(SETTING_DEFAULTS) != set(json.loads((HERE / "vectors" / "human-proof-v1.json").read_text())["settings"]):
+        fails.append("human: SETTING_DEFAULTS and vectors settings differ")
 
 
 

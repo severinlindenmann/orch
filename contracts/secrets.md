@@ -86,7 +86,7 @@ A profile maps variables to key names (`env`: the value in the variable; `files`
 plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false).
 Variables that change how programs load are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*, ORCH_*, …). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
-only with a matching settings record (human-proof.md, Widening settings), so editing the file alone does not enable `get`.
+only with a matching settings record (human-proof.md, Settings: records and tombstones), so editing the file alone does not enable `get`.
 
 ## Commands
 

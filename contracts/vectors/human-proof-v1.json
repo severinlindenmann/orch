@@ -258,62 +258,193 @@
    "home_trusted": false
   }
  ],
- "effective": [
+ "settings": [
+  "focus.live_session",
+  "focus.session_typing",
+  "insights.share_counts",
+  "insights.share_names",
+  "secret.allow_get",
+  "conn.allow"
+ ],
+ "settle": [
   {
    "name": "typing on in the file only (agent edit)",
    "setting": "focus.session_typing",
-   "file": true,
-   "record": null,
-   "effective": false
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
   },
   {
-   "name": "typing on with a record",
+   "name": "typing on with a proof",
    "setting": "focus.session_typing",
-   "file": true,
-   "record": true,
-   "effective": true
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    }
+   ],
+   "effective": [
+    true
+   ]
   },
   {
-   "name": "typing off in the file wins",
+   "name": "on(proof) -> off(file) -> on(file) stays off",
    "setting": "focus.session_typing",
-   "file": false,
-   "record": true,
-   "effective": false
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    },
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    true,
+    false,
+    false
+   ]
   },
   {
-   "name": "share names on in the file only",
-   "setting": "insights.share_names",
-   "file": true,
-   "record": null,
-   "effective": false
+   "name": "share_counts default on, no events",
+   "setting": "insights.share_counts",
+   "events": [],
+   "effective": []
   },
   {
-   "name": "share names on with a record",
-   "setting": "insights.share_names",
-   "file": true,
-   "record": true,
-   "effective": true
+   "name": "share_counts off(file) -> on(file) stays off",
+   "setting": "insights.share_counts",
+   "events": [
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false,
+    false
+   ]
   },
   {
-   "name": "live session default on needs no record",
+   "name": "share_counts off(file) -> on(proof)",
+   "setting": "insights.share_counts",
+   "events": [
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "proof",
+     "value": true
+    }
+   ],
+   "effective": [
+    false,
+    true
+   ]
+  },
+  {
+   "name": "live_session default on, file says on",
    "setting": "focus.live_session",
-   "file": true,
-   "record": null,
-   "effective": true
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    true
+   ]
   },
   {
-   "name": "share counts default on needs no record",
-   "setting": "insights.share_counts",
-   "file": true,
-   "record": null,
-   "effective": true
+   "name": "live_session off by person then agent edits on",
+   "setting": "focus.live_session",
+   "events": [
+    {
+     "by": "proof",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false,
+    false
+   ]
   },
   {
-   "name": "share counts off from the file",
-   "setting": "insights.share_counts",
-   "file": false,
-   "record": null,
-   "effective": false
+   "name": "share_names file only",
+   "setting": "insights.share_names",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  },
+  {
+   "name": "allow_get file only",
+   "setting": "secret.allow_get",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  },
+  {
+   "name": "allow_get proof then off",
+   "setting": "secret.allow_get",
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    },
+    {
+     "by": "file",
+     "value": false
+    }
+   ],
+   "effective": [
+    true,
+    false
+   ]
+  },
+  {
+   "name": "conn allow file only",
+   "setting": "conn.allow",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
   }
  ]
 }
