@@ -750,16 +750,8 @@ function ticketRenameStep(child) {
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } };
   actions.append(save); d.append(input, actions); window.orch.open(d); input.focus();
 }
-// The goal and what is not included live at the end of the parent's note: "Goal: ...\nNot included: ...".
-function planGoal(note) {
-  const text = String(note || ''), at = text.search(/Not included:/i);
-  const notIn = at < 0 ? '' : text.slice(at).replace(/^Not included:\s*/i, '').trim();
-  const before = (at < 0 ? text : text.slice(0, at)).trim().split(/\n\s*\n/).pop().trim();
-  const goal = before.replace(/^Goal:\s*/i, '').trim();
-  return {goal: /^Goal:/im.test(text) || at >= 0 ? goal : '', notIn};
-}
 function ticketPlan(t, q, children) {
-  const {goal, notIn} = planGoal(t.note);
+  const goal = t.plan?.goal, notIn = t.plan?.not_included;
   const editing = ticketPlanEditing.has(t.id);
   const start = snapshot ? null : ticketButton('Start work', 'primary', async () => {
     const lock = 'plan-answer-' + t.id;

@@ -713,12 +713,7 @@ def _description_plan(ticket: dict) -> list[str]:
 def _done_when_plan(ticket: dict) -> list[str]:
     if not ticket.get("done_when") or ticket.get("checklist"):
         return []
-    if ticket.get("plan_first") and not _plan_asked(ticket):  # the plan comes first: no "then start"
-        return [
-            "The person described what should be true when it is done: "
-            f"{_clip(ticket['done_when'], 2000)}. Use it for the done-when of the steps in the plan."
-        ]
-    if ticket.get("plan_first") and not _plan_asked(ticket):  # the plan comes first: no "then start"
+    if _plan_open(ticket):  # the plan comes first: no "then start"
         return [
             "The person described what should be true when it is done: "
             f"{_clip(ticket['done_when'], 2000)}. Use it for the done-when of the steps in the plan."
@@ -731,29 +726,36 @@ def _done_when_plan(ticket: dict) -> list[str]:
 
 
 PLAN_READY = "Plan ready"  # the one question of a "Show plan first" ticket (dashboard keys on it)
+PLAN_START = "Start work"
 PLAN_CHANGE = "Which step, and what should change?"
 
 
-def _plan_asked(ticket: dict) -> bool:
-    return any(str(q.get("text", "")).startswith(PLAN_READY) for q in ticket.get("questions") or [])
+def _plan_open(ticket: dict) -> bool:
+    """A plan_first ticket whose plan the person has not yet approved: no "Plan ready" question was answered
+    "Start work". (Open question, or answered with a change: the plan is still being made.)"""
+    if not ticket.get("plan_first"):
+        return False
+    return not any(
+        str(q.get("text", "")).startswith(PLAN_READY) and q.get("answer") == PLAN_START
+        for q in ticket.get("questions") or []
+    )
 
 
 def _plan_first_plan(ticket: dict) -> list[str]:
-    """Show plan first: plan, ask once, stop. Not again once that question exists (answered or open)."""
-    if not ticket.get("plan_first") or _plan_asked(ticket):
+    """Show plan first: plan, ask once, stop. The rule stays until "Plan ready" is answered "Start work"."""
+    if not _plan_open(ticket):
         return []
     tid = ticket["id"]
     return [
         "The person chose to see the plan first. Do NOT change any project file yet. Make the plan as in the "
         "skill section 'Plan big work': this ticket is the parent, one sub-ticket per step with its own "
-        f"done-when (`orch ticket new --parent {tid}`), in order. Write the goal and what is not included at "
-        "the end of the parent's note, keeping the person's own words above it: "
-        f'orch ticket edit {tid} --note "<the person\'s text>\\n\\nGoal: <goal>\\nNot included: <list>". '
+        f"done-when (`orch ticket new --parent {tid}`), in order. Write the goal and what is not included: "
+        f'orch ticket plan {tid} --goal "<goal>" --not-included "<what is not part of it>". '
         f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
         '--option "Change a step" --recommend "Start work", and stop. Start the steps only after the '
         'answer is "Start work". If the answer is "Change a step" (or asks for any change), ask one more '
         f'question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, then ask '
-        f'"{PLAN_READY}" again.'
+        f'"{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 
 

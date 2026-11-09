@@ -942,6 +942,20 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
     return apply_op(root, tid, op)[0]
 
 
+def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
+    """The agent's goal and 'Not included' of a plan, in its own field (never the person's note)."""
+    goal = goal.strip()
+    ni = (not_included or "").strip()
+    if not goal or len(goal) > 500 or len(ni) > 500:
+        raise Refused("The goal needs 1 to 500 characters, 'Not included' at most 500.")
+
+    def op(ticket):
+        ticket["plan"] = {"goal": goal, **({"not_included": ni} if ni else {}), "by": by[:100]}
+        add_history(ticket, by, "Plan written")
+
+    return apply_op(root, tid, op)[0]
+
+
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)

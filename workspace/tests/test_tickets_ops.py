@@ -380,3 +380,26 @@ def test_ticket_new_plan_first_flag(proj, run):
 def test_plan_first_is_not_a_patchable_field():
     with pytest.raises(tickets.Refused):
         tickets.clean_field("plan_first", "true")
+
+
+def test_ticket_plan_goes_in_its_own_field_not_the_note(proj, run):
+    t = json.loads(
+        run("ticket", "new", "Big", "--plan-first", "--note", "My words", "--json", "--by", "human:t")[1]
+    )
+    code, out, _ = run(
+        "ticket",
+        "plan",
+        t["id"],
+        "--goal",
+        "Pay online",
+        "--not-included",
+        "refunds",
+        "--json",
+        "--by",
+        "agent:claude",
+    )
+    assert code == 0
+    got = read(proj, t["id"])
+    assert got["plan"] == {"goal": "Pay online", "not_included": "refunds", "by": "agent:claude"}
+    assert got["note"] == "My words"
+    assert run("ticket", "plan", t["id"], "--goal", "x" * 501, "--by", "agent:claude")[0] != 0

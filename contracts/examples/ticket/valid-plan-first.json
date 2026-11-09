@@ -15,5 +15,10 @@
       "text": "Created"
     }
   ],
-  "plan_first": true
+  "plan_first": true,
+  "plan": {
+    "goal": "Customers pay online",
+    "not_included": "refunds",
+    "by": "agent:claude"
+  }
 }

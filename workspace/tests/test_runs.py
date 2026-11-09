@@ -251,15 +251,32 @@ def test_plan_first_prompt_plans_asks_one_question_and_stops(proj):
     assert "Plan big work" in runs.resume_prompt(t, [], None, "claude")
 
 
-def test_plan_first_prompt_is_absent_without_the_flag_and_after_the_question(proj):
+def test_plan_first_rule_holds_until_start_work_is_answered(proj):
     plain = tickets.create(proj, "Small fix", "human:me")
     assert "Plan ready" not in runs.fresh_prompt(plain, [])
-    t = tickets.create(proj, "Online payments", "human:me", plan_first=True)
-    t["questions"] = [{"id": "q1", "text": "Plan ready", "answer": "Start work"}]
-    assert "Plan ready" not in runs.fresh_prompt(t, [])
-
-
-# ---------------------------------------------------------------- the footer
+    t = tickets.create(
+        proj, "Online payments", "human:me", fields={"done_when": "Customers pay"}, plan_first=True
+    )
+    ready = {"id": "q1", "text": "Plan ready", "answer": None}
+    # 1. planning, and 2. the question is open
+    for qs in ([], [ready]):
+        t["questions"] = qs
+        assert "Do NOT change any project file" in runs.fresh_prompt(t, [])
+    # 3. "Change a step": re-plan, still no start
+    t["questions"] = [
+        {**ready, "answer": "Change a step"},
+        {"id": "q2", "text": "Which step, and what should change?", "answer": "Step 2 is too big"},
+    ]
+    for prompt in (runs.fresh_prompt(t, []), runs.resume_prompt(t, [], None, "claude")):
+        assert "Do NOT change any project file" in prompt and "then start" not in prompt
+    # 4. re-planned and asked again, still open
+    t["questions"].append({"id": "q3", "text": "Plan ready", "answer": None})
+    assert "Do NOT change any project file" in runs.fresh_prompt(t, [])
+    # 5. "Start work": the rule is gone and the ticket starts
+    t["questions"][2]["answer"] = "Start work"
+    started = runs.fresh_prompt(t, [])
+    assert "Do NOT change any project file" not in started and "then start" in started
+    assert "Do NOT change" not in runs.resume_prompt(t, [], None, "claude")
 
 
 def _inside(monkeypatch, proj, tid, agent="claude"):
@@ -454,7 +471,7 @@ def test_plan_first_with_done_when_does_not_say_then_start(proj):
     prompt = runs.fresh_prompt(t, [])
     assert "then start" not in prompt and "done-when of the steps" in prompt
     assert prompt.index("Do NOT change any project file") < prompt.index("Customers can pay")
-    assert "Goal: <goal>" in prompt and "Not included: <list>" in prompt
+    assert "orch ticket plan" in prompt and "\\n" not in prompt
     assert "Which step, and what should change?" in prompt
     plain = tickets.create(proj, "Other", "human:me", fields={"done_when": "x"})
     assert "then start" in runs.fresh_prompt(plain, [])
