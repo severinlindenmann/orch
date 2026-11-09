@@ -89,6 +89,7 @@ struct QuestionBody: Codable, Sendable, Equatable {
     /// Permission questions: what "Always" covers, shown as "Always allow <scope>".
     var scope: String? = nil
     var allowQuestion: Bool? = nil // allow_question via JSONCoding
+    var review: Bool? = nil // review via JSONCoding
     var groupRef: GroupRef? = nil // group_ref via JSONCoding
 }
 
@@ -136,6 +137,10 @@ struct Question: Codable, Sendable, Equatable, Identifiable {
     var isGroupAllow: Bool {
         message.body.allowQuestion == true && message.body.options.count == 3 &&
             Set(message.body.options) == Set(["once", "always", "no"])
+    }
+    var isReview: Bool {
+        message.body.review == true && message.body.options.count == 2 &&
+            Set(message.body.options) == Set(["accept", "changes"])
     }
     var isAllow: Bool { isGroupAllow || isLegacyAllow }
     /// Labels never change the raw option sent to the relay.
