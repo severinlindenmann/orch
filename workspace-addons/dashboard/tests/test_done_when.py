@@ -90,9 +90,10 @@ def test_proof_line_says_changed_since_the_recorded_check(tmp_path):
     import subprocess
 
     from orch import filesig
+
     from orch_dashboard.data import add_proof_state
 
-    run = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=tmp_path, check=True, capture_output=True)  # noqa: E731
+    run = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=tmp_path, check=True, capture_output=True)
     run("init", "-q")
     (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
     run("add", ".")
