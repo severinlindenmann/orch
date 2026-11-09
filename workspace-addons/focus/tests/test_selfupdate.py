@@ -24,6 +24,8 @@ def get(port, path):
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
+    except OSError:  # the process is being replaced: not listening for a moment
+        return 0, b""
 
 
 @pytest.fixture
