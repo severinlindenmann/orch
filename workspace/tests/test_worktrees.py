@@ -622,3 +622,19 @@ def test_the_ticket_record_has_no_local_path(repo):
     rec = tickets.load(repo, a)["work"]["folders"][0]
     assert set(rec) == {"branch", "base", "sub", "host"}
     assert str(repo.resolve().parent) not in json.dumps(tickets.load(repo, a)["work"])
+
+
+def test_codex_in_a_copy_gets_exactly_the_workspace_store_as_writable(repo):
+    root = repo.resolve()
+    fresh = ["codex", "exec", "--json", "--", "do it"]
+    resume = ["codex", "exec", "resume", "--json", "sid", "--", "do it"]
+    copy = Path(worktrees.create(repo, repo.tids[0])["path"])
+    for argv in (fresh, resume):
+        out = runs.store_access(argv, "codex", repo, copy)
+        assert out.count("--add-dir") == 1 and out[out.index("--add-dir") + 1] == str(root / ".orch")
+        assert out[: out.index("--add-dir")] == argv[: argv.index("exec") + 1]
+        assert out[out.index("--add-dir") + 2 :] == argv[argv.index("exec") + 1 :]
+    assert runs.store_access(fresh, "codex", repo, repo) == fresh  # not in a copy: unchanged
+    assert runs.store_access(fresh, "generic", repo, copy) == fresh  # no store_args declared
+    claude = ["claude", "-p", "x"]
+    assert runs.store_access(claude, "claude", repo, copy) == claude

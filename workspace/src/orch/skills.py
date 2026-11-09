@@ -200,7 +200,7 @@ def apply_copy_files(root: Path, work: Path) -> None:
 
     def plain(rel: str) -> bool:
         """Nothing on the way from `work` to work/rel is a link: a copy holds BRANCH content, and a committed
-        link (CLAUDE.local.md -> ~/.bashrc, .claude -> elsewhere) must not make orch write outside it."""
+        link (a local instruction file or skills folder pointing elsewhere) must not make orch write outside it."""
         p = work
         for part in Path(rel).parts:
             p = p / part

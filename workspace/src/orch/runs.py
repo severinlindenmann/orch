@@ -898,6 +898,7 @@ def plan(
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
+    argv = store_access(argv, name, root, workdir_for(root, read(root, tid)))
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -910,6 +911,24 @@ def plan(
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
     }
+
+
+def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> list[str] | None:
+    """A tool sandboxed to its working folder (adapter `store_args`) cannot reach the workspace's store from a
+    separate copy, so every `orch` write of the agent would fail: the adapter's words go into the argv with
+    exactly <root>/.orch as the extra writable folder, nothing else (never the whole workspace, never the orch
+    home). Not in a copy: unchanged."""
+    sa = (adapters.load(name, root).get("store_args")) if argv else None
+    if not sa or sa["after"] not in argv:
+        return argv
+    try:
+        if Path(work).resolve() == Path(root).resolve():
+            return argv
+    except OSError:
+        return argv
+    store = str(Path(root).resolve() / ".orch")
+    i = argv.index(sa["after"]) + 1
+    return [*argv[:i], *[x.replace("{store}", store) for x in sa["args"]], *argv[i:]]
 
 
 # ---------------------------------------------------------------- start

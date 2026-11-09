@@ -64,19 +64,19 @@
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
     "work": {
       "type": "object",
-      "description": "Optional. Where the ticket's agent works when it has a separate copy of the project folder (a git worktree made by orch, on branch orch/<ticket>). Kept for the life of the ticket. Paths are of the machine that made them: another machine ignores entries that are not its own copies. A single-repo workspace has one entry; further entries are more repositories of the same ticket.",
+      "description": "Optional. The ticket works in a separate copy of the project (a git worktree made by orch, branch orch/<ticket>), kept for the life of the ticket. A record for people and other machines: it holds NO local path (those stay in the machine-local registry .orch/run/worktrees.json) and no code resolves a path from it. A single-repo workspace has one entry per machine; more repositories add entries.",
       "properties": {
         "folders": {
           "type": "array",
           "maxItems": 32,
           "items": {
             "type": "object",
-            "required": ["path", "branch"],
+            "required": ["branch"],
             "properties": {
-              "path": { "type": "string", "minLength": 1, "maxLength": 1000, "description": "Full path of the copy (the worktree's top folder)." },
               "branch": { "type": "string", "minLength": 1, "maxLength": 200, "description": "The branch the copy works on, orch/<ticket>." },
               "base": { "type": "string", "pattern": "^[0-9a-f]{40,64}$", "description": "The commit the copy was made from." },
-              "sub": { "type": "string", "maxLength": 1000, "description": "The workspace folder below the git top folder ('' or absent when the workspace is the top). The agent starts in path/sub." }
+              "sub": { "type": "string", "maxLength": 1000, "description": "The workspace folder below the git top folder ('' when the workspace is the top)." },
+              "host": { "type": "string", "maxLength": 100, "description": "The machine that made the copy (same value as a session's host)." }
             }
           }
         }

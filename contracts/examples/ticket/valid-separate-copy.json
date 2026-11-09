@@ -35,10 +35,10 @@
   "work": {
     "folders": [
       {
-        "path": "/Users/me/.orch-tool/worktrees/0a1b2c3d/t_copy01",
         "branch": "orch/t_copy01",
         "base": "9aa1f88c0123456789abcdef0123456789abcdef",
-        "sub": "apps/web"
+        "sub": "apps/web",
+        "host": "laptop"
       }
     ]
   }
