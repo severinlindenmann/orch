@@ -297,6 +297,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
+    u.add_argument("--update-nonce", help=argparse.SUPPRESS)
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
 
     cli_status.add_parsers(sub, common)
@@ -542,13 +543,19 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
     elif cmd == "update":
-        done = addons.update(root, args.project_only, args.after_install)
+        report = []
+        done = addons.update(
+            root,
+            args.project_only,
+            args.after_install,
+            json_output=args.json,
+            report=report,
+            nonce=args.update_nonce,
+        )
         if args.after_install:
             pass
-        elif args.project_only:
+        elif args.project_only and (args.json or not report):
             _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
-        elif not args.json:
-            print("orch is up to date.")
     elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
