@@ -271,8 +271,15 @@ def test_no_leaks():
 
 @pytest.mark.parametrize("operation", [pickle.dumps, copy.copy, copy.deepcopy])
 def test_copying_refused(operation):
+    hider = Hider({"token": TOKEN})
+    for binary in (False, True):
+        stream = HidingStream(hider, binary=binary)
+        stream.feed(TOKEN.encode() if binary else TOKEN)
+        assert TOKEN[:6] not in repr(stream) + str(stream)
+        with pytest.raises(TypeError):
+            operation(stream)
     with pytest.raises(TypeError):
-        operation(Hider({"token": TOKEN}))
+        operation(hider)
 
 
 def test_order_overlap_and_identity():

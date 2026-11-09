@@ -227,6 +227,17 @@ class HidingStream:
         self._holdback = max((len(n) for n, _ in self._needles), default=1) - 1
         self._closed = False
 
+    def __repr__(self) -> str:
+        return f"HidingStream(closed={self._closed})"
+
+    __str__ = __repr__
+
+    def __reduce__(self) -> Any:
+        raise TypeError("HidingStream cannot be serialized")
+
+    def __getstate__(self) -> Any:
+        raise TypeError("HidingStream cannot be serialized")
+
     def feed(self, chunk: Any) -> Any:
         if self._closed:
             raise ValueError("Hiding stream is closed")
