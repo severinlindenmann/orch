@@ -282,13 +282,87 @@ def input_text(items: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _screen_free(root: Path, tid: str, dialog: str | None) -> bool:
-    """Before orch types its notice: the pane is readable, not in copy mode, and shows no dialog."""
+COPY_MODE_CANCEL_SECONDS = 30.0  # a pane scrolled up (copy mode) this long: orch leaves copy mode itself
+HOLD_WORDS = {
+    "scrolled": "Waiting: the agent's window is scrolled up.",
+    "dialog": "Waiting: the agent's window shows a question for a person.",
+    "text": "Waiting: there is unsent text in the agent's window.",
+    "unreadable": "Waiting: the agent's window cannot be read right now.",
+}
+_PROMPT_GLYPH = re.compile(r"^\s*[>\u276f\u203a]\s?")
+_DIM = re.compile(r"\x1b\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m")  # SGR 2 (dim/faint): a tool's grey suggestion
+
+
+def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str:
+    """What a person typed in the prompt box ("" when it is empty). The tool's own grey suggestion counts
+    as empty: it is drawn dim, and the cursor sits on its first character (typed text: cursor at its end)."""
+    lines = pane.split("\n")
+    a, b = _box_rows(lines, cy)
+    rows = [_PROMPT_GLYPH.sub("", ln, count=1).strip() for ln in lines[a:b]]
+    text = " ".join(r for r in rows if r)
+    if not text:
+        return ""
+    first = next((ln for ln in lines[a:b] if _PROMPT_GLYPH.sub("", ln, count=1).strip()), "")
+    head = _PROMPT_GLYPH.match(first)
+    after = first[head.end() :] if head else first
+    start = (head.end() if head else 0) + len(after) - len(after.lstrip())
+    if cx is not None and cx == start and len(rows) == 1:
+        return ""  # the cursor on the first character: a suggestion, not typed text
+    if raw is not None:
+        rl = raw.split("\n")
+        ra, rb = _box_rows([_ANSI.sub("", ln) for ln in rl], cy)
+        body = [ln for ln in rl[ra:rb] if _PROMPT_GLYPH.sub("", _ANSI.sub("", ln), count=1).strip()]
+        if body and all(_DIM.search(ln) for ln in body):
+            return ""
+    return text
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _hold_reason(root: Path, tid: str, dialog: str | None) -> str | None:
+    """Why orch must not type its notice now (None: it may): the pane is unreadable, in copy mode
+    (scrolled up), shows a dialog, or the prompt box holds text a person typed (both would go as one line)."""
     pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
-    d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}", timeout=QUICK)
-    if pane.returncode != 0 or d.returncode != 0 or (d.stdout.split() or ["?"])[0] != "0":
-        return False
-    return not _dialog_shows(pane.stdout, dialog)
+    fmt = "#{pane_in_mode} #{cursor_y} #{cursor_x}"
+    d = tmux(root, "display-message", "-p", "-t", target(tid), fmt, timeout=QUICK)
+    if pane.returncode != 0 or d.returncode != 0 or not d.stdout.split():
+        return "unreadable"
+    fields = d.stdout.split()
+    if fields[0] != "0":
+        return "scrolled"
+    if _dialog_shows(pane.stdout, dialog):
+        return "dialog"
+    try:
+        cy = int(fields[1])
+        cx = int(fields[2]) if len(fields) > 2 else None
+    except (ValueError, IndexError):
+        return "unreadable"
+    raw = tmux(root, "capture-pane", "-p", "-e", "-t", target(tid), timeout=QUICK)
+    if _box_text(pane.stdout, cy, cx, raw.stdout if raw.returncode == 0 else None):
+        return "text"
+    return None
+
+
+def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
+    """Under the run lock: keep the reason input is held back (shown by `orch run status`), and after
+    COPY_MODE_CANCEL_SECONDS of a scrolled-up pane leave copy mode (a quiet pane: nobody is reading it)."""
+    cur = rec.get("hold")
+    if why is None:
+        if cur:
+            rec.pop("hold", None)
+            runs._write(root, rec)
+        return
+    if not cur or cur.get("why") != why:
+        rec["hold"] = {"why": why, "since": tickets.now()}
+        runs._write(root, rec)
+    elif why == "scrolled":
+        try:
+            age = time.time() - runs._parse(cur["since"])
+        except (KeyError, ValueError):
+            return
+        if age >= COPY_MODE_CANCEL_SECONDS:
+            tmux(root, "send-keys", "-t", target(tid), "-X", "cancel", timeout=QUICK)
 
 
 def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:
@@ -327,13 +401,18 @@ def deliver(root: Path, tid: str, stop=None) -> int:
                 runs._write(root, rec)
             return 0
         line = notice_line(tid, any(i.get("via") == "start" for i in items))
-        if not _screen_free(root, tid, _dialog_rule(rec["agent"], root)):
-            return 0  # a dialog or a screen orch cannot read: the wrapper's watcher tries again shortly
+        why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root))
+        _note_hold(root, tid, rec, why)
+        if why:
+            return (
+                0  # held back (scrolled up, a dialog, unsent text): the wrapper's watcher tries again shortly
+            )
         if (stop is not None and stop.is_set()) or (runs.read(root, tid) or {}).get("stop_requested"):
             return 0
         if not _type_line(root, tid, line, QUICK):
             return 0
         rec = runs.read(root, tid) or rec
+        rec.pop("hold", None)
         rec["live"] = {"state": "working", "since": tickets.now()}
         rec["renewed_at"] = tickets.now()
         rec["submit"] = {"at": tickets.now(), "line": line, "enters": 1, "nudges": nudges + 1}
@@ -1038,6 +1117,8 @@ def start_waiting(root: Path) -> None:
 def line(rec: dict, root: Path | None = None) -> str:
     """One plain sentence about a live run, for `orch run status`."""
     state = (rec.get("live") or {}).get("state", "starting")
+    if (rec.get("hold") or {}).get("why") in HOLD_WORDS:
+        return HOLD_WORDS[rec["hold"]["why"]]
     if (rec.get("live") or {}).get("why"):
         return rec["live"]["why"]
     words = {

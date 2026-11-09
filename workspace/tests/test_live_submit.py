@@ -191,7 +191,8 @@ def _stuck(proj, run, monkeypatch, pane=None, mode="0", text="Please add a rain 
     runs._write(proj, rec)
     line = runs_live.notice_line(tid, False)
     sent = []
-    screen = {"pane": pane if pane is not None else _screen(line), "mode": "0"}
+    want = pane if pane is not None else _screen(line)
+    screen = {"pane": _screen(""), "mode": "0"}  # an empty prompt while orch types the notice
 
     def fake(root, *a, **k):
         if a[0] == "send-keys":
@@ -210,6 +211,7 @@ def _stuck(proj, run, monkeypatch, pane=None, mode="0", text="Please add a rain 
     monkeypatch.setattr(runs_live, "PASTE_DELAY", 0)
     item = runs.pending_add(proj, tid, "human:lume", "message", text)
     assert runs_live.deliver(proj, tid) == 1 and sent == [line, "Enter"]
+    screen["pane"] = want
     screen["mode"] = mode  # e.g. a person opened copy mode after the notice went in
     return tid, rec["run"], item, sent, screen
 
@@ -449,7 +451,8 @@ def test_a_prompt_hook_alone_does_not_count_as_read(proj, run, monkeypatch):
 
 
 def test_a_notice_taken_but_never_read_ends_in_a_one_step_run(proj, run, monkeypatch):
-    tid, rn, _, sent, _ = _stuck(proj, run, monkeypatch)
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch)
+    screen["pane"] = _screen("")  # the tool took the notice: the box is empty again
     runs_live._set_state(proj, tid, rn, "idle")  # it went idle without reading
     assert runs_live.deliver(proj, tid) == 1  # one more notice
     runs_live._set_state(proj, tid, rn, "idle")
@@ -666,3 +669,75 @@ def test_a_lost_notice_is_not_typed_again_over_a_dialog_or_when_it_shows_above(p
     screen["pane"] = _screen("", below="Esc to cancel")
     assert _at(proj, tid, rn, 5) is None
     assert sent[2:] == []
+
+
+# ---------------------------------------------------------------- held back: scrolled up, unsent text
+
+
+def _held(proj, run, monkeypatch, box="", mode="0", cx=2, raw=None):
+    """An idle live run with input waiting and a fake tmux; returns (ticket, run, keys sent, screen)."""
+    tid = _ticket(run)
+    rec = runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    rec["live"] = {"state": "idle", "since": tickets.now()}
+    rec["up"] = True
+    runs._write(proj, rec)
+    sent = []
+    screen = {"box": box, "mode": mode, "cx": cx, "raw": raw}
+
+    def fake(root, *a, **k):
+        if a[0] == "send-keys":
+            sent.append(a[-1])
+        if a[0] == "capture-pane":
+            pane = _screen(screen["box"])
+            if "-e" in a and screen["raw"] is not None:
+                pane = screen["raw"]
+            return subprocess.CompletedProcess(a, 0, pane, "")
+        if a[0] == "display-message":
+            return subprocess.CompletedProcess(a, 0, f"{screen['mode']} 49 {screen['cx']}\n", "")
+        return subprocess.CompletedProcess(a, 0, "", "")
+
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    monkeypatch.setattr(runs_live, "tmux", fake)
+    monkeypatch.setattr(runs_live, "PASTE_DELAY", 0)
+    runs.pending_add(proj, tid, "human:lume", "message", "Please add a rain plan.")
+    return tid, rec["run"], sent, screen
+
+
+def test_a_prompt_with_the_persons_unsent_text_is_never_typed_into(proj, run, monkeypatch):
+    """Lane C (B): the notice went in right after "commit the pptx skill too" and both were sent as one line."""
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, box="commit the pptx skill too", cx=27)
+    assert runs_live.deliver(proj, tid) == 0 and sent == []
+    rec = runs.read(proj, tid)
+    assert rec["hold"]["why"] == "text"
+    assert "unsent text" in runs_live.line(rec, proj)
+    screen["box"] = ""  # the person sent or cleared it
+    assert runs_live.deliver(proj, tid) == 1 and sent == [runs_live.notice_line(tid, False), "Enter"]
+    assert "hold" not in runs.read(proj, tid)
+
+
+def test_the_tools_grey_suggestion_counts_as_an_empty_prompt(proj, run, monkeypatch):
+    """fb18 screenshot: `commit the pilatus-pptx skill too` was the tool's own suggestion (cursor on its first
+    character), not typed text."""
+    tid, rn, sent, _ = _held(proj, run, monkeypatch, box="commit the pilatus-pptx skill too", cx=2)
+    assert runs_live.deliver(proj, tid) == 1 and sent[-1] == "Enter"
+
+
+def test_a_dim_suggestion_counts_as_empty_even_with_the_cursor_elsewhere(proj, run, monkeypatch):
+    raw = _screen("").replace("> ", "> \x1b[2mcommit the skill too\x1b[0m")
+    tid, rn, sent, _ = _held(proj, run, monkeypatch, box="commit the skill too", cx=9, raw=raw)
+    assert runs_live.deliver(proj, tid) == 1
+
+
+def test_a_scrolled_up_pane_says_so_and_orch_leaves_copy_mode_after_half_a_minute(
+    proj, run, monkeypatch
+):
+    """Lane C (C): the person scrolled up to read; the notice waited with no word on the page."""
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, mode="1")
+    assert runs_live.deliver(proj, tid) == 0 and sent == []
+    rec = runs.read(proj, tid)
+    assert rec["hold"]["why"] == "scrolled" and "scrolled up" in runs_live.line(rec, proj)
+    rec["hold"]["since"] = runs._iso(time.time() - runs_live.COPY_MODE_CANCEL_SECONDS - 1)
+    runs._write(proj, rec)
+    assert runs_live.deliver(proj, tid) == 0 and sent == ["cancel"]  # tmux send-keys -X cancel
+    screen["mode"] = "0"
+    assert runs_live.deliver(proj, tid) == 1 and sent[-2:] == [runs_live.notice_line(tid, False), "Enter"]
