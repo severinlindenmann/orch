@@ -15,11 +15,18 @@ from orch.errors import Refused
 
 @pytest.fixture
 def ws(proj, monkeypatch):
-    (proj / ".orch").mkdir(exist_ok=True)
-    for k in list(os.environ):
-        if k.startswith("CODEX_") or k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"):
-            monkeypatch.delenv(k, raising=False)
-    return proj
+    """A TEST workspace under <fake account home>/.orch-test with its test home (a source-tree test install never
+    pairs a real workspace with the account home), with the same environment hygiene as `proj`."""
+    from orch import addons
+
+    acct = addons.real_home()
+    base = acct / ".orch-test"
+    root = base / "ws"
+    (root / ".orch").mkdir(parents=True)
+    (base / "home").mkdir()
+    monkeypatch.setenv("ORCH_HOME", str(base / "home"))
+    monkeypatch.chdir(root)
+    return root
 
 
 def _proof(ws, op, target, by="human:pat", **kw):
@@ -194,9 +201,9 @@ def test_dev_proof_never_works_on_a_real_workspace(ws, run, monkeypatch):
         hp.dev_mark(ws)  # a workspace that already has a human key cannot become dev
 
 
-def test_dev_workspace_accepts_the_test_human(proj, run, monkeypatch):
+def test_dev_workspace_accepts_the_test_human(ws, run, monkeypatch):
+    proj = ws
     # a fresh demo workspace: marked dev at creation (no human.key yet), then the test human acts
-    (proj / ".orch").mkdir(exist_ok=True)
     monkeypatch.setattr(hp, "install_kind", lambda: "dev")
     hp.dev_mark(proj)
     assert hp.dev_workspace(proj)

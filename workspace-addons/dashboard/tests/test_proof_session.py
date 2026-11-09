@@ -18,15 +18,16 @@ from orch_dashboard.server import make_server  # noqa: E402
 @pytest.fixture
 def live(tmp_path, monkeypatch):
     acct = tmp_path / "acct"
-    acct.mkdir()
+    (acct / ".orch-test").mkdir(parents=True)  # a test workspace pairs only with a test home (never the real one)
     monkeypatch.setattr(addons, "real_home", lambda: acct)
-    monkeypatch.setenv("ORCH_HOME", str(acct / "orchhome"))
+    monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
     import os
 
     for k in list(os.environ):
         if k.startswith("CODEX_") or k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ORCH_AGENT"):
             monkeypatch.delenv(k, raising=False)
-    root = tmp_path / "ws"
+    (acct / ".orch-test" / "home").mkdir()
+    root = acct / ".orch-test" / "ws"
     (root / ".orch" / "tickets").mkdir(parents=True)
     monkeypatch.setenv("ORCH_BIN", "/tmp/planted-orch")  # must never be used
     srv = make_server(root, 0, orch_bin=pageproof.SELF)
