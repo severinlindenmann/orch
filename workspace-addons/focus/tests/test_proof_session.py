@@ -30,6 +30,14 @@ def live(tmp_path, monkeypatch):
     root = acct / ".orch-test" / "ws"
     (root / ".orch" / "tickets").mkdir(parents=True)
     monkeypatch.setenv("ORCH_BIN", "/tmp/planted-orch")  # must never be used
+
+    # No child `orch` here: a child would see the REAL account home (pwd) and fall back to ~/.orch-tool.
+    import subprocess
+
+    def no_child(argv, *a, **k):
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    monkeypatch.setattr(subprocess, "run", no_child)
     srv = make_server(root, 0, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield root, srv.server_address[1]
