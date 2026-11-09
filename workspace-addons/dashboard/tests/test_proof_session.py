@@ -364,3 +364,13 @@ def test_wont_do_clicks_need_a_proof_on_the_real_server_path():
         "t_a:c1",
     )
     assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": True}) is None
+
+
+def test_check_edit_and_remove_clicks_need_a_proof_on_the_real_server_path():
+    from orch_dashboard import actions as a
+
+    args = {"ticket": "t_abcdef", "check": "c1"}
+    assert a.proof_for("check.edit", {**args, "text": "x"}) == ("check.wont_do_undo", "t_abcdef:c1")
+    assert a.proof_for("check.remove", args) == ("check.wont_do_undo", "t_abcdef:c1")
+    assert a.build_argv("check.remove", args)[:4] == ["check", "remove", "t_abcdef", "c1"]
+    assert a.build_argv("check.edit", {**args, "text": "a -- b"})[-2:] == ["--", "a -- b"]

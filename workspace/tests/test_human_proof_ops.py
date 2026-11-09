@@ -503,7 +503,7 @@ def test_relay_connect_handoff_keeps_the_token_out_of_handoffs_json(ws, run, mon
     card = hp.handoffs(ws)[0]
     assert (
         card["op"] == "relay.connect"
-        and card["parts"] == {"host": "r.example"}
+        and card["parts"] == {"host": "r.example", "scheme": "https"}
         and "ws_a" not in json.dumps(card["parts"])
     )
     assert "orn_SECRETTOKEN" not in json.dumps(hp.handoffs(ws))
@@ -1044,7 +1044,7 @@ def test_the_connect_card_shows_hostname_and_port_built_from_the_url_and_a_long_
     )  # fmt: skip
     card = hp.handoffs(ws)[0]
     assert (
-        card["parts"] == {"host": f"{host}:8443"} and card["exact"] == f"{host}:8443"
+        card["parts"] == {"host": f"{host}:8443", "scheme": "https"} and card["exact"] == f"{host}:8443"
     )  # in full, no cut, no path
     assert hp.part(host).endswith("…")  # (free text WOULD have been cut)
 
@@ -1118,7 +1118,7 @@ def test_wont_do_needs_the_proof_and_hands_off_with_plain_parts(ws, run, monkeyp
     assert (
         card["op"] == "check.wont_do" and card["target"] == f"{tid}:{cid}" and card["value"] == "not needed"
     )
-    assert card["parts"] == {"title": "Plan", "step": "Write the file"}
+    assert card["parts"] == {"title": "Plan", "step": "Write the file", "n": 1}
     item = hp.handoff_take(ws, card["id"])
     code, out, err = _cli(run, monkeypatch, _proof(ws, item["op"], item["target"]), *item["argv"])
     assert code == 0, out + err
@@ -1143,7 +1143,7 @@ def test_undoing_a_wont_do_needs_a_proof_but_reopening_a_done_step_stays_free(ws
     code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
     assert code == 2 and tickets.load(ws, tid)["checklist"][0].get("wont_do") is True  # still won't do
     card = [h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"][0]
-    assert card["parts"] == {"title": "Plan", "step": "Write the file"}
+    assert card["parts"] == {"title": "Plan", "step": "Write the file", "n": 1, "action": "reopen"}
     code, *_ = _cli(
         run,
         monkeypatch,
@@ -1198,3 +1198,107 @@ def test_a_ticket_that_cannot_be_read_fails_closed_for_the_undo(ws, run, monkeyp
     (ws / ".orch" / "tickets" / f"{tid}.json").write_text("{not json")
     code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
     assert code == 2 and "proven" not in out  # refused: nothing was reopened without a proof
+
+
+# ---------------------------------------------------------- rename / remove of a Won't do need the proof too
+
+
+def _wont_do_step(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    _cli(
+        run, monkeypatch, _proof(ws, "check.wont_do", f"{tid}:{cid}"), "check", "wont-do", tid, cid, "--json"
+    )
+    assert tickets.load(ws, tid)["checklist"][0]["wont_do"] is True
+    return tid, cid
+
+
+def test_remove_and_rename_of_a_wont_do_need_the_proof_and_hand_off(ws, run, monkeypatch):
+    tid, cid = _wont_do_step(ws, run, monkeypatch)
+    for argv in (("check", "remove", tid, cid), ("check", "edit", tid, cid, "Renamed")):
+        code, out, err = run(*argv, "--by", "human:pat", "--json")
+        assert code == 2 and "Continue" in out + err, argv
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert step["wont_do"] is True and step["text"] == "Write the file"  # nothing changed
+    cards = {h["parts"]["action"]: h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"}
+    assert set(cards) == {"remove", "edit"} and cards["edit"]["value"] == "Renamed"
+    assert cards["remove"]["parts"] == {"title": "Plan", "step": "Write the file", "n": 1, "action": "remove"}
+    # with the proof: it works, and by comes from the proof
+    target = f"{tid}:{cid}"
+    code, *_ = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "check.wont_do_undo", target),
+        "check",
+        "edit",
+        tid,
+        cid,
+        "Renamed",
+        "--json",
+    )
+    assert code == 0 and tickets.load(ws, tid)["checklist"][0]["text"] == "Renamed"
+    code, *_ = _cli(
+        run, monkeypatch, _proof(ws, "check.wont_do_undo", target), "check", "remove", tid, cid, "--json"
+    )
+    assert code == 0 and tickets.load(ws, tid)["checklist"] == []
+
+
+def test_an_agent_cannot_remove_or_rename_a_wont_do_even_with_a_forged_flag(ws, run, monkeypatch):
+    tid, cid = _wont_do_step(ws, run, monkeypatch)
+    for argv in (("check", "remove", tid, cid), ("check", "edit", tid, cid, "X")):
+        assert run(*argv, "--by", "agent:x", "--json")[0] == 2
+    wrong = _proof(ws, "check.wont_do_undo", f"{tid}:c9")
+    assert _cli(run, monkeypatch, wrong, "check", "remove", tid, cid, "--json")[0] == 2
+    assert tickets.load(ws, tid)["checklist"][0]["wont_do"] is True
+
+
+def test_editing_and_removing_an_ordinary_step_stay_free(ws, run):
+    tid, cid = _ticket_with_step(ws, run)
+    assert run("check", "edit", tid, cid, "New text", "--by", "human:pat", "--json")[0] == 0
+    assert run("check", "remove", tid, cid, "--by", "human:pat", "--json")[0] == 0
+    assert hp.handoffs(ws) == []
+
+
+def test_the_library_edit_and_remove_decide_under_the_lock(ws, run, monkeypatch):
+    tid, cid = _wont_do_step(ws, run, monkeypatch)
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_edit(ws, tid, cid, "x", "human:pat")
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_remove(ws, tid, cid, "human:pat")
+    # a step that BECOMES wont_do between a caller's look and the locked operation is refused too
+    t2, c2 = _ticket_with_step(ws, run)
+    orig = tickets.apply_op
+
+    def swap(root, t, op):
+        if t == t2:
+            tickets.apply_op = orig
+            orig(root, t2, lambda x: x["checklist"][0].update(wont_do=True))
+        return orig(root, t, op)
+
+    monkeypatch.setattr(tickets, "apply_op", swap)
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_remove(ws, t2, c2, "human:pat")
+    monkeypatch.setattr(tickets, "apply_op", orig)
+    assert tickets.load(ws, t2)["checklist"][0]["wont_do"] is True
+
+
+def test_wont_do_cards_show_the_step_number_and_the_connect_card_the_scheme(ws, run):
+    from conftest import turn_on
+
+    tid, cid = _ticket_with_step(ws, run)
+    run("check", "wont-do", tid, cid, "--by", "human:pat", "--json")
+    assert hp.handoffs(ws)[0]["parts"]["n"] == 1
+    turn_on(ws, "relay")
+    run(
+        "relay",
+        "connect",
+        "http://r.example:8080",
+        "--workspace",
+        "w",
+        "--token",
+        "orn_T",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    card = [h for h in hp.handoffs(ws) if h["op"] == "relay.connect"][0]
+    assert card["parts"] == {"host": "r.example:8080", "scheme": "http"}

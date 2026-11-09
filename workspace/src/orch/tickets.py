@@ -1460,6 +1460,18 @@ def check_exists(root: Path, tid: str, cid: str) -> None:
     _item(load(root, tid), cid)
 
 
+class NeedsProof(Refused):
+    """A person's decision (undoing a Won't do) was asked for without the person's proof (H1)."""
+
+
+def _undo_guard(by: str, item: dict, tid: str, cid: str, proven: bool) -> None:
+    """Changing a Won't do step (rename, remove, reopen) is a person's decision and needs the person's proof
+    (H1). Called under the ticket lock on the ticket as it is now."""
+    _person_only(by, item, tid, cid)  # an agent is refused with its own words
+    if not proven:
+        raise NeedsProof("Changing a Won't do is a person's decision.")
+
+
 def check_edit(
     root: Path,
     tid: str,
@@ -1469,6 +1481,7 @@ def check_edit(
     if_revision: int | None = None,
     was: str | None = None,
     covers: str | None = None,
+    proven: bool = False,
 ) -> tuple[dict, dict]:
     if text is None and covers is None:
         raise Refused("Say the new text or --covers.")
@@ -1478,7 +1491,10 @@ def check_edit(
 
     def op(t):
         item = _item(t, cid)
-        _person_only(by, item, tid, cid)
+        if item.get("wont_do"):
+            _undo_guard(by, item, tid, cid, proven)
+        else:
+            _person_only(by, item, tid, cid)
         if text is not None:
             item["text"] = text.strip()
             add_history(t, by, f"Renamed {cid}")
@@ -1507,12 +1523,14 @@ def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dic
     return apply_op(root, tid, op)
 
 
-def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
-    """Always allowed. The history line keeps the step text and its proof."""
+def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
+    """Allowed, except a Won't do step: that is a person's decision and needs the person's proof (decided
+    under the lock). The history line keeps the step text and its proof."""
 
     def op(t):
         item = _item(t, cid)
-        _person_only(by, item, tid, cid)  # an agent cannot delete a person's decision
+        if item.get("wont_do"):
+            _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
@@ -1524,10 +1542,6 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     return apply_op(root, tid, op)
 
 
-class NeedsProof(Refused):
-    """A person's decision (undoing a Won't do) was asked for without the person's proof (H1)."""
-
-
 def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
     """Open again; the old proof stays in the history line. A Won't do step is a person's decision: only a
     person undoes it, and (H1) only with the person's proof: `proven` is True only when the caller verified a
@@ -1537,9 +1551,7 @@ def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
     def op(t):
         item = _item(t, cid)
         if item.get("wont_do"):
-            _person_only(by, item, tid, cid)  # an agent is refused with its own words
-            if not proven:
-                raise NeedsProof("Undoing a Won't do is a person's decision.")
+            _undo_guard(by, item, tid, cid, proven)
             for k in ("wont_do", "reason"):
                 item.pop(k, None)
             _clear_doing(item)

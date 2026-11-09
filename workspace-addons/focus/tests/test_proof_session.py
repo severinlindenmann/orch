@@ -21,7 +21,9 @@ from orch_focus.server import make_server
 @pytest.fixture
 def live(tmp_path, monkeypatch):
     acct = tmp_path / "acct"
-    (acct / ".orch-test").mkdir(parents=True)  # a test workspace pairs only with a test home (never the real one)
+    (acct / ".orch-test").mkdir(
+        parents=True
+    )  # a test workspace pairs only with a test home (never the real one)
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
     import os
@@ -88,7 +90,9 @@ def test_click_without_a_session_is_watch_only(live, monkeypatch):
     _root, port = live
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
-    st, _, _body = post(port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}})
+    st, _, _body = post(
+        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+    )
     assert st == 403 and ran == []
 
 
@@ -106,7 +110,10 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
 
     monkeypatch.setattr(actions, "run_with_proof", fake)
     st, _, _ = post(
-        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}, {"Cookie": ck}
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"Cookie": ck},
     )
     assert st == 200, seen
     assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # run_with_proof adds the flag itself
@@ -131,3 +138,26 @@ def test_click_with_session_but_forwarded_is_refused(live):
 def test_orch_bin_from_the_environment_is_ignored():
     argv = pageproof.argv0(pageproof.SELF)
     assert argv[1:5] == ["-I", "-P", "-m", "orch"] and argv[0] == pageproof.sys.executable
+
+
+def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
+    """An agent posting to Focus's act endpoint (no session cookie) can not change a person's Won't do."""
+    _root, port = live
+    for op, args in (
+        ("check.remove", {"ticket": "t_abc123", "check": "c1"}),
+        ("check.edit", {"ticket": "t_abc123", "check": "c1", "text": "x"}),
+        ("check.reopen", {"ticket": "t_abc123", "check": "c1"}),
+        ("check.wont_do", {"ticket": "t_abc123", "check": "c1"}),
+    ):
+        st, _, body = post(port, "/api/act", {"op": op, "args": args})
+        assert st == 403, (op, body)
+    from orch_focus import actions
+
+    assert actions.proof_for("check.edit", {"ticket": "t_a", "check": "c1"}) == (
+        "check.wont_do_undo",
+        "t_a:c1",
+    )
+    assert actions.proof_for("check.remove", {"ticket": "t_a", "check": "c1"}) == (
+        "check.wont_do_undo",
+        "t_a:c1",
+    )

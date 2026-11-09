@@ -992,7 +992,7 @@ HANDOFF_HEADS = {
     "addon.add_local": (("addon", "add"),),
     "chat.send": (("chat", "say"), ("chat", "send")),
     "check.wont_do": (("check", "wont-do"),),
-    "check.wont_do_undo": (("check", "reopen"),),
+    "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
     "chat.make_ticket": (("chat", "make-ticket"),),
 }
 
@@ -1100,6 +1100,26 @@ def step_text(root: Path, tid: str, cid: str) -> str:
     except (Refused, OSError, ValueError, AttributeError):
         text = ""
     return part(text) or "this step"
+
+
+def step_number(root: Path, tid: str, cid: str) -> int:
+    """The step's place in the ticket's list (1, 2, 3 ...): shown next to its (agent-written) text."""
+    from orch import tickets
+
+    try:
+        ids = [c.get("id") for c in tickets.load(root, tid).get("checklist") or []]
+        return ids.index(cid) + 1
+    except (Refused, OSError, ValueError, AttributeError):
+        return 0
+
+
+def step_parts(root: Path, tid: str, cid: str, **more) -> dict:
+    return {
+        "title": ticket_name(root, tid),
+        "step": step_text(root, tid, cid),
+        "n": step_number(root, tid, cid),
+        **more,
+    }
 
 
 def status_parts(root: Path, tid: str, data: str) -> dict:
