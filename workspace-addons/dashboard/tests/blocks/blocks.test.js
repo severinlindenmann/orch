@@ -3,7 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const {validate, render, isSafeHttps, LIMITS} = require('./blocks.js');
+const KIT = path.resolve(__dirname, '../../src/orch_dashboard/web/kit');
+const {validate, render, isSafeHttps, LIMITS} = require('../../src/orch_dashboard/web/kit/blocks.js');
 class Element {
   constructor(tag) { this.tagName = tag; this.className = ''; this.attributes = {}; this.children = []; this.text = ''; }
   get childNodes() { return this.children; }
@@ -21,7 +22,7 @@ const tag = name => e => e.tagName === name;
 const cls = name => e => (e.className || e.attributes.class || '').split(' ').includes(name);
 const draw = (doc, opts = {}) => render(doc, {document, ...opts});
 const docOf = (...blocks) => ({schema: 'orch.blocks/1', from: 'job', blocks});
-const folder = path.resolve(__dirname, '../../../../../../contracts/vectors/blocks');
+const folder = path.resolve(__dirname, '../../../../contracts/vectors/blocks');
 assert.ok(fs.existsSync(folder));
 const files = fs.readdirSync(folder).filter(n => n.endsWith('.json')).sort();
 assert.ok(files.length >= 21);
@@ -148,7 +149,7 @@ test('https checks and rendering defence', () => {
     assert.equal(find(draw(d).el, tag('a')), undefined);
   }
   for (const url of ['https://example.com/a?b=1#c','https://example.com/?a@b']) assert.equal(isSafeHttps(url), true);
-  assert.match(fs.readFileSync(path.join(__dirname,'blocks.js'),'utf8'), /case 'link':[\s\S]*?if \(!isSafeHttps\(b.url\)\)/);
+  assert.match(fs.readFileSync(path.join(KIT,'blocks.js'),'utf8'), /case 'link':[\s\S]*?if \(!isSafeHttps\(b.url\)\)/);
 });
 test('limits at and beyond boundaries', () => {
   const repeated = (n, v) => Array.from({length:n}, () => v);
@@ -226,14 +227,35 @@ test('invalid raw JSON is bounded and input is never mutated', () => {
   }
 });
 test('source guard and byte-identical kit copies', () => {
-  const source = fs.readFileSync(path.join(__dirname,'blocks.js'),'utf8');
+  const source = fs.readFileSync(path.join(KIT,'blocks.js'),'utf8');
   assert.doesNotMatch(source,/innerHTML|insertAdjacentHTML|outerHTML|document\.write|eval\s*\(|new Function/);
-  const root = path.resolve(__dirname,'../../../../../..');
-  for (const name of ['blocks.js','blocks.css']) assert.deepEqual(fs.readFileSync(path.join(__dirname,name)), fs.readFileSync(path.join(root,'workspace/src/orch_ui/static',name)));
+  const root = path.resolve(__dirname,'../../../..');
+  for (const name of ['blocks.js','blocks.css']) assert.deepEqual(fs.readFileSync(path.join(KIT,name)), fs.readFileSync(path.join(root,'workspace/src/orch_ui/static',name)));
 });
 test('demo data contains every valid fixture', () => {
   const vm = require('node:vm'), context = {window:{}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'blocks-demo-data.js'),'utf8'),context);
   const expected = Object.keys(fixtures).filter(n => n.startsWith('valid-')).sort();
   assert.deepEqual(Array.from(context.window.BLOCK_FIXTURES, f => f.name), expected);
+});
+
+test('charts: legend, end labels and one axis caption; no stray single-series heading', () => {
+  const line = draw(fixture('line-chart')).el;
+  assert.equal(findAll(line, cls('b-legend'))[0].children.length, 2);
+  assert.match(textOf(find(line, cls('b-axis'))), /1.*Lowest 0, highest 120.*3/);
+  const bar = draw(fixture('all-ten')).el;
+  assert.equal(findAll(find(bar, tag('figure')), tag('h4')).length, 0);
+  assert.equal(textOf(find(bar, cls('b-axiscap'))), 'Invoices by Day');
+});
+
+test('unknown total is indeterminate: no inline width on the bar', () => {
+  const el = draw(fixture('progress-unknown-total')).el;
+  assert.ok(find(el, cls('b-indet')));
+  assert.equal(find(el, tag('i')).attributes.style, undefined);
+});
+
+test('a picture that fails to load is hidden behind a note', () => {
+  const el = draw(fixture('picture-preview'), {fileUrl: p => '/' + p}).el;
+  assert.ok(find(el, tag('img')));
+  assert.equal(find(draw(fixture('picture-preview')).el, tag('img')), undefined);
 });

@@ -17,7 +17,15 @@
 .b-prog .l { display:flex; justify-content:space-between; gap:var(--s2); color:var(--text-muted); font-size:var(--fs-meta); margin-bottom:var(--s1); }
 .b-prog .bar { height:7px; background:var(--border); border-radius:var(--radius); overflow:hidden; }
 .b-prog .bar i { display:block; height:100%; background:var(--brand); }
-.b-indet .bar i { width:30%; opacity:.6; }
+.b-indet .bar i { width:100%; opacity:.7; background:repeating-linear-gradient(135deg,var(--brand) 0 8px,transparent 8px 16px); background-size:22.6px 100%; animation:b-slide 1s linear infinite; }
+@keyframes b-slide { to { background-position:22.6px 0; } }
+@media (prefers-reduced-motion:reduce) { .b-indet .bar i { animation:none; } }
+.b-pic[hidden] { display:none; }
+.b-legend { display:flex; flex-wrap:wrap; gap:var(--s3); list-style:none; padding:0; margin:var(--s2) 0 0; font-size:var(--fs-meta); color:var(--text-muted); }
+.b-legend li { display:flex; align-items:center; gap:var(--s1); }
+.b-legend i { display:inline-block; width:12px; height:3px; border-radius:2px; }
+.b-axis { display:flex; justify-content:space-between; gap:var(--s2); font-size:var(--fs-meta); color:var(--text-muted); margin-top:var(--s1); }
+.b-axiscap { margin-top:var(--s1); }
 .b-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:var(--s2); }
 .b-stat { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:var(--s2) var(--s3); }
 .b-stat strong { display:block; font-size:var(--fs-3); }
@@ -54,9 +62,6 @@
 .b-fallback { border:1px dashed var(--border); border-radius:var(--radius); color:var(--text-muted); padding:var(--s2) var(--s3); }
 .blocks.blocks-invalid { border:1px solid var(--danger); border-radius:var(--radius); padding:var(--s3); }
 .blocks .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); clip-path:inset(50%); white-space:nowrap; border:0; }
-.b-demo { max-width:760px; margin:var(--s5) auto; padding:var(--s4); display:flex; flex-direction:column; gap:var(--s4); }
-.b-demo-card { border:1px solid var(--border); border-radius:var(--radius); padding:var(--s4); background:var(--surface); }
-.b-demo-card h2 { margin-bottom:var(--s3); }
 @media (max-width:720px) {
   .b-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .b-kv { grid-template-columns:1fr; }

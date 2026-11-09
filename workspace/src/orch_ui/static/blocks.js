@@ -147,10 +147,19 @@
           flush();
         });
         fig.append(svg);
+        const legend = el('ul', 'b-legend', undefined, {'aria-hidden': 'true'});
+        b.series.forEach((s, index) => { const li = el('li'); li.append(el('i', 's' + index), el('span', '', s.name)); legend.append(li); });
+        fig.append(legend);
+        if (xs.length) {
+          const first = xs[0], last = xs[xs.length - 1];
+          const ends = el('div', 'b-axis', undefined, {'aria-hidden': 'true'});
+          ends.append(el('span', '', first), el('span', '', ys.length ? 'Lowest ' + ymin + ', highest ' + ymax : ''), el('span', '', last));
+          fig.append(ends);
+        }
       } else {
         const bars = el('div', 'bars', undefined, {'aria-hidden': 'true'});
         b.series.forEach((s, index) => {
-          bars.append(el('h4', 'b-muted', s.name));
+          if (b.series.length > 1) bars.append(el('h4', 'b-muted', s.name));
           const max = Math.max(1, ...s.points.map(p => Math.abs(p[1] || 0)));
           for (const [x, y] of s.points) {
             const row = el('div', 'r');
@@ -160,8 +169,8 @@
         });
         fig.append(bars);
       }
-      if (b.x_label) fig.append(muted(b.x_label));
-      if (b.y_label) fig.append(muted(b.y_label));
+      const caption = b.y_label && b.x_label ? b.y_label + ' by ' + b.x_label : b.y_label || b.x_label;
+      if (caption) fig.append(el('p', 'b-muted b-axiscap', caption, {'aria-hidden': 'true'}));
       fig.append(alternative);
       return fig;
     }
@@ -234,7 +243,12 @@
             if (url === null) box.append(muted('File not available'));
           }
           if (url && b.preview === 'image' && /\.(png|jpe?g|gif|webp)$/i.test(b.path) && (b.size === undefined || b.size <= 2 * 1024 * 1024))
-            box.append(el('img', 'b-pic', undefined, {src: url, alt: name, loading: 'lazy'}));
+          {
+            const img = el('img', 'b-pic', undefined, {src: url, alt: name, loading: 'lazy'});
+            // A picture that fails to load is replaced by a note, never a broken-image icon.
+            if (typeof img.addEventListener === 'function') img.addEventListener('error', () => { img.setAttribute('hidden', ''); box.append(muted('File not available')); });
+            box.append(img);
+          }
           return box;
         }
         case 'link':
