@@ -278,6 +278,15 @@ def _tracked(root: Path, rel: str) -> bool:
     return rc == 0
 
 
+def _refusal_text(root: Path, default: str) -> str:
+    """What the person reads when git is not asked: the plain reason when the root is their home folder or a
+    drive root (safegit.unusable_root), else `default`."""
+    from orch import safegit
+
+    why = safegit.unusable_root(root)
+    return f"{why[0].upper()}{why[1:]}. Nothing was stored." if why else default
+
+
 # What "closed" means when orch finds no git it trusts (no trusted git: safegit.have_git is False), per caller:
 #   _in_git_repo / check_private_path / _ignored -> refuse (nothing private is stored);
 #   _tracked -> "tracked" (the team's file: not touched); _git_exclude -> skipped with a note;
@@ -297,6 +306,9 @@ def _in_git_repo(root: Path) -> bool:
     index, ...) refuses: an unknown state is never treated as "no repo"."""
     sg = _safegit()
     rc, out, err = 127, b"", ""
+    why = sg.unusable_root(root)
+    if why:
+        raise Refused(f"{why[0].upper()}{why[1:]}. Nothing was stored.")
     if not sg.have_git(root):
         if sg.git_on_path():  # a git exists but none is trusted (a planted one?): never "not a repo"
             raise Refused(
@@ -328,7 +340,7 @@ def _ignored(root: Path, rel: str) -> bool:
     if rc == 1:
         return False
     if rc in (124, 125, 126, 127):
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
+        raise Refused(_refusal_text(root, "orch cannot ask git about this folder. Nothing was stored."))
     raise Refused("git could not say whether private files are ignored here. Nothing was stored.")
 
 
@@ -390,7 +402,11 @@ def check_private_path(root: Path, path: Path) -> None:
         ["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10
     )
     if rc not in (0, 1):
-        raise Refused("git could not say whether private files are tracked here. Nothing was stored.")
+        raise Refused(
+            _refusal_text(
+                root, "git could not say whether private files are tracked here. Nothing was stored."
+            )
+        )
     if not _ignored(root, rel) or rc == 0:
         raise Refused(
             f"git would not leave {rel} alone (a .gitignore of the project shows it, or it is tracked). "

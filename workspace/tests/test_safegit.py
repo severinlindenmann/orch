@@ -1296,7 +1296,7 @@ def test_a_failure_in_resolve_or_home_never_relaxes_the_avoidance(tmp_path, monk
     assert safegit._broad(Boom(tmp_path)) is False  # an exception: full avoidance stays
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("no home"))))
     assert safegit._is_home(tmp_path.resolve()) is False
-    assert safegit._broad(tmp_path) is False or safegit._broad(tmp_path) is True  # no crash
+    safegit._broad(tmp_path)  # a failing home lookup does not crash it
     assert not safegit._entry(tmp_path / "proj").startswith("=")
 
 
@@ -1334,3 +1334,47 @@ def test_a_root_that_is_home_or_a_drive_root_refuses_git(tmp_path, monkeypatch):
         assert safegit.run_bytes(["rev-parse", "--show-toplevel"], root)[0] == safegit.REFUSED  # root = cwd
     assert safegit.unusable_root(tmp_path / "project") is None
     assert safegit.unusable_root(None) is None
+
+
+def test_harness_shows_the_plain_message_for_a_home_or_drive_root_workspace(tmp_path, monkeypatch):
+    from orch import harness
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    for fn in (
+        lambda: harness._in_git_repo(tmp_path),
+        lambda: harness._ignored(tmp_path, "a"),
+        lambda: harness.check_private_path(tmp_path, tmp_path / ".orch" / "x"),
+    ):
+        with pytest.raises(Refused, match="whole home folder or a drive root"):
+            fn()
+
+
+def test_a_differently_spelled_home_is_still_refused(tmp_path, monkeypatch):
+    home = tmp_path / "Home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    other = tmp_path / "home"
+    if not other.exists():
+        pytest.skip("this file system is case-sensitive: `home` is a different folder from `Home`")
+    assert safegit.unusable_root(other)  # os.path.samefile: the same folder
+    link = tmp_path / "homelink"
+    link.symlink_to(home, target_is_directory=True)
+    assert safegit.unusable_root(link)  # a link to home too
+
+
+def test_git_exe_with_root_home_and_a_planted_git_in_home_is_refused(tmp_path, monkeypatch):
+    real = _exe(tmp_path)
+    home = tmp_path / "fakehome"
+    (home / ".local" / "bin").mkdir(parents=True)
+    sh(home / ".local" / "bin" / "git", "exit 1")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(home / ".local" / "bin"), str(real.parent)]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    other = tmp_path.parent / (tmp_path.name + "_x")
+    other.mkdir()
+    monkeypatch.chdir(other)
+    # root == home: the home subtree is avoided in full, so the planted git is not chosen ...
+    assert safegit.git_exe(other, home) == str(real)
+    # ... and any run with that root is refused outright
+    rc, _, err = safegit.run(["status"], other, filters=False, root=home)
+    assert rc == safegit.REFUSED and "home folder" in err
