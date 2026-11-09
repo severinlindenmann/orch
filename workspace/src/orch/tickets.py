@@ -945,6 +945,8 @@ def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     return apply_op(root, tid, lambda t: _set_field(t, "summary", text))[0]
 
 
+# Short plain-text fields on a ticket (outcome parts); the schema maxLength matches.
+TEXT_FIELD_MAX = 300
 OUTCOME_KEYS = ("changed", "why", "not_included")
 
 
@@ -959,8 +961,8 @@ def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
         if not isinstance(v, str):
             raise Refused(f"{k} must be text.")
         v = v.strip()
-        if len(v) > 300:
-            raise Refused(f"'{k}' is at most 300 characters.")
+        if len(v) > TEXT_FIELD_MAX:
+            raise Refused(f"'{k}' is at most {TEXT_FIELD_MAX} characters.")
         clean[k] = v
     if not clean:
         raise Refused("Say what to record: --changed, --why or --not-included.")

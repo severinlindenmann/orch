@@ -32,11 +32,25 @@ test('notes: only done tickets with an outcome, newest first', () => {
   const groups = context(items).notesGroups(items);
   assert.deepEqual(Array.from(groups, g => g.id), ['t_3', 't_2', 't_1']);
 });
-test('notes: grouped by parent, group order by newest note', () => {
-  const items = [done('t_1', {title:'Parent'}), done('t_2', {parent:'t_1'}), done('t_4'), done('t_3', {parent:'t_1'}), done('t_9', {parent:'t_gone'})];
+test('notes: grouped by parent, the parent is the group head and never sits under itself', () => {
+  const items = [done('t_1', {title:'Parent'}), done('t_2', {parent:'t_1'}), done('t_4'), done('t_3', {parent:'t_1'}), done('t_9', {parent:'t_gone'}), done('t_8', {parent:'t_8'})];
   const groups = context(items).notesGroups(items);
-  assert.deepEqual(JSON.parse(JSON.stringify(groups.map(g => [g.id, g.notes.map(n => n.id)]))), [['t_9', ['t_9']], ['t_4', ['t_4']], ['t_1', ['t_3', 't_2', 't_1']]]);
-  assert.equal(groups[2].parent.id, 't_1');
+  const shape = JSON.parse(JSON.stringify(groups.map(g => [g.id, g.head?.id || null, g.notes.map(n => n.id), g.parent?.id || null])));
+  assert.deepEqual(shape, [['t_9', 't_9', [], null], ['t_8', 't_8', [], null], ['t_4', 't_4', [], null], ['t_1', 't_1', ['t_3', 't_2'], null]]);
+});
+test('notes: a parent without its own note gives its children a "Step of" header', () => {
+  const items = [done('t_1', {title:'Parent', outcome:undefined}), done('t_2', {parent:'t_1'})];
+  const g = context(items).notesGroups(items);
+  assert.equal(g.length, 1); assert.equal(g[0].head, null); assert.equal(g[0].parent.id, 't_1'); assert.equal(g[0].notes[0].id, 't_2');
+});
+test('notes: order and time use when the ticket was marked done, not updated_at', () => {
+  const hist = at => [{at, text:'Moved to Done', by:'human:Pat'}];
+  const items = [done('t_1', {updated_at:'2026-11-09T10:00:00Z', history:hist('2026-11-01T10:00:00Z')}), done('t_2', {updated_at:'2026-11-02T10:00:00Z', history:hist('2026-11-05T10:00:00Z')}),
+    done('t_3', {updated_at:'2026-11-03T10:00:00Z', done_at:'2026-11-07T10:00:00Z', history:hist('2026-11-01T10:00:00Z')})];
+  const c = context(items);
+  assert.deepEqual(Array.from(c.notesGroups(items), g => g.id), ['t_3', 't_2', 't_1']);
+  assert.equal(c.doneAt(items[0]), '2026-11-01T10:00:00Z');
+  assert.equal(c.doneAt(done('t_5')), done('t_5').updated_at);
 });
 test('notes: search matches title, key and the outcome text', () => {
   const items = [done('t_1', {title:'Pay button', outcome:{changed:'Receipt email'}}), done('t_2', {key:'PIL-7', outcome:{why:'VAT was mixed in'}}), done('t_3')];
@@ -51,10 +65,10 @@ test('notes page: empty states and entries', () => {
   const empty = context([done('t_1', {outcome:undefined}), done('t_2', {status:'active'})]).notesPage();
   assert.match(text(empty), /Finished tickets will show what changed and why here\./);
   assert.equal(nodes(empty, n => n.attrs?.className === 'note-entry').length, 0);
-  const items = [done('t_1', {title:'Pay button', checklist:[{},{},{}]}), done('t_2', {parent:'t_1', title:'Receipt'})];
+  const items = [done('t_1', {title:'Pay button', checklist:[{},{},{},{}]}), done('t_2', {parent:'t_1', title:'Receipt'}), done('t_3', {parent:'t_1', title:'Pay link'})];
   const page = context(items).notesPage();
-  assert.equal(nodes(page, n => n.attrs?.className === 'note-entry').length, 2);
-  assert.match(text(page), /3 steps/); assert.match(text(page), /Step of /); assert.match(text(page), /Changed t_2/);
+  assert.equal(nodes(page, n => n.attrs?.className === 'note-entry').length, 3);
+  assert.match(text(page), /2 steps/); assert.doesNotMatch(text(page), /4 steps/); assert.doesNotMatch(text(page), /Step of /); assert.match(text(page), /Changed t_2/);
   assert.doesNotMatch(text(page), /Finished tickets will show/);
 });
 test('notes page is registered: route, nav, server and html', () => {
