@@ -221,8 +221,11 @@ def rel(proj, run):
     srv.stop()
 
 
-@pytest.fixture
-def start_guard_off(monkeypatch):
-    """Tests that start codex with ORCH_HOME under the pytest temp folder: the temp-folder guard
-    (adapters.check_start_folder, tested in test_adapters) would refuse them."""
+@pytest.fixture(autouse=True)
+def _start_guard_off(request, monkeypatch):
+    """Tests keep ORCH_HOME under pytest's temp folder, which the start-folder guard
+    (adapters.check_start_folder) refuses for every agent. It is off here; tests of the guard itself
+    ask for the real one with @pytest.mark.real_start_guard."""
+    if request.node.get_closest_marker("real_start_guard"):
+        return
     monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)

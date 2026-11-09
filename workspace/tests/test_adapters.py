@@ -301,7 +301,6 @@ def test_person_state_is_computed_once_per_start(codex_home, proj, monkeypatch):
         "orch.addons.home", lambda root=None: Path(sys.prefix)
     )  # outside the start and temp folders
     st = adapters.person_for("codex", proj)
-    adapters.check_start_folder("codex", proj, st)
     adapters.render("codex", "fresh", "oneshot", {"prompt": "p", "person": st}, proj)
     adapters.permission_note("codex", proj, None, st)
     assert len(calls) == 1
@@ -320,6 +319,7 @@ def test_missing_codex_config_gets_the_sandbox(codex_home, proj):
     )
 
 
+@pytest.mark.real_start_guard
 def test_codex_refuses_to_start_where_orch_home_is_inside(codex_home, proj, monkeypatch, tmp_path_factory):
     monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
     with pytest.raises(Refused, match="Start it from a smaller folder") as e:
@@ -327,29 +327,15 @@ def test_codex_refuses_to_start_where_orch_home_is_inside(codex_home, proj, monk
     assert str(proj) not in str(e.value)
     # unknown ORCH_HOME fails closed
 
-    armed = []
-    real_args = adapters.permission_args
-
-    def args_then_arm(*a, **k):  # config.permissions reads the home too: only the guard's own lookup fails
-        out = real_args(*a, **k)
-        armed.append(1)
-        return out
-
     def boom(root=None):
-        if armed:
-            raise Refused("x")
-        return proj / "oh"
+        raise Refused("x")
 
-    monkeypatch.setattr(adapters, "permission_args", args_then_arm)
     monkeypatch.setattr("orch.addons.home", boom)
     with pytest.raises(Refused, match="cannot tell"):
         adapters.check_start_folder("codex", proj)
-    # a read-only person: no workspace-write, nothing to guard
-    armed.clear()
-    (codex_home / "config.toml").write_text('sandbox_mode = "read-only"\n')
-    adapters.check_start_folder("codex", proj)
 
 
+@pytest.mark.real_start_guard
 def test_a_mixed_case_spelling_of_the_start_folder_is_the_same_folder(codex_home, proj, monkeypatch):
     (proj / "oh").mkdir(exist_ok=True)
     sw = Path(str(proj).swapcase())
@@ -360,6 +346,7 @@ def test_a_mixed_case_spelling_of_the_start_folder_is_the_same_folder(codex_home
         adapters.check_start_folder("codex", proj)
 
 
+@pytest.mark.real_start_guard
 def test_codex_refuses_an_orch_home_in_a_temp_folder(codex_home, proj, monkeypatch, tmp_path_factory):
     import tempfile
 
@@ -376,20 +363,6 @@ def test_codex_refuses_an_orch_home_in_a_temp_folder(codex_home, proj, monkeypat
     adapters.check_start_folder("codex", root)
 
 
-@pytest.mark.parametrize(
-    "flag",
-    ["workspace-write", "--full-auto", "danger-full-access", "--dangerously-bypass-approvals-and-sandbox"],
-)
-def test_the_guard_keys_on_the_final_argv(codex_home, proj, monkeypatch, flag):
-    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
-    with pytest.raises(Refused):
-        adapters.check_start_folder("codex", proj, None, ["codex", "exec", flag, "--", "p"])
-    adapters.check_start_folder(
-        "codex", proj, None, ["codex", "exec", "--", flag]
-    )  # the prompt is not a flag
-    adapters.check_start_folder("codex", proj, None, ["codex", "exec", "--", "p"])
-
-
 def test_deep_toml_and_oversized_reads_fail_closed(codex_home, proj):
     cfg = codex_home / "config.toml"
     cfg.write_text("a = " + "[" * 100000 + "]" * 100000 + "\n")
@@ -403,21 +376,49 @@ def test_colon_and_backslash_in_adapter_paths_are_refused(codex_home, proj):
         assert adapters.person_state(rule)["strict"] is True
 
 
-def test_plan_refuses_codex_when_orch_home_is_inside_the_start_folder(proj, new_ticket, monkeypatch):
+@pytest.mark.real_start_guard
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_the_guard_refuses_every_agent(codex_home, proj, monkeypatch, agent):
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    with pytest.raises(Refused, match="smaller folder"):
+        adapters.check_start_folder(agent, proj)
+
+
+@pytest.mark.real_start_guard
+def test_the_guard_ignores_flags_and_config(codex_home, proj, monkeypatch):
+    # a read-only person config means no flags at all, and still a refusal for an ORCH_HOME inside the folder
+    (codex_home / "config.toml").write_text('sandbox_mode = "read-only"\n')
+    assert adapters.permission_args("codex", proj, "auto") == []
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    with pytest.raises(Refused):
+        adapters.check_start_folder("codex", proj)
+
+
+@pytest.mark.real_start_guard
+def test_plan_and_start_refuse_when_orch_home_is_inside_the_start_folder(proj, new_ticket, monkeypatch):
     from orch import runs
 
     monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
     tid = new_ticket()
-    with pytest.raises(Refused, match="smaller folder"):
-        runs.plan(proj, tid, agent="codex")
+    for agent in ("codex", "claude"):
+        with pytest.raises(Refused, match="smaller folder"):
+            runs.plan(proj, tid, agent=agent)  # fresh
+        with pytest.raises(Refused, match="smaller folder"):
+            runs.plan(proj, tid, agent=agent, fresh=False)  # the resume path goes through plan too
+        for mode in ("oneshot", "live"):
+            with pytest.raises(Refused, match="smaller folder"):
+                runs.start(proj, tid, "human:tester", agent=agent, mode=mode)
 
 
-def test_the_guard_is_code_not_data(codex_home, proj, monkeypatch):
-    # workspace-write in the flags triggers the guard whatever the data says; other tools are not checked
-    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
-    with pytest.raises(Refused):
-        adapters.check_start_folder("codex", proj)
-    adapters.check_start_folder("claude", proj)
+@pytest.mark.real_start_guard
+def test_a_safe_setup_with_a_read_only_person_starts_without_flags(codex_home, proj, new_ticket, monkeypatch):
+    from orch import runs
+
+    (codex_home / "config.toml").write_text('sandbox_mode = "read-only"\n')
+    monkeypatch.setattr("orch.addons.home", lambda root=None: Path(sys.prefix))  # outside start and temp
+    p = runs.plan(proj, new_ticket(), agent="codex")
+    assert p["argv"][:4] == ["codex", "exec", "--json", "--"] and p["argv"][-2] == "--"
+    assert p["note"] == "Codex is set to read-only on this computer: it can't change files."
 
 
 def test_agents_without_a_mapping_ignore_the_mode(proj):

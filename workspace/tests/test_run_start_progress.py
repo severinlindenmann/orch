@@ -98,7 +98,7 @@ def test_a_one_shot_claude_streams_and_may_run_orch(proj, run):
     ]
 
 
-def test_a_tool_without_a_stream_gets_no_stream_args(proj, run, start_guard_off):
+def test_a_tool_without_a_stream_gets_no_stream_args(proj, run):
     tid = _ticket(run)
     config.set_key(proj, "workspace", "agent", "codex")
     assert "--output-format" not in runs.plan(proj, tid, mode="oneshot")["argv"]

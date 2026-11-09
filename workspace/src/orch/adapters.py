@@ -328,26 +328,11 @@ def _inside(inner: Path, outer: Path) -> bool:
     return False
 
 
-_WIDE = ("workspace-write", "--full-auto", "danger-full-access", "bypass")
-
-
-def check_start_folder(
-    name: str, root: Path, person: Mapping | None = None, argv: list[str] | None = None
-) -> None:
-    """A start whose flags make the tool write its folder (workspace-write, --full-auto, danger-full-access,
-    any bypass flag; code, not data: no adapter can drop it) is refused when ORCH_HOME is inside the start
-    folder or a temporary folder the sandbox may write: the agent could then write permissions.json, add-ons
-    and the human-choice markers. argv: the final command (flags before `--` only), else the mode's flags.
-    Fails closed when ORCH_HOME is unknown."""
-    flags = (
-        permission_args(name, root, None, person)
-        if argv is None
-        else argv[: argv.index("--")]
-        if "--" in argv
-        else argv
-    )
-    if not any(w in x for x in flags for w in _WIDE):
-        return
+def check_start_folder(name: str, root: Path) -> None:
+    """Every agent start (any adapter, fresh or resume, whatever its flags or the person's config): refused
+    when ORCH_HOME is inside the start folder or in a temporary folder. An agent that can write its start
+    folder (claude acceptEdits, codex workspace-write, any generic tool) could then write permissions.json,
+    add-ons and the human-choice markers. Fails closed when ORCH_HOME is unknown."""
     from orch import addons
 
     label = load(name, root)["label"]

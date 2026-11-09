@@ -204,7 +204,7 @@ def test_allow_is_ignored_with_one_notice_by_an_adapter_that_cannot_use_it(proj,
     assert "Bash(rm:*)" not in " ".join(_lines(log, "prompt"))
 
 
-def test_codex_session_comes_from_the_output(proj, run, tmp_path, monkeypatch, start_guard_off):
+def test_codex_session_comes_from_the_output(proj, run, tmp_path, monkeypatch):
     d = tmp_path / "cxbin"
     d.mkdir()
     fx = Path(__file__).resolve().parents[2] / "e2e" / "fixtures" / "agent-output" / "codex-exec-json.jsonl"

@@ -832,7 +832,7 @@ def plan(
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
     person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
-    adapters.check_start_folder(name, root, person)
+    adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
     if sid and adapters.transcript_exists(name, sid, root) is False:
@@ -881,7 +881,6 @@ def plan(
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
-    adapters.check_start_folder(name, root, person, argv)  # the final command, resumed or fresh
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -919,6 +918,7 @@ def start(
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)
+    adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
     notes = []
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):

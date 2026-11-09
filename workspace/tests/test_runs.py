@@ -166,7 +166,7 @@ def _choose(proj, name):
     config.set_key(proj, "workspace", "agent", name)
 
 
-def test_argv_resumes_only_this_agent_on_this_host(proj, new_ticket, run, start_guard_off):
+def test_argv_resumes_only_this_agent_on_this_host(proj, new_ticket, run):
     tid = new_ticket("Q3 summary")
     _choose(proj, "claude")
     j = json.loads(run("run", "argv", tid, "--json")[1])
