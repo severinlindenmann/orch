@@ -113,6 +113,20 @@ orch only records the wait. An add-on may wake the ticket when it is due; if non
 
 Read the parent first, work only in yours, keep it at most 3 levels deep. Close the sub-tickets before the parent.
 
+**Plan big work**
+
+Big = several steps or several areas, clearly. A small request stays one ticket. For big work:
+1. Ask only if the goal is genuinely unclear: `orch ask <id> "<question>" --option A --option B --recommend A` (one tap answers), then stop.
+2. Make the parent ticket: the goal in `--note`, and a line "Not included: ..." for what you will not do.
+3. Make each sub-ticket with its own `--done-when "<one plain line>"`, and add its checks (`orch check add`) so every part of the done line has a step. When `orch check add` has a `--covers` flag, say which done line each step covers.
+
+        orch ticket new "<goal>" --note "<what and why>. Not included: <what is left out>"
+        orch ticket new "<part>" --parent <id> --done-when "<how a person sees it is done>"
+
+4. Do the sub-tickets in order, one at a time. Show the plan with `orch ticket tree <id>`.
+
+Plans may change: update the tickets and `orch log <id> "<what changed>"`. No one signs off on a plan.
+
 **Keep context**
 
     orch log <id> "<what changed in the plan>"

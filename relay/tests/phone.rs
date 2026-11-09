@@ -1204,3 +1204,24 @@ async fn proposal_marker_needs_the_proposal_format() {
         assert_eq!(s, 422, "case {case}: {v}");
     }
 }
+
+#[tokio::test]
+async fn a_refused_message_id_can_be_used_again_for_the_plain_text() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let _p = t.pair_phone(&[&a]).await;
+    let id = mid();
+    let mut bad = proposal_msg(
+        &a.id,
+        &id,
+        &format!("proposal-{id}"),
+        json!(["make", "not_now"]),
+        json!({}),
+    );
+    bad["body"]["proposal"] = json!("delete_all");
+    assert_eq!(t.call(&a, "POST", "/v1/messages", Some(bad)).await.0, 422);
+    let text = json!({"schema": "orch.msg/1", "id": id, "from": a.id, "to": "phones", "type": "text",
+        "created_at": "2026-11-09T10:00:00Z", "body": {"text": "Ready. Shall I make this a ticket?", "general": true}});
+    let (s, v) = t.call(&a, "POST", "/v1/messages", Some(text)).await;
+    assert_eq!(s, 201, "{v}");
+}
