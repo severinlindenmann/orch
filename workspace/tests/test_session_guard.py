@@ -38,3 +38,19 @@ def test_trace_ownership_is_by_pid_only(tmp_path, monkeypatch):
     assert not conftest._ours({"pid": 9, "ppid": 8, "cwd": pytest_cwd})  # a parallel session's line
     monkeypatch.delenv("ORCH_TEST_SESSION_PIDS")
     assert not conftest._ours({"pid": 111, "ppid": 1, "cwd": pytest_cwd})
+
+
+def test_override_only_adds_a_location(tmp_path, monkeypatch):
+    import conftest
+
+    real = tmp_path / "realacct"
+    extra = tmp_path / "extra"
+    monkeypatch.setattr(conftest, "_REAL_HOME_FN", lambda: real)
+    monkeypatch.delenv("ORCH_TEST_GUARD_HOME", raising=False)
+    assert conftest._guard_bases() == [real / ".orch-tool"]
+    monkeypatch.setenv("ORCH_TEST_GUARD_HOME", str(extra))  # a stray override
+    assert conftest._guard_bases() == [real / ".orch-tool", extra / ".orch-tool"]
+    (real / ".orch-tool").mkdir(parents=True)
+    (real / ".orch-tool" / "f").write_text("a")
+    files, _ = conftest._snapshot_real_tool_home()
+    assert str(real / ".orch-tool" / "f") in files  # the real home is still watched
