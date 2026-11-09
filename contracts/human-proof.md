@@ -149,7 +149,21 @@ rows add a named case.
 | `chat.send`, `chat.sync`, `chat.contacts`, `chat.thread_sync` | `orch chat send/sync/contacts`, `thread --sync`; dashboard `chat.send_ws`, `chat.sync_ws` | chat / workspace | page, terminal | – |
 | `update` | `orch update` | – (target `orch`) | page, terminal | – |
 | `run.stop` | Focus Stop / Stop all (today `by=focus`) | ticket or `all` | page | – (an agent may still stop its own run, `ORCH_RUN` = that run) |
+| `relay.allow` | `orch relay allow <id> --once\|--permanent` (cli_clients.py 587): lets another workspace delegate or start work here | `<message id>:<once\|permanent>` | page, terminal | `verify` relay allow |
+| `group.remove_member` | remove a workspace from a group chat (cli_clients.py 283) | `<group>:<workspace>` | page, terminal | – |
+| `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | group | page, terminal | – |
+| `group.share_file` | share a file with a group, checked or not checkable (cli_clients.py 250/252, chat_groups.py 1505, 2656) | `<group>:<file sha256>` | page, terminal | – |
+| `group.readd_member` | re-add a removed member (chat_groups.py 1049) | `<group>:<workspace>` | page, terminal | – |
+| `config.share` | `orch config share on\|off` (cli_config.py 270): the marked block in the team's AGENTS.md | `on` / `off` (off needs no proof) | page, terminal | – |
+| `config.agents_may_finish` | `orch config set workflow.agents_may_finish on` (cli_config.py 210) | setting (off needs no proof) | page, terminal | `settle` class |
+| `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
+| `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
+| `run.human_input` | input that counts as a person's and may start a run (runs.py 382: `human:` by or phone) | ticket | page, phone | – |
+| `addon.act` (`who: people`) | an add-on button the manifest marks for people only (addons.py 599, 1051) | `<add-on>:<verb>:<ticket>` | page | – |
 | relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network), never a workspace token | – |
+
+How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
+(every hit was reviewed; display-only uses such as labels and history parsing are not ops).
 
 The rows from `ticket.verdict` down exist in v2 today and still trust `--by human:` / person detection: making them check a
 proof is **W2b slice 1.0a** (tracked follow-up); this contract is its spec.

@@ -389,6 +389,18 @@
    "dev_record": false,
    "result": "dev_on_real",
    "dev_file_lists": true
+  },
+  {
+   "name": "relay allow: proof for once used as permanent",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "relay.allow",
+   "target": "m_aaaaaaaaaaaaaaaa:permanent",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwib3AiOiJyZWxheS5hbGxvdyIsInRhcmdldCI6Im1fYWFhYWFhYWFhYWFhYWFhYTpvbmNlIn0.T41spxNOx8zTbDilluHl2NNxN6Xh0F2dKvjaD94brcc",
+   "result": "wrong_target"
   }
  ],
  "settings": [
