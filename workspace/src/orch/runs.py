@@ -720,12 +720,13 @@ _NO_LOGIN = re.compile(r"not logged in|log ?in|sign ?in|authenticat|api key|unau
 
 
 def start_failure_reason(root: Path, rec: dict) -> str:
-    """Why no agent appeared, as far as known: command missing, no login, tmux, else a plain line."""
+    """Why no agent appeared, as ONE OF A FIXED SET of plain messages. Never text copied from the agent's log
+    (it can hold keys, tokens or credential URLs, and this goes to ticket history, Chat, the phone, hooks)."""
     name = str(rec.get("agent") or "")
     with contextlib.suppress(Exception):
         binary = (adapters.load(name, root).get("detect") or {}).get("binary")
         if binary and not shutil.which(binary):
-            return f"the {binary} command was not found"
+            return "agent command not found"
     tail = ""
     log = rec.get("log")
     if log:
@@ -734,7 +735,7 @@ def start_failure_reason(root: Path, rec: dict) -> str:
             lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
             tail = lines[-1] if lines else ""
     if tail and _NO_LOGIN.search(tail):
-        return "no login (" + _clip(tail, 120) + ")"
+        return "no login"
     if rec.get("mode") == "live":
         from orch import runs_live
 
@@ -742,10 +743,23 @@ def start_failure_reason(root: Path, rec: dict) -> str:
             return "tmux is not installed"
         with contextlib.suppress(Exception):
             if not runs_live.session_exists(root, rec["ticket"]):
-                return "tmux failed: the session is gone"
-    if tail:
-        return _clip(tail, 140)
+                return "couldn't open the terminal session"
+    with contextlib.suppress(Exception):
+        from orch import syncgate
+
+        if syncgate.live_holder(root) is not None:
+            return "orch is syncing"
     return "no agent session appeared"
+
+
+def _log_detail(root: Path, rec: dict) -> str:
+    from orch.phone_view import redact
+
+    with contextlib.suppress(OSError):
+        data = (root / rec["log"]).read_bytes()[-2000:].decode("utf-8", "replace")
+        lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+        return _clip(redact(lines[-1]), 200) if lines else ""
+    return ""
 
 
 def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | None:
@@ -787,6 +801,9 @@ def _say_start_failed(root: Path, tid: str, rec: dict, text: str) -> None:
     if rec.get("log"):
         with contextlib.suppress(OSError), open_log(root / rec["log"]) as f:
             f.write((text + "\n").encode("utf-8"))
+            detail = _log_detail(root, rec)
+            if detail:  # the agent's own last line, for the person who opens this log: redacted
+                f.write(("orch: the agent's last line was: " + detail + "\n").encode("utf-8"))
     with contextlib.suppress(Exception):
         tickets.log(root, tid, text, "orch")
     if tickets.is_general(root, tid):  # Chat: an answer from the workspace instead of "is thinking" for ever

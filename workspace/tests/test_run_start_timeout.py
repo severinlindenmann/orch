@@ -72,14 +72,12 @@ def test_reason_is_the_real_cause_when_known(proj, new_ticket, monkeypatch):
     log = proj / ".orch/run/logs/x.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("starting\nError: Not logged in. Run claude login\n")
-    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == (
-        "no login (Error: Not logged in. Run claude login)"
-    )
+    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "no login"
     monkeypatch.setattr(runs.shutil, "which", lambda b: None)  # the command is gone
-    assert "command was not found" in runs.start_failure_reason(proj, runs.read(proj, tid))
+    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "agent command not found"
     monkeypatch.setattr(runs.shutil, "which", lambda b: "/x/" + b)
     log.write_text("segfault in launcher\n")
-    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "segfault in launcher"
+    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "no agent session appeared"
     assert rec["run"]
 
 
@@ -89,7 +87,7 @@ def test_tmux_failure_is_named_for_a_live_run(proj, new_ticket, monkeypatch):
     tid = new_ticket()
     _start(proj, tid, mode="live", live={"state": "starting", "since": _ago(100)})
     monkeypatch.setattr(runs_live, "session_exists", lambda root, t: False)
-    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "tmux failed: the session is gone"
+    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "couldn't open the terminal session"
 
 
 def test_chat_gets_a_message_instead_of_thinking_forever(proj, monkeypatch):
@@ -124,4 +122,30 @@ def test_a_fake_agent_that_never_starts_end_to_end(proj, new_ticket, monkeypatch
     rec = runs.claim(proj, tid, "human:tester", "fake", pid=os.getpid())
     assert rec["run"]
     text = runs.check_start_timeout(proj, tid, at=datetime.now(UTC).timestamp() + 5)
-    assert text == "Couldn't start the agent: the nope command was not found"
+    assert text == "Couldn't start the agent: agent command not found"
+
+
+def test_no_raw_log_text_ever_reaches_the_reason_or_the_ticket(proj, new_ticket):
+    """A log tail with a key: the reason is a fixed message; no key in history, status or what orch adds."""
+    tid = new_ticket()
+    key = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef"
+    _start(proj, tid, log=".orch/run/logs/k.log")
+    log = proj / ".orch/run/logs/k.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    original = f"Not logged in. ANTHROPIC_API_KEY={key} https://user:{key}@evil.example/x\n"
+    log.write_text(original)  # the agent's own output stays as it is
+    text = runs.check_start_timeout(proj, tid)
+    assert text == "Couldn't start the agent: no login"
+    t = tickets.load(proj, tid)
+    assert key not in json.dumps(t) and key not in text
+    added = log.read_text()[len(original) :]  # what orch appended: the reason and a redacted detail
+    assert key not in added and "the agent's last line was" in added and "[hidden]" in added
+
+
+def test_orch_is_syncing_is_a_known_cause(proj, new_ticket, monkeypatch):
+    from orch import syncgate
+
+    tid = new_ticket()
+    _start(proj, tid)
+    monkeypatch.setattr(syncgate, "live_holder", lambda root: {"pid": 1})
+    assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "orch is syncing"
