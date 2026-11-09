@@ -690,3 +690,57 @@ def test_start_records_the_launch_environment_and_keeps_it_for_a_running_service
     monkeypatch.setenv("HOME", "/second/home")  # `orch start` again: the same pid keeps its first environment
     services.start(proj)
     assert services.running()[0]["env"]["HOME"] == "/first/home"
+
+
+@pytest.mark.parametrize(
+    "path", ["/usr/bin::/bin", ":/usr/bin", "/usr/bin:", "", ".:/usr/bin", "bin:/usr/bin"]
+)
+def test_path_with_an_empty_or_relative_element_is_refused_whole(path, tmp_path):
+    from orch import launchenv
+
+    ok, bad = launchenv.validate({"PATH": path}, root=tmp_path, workspaces=set(), orch_home=tmp_path)
+    assert bad == ["PATH"] and "PATH" not in ok  # an empty element means the current folder
+
+
+def test_only_exact_orch_variables_are_recorded_and_restored(monkeypatch, tmp_path):
+    from orch import launchenv
+
+    for k in ("ORCH_REPO", "ORCH_REF", "ORCH_AGENT", "ORCH_HOME_STRICT", "ORCH_STATE_DIR", "ORCH_HOME"):
+        monkeypatch.setenv(k, "x" if k != "ORCH_HOME" else str(tmp_path))
+    got = launchenv.capture(root=tmp_path)
+    assert set(k for k in got if k.startswith("ORCH_")) == {"ORCH_HOME", "ORCH_ROOT"}
+    forged = {
+        "ORCH_REPO": "evil",
+        "ORCH_REF": "x",
+        "ORCH_AGENT": "claude",
+        "ORCH_RUN": "r",
+        "ORCH_HOME": str(tmp_path),
+    }
+    assert launchenv.clean(forged) == {"ORCH_HOME": str(tmp_path)}
+    ok, _ = launchenv.validate(forged, root=tmp_path, workspaces=set(), orch_home=tmp_path)
+    assert set(ok) == {"ORCH_HOME", "ORCH_ROOT"}
+
+
+def test_agent_markers_come_from_the_adapters_list(monkeypatch):
+    """Whatever the adapters say marks an agent run is never recorded or restored (one list, no drift)."""
+    from orch import adapters, launchenv
+
+    stripped = {
+        k
+        for k in ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
+    }
+    assert not any(launchenv.allowed(k) for k in stripped)
+    assert launchenv.apply({"CLAUDECODE": "1", "ORCH_RUN": "r", "HOME": "/c"}, {"HOME": "/h"}) == {
+        "HOME": "/h"
+    }
+    monkeypatch.setattr(adapters, "human_environ", lambda env: {k: v for k, v in env.items() if k != "HOME"})
+    assert launchenv.allowed("HOME") is False  # the helper decides, launchenv has no list of its own
+
+
+def test_locale_values_are_checked():
+    from orch import launchenv
+
+    ok, bad = launchenv.validate(
+        {"LANG": "en_US.UTF-8", "LC_ALL": "$(evil)"}, root=Path("/w"), workspaces=set(), orch_home=Path("/o")
+    )
+    assert ok["LANG"] == "en_US.UTF-8" and bad == ["LC_ALL"]

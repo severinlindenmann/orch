@@ -12,34 +12,38 @@ keep their login in (CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_*). Tokens and API keys 
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from pathlib import Path
 
+# Exactly these, nothing by prefix: ORCH_HOME (where the running state lives) and ORCH_ROOT (set from the
+# verified workspace). Other ORCH_* (ORCH_REPO, ORCH_REF, ORCH_AGENT, the actor and run markers, ...) change
+# what orch installs or who is acting: they are never carried from a record.
 NAMES = (
-    "HOME",
-    "PATH",
-    "TMPDIR",
-    "LANG",
-    "CLAUDE_CONFIG_DIR",
-    "CODEX_HOME",
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-)
-PREFIXES = ("LC_", "ORCH_")
-NEVER = frozenset(  # who is acting / which run: never carried over from one start to another
-    {"ORCH_ADDON", "ORCH_BIN", "ORCH_TICKET", "ORCH_RUN", "ORCH_VIA", "ORCH_DASHBOARD_NONCE"}
-)
+    "HOME", "PATH", "TMPDIR", "LANG", "ORCH_HOME", "ORCH_ROOT",
+    "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+)  # fmt: skip
+PREFIXES = ("LC_",)
 DIRS = frozenset({"CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR"})
 MAX = 4096
 
 
+_LOCALE = re.compile(r"[A-Za-z0-9_.@-]{1,64}")
+
+
 def allowed(name: str) -> bool:
-    return name not in NEVER and (name in NAMES or name.startswith(PREFIXES))
+    """On the list, and not something that says "an agent runs" (asked of the adapters' own helper, so the
+    two lists cannot drift apart)."""
+    from orch import adapters
+
+    return (name in NAMES or name.startswith(PREFIXES)) and name in adapters.human_environ({name: ""})
 
 
 def capture(env: dict[str, str] | None = None, root: Path | None = None) -> dict[str, str]:
     """The allowlisted part of the launch environment (ORCH_ROOT = the workspace folder)."""
-    src = os.environ if env is None else env
+    from orch import adapters
+
+    src = adapters.human_environ(os.environ if env is None else env)
     out = {
         k: v for k, v in src.items() if allowed(k) and isinstance(v, str) and len(v) <= MAX and "\0" not in v
     }
@@ -109,17 +113,19 @@ def validate(
     for k, v in clean(rec).items():
         why = None
         if k == "PATH":
-            parts = [x for x in v.split(os.pathsep) if x]
+            parts = v.split(os.pathsep)  # an empty element means the current folder: refused, not skipped
             why = (
-                "empty"
-                if not parts
+                "empty element"
+                if not v or any(not x for x in parts)
                 else next((w for w in (unsafe_dir(x, workspaces) for x in parts) if w), None)
             )
+        elif k == "LANG" or k.startswith("LC_"):
+            why = None if _LOCALE.fullmatch(v) else "not a locale name"
         elif k == "HOME":
             h = _home_of_user()
             why = None if h is None or Path(v).resolve() == h else "not this user's home"
         elif k == "ORCH_ROOT":
-            continue  # replaced below
+            continue  # replaced below with the verified root
         elif k == "ORCH_HOME":
             why = None if Path(v).resolve() == orch_home.resolve() else "not this orch folder"
         elif k in DIRS:
@@ -133,9 +139,10 @@ def validate(
 
 
 def apply(base: dict[str, str], recorded: dict[str, str]) -> dict[str, str]:
-    """`base` (the caller's environment) with every allowlisted variable replaced by the recorded set: a
-    variable the service did not have is not inherited from the caller."""
-    out = {k: v for k, v in base.items() if not allowed(k)}
-    out.update({k: v for k, v in base.items() if k in NEVER})
+    """`base` (the caller's environment, no agent markers) with every allowlisted variable replaced by the
+    recorded set: a variable the service did not have is not inherited from the caller."""
+    from orch import adapters
+
+    out = {k: v for k, v in adapters.human_environ(base).items() if not allowed(k)}
     out.update(recorded)
     return out
