@@ -65,7 +65,8 @@ def _reference():
     """The reference functions of contracts/validate.py, extracted without running that script."""
     tree = ast.parse((CONTRACTS / "validate.py").read_text())
     wanted = {
-        "SEC_MIN_LEN", "sec_b64_forms", "sec_forms", "sec_needles", "_hide_upto", "sec_hide", "sec_hide_stream",
+        "SEC_MIN_LEN", "sec_b64_forms", "sec_forms", "sec_needles", "_hide_upto", "sec_hide",
+        "sec_hide_stream",
     }
     body = []
     for node in tree.body:
