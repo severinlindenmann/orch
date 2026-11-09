@@ -76,6 +76,9 @@ def _add_dm_parsers(sub, common):
 
 
 def _dispatch_dm(args, root):
+    if args.sub in ("contacts", "thread"):  # send and sync check this in chat.py; reading is a person's too
+        if tickets.agent_tool() or not tickets.current_actor(getattr(args, "by", None)).startswith("human:"):
+            raise Refused("Only a person reads workspace messages in Chat.")
     if args.sub == "contacts":
         data = chat.contacts(root)
         text = "\n".join(f"{c['ws']}  {c['name']}" for c in data) or "No contacts."

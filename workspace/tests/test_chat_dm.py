@@ -350,3 +350,20 @@ def test_record_posted_never_raises_and_ignores_links(tmp_path, monkeypatch):
     (link / ".orch").symlink_to(real)
     assert relay._posted_path(link) is None
     assert relay.posted_ids(link) == []
+
+
+def test_contacts_and_thread_are_person_only(dm, monkeypatch):
+    from orch import cli_chat
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
+    for command in (["contacts"], ["thread", WS]):
+        for extra in ([], ["--by", "human:x"]):
+            args = cli.build_parser(show_all=True).parse_args(["chat", *command, *extra])
+            with pytest.raises(Refused, match="Only a person"):
+                cli_chat.dispatch(args, dm[0])
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    args = cli.build_parser(show_all=True).parse_args(["chat", "contacts", "--by", "agent:x", "--json"])
+    with pytest.raises(Refused, match="Only a person"):
+        cli_chat.dispatch(args, dm[0])
+    args = cli.build_parser(show_all=True).parse_args(["chat", "contacts", "--json"])
+    assert cli_chat.dispatch(args, dm[0])
