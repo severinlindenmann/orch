@@ -453,6 +453,8 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var checklist: [Task] = []
     var done: Int? = nil
     var total: Int? = nil
+    /// Steps a person declined ("Won't do"); optional on the wire, absent = count from the checklist.
+    var wontDo: Int? = nil
     var running: Bool? = nil
     var started: Bool? = nil
     var attachments: [Attachment] = []
@@ -465,7 +467,8 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
          running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], light: Bool? = nil) {
         self.refs = refs; self.light = light
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
-        self.done = checklist.filter { $0.done || $0.wontDo }.count; self.total = checklist.count
+        self.done = checklist.filter(\.done).count; self.total = checklist.count
+        let declined = checklist.filter(\.wontDo).count; self.wontDo = declined > 0 ? declined : nil
         self.running = running; self.started = started; self.attachments = attachments; self.historyTail = historyTail
     }
     init(from d: Decoder) throws {
@@ -477,6 +480,7 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         checklist = (try? c.decodeIfPresent([Task].self, forKey: .checklist)) ?? []
         done = try? c.decodeIfPresent(Int.self, forKey: .done)
         total = try? c.decodeIfPresent(Int.self, forKey: .total)
+        wontDo = (try? c.decodeIfPresent(Int.self, forKey: .wontDo)).flatMap { $0 >= 0 ? $0 : nil }
         running = try? c.decodeIfPresent(Bool.self, forKey: .running)
         started = try? c.decodeIfPresent(Bool.self, forKey: .started)
         attachments = (try? c.decodeIfPresent([Attachment].self, forKey: .attachments)) ?? []
@@ -484,7 +488,7 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         refs = TicketRef.decodeList(c, forKey: .refs)
         light = try? c.decodeIfPresent(Bool.self, forKey: .light)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, started, attachments, historyTail, refs, light }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, light }
     /// Quiet light views update only the fields they carry, preserving the full ticket details.
     func overlaid(on base: TicketSnapshot?) -> TicketSnapshot {
         guard light == true, var result = base else { return self }
@@ -502,8 +506,9 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         return result
     }
 
-    var doneCount: Int { done ?? checklist.filter { $0.done || $0.wontDo }.count }
-    var wontDoCount: Int { checklist.filter(\.wontDo).count }
+    /// Steps done with proof (a Won't do step is not counted).
+    var doneCount: Int { done ?? checklist.filter(\.done).count }
+    var wontDoCount: Int { wontDo ?? checklist.filter(\.wontDo).count }
     var totalCount: Int { total ?? checklist.count }
 }
 

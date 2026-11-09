@@ -58,7 +58,8 @@ final class WontDoTests: XCTestCase {
             XCTAssertEqual(try JSONCoding.decoder.decode(TicketSnapshot.Task.self, from: encoded), item)
         }
         let snapshot = TicketSnapshot(checklist: [original, .init(text: "Done", done: true), .init(text: "Open")])
-        XCTAssertEqual(snapshot.done, 2)
+        XCTAssertEqual(snapshot.done, 1)
+        XCTAssertEqual(snapshot.wontDo, 1)
         XCTAssertEqual(snapshot.totalCount, 3)
         let stored = try JSONCoding.encoder.encode(snapshot)
         XCTAssertEqual(try JSONCoding.decoder.decode(TicketSnapshot.self, from: stored), snapshot)
@@ -68,14 +69,14 @@ final class WontDoTests: XCTestCase {
         let data = Data(#"{"checklist":[{"text":"Done","done":true},{"text":"Skipped","wont_do":true},{"text":"Open"}]}"#.utf8)
         let snapshot = try JSONCoding.decoder.decode(TicketSnapshot.self, from: data)
         XCTAssertNil(snapshot.done)
-        XCTAssertEqual(snapshot.doneCount, 2)
+        XCTAssertEqual(snapshot.doneCount, 1)
         XCTAssertEqual(snapshot.wontDoCount, 1)
     }
 
     func testSummary() {
-        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Done", wontDo: 2), "1 of 3 done, 2 won't do")
+        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 3, status: "Done", wontDo: 2), "1 of 3 done, 2 won't do")
         XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 3, status: "Working", wontDo: 0), "2 of 3 steps done")
-        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 3, status: "Working", wontDo: 2), "0 of 3 done, 2 won't do")
+        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 3, status: "Working", wontDo: 2), "0 of 3 done, 2 won't do")
     }
 
     func testContractVector() throws {
@@ -91,7 +92,17 @@ final class WontDoTests: XCTestCase {
         XCTAssertEqual(snapshot.checklist.map(\.wontDo), [false, true, true])
         XCTAssertEqual(snapshot.checklist.count, 3)
         XCTAssertEqual(snapshot.checklist.dropFirst().first?.reason, "Finance pulls it themselves")
-        XCTAssertEqual(snapshot.doneCount, 3)
+        XCTAssertEqual(snapshot.doneCount, 1)
+        XCTAssertEqual(snapshot.wontDo, 2)
         XCTAssertEqual(snapshot.wontDoCount, 2)
+    }
+
+    func testOlderViewWithoutWontDoCountStillDecodes() throws {
+        let data = Data(#"{"checklist":[{"text":"Done","done":true},{"text":"Skipped","wont_do":true}],"done":1,"total":2}"#.utf8)
+        let snapshot = try JSONCoding.decoder.decode(TicketSnapshot.self, from: data)
+        XCTAssertNil(snapshot.wontDo)
+        XCTAssertEqual(snapshot.wontDoCount, 1)
+        let negative = try JSONCoding.decoder.decode(TicketSnapshot.self, from: Data(#"{"checklist":[],"done":1,"wont_do":-1,"total":3}"#.utf8))
+        XCTAssertNil(negative.wontDo)
     }
 }

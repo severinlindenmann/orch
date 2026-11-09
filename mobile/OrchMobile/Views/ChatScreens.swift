@@ -60,7 +60,7 @@ enum ConversationRules {
     /// Checklist progress only; the status has its own pill.
     static func summaryText(done: Int, total: Int, status: String, separator: String = " · ", wontDo: Int = 0) -> String {
         guard total > 0 else { return "" }
-        if wontDo > 0 { return "\(max(0, done - wontDo)) of \(total) done, \(wontDo) won't do" }
+        if wontDo > 0 { return "\(done) of \(total) done, \(wontDo) won't do" }
         return "\(done) of \(total) steps done"
     }
 
@@ -302,7 +302,8 @@ struct ConversationView: View {
                 }
                 Text(title).themeFont(13).foregroundStyle(Theme.muted)
                 if let view = ticket?.view {
-                    if view.totalCount > 0 { ProgressBar(done: view.doneCount, total: view.totalCount) }
+                    // Won't do steps leave the bar: it never shows work as finished that was not done.
+                    if view.totalCount - view.wontDoCount > 0 { ProgressBar(done: view.doneCount, total: view.totalCount - view.wontDoCount) }
                     ForEach(Array(view.checklist.enumerated()), id: \.offset) { _, task in
                         if task.wontDo {
                             HStack(spacing: 16) {
