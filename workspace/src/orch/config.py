@@ -474,7 +474,7 @@ def add_agent(
             approve_agent(root, name, typed)
         else:
             print(
-                f"orch: '{name}' also has other settings in this folder, so it is not allowed yet: orch private",
+                f"orch: '{name}' also has other settings here, so it is not allowed yet: orch private",
                 file=sys.stderr,
             )
 
