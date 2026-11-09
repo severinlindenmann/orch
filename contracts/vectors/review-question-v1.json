@@ -1,7 +1,7 @@
 {
   "about": "Review question (relay-api.md 'Review question'). question: the message the workspace sends to phones when a ticket enters Review (validates against message.schema.json). cases: a phone answer to it and what the workspace must do; state = the ticket's status and the current review round when the answer arrives.",
   "question": {
-    "schema": "orch.msg/1", "id": "m_rv0000000000001", "from": "ws_pilatus001", "to": "phones", "type": "question",
+    "schema": "orch.msg/1", "id": "m_rv00000000000001", "from": "ws_pilatus001", "to": "phones", "type": "question",
     "created_at": "2026-11-09T10:40:00Z", "ticket": "t_m2p8xz",
     "body": { "question_id": "review-2", "title": "Rename field X to source_id", "text": "Is this done?", "options": ["accept", "changes"], "recommended": null, "review": true }
   },
