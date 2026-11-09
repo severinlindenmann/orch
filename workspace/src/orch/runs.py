@@ -588,9 +588,7 @@ def claim(
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
         _drop_start_prompts_locked(root, tid)
-        rec = _new_record(tid, by, agent, mode, ticket, reason, root)
-        if folder is not None and Path(folder).resolve() != Path(root).resolve():
-            rec["folder"] = str(Path(folder).resolve())
+        rec = _new_record(tid, by, agent, mode, ticket, reason, Path(folder) if folder else root)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
@@ -607,11 +605,9 @@ def claim(
 
 def claim_routed(root: Path, tid: str, by: str, agent: str, mode: str, **kw) -> tuple[dict, list[str]]:
     """claim() after deciding where the agent works (worktrees.route): (record, notes for the person). The
-    decision, the copy and the claim happen under ONE workspace lock (worktrees.start_lock), so two
-    starts at the
-    same moment cannot both find the folder free. A copy that cannot be made is never an error: the run
-    works in
-    the workspace folder (and shows the "also changing this folder" line)."""
+    decision, the copy and the claim happen under ONE workspace lock (worktrees.start_lock), so two starts
+    at the same moment cannot both find the folder free. A copy that cannot be made is never an error: the
+    run works in the workspace folder (and shows the "also changing this folder" line)."""
     from orch import worktrees
 
     with worktrees.start_lock(root):
