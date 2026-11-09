@@ -50,7 +50,9 @@ final class ReviewBarUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["This question is already answered."].exists)
         XCTAssertFalse(app.staticTexts["This review was updated."].exists)
         XCTAssertFalse(app.staticTexts["This review is closed."].exists)
-        XCTAssertEqual((field.value as? String) ?? "", field.placeholderValue ?? "")
+        // Empty field: XCUITest reports "" or the placeholder as its value, depending on the iOS version.
+        let value = (field.value as? String) ?? ""
+        XCTAssertTrue(value.isEmpty || value == field.placeholderValue, "field not empty: \(value)")
     }
 
     func testReservedChangeNoteKeepsReviewOpen() {
@@ -70,7 +72,9 @@ final class ReviewBarUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons["review-changes"].waitForExistence(timeout: 20))
         app.buttons["review-changes"].tap()
-        app.buttons["composer-send"].tap()
+        // An empty change note cannot be sent: there is no Send button while the field is empty.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["composer-send"].exists)
         XCTAssertTrue(element(app, "review-bar").exists)
         XCTAssertTrue(app.staticTexts["Changes:"].exists)
     }

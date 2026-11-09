@@ -111,6 +111,13 @@ struct WorkspaceView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                TimelineView(.everyMinute) { context in
+                    ChatMuteButton(name: name, muted: summary?.workspace.isMuted(now: context.date) ?? false) { mute in
+                        Task { await model.setMute(workspaceId, mute) }
+                    }
+                }
+            }.chatCircleBackground()
+            ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: ChatRoute.info(workspace: workspaceId, ticket: nil)) {
                     Image(systemName: "info.circle").frame(width: 44, height: 44)
                 }.accessibilityLabel("Chat info").accessibilityIdentifier("workspace-info")
