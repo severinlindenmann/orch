@@ -1161,3 +1161,40 @@ def test_undoing_a_wont_do_needs_a_proof_but_reopening_a_done_step_stays_free(ws
     run("check", "done", tid, c2, "--note", "x", "--json", "--by", "agent:x")
     code, *_ = run("check", "reopen", tid, c2, "--by", "human:pat", "--json")
     assert code == 0
+
+
+def test_undo_is_decided_under_the_lock_a_load_error_requires_the_proof_and_a_swap_is_refused(
+    ws, run, monkeypatch
+):
+    tid, cid = _ticket_with_step(ws, run)
+    # a done step: free to reopen, no proof, no hand-off
+    code, out, _ = run("check", "add", tid, "Plain", "--json", "--by", "agent:x")
+    plain = json.loads(out)["id"]
+    run("check", "done", tid, plain, "--note", "x", "--json", "--by", "agent:x")
+    assert run("check", "reopen", tid, plain, "--by", "human:pat", "--json")[0] == 0
+    # the step becomes wont_do BETWEEN anything a caller could have checked and the locked reopen: the locked
+    # operation itself refuses (nothing is decided before the lock)
+    orig = tickets.apply_op
+
+    def become_wont_do_first(root, t, op):
+        if t == tid:
+            tickets.apply_op = orig  # one swap only
+            orig(root, tid, lambda x: x["checklist"][0].update(wont_do=True))
+        return orig(root, t, op)
+
+    monkeypatch.setattr(tickets, "apply_op", become_wont_do_first)
+    code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
+    monkeypatch.setattr(tickets, "apply_op", orig)
+    assert code == 2 and tickets.load(ws, tid)["checklist"][0].get("wont_do") is True
+    assert [h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"]  # asked for the click instead
+    # the library call itself needs the explicit proven flag
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_reopen(ws, tid, cid, "human:pat")
+    assert tickets.check_reopen(ws, tid, cid, "human:pat", proven=True)[1]["id"] == cid
+
+
+def test_a_ticket_that_cannot_be_read_fails_closed_for_the_undo(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    (ws / ".orch" / "tickets" / f"{tid}.json").write_text("{not json")
+    code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
+    assert code == 2 and "proven" not in out  # refused: nothing was reopened without a proof

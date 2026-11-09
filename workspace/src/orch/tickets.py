@@ -1524,14 +1524,22 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     return apply_op(root, tid, op)
 
 
-def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
+class NeedsProof(Refused):
+    """A person's decision (undoing a Won't do) was asked for without the person's proof (H1)."""
+
+
+def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
     """Open again; the old proof stays in the history line. A Won't do step is a person's decision: only a
-    person undoes it."""
+    person undoes it, and (H1) only with the person's proof: `proven` is True only when the caller verified a
+    proof for this step. Decided HERE, under the ticket lock, on the ticket as it is now (no check-then-act
+    gap, and a ticket that cannot be read refuses)."""
 
     def op(t):
         item = _item(t, cid)
         if item.get("wont_do"):
-            _person_only(by, item, tid, cid)
+            _person_only(by, item, tid, cid)  # an agent is refused with its own words
+            if not proven:
+                raise NeedsProof("Undoing a Won't do is a person's decision.")
             for k in ("wont_do", "reason"):
                 item.pop(k, None)
             _clear_doing(item)

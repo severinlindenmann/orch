@@ -914,20 +914,26 @@ def run(args: argparse.Namespace) -> None:
             t, c = tickets.check_remove(root, args.id, args.check, who)
             msg = f"{c['id']} removed. It and its proof are kept in the history."
         elif sub == "reopen":
-            if humanproof.step_is_wont_do(root, args.id, args.check) and not (
-                who.startswith("agent:") or tickets.agent_tool()
-            ):  # undoing a person's Won't do is a person's decision (H1): proof or hand-off
-                who = humanproof.person_by(
-                    root,
-                    args,
-                    "check.wont_do_undo",
-                    f"{args.id}:{args.check}",
-                    parts={
-                        "title": humanproof.ticket_name(root, args.id),
-                        "step": humanproof.step_text(root, args.id, args.check),
-                    },
-                )
-            t, c = tickets.check_reopen(root, args.id, args.check, who)
+            undo = {
+                "title": humanproof.ticket_name(root, args.id),
+                "step": humanproof.step_text(root, args.id, args.check),
+            }
+            if getattr(
+                args, "proof_stdin", False
+            ):  # a person's proof for undoing a Won't do (if there is one)
+                who = humanproof.person_by(root, args, "check.wont_do_undo", f"{args.id}:{args.check}")
+                t, c = tickets.check_reopen(root, args.id, args.check, who, proven=True)
+            else:
+                try:
+                    t, c = tickets.check_reopen(root, args.id, args.check, who)
+                except tickets.NeedsProof:
+                    # decided under the ticket lock: the step IS a Won't do. Proof or hand-off (H1).
+                    who = humanproof.person_by(
+                        root, args, "check.wont_do_undo", f"{args.id}:{args.check}", parts=undo
+                    )  # raises (hand-off) unless a person is proven
+                    t, c = tickets.check_reopen(
+                        root, args.id, args.check, who, proven=who.startswith("human:")
+                    )
             msg = f"{c['id']} is open again. Its proof stays in the history."
         elif sub == "start":
             t, c = tickets.check_start(root, args.id, args.check, who)

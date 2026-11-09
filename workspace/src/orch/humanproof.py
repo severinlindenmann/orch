@@ -1102,16 +1102,6 @@ def step_text(root: Path, tid: str, cid: str) -> str:
     return part(text) or "this step"
 
 
-def step_is_wont_do(root: Path, tid: str, cid: str) -> bool:
-    from orch import tickets
-
-    try:
-        item = next((c for c in tickets.load(root, tid).get("checklist") or [] if c.get("id") == cid), None)
-    except (Refused, OSError, ValueError, AttributeError):
-        return False
-    return bool(item and item.get("wont_do"))
-
-
 def status_parts(root: Path, tid: str, data: str) -> dict:
     """A person's ticket patch as fields: {title, status, also: [other keys]} (never the JSON)."""
     try:
