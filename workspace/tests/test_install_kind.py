@@ -194,16 +194,15 @@ def test_normal_install_refuses_a_folder_addon_without_a_handoff(proj, tmp_path,
 
 
 def test_folder_addon_passes_the_core_check_on_dev_test_and_with_the_handoff(proj, tmp_path, monkeypatch):
-    f = _folder_addon(tmp_path)
     monkeypatch.setattr(hp, "install_kind", lambda: "normal")
     assert not addons._local_add_ok()
-    with addons.trusted_local_add():
+    with addons.trusted_local_add("a" * 64):
         assert addons._local_add_ok()
     assert not addons._local_add_ok()
     for kind in ("dev", "test"):
         monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
         assert addons._local_add_ok()
-    assert len(addons.local_add_target(f)) == 32 and "addon.add_local" in hp.OPS
+    assert "addon.add_local" in hp.OPS
 
 
 def test_reinstall_needs_a_record_for_this_environment(tmp_path, monkeypatch):
@@ -264,18 +263,22 @@ def test_lane_c_layout_tool_env_under_orch_test_testnet(tmp_path, monkeypatch):
     assert hp.install_kind() == "test"
 
 
-def test_planted_folder_entry_is_not_installed_on_a_normal_install(proj, tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+def test_planted_folder_entry_is_not_installed_on_a_normal_install(tws, tmp_path, monkeypatch, capsys):
+    proj = tws
     evil = _folder_addon(tmp_path)
     planted = [
         {"name": "mine", "source": str(evil), "version": "0.1.0"},  # no approval
         {"name": "relay", "source": "built-in", "version": "0.1.0"},
     ]
-    kept = [{"name": "ok", "source": str(evil), "version": "0.1.0", "approved": True}]
+    snap = addons.prepare_local_add(proj, evil)
+    kept = [
+        {"name": "ok", "source": snap["snapshot"], "version": "0.1.0", "approved": True, "hash": snap["hash"]}
+    ]
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
     args = addons._tool_args(planted)
     assert str(evil) not in args and "--with" in args  # the built-in still goes in
     assert "only you can allow" in capsys.readouterr().err
-    assert str(evil) in addons._tool_args(kept)  # a person's earlier hand-off stays
+    assert snap["snapshot"] in addons._tool_args(kept)  # a person's earlier hand-off stays
     monkeypatch.setattr(hp, "install_kind", lambda: "dev")
     assert str(evil) in addons._tool_args(planted)  # dev/test installs install any folder
 
@@ -296,3 +299,83 @@ def test_installers_print_a_visible_line_and_validate_the_kind():
     ps = (ROOT / "install.ps1").read_text()
     assert "INSTALL: this orch is marked" in sh and "INSTALL: this orch is marked" in ps
     assert "ConvertTo-Json" in ps and "-notin" in ps and "ORCH_INSTALL_KIND" in ps
+
+
+# ---------------------------------------------------------------- snapshots (content-bound approval)
+
+
+def _real_addon(tmp_path, name="hello"):
+    from test_addons import make_addon
+
+    return make_addon(tmp_path, name)
+
+
+def _capture_reinstall(monkeypatch):
+    got = {}
+
+    def fake(entries, **kw):
+        got["entries"] = entries
+        return True
+
+    monkeypatch.setattr(addons, "_reinstall", fake)
+    return got
+
+
+def test_install_uses_the_snapshot_not_the_live_folder(tws, tmp_path, monkeypatch):
+    f = _real_addon(tmp_path)
+    snap = addons.prepare_local_add(tws, f)
+    assert addons.local_add_target(tws, f) == snap["hash"] and snap["short"] == snap["hash"][:8]
+    (f / "evil.py").write_text("print('swapped in after the click')")  # the live folder changes
+    got = _capture_reinstall(monkeypatch)
+    # the live folder now has another hash: the proof was for the old content
+    with addons.trusted_local_add(snap["hash"]), pytest.raises(Refused, match="changed since you allowed"):
+        addons.add(tws, str(f), yes=True)
+    (f / "evil.py").unlink()  # content back as allowed: installs, from the snapshot
+    with addons.trusted_local_add(snap["hash"]):
+        addons.add(tws, str(f), yes=True)
+    entry = got["entries"][-1]
+    assert entry["source"] == snap["snapshot"] and entry["hash"] == snap["hash"] and entry["approved"] is True
+    assert entry["folder"] == str(f.resolve())
+    assert not (Path(snap["snapshot"]) / "evil.py").exists()
+
+
+def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, monkeypatch, capsys):
+    f = _real_addon(tmp_path)
+    snap = addons.prepare_local_add(tws, f)
+    entry = {
+        "name": "hello",
+        "source": snap["snapshot"],
+        "version": "0.1.0",
+        "approved": True,
+        "hash": snap["hash"],
+    }
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    assert addons._missing_source(entry) is None
+    (Path(snap["snapshot"]) / "evil.py").write_text("x = 1")  # tampered
+    assert "changed since you allowed it" in addons._missing_source(entry)
+    args = addons._tool_args([entry])
+    assert snap["snapshot"] not in args and "left out" in capsys.readouterr().err
+    # a hash that does not match the entry's folder name is no snapshot either
+    entry2 = {**entry, "hash": "0" * 64, "source": str(f)}
+    assert "changed since you allowed it" in addons._missing_source(entry2)
+
+
+def test_snapshot_refuses_links_and_big_files(tws, tmp_path):
+    f = _real_addon(tmp_path)
+    (f / "link").symlink_to("/etc/passwd")
+    with pytest.raises(Refused, match="link or a special file"):
+        addons.prepare_local_add(tws, f)
+    (f / "link").unlink()
+    (f / "big.bin").write_bytes(b"0" * (5 * 1024 * 1024 + 1))
+    with pytest.raises(Refused, match="cannot be read safely"):
+        addons.prepare_local_add(tws, f)
+
+
+def test_same_content_same_hash_and_build_output_ignored(tws, tmp_path):
+    f = _real_addon(tmp_path)
+    a = addons.prepare_local_add(tws, f)["hash"]
+    (f / "build").mkdir()
+    (f / "build" / "x").write_text("generated")
+    assert addons.prepare_local_add(tws, f)["hash"] == a
+    (f / "pyproject.toml").write_text("changed = 1")
+    assert addons.prepare_local_add(tws, f)["hash"] != a

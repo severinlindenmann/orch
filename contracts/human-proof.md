@@ -185,7 +185,7 @@ rows add a named case.
 | `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
 | `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
 | `run.human_input` | input that counts as a person's and may start a run (runs.py 375-397 `human_waiting`: today any `human:` by or phone line in the agent-writable `.orch/run/pending/<tid>.jsonl`) | ticket | page, phone | `pending` |
-| `addon.add_local` | `orch addon add ./folder`: code from a folder runs inside orch's tool environment (normal installs only through this hand-off; dev/test installs may add directly) | sha256[:32] of the folder's real path (card shows the path) | page, terminal | – |
+| `addon.add_local` | `orch addon add ./folder`: code from a folder runs inside orch's tool environment (normal installs only through this hand-off; dev/test installs may add directly) | content hash of a snapshot of the folder (card shows the path and a short hash); the add installs from that snapshot, never the live folder | page, terminal | – |
 | `addon.act` (`who: people`) | an add-on button the manifest marks for people only (addons.py 599, 1051) | `<add-on>:<verb>:<ticket>` | page | – |
 | relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network), never a workspace token | – |
 
