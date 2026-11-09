@@ -1056,15 +1056,24 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
         _send_proposal_result(root, mid, recorded["result"], recorded["created_at"])
         return "ticket proposal: result resent", None
 
+    pend = rec.get("pending") if isinstance((rec.get("pending") or {}).get("answer"), str) else None
+    mine = pend if pend and pend["answer"] == answer_id else None
+
     def result(body: dict, to: str, **outcome) -> None:
-        saved = {"id": new_id(), "to": to, "body": body}
-        created_at = tickets.now()
+        # a result reserved before making keeps its id and time: a crash between make and record resends it
+        saved = {"id": (mine or {}).get("id") or new_id(), "to": to, "body": body}
+        created_at = (mine or {}).get("created_at") or tickets.now()
         results = dict(rec.get("results", {}))
         results[answer_id] = {"phone": frm, "result": saved, "created_at": created_at}
-        _set_asked(root, mid, result=saved, results=results, **outcome)
+        _set_asked(root, mid, results=results, pending=None, **outcome)
         _send_proposal_result(root, mid, saved, created_at)
 
     state = chat.proposal_state(root, mid)
+    if mine and ans == "make" and state == "made" and not rec.get("done"):
+        # a crash after making and before the result was recorded: this answer made it, so it is `made`
+        made = chat.make_ticket(root, mid, None, by)  # idempotent: the same ticket
+        result({"result": "made", "key": made["key"]}, "phones", done="make")
+        return f"made {made['key']} from a ticket proposal (via {via})", made["ticket"]
     if rec.get("done") or state in ("made", "gone"):
         line(
             f'A second answer to the ticket proposal "{title}" was ignored'
@@ -1092,7 +1101,9 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
             return "ticket proposal: not now", None
         line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
         return "ignored: the ticket proposal was already decided", None
-    _set_asked(root, mid, phone=frm)
+    reserve = {"answer": answer_id, "id": new_id(), "created_at": tickets.now()}
+    _set_asked(root, mid, phone=frm, pending=reserve)
+    mine = (_asked_edit(root, lambda records: records.get(mid) or {})).get("pending")
     try:
         made = chat.make_ticket(root, mid, None, by)
     except Refused as e:

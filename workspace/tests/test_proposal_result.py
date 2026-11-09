@@ -97,11 +97,13 @@ def test_result_vector(proj, run, conn, monkeypatch, case):
         assert m["to"] == case["to"] and m["reply_to"] == q["id"]
         assert "ticket" not in m and "key" not in m
         VALIDATOR.validate(m)
-        recorded = relay._asked_edit(proj, lambda a: a[q["id"]]["result"])
+        recorded = relay._asked_edit(proj, lambda a: list(a[q["id"]]["results"].values())[-1]["result"])
         assert recorded == {"id": m["id"], "to": case["to"], "body": case["send"]}
         assert not any(e["id"] == m["id"] for e in chat.read_day(proj, chat.day_key(proj))["messages"])
     if case.get("skipped"):
-        assert relay._asked_edit(proj, lambda a: a[q["id"]]["result"]["body"]) == {
+        assert relay._asked_edit(
+            proj, lambda a: list(a[q["id"]]["results"].values())[0]["result"]["body"]
+        ) == {
             "result": "made",
             "key": case["key"],
         }
@@ -134,7 +136,7 @@ def test_send_failure_keeps_result_for_retry(proj, run, conn, monkeypatch, failu
 
     def fail(root, raw):
         sent = json.loads(raw)
-        saved = relay._asked_edit(root, lambda a: a[q["id"]]["result"])
+        saved = relay._asked_edit(root, lambda a: list(a[q["id"]]["results"].values())[-1]["result"])
         assert saved == {"id": sent["id"], "to": sent["to"], "body": sent["body"]["proposal_result"]}
         attempts.append(raw)
         if failure == "oserror":
@@ -147,7 +149,7 @@ def test_send_failure_keeps_result_for_retry(proj, run, conn, monkeypatch, failu
 
     monkeypatch.setattr(relay, "_post_message", fail)
     assert run("relay", "inbox")[0] == 0
-    saved = relay._asked_edit(proj, lambda a: a[q["id"]]["result"])
+    saved = relay._asked_edit(proj, lambda a: list(a[q["id"]]["results"].values())[-1]["result"])
     assert saved["body"]["result"] == "made"
     assert "proposal result" in (proj / ".orch/run/relay-errors.log").read_text()
     (proj / ".orch/inbox-seen.json").write_text("{}")
@@ -171,3 +173,35 @@ def test_group_routed_make_sends_nothing(proj, run, conn):
     assert run("relay", "inbox")[0] == 0
     assert conn.sent == [q]
     assert real_tickets(proj) == []
+
+
+def test_crash_between_make_and_record_resends_made_with_same_id(proj, run, conn, monkeypatch):
+    """The ticket was made, the process died before the result was recorded: the retry still says
+    `made` to every phone (not decided to one), with the id reserved before making."""
+    propose(proj)
+    q = proposals(conn)[0]
+    config.set_code(proj, "DM1")
+    answer(conn, q, "make")
+    monkeypatch.setattr(relay, "_set_asked", _crash_on_results(relay._set_asked))
+    with pytest.raises(RuntimeError):
+        run_inbox_raw(proj)
+    monkeypatch.setattr(relay, "_set_asked", relay._set_asked.__wrapped__)
+    (proj / ".orch/inbox-seen.json").write_text("{}")
+    assert run("relay", "inbox")[0] == 0
+    results = [m for m in conn.sent if m["body"].get("proposal_result")]
+    assert len(results) == 1 and results[0]["to"] == "phones"
+    assert results[0]["body"]["proposal_result"]["result"] == "made"
+
+
+def _crash_on_results(orig):
+    def wrapper(root, mid, **fields):
+        if "results" in fields:
+            raise RuntimeError("crash before the result is recorded")
+        return orig(root, mid, **fields)
+
+    wrapper.__wrapped__ = orig
+    return wrapper
+
+
+def run_inbox_raw(proj):
+    relay.inbox(proj)
