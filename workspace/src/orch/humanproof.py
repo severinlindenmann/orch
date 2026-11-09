@@ -90,27 +90,37 @@ def install_record_path() -> Path:
 
 
 def read_install_record() -> str | None:
-    """The kind written by the installer into orch's own tool environment, or None (no usable record)."""
+    """The kind the installer wrote into orch's own tool environment, or None. The record counts only when
+    it sits in the running interpreter's environment AND its "root" is that environment's real path (an
+    old, copied or planted record, or one for another environment, is ignored). No `uv` and no environment
+    variable decides."""
+    here = Path(os.path.realpath(sys.prefix))
     try:
-        raw = saferead.read_private(install_record_path().parent, "orch-install.json", 4096)
+        raw = saferead.read_private(here, "orch-install.json", 4096)
         data = json.loads(raw) if raw is not None else None
     except (OSError, ValueError):
         return None
-    kind = data.get("kind") if isinstance(data, dict) else None
-    return kind if kind in INSTALL_KINDS else None
+    if not isinstance(data, dict) or data.get("kind") not in INSTALL_KINDS:
+        return None
+    root = data.get("root")
+    if not isinstance(root, str) or os.path.realpath(root) != str(here):
+        return None
+    return data["kind"]
 
 
-def install_record_text(kind: str) -> str:
-    """The record's text, as install.sh / install.ps1 write it after `uv tool install` (orch.install/1)."""
+def install_record_text(kind: str, root: str | Path) -> str:
+    """The record's text, as install.sh / install.ps1 write it after `uv tool install` (orch.install/1):
+    root = the real path of the tool environment at install time."""
     if kind not in INSTALL_KINDS:
         raise ValueError("kind must be normal, dev or test")
-    return json.dumps({"schema": "orch.install/1", "kind": kind}, sort_keys=True) + "\n"
+    body = {"schema": "orch.install/1", "kind": kind, "root": os.path.realpath(root)}
+    return json.dumps(body, sort_keys=True) + "\n"
 
 
 def write_install_record(env_dir: Path, kind: str) -> None:
     """Only for the update that reinstalls the tool environment (which drops the record): it carries over the
     kind the installer wrote, never a new one. No orch command takes a kind from its caller."""
-    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind))
+    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind, env_dir))
 
 
 def install_kind() -> str:

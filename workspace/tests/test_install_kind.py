@@ -16,11 +16,13 @@ from orch.errors import Refused
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _prefix(tmp_path, monkeypatch, record=None):
+def _prefix(tmp_path, monkeypatch, record=None, kind=None):
     env = tmp_path / "toolenv"
     env.mkdir()
+    if kind is not None:
+        record = hp.install_record_text(kind, env)
     if record is not None:
-        (env / "orch-install.json").write_text(record)
+        (env / "orch-install.json").write_text(record.replace("@ENV@", os.path.realpath(env)))
     monkeypatch.setattr(hp.sys, "prefix", str(env))
     return env
 
@@ -28,16 +30,16 @@ def _prefix(tmp_path, monkeypatch, record=None):
 @pytest.mark.parametrize("kind", ["normal", "dev", "test"])
 def test_record_format_roundtrip(tmp_path, monkeypatch, kind):
     env = _prefix(tmp_path, monkeypatch)
-    text = hp.install_record_text(kind)
-    assert json.loads(text) == {"schema": "orch.install/1", "kind": kind}
+    text = hp.install_record_text(kind, env)
+    assert json.loads(text) == {"schema": "orch.install/1", "kind": kind, "root": os.path.realpath(env)}
     (env / "orch-install.json").write_text(text)
     assert hp.install_kind() == kind
 
 
 def test_bad_kinds_are_not_records(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
-        hp.install_record_text("admin")
-    _prefix(tmp_path, monkeypatch, '{"kind": "admin"}')
+        hp.install_record_text("admin", "/x")
+    _prefix(tmp_path, monkeypatch, '{"kind": "admin", "root": "@ENV@"}')
     assert hp.read_install_record() is None
 
 
@@ -60,8 +62,8 @@ def test_installer_records_match_the_format(tmp_path):
         ]
         assert len(line) == 1
         cmd = line[0].replace('"$TOOL_DIR/orch-install.json"', f"'{out}'")
-        subprocess.run(["sh", "-c", f"KIND={kind}; {cmd}"], check=True)
-        assert json.loads(out.read_text()) == json.loads(hp.install_record_text(kind))
+        subprocess.run(["sh", "-c", f"KIND={kind}; ROOT={tmp_path}; {cmd}"], check=True)
+        assert json.loads(out.read_text()) == json.loads(hp.install_record_text(kind, tmp_path))
     sh = (ROOT / "install.sh").read_text()
     assert "ORCH_INSTALL_KIND" in sh and "normal|dev|test" in sh
     ps = (ROOT / "install.ps1").read_text()
@@ -78,7 +80,7 @@ def test_installer_rejects_a_bad_kind():
 
 
 def test_update_carries_the_record_over(tmp_path, monkeypatch):
-    env = _prefix(tmp_path, monkeypatch, hp.install_record_text("dev"))
+    env = _prefix(tmp_path, monkeypatch, kind="dev")
     (env / "bin").mkdir()
     monkeypatch.setattr(addons, "run_uv", lambda args: (env / "orch-install.json").unlink())  # the reinstall
     monkeypatch.setattr(addons, "_tool_args", lambda entries: [])
@@ -204,26 +206,62 @@ def test_folder_addon_passes_the_core_check_on_dev_test_and_with_the_handoff(pro
     assert len(addons.local_add_target(f)) == 32 and "addon.add_local" in hp.OPS
 
 
-def test_reinstall_only_from_the_real_tool_environment(tmp_path, monkeypatch):
+def test_reinstall_needs_a_record_for_this_environment(tmp_path, monkeypatch):
     env = _prefix(tmp_path, monkeypatch)
     (env / "bin").mkdir()
-    (env / "uv-receipt.toml").write_text("")  # a receipt alone is not enough
+    (env / "uv-receipt.toml").write_text("")  # a receipt is no trust anchor
     monkeypatch.setattr(addons, "run_uv", addons._REAL_RUN_UV)
     called = []
     monkeypatch.setattr(addons, "_tool_args", lambda e: called.append(1) or [])
-    monkeypatch.setattr(addons, "_tool_env_dir", lambda: tmp_path / "elsewhere" / "orch-workspace")
-    with pytest.raises(Refused, match="tool folder"):
+    with pytest.raises(Refused, match="tool folder"):  # no record
+        addons._install_tool([])
+    (env / "orch-install.json").write_text(hp.install_record_text("normal", tmp_path / "other"))
+    with pytest.raises(Refused, match="tool folder"):  # a record for another environment
         addons._install_tool([])
     assert not called
-    monkeypatch.setattr(addons, "_tool_env_dir", lambda: None)  # no uv: no reinstall
-    with pytest.raises(Refused):
-        addons._install_tool([])
-    link = tmp_path / "linked"
-    link.symlink_to(env)
-    monkeypatch.setattr(addons, "_tool_env_dir", lambda: link)  # same real folder
-    monkeypatch.setattr(addons, "run_uv", lambda a: None)
+
+
+def test_reinstall_pins_uv_tool_dir_to_the_recorded_place(tmp_path, monkeypatch):
+    env = _prefix(tmp_path, monkeypatch, kind="test")
+    (env / "bin").mkdir()
+    monkeypatch.setenv("UV_TOOL_DIR", "/agent/chosen")
+    monkeypatch.setenv("XDG_DATA_HOME", "/agent/xdg")
+    seen = []
+    monkeypatch.setattr(addons, "run_uv", lambda a: seen.append(os.environ["UV_TOOL_DIR"]))
+    monkeypatch.setattr(addons, "_tool_args", lambda e: [])
     addons._install_tool([])
-    assert called
+    assert seen == [os.path.realpath(tmp_path)]  # dirname of the recorded root
+    assert os.environ["UV_TOOL_DIR"] == "/agent/chosen"  # restored
+
+
+def test_env_vars_do_not_steer_the_install_kind(tmp_path, monkeypatch):
+    _prefix(tmp_path, monkeypatch, kind="normal")
+    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    before = hp.install_kind()
+    monkeypatch.setenv("UV_TOOL_DIR", str(tmp_path / "x"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "y"))
+    assert hp.install_kind() == before == "normal"
+
+
+def test_record_for_another_root_is_ignored(tmp_path, monkeypatch):
+    _prefix(tmp_path, monkeypatch, hp.install_record_text("test", tmp_path / "elsewhere"))
+    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    assert hp.read_install_record() is None and hp.install_kind() == "normal"
+    _prefix_old = tmp_path / "toolenv" / "orch-install.json"
+    _prefix_old.write_text('{"kind": "test"}')  # an old record without root
+    assert hp.install_kind() == "normal"
+
+
+def test_lane_c_layout_tool_env_under_orch_test_testnet(tmp_path, monkeypatch):
+    """UV_TOOL_DIR under ~/.orch-test/testnet is legitimate: its record names that environment."""
+    env = tmp_path / ".orch-test" / "testnet" / "tools" / "orch-workspace"
+    env.mkdir(parents=True)
+    (env / "orch-install.json").write_text(hp.install_record_text("test", env))
+    monkeypatch.setattr(hp.sys, "prefix", str(env))
+    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    assert hp.install_kind() == "test"
+    monkeypatch.setenv("UV_TOOL_DIR", str(env.parent))
+    assert hp.install_kind() == "test"
 
 
 def test_planted_folder_entry_is_not_installed_on_a_normal_install(proj, tmp_path, monkeypatch, capsys):

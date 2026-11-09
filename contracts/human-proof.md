@@ -136,7 +136,9 @@ source-tree run) **and** the workspace's realpath is under the literal `<account
 install, or for any other folder, it is refused before anything starts ("only on a test install"). It is never offered on a
 person's own install, and a dev kit does not get it.
 
-**Install record.** `<sys.prefix>/orch-install.json` = `{"schema": "orch.install/1", "kind": "normal|dev|test"}`, written
+**Install record.** `<sys.prefix>/orch-install.json` = `{"schema": "orch.install/1", "kind": "normal|dev|test", "root": "<real path of the tool environment>"}`; it counts only
+when it sits in the running interpreter's environment and `root` equals that environment's real path (no `uv`, no
+`UV_TOOL_DIR` / `XDG_DATA_HOME` decides; a reinstall by orch pins `UV_TOOL_DIR` to the dirname of `root`); written
 by `install.sh` / `install.ps1` straight into the tool environment after `uv tool install` (default `normal`; `test` or `dev`
 only through the installer option the person running it gives: `ORCH_INSTALL_KIND=test sh install.sh`, `-InstallKind test`),
 never by an orch command. `orch update` carries the existing kind over a reinstall. No record: a source-tree run is `test`,
