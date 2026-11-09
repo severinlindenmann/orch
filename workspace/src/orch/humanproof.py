@@ -205,11 +205,21 @@ def key_dir(root: Path, create: bool = True) -> Path:
     d = home / "keys" / ws
     if create:
         home.mkdir(parents=True, exist_ok=True)
-        _private_dir(d, home)
+        _private_dir(d.parent, home)
+        try:
+            d.mkdir(mode=0o700)
+            if POSIX:
+                d.chmod(0o700)
+            fresh = True
+        except FileExistsError:
+            fresh = False
+        _check_dir(d)
+        if fresh or not any(d.iterdir()):  # the binding is made only while the folder is new or empty
+            _bind_new(root, d)
     else:
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
-    _check_binding(root, d, create)
+    _check_binding(root, d)
     return d
 
 
@@ -219,26 +229,35 @@ BINDING_MISMATCH = (
 )
 
 
-def _check_binding(root: Path, d: Path, create: bool) -> None:
-    """Bind the workspace's local id (workspace-writable, so not trusted alone) to the workspace's real path,
-    in the guarded home (binding.json, 0600); refuse a mismatch (N17). The first use records the path. The
-    stored folder is compared by identity (samefile), so a case change on macOS is the same folder and a copy,
-    which is a different folder with the same id, is refused. A moved workspace is refused too: the person
-    reconnects it (a fresh id) rather than inheriting keys."""
+def _bind_new(root: Path, d: Path) -> None:
+    """Record the workspace's real path as binding.json in the new key folder: written to a temp file and
+    linked into place, so it appears whole and only if none exists (the first writer wins)."""
+    f = d / "binding.json"
+    tmp = d / f".binding.{secrets.token_hex(4)}.tmp"
+    try:
+        _write_private(
+            tmp, json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(root)}) + "\n"
+        )
+        with contextlib.suppress(FileExistsError):
+            os.link(tmp, f)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
+def _check_binding(root: Path, d: Path) -> None:
+    """The workspace's local id (workspace-writable, so not trusted alone) must be bound to this workspace's
+    real path in the guarded home (binding.json, 0600): a mismatch is refused (N17). A key folder WITHOUT a
+    binding is refused too: orch never binds a folder that already exists (no trust on first use); a person
+    reconnects the workspace instead. The stored folder is compared by identity (samefile), so a case change
+    on macOS is the same folder, while a copy (another folder, same id) or a move is refused."""
     f = d / "binding.json"
     here = os.path.realpath(root)
     try:
         _check_file(f)
         stored = json.loads(f.read_text(encoding="utf-8")).get("realpath")
     except FileNotFoundError:
-        if not create:
-            raise Refused(BINDING_MISMATCH) from None
-        with _key_lock(d):
-            if not f.exists():  # re-checked inside the lock: two first uses race
-                _write_private(f, json.dumps({"schema": "orch.binding/1", "realpath": here}) + "\n")
-                return
-        _check_binding(root, d, create)
-        return
+        raise Refused(BINDING_MISMATCH) from None
     except (ValueError, AttributeError):
         raise Refused("A record in the orch folder is unreadable.") from None
     if not isinstance(stored, str):

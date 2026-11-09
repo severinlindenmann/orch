@@ -625,3 +625,35 @@ def test_a_damaged_key_file_stops_the_whole_refresh(tws, monkeypatch):
             path.unlink()
         else:
             hp._write_private(path, before.decode())
+
+
+def test_an_existing_key_folder_without_a_binding_is_refused_and_not_written(tws):
+    from orch import addons
+
+    ws_id = addons.workspace_id(tws, create=True)
+    home = hp.guarded_home(tws)
+    d = home / "keys" / ws_id  # pre-created, e.g. by something that knows the id
+    hp._private_dir(d, home)
+    (d / "human.key").write_text("x")
+    before = sorted(p.name for p in d.iterdir())
+    for call in (
+        lambda: keystore.add(tws, "k", "token", TOKEN),
+        lambda: keystore.set_admin(tws, {"a": TOKEN}),
+        lambda: keystore.record_write(tws, "dev", {}),
+        lambda: keystore.get_value(tws, "k"),
+        lambda: hp.human_key(tws),
+    ):
+        with pytest.raises(Refused, match="copied or moved"):
+            call()
+    assert sorted(p.name for p in d.iterdir()) == before  # no binding, no lock, nothing written
+
+
+def test_an_empty_new_key_folder_is_bound_once_and_the_first_binding_wins(tws, acct):
+    keystore.add(tws, "k", "token", TOKEN)
+    d = hp.key_dir(tws)
+    first = (d / "binding.json").read_text()
+    other = acct / ".orch-test" / "other"
+    other.mkdir()
+    hp._bind_new(other, d)  # a later binding attempt never overwrites
+    assert (d / "binding.json").read_text() == first
+    assert not list(d.glob(".binding.*"))
