@@ -867,8 +867,6 @@ def test_hostile_general_id_never_reaches_the_ignore_file(proj, run):
     assert harness._general_lines(proj) == ["tickets/t_ghijkl.json"]
 
 
-@pytest.mark.parametrize("sub", ["make-ticket", "say"])
-
 @pytest.mark.parametrize("sub", ["make-ticket", "say", "contacts", "thread", "send"])
 def test_guard_refuses_person_chat_commands(proj, monkeypatch, sub):
     from types import SimpleNamespace
