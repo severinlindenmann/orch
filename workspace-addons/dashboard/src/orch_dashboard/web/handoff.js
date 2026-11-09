@@ -42,5 +42,20 @@
       });
     }).catch(function () {});
   }
-  notices(); poll(); setInterval(poll, 4000);
+  var shown = "";
+  function banner(text) {
+    var b = el("div", text, "orch-notice"); b.setAttribute("role", "status");
+    b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px";
+    var x = el("button", "Got it"); x.type = "button"; x.style.cssText = "margin-left:12px"; x.onclick = function () { b.remove(); };
+    b.appendChild(x); document.body.appendChild(b);
+  }
+  // the detached update: "Update finished" / "Update failed: <reason>" (also after the page reconnects)
+  function updateStatus() {
+    fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : {}; }).then(function (s) {
+      if (!s || !s.state || s.state === "running") return;
+      var t = s.state === "finished" ? "Update finished." : "Update failed: " + (s.reason || "it did not finish") + ".";
+      if (t !== shown) { shown = t; banner(t); }
+    }).catch(function () {});
+  }
+  notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
 })();

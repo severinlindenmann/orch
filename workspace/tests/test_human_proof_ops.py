@@ -4,6 +4,7 @@ replayed proofs, the dev test human, the pending start flows, launch token, hand
 import io
 import json
 import os
+import sys
 import time
 
 import pytest
@@ -906,3 +907,56 @@ def test_a_phone_text_with_an_unusable_key_folder_retries_then_tells_the_phone(w
     assert to == "ph_abcdefghij" and "Not saved on the computer" in text and "Try again shortly" in text
     assert kw["reply_to"] == msg["id"]
     assert chat.read_day(ws, chat.day_key(ws))["messages"] == []
+
+
+def test_the_queued_add_command_carries_the_absolute_path_the_card_shows(ws, run, monkeypatch):
+    from orch import addons
+
+    folder = ws.parent / "rel-addon"
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("x\n")
+    sub = ws / "sub"
+    sub.mkdir()
+    monkeypatch.chdir(sub)  # the requester's cwd is a subfolder; the page runs the command from the root
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))
+    monkeypatch.setattr(hp, "CURRENT_ARGV", ["addon", "add", "../../rel-addon", "--yes"])
+    code, out, err = run("addon", "add", "../../rel-addon", "--yes", "--by", "human:pat", "--json")
+    assert code == 2
+    card = hp.handoffs(ws)[0]
+    item = hp.handoff_take(ws, card["id"])
+    assert str(folder.resolve()) in card["label"] and str(folder.resolve()) in item["argv"]
+    assert "../../rel-addon" not in item["argv"]
+
+
+# ------------------------------------------------------------------ the detached update: log and result
+
+
+def _run_runner(ws, monkeypatch, code_text):
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr("sys.stdin", io.StringIO("hp1.proof\n"))
+    return pageproof._runner([sys.executable, "-c", code_text])
+
+
+def test_runner_records_a_finished_update(ws, monkeypatch):
+    assert _run_runner(ws, monkeypatch, "import sys; sys.stdin.read(); print('ok')") == 0
+    assert hp.take_update_status(ws) == {"state": "finished", "reason": ""}
+    assert hp.take_update_status(ws) is None  # read once
+    assert (hp.key_dir(ws) / "update.log").read_text().strip() == "ok"  # the log, in the guarded folder
+
+
+def test_runner_records_a_failed_update_with_a_short_plain_reason_and_no_proof(ws, monkeypatch):
+    code = (
+        "import sys; sys.stdin.read(); print('working'); print('Refused: The server said no.'); sys.exit(2)"
+    )
+    assert _run_runner(ws, monkeypatch, code) == 2
+    st = hp.take_update_status(ws)
+    assert st == {"state": "failed", "reason": "The server said no."}
+    assert "hp1." not in (hp.key_dir(ws) / "update.log").read_text()  # the proof is never in the log
+
+
+def test_runner_stops_a_hung_update(ws, monkeypatch):
+    monkeypatch.setattr(hp, "UPDATE_TIMEOUT", 0.5)
+    assert _run_runner(ws, monkeypatch, "import time; time.sleep(30)") == 1
+    st = hp.take_update_status(ws)
+    assert st["state"] == "failed" and "too long" in st["reason"]

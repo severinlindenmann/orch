@@ -1405,3 +1405,39 @@ def dev_mark_cli(root: Path, by_flag: str | None = None) -> None:
 def update_target(repo: str, ref: str) -> str:
     """The proof target of `update`: the resolved source, hashed (a target is letters, digits and `_.:@-`)."""
     return "orch@" + hashlib.sha256(f"{repo}@{ref}".encode()).hexdigest()[:32]
+
+
+# ------------------------------------------------------------------------------------------- update status
+
+UPDATE_TIMEOUT = 1800  # seconds: a hung install is stopped after 30 minutes
+
+
+def write_update_status(root: Path, state: str, reason: str = "") -> None:
+    """running | finished | failed, with a short plain reason (no secrets): what the page shows afterwards."""
+    if state not in ("running", "finished", "failed"):
+        return
+    with contextlib.suppress(Refused, OSError):
+        d = key_dir(root)
+        with _key_lock(d):
+            _write_private(
+                d / "update-status.json",
+                json.dumps({"state": state, "reason": reason[:200], "at": int(time.time())}),
+            )
+
+
+def take_update_status(root: Path) -> dict | None:
+    """The detached update's result for the page. A finished or failed result is read ONCE (then cleared); a
+    running one stays."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            f = d / "update-status.json"
+            data = json.loads(_read_guarded(f).decode("utf-8"))
+            if isinstance(data, dict) and data.get("state") in ("finished", "failed"):
+                with contextlib.suppress(OSError):
+                    f.unlink()
+    except (Refused, OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("state") not in ("running", "finished", "failed"):
+        return None
+    return {"state": data["state"], "reason": str(data.get("reason") or "")[:200]}

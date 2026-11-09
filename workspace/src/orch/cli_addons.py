@@ -47,11 +47,18 @@ def dispatch(args, root: Path) -> bool:
             # proof's target is the full hash. The proven add installs from the snapshot with that hash and is
             # refused when the folder changed since (a content swap before the click).
             info = addons.prepare_local_add(root, Path(args.name))
+            # the queued command carries the ABSOLUTE path the card shows (it runs later with cwd = the
+            # workspace root, where a relative `./x` would mean another folder)
+            queued = [
+                info["path"] if w == args.name else w
+                for w in humanproof._clean_argv(humanproof.CURRENT_ARGV) or []
+            ]
             who = humanproof.person_by(
                 root,
                 args,
                 "addon.add_local",
                 info["hash"],
+                argv=queued,
                 label=f"Add the add-on from {info['path']} (version {info['short']}) "
                 "\u2014 it runs inside orch",
             )

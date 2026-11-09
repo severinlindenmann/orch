@@ -80,6 +80,11 @@ def _record_update(root: Path, pid: int) -> None:
         pass
 
 
+def update_status(root: Path) -> dict | None:
+    """The detached update's state for the page: running, or finished / failed (read once)."""
+    return humanproof.take_update_status(root) if humanproof is not None else None
+
+
 def dismiss(root: Path, hid) -> None:
     if humanproof is not None and isinstance(hid, str):
         humanproof.handoff_drop(root, hid)

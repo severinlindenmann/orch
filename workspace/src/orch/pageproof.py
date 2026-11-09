@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
+import os
 import re
 import secrets
 import subprocess
@@ -154,15 +156,16 @@ def run_with_proof(
 
 
 def start_detached(argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env: dict) -> int:
-    """Run the core with `--proof-stdin` in its OWN session/process group with no timeout (an update restarts
-    this very server and must not be killed with it). The proof goes to its stdin; returns its pid at once."""
+    """Run the core with `--proof-stdin` through a small detached RUNNER (own session, survives a restart of
+    this server): it keeps the output in a log in the guarded home, stops a hung run after 30 minutes and
+    records running / finished / failed for the page. The proof goes to its stdin; returns its pid at once."""
     i = argv.index("--") if "--" in argv else len(argv)
-    argv = [*argv[:i], "--proof-stdin", *argv[i:]]
+    full = [*argv0(orch_bin), *argv[:i], "--proof-stdin", *argv[i:]]
     kw: dict = {"start_new_session": True}
     if sys.platform == "win32":
         kw = {"creationflags": 0x00000008 | 0x00000200}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     p = subprocess.Popen(  # noqa: S603
-        [*argv0(orch_bin), *argv],
+        [sys.executable, "-I", "-P", "-m", "orch.pageproof", json.dumps(full)],
         cwd=cwd,
         env=child_env(env, orch_bin),
         stdin=subprocess.PIPE,
@@ -177,3 +180,53 @@ def start_detached(argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env
     except OSError:
         pass
     return p.pid
+
+
+def _short_reason(text: str) -> str:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    last = lines[-1] if lines else "it did not finish"
+    return re.sub(r"^Refused:\s*", "", last)[:120]
+
+
+def _runner(cmd: list[str]) -> int:
+    """The detached runner: `python -I -P -m orch.pageproof '<json command>'`, the proof on its own stdin."""
+    root = Path.cwd()
+    proof = sys.stdin.readline()
+    humanproof.write_update_status(root, "running")
+    try:
+        log = humanproof.key_dir(root) / "update.log"
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    except (Refused, OSError):
+        humanproof.write_update_status(root, "failed", "the update could not write its log")
+        return 1
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        try:
+            p = subprocess.Popen(  # noqa: S603
+                cmd, cwd=root, stdin=subprocess.PIPE, stdout=out, stderr=subprocess.STDOUT, text=True
+            )
+            p.stdin.write(proof)
+            p.stdin.close()
+            code = p.wait(timeout=humanproof.UPDATE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            humanproof.write_update_status(root, "failed", "it took too long and was stopped")
+            return 1
+        except OSError:
+            humanproof.write_update_status(root, "failed", "the update could not be started")
+            return 1
+    if code == 0:
+        humanproof.write_update_status(root, "finished")
+        return 0
+    try:
+        tail = log.read_text(errors="replace")  # lint-allow: our own log (plain text)
+    except OSError:
+        tail = ""
+    humanproof.write_update_status(root, "failed", _short_reason(tail))
+    return code
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(_runner(json.loads(sys.argv[1])))
+    except (ValueError, IndexError):
+        sys.exit(2)

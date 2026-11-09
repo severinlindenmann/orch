@@ -301,3 +301,22 @@ def test_the_printable_link_is_refused_outside_a_test_folder(live, monkeypatch):
     monkeypatch.setattr(hp, "install_kind", lambda: "normal")
     with pytest.raises(hp.Refused):
         hp.printable_launch_url(root, "dashboard", f"http://127.0.0.1:{port}")
+
+
+def test_update_result_is_shown_to_a_session_once(live):
+    root, port = live
+    hp.write_update_status(root, "failed", "The server said no.")
+
+    def get(cookie=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request(
+            "GET",
+            "/api/update-status",
+            headers={"Host": f"127.0.0.1:{port}", **({"Cookie": cookie} if cookie else {})},
+        )
+        return json.loads(c.getresponse().read())
+
+    assert get() == {}  # no session: nothing, and nothing consumed
+    ck = session(root, port)
+    assert get(ck) == {"state": "failed", "reason": "The server said no."}
+    assert get(ck) == {}  # once
