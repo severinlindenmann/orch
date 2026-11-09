@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -224,3 +225,62 @@ def test_live_leftover_session_is_killed_by_exact_name(proj, new_ticket, monkeyp
     assert runs.check_start_timeout(proj, tid)
     kill = next(c for c in calls if c[0] == "kill-session")
     assert kill == ("kill-session", "-t", f"={tid}:")  # exact match, not a prefix
+
+
+def test_a_static_screen_stops_counting_as_alive_after_60s(proj, new_ticket, monkeypatch):
+    """An error with an open shell must still time out: only a screen that CHANGED within 60 s is alive."""
+    from orch import runs_live
+
+    tid = new_ticket()
+    _start(proj, tid, mode="live", age=200, live={"state": "starting", "since": _ago(100)})
+    pane = type("P", (), {"returncode": 0, "stdout": "error: could not start\n$ "})()
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    monkeypatch.setattr(runs_live, "tmux", lambda *a, **k: pane)
+    now = datetime.now(UTC).timestamp()
+    assert runs.check_start_timeout(proj, tid, at=now) is None  # first sight of this screen: a change
+    assert runs.check_start_timeout(proj, tid, at=now + 30) is None  # unchanged, but only 30 s
+    pane.stdout = "error: could not start\n$ ls\n"  # something moved: the clock starts again
+    assert runs.check_start_timeout(proj, tid, at=now + 70) is None
+    text = runs.check_start_timeout(proj, tid, at=now + 140)  # 70 s of the same screen
+    assert text == "Couldn't start the agent: no agent session appeared"
+    assert runs.read(proj, tid) is None
+
+
+def test_the_log_detail_is_the_agents_last_line_not_orchs_own(proj, new_ticket):
+    tid = new_ticket()
+    _start(proj, tid, log=".orch/run/logs/d.log")
+    log = proj / ".orch/run/logs/d.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("starting\nthe agent said this last\n")
+    assert runs.check_start_timeout(proj, tid)
+    lines = log.read_text().splitlines()
+    assert lines[-2:] == [
+        "Couldn't start the agent: no agent session appeared",
+        "orch: the agent's last line was: the agent said this last",
+    ]
+
+
+@pytest.mark.skipif(not shutil.which("tmux"), reason="tmux is not installed")
+def test_target_is_an_exact_name_for_capture_pane_and_kill_session(proj):
+    """runs_live.target() is `=name:`: it finds that session and no other with the same prefix."""
+    from orch import runs_live
+
+    tid = "t_exact1"
+    try:
+        r = runs_live.tmux(proj, "new-session", "-d", "-s", tid, "-c", str(proj), "echo hello-pane; sleep 60")
+        assert r.returncode == 0, r.stderr
+        assert runs_live.target(tid) == "=t_exact1:"
+        import time
+
+        for _ in range(20):
+            pane = runs_live.tmux(proj, "capture-pane", "-p", "-t", runs_live.target(tid))
+            if "hello-pane" in pane.stdout:
+                break
+            time.sleep(0.2)
+        assert pane.returncode == 0 and "hello-pane" in pane.stdout
+        short = runs_live.tmux(proj, "capture-pane", "-p", "-t", runs_live.target("t_exact"))  # a prefix
+        assert short.returncode != 0  # does not match t_exact1
+        assert runs_live.tmux(proj, "kill-session", "-t", runs_live.target("t_exact")).returncode != 0
+        assert runs_live.tmux(proj, "kill-session", "-t", runs_live.target(tid)).returncode == 0
+    finally:
+        runs_live.tmux(proj, "kill-server")

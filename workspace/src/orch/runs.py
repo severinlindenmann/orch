@@ -768,14 +768,36 @@ def _log_detail(root: Path, rec: dict) -> str:
     return ""
 
 
-def _live_pane_has_output(root: Path, tid: str) -> bool:
-    """A live session that exists and already shows something is starting up, not missing."""
+PANE_ALIVE_SECONDS = 60  # a live terminal counts as starting up while what it shows keeps changing
+
+
+def _live_pane_has_output(root: Path, tid: str, rec: dict | None = None, at: float | None = None) -> bool:
+    """A live session that shows output which CHANGED within PANE_ALIVE_SECONDS is starting up, not missing.
+    The first sight of a screen counts as a change; a screen that then stays the same (an error with an open
+    shell) stops counting after PANE_ALIVE_SECONDS, so it still times out. The hash and time of the last
+    change are kept in the run record."""
+    import hashlib
+
     from orch import runs_live
 
+    at = time.time() if at is None else at
     with contextlib.suppress(Exception):
-        if runs_live.session_exists(root, tid):
-            pane = runs_live.tmux(root, "capture-pane", "-p", "-t", runs_live.target(tid))
-            return pane is not None and pane.returncode == 0 and bool(pane.stdout.strip())
+        if not runs_live.session_exists(root, tid):
+            return False
+        pane = runs_live.tmux(root, "capture-pane", "-p", "-t", runs_live.target(tid))
+        text = pane.stdout.strip() if pane is not None and pane.returncode == 0 else ""
+        if not text:
+            return False
+        digest = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+        with locked(root, tid):
+            cur = read(root, tid)
+            if not cur or (rec and cur["run"] != rec["run"]):
+                return False
+            if cur.get("pane_hash") != digest:
+                cur["pane_hash"], cur["pane_changed_at"] = digest, _iso(at)
+                _write(root, cur)
+                return True
+            return at - _parse(cur["pane_changed_at"]) < PANE_ALIVE_SECONDS
     return False
 
 
@@ -798,7 +820,7 @@ def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | 
         # only this machine's own runs (a claim file that arrived by sync is not ours to judge)
         if not rec or rec.get("host") != host() or not _stuck(rec, at):
             return None
-        if rec.get("mode") == "live" and _live_pane_has_output(root, tid):
+        if rec.get("mode") == "live" and _live_pane_has_output(root, tid, rec, at):
             return None
         text = f"Couldn't start the agent: {start_failure_reason(root, rec)}"
         with locked(root, tid):  # decide and release in one step: a run that got its agent meanwhile stays
@@ -835,9 +857,9 @@ def _say_start_failed(root: Path, tid: str, rec: dict, text: str) -> None:
     """Where a person looks: the run line (ticket waits with the reason), Chat, ticket history, the log."""
     by = f"agent:{rec.get('agent')}"
     if rec.get("log"):
+        detail = _log_detail(root, rec)  # read BEFORE orch's own line goes in: it is the agent's last line
         with contextlib.suppress(OSError), open_log(root / rec["log"]) as f:
             f.write((text + "\n").encode("utf-8"))
-            detail = _log_detail(root, rec)
             if detail:  # the agent's own last line, for the person who opens this log: redacted
                 f.write(("orch: the agent's last line was: " + detail + "\n").encode("utf-8"))
     with contextlib.suppress(Exception):
