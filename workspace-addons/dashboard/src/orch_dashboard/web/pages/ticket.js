@@ -768,7 +768,7 @@ function ticketPlan(t, q, children) {
     h('h2', {}, clean(q.text)),
     goal ? h('p', {className:'preserve-lines'}, h('strong', {}, 'Goal: '), clean(goal)) : null,
     notIn ? h('p', {className:'meta preserve-lines'}, h('strong', {}, 'Not included: '), clean(notIn)) : null,
-    h('ol', {className:'ticket-plan-steps'}, children.filter(c => c.status !== 'dropped').sort((x, y) => (Number(String(x.key).split('-').pop()) || 0) - (Number(String(y.key).split('-').pop()) || 0)).map(child =>
+    h('ol', {className:'ticket-plan-steps'}, children.filter(c => c.status !== 'dropped').map(child =>
       h('li', {}, h('div', {className:'stack'}, h('strong', {}, clean(child.title)),
         child.done_when ? h('p', {className:'meta preserve-lines'}, 'Done when ' + clean(child.done_when)) : null,
         editing && !snapshot && ['open', 'ready'].includes(child.status) && !array(child.checklist).some(c => c.done)
