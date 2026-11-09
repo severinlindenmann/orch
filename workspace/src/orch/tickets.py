@@ -566,7 +566,7 @@ def create(
 
 def checks_done(ticket: dict) -> tuple[int, int]:
     c = ticket.get("checklist", [])
-    return sum(1 for x in c if x.get("done") or x.get("wont_do")), len(c)  # Won't do is resolved
+    return sum(1 for x in c if x.get("done") or x.get("wont_do")), len(c)
 
 
 def _check_can_finish(ticket: dict) -> None:
@@ -1058,7 +1058,7 @@ def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
     """A person decides a step will not be done. Person only, enforced here like accept_review: `by` must be
     human: and no agent tool may be in the environment; an agent can only ask (orch ask ...). The step stays
-    done=false (it is not done), counts as resolved and needs no proof. Calling it again changes the reason."""
+    done=false (it is not done), counts as resolved and needs no proof. Calling again changes the reason."""
     if not by.startswith("human:") or agent_tool():
         raise Refused(WONT_DO_AGENT.format(tid=tid, cid=cid))
     why = " ".join((reason or "").split())
@@ -1124,7 +1124,7 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     def op(t):
         item = _item(t, cid)
         if item.get("wont_do") and (not by.startswith("human:") or agent_tool()):
-            _refuse_if_wont_do(item, tid, cid)  # an agent cannot undo a person's decision by deleting the step
+            _refuse_if_wont_do(item, tid, cid)  # an agent cannot delete a person's decision
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
