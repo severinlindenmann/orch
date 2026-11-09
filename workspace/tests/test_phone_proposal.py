@@ -106,12 +106,12 @@ def test_make_from_the_phone_creates_exactly_one_ticket(proj, run, conn):
     assert t["title"] == proposals(conn)[0]["body"]["title"], "the phone shows the title that is made"
     assert chat.proposal_state(proj, q["id"]) == "made"
     acks = [m for m in conn.sent if m["type"] == "text" and m["body"].get("update", {}).get("kind") == "ack"]
-    assert len(acks) == 1 and acks[0]["ticket"] == t["id"] and acks[0]["reply_to"] == q["id"]
+    assert acks == [], "the card shows the result: no separate ack text"
     # the same answer again and a second one: nothing more
     answer(conn, q, "make", n=2)
     run("relay", "inbox")
     assert [x["id"] for x in real_tickets(proj)] == [t["id"]]
-    assert len([m for m in conn.sent if m["body"].get("update", {}).get("kind") == "ack"]) == 1
+    assert not [m for m in conn.sent if m["body"].get("update", {}).get("kind") == "ack"]
     general = tickets.load(proj, tickets.general_id(proj))
     assert any("too late" in h["text"] or "second answer" in h["text"] for h in general["history"])
 
@@ -355,3 +355,10 @@ def test_review_question_refused_or_offline_never_raises(proj, new_ticket, conn)
     tickets.set_status(proj, tid, "ready", "human:t")
     tickets.set_status(proj, tid, "review", "human:t")
     phone_view.sync_reviews(proj)  # offline: no exception either
+
+
+def test_the_helper_prompt_never_talks_about_failed_sends(proj):
+    ticket = {"id": tickets.ensure_general(proj, "human:t")}
+    prompt = chat.helper_prompt(proj, ticket, [], "")
+    assert "Never mention failures, refusals, retries or how anything was sent" in prompt
+    assert "offer it again" in prompt

@@ -967,8 +967,9 @@ def _set_asked(root: Path, mid: str, **fields) -> dict:
 
 
 def ack_proposal(root: Path, mid: str, made: dict) -> None:
-    """The ordinary ack ("Got it: <title>", with the new ticket and its key) that closes the phone's proposal
-    card, once, to the phone that answered (else where the question went).
+    """Closes the phone's proposal card when the DASHBOARD made the ticket first: the ordinary ack ("Got it:
+    <title>", with the new ticket and its key), once, to where the question went. When a phone's own answer
+    made it, nothing is sent: the card already shows the result ("Ticket made"), no second text.
     Only for a proposal asked on the phones."""
 
     def claim(asked):
@@ -976,7 +977,7 @@ def ack_proposal(root: Path, mid: str, made: dict) -> None:
         if not (isinstance(rec, dict) and rec.get("proposal") is True) or rec.get("acked"):
             return None
         rec["acked"] = True  # marked first: a lost ack is better than two
-        return str(rec.get("phone") or rec.get("to") or "phones")
+        return None if rec.get("phone") else str(rec.get("to") or "phones")
 
     if (target := _asked_edit(root, claim)) is None:
         return
