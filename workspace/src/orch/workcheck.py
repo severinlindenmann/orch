@@ -29,7 +29,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -45,9 +44,9 @@ TIMEOUT = 3.0  # seconds for the whole scan
 HARD_TIMEOUT = 4.0  # the hook process ends here whatever it is doing
 MAX_FILES = 20000
 MAX_LIST = 16 * 1024 * 1024
-# .agents holds tool setup (orch init writes skill links there), not the person's work; each tool's own
-# names (its settings folder, its local instruction file) come from its `reminder.skip` data
-SKIP_DIRS = (".orch", ".git", ".agents", "node_modules", ".venv", "__pycache__", "dist", "build")
+# each tool's own setup names (its settings folder, skill links, local instruction file) come from its
+# `reminder.skip` data
+SKIP_DIRS = (".orch", ".git", "node_modules", ".venv", "__pycache__", "dist", "build")
 SKIP_FILES = ("AGENTS.orch.md",)
 KEEP_MARKERS = 20
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
@@ -83,24 +82,30 @@ def _tool_skips() -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(dict.fromkeys(dirs)), tuple(dict.fromkeys(files))
 
 
+def _inside(path: str, folder: str) -> bool:
+    """path is folder or below it (commonpath of normalised real paths: right at a drive root too)."""
+    p, f = os.path.normcase(os.path.realpath(path)), os.path.normcase(os.path.realpath(folder))
+    try:
+        return os.path.commonpath([p, f]) == f
+    except ValueError:  # another drive
+        return False
+
+
 def _git_exe(root: Path) -> str | None:
-    """git as an ABSOLUTE path, found once on PATH. Windows resolves a bare "git" in the current folder first
-    (the project: a committed git.exe would run on every prompt), so relative PATH entries, the current folder
-    and anything under the project are never searched, and a hit inside the project is refused.
-    Migrate to safegit (B11), which does the same for every orch git call."""
+    """git as an ABSOLUTE path, found once on PATH. Windows resolves a bare "git" (and shutil.which) in the
+    current folder first (the project: a committed git.exe would run on every prompt), so each ABSOLUTE PATH
+    entry is checked for exactly `git.exe` (Windows) or `git` (POSIX) by hand: no relative entry, no .cmd,
+    no entry at or under the project or the current folder. Migrate to safegit (B11)."""
     if _GIT_EXE:
         return _GIT_EXE[0]
-    bad = [os.path.realpath(root), os.path.realpath(os.getcwd())]
+    name = "git.exe" if os.name == "nt" else "git"
     found = None
     for d in os.environ.get("PATH", "").split(os.pathsep):
-        if not d or not os.path.isabs(d):
+        if not d or not os.path.isabs(d) or _inside(d, str(root)) or _inside(d, os.getcwd()):
             continue
-        real = os.path.realpath(d)
-        if any(real == b or real.startswith(b + os.sep) for b in bad):
-            continue
-        hit = shutil.which("git", path=d)
-        if hit and os.path.isabs(hit):
-            found = hit
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            found = cand
             break
     _GIT_EXE.append(found)
     return found
@@ -269,8 +274,9 @@ def first_time(root: Path, sig: str) -> bool:
     """True for exactly one caller per change set (exclusive create of its marker). Error = False (silent)."""
     try:
         d = root / ".orch" / "run" / "work-check"
-        if (root / ".orch" / "run").is_symlink() or d.is_symlink():
-            return False
+        for x in (root / ".orch", root / ".orch" / "run", d):
+            if x.is_symlink() or (hasattr(x, "is_junction") and x.is_junction()):
+                return False
         d.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(d / sig[:32], os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
         os.close(fd)
@@ -284,7 +290,7 @@ def first_time(root: Path, sig: str) -> bool:
     return True
 
 
-def _read_event(events: tuple[str, ...], root_hint: list) -> str | None:
+def _read_event(events: tuple[str, ...], root_hint: list, names: dict | None = None) -> str | None:
     """The hook's stdin JSON: returns the event name (None = not one of `events`), adds its cwd to root_hint.
     Reads in a thread: a stdin that never closes must not hang the hook."""
     box: list[str] = []
@@ -296,37 +302,46 @@ def _read_event(events: tuple[str, ...], root_hint: list) -> str | None:
     t = threading.Thread(target=read, daemon=True)
     t.start()
     t.join(1.0)
-    event = events[-1]  # nothing readable: the usual one (the prompt event is listed last)
+    names = names or {}
+    event = names.get("default_event") or events[-1]  # nothing readable: the usual one
     try:
         data = json.loads(box[0]) if box and box[0].strip() else None
     except (ValueError, RecursionError):
         data = None
     if isinstance(data, dict):
-        if isinstance(data.get("hook_event_name"), str):
-            event = data["hook_event_name"]
-        cwd = data.get("cwd")
+        ev = data.get(names.get("event", "hook_event_name"))
+        if isinstance(ev, str):
+            event = ev
+        cwd = data.get(names.get("cwd", "cwd"))
         if isinstance(cwd, str) and os.path.isabs(cwd) and os.path.isdir(cwd):
             root_hint.append(cwd)
     return event if event in events else None
 
 
 def find_root(start: Path) -> Path:
-    """The workspace of `start`: the nearest folder upwards with a `.orch` that is ours (same owner), not
-    crossing the git top folder or the home folder (a `.orch` in a shared ancestor like /tmp is nobody's)."""
+    """The workspace of `start`: its own `.orch`, else the nearest one upwards, but only below a boundary we
+    can see (a `.git` folder or the home folder) and owned by us: a `.orch` in a shared ancestor (/tmp,
+    a drive root) is nobody's. No boundary found on the way up: only `start` itself counts."""
     home = Path.home()
+    chain = []
     for p in (start, *start.parents):
-        o = p / ".orch"
-        try:
-            if (
-                o.is_dir()
-                and not o.is_symlink()
-                and (not hasattr(os, "getuid") or o.stat().st_uid == os.getuid())
-            ):
-                return p
-        except OSError:
-            pass
+        chain.append(p)
         if p == home or (p / ".git").exists():
             break
+    else:
+        chain = [start]
+
+    def ours(o: Path) -> bool:
+        try:
+            if not o.is_dir() or o.is_symlink() or (hasattr(o, "is_junction") and o.is_junction()):
+                return False
+            return not hasattr(os, "getuid") or o.stat().st_uid == os.getuid()
+        except OSError:
+            return False
+
+    for p in chain:
+        if ours(p / ".orch"):
+            return p
     return start
 
 
@@ -362,7 +377,7 @@ def hook_main(argv: list[str] | None = None, watchdog: threading.Timer | None = 
         if not hooks or not data.get("output"):
             return 0
         hint: list[str] = []
-        event = _read_event(tuple(hooks), hint)
+        event = _read_event(tuple(hooks), hint, data.get("input"))
         root = find_root(Path(hint[0] if hint else os.getcwd()))
         if event is None or own_ticket_open(root):
             return 0

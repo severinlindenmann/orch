@@ -295,7 +295,8 @@ def test_hooks_doc_comes_from_data():
         assert group == {
             "hooks": [{"type": "command", "command": reminder_settings.hook_command("claude"), "timeout": 5}]
         }
-        assert os.path.isabs(group["hooks"][0]["command"].split()[0].strip("'"))
+        cmd = group["hooks"][0]["command"]
+        assert os.path.isabs(cmd[1 : cmd.index('"', 1)])  # the absolute interpreter, double-quoted
         assert "matcher" not in group and len(d["hooks"][event][0]["hooks"]) == 1
     assert len(d["hooks"]["Stop"]) == 1
     assert adapters.hooks_doc("codex", "r_1") is None

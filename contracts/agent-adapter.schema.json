@@ -144,6 +144,15 @@
           "properties": {
             "settings_file": { "$ref": "#/$defs/path", "description": "The tool's local (uncommitted) settings file below the project, where `orch init` merges reminder_hooks." },
             "skip": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" }, "description": "Names (folders; a name ending .md is a file) the tool's own setup puts in the project: left out of the work-check scan." },
+            "input": {
+              "type": "object", "additionalProperties": false,
+              "properties": {
+                "event": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Field of the hook's stdin JSON that names the event." },
+                "cwd": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Field of the hook's stdin JSON that names the tool's current folder." },
+                "default_event": { "type": "string", "pattern": "^[A-Za-z]{1,32}$", "description": "The event assumed when stdin gives none (one of reminder_hooks)." }
+              },
+              "description": "Names in the hook's stdin JSON."
+            },
             "output": { "type": "object", "description": "What the hook prints, as JSON: \"{event}\" and \"{line}\" in any string are replaced by the hook event name and the one reminder line." }
           },
           "description": "Optional. How the work-check hook talks to this tool (see reminder_hooks)."

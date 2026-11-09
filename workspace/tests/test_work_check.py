@@ -283,3 +283,48 @@ def test_hook_unknown_tool_or_missing_arg_is_silent(ws, monkeypatch, capsys):
     assert workcheck.hook_main(["work-check", "--hook", "nosuchtool"]) == 0
     assert workcheck.hook_main(["work-check", "--hook"]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_inside_uses_commonpath_not_startswith(tmp_path):
+    root = tmp_path.anchor or os.sep  # a drive root / filesystem root
+    assert workcheck._inside(str(tmp_path / "a" / "b"), root)
+    assert workcheck._inside(root, root)
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "project-tools").mkdir()
+    assert not workcheck._inside(
+        str(tmp_path / "project-tools"), str(tmp_path / "proj")
+    )  # a prefix is no parent
+    assert workcheck._inside(str(tmp_path / "proj"), str(tmp_path / "proj"))
+
+
+def test_git_is_found_by_hand_per_path_entry(tmp_path, monkeypatch):
+    other = tmp_path / "other"
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    gitf = _fake_git(other)
+    monkeypatch.setattr(workcheck, "_GIT_EXE", [])
+    monkeypatch.setenv("PATH", os.pathsep.join(["rel/bin", str(other)]))
+    assert workcheck._git_exe(proj) == str(gitf)
+
+
+def test_find_root_needs_a_boundary_to_walk_up(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(workcheck.Path, "home", classmethod(lambda cls: tmp_path / "elsewhere"))
+    (tmp_path / ".orch").mkdir()
+    deep = tmp_path / "x" / "y"
+    deep.mkdir(parents=True)
+    assert workcheck.find_root(deep) == deep  # no .git or home on the way up: only the start counts
+    (tmp_path / ".git").mkdir()
+    assert workcheck.find_root(deep) == tmp_path  # a git top folder is the boundary and holds our .orch
+
+
+def test_hook_reads_its_stdin_field_names_from_the_data(ws, monkeypatch, capsys):
+    from orch import adapters
+
+    _edit(ws)
+    data = adapters.load("claude")["reminder"]["input"]
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO(json.dumps({data["event"]: "SessionStart", data["cwd"]: str(ws)}))
+    )
+    assert workcheck.hook_main(["work-check", "--hook", "claude"]) == 0
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["hookEventName"] == "SessionStart"

@@ -982,19 +982,58 @@ def test_reminder_settings_in_git_exclude(proj, run):
     assert ".claude/settings.local.json" not in _git(proj, "status", "--porcelain")
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="posix quoting")
-def test_reminder_settings_command_is_quoted(monkeypatch):
-    import shlex
-
+def test_reminder_settings_command_is_double_quoted_and_shell_neutral(monkeypatch):
     from orch import reminder_settings
 
-    nasty = "/tmp/a b/$(touch x);y'z/py"
-    monkeypatch.setattr(sys, "executable", nasty)
+    monkeypatch.setattr(sys, "executable", "/tmp/a b/py")
     cmd = reminder_settings.hook_command("claude")
-    words = shlex.split(cmd)
-    assert words[:8] == [nasty, "-I", "-P", "-m", "orch", "work-check", "--hook", "claude"]
-    assert words[8:] == ["2>/dev/null", "||", "true"]  # an uninstalled orch never errors on a prompt
-    assert cmd.endswith(" -m orch work-check --hook claude 2>/dev/null || true")
+    assert cmd == '"/tmp/a b/py" -I -m orch work-check --hook claude'
+    assert "2>" not in cmd and "||" not in cmd  # no bash-only tricks: works under cmd too
+
+
+@pytest.mark.parametrize("bad", ['/tmp/a"b/py', "/tmp/a$b/py", "/tmp/a`b/py", "C:/x%PATH%/py", "/tmp/a!b/py"])
+def test_reminder_settings_refuses_unsafe_interpreter_path(proj, run, monkeypatch, bad):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(sys, "executable", bad)
+    with pytest.raises(ValueError):
+        reminder_settings.hook_command("claude")
+    assert reminder_settings.ensure(proj)  # a warning, nothing written
+    assert not (proj / ".claude/settings.local.json").exists()
+    assert adapters.reminder_doc("claude") is None
+
+
+def test_reminder_settings_warns_when_orch_cannot_be_imported_with_dash_I(proj, monkeypatch):
+    from orch import reminder_settings
+
+    monkeypatch.setattr(reminder_settings, "can_import", lambda root: False)
+    (w,) = reminder_settings.ensure(proj)
+    assert "could not start orch" in w and not (proj / ".claude/settings.local.json").exists()
+
+
+def test_reminder_settings_the_written_command_really_starts_orch(proj, run):
+    import subprocess
+
+    run("init")
+    cmd = _ours(_local_settings(proj), "UserPromptSubmit")[0]["command"]
+    r = subprocess.run(cmd, shell=True, cwd=proj, input="", capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and r.stderr == ""  # the hook always exits 0, quietly
+
+
+def test_reminder_settings_matches_only_its_own_command_shape():
+    from orch import reminder_settings
+
+    ours = [
+        '"/x/py" -I -m orch work-check --hook claude',
+        "/old/py -P -m orch work-check --hook claude 2>/dev/null || true",
+    ]
+    theirs = [
+        "echo orch work-check --hook claude",
+        "my-tool -m orch work-check --hook claude --extra",
+        "echo hi",
+    ]
+    assert all(reminder_settings._ours({"type": "command", "command": c}) for c in ours)
+    assert not any(reminder_settings._ours({"type": "command", "command": c}) for c in theirs)
 
 
 def test_reminder_settings_command_uses_forward_slashes(monkeypatch):

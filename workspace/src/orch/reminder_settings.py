@@ -8,20 +8,21 @@ team's git is left exactly as it is and the person gets one warning line. The wr
 file made with O_EXCL, renamed over: a link at the destination is replaced, never followed) and re-
 checked just before the rename.
 
-The hook command runs this very orch again:
-`<abs python> -I -P -m orch work-check --hook <tool> 2>/dev/null || true`.
-- absolute interpreter, forward slashes, POSIX quoting (shlex) on every OS: the tool runs hooks through a
-  POSIX shell (Git Bash on Windows);
-- `-I -P` (isolated, no cwd on sys.path). The interpreter is the one running `orch init`, and orch
-  needs Python 3.11+, which knows `-P`: an old interpreter never answers with the exit code that blocks;
-- `2>/dev/null || true`: a removed venv or an uninstalled orch never shows an error on every prompt.
+The hook command runs this very orch again: `"<abs python>" -I -m orch work-check --hook <tool>`.
+- absolute interpreter, forward slashes, double-quoted: the same line works under bash (Git Bash on
+  Windows) and cmd. An interpreter path with a character either shell would treat specially
+  (" % $ ` !) is not written: the person gets a warning instead;
+- `-I`: isolated, which also keeps the cwd and PYTHONPATH off sys.path;
+- no shell tricks to hide errors: `orch work-check --hook` itself always exits 0 and prints nothing else.
+At init the exact command is run once (`--version`): an orch that `-I` cannot import (a pip --user or
+PYTHONPATH install) gets a warning and nothing is written.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,15 +30,34 @@ from orch import harness
 from orch.errors import Refused
 
 TIMEOUT = 5
-_OURS = re.compile(r"\borch work-check --hook [a-z][a-z0-9-]*\b")
-_BARE = re.compile(r"^orch work-check --hook ([a-z][a-z0-9-]*)$")
-ENDING = " 2>/dev/null || true"
+_OURS = re.compile(r" -m orch work-check --hook [a-z][a-z0-9-]*(?: 2>/dev/null \|\| true)?$")
+_BAD = set('"%$`!\n\r\0')
 
 
 def hook_command(tool: str) -> str:
-    """The shell command of the hook for `tool` (a built-in adapter name)."""
+    """The hook command for `tool` (an adapter name); ValueError for an unsafe interpreter path."""
     exe = sys.executable.replace("\\", "/")
-    return shlex.join([exe, "-I", "-P", "-m", "orch", "work-check", "--hook", tool]) + ENDING
+    if not exe or _BAD & set(exe):
+        raise ValueError("the Python path has a character a hook command cannot carry safely")
+    return f'"{exe}" -I -m orch work-check --hook {tool}'
+
+
+def can_import(root: Path) -> bool:
+    """The exact interpreter and flags of the hook can import orch (not so for pip --user or PYTHONPATH)."""
+    try:
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-P",
+                "-m",
+                "orch",
+                "--version",
+            ]  # -I implies -P on 3.11+: same as the hook, cwd=root, capture_output=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
 
 
 def tools(root: Path) -> list[tuple[str, dict]]:
@@ -112,7 +132,12 @@ def _ensure_one(root: Path, rel: str, tool: str, events: list[str]) -> str | Non
         return f"{rel} is not a regular file: orch left it as it is."
     if harness._tracked(root, rel):
         return f"{rel} is part of your team's files (tracked by git): {left}"
-    command = hook_command(tool)
+    try:
+        command = hook_command(tool)
+    except ValueError:
+        return f"{rel}: the Python path has a character a hook cannot carry safely: {left}"
+    if not can_import(root):
+        return f"{rel}: the hook could not start orch with python -I (a --user or PYTHONPATH install): {left}"
     for attempt in (0, 1):
         try:
             before = _sig(path) if path.is_file() else None

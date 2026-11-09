@@ -270,6 +270,10 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
         return None
     from orch import reminder_settings
 
+    try:
+        command = reminder_settings.hook_command(name)
+    except ValueError:
+        return None  # an interpreter path no shell can carry safely: no reminder hooks, the run goes on
     return {
         "hooks": {
             event: [
@@ -277,7 +281,7 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": reminder_settings.hook_command(name),
+                            "command": command,
                             "timeout": REMINDER_TIMEOUT,
                         }
                     ]

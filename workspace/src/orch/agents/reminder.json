@@ -5,7 +5,8 @@
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
       "reminder": {
         "settings_file": ".claude/settings.local.json",
-        "skip": [".claude", "CLAUDE.local.md"],
+        "skip": [".claude", ".agents", "CLAUDE.local.md"],
+        "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" },
         "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } }
       }
     }
