@@ -253,3 +253,22 @@ def test_live_retry_does_not_break_mac(tws, enforce):
 def test_no_key_fails_closed(tws, enforce):
     runs.pending_add(tws, TID, "human:pat", "answer", "yes")
     assert runs.human_waiting(tws, TID) == []
+
+
+def test_keys_folder_symlink_refused_on_read(tws):
+    hp.human_key(tws)
+    home = tws.parent / "home"
+    real = home / "keys-real"
+    (home / "keys").rename(real)
+    (home / "keys").symlink_to(real)
+    with pytest.raises(Refused, match="wrong rights"):
+        hp.key_dir(tws, create=False)
+    with pytest.raises(Refused):
+        hp.verify_and_consume(tws, "hp1.x.y", "run.takeover", TID)
+
+
+def test_keys_folder_loose_rights_refused_on_read(tws):
+    hp.human_key(tws)
+    (tws.parent / "home" / "keys").chmod(0o755)
+    with pytest.raises(Refused, match="wrong rights"):
+        hp.key_dir(tws, create=False)
