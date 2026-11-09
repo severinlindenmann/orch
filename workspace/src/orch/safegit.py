@@ -103,6 +103,10 @@ def _inside(path: str, folder: str) -> bool:
 
 def _avoid(cwd: Path, root: Path | None) -> frozenset:
     out = {str(cwd)}
+    try:
+        out.add(str(Path.cwd().resolve()))  # always: whatever the caller passes, never a git from our own cwd
+    except OSError:
+        pass
     if root is not None:
         out.add(str(root))
     homes = list(addons.home_candidates())

@@ -285,24 +285,24 @@ def _tracked(root: Path, rel: str) -> bool:
         return True  # no trusted git: cannot tell, treat the file as the team's
     env = h[1]
     try:
-        return (
-            subprocess.run(
-                [
-                    *h[0],
-                    "ls-files",
-                    "--error-unmatch",
-                    "--",
-                    f":(icase){rel}",
-                ],  # .ORCH/... tracked is this file too
-                cwd=root,
-                capture_output=True,
-                env=env,
-                timeout=10,
-            ).returncode
-            == 0
-        )
+        rc = subprocess.run(
+            [
+                *h[0],
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                f":(icase){rel}",
+            ],  # .ORCH/... tracked is this file too
+            cwd=root,
+            capture_output=True,
+            env=env,
+            timeout=10,
+        ).returncode
     except (OSError, subprocess.SubprocessError):
         return True  # cannot tell: treat the file as the team's
+    if rc not in (0, 1):  # 0 = tracked, 1 = not tracked; anything else (123, a crash) = cannot tell
+        return True  # ... and that means "the team's file": the safe direction
+    return rc == 0
 
 
 def _git_on_path() -> bool:

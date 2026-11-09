@@ -751,7 +751,8 @@ def test_no_bare_true_anywhere(tmp_path, monkeypatch):
     assert inspect.signature(safegit.env).parameters["true"].default is inspect.Parameter.empty
 
 
-def test_a_project_python_is_not_a_trusted_trivial_command_on_windows(tmp_path):
+def test_a_project_python_is_not_a_trusted_trivial_command_on_windows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # (our own cwd is always avoided; the test runs from the venv's folder)
     import sys
 
     assert safegit._python_trivial("true", tmp_path, tmp_path).startswith(f'"{sys.executable}"')
@@ -862,3 +863,41 @@ def test_env_sets_the_c_locale(monkeypatch):
     monkeypatch.setenv("LC_ALL", "de_CH.UTF-8")
     e = safegit.env(Path("/tmp"), None, "/bin/true")
     assert e["LC_ALL"] == e["LANG"] == "C"
+
+
+@pytest.mark.parametrize("rc", [123, 2, 128, -11])
+def test_tracked_cannot_tell_means_tracked(proj, monkeypatch, rc):
+    from orch import harness
+
+    plain_git(proj, "init", "-q")
+    (proj / "a.txt").write_text("x\n")
+    real = harness.subprocess.run
+
+    def fake(argv, **kw):
+        if "ls-files" in argv:
+            return subprocess.CompletedProcess(argv, rc, b"", b"")
+        return real(argv, **kw)
+
+    monkeypatch.setattr(harness.subprocess, "run", fake)
+    assert harness._tracked(proj, "a.txt") is True  # unexpected exit code: the team's file
+    monkeypatch.setattr(harness.subprocess, "run", real)
+    assert harness._tracked(proj, "a.txt") is False  # git's own answer: not tracked
+    plain_git(proj, "add", "a.txt")
+    assert harness._tracked(proj, "a.txt") is True
+
+
+def test_a_git_in_our_own_cwd_is_never_used_even_without_cwd_or_root(tmp_path, monkeypatch):
+    ran = tmp_path / "CWD-GIT-RAN"
+    here = tmp_path / "agentrepo"
+    here.mkdir()
+    sh(here / "git", f"touch {ran}")
+    real = _exe(tmp_path)
+    for path in (os.pathsep.join([str(here), str(real.parent)]), str(here)):
+        monkeypatch.setenv("PATH", path)
+        monkeypatch.setattr(safegit, "_exes", {})
+        monkeypatch.chdir(here)
+        exe = safegit.git_exe(tmp_path / "elsewhere")  # the caller names another cwd and no root
+        assert exe in (None, str(real))
+        safegit.run(["--version"], tmp_path, filters=False)
+        assert not ran.exists()
+    assert str(here.resolve()) in safegit._avoid(tmp_path, None)
