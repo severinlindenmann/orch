@@ -308,6 +308,15 @@ def _check_wont_do(a):
     return ["check", "wont-do", _tid(a.get("ticket")), cid], [f"--reason={reason}"] if reason else [], []
 
 
+def _check_reopen(a):
+    """Open a step again (also a Won't do step): `orch check reopen <ticket> <task>`."""
+    _only(a, ("ticket", "check"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
+
+
 def _ref_add(a):
     _only(a, ("ticket", "target"))
     return ["ref", "add", _tid(a.get("ticket"))], [], [_text(a.get("target"), "reference")]
@@ -507,6 +516,7 @@ OPS = {
     "check.add": _check_add,
     "check.set": _check_set,
     "check.wont_do": _check_wont_do,
+    "check.reopen": _check_reopen,
     "run.start": _run_start,
     "run.stop": _run_stop,
     "addon.start": _addon_start,

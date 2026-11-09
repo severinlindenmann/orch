@@ -167,7 +167,32 @@ def _evidence(*lists):
     return sorted(seen.values(), key=lambda e: (e.get("at", ""), _canon(e)))
 
 
+def _person_wont(x):
+    return x.get("wont_do") is True and str(x.get("by", "")).startswith("human:")
+
+
+def _drop_wont(x):
+    return {k: v for k, v in x.items() if k not in ("wont_do", "reason")}
+
+
 def _check_item(ctx, x0, xa, xb):
+    # Won't do is a person's decision: a side without a human `by` cannot bring it in (the rule of
+    # orch.tickets.check_wont_do), and done vs won't do is one side's item wholesale, never a field mix.
+    x0, xa, xb = ({**x} if not x.get("wont_do") or _person_wont(x) else _drop_wont(x) for x in (x0, xa, xb))
+    if (xa.get("wont_do") and xb.get("done")) or (xb.get("wont_do") and xa.get("done")):
+        return dict(xa if ctx.a_newer else xb)
+    out = _check_merged(ctx, x0, xa, xb)
+    if out.get("wont_do") and not _person_wont(out):
+        out = _drop_wont(out)
+    if "reason" in out and not out.get("wont_do"):
+        out.pop("reason")
+    if out.get("wont_do"):
+        out.pop("state", None)
+        out["done"] = False
+    return out
+
+
+def _check_merged(ctx, x0, xa, xb):
     out = _obj(ctx, x0, xa, xb, skip=("evidence",), top=True, label=f"{xa.get('id')} ")
     out["evidence"] = _evidence(x0.get("evidence", []), xa.get("evidence", []), xb.get("evidence", []))
     if out.get("done") and not out["evidence"]:

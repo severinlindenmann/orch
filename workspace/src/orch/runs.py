@@ -764,6 +764,15 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         out.append(
             "Still to do:\n" + "\n".join(f"- {c['id']}: {_clip(c.get('text', ''), 200)}" for c in todo[:20])
         )
+    declined = [c for c in ticket.get("checklist") or [] if c.get("wont_do") and not c.get("done")]
+    if declined:
+        out.append(
+            "Declined by a person (do not do these): "
+            + "; ".join(
+                f"{c['id']} ({_clip(' '.join(str(c.get('reason') or 'no reason given').split()), 200)})"
+                for c in declined[:20]
+            )
+        )
     hist = (ticket.get("history") or [])[-5:]
     if hist:
         out.append(

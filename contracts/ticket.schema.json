@@ -92,7 +92,7 @@
       },
       "allOf": [
         { "if": { "properties": { "done": { "const": true } } }, "then": { "properties": { "evidence": { "minItems": 1 } } } },
-        { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } } } },
+        { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } }, "not": { "required": ["state"] } } },
         { "if": { "required": ["reason"] }, "then": { "required": ["wont_do"] } }
       ],
       "description": "Evidence-based: done=true needs at least one evidence entry. wont_do=true (a person's decision) is resolved without evidence and excludes done=true."

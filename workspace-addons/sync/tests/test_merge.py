@@ -353,3 +353,49 @@ def test_counter_never_raises_on_garbage():
     assert merge_counter({1: 1, "a": 2}, {"a": 3}, None)["last"] == 0
     assert merge_counter(_nest(500), {"last": 2}, None)["last"] == 2
     assert merge_counter({"last": True}, {"last": "9"}, {"last": [5]})["last"] == 0
+
+
+# ---- Won't do: a person's decision (human `by`); done vs won't do is one side wholesale
+
+def _step(**kw):
+    c = {"id": "c1", "text": "Email finance", "done": False, "evidence": []}
+    c.update(kw)
+    return c
+
+
+WONT = dict(wont_do=True, reason="Not needed", by="human:Ann", at=T2)
+DONE = dict(done=True, evidence=[{"type": "note", "ref": "sent it", "by": "agent:claude", "at": T2}],
+            by="agent:claude", at=T2)
+
+
+def test_wont_do_from_a_person_syncs():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])
+    for x, y in ((a, base), (base, a)):
+        out = merge_ticket(base, x, y, NOW)
+        assert out["checklist"][0]["wont_do"] is True and out["checklist"][0]["reason"] == "Not needed"
+        assert list(SCHEMA.iter_errors(out)) == []
+
+
+def test_wont_do_without_a_human_by_is_dropped():
+    base = tk(checklist=[_step()])
+    for by in ("agent:claude", None):
+        item = _step(wont_do=True, reason="sneaky", **({"by": by, "at": T2} if by else {}))
+        a = up(base, T2, checklist=[item])
+        for x, y in ((a, base), (base, a)):
+            c = merge_ticket(base, x, y, NOW)["checklist"][0]
+            assert "wont_do" not in c and "reason" not in c
+
+
+def test_done_vs_wont_do_is_one_side_wholesale():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])
+    b = up(base, T3, checklist=[_step(**DONE)])
+    for x, y in ((a, b), (b, a)):
+        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        assert c == _step(**DONE)  # b is newer: its item, no mixed fields
+        assert list(SCHEMA.iter_errors(merge_ticket(base, x, y, NOW))) == []
+    a2 = up(base, T3, checklist=[_step(**WONT)])
+    b2 = up(base, T2, checklist=[_step(**DONE)])
+    for x, y in ((a2, b2), (b2, a2)):
+        assert merge_ticket(base, x, y, NOW)["checklist"][0] == _step(**WONT)

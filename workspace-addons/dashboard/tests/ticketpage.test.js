@@ -252,9 +252,9 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   assert.equal(helpers.historyLine({text:"Marked c1 as won't do"}, t.checklist), "Marked as won't do: Skip this");
   assert.equal(c.ticketHistoryIsTechnical({kind:'check', text:"Marked c1 as won't do"}), false);
   await all.find(n => n.attrs['data-key'] === 'task-check-c1').onclick();
-  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['check.set',{ticket:t.id,check:'c1',done:false}]));
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['check.reopen',{ticket:t.id,check:'c1'}]));
   await all.find(n => n.tag === 'form').onsubmit({preventDefault(){}});
-  assert.equal(calls.pop()[1].done, false);
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['check.reopen',{ticket:t.id,check:'c1'}]));
   t.checklist[0] = {id:'c1',text:'Try this',done:false};
   all = c.taskRows(t).flatMap(nodes);
   const form = all.find(n => n.tag === 'form'), input = all.find(n => n.tag === 'input');

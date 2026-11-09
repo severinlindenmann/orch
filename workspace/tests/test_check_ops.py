@@ -3,6 +3,8 @@
 import json
 import time
 
+import pytest
+
 from orch import tickets
 
 
@@ -246,3 +248,72 @@ def test_run_prompt_skips_wont_do_steps(proj, run, new_ticket):
     run("check", "wont-do", tid, "c1", "--by", "human:tester")
     text = runs.fresh_prompt(tickets.load(proj, tid), [])
     assert "c2: step 2" in text and "c1: step 1" not in text
+
+
+def _decided(proj, run, new_ticket, n=2):
+    tid = with_checks(proj, run, new_ticket, n=n)
+    run("check", "wont-do", tid, "c1", "--reason", "Not needed", "--by", "human:tester")
+    return tid
+
+
+def test_agent_cannot_edit_a_wont_do_step(proj, run, new_ticket, monkeypatch):
+    tid = _decided(proj, run, new_ticket)
+    assert run("check", "edit", tid, "c1", "Run the security tests", "--by", "agent:claude")[0] == 2
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert run("check", "edit", tid, "c1", "Run the security tests", "--by", "human:tester")[0] == 2
+    assert read(proj, tid)["checklist"][0]["text"] == "step 1"
+    monkeypatch.delenv("CLAUDECODE")
+    assert run("check", "edit", tid, "c1", "Rename by person", "--by", "human:tester")[0] == 0
+
+
+def test_generic_writes_by_an_agent_cannot_change_wont_do(proj, run, new_ticket, monkeypatch):
+    """Every generic write path (apply_op callers, patch, edit) under an agent keeps the decision intact."""
+    tid = _decided(proj, run, new_ticket)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    # apply_op itself: setting, clearing, changing the reason, who/when, adding a new wont_do step
+    for change in (
+        lambda t: t["checklist"][1].update(wont_do=True),
+        lambda t: t["checklist"][0].pop("wont_do"),
+        lambda t: t["checklist"][0].update(reason="other"),
+        lambda t: t["checklist"][0].update(by="agent:claude"),
+        lambda t: t["checklist"].append(
+            {"id": "c9", "text": "x", "done": False, "evidence": [], "wont_do": True}
+        ),
+        lambda t: t["checklist"].pop(0),
+    ):
+        with pytest.raises(tickets.Refused):
+            tickets.apply_op(proj, tid, change)
+    # patch / edit cannot reach the checklist at all
+    assert run("ticket", "patch", tid, "--if-revision", "99", '{"checklist": []}')[0] == 2
+    assert run("ticket", "edit", tid, "--title", "New title")[0] == 0
+    t = read(proj, tid)
+    assert t["checklist"][0]["wont_do"] is True and t["checklist"][0]["reason"] == "Not needed"
+    assert "wont_do" not in t["checklist"][1]
+    # an unrelated agent write still works
+    assert tickets.apply_op(proj, tid, lambda t: t["checklist"][1].update(text="renamed"))[0]
+
+
+def test_progress_says_done_and_wont_do_apart(proj, run, new_ticket):
+    tid = with_checks(proj, run, new_ticket, n=3)
+    run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
+    assert tickets.progress_text(tickets.load(proj, tid)) == "1 of 3 done"
+    run("check", "wont-do", tid, "c2", "--by", "human:tester")
+    run("check", "wont-do", tid, "c3", "--by", "human:tester")
+    t = tickets.load(proj, tid)
+    assert tickets.progress_text(t) == "1 done, 2 won't do" and tickets.checks_split(t) == (1, 2, 3)
+    code, out, _ = run("ticket", "show", tid)
+    assert "1 done, 2 won't do" in out and "All resolved" in out and "3 of 3" not in out
+
+
+def test_prompt_names_declined_steps_and_cli_strips_control_chars(proj, run, new_ticket):
+    from orch import runs
+
+    tid = with_checks(proj, run, new_ticket, n=2)
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    tickets.apply_op(  # a synced or hand-edited reason can carry control characters
+        proj, tid, lambda t: t["checklist"][0].update(reason="Skip \x1b[31mred\x07")
+    )
+    text = runs.fresh_prompt(tickets.load(proj, tid), [])
+    assert "Declined by a person" in text and "c1 (" in text and "c1: step 1" not in text
+    _, out, _ = run("ticket", "show", tid)
+    assert "\x1b" not in out and "\x07" not in out

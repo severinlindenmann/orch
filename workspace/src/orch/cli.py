@@ -52,8 +52,7 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
-    d, n = tickets.checks_done(t)
-    return f"{d} of {n} done" if n else ""
+    return tickets.progress_text(t)
 
 
 def _line(t: dict) -> str:
@@ -107,7 +106,8 @@ def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> lis
     mark = "✓" if c["done"] else ("–" if wont else ("◐" if c.get("state") == "doing" else "○"))
     line = f"  {mark} {c['id']} {c['text']}"
     if wont:
-        line += "   Won't do" + (f": {c['reason']}" if c.get("reason") else "")
+        why = "".join(ch for ch in str(c.get("reason") or "") if ch.isprintable())
+        line += "   Won't do" + (f": {why}" if why else "")
     if q and not c["done"] and not wont:
         line += f"   waiting for your answer ({q['id']})"
     if c.get("state") == "doing" and not c["done"] and not wont and root is not None:
@@ -143,7 +143,11 @@ def _show(t: dict, root: Path | None = None) -> str:
         f"Status: {tickets.STATUS_WORDS[t['status']]}" + (f" - {_progress(t)}" if _progress(t) else "")
     )
     if n and d == n:
-        out.append(f"✓ All done · {n} of {n}")
+        out.append(
+            f"✓ All done · {_progress(t)}"
+            if tickets.checks_split(t)[1] == 0
+            else f"✓ All resolved · {_progress(t)}"
+        )
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
         out.append("  ".join(extra))

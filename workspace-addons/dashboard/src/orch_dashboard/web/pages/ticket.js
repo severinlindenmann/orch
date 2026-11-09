@@ -18,7 +18,7 @@ async function toggleTask(id, cid) {
   const t = ticketOf(id), task = array(t?.checklist).find(c => c.id === cid), lock = 'task-' + id + '-' + cid;
   if (!task || locks.has(lock)) return;
   locks.add(lock);
-  const result = await act('check.set', {ticket:t.id, check:cid, done:!window.DashHelpers.resolved(task)});
+  const result = task.wont_do ? await act('check.reopen', {ticket:t.id, check:cid}) : await act('check.set', {ticket:t.id, check:cid, done:!window.DashHelpers.resolved(task)});
   locks.delete(lock);
   render();
   if (!result.ok) window.orch.toast(result.text, 'error');
@@ -557,7 +557,7 @@ function taskRows(t) {
         h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"));
       form.onsubmit = async event => {
         event.preventDefault();
-        if (window.DashHelpers.resolved(task)) return toggleTask(t.id, task.id);
+        if (window.DashHelpers.resolved(task)) { const r = await act('check.reopen', {ticket:t.id, check:task.id}); render(); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
         const lock = 'task-' + t.id + '-' + task.id;
         if (locks.has(lock)) return;
         locks.add(lock);

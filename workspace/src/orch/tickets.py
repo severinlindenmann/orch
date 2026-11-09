@@ -301,6 +301,26 @@ def _write(root: Path, ticket: dict) -> None:
 NO_WRITE = object()  # an op returns this when it changed nothing
 
 
+def _wont_view(ticket: dict) -> list:
+    """The Won't do state of every step (id, flag, reason, who, when): what only a person may change."""
+    return [
+        (
+            c.get("id"),
+            c.get("wont_do"),
+            c.get("reason"),
+            c.get("by") if c.get("wont_do") else None,
+            c.get("at") if c.get("wont_do") else None,
+        )
+        for c in ticket.get("checklist") or []
+        if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
+    ]
+
+
+def _is_person(by: str) -> bool:
+    """The ONE person check for Won't do: a human actor and no agent tool in the environment."""
+    return by.startswith("human:") and not agent_tool()
+
+
 def apply_op(
     root: Path, tid: str, fn, *, expect: tuple[str, object] | None = None, if_revision: int | None = None
 ):
@@ -317,7 +337,11 @@ def apply_op(
             parent, _, leaf = expect[0].rpartition(".")
             raise _conflict(ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
         was_review = ticket.get("status") == "review"
+        wont_before = _wont_view(ticket)
         result = fn(ticket)
+        if agent_tool() and _wont_view(ticket) != wont_before:
+            # the one structural guard: no write path run by an agent changes a person's Won't do decision
+            raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
         if was_review and ticket.get("status") != "review":
@@ -567,6 +591,24 @@ def create(
 def checks_done(ticket: dict) -> tuple[int, int]:
     c = ticket.get("checklist", [])
     return sum(1 for x in c if x.get("done") or x.get("wont_do")), len(c)
+
+
+def checks_split(ticket: dict) -> tuple[int, int, int]:
+    """(done with proof, won't do, total): a ticket's steps, declined ones counted apart."""
+    c = ticket.get("checklist", [])
+    return (
+        sum(1 for x in c if x.get("done")),
+        sum(1 for x in c if x.get("wont_do") and not x.get("done")),
+        len(c),
+    )
+
+
+def progress_text(ticket: dict) -> str:
+    """'2 of 4 done', or '3 done, 1 won't do' when steps were declined: never '4 of 4' for work not done."""
+    done, wont, total = checks_split(ticket)
+    if not total:
+        return ""
+    return f"{done} done, {wont} won't do" if wont else f"{done} of {total} done"
 
 
 def _check_can_finish(ticket: dict) -> None:
@@ -1055,11 +1097,17 @@ def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
         raise Refused(f"{cid} was marked won't do by a person. Only a person opens it again.")
 
 
+def _person_only(by: str, item: dict, tid: str, cid: str) -> None:
+    """A step marked Won't do is a person's decision: only a person edits, removes or reopens it."""
+    if item.get("wont_do") and not _is_person(by):
+        _refuse_if_wont_do(item, tid, cid)
+
+
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
     """A person decides a step will not be done. Person only, enforced here like accept_review: `by` must be
     human: and no agent tool may be in the environment; an agent can only ask (orch ask ...). The step stays
     done=false (it is not done), counts as resolved and needs no proof. Calling again changes the reason."""
-    if not by.startswith("human:") or agent_tool():
+    if not _is_person(by):
         raise Refused(WONT_DO_AGENT.format(tid=tid, cid=cid))
     why = " ".join((reason or "").split())
     if len(why) > 200 or (why and not why.isprintable()):
@@ -1095,6 +1143,7 @@ def check_edit(
 
     def op(t):
         item = _item(t, cid)
+        _person_only(by, item, tid, cid)
         item["text"] = text.strip()
         add_history(t, by, f"Renamed {cid}")
         return item
@@ -1123,8 +1172,7 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
 
     def op(t):
         item = _item(t, cid)
-        if item.get("wont_do") and (not by.startswith("human:") or agent_tool()):
-            _refuse_if_wont_do(item, tid, cid)  # an agent cannot delete a person's decision
+        _person_only(by, item, tid, cid)  # an agent cannot delete a person's decision
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
@@ -1143,8 +1191,7 @@ def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     def op(t):
         item = _item(t, cid)
         if item.get("wont_do"):
-            if not by.startswith("human:") or agent_tool():
-                _refuse_if_wont_do(item, tid, cid)
+            _person_only(by, item, tid, cid)
             for k in ("wont_do", "reason"):
                 item.pop(k, None)
             _clear_doing(item)

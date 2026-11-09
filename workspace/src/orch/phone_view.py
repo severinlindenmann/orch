@@ -664,7 +664,7 @@ def _view_step(c: dict) -> dict:
 
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     checklist = _shown_checklist(ticket)
-    done, total = tickets.checks_done({"checklist": checklist})
+    done, wont, total = tickets.checks_split({"checklist": checklist})
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
@@ -690,6 +690,8 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "history_tail": hist,
         "attachments": atts,
     }
+    if wont:
+        view["wont_do"] = wont  # steps a person declined; "done" counts only steps done with proof
     if ticket.get("started") is True:
         view["started"] = True
     if shared_refs := reference_views(root, ticket):
@@ -1033,13 +1035,13 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     update_state(root, claim)
     sent = []
     for tid, to, t, finished, before, claimed in due:
-        done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
+        shown = {"checklist": _shown_checklist(t)}
         if finished:
             if _send_result(root, tid, to, t, finished):
                 sent.append(tid)
             continue
         try:
-            relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
+            relay.send_text(root, to, f"Tasks: {tickets.progress_text(shown)}", tid, "note", view=True)
             sent.append(tid)
         except Refused:  # not sent: undo the claim (also the status, so it is sent again next pull)
 
@@ -1222,8 +1224,8 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
     for ph in phones:
         have = set(done_for.get(ph, []))
         for t in [t for t in open_[:OPEN_MAX] if t["id"] not in have]:
-            done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
-            text = f"Tasks: {done} of {total} done" if total else NEW_TEXT
+            progress = tickets.progress_text({"checklist": _shown_checklist(t)})
+            text = f"Tasks: {progress}" if progress else NEW_TEXT
             try:
                 relay.send_text(root, ph, text, t["id"], "note", view=True)
             except Refused:
