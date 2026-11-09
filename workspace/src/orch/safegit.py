@@ -132,14 +132,17 @@ def find_exe(name: str, avoid) -> str | None:
 
 
 def have_git(cwd: Path, root: Path | None = None) -> bool:
-    """A git that orch trusts exists here. A yes/no only: no other module gets the program's path (the lint
-    in tests/test_safegit.py forbids git_exe() and any git path outside this module)."""
+    """A git that orch trusts exists here (found by the avoid rules). A yes/no only, never a path: no other
+    module gets the program (the lint in tests/test_safegit.py forbids git_exe(), hardened() and any git
+    path outside this module)."""
     return git_exe(cwd, root) is not None
 
 
 def git_on_path() -> bool:
-    """Is there SOME absolute git program on the PATH (find_exe with nothing avoided)? Lets a caller tell "git
-    is not installed" from "only a git orch does not trust is here"."""
+    """Is there SOME git program on the PATH (find_exe with nothing avoided)? A yes/no, never a path. Narrower
+    than the old per-caller lookup: only ABSOLUTE PATH entries count, so a git planted only in a relative or
+    empty entry no longer says "a git exists but is untrusted" (the callers still refuse in a folder that
+    has a .git). Lets a caller tell "git is not installed" from "only a git orch does not trust is here"."""
     return find_exe("git", frozenset()) is not None
 
 
@@ -233,6 +236,93 @@ def base_args(true: str, read_only: bool = False) -> list[str]:
     return ["--no-optional-locks", *out] if read_only else out
 
 
+def _spawn(*a, **k):
+    """The one process start of the streaming path."""
+    return subprocess.Popen(*a, **k)
+
+
+STDERR_KEEP = 64 * 1024
+
+
+def _kill(p) -> None:
+    """Kill git and everything it started (POSIX: its process group; the child holds the pipes otherwise)."""
+    try:
+        if os.name != "nt":
+            os.killpg(p.pid, 9)
+        else:
+            p.kill()
+    except OSError:
+        p.kill()
+
+
+def _stream(argv, cwd, env_, timeout, data, max_bytes):
+    """(rc, stdout, stderr) reading stdout WHILE git runs: past `max_bytes` the child is killed at once
+    (rc TOO_LONG); on timeout it is killed and subprocess.TimeoutExpired is raised. stderr is drained on a
+    thread and only its first STDERR_KEEP bytes are kept, so a chatty git cannot fill the pipe or memory."""
+    p = _spawn(
+        argv,
+        cwd=cwd,
+        env=env_,
+        stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=os.name != "nt",  # own process group: a kill also reaches git's children
+    )
+    out = bytearray()
+    err = bytearray()
+    over = threading.Event()
+
+    def pump_out():
+        while True:
+            chunk = p.stdout.read1(65536)
+            if not chunk:
+                return
+            out.extend(chunk)
+            if max_bytes is not None and len(out) > max_bytes:
+                over.set()
+                _kill(p)
+                return
+
+    def pump_err():
+        while True:
+            chunk = p.stderr.read1(65536)
+            if not chunk:
+                return
+            if len(err) < STDERR_KEEP:
+                err.extend(chunk[: STDERR_KEEP - len(err)])
+
+    def feed():
+        try:
+            p.stdin.write(data)
+            p.stdin.close()
+        except OSError:
+            pass
+
+    threads = [threading.Thread(target=f, daemon=True) for f in (pump_out, pump_err)]
+    if data is not None:
+        threads.append(threading.Thread(target=feed, daemon=True))
+    for t in threads:
+        t.start()
+    try:
+        p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill(p)
+        p.wait()
+        raise
+    finally:
+        for t in threads:
+            t.join(5)  # a grandchild that keeps the pipe open cannot hold us longer than this
+        if not any(t.is_alive() for t in threads):  # (close would block behind a reader still waiting)
+            for f in (p.stdout, p.stderr):
+                try:
+                    f.close()
+                except OSError:
+                    pass
+    if over.is_set():
+        return TOO_LONG, b"", f"git printed more than {max_bytes} bytes"
+    return p.returncode, bytes(out), bytes(err).decode("utf-8", "replace").strip()
+
+
 def _raw_bytes(
     argv: list[str],
     cwd: Path,
@@ -242,8 +332,8 @@ def _raw_bytes(
     config: list[tuple[str, str]] | None = None,
     max_bytes: int | None = None,
 ):
-    """(rc, stdout bytes, stderr text). The ONE subprocess call. rc 123: stdout was longer than `max_bytes`
-    (nothing of it is returned)."""
+    """(rc, stdout bytes, stderr text). The ONE subprocess call. With `max_bytes` stdout is read while git
+    runs and git is killed once it passes the cap (rc 123, nothing returned)."""
     true = trivial("true", cwd, root)
     if true is None:
         return REFUSED, b"", "orch could not find a trusted `true` program, so it did not run git here"
@@ -251,14 +341,17 @@ def _raw_bytes(
     if exe is None:
         return 127, b"", "git is not installed (or only found inside the project, which orch does not run)"
     argv = [exe, *argv[1:]]
+    environ = env(cwd, root, true, config)
     try:
+        if max_bytes is not None:
+            return _stream(argv, cwd, environ, timeout, data, max_bytes)
         p = subprocess.run(
             argv,
             cwd=cwd,
             capture_output=True,
             input=data,
             stdin=None if data is not None else subprocess.DEVNULL,  # never waits for a terminal
-            env=env(cwd, root, true, config),
+            env=environ,
             timeout=timeout,
             check=False,
         )
@@ -268,8 +361,6 @@ def _raw_bytes(
         return 124, b"", f"git {argv[-1] if argv else ''} took longer than {int(timeout)} s"
     except OSError as e:  # the program exists but could not be started: not "git is not installed"
         return CANNOT_START, b"", str(e)
-    if max_bytes is not None and len(p.stdout) > max_bytes:
-        return TOO_LONG, b"", f"git printed more than {max_bytes} bytes"
     return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace").strip()
 
 
@@ -313,8 +404,9 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
 ALLOWED = {
     "worktree", "read-tree", "update-index", "checkout-index", "ls-files", "rev-parse", "config", "branch",
     "symbolic-ref", "cat-file", "merge-base", "show-ref", "for-each-ref", "status", "diff", "log", "show",
-    "merge", "commit", "add", "rm", "reset", "stash",
+    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore",
 }  # fmt: skip
+# (check-ignore reads ignore rules only: no content, no filters; --stdin is refused below)
 _WORKTREE_OK = {"add", "remove", "prune", "list"}
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
@@ -356,6 +448,8 @@ def refusal(args: list[str]) -> str | None:
         return "git worktree: only add, remove, prune and list are run"
     if cmd == "stash" and not (rest and rest[0] in ("list", "show")):
         return "git stash: only list and show are run"
+    if cmd == "check-ignore" and any(a.split("=", 1)[0] in ("--stdin", "-z") for a in flags):
+        return "git check-ignore: only paths given in the argument list are run"
     if cmd == "config" and not any(a in _CONFIG_READ for a in flags):
         return "git config: orch only reads the configuration"
     if cmd in _NO_MODES or cmd == "add":
@@ -416,20 +510,6 @@ def driver_args(
                 return None
             pairs.append((f"merge.{m[4]}.driver", false))
     return pairs
-
-
-def hardened(cwd: Path, root: Path | None = None) -> tuple[list[str], dict[str, str]] | None:
-    """For the few read-only callers that still start git themselves and need bytes or a plain return code
-    (harness.py, filesig.py): (argv prefix, environment) with the same hardening as run(): absolute git found
-    by the avoid rules, no hooks, no fsmonitor, no untracked cache, no network, no editor, no optional locks,
-    sanitized PATH, no GIT_* variable. Use only for check-ignore (it runs no filters).
-    None = no trusted git: treat as "git is not installed". filesig, work-check and harness use run_bytes();
-    the one caller left is harness._ignored (`git check-ignore`, not allowlisted): it keeps this form."""
-    true = trivial("true", cwd, root)
-    exe = git_exe(cwd, root)
-    if true is None or exe is None:
-        return None
-    return [exe, *base_args(true, True)], env(cwd, root, true)
 
 
 def _prepare(args, cwd, timeout, filters, read_only, root):

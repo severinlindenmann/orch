@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -279,7 +278,7 @@ def _tracked(root: Path, rel: str) -> bool:
     return rc == 0
 
 
-# What "closed" means when orch finds no git it trusts (hardened() is None), per caller:
+# What "closed" means when orch finds no git it trusts (no trusted git: safegit.have_git is False), per caller:
 #   _in_git_repo / check_private_path / _ignored -> refuse (nothing private is stored);
 #   _tracked -> "tracked" (the team's file: not touched); _git_exclude -> skipped with a note;
 #   filesig.files_sig -> None (no signature).
@@ -288,12 +287,6 @@ def _safegit():
     from orch import safegit
 
     return safegit
-
-
-def _hardened(cwd: Path):
-    """safegit.hardened, ONLY for `git check-ignore` (_ignored): it is not on safegit's allowlist of
-    subcommands (it takes no filters and prints nothing orch needs), so it keeps the hardened argv/env."""
-    return _safegit().hardened(cwd)
 
 
 is_tracked = _tracked  # public: other modules ask whether git tracks a file
@@ -329,23 +322,13 @@ def _in_git_repo(root: Path) -> bool:
 
 
 def _ignored(root: Path, rel: str) -> bool:
-    h = _hardened(root)
-    if h is None:
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
-    try:
-        r = subprocess.run(
-            [*h[0], "check-ignore", "-q", "--", rel],
-            cwd=root,
-            capture_output=True,
-            env=h[1],
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
-    if r.returncode == 0:
+    rc, _, _ = _safegit().run_bytes(["check-ignore", "-q", "--", rel], root, 10)
+    if rc == 0:
         return True
-    if r.returncode == 1:
+    if rc == 1:
         return False
+    if rc in (124, 125, 126, 127):
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
     raise Refused("git could not say whether private files are ignored here. Nothing was stored.")
 
 

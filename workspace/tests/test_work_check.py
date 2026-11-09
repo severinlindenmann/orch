@@ -209,13 +209,13 @@ def test_hostile_git_filter_never_runs(ws):
 
 def test_git_runs_through_safegit_with_the_hardened_flags(ws, monkeypatch):
     seen = []
-    real = subprocess.run
+    real = subprocess.Popen
 
     def spy(argv, *a, **k):
         seen.append((list(argv), dict(k.get("env") or {})))
         return real(argv, *a, **k)
 
-    monkeypatch.setattr(safegit.subprocess, "run", spy)
+    monkeypatch.setattr(safegit.subprocess, "Popen", spy)
     monkeypatch.setenv("GIT_DIR", "/nonexistent")
     _edit(ws)
     assert workcheck.check(ws)["remind"] is True
