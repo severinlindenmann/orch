@@ -289,7 +289,7 @@ def _visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "dev-proof"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -360,6 +360,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
+
+    d = sub.add_parser(
+        "dev-proof", parents=[common], help=argparse.SUPPRESS
+    )  # e2e test human (dev workspaces)
+    d.add_argument("op")
+    d.add_argument("target")
 
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
@@ -653,6 +659,10 @@ def run(args: argparse.Namespace) -> None:
                 else ""
             ),
         )
+    elif cmd == "dev-proof":
+        # The e2e test human: a proof for a DEV demo workspace only (guarded-home record, dev/test install);
+        # a real workspace never gets one. Printed on stdout, to be piped into `<command> --proof-stdin`.
+        print(humanproof.mint_dev(root, args.op, args.target))
     elif cmd == "update":
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
             if not humanproof.person_by(

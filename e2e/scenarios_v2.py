@@ -1092,6 +1092,11 @@ def u1_upgrade_from_old_orch(e):
     dbase = w.j("dashboard", "status", by=None, env=new_env_all)["url"].rstrip("/")
     check(wait_http(dbase + "/"), "the dashboard add-on did not start after the upgrade")
     rc, out, err = w.sh(["orch", "update"], env=new_env_all, timeout=900)
+    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
+        # `orch update` is a person's action (H1): in a dev demo workspace the scripted test human proves it
+        prc, proof, perr = w.sh(["orch", "dev-proof", "update", "orch"], env=new_env_all)
+        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
+        rc, out, err = w.sh(["orch", "update", "--proof-stdin"], env=new_env_all, timeout=900, input=proof.strip() + "\n")
     check(rc == 0 and "Traceback" not in out + err, f"orch update: {(err or out)[-400:]}")
     rc, out, err = w.sh(["orch", "addon", "add", "focus", "--yes"], env=new_env_all, timeout=900)
     check(rc == 0, f"addon add focus after the upgrade: {(err or out)[-300:]}")

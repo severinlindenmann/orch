@@ -48,8 +48,8 @@ def w0(e):
            "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref, "ORCH_HOME": str(ohome), "ORCH_HOME_STRICT": "1"}
     url = f"https://raw.githubusercontent.com/severinlindenmann/orch/{ref}/install.sh"
 
-    def run(cmd, cwd=None, timeout=600):
-        p = subprocess.run(cmd, cwd=cwd or home, env=env, capture_output=True, text=True, timeout=timeout)
+    def run(cmd, cwd=None, timeout=600, input=None):
+        p = subprocess.run(cmd, cwd=cwd or home, env=env, capture_output=True, text=True, timeout=timeout, input=input)
         return p.returncode, p.stdout, p.stderr
 
     check(shutil.which("uv", path=env["PATH"]) is None, "uv must not be on the bare PATH")
@@ -65,6 +65,11 @@ def w0(e):
     skill = proj / ".agents/skills/orch/SKILL.md"
     skill.write_text("tampered\n")
     rc, out, err = run(["orch", "update"], cwd=proj)
+    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
+        # a person's action (H1): the scripted test human proves it in a dev demo workspace
+        prc, proof, perr = run(["orch", "dev-proof", "update", "orch"], cwd=proj)
+        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
+        rc, out, err = run(["orch", "update", "--proof-stdin"], cwd=proj, input=proof.strip() + "\n")
     check(rc == 0 and skill.read_text() != "tampered\n", f"orch update did not refresh the skill: rc={rc} {err[-200:]}")
     return f"one-liner ({ref}) -> uv fetched, version, init, update ok"
 

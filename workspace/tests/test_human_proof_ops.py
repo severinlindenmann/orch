@@ -644,3 +644,18 @@ def test_an_unusable_key_folder_refuses_visibly_and_saves_nothing(ws, run, monke
     code, out, err = _cli(run, monkeypatch, proof, "ticket", "changes", rid, "more", "--json")
     assert code == 2 and "Not saved" in out + err and tickets.load(ws, rid)["status"] == "review"
     assert runs.undelivered(ws, rid) == []
+
+
+def test_dev_proof_command_works_only_in_a_dev_workspace(ws, run, capsys, monkeypatch):
+    # a real/normal workspace: refused
+    code, out, err = run("dev-proof", "update", "orch")
+    assert code == 2 and "hp1." not in out
+    # a dev demo workspace (marked at creation): the test human's proof drives `update --proof-stdin`'s gate
+    fresh = ws.parent / "demo"
+    (fresh / ".orch").mkdir(parents=True)
+    monkeypatch.chdir(fresh)
+    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
+    hp.dev_mark(fresh)
+    code, out, err = run("dev-proof", "ticket.answer", "t_a:q1")
+    assert code == 0 and out.strip().startswith("hp1.")
+    assert hp.verify_and_consume(fresh, out.strip(), "ticket.answer", "t_a:q1") == "human:test-human"
