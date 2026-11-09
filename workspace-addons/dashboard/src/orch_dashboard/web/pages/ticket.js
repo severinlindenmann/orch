@@ -738,6 +738,8 @@ function ticketParts(t, children) {
 // One honest line about the proof (computed by the core as t.proof): a mark, the line, and the detail behind "Details".
 const PROOF_MARK = {passed:['ok', '✓'], failed:['bad', '×'], changed:['warn', '!'], note:['none', 'i'], missing:['none', '–']};
 const PROOF_WORD = {passed:'Check passed', failed:'Check failed', changed:'Changed since the check', note:'Note only', missing:'No proof yet'};
+// The fixed text the button sends through the existing "Ask for changes" path (ticket.changes). Nothing from the proof is sent.
+const RECHECK_TEXT = 'Please run the checks again and record them with orch check record.';
 function ticketProofLine(t) {
   const p = t.proof;
   if (!p || typeof p.line !== 'string' || !p.line) return null;
@@ -749,6 +751,7 @@ function ticketProofLine(t) {
   return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
     h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
     array(p.uncovered).length ? h('p', {className:'meta'}, array(p.uncovered)[0]) : null,
+    /haven't been checked/.test(p.line) && t.status === 'review' && !snapshot ? ticketButton('Ask the agent to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
     rows.length && !snapshot ? h('details', {className:'ticket-proof-details'}, h('summary', {}, 'Details'), h('ul', {}, rows)) : null);
 }
 

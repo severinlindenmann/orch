@@ -353,3 +353,12 @@ def test_counter_never_raises_on_garbage():
     assert merge_counter({1: 1, "a": 2}, {"a": 3}, None)["last"] == 0
     assert merge_counter(_nest(500), {"last": 2}, None)["last"] == 2
     assert merge_counter({"last": True}, {"last": "9"}, {"last": [5]})["last"] == 0
+
+
+def test_two_recorded_runs_of_the_same_command_are_both_kept():
+    run = lambda at, code: {"type": "command", "ref": "pytest -q", "ran_at": at, "exit": code, "at": at}  # noqa: E731
+    first, second = run("2026-11-09T10:00:00Z", 1), run("2026-11-09T11:00:00Z", 0)
+    base = tk(checklist=[{"id": "c1", "text": "x", "done": False, "evidence": [first]}])
+    ours = [{"id": "c1", "text": "x", "done": False, "evidence": [first, second]}]
+    m = merge_ticket(base, up(base, T2, checklist=ours), up(base, T3), NOW)
+    assert [e["exit"] for e in m["checklist"][0]["evidence"]] == [1, 0]

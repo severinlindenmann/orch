@@ -221,3 +221,51 @@ def test_summary_is_printable_one_line_and_on_one_proof(proj, run, tid):
     assert run("check", "done", tid, "c1", "--note", "n", "--pr", "PR #1", "--summary", "Done.")[0] == 0
     evs = read(proj, tid)["checklist"][0]["evidence"]
     assert [e.get("summary") for e in evs] == ["Done.", None]
+
+
+def test_record_stores_cmd_exit_and_output_tail(proj, run, validate, tid):
+    log = proj / "out.txt"
+    log.write_text("x" * 5000 + "\x1b[31mred\x00\x07 ok\n", encoding="utf-8")
+    code, out, err = run(
+        "check", "record", tid, "c1", "--cmd", "uv run pytest -q", "--exit", "1", "--output", "out.txt"
+    )
+    assert code == 0 and "Recorded for c1" in out, err
+    t = read(proj, tid)
+    ev = t["checklist"][0]["evidence"][0]
+    assert ev["type"] == "command" and ev["ref"] == "uv run pytest -q" and ev["exit"] == 1
+    assert ev["ran_at"].endswith("Z") and "files_sig" not in ev  # not a git folder
+    assert len(ev["output_tail"]) <= 2048 and ev["output_tail"].endswith("red ok\n")
+    assert "\x1b" not in ev["output_tail"] and "\x00" not in ev["output_tail"]
+    assert t["checklist"][0]["done"] is False  # recording is not finishing
+    validate(t)
+
+
+def test_record_refusals(proj, run, tid, tmp_path):
+    assert run("check", "record", tid, "c9", "--cmd", "x")[0] == 2
+    assert run("check", "record", tid, "c1", "--cmd", "  ")[0] == 2
+    outside = tmp_path.parent / "elsewhere.txt"
+    outside.write_text("secret", encoding="utf-8")
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", str(outside))[0] == 2
+    (proj / ".orch" / "run").mkdir(parents=True, exist_ok=True)
+    (proj / ".orch" / "run" / "k.txt").write_text("k", encoding="utf-8")
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", ".orch/run/k.txt")[0] == 2
+    (proj / "link.txt").symlink_to(outside)
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "link.txt")[0] == 2
+    assert read(proj, tid)["checklist"][0]["evidence"] == []
+
+
+def test_evidence_record_fields_are_typed():
+    ok = {"type": "command", "ref": "x", "exit": 0, "ran_at": "2026-11-09T10:00:00Z", "files_sig": "ab" * 32}
+    assert tickets.parse_evidence(json.dumps(ok))["exit"] == 0
+    for bad in (
+        {"exit": "0"},
+        {"exit": True},
+        {"exit": 1.5},
+        {"ran_at": "yesterday"},
+        {"files_sig": "XYZ"},
+        {"files_sig": "a" * 200},
+        {"output_tail": 5},
+        {"output_tail": "x" * 2049},
+    ):
+        with pytest.raises(tickets.Refused):
+            tickets.parse_evidence(json.dumps({"type": "command", "ref": "x", **bad}))

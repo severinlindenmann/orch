@@ -42,6 +42,10 @@ See what a run is doing with `orch run status <id>`; a person can send you a mes
 
     orch check done <id> c1 --command "uv run pytest -q"
 
+After you ran a check command (tests, a build, a linter), record it: `orch check record <id> c1 --cmd "<what ran>" --exit $?`
+(`--output <file in the project>` adds the last lines of its output). orch only writes it down and never runs it; the
+person then sees whether files changed since the check.
+
 Proof flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
 into the ticket (workspace files, at most 25 MB). Record what really happened. Never invent proof.
 Every finished step also gets `--summary "<what came out, one plain line>"` (at most 200 characters; no file names or

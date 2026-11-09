@@ -141,7 +141,7 @@ def _show(t: dict, root: Path | None = None) -> str:
     )
     if n and d == n:
         out.append(f"✓ All done · {n} of {n}")
-    out.append(f"Proof: {tickets.proof_state(t)['line']}")
+    out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
         out.append("  ".join(extra))
@@ -412,6 +412,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         x = c.add_parser(name, parents=[common], help=hlp)
         x.add_argument("id")
         x.add_argument("check")
+    x = c.add_parser("record", parents=[common], help="record that a command ran (orch does not run it)")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--cmd", required=True, metavar="TEXT", dest="ran", help="what ran, as text")
+    x.add_argument("--exit", type=int, metavar="N", dest="exit_code", help="its exit code")
+    x.add_argument("--output", metavar="FILE", help="a file with its output (- = standard input)")
     x = c.add_parser("done", parents=[common])
     x.add_argument("id")
     x.add_argument("check")
@@ -685,6 +691,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
+    elif cmd == "check" and sub == "record":
+        t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
+        _out(args, c, f"Recorded for {c['id']}: {c['evidence'][-1]['ref']}")
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":

@@ -161,7 +161,7 @@ def _order(items, base_ids, key=None):
 def _evidence(*lists):
     seen = {}
     for e in (e for lst in lists for e in lst):
-        k = (e.get("type"), e.get("ref"))
+        k = (e.get("type"), e.get("ref"), e.get("ran_at"))  # a recorded run is one entry per run
         if k not in seen or _canon(e) > _canon(seen[k]):
             seen[k] = e
     return sorted(seen.values(), key=lambda e: (e.get("at", ""), _canon(e)))

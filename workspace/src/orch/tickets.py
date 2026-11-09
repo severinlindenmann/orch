@@ -36,6 +36,9 @@ STATUS_WORDS = {
 OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
 COVERS_MAX = 300
+TAIL_MAX = 2048
+RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
 WAIT_KINDS = ("time", "ticket", "question", "external")
 PATCH_FIELDS = ("title", "status", "waiting_on", "owner", "due", "note", "done_when", "summary")
@@ -568,28 +571,52 @@ def checks_done(ticket: dict) -> tuple[int, int]:
     return sum(1 for x in c if x.get("done")), len(c)
 
 
-def _ev_failed(ev: dict) -> bool:
-    """A recorded failure: the proof explicitly says exit != 0. No exit recorded = unknown, never failed."""
-    code = ev.get("exit")
-    return isinstance(code, int) and not isinstance(code, bool) and code != 0
+def _latest(evs: list[dict], key: str) -> dict | None:
+    """The newest command evidence that carries `key` (a recorded run; later ones replace earlier ones)."""
+    return next((e for e in reversed(evs) if e.get("type") == "command" and e.get(key) is not None), None)
 
 
-def proof_state(ticket: dict) -> dict:
-    """Honest proof summary of a ticket, pure (no I/O).
+def _ev_failed(evs: list[dict]) -> bool:
+    """A recorded failure: the newest recorded run says exit != 0. No exit recorded = unknown, never
+    failed."""
+    ev = _latest(evs, "exit")
+    return ev is not None and type(ev["exit"]) is int and ev["exit"] != 0
+
+
+def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> dict:
+    """Honest proof summary of a ticket.
     per_item: id -> passed | failed | changed | note | missing.
-    done + a failed recorded exit = failed; done + any proof that is not a note = passed;
-    done + note proof only = note; not done = missing. `changed` is reserved for recorded checks whose
-    files changed since (set by B8, `stale`). uncovered: one hint when done_when is set and no task has
-    `covers`. line: the one-line summary."""
+    failed = the newest recorded run (`orch check record`) has exit != 0 (also on a task not done);
+    done + any proof that is not a note = passed; done + note proof only = note; not done = missing.
+    changed (done, needs `root`): the newest recorded run has a files_sig and files_sig(root) is different now
+    (`stale: true` on evidence forces it). The current signature is computed at most once per call, only
+    when a
+    recorded signature exists; `cache` reuses it for a few seconds (polled pages). Reads files only, runs
+    nothing
+    from the ticket. uncovered: one hint when done_when is set and no task has `covers`. line: the summary."""
+    from orch import filesig
+
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and isinstance(c.get("id"), str)]
     per: dict[str, str] = {}
+    current: list = []
+
+    def moved(ev: dict) -> bool:
+        if root is None:
+            return False
+        if not current:
+            current.append(filesig.cached_sig(root) if cache else filesig.files_sig(root))
+        return current[0] is not None and current[0] != ev["files_sig"]
+
     for c in items:
         evs = [e for e in c.get("evidence") or [] if isinstance(e, dict)]
-        if not c.get("done"):
-            per[c["id"]] = "missing"
-        elif any(_ev_failed(e) for e in evs):
+        sig_ev = _latest(evs, "files_sig")
+        if _ev_failed(evs):
             per[c["id"]] = "failed"
-        elif any(e.get("stale") is True for e in evs):
+        elif not c.get("done"):
+            per[c["id"]] = "missing"
+        elif any(e.get("stale") is True for e in evs) or (
+            sig_ev is not None and isinstance(sig_ev["files_sig"], str) and moved(sig_ev)
+        ):
             per[c["id"]] = "changed"
         elif any(e.get("type") != "note" for e in evs):
             per[c["id"]] = "passed"
@@ -1077,7 +1104,23 @@ def parse_evidence(raw: str) -> dict:
         if not 1 <= len(line) <= 200 or not line.isprintable():
             raise Refused("A proof summary is one line of 1 to 200 printable characters.")
         ev["summary"] = line
+    _check_record_fields(ev)
     return ev
+
+
+def _check_record_fields(ev: dict) -> None:
+    """Optional fields of a recorded check (`orch check record`): exit, ran_at, files_sig, output_tail.
+    Data only."""
+    if "exit" in ev and (type(ev["exit"]) is not int or not -255 <= ev["exit"] <= 255):
+        raise Refused("A recorded exit code is a whole number.")
+    if "ran_at" in ev and not (isinstance(ev["ran_at"], str) and RAN_AT.fullmatch(ev["ran_at"])):
+        raise Refused("ran_at is a UTC time like 2026-11-09T14:30:00Z.")
+    if "files_sig" in ev and not (isinstance(ev["files_sig"], str) and SIG.fullmatch(ev["files_sig"])):
+        raise Refused("files_sig is a hex string of 16 to 128 characters.")
+    if "output_tail" in ev and not (
+        isinstance(ev["output_tail"], str) and len(ev["output_tail"]) <= TAIL_MAX
+    ):
+        raise Refused(f"output_tail is text of at most {TAIL_MAX} characters.")
 
 
 def _clear_doing(item: dict) -> None:
@@ -1105,6 +1148,78 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
         item["done"] = True
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
+        return item
+
+    return apply_op(root, tid, op)
+
+
+def _output_tail(root: Path, source: str | None) -> str | None:
+    """The last TAIL_MAX characters of the output file (`-` = standard input), control characters removed.
+    Only read as text, never run. A file must be a plain file inside the workspace, not under .orch or
+    .git."""
+    if source is None:
+        return None
+    if source == "-":
+        data = sys.stdin.buffer.read()[-8192:]
+    else:
+        p = Path(source)
+        p = p if p.is_absolute() else Path.cwd() / p
+        try:
+            real = p.resolve(strict=True)
+            inside = real.relative_to(Path(root).resolve())
+        except (OSError, ValueError):
+            raise Refused("The output file must be a file inside this workspace.") from None
+        if inside.parts[:1] in ((".orch",), (".git",)) or not real.is_file():
+            raise Refused("The output file must be a file inside this workspace.")
+        with real.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 8192))
+            data = f.read()
+    text = clean_untrusted(data.decode("utf-8", "replace"), 100_000)
+    return text[-TAIL_MAX:]
+
+
+def check_record(
+    root: Path,
+    tid: str,
+    cid: str,
+    cmd: str,
+    exit_code: int | None,
+    output: str | None,
+    by: str,
+) -> tuple[dict, dict]:
+    """Record that a command ran for a task: ONE `command` evidence with exit, ran_at, files_sig (when
+    the folder
+    is under git) and the output tail. It only stores what the agent says; `cmd` and the output are data,
+    never
+    run. The task is not marked done (that stays `orch check done`)."""
+    from orch import filesig
+
+    line = " ".join(clean_untrusted(cmd or "", 500).split())
+    if not line:
+        raise Refused('Say what ran, e.g. --cmd "uv run pytest -q".')
+    _item(load(root, tid), cid)  # a wrong ticket or task is refused before anything is read
+    ev: dict = {"type": "command", "ref": line}
+    if exit_code is not None:
+        ev["exit"] = exit_code
+    ev["ran_at"] = now()
+    sig = filesig.files_sig(root)
+    if sig:
+        ev["files_sig"] = sig
+    tail = _output_tail(root, output)
+    if tail:
+        ev["output_tail"] = tail
+    parse_evidence(json.dumps(ev))  # same checks as every proof
+    ev["by"], ev["at"] = by, now()
+
+    def op(t):
+        item = _item(t, cid)
+        item["evidence"].append(ev)
+        add_history(
+            t,
+            by,
+            f"Recorded a check run for {cid}" + (f" (exit {exit_code})" if exit_code is not None else ""),
+        )
         return item
 
     return apply_op(root, tid, op)

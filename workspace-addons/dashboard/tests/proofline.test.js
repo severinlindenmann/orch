@@ -27,3 +27,20 @@ test('a failed check is a bad mark, no checks is neutral', () => {
   assert.match(json, /proof-bad/);
   assert.match(JSON.stringify(line({id:'t_1', checklist:[], proof:{line:'No checks recorded', uncovered:[], per_item:{}}})), /proof-none/);
 });
+test('changed since the check: the line and a button that sends one fixed text', () => {
+  const sent = [];
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  const ticketButton = (label, cls, fn, attrs) => ({tag:'button', label, fn, attrs, children:[label]});
+  const c = vm.createContext({h, array:v => Array.isArray(v) ? v : [], clean:v => v, snapshot:false, ticketButton, ticketSendChanges:(t, text) => sent.push([t.id, text])});
+  vm.runInContext(src.slice(start, end), c);
+  const proof = {line:"Changes haven't been checked yet", uncovered:[], per_item:{c1:'changed'}};
+  const t = {id:'t_1', status:'review', checklist:[{id:'c1', text:'Tests pass', evidence:[{type:'command', ref:'rm -rf /; echo hi'}]}], proof};
+  const out = c.ticketProofLine(t);
+  assert.match(text(out), /Changes haven't been checked yet/);
+  const find = n => n && (n.tag === 'button' ? n : (n.children || []).map(find).find(Boolean));
+  const btn = find(out);
+  assert.equal(btn.label, 'Ask the agent to check again');
+  btn.fn();
+  assert.deepEqual(sent, [['t_1', 'Please run the checks again and record them with orch check record.']]); // fixed text, not the stored command
+  assert.equal(find(c.ticketProofLine({...t, status:'active'})), undefined);
+});

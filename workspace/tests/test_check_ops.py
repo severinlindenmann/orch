@@ -1,9 +1,13 @@
 """Task ops: edit, move, remove, reopen, start, stop; derived blocked; stale 'doing' marker."""
 
 import json
+import os
+import subprocess
 import time
 
-from orch import tickets
+import pytest
+
+from orch import filesig, tickets
 
 
 def read(proj, tid):
@@ -175,3 +179,150 @@ def test_covers_add_edit_and_show(proj, run, validate, new_ticket):
     assert run("check", "add", tid, "x", "--covers", "y" * 301)[0] == 2
     code, out, _ = run("ticket", "show", tid)
     assert code == 0 and "Proof: No checks recorded" in out
+
+
+# ---- recorded checks (B8): record, files_sig, changed since, failed ----
+def _git(proj, *args):
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=proj, check=True, capture_output=True
+    )
+
+
+@pytest.fixture
+def repo(proj):
+    _git(proj, "init", "-q")
+    (proj / "a.txt").write_text("one\n", encoding="utf-8")
+    _git(proj, "add", "a.txt")
+    _git(proj, "commit", "-q", "-m", "first")
+    return proj
+
+
+def test_files_sig_changes_and_ignores(repo):
+    a = filesig.files_sig(repo)
+    assert a and len(a) == 64 and filesig.files_sig(repo) == a
+    (repo / "a.txt").write_text("two\n", encoding="utf-8")
+    b = filesig.files_sig(repo)
+    assert b and b != a
+    (repo / "a.txt").write_text("one\n", encoding="utf-8")
+    assert filesig.files_sig(repo) == a
+    for ignored in (".orch/x.json", "node_modules/m/i.js", "__pycache__/c.pyc", "dist/o.js"):
+        (repo / ignored).parent.mkdir(parents=True, exist_ok=True)
+        (repo / ignored).write_text("x", encoding="utf-8")
+    assert filesig.files_sig(repo) == a  # .orch and cache folders do not count
+    (repo / "new.txt").write_text("hi", encoding="utf-8")
+    c = filesig.files_sig(repo)
+    assert c and c != a
+    (repo / "new.txt").write_text("hi!", encoding="utf-8")
+    assert filesig.files_sig(repo) not in (a, c)
+
+
+def test_files_sig_without_git_or_on_timeout(proj, repo, monkeypatch):
+    plain = proj.parent / (proj.name + "_plain")
+    plain.mkdir()
+    assert filesig.files_sig(plain) is None  # not a git folder
+    assert filesig.files_sig(repo)
+
+    def slow(*a, **k):
+        raise subprocess.TimeoutExpired("git", 3)
+
+    monkeypatch.setattr(filesig.subprocess, "run", slow)
+    assert filesig.files_sig(repo) is None
+    monkeypatch.undo()
+    monkeypatch.setattr(filesig, "MAX_UNTRACKED", 1)
+    (repo / "u1").write_text("1")
+    (repo / "u2").write_text("2")
+    assert filesig.files_sig(repo) is None  # size cap
+
+
+def test_files_sig_without_git_binary(repo, monkeypatch):
+    def nogit(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(filesig.subprocess, "run", nogit)
+    assert filesig.files_sig(repo) is None
+
+
+def test_files_sig_fresh_repo_without_commit(proj):
+    _git(proj, "init", "-q")
+    (proj / "x.txt").write_text("x")
+    assert filesig.files_sig(proj)
+
+
+def _done_with_record(proj, run, repo_tid, exit_code):
+    run("check", "done", repo_tid, "c1", "--note", "by hand")
+    code, out, err = run(
+        "check", "record", repo_tid, "c1", "--cmd", "uv run pytest -q", "--exit", str(exit_code), "--json"
+    )
+    assert code == 0, err
+    return json.loads(out)
+
+
+def test_proof_state_changed_and_failed(repo, run, new_ticket, validate):
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    ev = _done_with_record(repo, run, tid, 0)["evidence"][-1]
+    assert ev["exit"] == 0 and len(ev["files_sig"]) == 64 and ev["ran_at"].endswith("Z")
+    t = tickets.load(repo, tid)
+    validate(t)
+    assert tickets.proof_state(t, repo)["per_item"]["c1"] == "passed"
+    (repo / "a.txt").write_text("edited\n", encoding="utf-8")
+    state = tickets.proof_state(t, repo)
+    assert state["per_item"]["c1"] == "changed" and state["line"] == "Changes haven't been checked yet"
+    assert tickets.proof_state(t)["per_item"]["c1"] == "passed"  # no root, no staleness
+    # recording again at the new state clears it; a failed run says so
+    run("check", "record", tid, "c1", "--cmd", "uv run pytest -q", "--exit", "0")
+    t = tickets.load(repo, tid)
+    assert tickets.proof_state(t, repo)["per_item"]["c1"] == "passed"
+    run("check", "record", tid, "c1", "--cmd", "uv run pytest -q", "--exit", "1")
+    t = tickets.load(repo, tid)
+    assert tickets.proof_state(t, repo)["line"] == "1 check failed"
+
+
+def test_proof_state_computes_sig_once(repo, run, new_ticket, monkeypatch):
+    tid = new_ticket("Export")
+    for text in ("a", "b"):
+        run("check", "add", tid, text)
+    for c in ("c1", "c2"):
+        run("check", "done", tid, c, "--note", "n")
+        run("check", "record", tid, c, "--cmd", "x", "--exit", "0")
+    calls = []
+    real = filesig.files_sig
+    monkeypatch.setattr(filesig, "files_sig", lambda r: calls.append(r) or real(r))
+    tickets.proof_state(tickets.load(repo, tid), repo)
+    assert len(calls) == 1
+
+
+def test_record_and_proof_state_never_execute(repo, run, new_ticket, monkeypatch, tmp_path):
+    """The invariant: the recorded command and output are data. Nothing may run them."""
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    out = repo / "out.txt"
+    out.write_text("$(touch PWNED)\n`touch PWNED`\n", encoding="utf-8")
+    real_popen = subprocess.Popen
+    seen = []
+
+    def only_git(argv, *a, **k):
+        assert isinstance(argv, list) and argv[0] == "git" and not k.get("shell"), argv
+        assert not any("PWNED" in x or "rm -rf" in x for x in argv), argv
+        seen.append(argv)
+        return real_popen(argv, *a, **k)
+
+    def boom(*a, **k):
+        raise AssertionError("something was executed")
+
+    monkeypatch.setattr(subprocess, "Popen", only_git)
+    for name in ("call", "check_call", "check_output"):
+        monkeypatch.setattr(subprocess, name, boom)
+    for name in ("system", "popen", "execv", "execvp", "spawnv", "posix_spawn"):
+        if hasattr(os, name):
+            monkeypatch.setattr(os, name, boom)
+    code, _, err = run(
+        "check", "record", tid, "c1", "--cmd", "touch PWNED; rm -rf /", "--exit", "0", "--output", "out.txt"
+    )
+    assert code == 0, err
+    run("check", "done", tid, "c1", "--note", "n")
+    t = tickets.load(repo, tid)
+    tickets.proof_state(t, repo)
+    assert not (repo / "PWNED").exists() and seen  # only fixed git argv lists ran
+    ev = t["checklist"][0]["evidence"][0]
+    assert ev["ref"] == "touch PWNED; rm -rf /" and "$(touch PWNED)" in ev["output_tail"]
