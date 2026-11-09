@@ -407,6 +407,13 @@ for sect, defname in (("answer", "answer_request"), ("settings_patch", "settings
             fails.append(f"phone-v3 vector {sect} {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
 
 
+# Review question (relay-api.md, Review question): the question validates; the cases are fixed outcomes.
+rqvec = json.loads((HERE / "vectors" / "review-question-v1.json").read_text())
+check("message", rqvec["question"], True, "review-question vector: question")
+for case in rqvec["cases"]:
+    if case["do"] not in ("accept", "changes", "nothing") or (case["do"] == "changes" and not case.get("note")):
+        fails.append(f"review-question vector {case['name']}: bad outcome")
+
 # Mobile mode (relay-api.md, Mobile mode).
 mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())
 for case in mmvec["heartbeat"]:

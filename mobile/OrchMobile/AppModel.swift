@@ -200,7 +200,7 @@ final class AppModel {
     }
     /// The "Got it" line the workspace sent for a text of this phone.
     func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
-    var openQuestionCount: Int { questions.filter { answers[$0.id] == nil }.count }
+    var openQuestionCount: Int { questions.filter { !$0.isReview && answers[$0.id] == nil }.count }
 
     // MARK: Onboarding
 
@@ -444,7 +444,7 @@ final class AppModel {
         await flushOutbox()
         if let now = outbox.item(clientId: item.clientId) { return now }
         // Already listed by the relay (so removed from the outbox): report it as sent.
-        var done = item; done.sentMessageId = messages.first { $0.clientId == item.clientId }?.id
+        var done = item; done.sentMessageId = messages.first { ($0.clientId ?? $0.message.body.clientId) == item.clientId }?.id
         return done
     }
     /// Try a refused message again / drop it.

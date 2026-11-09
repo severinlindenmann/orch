@@ -93,7 +93,9 @@ def _run_stop(a):
 
 def _run_send(a):
     _only(a, ("ticket", "text"))
-    return ["run", "send", _t(a)], [], [_text(a.get("text"), "message")]
+    # The ticket goes AFTER the options, with the text: `run send` has an optional text, and some Python versions
+    # (3.11, early 3.12) let `send <ticket>` swallow it, then fail on `-- <text>` with "unrecognized arguments".
+    return ["run", "send"], [], [_t(a), _text(a.get("text"), "message")]
 
 
 def _check_add(a):

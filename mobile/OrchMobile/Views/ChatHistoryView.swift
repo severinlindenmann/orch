@@ -53,7 +53,7 @@ struct ChatHelperLabel: View {
                 .overlay(alignment: .bottomTrailing) {
                     Image(systemName: "sparkle").themeFont(9).foregroundStyle(Theme.brand).offset(x: 3, y: 3)
                 }
-            Text("\(name) helper").themeFont(13).foregroundStyle(Theme.muted)
+            Text("\(name)").themeFont(13).foregroundStyle(Theme.muted)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
     }
 }
