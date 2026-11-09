@@ -172,3 +172,18 @@ def test_rows_show_the_ticket_key(ws, fake_orch):
     (d / f"{TID}.json").write_text(json.dumps({**t, "key": "DM1-12"}))
     lists = {b["title"]: b["items"] for b in build(ws, str(fake_orch))["blocks"] if b["type"] == "list"}
     assert lists["Live now"][0]["title"] == "DM1-12 · Close March books"
+
+
+def test_view_asks_orch_twice_at_the_same_time_not_one_after_the_other(ws, tmp_path):
+    """fb20: the dashboard gives `orch focus view` 2 s; a live session made it start two more orch commands one
+    after the other (titles, then agent names), so a slow machine went past the limit and the tab went stale."""
+    import sys
+    import time
+
+    slow = tmp_path / "slow-orch"
+    slow.write_text(f"#!{sys.executable}\nimport sys, time\ntime.sleep(1.0)\nprint('[]')\n")
+    slow.chmod(0o755)
+    claim(ws)
+    t0 = time.monotonic()
+    build(ws, str(slow))
+    assert time.monotonic() - t0 < 1.7

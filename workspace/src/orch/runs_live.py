@@ -412,29 +412,32 @@ def _box_rows(lines: list[str], cy: int) -> tuple[int, int]:
     return max(0, cy - 2), cy + 1
 
 
-def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | None, str]:
-    """(unsent, pane hash). unsent: True when the notice line still sits in the prompt box, False when it does
-    not, None when that cannot be told safely: copy mode, the tool's dialog shows anywhere on the pane (an
+def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | None, str, bool]:
+    """(unsent, pane hash, lost). lost: the notice is nowhere on the visible pane (not in the box, not
+    echoed above it): the tool dropped the typed keys. unsent: True when the notice line still sits in
+    the prompt box, False when it does not, None when that cannot be told safely: copy mode, the tool's dialog shows anywhere on the pane (an
     Enter would answer it), or tmux failed."""
     pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
     if pane.returncode != 0:
-        return None, ""
+        return None, "", False
     digest = hashlib.sha256(pane.stdout.encode("utf-8")).hexdigest()[:16]
     d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}", timeout=QUICK)
     try:
         in_mode, y = d.stdout.split()
         cy = int(y)
     except ValueError:
-        return None, digest
+        return None, digest, False
     if d.returncode != 0 or in_mode != "0":
-        return None, digest
+        return None, digest, False
     # the tool's dialog anywhere on the visible pane: no Enter (a false match only costs the extra Enter, and
     # such checks count towards the give-up); the box rows below only locate the notice line
     if _dialog_shows(pane.stdout, dialog):
-        return None, digest
+        return None, digest, False
     lines = pane.stdout.split("\n")
     a, b = _box_rows(lines, cy)
-    return _squeeze(line) in _squeeze("".join(lines[a:b])), digest
+    unsent = _squeeze(line) in _squeeze("".join(lines[a:b]))
+    lost = not unsent and _squeeze(line) not in _squeeze("".join(lines))
+    return unsent, digest, lost
 
 
 def check_submit(
@@ -471,7 +474,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             if age < SUBMIT_CHECK_SECONDS or not session_exists(root, tid):
                 return None
             dialog = _dialog_rule(rec["agent"], root)
-            unsent, digest = _look(root, tid, s.get("line") or "", dialog)
+            unsent, digest, lost = _look(root, tid, s.get("line") or "", dialog)
             if digest and digest != s.get("pane"):
                 s["pane"], s["quiet"] = digest, runs._iso(t)
             quiet = t - runs._parse(s.get("quiet") or s["at"])
@@ -489,7 +492,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             and not s.get("watchdog")
             and (enters == 1 or age >= SUBMIT_WATCHDOG_SECONDS)
         ):
-            again, _ = _look(root, tid, s.get("line") or "", dialog)  # the screen may have changed meanwhile
+            again, _, _ = _look(root, tid, s.get("line") or "", dialog)  # screen may have changed meanwhile
             if again is True and not (stop is not None and stop.is_set()) and _enter(root, tid, QUICK):
                 s["enters"] = enters + 1
                 if age >= SUBMIT_WATCHDOG_SECONDS:
@@ -501,6 +504,20 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
                     run,
                     f"Enter again ({s['enters']}): the notice still sat in the box at {int(age)} s",
                 )
+        elif (
+            not stuck
+            and not s.get("stale")
+            and lost
+            and not s.get("retyped")
+            and age < SUBMIT_WATCHDOG_SECONDS
+        ):
+            # fb18: the tool dropped the typed keys (still redrawing): the notice is nowhere on the pane, so
+            # it was never taken. Type it once more instead of waiting for the tool's own idle reminder.
+            again, _, still = _look(root, tid, s.get("line") or "", dialog)
+            if still and not (stop is not None and stop.is_set()) and _type_line(root, tid, s["line"], QUICK):
+                s["retyped"] = True
+                did = "typed_again"
+                _log_submit(root, tid, run, f"typed the notice again: not on the screen at {int(age)} s")
         elif (
             not stuck
             and age >= SUBMIT_GIVE_UP_SECONDS + 60

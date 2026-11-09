@@ -642,3 +642,27 @@ def test_no_notice_while_the_tool_never_said_it_is_up(proj, run, monkeypatch):
     runs._write(proj, rec)
     n = len(sent)
     assert runs_live.deliver(proj, tid) == 0 and len(sent) == n
+
+
+def test_a_notice_that_never_reached_the_screen_is_typed_again_once(proj, run, monkeypatch):
+    """fb18: the tool was still redrawing after its turn, dropped the typed notice and only showed its own
+    suggestion in the empty box (`commit the pilatus-pptx skill too`). The notice was neither in the box nor
+    anywhere above it, but "not in the box" was read as "taken": nothing went in until the tool's own idle
+    reminder, about two minutes later. A notice nowhere on the pane is typed again (once)."""
+    ghost = _screen("commit the pilatus-pptx skill too", above="Brewed for 5m 1s")
+    tid, rn, item, sent, screen = _stuck(proj, run, monkeypatch, pane=ghost)
+    line = runs_live.notice_line(tid, False)
+    assert _at(proj, tid, rn, 1) is None
+    assert _at(proj, tid, rn, 3) == "typed_again" and sent[2:] == [line, "Enter"]
+    assert _at(proj, tid, rn, 5) is None and sent[2:] == [line, "Enter"]  # once, never a loop
+    assert runs.read(proj, tid)["submit"]["retyped"] is True
+    assert "commit the pilatus" not in "".join(sent)  # the tool's text is never answered with Enter alone
+
+
+def test_a_lost_notice_is_not_typed_again_over_a_dialog_or_when_it_shows_above(proj, run, monkeypatch):
+    tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, pane="")
+    screen["pane"] = _screen("", above="> " + runs_live.notice_line(tid, False))
+    assert _at(proj, tid, rn, 3) is None
+    screen["pane"] = _screen("", below="Esc to cancel")
+    assert _at(proj, tid, rn, 5) is None
+    assert sent[2:] == []
