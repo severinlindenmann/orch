@@ -42,7 +42,7 @@ struct ConversationInfoView: View {
         if case .general = conversation { return "Your ongoing Chat with \(workspaceName)" }
         let status = topic?.status.label ?? ticket.map { TopicStatus($0).label } ?? "Working"
         let snapshot = ticket?.view
-        let done = snapshot?.done ?? snapshot.flatMap { $0.checklist.isEmpty ? nil : $0.checklist.filter(\.done).count }
+        let done = snapshot?.done ?? snapshot.flatMap { $0.checklist.isEmpty ? nil : $0.checklist.filter { $0.done || $0.wontDo }.count }
         return done.map { "\($0) tasks complete - \(status)" } ?? status
     }
 
