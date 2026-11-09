@@ -461,9 +461,23 @@ def _message(
             return {**msg, "sent": False}
         path.unlink(missing_ok=True)  # the relay said no: nothing to retry
         raise
+    _record_posted(root, msg["id"])
     path.unlink(missing_ok=True)
     _set_problem(root, None)  # it went out: whatever blocked it is fixed
-    return msg
+    return {**msg, "sent": True}
+
+
+def posted_ids(root: Path) -> list[str]:
+    data = net.read_json(root / ".orch" / "relay-posted.json", [])
+    return [x for x in data if isinstance(x, str)] if isinstance(data, list) else []
+
+
+def _record_posted(root: Path, mid: str) -> None:
+    """Only called after the relay accepted a post, never when merely queued."""
+    with tickets._locked(root, "relay-posted"):
+        ids = posted_ids(root)
+        ids = [x for x in ids if x != mid]
+        net.write_json(root / ".orch" / "relay-posted.json", (ids + [mid])[-5000:], True)
 
 
 def _problem_path(root: Path) -> Path:
@@ -526,6 +540,7 @@ def resend_outbox(root: Path) -> dict:
                 break
             res["dropped"].append({"id": m["id"], "reason": str(e)})
         else:
+            _record_posted(root, m["id"])
             res["sent"].append(m["id"])
         p.unlink(missing_ok=True)
     if not res["waiting"] and "problem" not in res:

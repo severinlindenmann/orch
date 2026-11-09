@@ -375,7 +375,7 @@ new MutationObserver(() => {
 }).observe(document.documentElement, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class']});
 
 // Workspace DMs are a separate layer, so group/Chat changes can merge independently.
-const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, error:false};
+const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, error:false, lastFetch:-Infinity, timer:null};
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
 const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
 function chatDmMessages(ws) {
@@ -383,26 +383,42 @@ function chatDmMessages(ws) {
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
 }
 async function chatDmLoad() {
-  if (snapshot || chatDm.loading) return;
+  if (snapshot || route().kind !== 'chat' || chatDm.loading) return;
+  const delay = 5000 - (Date.now() - chatDm.lastFetch);
+  if (delay > 0) {
+    if (!chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, delay);
+    return;
+  }
+  if (chatDm.timer) { clearTimeout(chatDm.timer); chatDm.timer = null; }
+  chatDm.lastFetch = Date.now();
   chatDm.loading = true;
+  const ws = chatUi.open;
   try {
     const response = await fetch('/api/chat/contacts');
     if (!response.ok) throw new Error('Contacts');
     const contacts = await response.json();
     if (!Array.isArray(contacts)) throw new Error('Contacts');
     chatDm.contacts = chatObjects(contacts).filter(c => chatDmId(c.ws));
-    await Promise.all(chatDm.contacts.map(async c => {
-      const response = await fetch('/api/chat/thread/' + c.ws);
+    if (chatDmId(ws) && chatDmContact(ws)) {
+      const synced = await window.orchAct('chat.sync_ws', {workspace:ws});
+      if (!synced?.ok) throw new Error('Sync');
+      const response = await fetch('/api/chat/thread/' + ws);
       if (!response.ok) throw new Error('Thread');
       const thread = await response.json();
       if (!Array.isArray(thread?.messages)) throw new Error('Thread');
-      chatDm.threads.set(c.ws, thread);
+      chatDm.threads.set(ws, thread);
       const stored = new Set(thread.messages.map(m => m.id));
-      chatDm.pending.set(c.ws, array(chatDm.pending.get(c.ws)).filter(m => !stored.has(m.id)));
-    }));
+      chatDm.pending.set(ws, array(chatDm.pending.get(ws)).filter(m => !stored.has(m.id)));
+    }
     chatDm.error = false;
   } catch { chatDm.error = true; }
-  finally { chatDm.loading = false; if (route().kind === 'chat') render(); }
+  finally {
+    chatDm.loading = false;
+    if (route().kind === 'chat') {
+      render();
+      if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
+    }
+  }
 }
 function chatDmRoute() {
   const ws = location.hash.slice(6);
@@ -520,7 +536,7 @@ async function chatDmSend(text, retryId) {
   }
   chatUi.sending.add(ws); render();
   try {
-    const result = await window.orchAct('chat.send_ws', {workspace:ws, text});
+    const result = await window.orchAct('chat.send_ws', {workspace:ws, text, ...(/^m_[a-z0-9]{16}$/.test(retryId || '') ? {retry:retryId} : {})});
     const saved = result?.state?.chat_dm_result;
     if (result?.ok && saved?.id) Object.assign(entry, saved);
     else entry.state = 'failed';

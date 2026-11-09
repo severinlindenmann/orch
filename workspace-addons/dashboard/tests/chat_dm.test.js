@@ -9,7 +9,7 @@ function context() {
     style:{}, classList:{add(){}}, append(...nodes){this.children.push(...nodes);}, prepend(...nodes){this.children.unshift(...nodes);},
     addEventListener(){}, querySelector(){return null;}, get textContent(){return JSON.stringify(this.children);}});
   const events = {};
-  const c = vm.createContext({h, fragment:(...children) => h('fragment', {}, ...children),
+  const c = vm.createContext({setTimeout:() => 1, clearTimeout(){}, h, fragment:(...children) => h('fragment', {}, ...children),
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), state:{}, snapshot:false,
     CSS:{supports:() => false}, time:() => '', date:() => '', ticketOf:() => null,
     location:{hash:'#chat/' + WS}, history:{replaceState(){}}, route:() => ({kind:'chat'}), render(){},
@@ -53,4 +53,42 @@ test('failed send offers retry, deep links select the workspace', async () => {
   vm.runInContext("chatUi.open = 'chat'", c);
   c.chatDmRoute();
   assert.equal(vm.runInContext('chatUi.open', c), WS);
+});
+
+test('DM refresh syncs before GET, fetches only the open thread, and throttles state events', async () => {
+  const c = context(), calls = [], timers = [];
+  let now = 10000;
+  c.Date = {now:() => now};
+  c.setTimeout = (fn, delay) => {timers.push({fn, delay}); return timers.length;};
+  c.clearTimeout = () => {};
+  c.window.orchAct = async (op, args) => {calls.push([op, args.workspace]); return {ok:true};};
+  c.fetch = async url => {
+    calls.push(url);
+    return {ok:true, json:async () => url.endsWith('contacts') ?
+      [{ws:WS,name:'Home'}, {ws:'ws_0123456789',name:'Other'}] : {ws:WS,messages:[]}};
+  };
+  await c.chatDmLoad();
+  assert.deepEqual(calls, ['/api/chat/contacts', ['chat.sync_ws', WS], '/api/chat/thread/' + WS]);
+  for (let i = 0; i < 20; i++) c.chatDmRoute();
+  assert.equal(calls.length, 3);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 5000);
+  now += 5000;
+  timers[0].fn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 6);
+});
+
+test('retry sends the persisted failed id to the server', async () => {
+  const c = context();
+  let sent;
+  vm.runInContext(`chatDm.threads.set('${WS}', {messages:[{id:'m_abcdefghijklmnop',by:'you',text:'again',state:'failed'}]}); chatDm.lastFetch = Date.now();`, c);
+  c.window.orchAct = async (op, args) => {
+    sent = {op, ...args};
+    return {ok:true,state:{chat_dm_result:{id:'m_0123456789abcdef',by:'you',text:'again',state:'sending'}}};
+  };
+  await c.chatDmSend('again', 'm_abcdefghijklmnop');
+  assert.equal(sent.op, 'chat.send_ws');
+  assert.equal(sent.retry, 'm_abcdefghijklmnop');
+  assert.equal(vm.runInContext(`chatDmMessages('${WS}').some(m => m.id === 'm_abcdefghijklmnop')`, c), false);
 });

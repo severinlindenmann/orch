@@ -88,8 +88,11 @@ def test_record_before_send_plain_call_and_offline_recheck(dm, monkeypatch):
     assert entry["state"] == "sending"
     assert chat.dm_thread(root, WS)["messages"][0]["state"] == "sending"
     outbox.unlink()
-    assert chat.dm_thread(root, WS)["messages"][0]["state"] == "delivered"
-    monkeypatch.setattr(relay, "send_text", lambda *args: {"id": MID})
+    assert chat.dm_sync(root, WS)["messages"][0]["state"] == "sending"
+    relay._record_posted(root, MID)
+    assert chat.dm_thread(root, WS)["messages"][0]["state"] == "sending"
+    assert chat.dm_sync(root, WS)["messages"][0]["state"] == "delivered"
+    monkeypatch.setattr(relay, "send_text", lambda *args: {"id": MID, "sent": True})
     assert chat.dm_send(root, WS, "accepted")["state"] == "delivered"
 
 
@@ -123,7 +126,7 @@ def test_inbox_clean_idempotent_sorted_and_isolated(dm):
         net.write_json(
             root / ".orch/inbox" / f"m_{i}.json",
             {
-                "id": f"m_{i}",
+                "id": f"m_{i:016d}",
                 "type": kind,
                 "from": peer,
                 "body": body,
@@ -131,7 +134,8 @@ def test_inbox_clean_idempotent_sorted_and_isolated(dm):
             },
             True,
         )
-    msgs = chat.dm_thread(root, WS)["messages"]
+    assert chat.dm_read(root, WS)["messages"] == []
+    msgs = chat.dm_sync(root, WS)["messages"]
     assert [m["text"] for m in msgs] == ["earlier", relay.clean_untrusted(text, 2000)]
     assert chat.dm_thread(root, WS)["messages"] == msgs
     with pytest.raises(Refused):
@@ -154,7 +158,9 @@ def test_store_cap(dm):
     assert chat.dm_thread(root, WS)["messages"][0]["id"] == "10"
 
 
-@pytest.mark.parametrize("sub,args", [("contacts", []), ("thread", [WS]), ("send", [WS, "hello"])])
+@pytest.mark.parametrize(
+    "sub,args", [("contacts", []), ("thread", [WS]), ("sync", [WS]), ("send", [WS, "hello"])]
+)
 def test_helper_default_denies_new_commands(dm, monkeypatch, sub, args):
     parsed = cli.build_parser(show_all=True).parse_args(["chat", sub, *args, "--json"])
     monkeypatch.setattr(chat, "is_helper", lambda root: True)
@@ -166,8 +172,8 @@ def test_helper_default_denies_new_commands(dm, monkeypatch, sub, args):
 def test_cli_dispatch(dm, monkeypatch, capsys):
     from orch import cli_chat
 
-    monkeypatch.setattr(relay, "send_text", lambda *args: {"id": MID})
-    for command in (["contacts"], ["send", WS, "hi"], ["thread", WS]):
+    monkeypatch.setattr(relay, "send_text", lambda *args: {"id": MID, "sent": True})
+    for command in (["contacts"], ["send", WS, "hi"], ["thread", WS], ["sync", WS]):
         args = cli.build_parser(show_all=True).parse_args(["chat", *command, "--json"])
         assert cli_chat.dispatch(args, dm[0])
         assert WS in capsys.readouterr().out or command[0] == "send"
@@ -201,3 +207,130 @@ def test_thread_sorts_actual_instants(dm):
         True,
     )
     assert [m["id"] for m in chat.dm_thread(root, WS)["messages"]] == ["earlier", "later"]
+
+
+def test_hostile_look(dm):
+    from orch import look
+
+    root, directory = dm
+    row = directory["workspaces"][0]
+    for bad in (
+        {"icon": look.ICON_IDS[0], "color": "red;background:url(//x)"},
+        {"icon": "x" * 100000, "color": "x" * 100000},
+        {"url": "//x"},
+    ):
+        row["look"] = bad
+        assert "look" not in chat.contacts(root)[0]
+    row["look"] = {"icon": look.ICON_IDS[0], "color": look.COLOR_IDS[0], "url": "//x", "extra": "x" * 100000}
+    assert chat.contacts(root)[0]["look"] == {"icon": look.ICON_IDS[0], "color": look.COLOR_IDS[0]}
+
+
+def test_pure_reads_and_inbox_limits(dm):
+    root, _ = dm
+    inbox = root / ".orch/inbox"
+    for i, mid in enumerate([MID, 'x"]', "m_short"]):
+        net.write_json(
+            inbox / f"m_{i}.json", {"id": mid, "from": WS, "type": "text", "body": {"text": "hi"}}, True
+        )
+    net.write_json(
+        inbox / "m_large.json",
+        {"id": "m_0123456789abcdef", "from": WS, "type": "text", "body": {"text": "x" * 65536}},
+        True,
+    )
+    before = {p: p.stat().st_mtime_ns for p in root.rglob("*")}
+    assert chat.dm_read(root, WS)["messages"] == []
+    chat.contacts(root)
+    assert before == {p: p.stat().st_mtime_ns for p in root.rglob("*")}
+    assert [m["id"] for m in chat.dm_sync(root, WS)["messages"]] == [MID]
+
+
+def test_inbox_directory_links(dm, tmp_path):
+    root, _ = dm
+    outside = tmp_path / "outside" / ".orch"
+    net.write_json(
+        outside / "m_test.json", {"id": MID, "from": WS, "type": "text", "body": {"text": "forged"}}, True
+    )
+    (root / ".orch").mkdir()
+    (root / ".orch/inbox").symlink_to(outside, target_is_directory=True)
+    assert chat.dm_sync(root, WS)["messages"] == []
+    linked = root / "linked"
+    linked.mkdir()
+    (linked / ".orch").symlink_to(root / ".orch", target_is_directory=True)
+    assert list(chat._dm_inbox(linked)) == []
+
+
+def test_newest_500_inbox_files(dm):
+    import os
+
+    root, _ = dm
+    for i in range(505):
+        path = root / ".orch/inbox" / f"m_{i:016d}.json"
+        net.write_json(path, {"id": path.stem, "from": WS, "type": "text", "body": {"text": str(i)}})
+        os.utime(path, (i + 1, i + 1))
+    assert {m["body"]["text"] for m in chat._dm_inbox(root)} == {str(i) for i in range(5, 505)}
+
+
+def test_cli_spoof_and_sync_person_only(dm, monkeypatch):
+    from orch import cli_chat
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
+    for command in (["send", WS, "hi"], ["sync", WS]):
+        args = cli.build_parser(show_all=True).parse_args(["chat", *command, "--by", "human:x"])
+        with pytest.raises(Refused, match="Only a person"):
+            cli_chat.dispatch(args, dm[0])
+
+
+def test_retry_replaces_failed_entry(dm, monkeypatch):
+    root, _ = dm
+
+    def fail(*args):
+        raise Refused("offline")
+
+    monkeypatch.setattr(relay, "send_text", fail)
+    failed = chat.dm_send(root, WS, "hello")
+    monkeypatch.setattr(relay, "send_text", lambda *args: {"id": MID, "sent": True})
+    sent = chat.dm_send(root, WS, "hello", retry=failed["id"])
+    assert chat.dm_read(root, WS)["messages"] == [sent]
+    with pytest.raises(Refused):
+        chat.dm_send(root, WS, "hello", retry=failed["id"])
+
+
+def test_relay_flush_records_only_successful_posts(dm, monkeypatch):
+    root, _ = dm
+    monkeypatch.setattr(relay, "apply_allow_answers", lambda root: None)
+    path = root / ".orch/outbox" / f"{MID}.json"
+    net.write_json(path, {"id": MID}, True)
+
+    def reject(*args):
+        error = Refused("permission denied")
+        error.status = 403
+        raise error
+
+    monkeypatch.setattr(relay, "_post_message", reject)
+    relay.resend_outbox(root)
+    assert MID not in relay.posted_ids(root)
+    net.write_json(path, {"id": MID}, True)
+    monkeypatch.setattr(relay, "_post_message", lambda *args: None)
+    assert relay.resend_outbox(root)["sent"] == [MID]
+    assert MID in relay.posted_ids(root)
+    assert not path.exists()
+
+
+def test_relay_immediate_post_ack(dm, monkeypatch):
+    from orch import relay_view
+
+    root, _ = dm
+    monkeypatch.setattr(relay, "_cfg", lambda root: {"workspace": OTHER})
+    monkeypatch.setattr(relay_view, "record_sent", lambda *args: None)
+    monkeypatch.setattr(relay, "_post_message", lambda *args: None)
+    msg = relay._message(root, WS, "text", {"text": "hi"})
+    assert msg["sent"] is True
+    assert msg["id"] in relay.posted_ids(root)
+
+    def offline(*args):
+        raise Refused("offline")
+
+    monkeypatch.setattr(relay, "_post_message", offline)
+    queued = relay._message(root, WS, "text", {"text": "later"})
+    assert queued["sent"] is False
+    assert queued["id"] not in relay.posted_ids(root)

@@ -760,6 +760,8 @@ def can_of(flags) -> dict:
 
 
 def contacts(root: Path) -> list[dict]:
+    from orch.chat_groups import _valid_look
+
     directory = relay._read_dir(root)
     rows = directory.get("workspaces") if isinstance(directory, dict) else None
     out = {}
@@ -775,8 +777,8 @@ def contacts(root: Path) -> list[dict]:
             "name": relay.clean_untrusted(name if isinstance(name, str) else ws, 100),
             "can": can_of(row.get("can_send")),
         }
-        if isinstance(row.get("look"), dict):
-            item["look"] = row["look"]
+        if lk := _valid_look(row.get("look")):
+            item["look"] = lk
         out[ws] = item
     return list(out.values())
 
@@ -812,7 +814,7 @@ def _dm_write(root: Path, ws: str, data: dict) -> None:
     net.write_json(_dm_path(root, ws), data, True)
 
 
-def dm_send(root: Path, ws: str, text: str, by: str | None = None) -> dict:
+def dm_send(root: Path, ws: str, text: str, by: str | None = None, retry: str | None = None) -> dict:
     if not tickets.current_actor(by).startswith("human:") or tickets.agent_tool():
         raise Refused("Only a person writes as themselves in Chat.")
     contact = _dm_contact(root, ws)
@@ -824,12 +826,17 @@ def dm_send(root: Path, ws: str, text: str, by: str | None = None) -> dict:
     entry = {"id": relay.new_id(), "at": tickets.now(), "by": "you", "text": text, "state": "sending"}
     with tickets._locked(root, "chat"):
         data = _dm_read(root, ws)
+        if retry is not None:
+            old = next((m for m in data["messages"] if m.get("id") == retry), None)
+            if not old or old.get("by") != "you" or old.get("state") != "failed":
+                raise Refused("Only a failed message can be retried.")
+            data["messages"].remove(old)
         data["messages"].append(entry)
         _dm_write(root, ws, data)
     try:
         sent = relay.send_text(root, ws, text)
         entry["relay_id"] = sent["id"]
-        if sent.get("sent") is not False:
+        if sent.get("sent") is True:
             entry["state"] = "delivered"
     except Exception as exc:  # Once saved, return the message even if sending fails.
         entry.update(state="failed", error=relay.clean_untrusted(str(exc), 200))
@@ -841,21 +848,64 @@ def dm_send(root: Path, ws: str, text: str, by: str | None = None) -> dict:
     return entry
 
 
+def dm_read(root: Path, ws: str) -> dict:
+    contact = _dm_contact(root, ws)
+    data = _dm_read(root, ws)
+    return {**contact, "messages": sorted(data["messages"], key=_dm_order)[-500:]}
+
+
 def dm_thread(root: Path, ws: str) -> dict:
+    """Compatibility name for a pure stored-thread read."""
+    return dm_read(root, ws)
+
+
+def _dm_inbox(root: Path):
+    import heapq
+    import json
+
+    inbox = root / ".orch" / "inbox"
+    if (root / ".orch").is_symlink() or inbox.is_symlink():
+        return
+
+    def candidates():
+        for path in inbox.glob("m_*.json"):
+            try:
+                if not path.is_symlink() and path.is_file():
+                    yield (path.stat().st_mtime_ns, path.name, path)
+            except OSError:
+                continue
+
+    for _, _, path in heapq.nlargest(500, candidates()):
+        try:
+            if path.stat().st_size > 65536:
+                continue
+            with path.open("rb") as stream:
+                raw = stream.read(65537)
+            if len(raw) <= 65536:
+                yield json.loads(raw)
+        except (OSError, ValueError):
+            continue
+
+
+def dm_sync(root: Path, ws: str, by: str | None = None) -> dict:
+    if not tickets.current_actor(by).startswith("human:") or tickets.agent_tool():
+        raise Refused("Only a person syncs workspace Chat.")
     contact = _dm_contact(root, ws)
     with tickets._locked(root, "chat"):
         data = _dm_read(root, ws)
         ids = {m.get("id") for m in data["messages"] if isinstance(m.get("id"), str)}
-        for path in (root / ".orch" / "inbox").glob("m_*.json"):
-            if path.is_symlink():
-                continue
-            msg = net.read_json(path, None)
+        for msg in _dm_inbox(root):
             if not isinstance(msg, dict) or msg.get("from") != ws or msg.get("type") != "text":
                 continue
             body, mid = msg.get("body"), msg.get("id")
             if not isinstance(body, dict) or body.get("group") or body.get("update"):
                 continue
-            if not isinstance(mid, str) or mid in ids or not isinstance(body.get("text"), str):
+            if (
+                not isinstance(mid, str)
+                or not re.fullmatch(r"m_[a-z0-9]{16}", mid)
+                or mid in ids
+                or not isinstance(body.get("text"), str)
+            ):
                 continue
             data["messages"].append(
                 {
@@ -867,6 +917,7 @@ def dm_thread(root: Path, ws: str) -> dict:
                 }
             )
             ids.add(mid)
+        sent_ids = relay.posted_ids(root)
         for m in data["messages"]:
             rid = m.get("relay_id")
             if (
@@ -875,7 +926,7 @@ def dm_thread(root: Path, ws: str) -> dict:
                 and not m.get("error")
                 and isinstance(rid, str)
                 and re.fullmatch(r"m_[a-z0-9]{16}", rid)
-                and not (root / ".orch" / "outbox" / f"{rid}.json").exists()
+                and rid in sent_ids
             ):
                 m["state"] = "delivered"
         _dm_write(root, ws, data)

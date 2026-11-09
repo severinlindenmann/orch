@@ -581,14 +581,27 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
 
 # Workspace direct messages: a separate operation from phone/group chat.
 def _chat_send_ws(a):
-    _only(a, ("workspace", "text"))
+    _only(a, ("workspace", "text", "retry"))
     ws = a.get("workspace")
     if not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         raise BadRequest("That is not a workspace.")
     text = _text(a.get("text"))
     if len(text) > 2000:
         raise BadRequest("A message has 1 to 2000 characters.")
-    return ["chat", "send", ws], [], [text]
+    retry = a.get("retry")
+    if retry is not None and (not isinstance(retry, str) or not re.fullmatch(r"m_[a-z0-9]{16}", retry)):
+        raise BadRequest("That is not a message.")
+    return ["chat", "send", ws], ["--retry", retry] if retry else [], [text]
+
+
+def _chat_sync_ws(a):
+    _only(a, ("workspace",))
+    ws = a.get("workspace")
+    if not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
+        raise BadRequest("That is not a workspace.")
+    return ["chat", "sync", ws], [], []
 
 
 OPS["chat.send_ws"] = _chat_send_ws
+
+OPS["chat.sync_ws"] = _chat_sync_ws
