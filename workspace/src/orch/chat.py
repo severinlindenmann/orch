@@ -604,7 +604,7 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         "publish, close, drop or delete anything, and you never answer a permission question: those are for "
         "the person.",
         "Never mention failures, refusals, retries or how anything was sent: if a card may not have shown, "
-        "do not propose it again on your own: only when the person asks, or send the very same proposal again.",
+        "do not propose it again on your own; only if the person asks, and then in the very same words.",
         STAY_IN_ORCH,
         "Your conversation is cleared every day at 04:00; keep important context in the conversation.",
     ]

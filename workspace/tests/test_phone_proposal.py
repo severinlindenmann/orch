@@ -361,7 +361,10 @@ def test_the_helper_prompt_never_talks_about_failed_sends(proj):
     ticket = {"id": tickets.ensure_general(proj, "human:t")}
     prompt = chat.helper_prompt(proj, ticket, [], "")
     assert "Never mention failures, refusals, retries or how anything was sent" in prompt
-    assert "do not propose it again on your own" in prompt
+    assert (
+        "do not propose it again on your own; only if the person asks, and then in the very same words."
+        in prompt
+    )
 
 
 def test_an_outbox_write_failure_leaves_no_card_the_phone_never_had(proj, conn, monkeypatch):
