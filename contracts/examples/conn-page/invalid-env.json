@@ -1,0 +1,31 @@
+{
+ "items": [
+  {
+   "name": "gdrive",
+   "label": "Google Drive",
+   "source": "harness",
+   "transport": "stdio",
+   "command": "npx",
+   "host": null,
+   "profile": null,
+   "actions": [
+    {
+     "name": "read_file",
+     "allowed": true
+    },
+    {
+     "name": "search",
+     "allowed": true
+    }
+   ],
+   "allow_all": false,
+   "state": "ok",
+   "shadowed": false,
+   "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "env": {
+    "A": "b"
+   }
+  }
+ ],
+ "next": null
+}

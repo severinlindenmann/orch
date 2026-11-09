@@ -1435,7 +1435,8 @@ def _save_phone_file(root: Path, tid: str, mid: str, att: dict, final: bool = Fa
         name = safe_name(att.get("name", ""))
     except Refused:
         name = "file"
-    dest = _save_into(tickets.files_dir(root, tid), name, raw)
+    with tickets.files_dir_locked(root, tid) as fdir:
+        dest = _save_into(fdir, name, raw)
     rel = dest.relative_to(root).as_posix()
     st["saved"][key] = rel
     st["saved"] = dict(list(st["saved"].items())[-V3_STATE_KEEP:])

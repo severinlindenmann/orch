@@ -4,7 +4,8 @@ crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json)
 phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
-Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
+Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
+With kinds (activity, secrets, jobs, blocks, inventory, addon-manifest, screen, counts, human, proposal) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -136,6 +137,1230 @@ def check(kind, doc, want_ok, label):
     errs = errors(kind, doc)
     if bool(errs) == want_ok:
         fails.append(f"{label}: expected {'valid' if want_ok else 'invalid'}, got {errs[0].message if errs else 'valid'}")
+
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Draft 02 (Live + Insights): record, keys, jobs, blocks, inventory, screen, counts, proposals.
+# `validate.py <kind> [<kind> ...]` runs only those kinds; no argument = everything (the checks above, then these).
+# ---------------------------------------------------------------------------------------------------------------------
+import shlex
+from datetime import datetime, timedelta
+
+SELECT = sys.argv[1:]
+
+
+_W_REG = []
+
+
+def _w(name, defname=None):
+    """Validator for one schema (or one of its $defs); refs to other contract schemas resolve by file name."""
+    if not _W_REG:
+        reg = Registry()
+        for f in sorted(HERE.glob("*.schema.json")):
+            doc = _expand(json.loads(f.read_text()))
+            reg = reg.with_resource(doc.get("$id", f.name), Resource.from_contents(doc))
+        _W_REG.append(reg)
+    schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text()))
+    if defname:
+        schema = {"$id": schema["$id"], "$ref": f"#/$defs/{defname}", "$defs": schema["$defs"]}
+    return Draft202012Validator(schema, format_checker=FormatChecker(), registry=_W_REG[0])
+
+
+def _examples(folder, errfn):
+    files = sorted((HERE / "examples" / folder).glob("*.*"))
+    for f in files:
+        errs = errfn(load(f))
+        want = f.name.startswith("valid-")
+        if bool(errs) == want:
+            fails.append(f"examples/{folder}/{f.name}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
+    for prefix in ("valid-", "invalid-"):
+        if not any(f.name.startswith(prefix) for f in files):
+            fails.append(f"examples/{folder}: needs at least one {prefix}* example")
+
+
+def _msgs(v, doc):
+    return [e.message for e in v.iter_errors(doc)]
+
+
+def _vec(name):
+    return json.loads((HERE / "vectors" / name).read_text())
+
+
+def _expect(label, got, want):
+    if got != want:
+        fails.append(f"{label}: expected {json.dumps(want, ensure_ascii=False)[:300]}, got {json.dumps(got, ensure_ascii=False)[:300]}")
+
+
+def _core_clean(*names):
+    for name in names:
+        hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text())
+        if hit:
+            fails.append(f"{name}.schema.json names an add-on or agent tool: {hit.group(0)!r}")
+
+
+# --- activity (activity.md) ------------------------------------------------------------------------------------------
+EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
+FILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+PRECEDENCE = {"hook": 2, "broker": 2, "job": 2, "core": 2, "log": 1}
+
+
+def act_event_id(tool_call_id, run, seq):
+    """The tool's own id when it is a safe id; an unsafe one is hashed (still the same for hook and log); none -> run:seq."""
+    if tool_call_id is None:
+        return f"{run}:{seq}"
+    if EVENT_ID.match(tool_call_id):
+        return tool_call_id
+    return "x_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:32]
+
+
+def act_detail_name(event_id):
+    return event_id if FILE_ID.match(event_id) else "x_" + hashlib.sha256(event_id.encode()).hexdigest()[:32]
+
+
+def act_dedupe(lines):
+    """Indices of the lines readers keep: per (run, id, kind, finished) the highest precedence, ties -> first written."""
+    best = {}
+    for i, ln in enumerate(lines):
+        key = (ln["run"], ln["id"], ln["kind"], ln.get("outcome") is not None)
+        if key not in best or PRECEDENCE[ln["via"]] > PRECEDENCE[lines[best[key]]["via"]]:
+            best[key] = i
+    return sorted(best.values())
+
+
+def _t(s):
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+
+
+HOOK_KINDS = ("step", "denial", "helper.start", "helper.end", "usage")
+
+
+def act_hook_accept(line):
+    """What the out-of-process hook entry (orch run event) stores: only hook kinds, always via hook."""
+    if line.get("kind") not in HOOK_KINDS:
+        return "refused"
+    return {**line, "via": "hook"}
+
+
+def act_retention(case):
+    now, keep, cap = _t(case["now"]), case["keep_days"], case["max_mb"]
+    runs = [dict(r) for r in case["runs"]]
+    out = {"delete_detail": [], "delete_run": []}
+    for r in runs:
+        if r["ended"] and now - _t(r["ended"]) > timedelta(days=keep):
+            if r["detail_mb"]:
+                out["delete_detail"].append(r["run"])
+            out["delete_run"].append(r["run"])
+            r["detail_mb"] = r["file_mb"] = 0
+    ended = sorted((r for r in runs if r["ended"] and r["file_mb"]), key=lambda r: r["ended"])
+    while sum(r["detail_mb"] + r["file_mb"] for r in runs) > cap:
+        with_detail = [r for r in ended if r["detail_mb"]]
+        if with_detail:
+            with_detail[0]["detail_mb"] = 0
+            out["delete_detail"].append(with_detail[0]["run"])
+            continue
+        left = [r for r in ended if r["file_mb"]]
+        if not left:
+            break
+        left[0]["file_mb"] = 0
+        out["delete_run"].append(left[0]["run"])
+    out["fold_first"] = list(out["delete_run"])
+    return out
+
+
+def act_write_allowed(case):
+    """hider: store | none | test. A store hider counts only from the trusted orch home; the test hider only when the
+    tests package passes it in (entry = tests), never on a CLI entry, whatever env is set."""
+    if case["hider"] == "store":
+        return bool(case["home_trusted"])
+    if case["hider"] == "test":
+        return case["entry"] == "tests"
+    return False
+
+
+def _one_line(text, n):
+    return " ".join(str(text).split())[:n]
+
+
+def _shell_unwrap(cmd):
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return cmd
+    if len(parts) == 3 and Path(parts[0]).name in ("sh", "bash", "zsh") and parts[1] in ("-c", "-lc"):
+        return parts[2]
+    return cmd
+
+
+def act_map_stream(lines, ctx):
+    """Reference mapping of an item.* JSON stream (one-shot collector) to orch.activity/1 events (activity.md)."""
+    run, out, turn, session = ctx["run"], [], 0, None
+
+    def emit(**k):
+        ev = {"v": 1, "id": k.pop("id", None), "seq": len(out) + 1, "run": run, "session": session, "agent": "main",
+              "parent": None, "at": ctx["at"], "ticket": ctx["ticket"], "harness": ctx["harness"], "via": "log",
+              "used": None, "outcome": None, "detail": None, "coverage": "full"}
+        ev.update(k)
+        if ev["id"] is None:
+            ev["id"] = f"{run}:{ev['seq']}"
+        out.append(ev)
+
+    for raw in lines:
+        m = json.loads(raw)
+        t, item = m.get("type"), m.get("item") or {}
+        if t == "thread.started":
+            session = m.get("thread_id")
+        elif t == "turn.started":
+            turn += 1
+            emit(kind="run.state", text="Working", data={"state": "working"})
+        elif t in ("item.started", "item.completed") and item.get("type") == "command_execution":
+            eid = f"{run}:{turn}:{item['id']}"
+            used = {"kind": "tool", "name": "Run command", "action": None, "source": "builtin", "version": None}
+            text = _one_line(_shell_unwrap(item.get("command", "")), 200)
+            if t == "item.started":
+                emit(id=eid, kind="step", text=text, used=used)
+            else:
+                code = item.get("exit_code")
+                ok = None if code is None else code == 0
+                first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
+                err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
+                emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
+                     detail=f"detail/{run}/{act_detail_name(eid)}.json")
+        elif t == "item.completed" and item.get("type") == "agent_message":
+            eid = f"{run}:{turn}:{item['id']}"
+            say = _one_line(item.get("text", ""), 200)
+            emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
+                 detail=f"detail/{run}/{act_detail_name(eid)}.json")
+        elif t == "turn.completed":
+            u = m.get("usage") or {}
+            emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
+                 data={"tokens_in": u.get("input_tokens", 0), "tokens_out": u.get("output_tokens", 0)})
+            emit(kind="run.state", text="Idle", data={"state": "idle"})
+    return out
+
+
+def kind_activity():
+    v = _w("activity")
+    vd = _w("activity", "detail_file")
+    _examples("activity", lambda d: _msgs(v, d))
+    _examples("activity-detail", lambda d: _msgs(vd, d))
+    _core_clean("activity")
+    vec = _vec("activity-v1.json")
+    for c in vec["ids"]:
+        _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
+    for c in vec["detail_names"]:
+        _expect(f"activity detail_names {c['id']}", act_detail_name(c["id"]), c["file"])
+    for c in vec["dedupe"]:
+        _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
+    for c in vec["hook_entry"]:
+        _expect(f"activity hook_entry {c['name']}", act_hook_accept(c["line"]), c["stored"])
+    for c in vec["retention"]:
+        _expect(f"activity retention {c['name']}", act_retention(c), c["expect"])
+    for c in vec["fail_closed"]:
+        _expect(f"activity fail_closed {c['name']}", act_write_allowed(c), c["write"])
+    for c in vec["stream_mapping"]:
+        got = act_map_stream(c["lines"], c["ctx"])
+        for ev in got:
+            for e in v.iter_errors(ev):
+                fails.append(f"activity stream_mapping {c['capture']} seq {ev['seq']}: {e.message}")
+        _expect(f"activity stream_mapping {c['capture']}", got, c["events"])
+
+
+
+# --- secrets (secrets.md) --------------------------------------------------------------------------------------------
+SEC_MIN_LEN = 8  # values (and derived forms) shorter than this are never hidden by exact value (secrets.md, Hiding)
+
+
+def sec_b64_forms(v):
+    """base64 and base64url of the value at the 3 byte alignments (0, 1, 2 bytes before it), without padding and with
+    the boundary characters that depend on neighbouring bytes trimmed: matches the value anywhere inside a longer
+    encoded string (e.g. Basic base64("user:token"))."""
+    b, out = v.encode(), []
+    for k in range(3):
+        enc = base64.b64encode(b"\0" * k + b).decode().rstrip("=")
+        first, last = -(-8 * k // 6), (8 * (k + len(b))) // 6  # chars fully inside the value's bits
+        part = enc[first:last]
+        out += [part, part.translate(str.maketrans("+/", "-_"))]
+    return out
+
+
+def sec_forms(v):
+    """Every required form of one value (applied once; the only nested form is url-quoted base64)."""
+    from urllib.parse import quote
+
+    hx = v.encode().hex()
+    b64 = sec_b64_forms(v)
+    cands = [v, json.dumps(v, ensure_ascii=False)[1:-1], quote(v, safe=""), hx, hx.upper()] + b64
+    cands += [quote(f, safe="") for f in b64]
+    return [c for c in dict.fromkeys(cands) if len(c) >= SEC_MIN_LEN]
+
+
+def sec_needles(keys):
+    """[(needle, name)] for a list of {name, type, value} (value of a json key = the object), longest first."""
+    out = []
+
+    def leaves(o):
+        if isinstance(o, str):
+            yield o
+        elif isinstance(o, dict):
+            for x in o.values():
+                yield from leaves(x)
+        elif isinstance(o, list):
+            for x in o:
+                yield from leaves(x)
+
+    def add(v, name):
+        if len(v) < SEC_MIN_LEN:
+            return
+        out.extend((f, name) for f in sec_forms(v))
+        if "\n" in v:
+            out.extend((ln, name) for ln in v.splitlines() if len(ln) >= 16)
+
+    for k in keys:
+        v, name = k["value"], k["name"]
+        if k["type"] == "json":
+            out.append((json.dumps(v, separators=(",", ":"), ensure_ascii=False), name))
+            for leaf in leaves(v):
+                add(leaf, name)
+        else:
+            add(v, name)
+    seen, uniq = set(), []
+    for n, name in sorted(out, key=lambda x: (-len(x[0]), x[0])):
+        if n and n not in seen:
+            seen.add(n)
+            uniq.append((n, name))
+    return uniq
+
+
+def _hide_upto(buf, needles, stop):
+    """Hide matches that START before index stop; returns (output, index where unprocessed text begins)."""
+    out, i = [], 0
+    while i < stop:
+        for n, name in needles:
+            if buf.startswith(n, i):
+                out.append(f"[hidden: {name}]")
+                i += len(n)
+                break
+        else:
+            out.append(buf[i])
+            i += 1
+    return "".join(out), i
+
+
+def sec_hide(text, needles):
+    return _hide_upto(text, needles, len(text))[0]
+
+
+def sec_hide_stream(chunks, needles):
+    longest = max((len(n) for n, _ in needles), default=1)
+    buf, out = "", []
+    for c in chunks:
+        buf += c
+        done, i = _hide_upto(buf, needles, max(0, len(buf) - (longest - 1)))
+        out.append(done)
+        buf = buf[i:]
+    out.append(sec_hide(buf, needles))
+    return out
+
+
+def sec_get(case):
+    if not case["key_in_profile"]:
+        return "not_in_profile"
+    if not case["allow_get"]:
+        return "get_off"
+    if case["stdout_tty"]:
+        return "get_to_terminal"
+    return "ok"
+
+
+def sec_resolve(entries):
+    """Which entry is used per name ('workspace' wins) and which are shadowed."""
+    used, shadowed = {}, []
+    for e in entries:
+        if e["name"] not in used or e["source"] == "workspace":
+            if e["name"] in used:
+                shadowed.append(e["name"])
+            used[e["name"]] = e["source"]
+        else:
+            shadowed.append(e["name"])
+    return {"used": dict(sorted(used.items())), "shadowed": sorted(set(shadowed))}
+
+
+def kind_secrets():
+    vp, vk, vl = _w("secrets", "profiles"), _w("secrets", "keys_file"), _w("secrets", "list_answer")
+    _examples("secret-profiles", lambda d: _msgs(vp, d))
+    _examples("secret-keys", lambda d: _msgs(vk, d))
+    _examples("secret-list", lambda d: _msgs(vl, d))
+    for f in sorted((HERE / "examples" / "secret-profiles").glob("valid-*")):
+        if re.search(r"(?i)(dapi|ghp_|sk_live|-----BEGIN)", f.read_text()):
+            fails.append(f"examples/secret-profiles/{f.name}: a profile must hold names only")
+    vec = _vec("secrets-v1.json")
+    for c in vec["hide"]:
+        needles = sec_needles(c["keys"])
+        whole = sec_hide("".join(c["chunks"]), needles)
+        _expect(f"secrets hide {c['name']} (whole)", whole, c["expect"])
+        streamed = sec_hide_stream(c["chunks"], needles)
+        _expect(f"secrets hide {c['name']} (streamed)", "".join(streamed), c["expect"])
+        for n, _ in needles:
+            if n in c["expect"]:
+                fails.append(f"secrets hide {c['name']}: a hidden form survives in expect: {n[:12]}...")
+    for c in vec["min_len"]:
+        _expect(f"secrets min_len {c['value']!r}", bool(sec_needles([{"name": "k", "type": "token", "value": c["value"]}])), c["hidden"])
+    for c in vec["get"]:
+        _expect(f"secrets get {c['name']}", sec_get(c), c["result"])
+    for c in vec["resolve"]:
+        _expect(f"secrets resolve {c['name']}", sec_resolve(c["entries"]), c["expect"])
+    for c in vec["too_short"]:
+        ok = not _msgs(vk, {"schema": "orch.keys/1", "keys": {"k": {"type": "token", "source": "workspace", "value": c["value"], "added_at": "2026-11-16T09:00:00Z"}}})
+        _expect(f"secrets too_short {c['value']!r}", ok, c["stored"])
+
+
+
+# --- blocks (blocks.md) ----------------------------------------------------------------------------------------------
+BLOCK_TYPES = ["summary", "steps", "progress", "stat", "kv", "table", "file", "link", "log", "chart"]
+
+
+def _strings(o):
+    if isinstance(o, str):
+        yield o
+    elif isinstance(o, dict):
+        for k, x in o.items():
+            yield from _strings(k)
+            yield from _strings(x)
+    elif isinstance(o, list):
+        for x in o:
+            yield from _strings(x)
+
+
+def blocks_errors(v, doc):
+    errs = _msgs(v, doc)
+    if not errs and len(json.dumps(doc, separators=(",", ":"), ensure_ascii=False).encode()) > 65536:
+        errs.append("document over 64 KB")
+    return errs
+
+
+def kind_blocks():
+    v = _w("blocks")
+    _core_clean("blocks")
+    files = sorted((HERE / "vectors" / "blocks").glob("*.json"))
+    seen = set()
+    for f in files:
+        case = json.loads(f.read_text())
+        label = f"vectors/blocks/{f.name}"
+        want = f.name.startswith("valid-")
+        if case.get("valid") is not want:
+            fails.append(f"{label}: valid must be {want} for a {'valid' if want else 'invalid'}-* file")
+        errs = blocks_errors(v, case["doc"])
+        if bool(errs) == want:
+            fails.append(f"{label}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
+        if want:
+            texts = set(_strings(case["doc"]))
+            lines = texts | {ln for t in texts for ln in t.split("\n")}
+            for s in case["shows"]:
+                if s not in lines:
+                    fails.append(f"{label}: shows {s!r} is not a whole text (or line) of the document")
+            if not case["shows"]:
+                fails.append(f"{label}: a valid fixture must list what it shows")
+            unknown = sum(1 for b in case["doc"]["blocks"] if b.get("type") not in BLOCK_TYPES)
+            _expect(f"{label} fallback", unknown, case["fallback"])
+            seen.update(b.get("type") for b in case["doc"]["blocks"])
+    missing = [t for t in BLOCK_TYPES if t not in seen]
+    if missing:
+        fails.append(f"vectors/blocks: no valid fixture uses {missing}")
+    for prefix in ("valid-", "invalid-"):
+        if not any(f.name.startswith(prefix) for f in files):
+            fails.append(f"vectors/blocks: needs at least one {prefix}* fixture")
+
+
+
+# --- jobs (job-events.md) --------------------------------------------------------------------------------------------
+JOB_FINAL = ("ok", "failed", "cancelled", "lost")
+JOB_EVENT_CAP = 2000
+PROGRESS_RE = (re.compile(r"^\s*(\d+)\s*/\s*(\d+)\b"), re.compile(r"^\s*(\d{1,3}(?:\.\d+)?)\s*%"))
+
+
+def job_replay(events, binding, cap=JOB_EVENT_CAP):
+    """Apply input events of one job in order: [result per event], final state. result = 'ok' or a refusal code."""
+    state, steps, results, stored = None, {}, [], 0
+    for ev in events:
+        t = ev["type"]
+        if ev.get("job", binding["job"]) != binding["job"] or ev.get("run", binding["run"]) != binding["run"]:
+            results.append("other_run")
+            continue
+        if t == "lost":
+            if state == "running" and ev.get("by") == "orch":
+                state = "lost"
+                results.append("ok")
+            else:
+                results.append("ended" if state in JOB_FINAL else "not_allowed")
+            continue
+        if ev.get("by") is not None:
+            results.append("not_allowed")
+            continue
+        if state is None and t != "start":
+            results.append("not_started")
+            continue
+        if state in JOB_FINAL:
+            results.append("ended")
+            continue
+        if t == "start" and state is not None:
+            results.append("already_started")
+            continue
+        if stored >= cap:
+            results.append("cap")
+            continue
+        if t == "step":
+            prev = steps.get(ev["step"])
+            if prev in ("done", "failed", "skipped"):
+                results.append("step_finished")
+                continue
+            steps[ev["step"]] = ev["state"]
+        if t == "progress" and ev.get("total") is not None and ev["done"] > ev["total"]:
+            results.append("invalid")
+            continue
+        if t == "start":
+            state = "running"
+        if t == "end":
+            state = ev["status"]
+        stored += 1
+        results.append("ok")
+    return results, state
+
+
+def job_is_lost(c):
+    if c["state"] != "running":
+        return False
+    quiet = _t(c["now"]) - _t(c["last_event_at"]) >= timedelta(minutes=c.get("quiet_minutes", 10))
+    return bool(quiet or c.get("process_gone") or c.get("run_ended"))
+
+
+def job_progress_from_line(line):
+    m = PROGRESS_RE[0].match(line)
+    if m:
+        done, total = int(m.group(1)), int(m.group(2))
+        return {"done": done, "total": total} if total > 0 and done <= total else None
+    m = PROGRESS_RE[1].match(line)
+    if m and float(m.group(1)) <= 100:
+        return {"done": float(m.group(1)), "total": 100, "unit": "%"}
+    return None
+
+
+def _job_stream_errors(v, doc):
+    if not isinstance(doc, list) or not doc:
+        return ["needs a non-empty list of events (one job)"]
+    errs = [m for ev in doc for m in _msgs(v, ev)]
+    if errs:
+        return errs
+    res, _ = job_replay(doc, {"job": doc[0]["job"], "run": doc[0]["run"]})
+    if [s for s in [ev["seq"] for ev in doc]] != list(range(1, len(doc) + 1)):
+        return ["seq must be 1, 2, 3 ... in a stored stream"]
+    bad = [r for r in res if r != "ok"]
+    return [f"stream breaks the state rules: {bad[0]}"] if bad else []
+
+
+def kind_jobs():
+    v, vi = _w("job-event"), _w("job-event", "input")
+    _core_clean("job-event")
+    _examples("job-event", lambda d: _job_stream_errors(v, d))
+    _examples("job-input", lambda d: _msgs(vi, d))
+    vec = _vec("jobs-v1.json")
+    for c in vec["replay"]:
+        for ev in c["events"]:
+            if ev["type"] != "lost" and not ev.get("by"):
+                for m in _msgs(vi, ev):
+                    fails.append(f"jobs replay {c['name']}: input not valid: {m}")
+        res, state = job_replay(c["events"], c["binding"], c.get("cap", JOB_EVENT_CAP))
+        _expect(f"jobs replay {c['name']} results", res, c["results"])
+        _expect(f"jobs replay {c['name']} state", state, c["state"])
+    for c in vec["lost"]:
+        _expect(f"jobs lost {c['name']}", job_is_lost(c), c["lost"])
+    for c in vec["progress_pattern"]:
+        _expect(f"jobs progress_pattern {c['line']!r}", job_progress_from_line(c["line"]), c["progress"])
+
+
+
+# --- inventory (inventory.md) ----------------------------------------------------------------------------------------
+INV_ORDER = {"skill": ["workspace", "admin", "marketplace", "builtin", "harness"],
+             "connection": ["workspace", "admin", "harness"], "key": ["workspace", "admin"]}
+
+
+def inv_skill_version(files):
+    """files: {relative posix path: text}; dot-names are skipped."""
+    h = hashlib.sha256()
+    for path in sorted((p for p in files if not any(part.startswith(".") for part in p.split("/"))), key=lambda p: p.encode()):
+        h.update(path.encode() + b"\0" + hashlib.sha256(files[path].encode()).hexdigest().encode() + b"\n")
+    return "sha256:" + h.hexdigest()
+
+
+def inv_conn_version(server):
+    clean = {k: v for k, v in server.items() if k not in ("env", "headers")}
+    return "sha256:" + hashlib.sha256(json.dumps(clean, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def inv_winners(kind, entries):
+    order = INV_ORDER[kind]
+    best = {}
+    for e in entries:
+        if e["name"] not in best or order.index(e["source"]) < order.index(best[e["name"]]):
+            best[e["name"]] = e["source"]
+    return dict(sorted(best.items()))
+
+
+def inv_classify(c):
+    """Source of a skill/connection found on disk; everything unproven is workspace."""
+    name, version = c["name"], c["version"]
+    if c.get("from_harness_settings"):
+        return "harness"
+    if [name, version] in c["refresh_items"]:
+        return "admin"
+    if c["shipped"].get(name) == version:
+        return "builtin"
+    if c["marketplace_index"].get(name) == version:
+        return "marketplace"
+    return "workspace"
+
+
+def inv_allowed(c):
+    """Allowed actions of one connection: the .orch/mcp.json entry counts only where it matches the proof-made grant
+    (human-proof.md); no entry or no grant = nothing allowed (P1)."""
+    entry, grant, actions = c.get("file"), c.get("grant"), c["actions"]
+    if entry is None or grant is None:
+        return []
+
+    def expand(x):
+        return set(actions) if x == "*" else set(x)
+
+    return sorted(expand(entry) & expand(grant) & set(actions))
+
+
+def inv_settle_allow(c):
+    """Allow list over time: a proof sets file and grant; a file edit sets the file and NARROWS the grant to file ∩ grant
+    (a list tombstone), never widens it. Effective after each event = file ∩ grant ∩ known actions."""
+    actions = set(c["actions"])
+
+    def expand(x):
+        return set(actions) if x == "*" else set(x or [])
+
+    file_val, grant, out = None, None, []
+    for ev in c["events"]:
+        if ev["by"] == "proof":
+            file_val = grant = ev["value"]
+        else:
+            file_val = ev["value"]
+            if grant is not None:
+                grant = sorted(expand(grant) & expand(file_val))
+        out.append(sorted(expand(file_val) & expand(grant) & actions) if grant is not None else [])
+    return out
+
+
+def kind_inventory():
+    vi, vm, vp = _w("inventory", "inventory"), _w("inventory", "mcp_file"), _w("inventory", "conn_page")
+    _core_clean("inventory")
+    _examples("inventory", lambda d: _msgs(vi, d))
+    _examples("mcp-file", lambda d: _msgs(vm, d))
+    _examples("conn-page", lambda d: _msgs(vp, d))
+    vec = _vec("inventory-v1.json")
+    for c in vec["skill_version"]:
+        _expect(f"inventory skill_version {c['name']}", inv_skill_version(c["files"]), c["version"])
+    for c in vec["conn_version"]:
+        _expect(f"inventory conn_version {c['name']}", inv_conn_version(c["server"]), c["version"])
+    for c in vec["precedence"]:
+        _expect(f"inventory precedence {c['name']}", inv_winners(c["kind"], c["entries"]), c["winners"])
+    for c in vec["classify"]:
+        _expect(f"inventory classify {c['name_case']}", inv_classify(c), c["source"])
+    for c in vec["allow_settle"]:
+        _expect(f"inventory allow_settle {c['name']}", inv_settle_allow(c), c["effective"])
+    for c in vec["allowed"]:
+        _expect(f"inventory allowed {c['name']}", inv_allowed(c), c["allowed"])
+
+
+
+# --- addon-manifest amendment (addon-manifest.md, Reserved core commands) --------------------------------------------
+RESERVED_W2B = ["record", "job", "secret", "conn", "run", "screen", "type"]
+
+
+def kind_addon_manifest():
+    if SELECT:  # without arguments the generic example loop above already checked these
+        for f in sorted((HERE / "examples" / "addon-manifest").glob("*.toml")):
+            check("addon-manifest", load(f), f.name.startswith("valid-"), f"examples/addon-manifest/{f.name}")
+        check("addon-manifest", load(HERE / "review" / "automation.orch-addon.toml"), True, "review/automation.orch-addon")
+    names = json.loads((HERE / "addon-manifest.schema.json").read_text())["properties"]["name"]["not"]["enum"]
+    for n in RESERVED_W2B:
+        if n not in names:
+            fails.append(f"addon-manifest.schema.json: {n!r} must be a reserved core name")
+    vpage, verr = _w("cli-answer", "page"), _w("cli-answer", "error")
+    _examples("cli-page", lambda d: _msgs(vpage, d))
+    _examples("cli-error", lambda d: _msgs(verr, d))
+
+
+
+# --- screen (screen.md) ----------------------------------------------------------------------------------------------
+import codecs
+
+ALT_RE = re.compile(r"\x1b\[\?(1049|1047|47)([hl])")
+LAYOUT_RE = re.compile(r",(\d+)x(\d+),")
+OCTAL_RE = re.compile(rb"\\([0-7]{3})")
+
+
+def scr_unescape(data):
+    """tmux control mode: bytes below 0x20 and '\\' arrive as \\ooo; everything else raw."""
+    return OCTAL_RE.sub(lambda m: bytes([int(m.group(1), 8)]), data)
+
+
+class ScrStrip:
+    """Streaming filter: drops every OSC (ESC ] / 0x9d), DCS (ESC P / 0x90), APC (ESC _ / 0x9f), PM (ESC ^ / 0x9e) and
+    SOS (ESC X / 0x98) string up to its terminator (BEL, ESC \\ or 0x9c), also when split across chunks. P1: none of these
+    are needed to draw the screen; they carry clipboard writes, links, titles, notifications and query replies."""
+
+    STARTS = {"]": "osc", "P": "str", "_": "str", "^": "str", "X": "str"}
+    C1 = {"\x9d": "osc", "\x90": "str", "\x9f": "str", "\x9e": "str", "\x98": "str"}
+
+    def __init__(self):
+        self.mode, self.pending = None, ""
+
+    def feed(self, text, final=False):
+        out, s, i = [], self.pending + text, 0
+        self.pending = ""
+        while i < len(s):
+            ch = s[i]
+            if self.mode:
+                if (ch == "\x07" and self.mode == "osc") or ch == "\x9c":
+                    self.mode = None
+                elif ch == "\x1b":
+                    if i + 1 >= len(s):
+                        self.pending = ch if not final else ""
+                        break
+                    if s[i + 1] == "\\":
+                        self.mode = None
+                        i += 1
+                i += 1
+                continue
+            if ch == "\x1b":
+                if i + 1 >= len(s):
+                    if not final:
+                        self.pending = ch
+                    else:
+                        out.append(ch)
+                    break
+                if s[i + 1] in self.STARTS:
+                    self.mode = self.STARTS[s[i + 1]]
+                    i += 2
+                    continue
+            if ch in self.C1:
+                self.mode = self.C1[ch]
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+
+def scr_from_control(lines, needles=()):
+    """Control-mode lines (bytes, without newline) -> stream lines after hello/snapshot (seq from 1)."""
+    out, dec, alt, size = [], codecs.getincrementaldecoder("utf-8")("replace"), False, None
+    longest = max((len(n) for n, _ in needles), default=1)
+    hold = [""]
+    strip = ScrStrip()
+
+    def emit(**k):
+        out.append({"v": 1, "seq": len(out) + 1, **k})
+
+    for raw in lines:
+        if raw.startswith(b"%output "):
+            parts = raw.split(b" ", 2)
+            text = strip.feed(dec.decode(scr_unescape(parts[2] if len(parts) > 2 else b"")))
+            buf = hold[0] + text
+            done, i = _hide_upto(buf, list(needles), max(0, len(buf) - (longest - 1)))
+            hold[0] = buf[i:]
+            if done:
+                emit(type="output", data=done)
+            for m in ALT_RE.finditer(text):
+                on = m.group(2) == "h"
+                if on != alt:
+                    alt = on
+                    emit(type="alt", on=on)
+        elif raw.startswith(b"%layout-change "):
+            m = LAYOUT_RE.search(raw.decode("utf-8", "replace"))
+            if m and (int(m.group(1)), int(m.group(2))) != size:
+                size = (int(m.group(1)), int(m.group(2)))
+                emit(type="resize", cols=size[0], rows=size[1])
+        elif raw.startswith(b"%exit"):
+            emit(type="end", reason="session-gone")
+    rest = hold[0] + strip.feed(dec.decode(b"", final=True), final=True)
+    if rest:
+        emit(type="output", data=sec_hide(rest, list(needles)))
+    return out
+
+
+def scr_takeover(c):
+    """c["proof"] = the hp_verify result of the call (human-proof.md); c["proof_by"] = by from the proof. No flag is read."""
+    if not c["live_session"] or not c["session_typing"]:
+        return "switched_off"
+    if c["admin_lock"]:
+        return "locked_by_admin"
+    if c["proof"] != "ok":
+        return "not_allowed"
+    if not c["live"]:
+        return "not_available"
+    if c["held_by"] and c["held_by"] != c["proof_by"] and _t(c["now"]) < _t(c["expires_at"]):
+        return "conflict"
+    return "ok"
+
+
+def scr_expired(c):
+    return _t(c["now"]) >= _t(c["last_input_at"]) + timedelta(seconds=120)
+
+
+def _screen_stream_errors(v, doc):
+    if not isinstance(doc, list) or not doc:
+        return ["needs a non-empty list of stream lines"]
+    errs = [m for ln in doc for m in _msgs(v, ln)]
+    if errs:
+        return errs
+    if [ln["seq"] for ln in doc] != list(range(1, len(doc) + 1)):
+        return ["seq must be 1, 2, 3 ..."]
+    if doc[0]["type"] != "hello" and not (len(doc) == 1 and doc[0]["type"] == "error"):
+        return ["the first line must be hello (or a refusal: one error line)"]
+    ends = [i for i, ln in enumerate(doc) if ln["type"] in ("end", "error")]
+    if ends and ends[0] != len(doc) - 1:
+        return ["end or error must be the last line"]
+    return []
+
+
+def kind_screen():
+    v, vt = _w("screen"), _w("screen", "type_input")
+    _examples("screen", lambda d: _screen_stream_errors(v, d))
+    _examples("type-input", lambda d: _msgs(vt, d))
+    for f in sorted((HERE / "examples" / "run").glob("*takeover*")):
+        check("run", load(f), f.name.startswith("valid-"), f"examples/run/{f.name}")
+    vec = _vec("screen-v1.json")
+    for c in vec["control_mode"]:
+        lines = [ln.encode() for ln in c["lines"]]
+        got = scr_from_control(lines, sec_needles(c.get("keys", [])))
+        for ln in got:
+            for m in _msgs(v, ln):
+                fails.append(f"screen control_mode {c['name']} seq {ln['seq']}: {m}")
+        if "frames" in c:
+            _expect(f"screen control_mode {c['name']}", got, c["frames"])
+        if "joined" in c:
+            _expect(f"screen control_mode {c['name']} joined", "".join(x.get("data", "") for x in got), c["joined"])
+    for c in vec["utf8_split"]:
+        got = scr_from_control([b"%output %0 " + bytes.fromhex(h) for h in c["chunks_hex"]])
+        _expect(f"screen utf8_split {c['name']}", [x["data"] for x in got if x["type"] == "output"], c["data"])
+    for c in vec["takeover"]:
+        _expect(f"screen takeover {c['name']}", scr_takeover(c), c["result"])
+    for c in vec["expiry"]:
+        _expect(f"screen expiry {c['name']}", scr_expired(c), c["expired"])
+
+
+
+# --- counts (counts.md, usage-counts.md) -----------------------------------------------------------------------------
+import hmac
+
+CNT_FIELDS = ("kind", "name", "source", "runs", "uses", "ok", "failed", "refused", "unknown", "seen")
+NAMES_ALWAYS_SENT = ("admin", "builtin", "marketplace")  # P1: anything else (workspace, harness, none, unknown) is hidden
+
+
+def cnt_items(case):
+    """Reference counting with denominators: runs[].sees = kinds the run's agent tool can report."""
+    runs, items = case["runs"], {}
+    for inv in case.get("inventory", []):
+        items.setdefault((inv["kind"], inv["name"], inv["source"]), {"uses": 0, "ok": 0, "failed": 0, "refused": 0, "unknown": 0, "used_runs": set()})
+    for r in runs:
+        for ev in r["events"]:
+            it = items.setdefault((ev["kind"], ev["name"], ev["source"]), {"uses": 0, "ok": 0, "failed": 0, "refused": 0, "unknown": 0, "used_runs": set()})
+            it["uses"] += 1
+            it["used_runs"].add(r["run"])
+            if ev.get("refused"):
+                it["refused"] += 1
+            elif ev["ok"] is True:
+                it["ok"] += 1
+            elif ev["ok"] is False:
+                it["failed"] += 1
+            else:
+                it["unknown"] += 1
+    out = []
+    for (kind, name, source), it in sorted(items.items()):
+        of = sum(1 for r in runs if kind in r["sees"])
+        used = len(it["used_runs"])
+        seen = "yes" if it["uses"] else ("not_seen" if of else "unknown")
+        out.append({"kind": kind, "name": name, "source": source, "runs": {"used": used, "of": max(of, used), "unseen": len(runs) - max(of, used)},
+                    "uses": it["uses"], "ok": it["ok"], "failed": it["failed"], "refused": it["refused"], "unknown": it["unknown"], "seen": seen})
+    return out
+
+
+def usage_name(kind, name, source, share_names, salt):
+    if source in NAMES_ALWAYS_SENT or share_names:
+        return {"name": name, "ref": None}
+    return {"name": None, "ref": "h_" + hmac.new(salt.encode(), f"{kind}:{name}".encode(), hashlib.sha256).hexdigest()[:16]}
+
+
+def usage_queue(c):
+    if not c["share_counts"] or c["policy"] == "off":
+        return {"send": [], "drop": sorted(c["pending"])}
+    today = datetime.strptime(c["today"], "%Y-%m-%d")
+    old = [d for d in c["pending"] if (today - datetime.strptime(d, "%Y-%m-%d")).days > 60]
+    keep = sorted(d for d in c["pending"] if d not in old and d != c["today"])
+    return {"send": keep if c["connected"] else [], "drop": sorted(old)}
+
+
+def kind_counts():
+    va, vd, vu, vp = (_w("counts", d) for d in ("answer", "day_file", "upload", "policy"))
+    _core_clean("counts")
+    _examples("counts", lambda d: _msgs(va, d))
+    _examples("counts-day", lambda d: _msgs(vd, d))
+    _examples("usage-upload", lambda d: _msgs(vu, d))
+    _examples("usage-policy", lambda d: _msgs(vp, d))
+    vec = _vec("counts-v1.json")
+    for c in vec["denominators"]:
+        _expect(f"counts denominators {c['name']}", cnt_items(c), c["items"])
+    for c in vec["names"]:
+        _expect(f"counts names {c['name']}", usage_name(c["kind"], c["item"], c["source"], c["share_names"], c["salt"]), c["sent"])
+    for c in vec["queue"]:
+        _expect(f"counts queue {c['name']}", usage_queue(c), c["expect"])
+    for c in vec["idempotent"]:
+        store = {}
+        results = []
+        for put in c["puts"]:
+            key = (put["workspace"], put["day"])
+            results.append("replaced" if key in store else "stored")
+            store[key] = put["body"]
+        _expect(f"counts idempotent {c['name']}", {"results": results, "days": len(store)}, c["expect"])
+
+
+
+# --- human proof (human-proof.md, invariant H1) ----------------------------------------------------------------------
+HP_MAX_LIFE = 60
+
+
+def _b64u(b):
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+
+def hp_mint(key_hex, payload):
+    body = "hp1." + _b64u(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+    return body + "." + _b64u(hmac.new(bytes.fromhex(key_hex), body.encode(), hashlib.sha256).digest())
+
+
+def hp_verify(c):
+    """Reference check of a human-only call. Flags (--by, --from) and the environment are never trusted."""
+    if c.get("agent_env"):
+        return "agent_env"
+    if c.get("home_trusted") is False:  # key, nonce store or settings came from an env-chosen orch home
+        return "forged"
+    proof = c.get("proof")
+    if not proof:
+        return "missing"
+    parts = proof.split(".")
+    if len(parts) != 3 or parts[0] != "hp1":
+        return "forged"
+    try:
+        p = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except ValueError:
+        return "forged"
+    if not isinstance(p, dict) or _msgs(_w("human-proof", "payload"), p):
+        return "forged"
+    if p.get("dev"):  # test-human proof: only on a workspace with a dev RECORD in the guarded home (never a file)
+        if not c.get("dev_record"):
+            return "dev_on_real"
+        key = c.get("dev_key")
+        if not key or p["by"] != "human:test-human":
+            return "forged"
+    else:
+        key = c["key"]
+    want = _b64u(hmac.new(bytes.fromhex(key), f"hp1.{parts[1]}".encode(), hashlib.sha256).digest())
+    if not hmac.compare_digest(want, parts[2]):
+        return "forged"
+    if c.get("by_flag") is not None and c["by_flag"] != p["by"]:
+        return "forged"
+    if p["op"] != c["op"]:
+        return "wrong_op"
+    if p["target"] != c["target"]:
+        return "wrong_target"
+    if p["exp"] - p["iat"] > HP_MAX_LIFE or not p["iat"] <= c["now"] < p["exp"]:
+        return "expired"
+    if p["nonce"] in c.get("used_nonces", []):
+        return "replayed"
+    return "ok"
+
+
+SETTING_DEFAULTS = {"focus.live_session": True, "focus.session_typing": False, "insights.share_counts": True,
+                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False}
+
+
+def hp_settle(c):
+    """Effective value after each event. file:v = someone edited the file; proof:v = a person set it with a proof (the core
+    writes file and record). Lowering in the file writes a tombstone record (false). Effective = file AND (record, or the
+    default when no record ever existed)."""
+    default = SETTING_DEFAULTS[c["setting"]]
+    file_val, record, out = default, None, []
+    for ev in c["events"]:
+        if ev["by"] == "proof":
+            file_val = record = ev["value"]
+        else:
+            file_val = ev["value"]
+            if ev["value"] is False:
+                record = False
+        out.append(bool(file_val and (record if record is not None else default)))
+    return out
+
+
+def _pending_mac(key, workspace, ticket, line):
+    canon = json.dumps({k: x for k, x in line.items() if k not in ("mac", "delivered_at", "human")}, sort_keys=True,
+                       separators=(",", ":"), ensure_ascii=False)
+    return _b64u(hmac.new(bytes.fromhex(key), f"pending1.{workspace}.{ticket}.{canon}".encode(), hashlib.sha256).digest())
+
+
+def pending_is_human(c):
+    """A pending line is a person's only with a valid MAC bound to this workspace and ticket; by/via/human are ignored."""
+    line = c["line"]
+    mac = line.get("mac")
+    if not mac or line.get("kind") not in ("answer", "message", "text"):
+        return False
+    return hmac.compare_digest(_pending_mac(c["key"], c["workspace"], c["ticket"], line), mac)
+
+
+def pending_deliver(c):
+    """Deliver a line only when its id is not in the guarded delivered record (delivered_at is display only)."""
+    return c["line"]["id"] not in c["delivered_ids"]
+
+
+def _wontdo_mac(key, workspace, item):
+    canon = json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{canon}".encode(), hashlib.sha256).digest())
+
+
+def wontdo_is_human(c):
+    """A synced won't-do is a person's only via the receiving core's relay-authenticated sender or its own wontdo1 MAC."""
+    if c.get("relay_authenticated_sender"):
+        return True
+    m = c.get("mac")
+    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["item"]))
+
+
+def relay_conn(c):
+    """Where relay calls go: only the record in the guarded home; a differing workspace file refuses; env never used."""
+    rec = c.get("record")
+    if not rec:
+        return "not_connected"
+    f = c.get("file")
+    if f is not None and (f.get("url") != rec["url"] or f.get("workspace") != rec["workspace"]):
+        return "refused"
+    return {"url": rec["url"], "workspace": rec["workspace"], "token_from": "record", "proxy": None, "trust": "fixed"}
+
+
+def dev_can_mark(c):
+    """A workspace becomes dev only when a dev install creates it, and never once it has a human key."""
+    return bool(c["install_dev"] and c["creating"] and not c["has_human_key"])
+
+
+def _under(path, prefix):
+    """Component-wise: is realpath `path` inside the literal `prefix` (both absolute POSIX strings)?"""
+    pp, xp = [x for x in path.split("/") if x], [x for x in prefix.split("/") if x]
+    return len(pp) > len(xp) and pp[: len(xp)] == xp
+
+
+def home_ok(c):
+    """Guarded orch home rule (secrets.md). Test paths exist only on a dev/test install, under the literal
+    <account home>/.orch-test/ that lstats as a real directory owned by the user; paths are compared by realpath."""
+    prefix = c["account_home"].rstrip("/") + "/.orch-test"
+    active = c["install"] in ("dev", "test") and c["prefix_real_dir"]
+    ws_test = active and _under(c["workspace_realpath"], prefix)
+    default_home = c["account_home"].rstrip("/") + "/.orch-tool"
+    if c["home_realpath"] == default_home:
+        home = "default"
+    elif active and _under(c["home_realpath"], prefix):
+        home = "test"
+    else:
+        home = "other"
+    return (not ws_test and home == "default") or (ws_test and home == "test")
+
+
+def kind_human():
+    vs = _w("human-proof", "settings_record")
+    _examples("human-settings", lambda d: _msgs(vs, d))
+    vec = _vec("human-proof-v1.json")
+    for c in vec["verify"]:
+        _expect(f"human verify {c['name']}", hp_verify(c), c["result"])
+    for c in vec["concurrent"]:  # one nonce store under the key lock: the first call wins, the second is a replay
+        used, got = [], []
+        for call in c["calls"]:
+            r = hp_verify({**call, "used_nonces": list(used)})
+            if r == "ok":
+                used.append(json.loads(base64.urlsafe_b64decode(call["proof"].split(".")[1] + "=="))["nonce"])
+            got.append(r)
+        _expect(f"human concurrent {c['name']}", got, c["results"])
+    for c in vec["pending"]:
+        _expect(f"human pending {c['name']}", pending_is_human(c), c["human"])
+    for c in vec["deliver"]:
+        _expect(f"human deliver {c['name']}", pending_deliver(c), c["deliver"])
+    for c in vec["wont_do"]:
+        _expect(f"human wont_do {c['name']}", wontdo_is_human(c), c["human"])
+    for c in vec["relay"]:
+        _expect(f"human relay {c['name']}", relay_conn(c), c["expect"])
+    for c in vec["dev_mark"]:
+        _expect(f"human dev_mark {c['name']}", dev_can_mark(c), c["ok"])
+    for c in vec["home"]:
+        _expect(f"human home {c['name']}", home_ok(c), c["ok"])
+    for c in vec["settle"]:
+        _expect(f"human settle {c['name']}", hp_settle(c), c["effective"])
+    if set(SETTING_DEFAULTS) != set(json.loads((HERE / "vectors" / "human-proof-v1.json").read_text())["settings"]):
+        fails.append("human: SETTING_DEFAULTS and vectors settings differ")
+
+
+
+# --- proposals (proposal.md) -----------------------------------------------------------------------------------------
+CHECKUP_ALLOWED = {("record", "query"), ("record", "tail"), ("record", "counts"), ("record", "propose"), ("ticket", "list"),
+                   ("ticket", "show"), ("conn", "list"), ("log", None), ("check", None)}
+SHELL_META = re.compile(r"[;&|`$<>\\\n(){}*?~]")
+
+
+def checkup_allowed(c):
+    """Layer 1 (the agent tool's own exact allowlist): the whole shell command must be `orch <cmd> [<sub>] ...` from the
+    list, no shell syntax; log/check only on the check-up's own ticket. Layer 2 (core): propose only when the run record
+    says profile checkup. Returns True when both layers allow it."""
+    cmd = c["command"]
+    if SHELL_META.search(cmd):
+        return False
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return False
+    if len(argv) < 2 or argv[0] != "orch":
+        return False
+    top, sub = argv[1], (argv[2] if len(argv) > 2 else None)
+    if (top, sub) not in CHECKUP_ALLOWED and (top, None) not in CHECKUP_ALLOWED:
+        return False
+    if top in ("log", "check"):
+        rest = [a for a in argv[2:] if not a.startswith("-")]
+        tick = rest[1] if top == "check" and len(rest) > 1 and rest[0] in ("add", "done", "start") else (rest[0] if rest else None)
+        if tick != c["own_ticket"]:
+            return False
+    if (top, sub) == ("record", "propose") and c.get("profile") != "checkup":
+        return False
+    return True
+
+
+def change_sha256(change):
+    if change is None:
+        return None
+    return "sha256:" + hashlib.sha256(json.dumps(change["files"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def proposal_from_draft(draft, ctx):
+    """The core builds the stored proposal; the agent's draft supplies only its own fields. 'refused:<why>' on a bad draft."""
+    if _msgs(_w("proposal", "draft"), draft):
+        return "refused:invalid"
+    if ctx.get("profile") != "checkup":
+        return "refused:not_checkup"
+    t = draft["target"]
+    if draft["kind"] == "skill.new" and (t["name"].startswith("orch") or t["name"] in ctx["existing_names"]):
+        return "refused:name_taken"
+    files = None
+    if draft["change"] is not None:
+        files = [{"path": f["path"], "before": ctx["file_hashes"].get(f["path"]), "after": f["after"]} for f in draft["change"]["files"]]
+    change = None if files is None else {"files": files}
+    return {"schema": "orch.proposal/1", "id": ctx["id"], "created_at": ctx["now"], "checkup": ctx["checkup"],
+            "kind": draft["kind"], "title": draft["title"], "plain": draft["plain"], "likely": draft["likely"],
+            "evidence": draft["evidence"],
+            "target": {"kind": t["kind"], "name": t["name"], "source": "new" if draft["kind"] == "skill.new" else ctx["source"],
+                       "version": None if draft["kind"] == "skill.new" else ctx["version"]},
+            "change": change, "change_sha256": change_sha256(change),
+            "tests": {"state": "not_run", "cases": [], "ran_at": None}, "status": "proposed", "decided": None, "applied": None}
+
+
+def proposal_hash(doc):
+    """sha256 over {id, kind, target, change} of a proposal (canonical JSON); kept with the test result in orch home."""
+    core = {k: doc.get(k) for k in ("id", "kind", "target", "change")}
+    return "sha256:" + hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def proposal_step(c):
+    """One decision. Status, tests and target come from the record in the guarded orch home (c["record"]); the workspace
+    copy (c["file"]) only has to hash to the recorded value. Returns the new status or a refusal code."""
+    rec, act = c["record"], c["action"]
+    if act in ("accept", "rollback", "send_to_admin", "reject") and c.get("proof") != "ok":
+        return "not_allowed"
+    if rec is None:
+        return "not_found"
+    st = rec["status"]
+    if act == "skill_changed":
+        return "stale" if st in ("proposed", "tested") else st
+    if act == "tests_done":
+        return "tested" if st == "proposed" and c["tests"] == "passed" else st
+    if act == "reject":
+        return "rejected" if st in ("proposed", "tested") else "conflict"
+    if proposal_hash(c["file"]) != rec["hash"]:
+        return "changed"
+    if act == "send_to_admin":
+        return "sent_to_admin" if st == "tested" and rec["target"]["source"] == "admin" else "conflict"
+    if act == "accept":
+        if rec["target"]["source"] == "admin":
+            return "admin_only"
+        if st != "tested" or rec["tests"] != "passed":
+            return "not_tested"
+        if c["current_version"] != rec["target"]["version"]:
+            return "stale"
+        if c["proof_target"] != f"{rec['id']}@{rec['hash'].removeprefix('sha256:')}":
+            return "changed"
+        return "accepted"
+    if act == "rollback":
+        if st != "accepted":
+            return "conflict"
+        return "rolled_back" if c["current_version"] == rec["applied_after"] else "conflict"
+    return "invalid"
+
+
+def kind_proposal():
+    v = _w("proposal")
+    _examples("proposal", lambda d: _msgs(v, d))
+    vec = _vec("proposal-v1.json")
+    for c in vec["steps"]:
+        _expect(f"proposal steps {c['name']}", proposal_step(c), c["result"])
+    vd = _w("proposal", "draft")
+    _examples("proposal-draft", lambda d: _msgs(vd, d))
+    for c in vec["checkup_commands"]:
+        _expect(f"proposal checkup_commands {c['command']!r}", checkup_allowed(c), c["allowed"])
+    for c in vec["from_draft"]:
+        got = proposal_from_draft(c["draft"], c["ctx"])
+        if isinstance(got, dict):
+            for m in _msgs(v, got):
+                fails.append(f"proposal from_draft {c['name']}: stored proposal not valid: {m}")
+        _expect(f"proposal from_draft {c['name']}", got, c["expect"])
+
+
+# --- dispatch (keep last in this block) ------------------------------------------------------------------------------
+KINDS = {
+    "activity": kind_activity,
+    "secrets": kind_secrets,
+    "jobs": kind_jobs,
+    "blocks": kind_blocks,
+    "inventory": kind_inventory,
+    "addon-manifest": kind_addon_manifest,
+    "screen": kind_screen,
+    "counts": kind_counts,
+    "human": kind_human,
+    "proposal": kind_proposal,
+}
+
+
+def _finish(label):
+    if fails:
+        print("\n".join("FAIL " + f for f in fails))
+        sys.exit(1)
+    print(f"{label}: ALL OK")
+    sys.exit(0)
+
+
+if SELECT:
+    _unknown = [k for k in SELECT if k not in KINDS]
+    if _unknown:
+        print(f"Unknown kind: {', '.join(_unknown)}. Kinds: {', '.join(KINDS)}")
+        sys.exit(2)
+    for _k in dict.fromkeys(SELECT):
+        KINDS[_k]()
+    _finish("contracts " + " ".join(dict.fromkeys(SELECT)))
+# ---------------------------------------------------------------------------------------------------------------------
 
 
 for kind in V:
@@ -994,6 +2219,8 @@ for prefix in ("valid-", "invalid-"):
     if not any(f.name.startswith(prefix) for f in cg_files):
         fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
 
+for _fn in KINDS.values():
+    _fn()
 if fails:
     print("\n".join("FAIL " + f for f in fails))
     sys.exit(1)

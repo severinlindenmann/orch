@@ -84,7 +84,7 @@ def set_default_hours(root: Path, hours) -> int:
 
 def keeper_alive(d: dict) -> bool:
     pid, started = d.get("keeper_pid"), d.get("keeper_started")
-    return bool(pid) and procs.pid_started(pid) is not None and procs.pid_started(pid) == started
+    return bool(pid) and (now := procs.pid_started(pid)) is not None and procs.same_start(now, started)
 
 
 def settle(root: Path, now: datetime | None = None) -> dict:

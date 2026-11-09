@@ -1,0 +1,5 @@
+{"schema": "orch.keys/1", "keys": {
+ "databricks-token": {"type": "token", "source": "workspace", "value": "fake-token-Q7xP2mK9vL4", "added_at": "2026-11-16T09:00:00Z"},
+ "google-sa.json": {"type": "json", "source": "admin", "value": "{\"type\": \"service_account\", \"private_key\": \"fake\"}", "added_at": "2026-11-16T09:00:00Z"},
+ "deploy-key": {"type": "key-file", "source": "workspace", "file": "deploy-key", "added_at": "2026-11-16T09:00:00Z"}
+}}

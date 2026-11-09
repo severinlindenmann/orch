@@ -1,0 +1,8 @@
+{
+ "schema": "orch.mcp/1",
+ "servers": {
+  "crm": {
+   "url": "http://mcp.crm.example/sse"
+  }
+ }
+}

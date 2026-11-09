@@ -1,0 +1,24 @@
+{
+ "kind": "skill.fix",
+ "title": "invoice-export: say the date format",
+ "plain": "Write dates as YYYY-MM-DD.",
+ "likely": false,
+ "evidence": [
+  {
+   "ticket": "t_inv7c2"
+  }
+ ],
+ "target": {
+  "kind": "skill",
+  "name": "invoice-export"
+ },
+ "change": {
+  "files": [
+   {
+    "path": "SKILL.md",
+    "after": "new text\n"
+   }
+  ]
+ },
+ "status": "accepted"
+}
