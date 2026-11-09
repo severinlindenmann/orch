@@ -103,7 +103,7 @@ enum GroupRoomRules {
         let name = group.name(of: event.ws ?? "")
         switch event.kind {
         case "created": return "Group started from ticket \(group.ticketKey ?? "") · \(group.title)"
-        case "member_added": return "\(group.hostName) helper added \(name) to this group"
+        case "member_added": return "\(group.hostName) added \(name) to this group"
         case "member_left": return "\(name) left this group"
         case "approved":
             let mode = event.mode == "always" ? "always" : "once"
