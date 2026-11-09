@@ -1999,8 +1999,21 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
     ticket_path(root, tid)
     with _locked(root, tid):
         res = _attach_write(root, tid, hint, data, exact)
-    if not res.get("existed"):
-        apply_op(root, tid, lambda t: add_history(t, by, f"Attached {res['name']}"))
+    text = f"Attached {res['name']}"
+    if res.get("existed"):
+        # done before: only the history line may be missing (an earlier call was refused as busy after the
+        # file was written); add it if it is not there
+        apply_op(
+            root,
+            tid,
+            lambda t: (
+                NO_WRITE
+                if any(h.get("text") == text for h in t.get("history", []))
+                else add_history(t, by, text)
+            ),
+        )
+    else:
+        apply_op(root, tid, lambda t: add_history(t, by, text))
     return res
 
 

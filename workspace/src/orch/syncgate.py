@@ -8,7 +8,11 @@ touches the file, or refused/waiting: nothing is written into a merge.
 A gate is stale only when its holder is verifiably not a live sync step: the process is gone, the pid has
 another start time, the pid is not an orch process, or no step record (`.orch/run/sync/step-<id>.json`,
 written by `hold` for the same pid) backs it; an unreadable or garbled gate file is stale too (a live holder
-publishes the file whole, so it never shows a partial one). Never a timer.
+publishes the file whole, so it never shows a partial one; a very recent empty one, from the no-links
+fallback, still counts as live). Never a timer.
+
+The sync step must do all its writes on the thread that holds the gate: a worker thread is another thread and
+is refused like any writer.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from orch.errors import Refused
 
 WAIT_SECONDS = 30.0  # a writer waits this long, then says "busy" (it never breaks a live gate)
 POLL_SECONDS = 0.02
+FRESH_SECONDS = 2.0  # an unreadable gate younger than this may be a holder mid-write (no-links fallback)
 REREAD_SECONDS = 0.05  # an unreadable gate is read once more after this, then counts as stale
 REPLACE_TRIES = 10  # Windows: a file open elsewhere refuses os.replace; retried inside the gate
 REPLACE_DELAY = 0.2
@@ -84,7 +89,13 @@ def _looks_like_orch(pid: int) -> bool:
     except Exception:
         return True  # cannot tell: do not call a holder stale on a guess about ps
     cmd = r.stdout.strip()
-    return "orch" in cmd.lower() if cmd else True
+    if not cmd:
+        return True
+    toks = cmd.split()
+    names = {"orch", "orch.exe"}
+    if any(re.split(r"[\\/]", t)[-1] in names for t in toks):
+        return True  # the orch program itself (tool script or pipx/uv shim)
+    return any(a == "-m" and b.split(".")[0] == "orch" for a, b in zip(toks, toks[1:], strict=False))
 
 
 def _stale(root: Path, rec: dict) -> bool:
@@ -103,12 +114,21 @@ def _stale(root: Path, rec: dict) -> bool:
     return not _looks_like_orch(pid)
 
 
+def _fresh_unreadable(root: Path) -> bool:
+    try:
+        return time.time() - gate_path(root).stat().st_mtime < FRESH_SECONDS
+    except OSError:
+        return False
+
+
 def live_holder(root: Path) -> dict | None:
     """The gate record when a live sync step of another thread/process holds it, else None."""
     if not gate_path(root).exists():
         return None
     rec = _read(root)
-    if rec is None or _is_me(rec) or _stale(root, rec):
+    if rec is None:
+        return {"unreadable": True} if _fresh_unreadable(root) else None
+    if _is_me(rec) or _stale(root, rec):
         return None
     return rec
 
@@ -158,30 +178,41 @@ def _publish(p: Path, text: str) -> bool:
 
 @contextlib.contextmanager
 def hold(root: Path, step_id: str = "sync"):
-    """The sync step's gate. Refused (busy) when another live step holds it; a stale gate is taken over."""
-    if not _STEP_RE.fullmatch(step_id):
-        raise Refused("A sync step id has 1 to 64 letters, digits, dots, dashes or underscores.")
+    """The sync step's gate. Refused (busy) when another live step holds it; a stale gate is taken over.
+    The step record has a name of its own per hold (id + random suffix), written before the gate is published
+    (a gate without its record would look stale) and removed only by the hold that wrote it, so a refused
+    second hold can never touch the live step's record."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,50}", step_id):
+        raise Refused("A sync step id has 1 to 50 letters, digits, dots, dashes or underscores.")
     p = gate_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     me = os.getpid()
-    sp = step_path(root, step_id)
+    sid = f"{step_id}-{secrets.token_hex(4)}"
+    sp = step_path(root, sid)
     sp.parent.mkdir(parents=True, exist_ok=True)
-    sp.write_text(json.dumps({"pid": me, "step_id": step_id}), encoding="utf-8")
+    step_text = json.dumps({"pid": me, "step_id": sid})
     text = json.dumps(
         {
             "pid": me,
             "start_time": procs.pid_started(me) or "-",
             "nonce": _NONCE,
             "thread": threading.get_ident(),
-            "step_id": step_id,
+            "step_id": sid,
         }
     )
+    stmp = sp.with_name(f"{sp.name}.tmp")
+    stmp.write_text(step_text, encoding="utf-8")
+    os.replace(stmp, sp)  # atomic: a reader never sees half a record
     try:
         for _ in range(5):
             if _publish(p, text):
                 break
             other = _read(root)
-            if other is not None and (_is_me(other) or not _stale(root, other)):
+            if other is None:
+                live = _fresh_unreadable(root)
+            else:
+                live = _is_me(other) or not _stale(root, other)
+            if live:
                 raise Refused("orch is already syncing. Try again in a moment.")
             _take_stale(root)
         else:
@@ -194,7 +225,8 @@ def hold(root: Path, step_id: str = "sync"):
                     procs.unlink(p)
     finally:
         with contextlib.suppress(OSError):
-            sp.unlink()
+            if sp.read_text(encoding="utf-8") == step_text:
+                sp.unlink()
 
 
 def _take_stale(root: Path) -> bool:
@@ -208,7 +240,10 @@ def _take_stale(root: Path) -> bool:
         return False
     try:
         rec = _read_file(mine)
-        if rec is None or _stale(root, rec):
+        if rec is None:
+            if time.time() - mine.stat().st_mtime >= FRESH_SECONDS:
+                return True  # unreadable and not fresh: nobody is mid-write
+        elif _stale(root, rec):
             return True
         with contextlib.suppress(OSError):
             os.link(mine, p)
