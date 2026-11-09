@@ -536,11 +536,11 @@ def create(
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
-    with _locked(root, ticket["id"]):
-        if ticket_path(root, ticket["id"]).exists():
-            raise Refused("That ticket already exists.")
-        ticket["revision"] = 1
-        _write(root, ticket)
+    if tid is not None and ticket_path(root, tid).exists():
+        raise Refused("That ticket already exists.")
+    save(
+        root, ticket
+    )  # under the ticket lock; it also refuses an id that appeared meanwhile (revision differs)
     return ticket
 
 

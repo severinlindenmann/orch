@@ -17,7 +17,7 @@ test('proposal offers a person Make ticket, then a ticket chip', () => {
   const card = c.chatRefs([{kind:'proposal', title:'Fish'}], 'message-m_abcdefghij', 'm_abcdefghij')[0];
   assert.equal(card.tag, 'button');
   assert.equal(card.attrs['data-id'], 'm_abcdefghij');
-  assert.match(JSON.stringify(card), /Make ticket/);
+  assert.match(JSON.stringify(card), /Make ticket: Fish/);
   const made = c.chatRefs([{kind:'proposal', made:{id:'t_fish', key:'FS-1'}}], 'x')[0];
   assert.equal(made.tag, 'a'); assert.equal(made.attrs.href, '#ticket/t_fish');
   c.snapshot = true;

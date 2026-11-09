@@ -1062,3 +1062,12 @@ def test_make_ticket_last_convo_start_wins(proj):
     result = chat.make_ticket(proj, "proposal", by="human:me")
     assert tickets.load(proj, result["ticket"])["note"] == "You: New request"
     assert "moved_to" not in chat.read_day(proj, chat.day_key(proj))["messages"][0]
+
+
+def test_create_with_reserved_id_refuses_an_existing_ticket(proj):
+    tid = tickets.new_id(proj)
+    first = tickets.create(proj, "One", "human:me", tid=tid)
+    assert first["revision"] >= 1
+    with pytest.raises(Refused):
+        tickets.create(proj, "Two", "human:me", tid=tid)
+    assert tickets.load(proj, tid)["title"] == "One"

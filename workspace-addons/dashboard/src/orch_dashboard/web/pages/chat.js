@@ -122,7 +122,7 @@ function chatActivity() {
 function chatRefs(refs, prefix, mid, readOnly = false) {
   return chatObjects(refs).map((ref, i) => {
     const key = prefix + '-ref-' + i;
-    if (ref.kind === 'proposal') return ref.made ? h('a', {className:'chat-member-chip', 'data-key':key, href:chatLink(ref.made.id)}, clean(ref.made.key)) : chatButton('Make ticket', 'make-ticket', {className:'btn outline', 'data-key':key, 'data-id':mid, disabled:snapshot || readOnly || chatUi.pending.has(mid)});
+    if (ref.kind === 'proposal') return ref.made ? h('a', {className:'chat-member-chip', 'data-key':key, href:chatLink(ref.made.id)}, clean(ref.made.key)) : chatButton('Make ticket: ' + clean(ref.title).slice(0, 80), 'make-ticket', {className:'btn outline', 'data-key':key, 'data-id':mid, disabled:snapshot || readOnly || chatUi.pending.has(mid)});
     if (ref.kind === 'ticket' && ref.id) {
       const ticket = ticketOf(ref.id);
       return h('a', {className:'chat-card', 'data-key':key, href:chatLink(ref.id)}, chatText('strong', '', [ref.key, ref.title].filter(Boolean).join(' · ')), ticket?.status ? chatText('small', '', window.DashHelpers.statusWord(ticket.status)) : null);
