@@ -459,3 +459,26 @@ def test_packed_magic_anywhere_fails_closed(proj, run, new_ticket, conn, name, d
     artifact(proj, tid, name, data)
     assert run("ask", tid, f"See artifacts/{name}")[0] == 0
     assert phone_view.view_for(proj, tid)["attachments"] == []
+
+
+def test_a_page_and_its_picture_are_one_entry(proj, run, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Report")
+    artifact(proj, tid, "report.png", png())
+    artifact(proj, tid, "report.html", b"<h1>Report</h1>")
+    artifact(proj, tid, "other.png", png(_chunk(b"tRNS", b"\x00\x00")))
+    assert run("ask", tid, "See artifacts/report.png, artifacts/report.html and artifacts/other.png")[0] == 0
+    atts = phone_view.view_for(proj, tid)["attachments"]
+    names = [a["name"] for a in atts]
+    page, pic = atts[names.index("report.html")], atts[names.index("report.png")]
+    assert page["preview"] == pic["id"]
+    assert names.index("report.png") == names.index("report.html") + 1  # the picture follows its page
+    assert "preview" not in pic and "preview" not in atts[names.index("other.png")]
+
+
+def test_a_picture_that_was_not_sent_is_never_a_preview(proj, run, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Report")
+    artifact(proj, tid, "report.png", png(_chunk(b"tEXt", b"key\x00hidden")))  # fails the PNG check
+    artifact(proj, tid, "report.html", b"<h1>Report</h1>")
+    assert run("ask", tid, "See artifacts/report.png and artifacts/report.html")[0] == 0
+    atts = phone_view.view_for(proj, tid)["attachments"]
+    assert [a["name"] for a in atts] == ["report.html"] and "preview" not in atts[0]

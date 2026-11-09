@@ -2101,6 +2101,165 @@
      }
     }
    }
+  },
+  {
+   "name": "page-with-preview",
+   "ok": true,
+   "why": "",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "file",
+        "title": "report.html",
+        "blob_id": "b_0123456789abcdef",
+        "name": "report.html",
+        "size": 900,
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_0123456789ab",
+        "rev": "r1",
+        "preview": "a_ba9876543210"
+       },
+       {
+        "kind": "image",
+        "title": "report.png",
+        "blob_id": "b_abcdef0123456789",
+        "name": "report.png",
+        "size": 4821,
+        "at": "2026-11-06T09:37:00Z",
+        "id": "a_ba9876543210",
+        "rev": "r2"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "preview-not-an-artifact-id",
+   "ok": false,
+   "why": "preview names another attachment by its a_ id, never a name or url",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "file",
+        "title": "report.html",
+        "blob_id": "b_0123456789abcdef",
+        "name": "report.html",
+        "size": 900,
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_0123456789ab",
+        "rev": "r1",
+        "preview": "report.png"
+       },
+       {
+        "kind": "image",
+        "title": "report.png",
+        "blob_id": "b_abcdef0123456789",
+        "name": "report.png",
+        "size": 4821,
+        "at": "2026-11-06T09:37:00Z",
+        "id": "a_ba9876543210",
+        "rev": "r2"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "preview-is-a-url",
+   "ok": false,
+   "why": "preview is never a url",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "file",
+        "title": "report.html",
+        "blob_id": "b_0123456789abcdef",
+        "name": "report.html",
+        "size": 900,
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_0123456789ab",
+        "rev": "r1",
+        "preview": "https://x.example/p.png"
+       },
+       {
+        "kind": "image",
+        "title": "report.png",
+        "blob_id": "b_abcdef0123456789",
+        "name": "report.png",
+        "size": 4821,
+        "at": "2026-11-06T09:37:00Z",
+        "id": "a_ba9876543210",
+        "rev": "r2"
+       }
+      ]
+     }
+    }
+   }
   }
  ]
 }

@@ -170,7 +170,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
 
 test('result preview tiles keep HTML static and bound text excerpts', async () => {
   const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
-  const ctx = {h, window:{DashHelpers:helpers}, snapshot:false, URL, TextDecoder, fetch:async () => new Response('line\n'.repeat(1000),{headers:{'Content-Type':'text/plain'}})};
+  const ctx = {h, window:{DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('line\n'.repeat(1000),{headers:{'Content-Type':'text/plain'}})};
   vm.createContext(ctx);
   vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
   vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);

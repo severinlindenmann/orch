@@ -361,7 +361,7 @@ function linkGroups(links) {
   return [...groups].sort(([a], [b]) => Number(a === 'References') - Number(b === 'References'));
 }
 // Preview text is cached by file revision; snapshot copies never request local files.
-const ticketPreviewText = new Map();
+const ticketPreviewText = new Map(), ticketPreviewDone = new Map();
 function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
@@ -382,12 +382,15 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
     finally { await reader.cancel(); }
     return {text:text.slice(0, 2048).split('\n').slice(0, 8).join('\n')};
   }).catch(() => null));
-  ticketPreviewText.get(key).then(data => {
+  // A finished preview is drawn at once: the page redraws often, and a tile filled later would be thrown away.
+  const fill = data => {
     if (data?.blob) {
       const src = URL.createObjectURL(data.blob), img = h('img', {src, alt:title, loading:'lazy'});
       img.onload = img.onerror = () => URL.revokeObjectURL(src); tile.append(img);
     } else if (data?.text) tile.append(h('pre', {}, data.text));
-  });
+  };
+  if (ticketPreviewDone.has(key)) fill(ticketPreviewDone.get(key));
+  else ticketPreviewText.get(key).then(data => { ticketPreviewDone.set(key, data); fill(data); if (route().kind === 'ticket') render(); });
   return tile;
 }
 // A real artifact: its name, what kind it is, a preview and Open. A proof without a file shows no "Completed" filler.
@@ -400,7 +403,7 @@ const evidenceFile = (t, ev) => {
 function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   const helpers = window.DashHelpers;
   const name = file ? file.name.split('/').pop() : '';
-  const title = helpers.cleanOutcome(ev.title) || name || helpers.cleanOutcome(ev.summary) || 'Note';
+  const title = clean(ev.title) || name || helpers.cleanOutcome(ev.summary) || 'Note';
   const summary = helpers.cleanOutcome(ev.summary);
   const at = ev.at || file?.mtime;
   const who = ev.by ? ticketActor(ev.by) : '';

@@ -528,7 +528,38 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         )
     out.extend(artifact_entries[:slots])
     out.sort(key=lambda a: a["at"], reverse=True)
-    return out[:ATTACHMENTS]
+    return pair_previews(out)[:ATTACHMENTS]
+
+
+def pair_previews(atts: list[dict]) -> list[dict]:
+    """One result, one thing to open: a page (name.html) and its picture (name.png) that are both in the list
+    become one entry. The page gets `preview` = the picture's artifact id and comes first; the picture stays
+    in the list (an older phone still shows it, a newer one shows it inside the page, not on its own).
+    Only a PNG that is already in the list (so already checked and uploaded) can be a preview."""
+
+    def stem(a: dict) -> str:
+        return Path(str(a.get("name", ""))).stem.lower()
+
+    pictures = {
+        stem(a): a
+        for a in atts
+        if a.get("kind") == "image" and a.get("id") and str(a.get("name", "")).lower().endswith(".png")
+    }
+    out: list[dict] = []
+    moved: set[int] = set()
+    for a in atts:
+        if id(a) in moved:
+            continue
+        is_page = a.get("kind") == "file" and a.get("id") and str(a.get("name", "")).lower().endswith((".html", ".htm"))
+        pic = pictures.get(stem(a)) if is_page else None
+        if pic is not None and "preview" not in a:
+            a["preview"] = pic["id"]
+            out.append(a)
+            out.append(pic)  # right behind its page
+            moved.add(id(pic))
+        else:
+            out.append(a)
+    return out
 
 
 def artifact_title(root: Path, ticket: dict, aid: str) -> str | None:

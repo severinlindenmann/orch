@@ -373,6 +373,6 @@ body.mobile-mode-on .mm-phone::after{content:'';position:absolute;bottom:3px;lef
 @media(max-width:720px){body.mobile-mode-on .mm-bar.live{margin:12px 16px 0}}
 /* 9 Nov dash-b: compact task proof chips and real artifact cards */
 .task-proofs{flex-wrap:wrap;gap:6px;margin-top:4px}
-.task-proofs .chip{cursor:pointer;font:inherit;font-size:12px}
+.task-proofs .chip{cursor:pointer;font:inherit;font-size:12px;color:var(--text);background:var(--surface-2);border:1px solid var(--border);padding:2px 10px;min-height:0;text-decoration:none}
 .ticket-result .row.between{justify-content:space-between;align-items:baseline;gap:12px}
 .ticket-result .ticket-preview-label{display:none}
