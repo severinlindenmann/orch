@@ -44,6 +44,10 @@ MSG_LINKED_HOME = (
     "orch's folder in your account is a link to somewhere else, so orch won't trust it. "
     "Move the real folder back to {path}."
 )
+MSG_ENV_CHANGE = (
+    "orch is set up to use a different orch folder than your account's, so it will not change its own "
+    "install from here. Start orch normally (without ORCH_HOME) to update it or add things."
+)
 MSG_TEST_WS = "This is a test workspace; start it with its own test orch folder."
 MSG_TEST_INSTALL = "This is a test install of orch; it only works in test folders."
 
