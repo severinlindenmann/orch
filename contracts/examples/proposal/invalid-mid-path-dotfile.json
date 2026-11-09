@@ -1,0 +1,49 @@
+{
+ "schema": "orch.proposal/1",
+ "id": "pr_7k2m9x4q",
+ "created_at": "2026-11-16T07:05:00Z",
+ "checkup": {
+  "ticket": "t_chk001",
+  "run": "r_chk00001"
+ },
+ "kind": "skill.fix",
+ "title": "invoice-export: say the date format",
+ "plain": "The skill will tell the agent to write dates as 2026-11-16, because 3 tickets were sent back for mixed date formats.",
+ "likely": false,
+ "evidence": [
+  {
+   "ticket": "t_inv7c2",
+   "run": "r_8k2m01",
+   "event": "toolu_01ABcd"
+  }
+ ],
+ "target": {
+  "kind": "skill",
+  "name": "invoice-export",
+  "source": "workspace",
+  "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ },
+ "change": {
+  "files": [
+   {
+    "path": "docs/.orch-shared",
+    "before": null,
+    "after": "x"
+   }
+  ]
+ },
+ "change_sha256": "sha256:b87ad879959c9fc936aeb85a19f9bd71506ead07e7866833494fa0375f3b19b9",
+ "tests": {
+  "state": "passed",
+  "cases": [
+   {
+    "ticket": "t_inv7c2",
+    "result": "better"
+   }
+  ],
+  "ran_at": "2026-11-16T07:10:00Z"
+ },
+ "status": "tested",
+ "decided": null,
+ "applied": null
+}

@@ -24,6 +24,7 @@
   "version": null
  },
  "change": null,
+ "change_sha256": null,
  "tests": {
   "state": "not_run",
   "cases": [],

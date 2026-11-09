@@ -32,6 +32,7 @@
    }
   ]
  },
+ "change_sha256": "sha256:893e869f0cde930a79e10e9fa9a87ddd451b7bfb00c0e027d245347c602a6169",
  "tests": {
   "state": "passed",
   "cases": [

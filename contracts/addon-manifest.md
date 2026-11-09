@@ -147,7 +147,7 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
 | `orch record query … [--limit N] [--after C] --json` | page of `orch.activity/1` events | activity.md |
 | `orch record counts [--days N] … --json` | `orch.counts/1` with inventory | counts.md |
 | `orch record delete-detail <ticket> --proof-stdin --json` | `{"deleted": n}` (a person only) | activity.md |
-| `orch record propose --json '<proposal>'` | the stored `orch.proposal/1` (check-up runs only) | proposal.md |
+| `orch record propose --json` (the draft on stdin, proposal.schema.json `$defs/draft`) | the stored `orch.proposal/1` (check-up runs only) | proposal.md |
 | `orch job start\|step\|progress\|artifact\|metric\|table\|link\|log\|end\|run …` | the stored `orch.job/1` event | job-events.md |
 | `orch secret env\|file\|exec\|list\|get …` | child's exit code / page of names | secrets.md |
 | `orch run screen <ticket> --follow --json` | NDJSON `orch.screen/1` stream | screen.md |

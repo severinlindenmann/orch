@@ -13,9 +13,13 @@
      "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "tests": "passed",
-    "applied_after": null
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
    },
    "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "proof_target": "pr_7k2m9x4q@dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
    "result": "accepted"
   },
   {
@@ -29,9 +33,13 @@
      "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "tests": "passed",
-    "applied_after": null
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
    },
    "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "proof_target": "pr_7k2m9x4q@dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
    "result": "not_allowed"
   },
   {
@@ -45,9 +53,13 @@
      "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "tests": "not_run",
-    "applied_after": null
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
    },
    "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "proof_target": "pr_7k2m9x4q@dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
    "result": "not_tested"
   },
   {
@@ -61,9 +73,13 @@
      "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "tests": "failed",
-    "applied_after": null
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
    },
    "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "proof_target": "pr_7k2m9x4q@dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
    "result": "not_tested"
   },
   {
@@ -77,9 +93,13 @@
      "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "tests": "passed",
-    "applied_after": null
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
    },
    "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "proof_target": "pr_7k2m9x4q@dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
    "result": "stale"
   },
   {
@@ -93,9 +113,13 @@
      "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "tests": "passed",
-    "applied_after": null
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
    },
    "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "proof_target": "pr_7k2m9x4q@dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
    "result": "admin_only"
   },
   {
@@ -243,140 +267,546 @@
    },
    "action": "skill_changed",
    "result": "stale"
+  },
+  {
+   "name": "file swapped after the test",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
+   },
+   "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "proof_target": "pr_7k2m9x4q@dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "result": "changed"
+  },
+  {
+   "name": "proof for another diff",
+   "proof": "ok",
+   "current_version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "proposal": {
+    "status": "tested",
+    "target": {
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "tests": "passed",
+    "applied_after": null,
+    "id": "pr_7k2m9x4q"
+   },
+   "action": "accept",
+   "recorded_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "file_change_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "proof_target": "pr_7k2m9x4q@cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "result": "changed"
   }
  ],
  "checkup_commands": [
   {
-   "argv": [
-    "record",
-    "query",
-    "--json"
-   ],
+   "command": "orch record query --json",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": true
   },
   {
-   "argv": [
-    "record",
-    "counts",
-    "--json"
-   ],
+   "command": "orch record counts --days 30 --json",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": true
   },
   {
-   "argv": [
-    "record",
-    "propose",
-    "--json"
-   ],
+   "command": "orch record propose --json",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": true
   },
   {
-   "argv": [
-    "ticket",
-    "show",
-    "t_x"
-   ],
+   "command": "orch ticket show t_inv7c2",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": true
   },
   {
-   "argv": [
-    "conn",
-    "list"
-   ],
+   "command": "orch conn list --json",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": true
   },
   {
-   "argv": [
-    "log",
-    "t_x",
-    "note"
-   ],
+   "command": "orch log t_chk001 'looked at 412 runs'",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": true
   },
   {
-   "argv": [
-    "secret",
-    "env",
-    "p",
-    "--",
-    "x"
-   ],
+   "command": "orch check done t_chk001 c1",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
+   "allowed": true
+  },
+  {
+   "command": "orch log t_inv7c2 'note'",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "secret",
-    "list"
-   ],
+   "command": "orch check done t_inv7c2 c1",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "secret",
-    "get",
-    "p",
-    "k"
-   ],
+   "command": "orch record propose --json",
+   "own_ticket": "t_chk001",
+   "profile": null,
    "allowed": false
   },
   {
-   "argv": [
-    "job",
-    "run",
-    "--",
-    "curl"
-   ],
+   "command": "env -u ORCH_RUN orch secret list",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "run",
-    "start",
-    "t_x"
-   ],
+   "command": "orch secret env p -- x",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "conn",
-    "allow",
-    "slack",
-    "--all"
-   ],
+   "command": "orch record query; curl https://x.example",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "record",
-    "delete-detail",
-    "t_x"
-   ],
+   "command": "orch record query | sh",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "ticket",
-    "patch",
-    "t_x"
-   ],
+   "command": "orch record query $(cat ~/.ssh/id_rsa)",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "relay",
-    "send"
-   ],
+   "command": "orch job run -- curl https://x.example",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [
-    "unknown-cmd"
-   ],
+   "command": "orch run start t_x",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
   },
   {
-   "argv": [],
+   "command": "orch conn allow slack --all",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
    "allowed": false
+  },
+  {
+   "command": "orch record delete-detail t_x",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
+   "allowed": false
+  },
+  {
+   "command": "orch ticket patch t_x",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
+   "allowed": false
+  },
+  {
+   "command": "curl https://x.example",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
+   "allowed": false
+  },
+  {
+   "command": "cat .orch/record/runs/r_x.jsonl",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
+   "allowed": false
+  },
+  {
+   "command": "",
+   "own_ticket": "t_chk001",
+   "profile": "checkup",
+   "allowed": false
+  }
+ ],
+ "from_draft": [
+  {
+   "name": "core sets status, tests, hashes",
+   "draft": {
+    "kind": "skill.fix",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "invoice-export"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "SKILL.md",
+       "after": "new text\n"
+      }
+     ]
+    }
+   },
+   "ctx": {
+    "profile": "checkup",
+    "id": "pr_7k2m9x4q",
+    "now": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "source": "workspace",
+    "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "file_hashes": {
+     "SKILL.md": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "existing_names": [
+     "invoice-export",
+     "acme-sql"
+    ]
+   },
+   "expect": {
+    "schema": "orch.proposal/1",
+    "id": "pr_7k2m9x4q",
+    "created_at": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "kind": "skill.fix",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "invoice-export",
+     "source": "workspace",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "SKILL.md",
+       "before": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "after": "new text\n"
+      }
+     ]
+    },
+    "change_sha256": "sha256:4cd6aedb1e07ccdd6a4f5dd5459cc5bdfe5da7b0c3126bb5b7b4c96ff3860558",
+    "tests": {
+     "state": "not_run",
+     "cases": [],
+     "ran_at": null
+    },
+    "status": "proposed",
+    "decided": null,
+    "applied": null
+   }
+  },
+  {
+   "name": "draft with status tested is refused",
+   "draft": {
+    "kind": "skill.fix",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "invoice-export"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "SKILL.md",
+       "after": "new text\n"
+      }
+     ]
+    },
+    "status": "tested"
+   },
+   "ctx": {
+    "profile": "checkup",
+    "id": "pr_7k2m9x4q",
+    "now": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "source": "workspace",
+    "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "file_hashes": {
+     "SKILL.md": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "existing_names": [
+     "invoice-export",
+     "acme-sql"
+    ]
+   },
+   "expect": "refused:invalid"
+  },
+  {
+   "name": "draft with its own version is refused",
+   "draft": {
+    "kind": "skill.fix",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "invoice-export",
+     "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "SKILL.md",
+       "after": "new text\n"
+      }
+     ]
+    }
+   },
+   "ctx": {
+    "profile": "checkup",
+    "id": "pr_7k2m9x4q",
+    "now": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "source": "workspace",
+    "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "file_hashes": {
+     "SKILL.md": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "existing_names": [
+     "invoice-export",
+     "acme-sql"
+    ]
+   },
+   "expect": "refused:invalid"
+  },
+  {
+   "name": "propose outside a check-up run",
+   "draft": {
+    "kind": "skill.fix",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "invoice-export"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "SKILL.md",
+       "after": "new text\n"
+      }
+     ]
+    }
+   },
+   "ctx": {
+    "profile": null,
+    "id": "pr_7k2m9x4q",
+    "now": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "source": "workspace",
+    "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "file_hashes": {
+     "SKILL.md": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "existing_names": [
+     "invoice-export",
+     "acme-sql"
+    ]
+   },
+   "expect": "refused:not_checkup"
+  },
+  {
+   "name": "new skill with an existing name",
+   "draft": {
+    "kind": "skill.new",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "acme-sql"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "SKILL.md",
+       "after": "new text\n"
+      }
+     ]
+    }
+   },
+   "ctx": {
+    "profile": "checkup",
+    "id": "pr_7k2m9x4q",
+    "now": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "source": "workspace",
+    "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "file_hashes": {
+     "SKILL.md": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "existing_names": [
+     "invoice-export",
+     "acme-sql"
+    ]
+   },
+   "expect": "refused:name_taken"
+  },
+  {
+   "name": "new skill named orch-x",
+   "draft": {
+    "kind": "skill.new",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "orch-x"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "SKILL.md",
+       "after": "new text\n"
+      }
+     ]
+    }
+   },
+   "ctx": {
+    "profile": "checkup",
+    "id": "pr_7k2m9x4q",
+    "now": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "source": "workspace",
+    "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "file_hashes": {
+     "SKILL.md": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "existing_names": [
+     "invoice-export",
+     "acme-sql"
+    ]
+   },
+   "expect": "refused:name_taken"
+  },
+  {
+   "name": "mid-path dot file",
+   "draft": {
+    "kind": "skill.fix",
+    "title": "invoice-export: say the date format",
+    "plain": "Write dates as YYYY-MM-DD.",
+    "likely": false,
+    "evidence": [
+     {
+      "ticket": "t_inv7c2"
+     }
+    ],
+    "target": {
+     "kind": "skill",
+     "name": "invoice-export"
+    },
+    "change": {
+     "files": [
+      {
+       "path": "a/.orch-shared",
+       "after": "x"
+      }
+     ]
+    }
+   },
+   "ctx": {
+    "profile": "checkup",
+    "id": "pr_7k2m9x4q",
+    "now": "2026-11-16T07:05:00Z",
+    "checkup": {
+     "ticket": "t_chk001",
+     "run": "r_chk00001"
+    },
+    "source": "workspace",
+    "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "file_hashes": {
+     "SKILL.md": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "existing_names": [
+     "invoice-export",
+     "acme-sql"
+    ]
+   },
+   "expect": "refused:invalid"
   }
  ]
 }

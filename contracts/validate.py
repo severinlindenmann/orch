@@ -1011,14 +1011,61 @@ def kind_human():
 # --- proposals (proposal.md) -----------------------------------------------------------------------------------------
 CHECKUP_ALLOWED = {("record", "query"), ("record", "tail"), ("record", "counts"), ("record", "propose"), ("ticket", "list"),
                    ("ticket", "show"), ("conn", "list"), ("log", None), ("check", None)}
+SHELL_META = re.compile(r"[;&|`$<>\\\n(){}*?~]")
 
 
-def checkup_allowed(argv):
-    """argv after 'orch'. P1: only the enumerated read commands; anything else is refused."""
-    if not argv:
+def checkup_allowed(c):
+    """Layer 1 (the agent tool's own exact allowlist): the whole shell command must be `orch <cmd> [<sub>] ...` from the
+    list, no shell syntax; log/check only on the check-up's own ticket. Layer 2 (core): propose only when the run record
+    says profile checkup. Returns True when both layers allow it."""
+    cmd = c["command"]
+    if SHELL_META.search(cmd):
         return False
-    cmd, sub = argv[0], (argv[1] if len(argv) > 1 and not argv[1].startswith("-") else None)
-    return (cmd, sub) in CHECKUP_ALLOWED or ((cmd, None) in CHECKUP_ALLOWED and cmd in ("log", "check"))
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return False
+    if len(argv) < 2 or argv[0] != "orch":
+        return False
+    top, sub = argv[1], (argv[2] if len(argv) > 2 else None)
+    if (top, sub) not in CHECKUP_ALLOWED and (top, None) not in CHECKUP_ALLOWED:
+        return False
+    if top in ("log", "check"):
+        rest = [a for a in argv[2:] if not a.startswith("-")]
+        tick = rest[1] if top == "check" and len(rest) > 1 and rest[0] in ("add", "done", "start") else (rest[0] if rest else None)
+        if tick != c["own_ticket"]:
+            return False
+    if (top, sub) == ("record", "propose") and c.get("profile") != "checkup":
+        return False
+    return True
+
+
+def change_sha256(change):
+    if change is None:
+        return None
+    return "sha256:" + hashlib.sha256(json.dumps(change["files"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def proposal_from_draft(draft, ctx):
+    """The core builds the stored proposal; the agent's draft supplies only its own fields. 'refused:<why>' on a bad draft."""
+    if _msgs(_w("proposal", "draft"), draft):
+        return "refused:invalid"
+    if ctx.get("profile") != "checkup":
+        return "refused:not_checkup"
+    t = draft["target"]
+    if draft["kind"] == "skill.new" and (t["name"].startswith("orch") or t["name"] in ctx["existing_names"]):
+        return "refused:name_taken"
+    files = None
+    if draft["change"] is not None:
+        files = [{"path": f["path"], "before": ctx["file_hashes"].get(f["path"]), "after": f["after"]} for f in draft["change"]["files"]]
+    change = None if files is None else {"files": files}
+    return {"schema": "orch.proposal/1", "id": ctx["id"], "created_at": ctx["now"], "checkup": ctx["checkup"],
+            "kind": draft["kind"], "title": draft["title"], "plain": draft["plain"], "likely": draft["likely"],
+            "evidence": draft["evidence"],
+            "target": {"kind": t["kind"], "name": t["name"], "source": "new" if draft["kind"] == "skill.new" else ctx["source"],
+                       "version": None if draft["kind"] == "skill.new" else ctx["version"]},
+            "change": change, "change_sha256": change_sha256(change),
+            "tests": {"state": "not_run", "cases": [], "ran_at": None}, "status": "proposed", "decided": None, "applied": None}
 
 
 def proposal_step(c):
@@ -1042,6 +1089,9 @@ def proposal_step(c):
             return "not_tested"
         if c["current_version"] != p["target"]["version"]:
             return "stale"
+        recorded = c["recorded_change_sha256"]  # kept in the trusted orch home when the tests ran
+        if c["file_change_sha256"] != recorded or c["proof_target"] != f"{p['id']}@{recorded.removeprefix('sha256:')}":
+            return "changed"
         return "accepted"
     if act == "rollback":
         if st != "accepted":
@@ -1056,8 +1106,16 @@ def kind_proposal():
     vec = _vec("proposal-v1.json")
     for c in vec["steps"]:
         _expect(f"proposal steps {c['name']}", proposal_step(c), c["result"])
+    vd = _w("proposal", "draft")
+    _examples("proposal-draft", lambda d: _msgs(vd, d))
     for c in vec["checkup_commands"]:
-        _expect(f"proposal checkup_commands {' '.join(c['argv'])}", checkup_allowed(c["argv"]), c["allowed"])
+        _expect(f"proposal checkup_commands {c['command']!r}", checkup_allowed(c), c["allowed"])
+    for c in vec["from_draft"]:
+        got = proposal_from_draft(c["draft"], c["ctx"])
+        if isinstance(got, dict):
+            for m in _msgs(v, got):
+                fails.append(f"proposal from_draft {c['name']}: stored proposal not valid: {m}")
+        _expect(f"proposal from_draft {c['name']}", got, c["expect"])
 
 
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
