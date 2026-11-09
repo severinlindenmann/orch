@@ -46,7 +46,19 @@ def dispatch(args, root: Path) -> bool:
         d = chat.read_day(root, args.day)
         _out(args, d, "\n".join(f"{m['by']}: {m['text']}" for m in d["messages"]) or "Nothing on that day.")
     elif args.sub == "make-ticket":
-        r = chat.make_ticket(root, args.message_id, args.title, getattr(args, "by", None))
+        from orch import humanproof
+
+        # a person's click (H1): proof from the page, or a hand-off. The phone path calls chat.make_ticket in
+        # this process with the relay-authenticated sender instead (relay._apply_proposal_answer).
+        who = humanproof.person_by(
+            root,
+            args,
+            "chat.make_ticket",
+            args.message_id,
+            label="Make a ticket from this Chat conversation",
+            value=args.title or "",
+        )
+        r = chat.make_ticket(root, args.message_id, args.title, who)
         _out(args, r, r["key"])
     elif args.sub == "say":
         if tickets.agent_tool():
@@ -100,11 +112,21 @@ def _dispatch_dm(args, root):
         )
         text = "Synced."
     elif args.sub == "send":
+        from orch import humanproof
+
+        who = humanproof.person_by(
+            root,
+            args,
+            "chat.send",
+            args.workspace,
+            label="Send a message to the workspace " + args.workspace,
+            value=args.text,
+        )
         data = chat.dm_send(
             root,
             args.workspace,
             args.text,
-            getattr(args, "by", None),
+            who,
             retry=args.retry,
             client_id=args.client_id,
         )

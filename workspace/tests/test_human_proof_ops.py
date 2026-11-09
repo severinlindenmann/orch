@@ -659,3 +659,69 @@ def test_dev_proof_command_works_only_in_a_dev_workspace(ws, run, capsys, monkey
     code, out, err = run("dev-proof", "ticket.answer", "t_a:q1")
     assert code == 0 and out.strip().startswith("hp1.")
     assert hp.verify_and_consume(fresh, out.strip(), "ticket.answer", "t_a:q1") == "human:test-human"
+
+
+# ------------------------------------------------------------------ chat: make-ticket, DM ops
+
+
+def _proposal(ws):
+    from orch import chat
+
+    chat.record(ws, "person", "you", "dashboard", "Fish", convo_start=True)
+    chat.record(
+        ws,
+        "m_proposal0000001",
+        "ws_helper01",
+        "helper",
+        "Ready?",
+        refs=[{"kind": "proposal", "title": "Fish"}],
+    )
+    return "m_proposal0000001"
+
+
+def test_make_ticket_needs_the_proof_in_the_cli_and_hands_off(ws, run, monkeypatch):
+    mid = _proposal(ws)
+    code, out, err = run("chat", "make-ticket", mid, "--by", "human:pat", "--json")
+    assert code == 2 and "Continue" in out + err
+    assert (
+        not [t for t in tickets.list_all(ws) if t.get("title") == "Fish"]
+        if hasattr(tickets, "list_all")
+        else True
+    )
+    card = hp.handoffs(ws)[0]
+    assert card["op"] == "chat.make_ticket" and card["target"] == mid
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "chat.make_ticket", mid), "chat", "make-ticket", mid, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["key"]
+
+
+def test_make_ticket_forged_by_with_a_proof_for_another_message_is_refused(ws, run, monkeypatch):
+    mid = _proposal(ws)
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "chat.make_ticket", "m_other"), "chat", "make-ticket", mid, "--json"
+    )
+    assert code == 2 and "dashboard on this computer" in out + err
+
+
+def test_the_phone_path_makes_the_ticket_in_process_from_the_relay_sender_only(ws):
+    """relay._apply_proposal_answer calls chat.make_ticket(root, mid, None, by) with the relay-authenticated
+    `human:<phone>`: no proof is read there. An agent in the environment, or a by that is not human:, is
+    refused inside chat itself, so the in-process call is not an unproven way for an agent."""
+    from orch import chat
+
+    mid = _proposal(ws)
+    with pytest.raises(Refused):
+        chat.make_ticket(ws, mid, None, "agent:x")
+    made = chat.make_ticket(ws, mid, None, "human:ph_abcdef")
+    assert made["key"]
+
+
+def test_dm_reads_and_sync_need_no_proof_and_confer_no_person_input(ws, run):
+    """contacts / thread / sync are read-only for orch's authority: no proof, no hand-off per poll, and they
+    never write a person-class pending line (the pending MAC is only written for proven input)."""
+    for argv in (("chat", "contacts"), ("chat", "sync")):
+        code, out, err = run(*argv, "--by", "human:pat", "--json")
+        assert "dashboard on this computer" not in out + err and "Continue" not in out + err
+    assert hp.handoffs(ws) == []

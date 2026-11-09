@@ -870,7 +870,8 @@ HANDOFF_HEADS = {
     "relay.allow": (("relay", "allow"),),
     "relay.connect": (("relay", "connect"),),
     "update": (("update",),),
-    "chat.send": (("chat", "say"),),
+    "chat.send": (("chat", "say"), ("chat", "send")),
+    "chat.make_ticket": (("chat", "make-ticket"),),
 }
 
 

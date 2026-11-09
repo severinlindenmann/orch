@@ -6,7 +6,7 @@
   function post(op, id) {
     return fetch("/api/act", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({op: op, args: {id: id}})});
   }
-  var WORDS = {"ticket.answer": "Send an answer", "run.human_input": "Send a message to the agent", "ticket.verdict": "Decide on a ticket", "relay.allow": "Allow another workspace", "update": "Update orch", "relay.connect": "Connect to a relay", "chat.send": "Write in Chat"};
+  var WORDS = {"ticket.answer": "Send an answer", "run.human_input": "Send a message to the agent", "ticket.verdict": "Decide on a ticket", "relay.allow": "Allow another workspace", "update": "Update orch", "relay.connect": "Connect to a relay", "chat.send": "Write in Chat", "chat.make_ticket": "Make a ticket"};
   function render(items) {
     var key = JSON.stringify(items);
     if (key === seen) return;
