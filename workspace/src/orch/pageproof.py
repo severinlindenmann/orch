@@ -14,6 +14,7 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 from http.cookies import SimpleCookie
 from pathlib import Path
 
@@ -29,7 +30,7 @@ REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard a
 
 def argv0(orch_bin: str | None) -> list[str]:
     """The command prefix. SELF = this interpreter in isolated mode; any other value is a TEST fake."""
-    return [sys.executable, "-I", "-m", "orch"] if orch_bin == SELF else [str(orch_bin)]
+    return [sys.executable, "-I", "-P", "-m", "orch"] if orch_bin == SELF else [str(orch_bin)]
 
 
 def child_env(env: dict, orch_bin: str | None) -> dict:
@@ -66,6 +67,7 @@ class PageSession:
         self.key: bytes | None = None
         self.spent: set[str] = set()  # sha256 of launch tokens already used in this server run
         self.revoked = False
+        self._lock = threading.Lock()  # one lock across check, consume and spent.add (no race on reuse)
         if tickets.agent_tool():
             return
         try:
@@ -81,19 +83,20 @@ class PageSession:
         if self.key is None or not isinstance(token, str) or not _TOKEN_RE.fullmatch(token):
             return None
         digest = hashlib.sha256(token.encode()).hexdigest()
-        if digest in self.spent:
-            self.cookie = secrets.token_urlsafe(32)
-            self.revoked = True
-            print(
-                f"orch {self.server}: a sign-in link was used twice; the page session was ended.",
-                file=sys.stderr,
-            )
-            return None
-        if not humanproof.consume_launch_token(self.root, self.server, token):
-            return None
-        self.spent.add(digest)
-        self.revoked = False
-        return self.cookie
+        with self._lock:
+            if digest in self.spent:
+                self.cookie = secrets.token_urlsafe(32)
+                self.revoked = True
+                print(
+                    f"orch {self.server}: a sign-in link was used twice; the page session was ended.",
+                    file=sys.stderr,
+                )
+                return None
+            if not humanproof.consume_launch_token(self.root, self.server, token):
+                return None
+            self.spent.add(digest)
+            self.revoked = False
+            return self.cookie
 
     def authed(self, headers) -> bool:
         raw = headers.get("Cookie") or ""
@@ -134,8 +137,10 @@ def run_with_proof(
     argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env: dict, timeout: int
 ) -> subprocess.CompletedProcess:
     """Run the core with `--proof-stdin`; the proof is the first line of stdin, never argv or env."""
+    i = argv.index("--") if "--" in argv else len(argv)  # the flag goes BEFORE the free text after `--`
+    argv = [*argv[:i], "--proof-stdin", *argv[i:]]
     return subprocess.run(
-        [*argv0(orch_bin), *argv, "--proof-stdin"],
+        [*argv0(orch_bin), *argv],
         check=False,
         cwd=cwd,
         capture_output=True,

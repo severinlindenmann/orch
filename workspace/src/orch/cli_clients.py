@@ -466,7 +466,7 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "connect":
         # connecting (or changing the relay address) is a person's action (H1): proof for this relay host
         if not humanproof.person_by(root, args, "relay.connect", _host(args.url)).startswith("human:"):
-            raise Refused(humanproof.HANDOFF)
+            raise Refused(humanproof.AGENT_REFUSED)
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
             args,
@@ -595,7 +595,7 @@ def run_relay(args, root: Path, out) -> None:
             label=f"Allow {msg.get('from')} ({mode})",
             value=str(task),
         ).startswith("human:"):
-            raise Refused(humanproof.HANDOFF)
+            raise Refused(humanproof.AGENT_REFUSED)
         m = relay.give_allow(root, args.id, mode)
         out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":

@@ -223,7 +223,7 @@ def rel(proj, run):
     srv.stop()
 
 
-REAL_PROOF_MODULES = ("test_human_proof_ops", "test_humanproof")
+REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof")
 
 
 @pytest.fixture(autouse=True)

@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+from orch import term
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
@@ -645,6 +646,7 @@ def mint_dev(root: Path, op: str, target: str, life: int = 30) -> str:
 # ------------------------------------------------------------------------------------------- CLI gate
 
 HANDOFF = "Do this in the dashboard on this computer."
+AGENT_REFUSED = "Only a human can do this. Ask the human to run it themselves."
 HANDOFF_PER_OP = 3
 
 
@@ -771,7 +773,7 @@ def _dashboard_note(root: Path) -> str:
         url = services.local_url(row.get("url")) if row else None
     except Exception:  # noqa: BLE001 - the note is best effort
         url = None
-    if url and sys.stdout.isatty():
+    if url and term.is_terminal(sys.stdout):
         open_browser(launch_url(root, "dashboard", url))
         return f"Opened the dashboard ({url}): press Continue to send this to the agent."
     if url:

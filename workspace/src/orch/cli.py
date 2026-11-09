@@ -637,7 +637,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "update":
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
             if not humanproof.person_by(root, args, "update", "orch").startswith("human:"):
-                raise Refused(humanproof.HANDOFF)
+                raise Refused(humanproof.AGENT_REFUSED)
         report, notes = [], []
         done = addons.update(
             root,

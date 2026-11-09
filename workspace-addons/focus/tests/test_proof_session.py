@@ -8,11 +8,14 @@ import threading
 import pytest
 
 pytest.importorskip("orch")
-from orch import addons  # noqa: E402
-from orch import humanproof as hp  # noqa: E402
-from orch import pageproof  # noqa: E402
-from orch_focus import actions  # noqa: E402
-from orch_focus.server import make_server  # noqa: E402
+from orch import (
+    addons,
+    pageproof,
+)
+from orch import humanproof as hp
+
+from orch_focus import actions
+from orch_focus.server import make_server
 
 
 @pytest.fixture
@@ -82,10 +85,10 @@ def test_session_refused_through_a_proxy_or_foreign_host(live):
 
 
 def test_click_without_a_session_is_watch_only(live, monkeypatch):
-    root, port = live
+    _root, port = live
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
-    st, _, body = post(port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}})
+    st, _, _body = post(port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}})
     assert st == 403 and ran == []
 
 

@@ -8,11 +8,14 @@ import threading
 import pytest
 
 pytest.importorskip("orch")
-from orch import addons  # noqa: E402
-from orch import humanproof as hp  # noqa: E402
-from orch import pageproof  # noqa: E402
-from orch_dashboard import actions  # noqa: E402
-from orch_dashboard.server import make_server  # noqa: E402
+from orch import (
+    addons,
+    pageproof,
+)
+from orch import humanproof as hp
+
+from orch_dashboard import actions
+from orch_dashboard.server import make_server
 
 
 @pytest.fixture
@@ -84,10 +87,10 @@ def test_session_refused_through_a_proxy_or_foreign_host(live):
 
 
 def test_click_without_a_session_is_watch_only(live, monkeypatch):
-    root, port = live
+    _root, port = live
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
-    st, _, body = post(
+    st, _, _body = post(
         port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
     )
     assert st == 403 and ran == []
@@ -134,7 +137,7 @@ def test_click_with_session_but_forwarded_is_refused(live):
 
 def test_orch_bin_from_the_environment_is_ignored():
     argv = pageproof.argv0(pageproof.SELF)
-    assert argv[1:4] == ["-I", "-m", "orch"] and argv[0] == pageproof.sys.executable
+    assert argv[1:5] == ["-I", "-P", "-m", "orch"] and argv[0] == pageproof.sys.executable
 
 
 def test_handoff_listing_hides_the_command_and_confirm_runs_it_with_a_proof(live, monkeypatch):

@@ -280,7 +280,7 @@ def test_page_session_is_watch_only_with_an_agent_in_the_environment(ws, monkeyp
 def test_argv0_never_uses_orch_bin(monkeypatch):
     monkeypatch.setenv("ORCH_BIN", "/tmp/planted")
     argv = pageproof.argv0(pageproof.SELF)
-    assert argv[:3] == [pageproof.sys.executable, "-I", "-m"] and "planted" not in " ".join(argv)
+    assert argv[:4] == [pageproof.sys.executable, "-I", "-P", "-m"] and "planted" not in " ".join(argv)
     assert "ORCH_BIN" not in pageproof.child_env({"ORCH_BIN": "/tmp/planted"}, pageproof.SELF)
 
 
@@ -396,3 +396,25 @@ def test_second_use_of_a_spent_token_revokes_the_session(ws, capsys):
     # one more click on the dashboard from orch gives a new token and a working session
     cookie2 = s.launch(hp.write_launch_token(ws, "dashboard"))
     assert cookie2 and cookie2 != cookie and s.can_mint({**hdr, "Cookie": f"{pageproof.COOKIE}={cookie2}"}, 1)
+
+
+def test_two_threads_with_the_same_token_exactly_one_session_then_revoked(ws, capsys):
+    import threading
+
+    s = pageproof.PageSession(ws, "dashboard")
+    tok = hp.write_launch_token(ws, "dashboard")
+    barrier, got = threading.Barrier(2), []
+
+    def hit():
+        barrier.wait()
+        got.append(s.launch(tok))
+
+    ts = [threading.Thread(target=hit) for _ in range(2)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(g is not None for g in got) == [False, True]  # exactly one request got a session
+    assert s.revoked  # the other one revoked it
+    first = next(g for g in got if g)
+    assert not s.can_mint({"Host": "127.0.0.1:1", "Cookie": f"{pageproof.COOKIE}={first}"}, 1)
+    err = capsys.readouterr().err
+    assert "used twice" in err and tok not in err and first not in err
