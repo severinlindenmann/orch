@@ -430,6 +430,7 @@ def test_a_real_workspace_with_another_orch_home_is_refused(acct, monkeypatch, t
 
 
 def test_a_real_workspace_uses_the_default_home_in_the_account_not_a_real_one(acct, monkeypatch):
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")  # a test install never pairs a real workspace
     ws = acct / "projects" / "real"
     (ws / ".orch").mkdir(parents=True)
     monkeypatch.delenv("ORCH_HOME", raising=False)
