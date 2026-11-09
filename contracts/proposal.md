@@ -57,11 +57,13 @@ proposed|tested --reject--> rejected      tested --send to admin--> sent_to_admi
 any open state --skill changed meanwhile--> stale
 ```
 
-- **The diff is bound.** When the tests run, the core records `change_sha256` in the guarded orch home
-  (`<orch home>/keys/<ws>/proposals.json`, the workspace copy can be edited). The Accept screen shows the **full diff** (every
-  file, before and after), not only `plain`, and the page mints the `checkup.accept` proof for target
-  `<id>@<change_sha256 hex>`. Accept recomputes the hash of the stored change and refuses (`changed`) when it differs from the
-  recorded one or from the proof's target (vectors `steps`: file swapped after the test, proof for another diff).
+- **The record in orch home decides.** When a proposal is stored and when its tests finish, the core writes
+  `<guarded orch home>/keys/<ws>/proposals.json`: per id the status, the test result and cases, and `hash` = sha256 over
+  `{id, kind, target, change}` of the proposal (reference `proposal_hash`). Accept, Send to admin, Rollback and the Accept
+  screen read status, tests and target **from that record**; the workspace copy in `.orch/record/proposals/` must hash to the
+  recorded value or the action is refused (`changed`): marking tests passed, flipping the source from admin to workspace, or
+  pointing the same diff at another skill in the workspace copy all fail. The Accept screen shows the full diff from the
+  record-checked copy, and the page mints the `checkup.accept` proof for target `<id>@<hash hex>` (vectors `steps`).
 - `accept` (`checkup.accept` proof, human-proof.md): only from `tested` with `tests.state = passed`, only when the target's
   current version equals `target.version` (else `stale`), never for an admin-shared skill (`target.source = admin`: only "Send
   to admin", `checkup.send_to_admin` proof). Applies the files in one step (new files + rename), writes `decided`,

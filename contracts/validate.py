@@ -1217,35 +1217,45 @@ def proposal_from_draft(draft, ctx):
             "tests": {"state": "not_run", "cases": [], "ran_at": None}, "status": "proposed", "decided": None, "applied": None}
 
 
+def proposal_hash(doc):
+    """sha256 over {id, kind, target, change} of a proposal (canonical JSON); kept with the test result in orch home."""
+    core = {k: doc.get(k) for k in ("id", "kind", "target", "change")}
+    return "sha256:" + hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
 def proposal_step(c):
-    """One decision on a proposal -> new status or a refusal code."""
-    p, act = c["proposal"], c["action"]
+    """One decision. Status, tests and target come from the record in the guarded orch home (c["record"]); the workspace
+    copy (c["file"]) only has to hash to the recorded value. Returns the new status or a refusal code."""
+    rec, act = c["record"], c["action"]
     if act in ("accept", "rollback", "send_to_admin", "reject") and c.get("proof") != "ok":
         return "not_allowed"
-    st = p["status"]
+    if rec is None:
+        return "not_found"
+    st = rec["status"]
     if act == "skill_changed":
         return "stale" if st in ("proposed", "tested") else st
     if act == "tests_done":
         return "tested" if st == "proposed" and c["tests"] == "passed" else st
     if act == "reject":
         return "rejected" if st in ("proposed", "tested") else "conflict"
+    if proposal_hash(c["file"]) != rec["hash"]:
+        return "changed"
     if act == "send_to_admin":
-        return "sent_to_admin" if st == "tested" and p["target"]["source"] == "admin" else "conflict"
+        return "sent_to_admin" if st == "tested" and rec["target"]["source"] == "admin" else "conflict"
     if act == "accept":
-        if p["target"]["source"] == "admin":
+        if rec["target"]["source"] == "admin":
             return "admin_only"
-        if st != "tested" or p["tests"] != "passed":
+        if st != "tested" or rec["tests"] != "passed":
             return "not_tested"
-        if c["current_version"] != p["target"]["version"]:
+        if c["current_version"] != rec["target"]["version"]:
             return "stale"
-        recorded = c["recorded_change_sha256"]  # kept in the trusted orch home when the tests ran
-        if c["file_change_sha256"] != recorded or c["proof_target"] != f"{p['id']}@{recorded.removeprefix('sha256:')}":
+        if c["proof_target"] != f"{rec['id']}@{rec['hash'].removeprefix('sha256:')}":
             return "changed"
         return "accepted"
     if act == "rollback":
         if st != "accepted":
             return "conflict"
-        return "rolled_back" if c["current_version"] == p["applied_after"] else "conflict"
+        return "rolled_back" if c["current_version"] == rec["applied_after"] else "conflict"
     return "invalid"
 
 

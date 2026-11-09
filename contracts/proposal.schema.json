@@ -216,7 +216,7 @@
           "$ref": "#/$defs/version"
         }
       ],
-      "description": "Set by the core: sha256 of the canonical JSON of change.files (sort_keys, separators , :). Also recorded in the trusted orch home when tests run; the accept proof's target is <id>@<change_sha256>."
+      "description": "Set by the core: sha256 of the canonical JSON of change.files. The authoritative hash (over id, kind, target, change) and the test result live in the guarded orch home (proposal.md); this copy is informational."
     },
     "tests": {
       "type": "object",

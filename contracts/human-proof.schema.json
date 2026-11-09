@@ -9,7 +9,7 @@
       "type": "object", "required": ["op", "target", "by", "iat", "exp", "nonce"], "additionalProperties": false,
       "properties": {
         "op": { "$ref": "#/$defs/op" },
-        "target": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:@-]+$", "description": "For checkup.accept: <proposal id>@<change_sha256 hex>. Otherwise the exact ticket id, setting name, key/profile/connection name or proposal id." },
+        "target": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:@-]+$", "description": "For checkup.accept: <proposal id>@<record hash hex> (proposal.md). Otherwise the exact ticket id, setting name, key/profile/connection name or proposal id." },
         "by": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$" },
         "iat": { "type": "integer", "minimum": 0, "description": "Unix seconds." },
         "exp": { "type": "integer", "minimum": 0, "description": "Unix seconds, at most iat + 60." },
