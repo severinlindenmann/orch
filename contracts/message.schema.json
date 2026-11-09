@@ -255,12 +255,13 @@
         { "if": { "required": ["review"] },
           "then": { "properties": { "question_id": { "pattern": "^review-" }, "options": { "const": ["accept", "changes"] } }, "not": { "required": ["scope"] } } },
         { "if": { "required": ["proposal"] },
-          "then": { "required": ["title"], "properties": { "question_id": { "pattern": "^proposal-" }, "options": { "const": ["make", "not_now"] }, "recommended": { "type": "null" }, "title": { "minLength": 1, "maxLength": 120 } }, "not": { "anyOf": [{ "required": ["scope"] }, { "required": ["review"] }] } } }
+          "then": { "required": ["title"], "properties": { "question_id": { "pattern": "^proposal-" }, "options": { "const": ["make", "not_now"] }, "recommended": { "type": "null" }, "title": { "minLength": 1, "maxLength": 120 } }, "not": { "anyOf": [{ "required": ["scope"] }, { "required": ["review"] }] } } },
+        { "if": { "not": { "required": ["proposal"] } }, "then": { "not": { "required": ["when"] } } }
       ],
       "properties": {
         "question_id": { "type": "string", "pattern": "^(q[0-9]{1,4}|review-[0-9]{1,4}|proposal-m_[a-z0-9]{16})$", "description": "q<n> = a question of the ticket; review-<n> = the review question of round n (review: true); proposal-<message id> = the ticket proposal of the helper (proposal: \"make_ticket\", the message id is this question's own id)." },
         "proposal": { "const": "make_ticket", "description": "Optional marker: the General helper proposes a ticket (options make, not_now; title = the proposed ticket title; no ticket on the message). The phone shows a Make ticket card. Any other value is not this marker." },
-        "when": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Optional, with proposal: a date (YYYY-MM-DD) the helper proposes; the phone shows it under the title." },
+        "when": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Optional, only with proposal: a date (YYYY-MM-DD) the helper proposes; the phone shows it under the title." },
         "review": { "const": true, "description": "Optional marker: the review question \"Is this done?\" of a ticket in Review (options accept, changes). The phone shows it only as that ticket chat's review bar, never as a question card." },
         "title": { "type": "string", "description": "Ticket title, for the phone card" },
         "text": { "type": "string", "minLength": 1 },

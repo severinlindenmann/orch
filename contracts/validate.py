@@ -457,7 +457,7 @@ pqvec = json.loads((HERE / "vectors" / "proposal-question-v1.json").read_text())
 for v in pqvec["valid"]:
     check("message", v["message"], True, f"proposal-question vector valid {v['name']}")
 for v in pqvec["invalid"]:
-    if v["name"] in ("question-id-not-own-id", "with-ticket"):  # relay-only rules, not schema
+    if v["name"] in ("question-id-not-own-id", "with-ticket", "prefix-without-marker", "null-marker"):  # relay-only rules, not schema
         continue
     check("message", v["message"], False, f"proposal-question vector invalid {v['name']}")
 for case in pqvec["cases"]:

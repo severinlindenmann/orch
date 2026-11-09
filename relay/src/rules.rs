@@ -220,7 +220,17 @@ fn check_review_question(msg: &Value) -> Res<()> {
 fn check_proposal_question(msg: &Value) -> Res<()> {
     let b = &msg["body"];
     if b.get("proposal").is_none() {
-        return Ok(());
+        // the id prefix belongs to the marker: no other question may look like a proposal card
+        return if b["question_id"]
+            .as_str()
+            .is_some_and(|q| q.starts_with("proposal-"))
+        {
+            Err(invalid(
+                "A question_id starting with proposal- needs body.proposal make_ticket.",
+            ))
+        } else {
+            Ok(())
+        };
     }
     let own = msg["id"].as_str().unwrap_or("");
     let title_len = b["title"].as_str().map_or(0, |t| t.chars().count());

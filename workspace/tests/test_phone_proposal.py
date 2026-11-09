@@ -69,6 +69,7 @@ def test_one_question_instead_of_a_text(proj, conn):
     }
     jsonschema.Draft202012Validator(json.loads((CONTRACTS / "message.schema.json").read_text())).validate(q)
     assert not [m for m in conn.sent if m["type"] == "text"], "no separate text"
+    assert relay._asked_edit(proj, lambda a: a[q["id"]]["to"]) == "phones"
     # the dashboard History keeps it with its Make ticket card
     assert chat.proposal_state(proj, q["id"]) == "open"
 
@@ -102,6 +103,7 @@ def test_make_from_the_phone_creates_exactly_one_ticket(proj, run, conn):
     assert "made" in run("relay", "inbox")[1]
     (t,) = real_tickets(proj)
     assert t.get("title_auto") is True and t["title"].startswith("Rename field X")
+    assert t["title"] == proposals(conn)[0]["body"]["title"], "the phone shows the title that is made"
     assert chat.proposal_state(proj, q["id"]) == "made"
     acks = [m for m in conn.sent if m["type"] == "text" and m["body"].get("update", {}).get("kind") == "ack"]
     assert len(acks) == 1 and acks[0]["ticket"] == t["id"] and acks[0]["reply_to"] == q["id"]
@@ -183,6 +185,33 @@ def test_an_agent_session_never_applies_the_answer(proj, run, conn, monkeypatch)
     monkeypatch.delenv("CLAUDECODE")
     run("relay", "inbox")
     assert len(real_tickets(proj)) == 1
+
+
+def agent_envs():
+    from orch import adapters
+
+    out = [("ORCH_AGENT", "anything")]
+    for name, a in adapters._registry().items():
+        d = a.get("detect") or {}
+        if d.get("env_any"):
+            out.append((d["env_any"][0], "1"))
+        elif d.get("env_prefix"):
+            out.append((d["env_prefix"] + "X", "1"))
+    return out
+
+
+@pytest.mark.parametrize("key,value", agent_envs())
+def test_every_agent_runtime_is_an_agent_session(proj, run, conn, monkeypatch, key, value):
+    assert tickets.agent_tool() is None
+    propose(proj)
+    (q,) = proposals(conn)
+    answer(conn, q, "make")
+    monkeypatch.setenv(key, value)
+    assert tickets.agent_tool()
+    run("relay", "inbox")
+    assert real_tickets(proj) == []
+    with pytest.raises(tickets.Refused):
+        chat.make_ticket(proj, q["id"], None, "human:x")
 
 
 def test_other_words_do_nothing(proj, run, conn):

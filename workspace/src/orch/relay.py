@@ -715,7 +715,8 @@ def _send_proposal(
     ONE question
     instead of the text, bound to its own message id. The asked record is written BEFORE the send."""
     mid = new_id()
-    title = " ".join(clean_untrusted(str(proposal["title"]), 120).split())[:120] or "New ticket"
+    # the very string chat.make_ticket gives the ticket (and the ack): what the person sees is what is made
+    title = tickets.placeholder_title(str(proposal["title"]))
     body = {
         "question_id": f"proposal-{mid}",
         "title": title,
@@ -724,21 +725,12 @@ def _send_proposal(
         "recommended": None,
         "proposal": "make_ticket",
     }
-    asked = net.read_json(_asked_path(root), {})
-    asked[mid] = {
-        "ticket": None,
-        "question_id": body["question_id"],
-        "to": "phones",
-        "proposal": True,
-        "title": title,
-    }
-    net.write_json(_asked_path(root), asked, True)
+    rec = {"ticket": None, "question_id": body["question_id"], "to": to, "proposal": True, "title": title}
+    _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     try:
         msg = _message(root, to, "question", body, None, reply_to, mid)
     except Refused:
-        asked = net.read_json(_asked_path(root), {})
-        if asked.pop(mid, None) is not None:
-            net.write_json(_asked_path(root), asked, True)
+        _asked_edit(root, lambda asked: asked.pop(mid, None))
         raise
     with contextlib.suppress(Refused, OSError):  # the question is sent; a missing history line never fails it
         _record_general(root, msg, text, general_body, reply_to, refs)
@@ -842,9 +834,8 @@ def send_question(
         **question_extras(q, previews, scope),
     }
     msg = _message(root, "phones", "question", body, ticket["id"])
-    asked = net.read_json(_asked_path(root), {})
-    asked[msg["id"]] = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
-    net.write_json(_asked_path(root), asked, True)
+    rec = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
+    _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
         send_text(root, "phones", "Waiting for your answer", ticket["id"], "note", view=True)
@@ -868,15 +859,12 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
         "recommended": None,
         "review": True,
     }
-    asked = net.read_json(_asked_path(root), {})
-    asked[mid] = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
-    net.write_json(_asked_path(root), asked, True)
+    rec = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
+    _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     try:
         return _message(root, "phones", "question", body, ticket["id"], mid=mid)
     except Refused:
-        asked = net.read_json(_asked_path(root), {})
-        if asked.pop(mid, None) is not None:
-            net.write_json(_asked_path(root), asked, True)
+        _asked_edit(root, lambda asked: asked.pop(mid, None))
         raise
 
 
@@ -903,32 +891,42 @@ def _person_asked(root: Path, msg: dict) -> bool:
     return _review_asked(root, msg) is not None or _proposal_asked(root, msg) is not None
 
 
-def _set_asked(root: Path, mid: str, **fields) -> dict:
-    asked = net.read_json(_asked_path(root), {})
-    rec = asked.get(mid)
-    if isinstance(rec, dict):
-        rec.update(fields)
+def _asked_edit(root: Path, fn):
+    """One read-modify-write of questions-sent.json under its own small lock (never held while anything else
+    is called, so it nests safely inside relay.lock): fn(asked) edits the dict, returns its result."""
+    with locked(root, name="asked.lock"):
+        asked = net.read_json(_asked_path(root), {})
+        out = fn(asked)
         net.write_json(_asked_path(root), asked, True)
-    return rec if isinstance(rec, dict) else {}
+        return out
+
+
+def _set_asked(root: Path, mid: str, **fields) -> dict:
+    def edit(asked):
+        rec = asked.get(mid)
+        if isinstance(rec, dict):
+            rec.update(fields)
+        return rec if isinstance(rec, dict) else {}
+
+    return _asked_edit(root, edit)
 
 
 def ack_proposal(root: Path, mid: str, made: dict) -> None:
     """The ordinary ack ("Got it: <title>", with the new ticket and its key) that closes the phone's proposal
-    card, once, to the phone that answered (else all phones).
-    Only for a proposal that was asked on the phones."""
-    rec = net.read_json(_asked_path(root), {}).get(mid)
-    if not (isinstance(rec, dict) and rec.get("proposal") is True) or rec.get("acked"):
+    card, once, to the phone that answered (else where the question went).
+    Only for a proposal asked on the phones."""
+
+    def claim(asked):
+        rec = asked.get(mid)
+        if not (isinstance(rec, dict) and rec.get("proposal") is True) or rec.get("acked"):
+            return None
+        rec["acked"] = True  # marked first: a lost ack is better than two
+        return str(rec.get("phone") or rec.get("to") or "phones")
+
+    if (target := _asked_edit(root, claim)) is None:
         return
-    _set_asked(root, mid, acked=True)  # marked first: a lost ack is better than two
     try:
-        send_text(
-            root,
-            str(rec.get("phone") or "phones"),
-            f"Got it: {made['title']}"[:300],
-            made["ticket"],
-            "ack",
-            mid,
-        )
+        send_text(root, target, f"Got it: {made['title']}"[:300], made["ticket"], "ack", mid)
     except BaseException:
         _set_asked(root, mid, acked=False)
         raise
@@ -960,7 +958,7 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
         with contextlib.suppress(Refused, OSError):
             tickets.note_history(root, tickets.ensure_general(root, by), by, text, via)
 
-    if net.read_json(_asked_path(root), {}).get(mid, {}).get("done"):
+    if _asked_edit(root, lambda asked: (asked.get(mid) or {}).get("done")):
         line(f'A second answer to the ticket proposal "{title}" was ignored')
         return "ignored: the ticket proposal was already decided", None
     state = chat.proposal_state(root, mid)
