@@ -204,15 +204,42 @@ def test_folder_addon_passes_the_core_check_on_dev_test_and_with_the_handoff(pro
     assert len(addons.local_add_target(f)) == 32 and "addon.add_local" in hp.OPS
 
 
-def test_reinstall_refused_outside_the_tool_environment(tmp_path, monkeypatch):
-    env = _prefix(tmp_path, monkeypatch)  # no uv-receipt.toml: a source checkout
+def test_reinstall_only_from_the_real_tool_environment(tmp_path, monkeypatch):
+    env = _prefix(tmp_path, monkeypatch)
+    (env / "bin").mkdir()
+    (env / "uv-receipt.toml").write_text("")  # a receipt alone is not enough
     monkeypatch.setattr(addons, "run_uv", addons._REAL_RUN_UV)
     called = []
     monkeypatch.setattr(addons, "_tool_args", lambda e: called.append(1) or [])
+    monkeypatch.setattr(addons, "_tool_env_dir", lambda: tmp_path / "elsewhere" / "orch-workspace")
     with pytest.raises(Refused, match="tool folder"):
         addons._install_tool([])
     assert not called
-    (env / "uv-receipt.toml").write_text("")
+    monkeypatch.setattr(addons, "_tool_env_dir", lambda: None)  # no uv: no reinstall
+    with pytest.raises(Refused):
+        addons._install_tool([])
+    link = tmp_path / "linked"
+    link.symlink_to(env)
+    monkeypatch.setattr(addons, "_tool_env_dir", lambda: link)  # same real folder
+    monkeypatch.setattr(addons, "run_uv", lambda a: None)
+    addons._install_tool([])
+    assert called
+
+
+def test_planted_folder_entry_is_not_installed_on_a_normal_install(proj, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    evil = _folder_addon(tmp_path)
+    planted = [
+        {"name": "mine", "source": str(evil), "version": "0.1.0"},  # no approval
+        {"name": "relay", "source": "built-in", "version": "0.1.0"},
+    ]
+    kept = [{"name": "ok", "source": str(evil), "version": "0.1.0", "approved": True}]
+    args = addons._tool_args(planted)
+    assert str(evil) not in args and "--with" in args  # the built-in still goes in
+    assert "only you can allow" in capsys.readouterr().err
+    assert str(evil) in addons._tool_args(kept)  # a person's earlier hand-off stays
+    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
+    assert str(evil) in addons._tool_args(planted)  # dev/test installs install any folder
 
 
 def test_start_json_with_launch_urls_is_valid_json(proj, monkeypatch, capsys):

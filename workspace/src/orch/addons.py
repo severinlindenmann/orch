@@ -401,6 +401,8 @@ def _missing_source(e: dict) -> str | None:
     if e["source"] == "built-in":
         local = _is_local(repo()) and not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
         return "it no longer ships with orch" if local else None
+    if not (e.get("approved") is True or _local_add_ok()):
+        return "it comes from a folder, and only you can allow that (in the dashboard on this computer)"
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
 
 
@@ -492,6 +494,24 @@ def _tool_args(entries: list[dict]) -> list[str]:
     return args
 
 
+def _tool_env_dir() -> Path | None:
+    """<uv tool dir>/orch-workspace: the one folder orch's own tool environment lives in."""
+    uv = _which_uv()
+    if not uv:
+        return None
+    try:
+        r = subprocess.run([uv, "tool", "dir"], text=True, capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip()
+    return Path(out) / "orch-workspace" if r.returncode == 0 and out else None
+
+
+def _in_tool_env(env: Path) -> bool:
+    want = _tool_env_dir()
+    return want is not None and os.path.realpath(env) == os.path.realpath(want)
+
+
 def _reinstall_anywhere() -> bool:
     """Tests replace run_uv and run from the source tree: they may 'reinstall' without a tool folder."""
     return run_uv is not _REAL_RUN_UV
@@ -501,7 +521,7 @@ def _install_tool(entries: list[dict]) -> None:
     from orch import humanproof
 
     env = Path(sys.prefix)
-    if not (env / "uv-receipt.toml").is_file() and not _reinstall_anywhere():
+    if not _reinstall_anywhere() and not _in_tool_env(env):
         raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
     kind = humanproof.read_install_record()  # the reinstall drops the record: carry the installer's kind over
     run_uv(_tool_args(entries))
@@ -1286,6 +1306,8 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         _check_requires(root, m)
         _confirm(m, True, yes)
         entry = {"name": m["name"], "source": str(folder), "version": m["version"]}
+        if _LOCAL_ADD_PROVEN:  # a person's hand-off on a normal install: later reinstalls keep it
+            entry["approved"] = True
     else:
         name = source
         if not NAME_RE.match(name) or name in RESERVED:
