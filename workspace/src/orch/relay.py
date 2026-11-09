@@ -660,9 +660,19 @@ def send_text(
             try:
                 msg = _message(root, to, "text", body, ticket, reply_to, mid)
             except Refused as e2:
-                if getattr(e2, "status", None) != 409:  # 409: the relay has this id already
+                if getattr(e2, "status", None) != 409:
                     raise
-                raise e from None
+                # 409: the relay has this id already (stored): that is a send, not a failure
+                msg = {
+                    "schema": "orch.msg/1",
+                    "id": mid,
+                    "to": to,
+                    "type": "text",
+                    "body": body,
+                    "created_at": tickets.now(),
+                    "ticket": ticket,
+                    "sent": True,
+                }
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)
     if update and ticket and to_phone and not isinstance(view, dict):  # a light update follows nothing new

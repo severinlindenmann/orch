@@ -852,3 +852,58 @@ def test_an_explicit_view_refusal_falls_back_once_with_the_same_id(proj, run, ne
     relay.send_text(proj, "phones", "Ready", tid, "result", mid="m_fixedid0000000001")
     got = [m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]
     assert len(got) == 1 and "ticket_view" not in got[0]["body"] and got[0]["id"] == "m_fixedid0000000001"
+
+
+@pytest.mark.parametrize("status", [502, 503, 504, 408, 429, None])
+def test_a_gateway_error_keeps_the_result_entry(proj, run, new_ticket, conn, monkeypatch, status):
+    from orch import relay
+    from orch.errors import Refused
+
+    tid, at = _prep(proj, run, new_ticket, "Gateway")
+
+    def boom(*a, **k):
+        e = Refused("x")
+        e.status = status
+        raise e
+
+    monkeypatch.setattr(relay, "send_text", boom)
+    phone_view.sync(proj, now=at + 100)
+    assert phone_view.load_state(proj)["results"][tid]["sent"] is False
+
+
+def test_view_fallback_that_hits_409_is_a_send(proj, run, new_ticket, conn, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    tid = new_ticket("Stored")
+    calls = []
+
+    def post(root, raw):
+        calls.append(raw)
+        e = Refused("x")
+        e.status = 400 if len(calls) == 1 else 409
+        raise e
+
+    monkeypatch.setattr(relay, "_post_message", post)
+    msg = relay.send_text(proj, "phones", "Ready", tid, "result", mid="m_fixedid0000000002")
+    assert len(calls) == 2 and msg["id"] == "m_fixedid0000000002"
+
+
+def test_permanent_refusals_are_claimed_at_most_three_times(proj, run, new_ticket, conn, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    tid, at = _prep(proj, run, new_ticket, "Never")
+    attempts = []
+
+    def no(root, to, text, t, kind, **k):
+        if kind == "result":
+            attempts.append(1)
+        e = Refused("no")
+        e.status = 400
+        raise e
+
+    monkeypatch.setattr(relay, "send_text", no)
+    for i in range(8):
+        phone_view.sync(proj, now=at + 100 * (i + 1))
+    assert len(attempts) == phone_view.RESULT_MAX_CLAIMS

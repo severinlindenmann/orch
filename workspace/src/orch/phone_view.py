@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -926,6 +927,7 @@ def _just_finished(prev, ticket: dict) -> bool:
     return prev is not None and prev not in FINISHED and ticket.get("status") in FINISHED
 
 
+RESULT_MAX_CLAIMS = 3  # claims per review round after definite refusals
 RESULT_LEASE = 30  # seconds an unsent result record is left to the pass that claimed it before a retry
 
 
@@ -934,12 +936,15 @@ def _claim_result(state: dict, tid: str, to: str) -> dict | None:
     {mid, nonce, to, at, sent} per (ticket, review round). Returns the new entry, or None when this round
     already has one (sent, or claimed and still to be retried by _retry_results). The entry keeps its message
     id, so every retry sends the same message and the relay drops a duplicate. It is dropped when the ticket
-    is seen outside Review/Done (a new round) or on a definite refusal (compare-and-set on the nonce)."""
+    is seen outside Review/Done (a new round: an unsent result is dropped when the ticket leaves Review/Done)
+    or on a definite refusal (compare-and-set on the nonce, at most RESULT_MAX_CLAIMS times per round)."""
     from orch import relay
 
     results = state.setdefault("results", {})
     if tid in results:
         return None
+    if state.get("result_refused", {}).get(tid, 0) >= RESULT_MAX_CLAIMS:
+        return None  # the relay refused this round's result for good several times: stop asking
     rec = {
         "mid": relay.new_id(),
         "nonce": f"{os.getpid()}-{time.monotonic_ns()}",
@@ -967,11 +972,10 @@ def _retry_results(state: dict, all_: list, skip: set) -> list[tuple]:
 
 
 def _definite_refusal(e: Refused) -> bool:
-    """The relay said no for good (4xx other than 408/429). Anything else may have been stored."""
-    from orch import relay
-
+    """The relay said no for good: 400-499 except 408 and 429. A 5xx (also 502/503), a timeout or no status
+    may have been stored, so those keep the entry."""
     status = getattr(e, "status", None)
-    return status is not None and not relay._unreachable(e)
+    return isinstance(status, int) and 400 <= status < 500 and status not in (408, 429)
 
 
 def sync(root: Path, now: float | None = None) -> list[str]:
@@ -1003,23 +1007,19 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             fin = _claim_result(state, tid, rec["to"]) if _just_finished(rec.get("status"), t) else None
             due.append((tid, rec["to"], t, fin, rec.get("status"), sig))
             rec.update(sig=sig, at=now, status=t.get("status"))
-        nonce = f"{os.getpid()}-{time.monotonic_ns()}"  # which pass claimed it (the undo checks it)
         for t in all_:
             tid, prev = t["id"], seen.get(t["id"])
             seen[tid] = t.get("status")
             if t.get("status") not in FINISHED:
                 state.get("results", {}).pop(tid, None)  # left Review/Done: the next finish is a new round
+                state.get("result_refused", {}).pop(tid, None)
             if tid in state["tickets"] or not _just_finished(prev, t):
                 continue
             with contextlib.suppress(Refused, OSError, ValueError):
                 if on or mobile_mode.from_phone(root, tid):
                     if fin := _claim_result(state, tid, "phones"):
                         due.append((tid, "phones", t, fin, prev, None))
-                        state.setdefault("claims", {})[tid] = nonce
         due.extend(_retry_results(state, all_, {d[0] for d in due if d[3]}))
-        claims[0] = nonce
-
-    claims = [None]
 
     update_state(root, claim)
     sent = []
@@ -1045,12 +1045,6 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                         rec.pop("status", None)
                     else:
                         rec["status"] = before
-                elif rec is None and st.get("claims", {}).get(tid) == claims[0]:  # ours, not a later claim
-                    st["claims"].pop(tid, None)
-                    if before is None:
-                        st["status"].pop(tid, None)
-                    else:
-                        st["status"][tid] = before
 
             with contextlib.suppress(Refused):
                 update_state(root, undo)
@@ -1069,6 +1063,12 @@ def _send_result(root: Path, tid: str, to: str, t: dict, rec: dict) -> bool:
             return  # a newer round's entry is never touched
         if drop:
             del st["results"][tid]
+            n = st.setdefault("result_refused", {})
+            n[tid] = n.get(tid, 0) + 1
+            if n[tid] >= RESULT_MAX_CLAIMS:
+                logging.getLogger("orch").warning(
+                    "result push for %s refused %d times: giving up", tid, n[tid]
+                )
             st.setdefault("status", {})[tid] = "open"  # seen as just finished again: claimed next pull
             if tid in st["tickets"]:
                 st["tickets"][tid].update(sig=None, at=0, status="open")
