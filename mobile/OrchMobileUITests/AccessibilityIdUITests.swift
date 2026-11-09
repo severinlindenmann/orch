@@ -56,6 +56,11 @@ final class AccessibilityIdUITests: XCTestCase {
         let status = element(app, "tasks-toggle")
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: status)
         XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 20), .completed, "ticket status line hittable", file: file, line: line)
+        // The navigation bar finishes its push after the content (iOS 26 keeps the old and new toolbar during it): one Back
+        // button = the bar settled. A duplicate that stays is still caught: this wait then fails, and so does the snapshot.
+        let backs = app.descendants(matching: .any).matching(identifier: "chat-back")
+        let oneBack = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 1"), object: backs)
+        XCTAssertEqual(XCTWaiter.wait(for: [oneBack], timeout: 20), .completed, "one navigation bar after the push", file: file, line: line)
     }
 
     @MainActor
