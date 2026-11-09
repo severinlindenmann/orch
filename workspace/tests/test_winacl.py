@@ -376,3 +376,37 @@ def test_profile_lookup_failure_is_refused(monkeypatch):
     monkeypatch.setattr(winacl, "_profile_raw", lambda: (_ for _ in ()).throw(OSError("x")))
     with pytest.raises(Refused):
         winacl.profile_dir()
+
+
+def _read_fails_once(monkeypatch):
+    real, n = hp.saferead.read_private, []
+
+    def once(*a):
+        if not n:
+            n.append(1)
+            return None  # a transient read error, once
+        return real(*a)
+
+    monkeypatch.setattr(hp.saferead, "read_private", once)
+
+
+def test_read_none_with_a_clean_file_on_windows_is_unknown_not_a_reset(win, tws, monkeypatch):
+    key = hp.human_key(tws)
+    _read_fails_once(monkeypatch)
+    with pytest.raises(winacl.Unknown):
+        hp.human_key(tws, create=False)
+    assert hp.human_key(tws, create=False) == key and hp.take_notices(tws) == []
+
+
+def test_read_none_with_a_real_finding_still_resets(win, tws, monkeypatch):
+    key = hp.human_key(tws)
+    d = hp.key_dir(tws, create=False)
+    os.link(d / "human.key", d / "second-name")  # a second name: a finding, not a transient error
+    assert hp.human_key(tws) != key  # read_private is None for it: reset_protection rotates the key
+    assert [n["text"] for n in hp.take_notices(tws)] == [hp.RESET_NOTICE]
+
+
+def test_posix_read_none_is_still_a_loose_file(tws, monkeypatch):
+    key = hp.human_key(tws)
+    _read_fails_once(monkeypatch)
+    assert hp.human_key(tws) != key  # POSIX behaviour unchanged: reset
