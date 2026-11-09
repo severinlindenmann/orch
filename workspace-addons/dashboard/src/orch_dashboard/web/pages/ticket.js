@@ -435,6 +435,16 @@ function artifactsPanel(t) {
     }),
     links.length ? h('section', {}, h('h2', {}, 'References'), links.map(l => linkRow(t, l, false))) : null);
 }
+function ticketFiles(t) {
+  const files = snapshot ? [] : array(artifactData.get(t.id)?.data?.files);
+  if (!files.length) return null;
+  return h('section', {className:'ticket-files', 'data-key':'ticket-files'}, h('h3', {}, 'Files'),
+    h('div', {className:'ticket-file-chips'}, ...files.map(file => {
+      const chip = button('', 'chip', () => previewFile(t.id, 'artifacts', file.name));
+      chip.append(el('span', '', file.name), el('span', 'meta', sizeText(file.size)));
+      return chip;
+    })));
+}
 async function previewFile(tid, kind, fileName) {
   if (snapshot || !tid || !fileName) return;
   const {d, actions} = dialog(fileName, 'sheet');
@@ -691,7 +701,7 @@ function detail(t) {
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
       !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),
-      panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, children.length || (!parent && !t.parent) ? ticketParts(t, children) : null, tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
+      panel('overview', [t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, children.length || (!parent && !t.parent) ? ticketParts(t, children) : null, ticketFiles(t), tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
       panel('tasks', tasksCard('tasks')),
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),

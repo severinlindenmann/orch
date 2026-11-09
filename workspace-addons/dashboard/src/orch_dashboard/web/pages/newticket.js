@@ -1,17 +1,122 @@
 'use strict';
+const ticketFileTypes = {text:/\.(txt|md|csv|tsv|json|log|xml|yml|yaml|toml|ini)$/i, image:/\.(png|jpg|jpeg|gif|webp)$/i};
+function ticketFileType(name) {
+  return ticketFileTypes.text.test(name) ? 'text' : ticketFileTypes.image.test(name) ? 'image' : '';
+}
+function ticketFileError(file, files) {
+  if (!ticketFileType(file.name)) return file.name + ': only text files and pictures';
+  if (file.size > 2 * 1024 * 1024) return file.name + ' is over 2 MB';
+  if (files.length >= 4) return 'At most 4 files';
+  if (files.reduce((sum, item) => sum + item.size, file.size) > 3.5 * 1024 * 1024) return 'Files are over 3.5 MB';
+  return '';
+}
+function ticketTextTitle(text, limit) {
+  return (text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '').slice(0, limit);
+}
+function ticketBase64(dataURL) {
+  return dataURL.slice(dataURL.indexOf(',') + 1);
+}
 // New ticket / edit ticket dialog.
 function ticketForm(t) {
   const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
   let optionalFields = fields;
+  let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
+  let updateAttachments = () => {};
+  const updateValidity = () => {
+    if (t) return;
+    const empty = !inputs.text.value.trim() && !pastedText && !files.length;
+    inputs.text.required = empty;
+    inputs.text.setCustomValidity(empty ? 'What needs doing?' : '');
+  };
+  d.addEventListener('close', () => {
+    closed = true;
+    for (const file of files) if (file.url) URL.revokeObjectURL(file.url);
+  });
   if (!t) {
     const label = el('label', '', 'What needs doing?');
     const input = el('textarea', 'input new-ticket-text');
     input.name = 'text'; input.id = 'field-' + serial + '-text';
-    input.rows = 10; input.maxLength = 20000; input.required = true;
+    input.rows = 10; input.maxLength = 500000; input.required = true;
     input.placeholder = 'Paste or write it here. A short title or a long text with many points: the agent splits it into tasks.';
-    input.addEventListener('input', () => input.setCustomValidity(input.value.trim() ? '' : 'What needs doing?'));
+    input.addEventListener('input', updateValidity);
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
+    const zone = button('Drop files here (e.g. .md, .txt) or paste any amount of text', 'new-ticket-drop', () => picker.click());
+    const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
+    picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.xml,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
+    const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
+    const chips = el('div', 'new-ticket-files');
+    const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. The agent writes the title and a short description.');
+    const preview = file => {
+      const {d:previewDialog, actions:previewActions} = dialog(file.name, 'sheet');
+      previewActions.firstChild.textContent = 'Close';
+      const stage = el('div', 'new-ticket-preview');
+      if (file.type === 'image') {
+        const img = el('img'); img.alt = file.name; img.src = file.url; stage.append(img);
+      } else {
+        const pre = el('pre'); pre.textContent = file.text.slice(0, 200000); stage.append(pre);
+      }
+      previewDialog.append(stage, previewActions); window.orch.open(previewDialog);
+    };
+    updateAttachments = () => {
+      chips.replaceChildren();
+      const addChip = (file, remove, pasted = false) => {
+        const row = el('div', 'chip new-ticket-file');
+        const body = button('', 'new-ticket-file-main', () => preview(file));
+        body.append(el('span', '', file.name), el('span', 'meta', sizeText(file.size) + (pasted ? ' (pasted text)' : '')));
+        const x = button('×', 'new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + file.name);
+        row.append(body, x); chips.append(row);
+      };
+      if (pastedText) addChip({name:'note.md', text:pastedText, size:new Blob([pastedText]).size, type:'text'}, () => { pastedText = ''; updateAttachments(); }, true);
+      for (const file of files) addChip(file, () => {
+        files = files.filter(item => item !== file);
+        if (file.url) URL.revokeObjectURL(file.url);
+        updateAttachments();
+      });
+      help.hidden = !pastedText; updateValidity();
+    };
+    const addFiles = incoming => {
+      reading = reading.then(async () => {
+        fileError.textContent = '';
+        const errors = [];
+        for (const file of incoming) {
+          if (closed) break;
+          const problem = ticketFileError(file, files);
+          if (problem) { errors.push(problem); continue; }
+          try {
+            const type = ticketFileType(file.name);
+            const item = {name:file.name, size:file.size, type};
+            if (type === 'text') item.text = await file.text();
+            else item.data = ticketBase64(await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error);
+              reader.readAsDataURL(file);
+            }));
+            if (closed) break;
+            if (type === 'image') item.url = URL.createObjectURL(file);
+            files.push(item); updateAttachments();
+          } catch (_) { errors.push(file.name + ': could not read'); }
+        }
+        fileError.textContent = errors.join('\n');
+      });
+    };
+    picker.addEventListener('change', () => { addFiles(Array.from(picker.files)); picker.value = ''; });
+    for (const target of [input, zone]) {
+      target.addEventListener('dragover', event => { if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault(); });
+      target.addEventListener('drop', event => {
+        if (!event.dataTransfer?.files.length) return;
+        event.preventDefault(); addFiles(Array.from(event.dataTransfer.files));
+      });
+    }
+    input.addEventListener('paste', event => {
+      const text = event.clipboardData?.getData('text/plain') || '';
+      if (text.length <= 1500) return;
+      event.preventDefault();
+      const combined = pastedText ? pastedText + '\n\n' + text : text;
+      if (combined.length > 500000) { fileError.textContent = 'Text is over 500000 characters'; return; }
+      pastedText = combined; updateAttachments();
+    });
+    fields.append(zone, picker, fileError, chips, help); updateAttachments();
     const options = el('details', 'new-ticket-options');
     optionalFields = el('div', 'form-fields');
     options.append(el('summary', '', 'More options'), optionalFields); fields.append(options);
@@ -51,7 +156,9 @@ function ticketForm(t) {
   let created = null, creationUnresolved = false;
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!t) inputs.text.setCustomValidity(inputs.text.value.trim() ? '' : 'What needs doing?');
+    await reading;
+    if (closed) return;
+    updateValidity();
     if (!form.reportValidity() || submit.disabled || creationUnresolved) return;
     submit.disabled = true; error.textContent = ''; reload.hidden = true;
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
@@ -59,13 +166,19 @@ function ticketForm(t) {
     if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision});
     else {
       const fullText = inputs.text.value;
-      values.title = fullText.split(/\r?\n/).map(line => line.trim()).find(Boolean).slice(0, 200);
-      values.note = /[\r\n]/.test(fullText) || fullText.trim() !== values.title ? fullText : '';
+      if (fullText.length > 1500) {
+        const combined = pastedText ? pastedText + '\n\n' + fullText : fullText;
+        if (combined.length > 500000) { error.textContent = 'Text is over 500000 characters'; submit.disabled = false; return; }
+        pastedText = combined; inputs.text.value = ''; updateAttachments();
+      }
+      const longText = pastedText, shortText = inputs.text.value;
+      values.title = ticketTextTitle(fullText.trim() ? fullText : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length ? 80 : 200);
+      values.note = shortText.length <= 1500 && (/[\r\n]/.test(shortText) || shortText.trim() !== values.title) ? shortText : '';
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
-        // m1-api: switch to the paste action when it lands
-        result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))});  // one write, one history line
+        result = await act('ticket.new', {title:values.title, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})});  // one write, one history line
         if (result.ok) {
+          if (result.state?.attached?.failed?.length) window.orch.toast('The ticket was created. Not saved: ' + result.state.attached.failed.join(', '), 'error');
           created = tickets().filter(t => t.title === values.title && !previous.has(t.id)).sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0))[0];
           if (!created) {
             creationUnresolved = true;

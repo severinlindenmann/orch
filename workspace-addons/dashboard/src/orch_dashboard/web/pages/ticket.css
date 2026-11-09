@@ -67,3 +67,7 @@
 .ticket-result .btn { justify-self: start; min-height: 44px; }
 .ticket-part, .ticket-heading > a, .ticket-details a { min-height: 44px; display: flex; align-items: center; }
 .ticket-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ticket-files h3 { margin: 0 0 8px; font-size: 13px; }
+.ticket-file-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.ticket-file-chips .chip { display: inline-flex; gap: 8px; cursor: pointer; max-width: 100%; }
+.ticket-file-chips .chip > :first-child { overflow-wrap: anywhere; }

@@ -152,3 +152,20 @@ test('loading is keyed and busy; connection notice offers retry and details', ()
   connection.children[1].click(); assert.deepEqual(calls, ['refresh']);
   ctx.connectionNotice(connection, true); assert.match(connection.children[0].children[0], /Showing the last update/);
 });
+
+test('act keeps small requests alive and omits keepalive for large bodies', async () => {
+  const requests = [];
+  const ctx = context(async (url, options) => {
+    requests.push(options);
+    return {status:200, json:async () => ({tickets:[]})};
+  });
+  for (const size of [100, 59999, 60000]) {
+    const overhead = JSON.stringify({op:'ticket.new', args:{long_text:''}}).length;
+    await ctx.act('ticket.new', {long_text:'a'.repeat(size - overhead)});
+  }
+  assert.equal(requests[0].keepalive, true);
+  assert.equal(requests[1].body.length, 59999);
+  assert.equal(requests[1].keepalive, true);
+  assert.equal(requests[2].body.length, 60000);
+  assert.equal(Object.hasOwn(requests[2], 'keepalive'), false);
+});
