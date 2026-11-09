@@ -948,3 +948,14 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
     ):
         assert _post_raw(act_server, {"op": "ticket.new", "args": args})[0] == 400, args
     assert acts(act_orch) == []  # nothing was created
+
+@pytest.mark.parametrize("value", [True, False, None])
+def test_ticket_new_plan_first(value):
+    _, flags, _ = actions._ticket_new({"title": "Plan", "plan_first": value})
+    assert ("--plan-first" in flags) is (value is True)
+
+
+@pytest.mark.parametrize("value", ["true", 1, [], {}])
+def test_ticket_new_plan_first_requires_boolean(value):
+    with pytest.raises(actions.BadRequest):
+        actions._ticket_new({"title": "Plan", "plan_first": value})

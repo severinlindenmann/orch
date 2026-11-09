@@ -366,6 +366,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
     )
     x.add_argument(
+        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -413,6 +416,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
     )
+    x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
+    x.add_argument("id")
+    x.add_argument("--goal", required=True)
+    x.add_argument("--not-included", dest="not_included")
     x = t.add_parser(
         "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
     )
@@ -665,6 +672,7 @@ def run(args: argparse.Namespace) -> None:
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
+            plan_first=args.plan_first,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -747,6 +755,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "title":
         t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
         _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "plan":
+        t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
+        _out(args, t, "Plan written.")
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         r = tickets.attach(root, args.id, args.name, data, by())

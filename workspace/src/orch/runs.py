@@ -897,6 +897,11 @@ def _description_plan(ticket: dict) -> list[str]:
 def _done_when_plan(ticket: dict) -> list[str]:
     if not ticket.get("done_when"):
         return []
+    if _plan_open(ticket):  # the plan comes first: no "then start"
+        return [
+            "The person described what should be true when it is done: "
+            f"{_clip(ticket['done_when'], 2000)}. Use it for the done-when of the steps in the plan."
+        ]
     covers = 'Give each task `--covers "<the part of Done when it covers, quoted>"` so every part has a task.'
     if ticket.get("checklist"):
         if any(c.get("covers") for c in ticket["checklist"]):
@@ -911,6 +916,40 @@ def _done_when_plan(ticket: dict) -> list[str]:
         "The person described what should be true when it is done: "
         f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
         f"(one check per thing that must be true). {covers} Then start."
+    ]
+
+
+PLAN_READY = "Plan ready"  # the one question of a "Show plan first" ticket (dashboard keys on it)
+PLAN_START = "Start work"
+PLAN_CHANGE = "Which step, and what should change?"
+
+
+def _plan_open(ticket: dict) -> bool:
+    """A plan_first ticket whose plan the person has not yet approved: no "Plan ready" question was answered
+    "Start work". (Open question, or answered with a change: the plan is still being made.)"""
+    if not ticket.get("plan_first"):
+        return False
+    return not any(
+        str(q.get("text", "")).startswith(PLAN_READY) and q.get("answer") == PLAN_START
+        for q in ticket.get("questions") or []
+    )
+
+
+def _plan_first_plan(ticket: dict) -> list[str]:
+    """Show plan first: plan, ask once, stop. The rule stays until "Plan ready" is answered "Start work"."""
+    if not _plan_open(ticket):
+        return []
+    tid = ticket["id"]
+    return [
+        "The person chose to see the plan first. Do NOT change any project file yet. Make the plan as in the "
+        "skill section 'Plan big work': this ticket is the parent, one sub-ticket per step with its own "
+        f"done-when (`orch ticket new --parent {tid}`), in order. Write the goal and what is not included: "
+        f'orch ticket plan {tid} --goal "<goal>" --not-included "<what is not part of it>". '
+        f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
+        '--option "Change a step" --recommend "Start work", and stop. Start the steps only after the '
+        'answer is "Start work". If the answer is "Change a step" (or asks for any change), ask one more '
+        f'question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, then ask '
+        f'"{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 
 
@@ -941,7 +980,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
-    out[1:1] = _done_when_plan(ticket)
+    out[1:1] = _plan_first_plan(ticket) + _done_when_plan(ticket)  # the plan instruction comes first
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("description"):  # written by an agent, from the person's text: not the person's words
@@ -987,6 +1026,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         parts.append("New input:\n" + _items_text(items))
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
+    parts[:0] = _plan_first_plan(ticket)
     parts.extend(_done_when_plan(ticket))
     return "\n\n".join(parts)[:12000]
 

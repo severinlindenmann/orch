@@ -1,4 +1,4 @@
-/* Question card logic, no DOM. One tap sends nothing for 5 seconds (Undo); then exactly one send.
+/* Question card logic, no DOM. Plain-question options (oneTap, no kind) send immediately; everything else waits 5 seconds (Undo); exactly one send.
    idle -> pending -> sending -> sent | undone | conflict | error ;  a reload with an unsent pending answer -> notsent.
    Clock, send function, storage and id source are injected so tests need no browser and no real time. */
 (function (root, factory) {
@@ -52,7 +52,7 @@
       return '';
     }
 
-    function choose(text) {
+    function choose(text, {immediate = false} = {}) {
       if (state.phase === 'pending' || state.phase === 'sending') return {ok: false, error: 'Already answering.'};
       const error = validate(text);
       if (error) return {ok: false, error};
@@ -60,8 +60,11 @@
       deadline = clock.now() + undoMs;
       save({answer: text, actionId, at: clock.now()});
       set({phase: 'pending', answer: text, actionId, secondsLeft: Math.ceil(undoMs / 1000)});
-      tick = clock.setTimeout(countdown, 1000);
-      timer = clock.setTimeout(fire, undoMs);
+      if (immediate) { clear(); fire(); }
+      else {
+        tick = clock.setTimeout(countdown, 1000);
+        timer = clock.setTimeout(fire, undoMs);
+      }
       return {ok: true};
     }
 

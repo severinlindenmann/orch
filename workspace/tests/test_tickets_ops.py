@@ -368,6 +368,43 @@ def test_ask_refuses_curly_apostrophe_and_natural_language_machine_key(proj, run
     assert run(*base, '{"key": "paste your API key"}')[0] == 2
 
 
+def test_ticket_new_plan_first_flag(proj, run):
+    code, out, _ = run("ticket", "new", "Big work", "--plan-first", "--json", "--by", "human:tester")
+    assert code == 0
+    assert json.loads(out)["plan_first"] is True
+    assert read(proj, json.loads(out)["id"])["plan_first"] is True
+    plain = json.loads(run("ticket", "new", "Small", "--json", "--by", "human:tester")[1])
+    assert "plan_first" not in plain
+
+
+def test_plan_first_is_not_a_patchable_field():
+    with pytest.raises(tickets.Refused):
+        tickets.clean_field("plan_first", "true")
+
+
+def test_ticket_plan_goes_in_its_own_field_not_the_note(proj, run):
+    t = json.loads(
+        run("ticket", "new", "Big", "--plan-first", "--note", "My words", "--json", "--by", "human:t")[1]
+    )
+    code, out, _ = run(
+        "ticket",
+        "plan",
+        t["id"],
+        "--goal",
+        "Pay online",
+        "--not-included",
+        "refunds",
+        "--json",
+        "--by",
+        "agent:claude",
+    )
+    assert code == 0
+    got = read(proj, t["id"])
+    assert got["plan"] == {"goal": "Pay online", "not_included": "refunds", "by": "agent:claude"}
+    assert got["note"] == "My words"
+    assert run("ticket", "plan", t["id"], "--goal", "x" * 501, "--by", "agent:claude")[0] != 0
+
+
 def test_outcome_set_merge_and_clear(proj, run, new_ticket):
     tid = new_ticket()
     code = run("ticket", "outcome", tid, "--changed", "Added CSV export.", "--why", "Finance needs it")[0]
