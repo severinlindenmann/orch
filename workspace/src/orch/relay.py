@@ -642,6 +642,9 @@ def send_text(
         if ticket and (title := _update_title(root, ticket)):
             body["update"]["title"] = title
     to_phone = to == "phones" or to.startswith("ph_")
+    if general and not update and sender != "you" and to_phone:
+        if proposal := next((r for r in chat.clean_refs(root, refs or []) if r["kind"] == "proposal"), None):
+            return _send_proposal(root, to, text, proposal, body, reply_to, refs)
     if view is None:
         view = to_phone and update in phone_view.SEND_KINDS
     if isinstance(view, dict):  # a ready (light) snapshot
@@ -662,15 +665,57 @@ def send_text(
     if general and not update and not sender == "you":
         # a real text to the General conversation: kept in its history: the dashboard shows both ways
         try:
-            gid = tickets.ensure_general(root, tickets.current_actor())
-            tickets.apply_op(
-                root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True)
-            )
-            chat.record(
-                root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs
-            )
+            _record_general(root, msg, text, body, reply_to, refs)
         except (Refused, OSError):
             pass  # the text is sent; a missing history line never fails the send
+    return msg
+
+
+def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs) -> None:
+    from orch import chat
+
+    gid = tickets.ensure_general(root, tickets.current_actor())
+    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True))
+    chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)
+
+
+PROPOSAL_OPTIONS = ["make", "not_now"]
+
+
+def _send_proposal(
+    root: Path, to: str, text: str, proposal: dict, general_body: dict, reply_to, refs
+) -> dict:
+    """The General helper's ticket proposal on the phones (relay-api.md 'Ticket proposal question'):
+    ONE question
+    instead of the text, bound to its own message id. The asked record is written BEFORE the send."""
+    mid = new_id()
+    title = " ".join(clean_untrusted(str(proposal["title"]), 120).split())[:120] or "New ticket"
+    body = {
+        "question_id": f"proposal-{mid}",
+        "title": title,
+        "text": text,
+        "options": PROPOSAL_OPTIONS,
+        "recommended": None,
+        "proposal": "make_ticket",
+    }
+    asked = net.read_json(_asked_path(root), {})
+    asked[mid] = {
+        "ticket": None,
+        "question_id": body["question_id"],
+        "to": "phones",
+        "proposal": True,
+        "title": title,
+    }
+    net.write_json(_asked_path(root), asked, True)
+    try:
+        msg = _message(root, to, "question", body, None, reply_to, mid)
+    except Refused:
+        asked = net.read_json(_asked_path(root), {})
+        if asked.pop(mid, None) is not None:
+            net.write_json(_asked_path(root), asked, True)
+        raise
+    with contextlib.suppress(Refused, OSError):  # the question is sent; a missing history line never fails it
+        _record_general(root, msg, text, general_body, reply_to, refs)
     return msg
 
 
@@ -822,6 +867,98 @@ def _paired_phone(root: Path, frm: str) -> dict | None:
     return None
 
 
+def _proposal_asked(root: Path, msg: dict) -> dict | None:
+    asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
+    return asked if isinstance(asked, dict) and asked.get("proposal") is True else None
+
+
+def _person_asked(root: Path, msg: dict) -> bool:
+    """A question only a person decides (review, ticket proposal): never applied from an agent session."""
+    return _review_asked(root, msg) is not None or _proposal_asked(root, msg) is not None
+
+
+def _set_asked(root: Path, mid: str, **fields) -> dict:
+    asked = net.read_json(_asked_path(root), {})
+    rec = asked.get(mid)
+    if isinstance(rec, dict):
+        rec.update(fields)
+        net.write_json(_asked_path(root), asked, True)
+    return rec if isinstance(rec, dict) else {}
+
+
+def ack_proposal(root: Path, mid: str, made: dict) -> None:
+    """The ordinary ack ("Got it: <title>", with the new ticket and its key) that closes the phone's proposal
+    card, once, to the phone that answered (else all phones).
+    Only for a proposal that was asked on the phones."""
+    rec = net.read_json(_asked_path(root), {}).get(mid)
+    if not (isinstance(rec, dict) and rec.get("proposal") is True) or rec.get("acked"):
+        return
+    _set_asked(root, mid, acked=True)  # marked first: a lost ack is better than two
+    try:
+        send_text(
+            root,
+            str(rec.get("phone") or "phones"),
+            f"Got it: {made['title']}"[:300],
+            made["ticket"],
+            "ack",
+            mid,
+        )
+    except BaseException:
+        _set_asked(root, mid, acked=False)
+        raise
+
+
+def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
+    """An answer to a ticket proposal. It acts only when ALL hold: it comes from a phone paired with this
+    workspace (the relay-authenticated `from`, not group-routed), it answers THIS proposal's
+    question (reply_to),
+    the question is still open (first answer wins) and the proposal is not already a ticket. "make" = the
+    dashboard's Make ticket (chat.make_ticket, idempotent per proposal); "not_now" = a history line. Anything
+    else is a history line only. The actor is human:<stored phone name>, never taken from the body,
+    never an agent."""
+    from orch import chat
+
+    frm = str(msg.get("from", ""))
+    phone = _paired_phone(root, frm) if frm.startswith("ph_") else None
+    if phone is None or msg_group(msg):
+        return "ignored: only a phone paired with this workspace answers a ticket proposal", None
+    ans = clean_untrusted(str(msg.get("body", {}).get("answer")), 2000).strip().casefold()
+    if ans not in PROPOSAL_OPTIONS:
+        return "ignored: not an answer to a ticket proposal", None
+    name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
+    by, via = f"human:{name or frm}", "phone"
+    mid = str(msg.get("reply_to"))
+    title = str(asked.get("title") or "a proposal")
+
+    def line(text: str) -> None:
+        with contextlib.suppress(Refused, OSError):
+            tickets.note_history(root, tickets.ensure_general(root, by), by, text, via)
+
+    if net.read_json(_asked_path(root), {}).get(mid, {}).get("done"):
+        line(f'A second answer to the ticket proposal "{title}" was ignored')
+        return "ignored: the ticket proposal was already decided", None
+    state = chat.proposal_state(root, mid)
+    if state in ("made", "gone") or (state == "open" and ans == "not_now"):
+        _set_asked(root, mid, done=state if state != "open" else "not_now")
+        if ans == "not_now" and state == "open":
+            line(f'Not now, from the phone: the ticket proposal "{title}"')
+            return "ticket proposal: not now", None
+        line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
+        return "ignored: the ticket proposal was already decided", None
+    if ans == "not_now":  # making has started: it finishes, the answer changes nothing
+        line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
+        return "ignored: the ticket proposal was already decided", None
+    _set_asked(root, mid, phone=frm)
+    try:
+        made = chat.make_ticket(root, mid, None, by)
+    except Refused as e:
+        _set_asked(root, mid, done="refused")
+        line("A ticket proposal answer from the phone was not used: " + str(e)[:120])
+        return f"not applied: {e}", None
+    _set_asked(root, mid, done="make")
+    return f"made {made['key']} from a ticket proposal (via {via})", made["ticket"]
+
+
 def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
     """An answer to a review question. It acts only when ALL hold: it comes from a phone paired with this
     workspace (the relay-authenticated `from`, not a group-routed message), it answers THIS question message
@@ -958,6 +1095,8 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         return why, None
     if asked.get("review") is True:
         return _apply_review_answer(root, msg, asked)
+    if asked.get("proposal") is True:
+        return _apply_proposal_answer(root, msg, asked)
     by, via = _answer_by(msg, asked)
     try:
         t, q = tickets.answer(
@@ -1822,7 +1961,7 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                 after = None  # group hooks run after relay.lock is released (lock order: relay, never inside)
                 with locked(root):
                     if m["id"] not in seen(root):  # another reader may have handled it meanwhile
-                        if typ == "answer" and tickets.agent_tool() and _review_asked(root, m):
+                        if typ == "answer" and tickets.agent_tool() and _person_asked(root, m):
                             # accepting is the person's decision: never applied from an agent session; the
                             # workspace's own process picks the saved answer up (not marked seen)
                             note = "a review answer waits for the workspace to apply it"
