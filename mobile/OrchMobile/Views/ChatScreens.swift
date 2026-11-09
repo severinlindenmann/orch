@@ -57,9 +57,9 @@ enum ConversationRules {
         return items.dropFirst(index + 1).contains { $0.side == .them && $0.kind == .message && $0.label != nil }
     }
 
-    /// "2 of 5 · Working"; with no checklist only the status ("Working").
+    /// Checklist progress only; the status has its own pill.
     static func summaryText(done: Int, total: Int, status: String, separator: String = " · ") -> String {
-        total > 0 ? "\(done) of \(total)\(separator)\(status)" : status
+        total > 0 ? "\(done) of \(total) steps done" : ""
     }
 
     /// General only: acks (a workspace text with `reply_to`) naming a ticket for a General text of this phone.
@@ -104,6 +104,7 @@ struct ConversationView: View {
     @State private var dayDetails = false
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
     @State private var viewing: ArtifactItem?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var reply: ReplyPreview?
@@ -140,7 +141,7 @@ struct ConversationView: View {
     }
     private var title: String {
         switch resolved {
-        case .general: historyDay.map { ChatDay.label(forDay: $0, today: today) + " · read only" } ?? "Chat"
+        case .general: historyDay.map { ChatDay.label(forDay: $0, today: today) + " · read only" } ?? workspaceName
         case .starting: "New topic"
         case .topic: ticket.map { [$0.key, $0.displayTitle].compactMap { $0 }.joined(separator: " · ") } ?? "Topic"
         }
@@ -159,13 +160,10 @@ struct ConversationView: View {
             OfflineBanner()
             if let ticket {
                 summary(ticket)
-                HStack {
-                    Text("Chat").themeFont(17, .semibold)
-                    Spacer()
-                    if let answered = ConversationRules.answeredText(in: items) {
-                        Text(answered).themeFont(13).foregroundStyle(Theme.muted)
-                    }
-                }.padding(.horizontal, 16).padding(.vertical, 12)
+                if let answered = ConversationRules.answeredText(in: items) {
+                    Text(answered).themeFont(13).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 16).padding(.vertical, 8)
+                }
             }
             messages(items)
         }
@@ -173,7 +171,12 @@ struct ConversationView: View {
             .background(Theme.bg, ignoresSafeAreaEdges: .bottom)
             .background(Theme.bg.ignoresSafeArea(edges: .top))
             .foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier("conversation-view")
+            .navigationBarBackButtonHidden()
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { headerIcon("chevron.left") }
+                        .buttonStyle(.plain).accessibilityLabel("Back").accessibilityIdentifier("chat-back")
+                }.chatCircleBackground()
                 ToolbarItem(placement: .principal) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(title).themeFont(16, .semibold).lineLimit(1).accessibilityIdentifier("chat-title")
@@ -184,17 +187,16 @@ struct ConversationView: View {
                 if isGeneral && historyDay == nil {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { historyShown = true } label: {
-                            VStack(spacing: 2) { Image(systemName: "clock"); Text("History").themeFont(11) }
-                                .frame(minWidth: 44, minHeight: 44)
-                        }.accessibilityIdentifier("chat-history")
-                    }
+                            headerIcon("clock")
+                        }.buttonStyle(.plain).accessibilityLabel("History").accessibilityIdentifier("chat-history")
+                    }.chatCircleBackground()
                 }
                 if historyDay == nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
-                        Image(systemName: "info.circle").themeFont(18).frame(minWidth: 44, minHeight: 44)
-                    }.accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
-                }
+                        headerIcon("info.circle")
+                    }.buttonStyle(.plain).accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
+                }.chatCircleBackground()
                 }
             }
             .navigationBarTitleDisplayMode(.inline).toolbarColorScheme(.dark, for: .navigationBar)
@@ -205,14 +207,14 @@ struct ConversationView: View {
                     if historyDay != nil {
                         Button("Go to Today") { goToToday?() }.buttonStyle(WideButtonStyle(color: Theme.brand))
                     } else {
-                    if working(items, now: now) { StatusLine(isGeneral ? "\(workspaceName) helper is thinking…" : "\(workspaceName) is working…") }
-                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply)
+                    if working(items, now: now) { StatusLine(isGeneral ? "\(workspaceName) is thinking…" : "\(workspaceName) is working…") }
+                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(workspaceName: workspaceName, running: ticket.map { TopicStatus($0) == .working }, review: ticket.map { TopicStatus($0) == .review } ?? false, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply)
                     }
                 }
             }
             .sheet(isPresented: $historyShown) { ChatHistoryView(workspaceId: resolved.workspace) }
             .sheet(isPresented: $dayDetails) {
-                Text("The helper starts each day fresh at 04:00. Yesterday's chat stays in History. Nothing is deleted.")
+                Text("\(workspaceName) starts fresh at 04:00. Earlier chats stay in History.")
                     .themeFont(17).foregroundStyle(Theme.text).padding(24)
                     .presentationDetents([.medium]).presentationBackground(Theme.surface).presentationDragIndicator(.visible)
             }
@@ -226,12 +228,15 @@ struct ConversationView: View {
                 }
             }
     }
+    private func headerIcon(_ symbol: String) -> some View {
+        Image(systemName: symbol).themeFont(20).foregroundStyle(Theme.text)
+            .frame(width: 44, height: 44).background(Theme.surface3, in: Circle())
+    }
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
         else {
             HStack(spacing: 4) {
-                if isGeneral { Text("\(workspaceName) helper ·") }
-                else if resolved.ticket != nil { Text("\(workspaceName) ·") }
+                if resolved.ticket != nil { Text("\(workspaceName) ·") }
                 TimelineView(.everyMinute) { context in
                     let presence = model.presence(of: resolved.workspace, now: context.date)
                     HStack(spacing: 4) {
@@ -248,7 +253,7 @@ struct ConversationView: View {
                 if [.waitingOnYou, .review].contains(TopicStatus(ticket)) {
                     TicketStatusChip(status: TopicStatus(ticket))
                 }
-                if !([.waitingOnYou, .review].contains(TopicStatus(ticket)) && (ticket.view?.totalCount ?? 0) == 0) {
+                if (ticket.view?.totalCount ?? 0) > 0 {
                     Text(ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label))
                 }
                 Spacer(minLength: 8)
@@ -269,7 +274,7 @@ struct ConversationView: View {
                     Button { tasksShown = false } label: { Image(systemName: "xmark").frame(width: 44, height: 44).background(Theme.surface3, in: Circle()) }
                         .accessibilityLabel("Close tasks").accessibilityIdentifier("tasks-close")
                 }
-                Text("\(title) · \(ticket.map { TopicStatus($0).label } ?? "")").themeFont(13).foregroundStyle(Theme.muted)
+                Text(title).themeFont(13).foregroundStyle(Theme.muted)
                 if let view = ticket?.view {
                     if view.totalCount > 0 { ProgressBar(done: view.doneCount, total: view.totalCount) }
                     ForEach(Array(view.checklist.enumerated()), id: \.offset) { _, task in
@@ -287,7 +292,7 @@ struct ConversationView: View {
     private enum Row: Identifiable {
         case item(ConvItem, index: Int)
         case chip(StartedChip)
-        var id: String { switch self { case .item(let i, _): i.id; case .chip(let c): "chip-" + c.id } }
+        var id: String { switch self { case .item(let i, _): i.rowID; case .chip(let c): "chip-" + c.id } }
         var at: String { switch self { case .item(let i, _): i.at; case .chip(let c): c.at } }
         var isChip: Bool { if case .chip = self { true } else { false } }
     }
@@ -341,7 +346,7 @@ struct ConversationView: View {
                         .onAppear { atBottom = true; rememberRead() }
                         .onDisappear { atBottom = false }
                 }.padding(.horizontal, 16).padding(.vertical, 10)
-            }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively)
+            }.defaultScrollAnchor(.bottom).defaultScrollAnchor(.top, for: .alignment).scrollDismissesKeyboard(.interactively)
                 .accessibilityIdentifier("message-list")
                 // Not an overlay: the button takes its own row above the composer, so it never covers a bubble.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -351,7 +356,7 @@ struct ConversationView: View {
                             .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 12).padding(.bottom, 12)
                     }
                 }
-                .onChange(of: items.last?.id) { _, _ in
+                .onChange(of: items.last?.rowID) { _, _ in
                     if atBottom || items.last?.side == .me { scroll(proxy, to: "conversation-bottom", anchor: .bottom) }
                     rememberRead(bottomSeen: atBottom)   // the open conversation is read, also while scrolled up
                 }
@@ -365,11 +370,20 @@ struct ConversationView: View {
     }
     /// A tap on a picture, file or preview in the conversation: `id` is a blob id, or the id of a topic attachment / question preview.
     private func openArtifact(_ id: String) {
-        let found = model.conversationItems(resolved).lazy.flatMap(\.attachments).first { $0.blobId == id }.map { ArtifactItem($0, in: resolved) }
-            ?? ticket?.view?.attachments.first { $0.id == id || $0.blobId == id || $0.artifactId == id }.map { ArtifactItem($0, in: resolved) }
-            ?? model.tickets.lazy.compactMap { $0.view?.attachments.first { $0.id == id } }.first.map { ArtifactItem($0, in: resolved) }
+        let items: [ConvItem] = model.conversationItems(resolved)
+        var found: ArtifactItem? = nil
+        if let a = items.flatMap({ $0.attachments }).first(where: { $0.blobId == id }) { found = ArtifactItem(a, in: resolved) }
+        if found == nil, let a = items.flatMap({ $0.artifacts }).first(where: { $0.id == id || $0.blobId == id || $0.artifactId == id }) {
+            found = ArtifactItem(a, in: resolved)
+        }
+        if found == nil, let a = ticket?.view?.attachments.first(where: { $0.id == id || $0.blobId == id || $0.artifactId == id }) {
+            found = ArtifactItem(a, in: resolved)
+        }
+        if found == nil, let a = model.tickets.compactMap({ $0.view?.attachments.first { $0.id == id } }).first {
+            found = ArtifactItem(a, in: resolved)
+        }
         guard let item = found else { return }
-        if item.kind == .link { if let url = item.safeLinkURL { openURL(url) } } else { viewing = item }
+        if item.kind == ArtifactItem.Kind.link { if let url = item.safeLinkURL { openURL(url) } } else { viewing = item }
     }
     private func chipView(_ chip: StartedChip) -> some View {
         Button {
@@ -400,7 +414,7 @@ struct ConversationView: View {
             }, onOpenArtifact: openArtifact, isStale: stale, position: ConversationRules.openPosition(of: item.id, in: items))
         } else if item.side == .me && item.voice != nil {
             OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: historyDay == nil ? retry : {}, onDiscard: historyDay == nil ? discard : {}, onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
-        } else if item.side == .them && item.canPlay && item.speak != nil {
+        } else if item.side == .them && item.label == nil && item.canPlay && item.speak != nil {
             AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName, onReply: historyDay == nil ? replyHere : nil)
         } else {
             MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
@@ -416,8 +430,7 @@ struct ConversationView: View {
             VStack(spacing: 12) {
                 Image(systemName: "bubble.left.and.bubble.right").themeFont(32).foregroundStyle(Theme.brand)
                 if case .general = resolved {
-                    Text("Say hello to \(workspaceName) helper").themeFont(20, .semibold)
-                    Text("Talk with \(workspaceName) helper here.").themeFont(15).foregroundStyle(Theme.muted)
+                    Text("Say hello to \(workspaceName)").themeFont(20, .semibold)
                 } else { Text("Nothing here yet").themeFont(17).foregroundStyle(Theme.muted) }
             }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
         }
@@ -432,7 +445,7 @@ struct ConversationView: View {
     private func focusQuestion(_ focus: String?, proxy: ScrollViewProxy) {
         guard let focus, items.contains(where: { $0.id == focus }) else { return }
         scrolledQuestion = focus
-        scroll(proxy, to: focus, anchor: .center)
+        scroll(proxy, to: items.first { $0.id == focus }?.rowID ?? focus, anchor: .center)
     }
     private func scroll(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
         if reduceMotion { proxy.scrollTo(id, anchor: anchor) }
@@ -462,5 +475,13 @@ struct TicketStatusChip: View {
         Text(status.label).themeFont(13, .medium).foregroundStyle(color)
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(color.opacity(0.16), in: Capsule())
+    }
+}
+
+// iOS 26 otherwise joins adjacent toolbar actions in one glass pill.
+private extension ToolbarItem {
+    @ToolbarContentBuilder func chatCircleBackground() -> some ToolbarContent {
+        if #available(iOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) }
+        else { self }
     }
 }

@@ -123,7 +123,6 @@ enum ChatBuilder {
                 let title = u.title ?? msg.body.text
                 out.append(ChatItem(id: "sys-" + m.id, at: msg.createdAt,
                                     kind: .system("Ticket created: " + [key, title].compactMap { $0 }.joined(separator: " · "))))
-                out.append(ChatItem(id: m.id, at: msg.createdAt + "~", kind: .theirs(msg.body.text, label: nil)))
             } else if msg.ticket == nil {
                 out.append(ChatItem(id: m.id, at: msg.createdAt, kind: m.fromPhone ? .mine(msg.body.text, queued: false) : .theirs(msg.body.text, label: nil)))
             }
@@ -205,9 +204,10 @@ enum ChatBuilder {
 
     // MARK: Composer wording
 
-    /// Mockup: an open topic (running or run state unknown) says "Goes in after this step"; only a finished one "Saved for the next run".
-    static func composerNote(running: Bool?, finished: Bool = false) -> String {
-        finished && running != true ? "Saved for the next run" : "Goes in after this step"
+    /// Only an active ticket needs a delivery hint.
+    static func composerNote(workspaceName: String, running: Bool?, review: Bool = false, finished: Bool = false) -> String? {
+        guard !review, !finished, running == true else { return nil }
+        return "\(workspaceName) reads this after its current step"
     }
 
     /// Display time: "9:41" today, otherwise a short date.

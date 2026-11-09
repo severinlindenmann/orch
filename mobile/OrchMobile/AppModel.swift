@@ -444,7 +444,7 @@ final class AppModel {
         await flushOutbox()
         if let now = outbox.item(clientId: item.clientId) { return now }
         // Already listed by the relay (so removed from the outbox): report it as sent.
-        var done = item; done.sentMessageId = messages.first { $0.clientId == item.clientId }?.id
+        var done = item; done.sentMessageId = messages.first { ($0.clientId ?? $0.message.body.clientId) == item.clientId }?.id
         return done
     }
     /// Try a refused message again / drop it.
