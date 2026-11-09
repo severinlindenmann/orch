@@ -28,6 +28,19 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pytest -q -n auto
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workspace-addons/sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q -n auto
   focus:
     runs-on: ubuntu-latest
     defaults:

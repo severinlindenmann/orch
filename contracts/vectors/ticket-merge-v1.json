@@ -1,0 +1,2996 @@
+{
+ "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now) must give `expect` (null = cannot merge, caller pauses) and the SAME result with a and b swapped. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now) -> {changed, counter}. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys).",
+ "now": "2026-11-10T12:00:00Z",
+ "tickets": [
+  {
+   "name": "scalar-one-side",
+   "rule": "2",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "owner": "Ann"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "due": "2026-12-01"
+   },
+   "expect": {
+    "due": "2026-12-01",
+    "key": "DM1-1",
+    "owner": "Ann",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "scalar-same-both",
+   "rule": "2",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "note": "x"
+   },
+   "expect": {
+    "key": "DM1-1",
+    "note": "x",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "title-both-differ-newer-wins",
+   "rule": "2+D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Export invoices",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "CSV export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "CSV export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: title \"Export invoices\" was replaced"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "note-summary-owner-due-losers-to-history",
+   "rule": "2+D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "note": "mine note",
+    "summary": "mine sum",
+    "owner": "Bob",
+    "due": "2026-12-02"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "note": "their note",
+    "summary": "their sum",
+    "owner": "Ann",
+    "due": "2026-12-01"
+   },
+   "expect": {
+    "due": "2026-12-02",
+    "key": "DM1-1",
+    "note": "mine note",
+    "owner": "Bob",
+    "summary": "mine sum",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: due \"2026-12-01\" was replaced"
+     },
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: note \"their note\" was replaced"
+     },
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: owner \"Ann\" was replaced"
+     },
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: summary \"their sum\" was replaced"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "waiting-on-newer-wins",
+   "rule": "2",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "waiting_on": {
+     "kind": "external",
+     "ref": "bank"
+    }
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "waiting_on": {
+     "kind": "ticket",
+     "ref": "t_zzz999"
+    }
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "waiting_on": {
+     "kind": "ticket",
+     "ref": "t_zzz999"
+    },
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "unknown-field-kept",
+   "rule": "9",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "x_custom": {
+     "k": 1
+    }
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "owner": "Ann"
+   },
+   "expect": {
+    "key": "DM1-1",
+    "owner": "Ann",
+    "title": "Invoice export",
+    "x_custom": {
+     "k": 1
+    },
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "status-one-side",
+   "rule": "3",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "active",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "owner": "Ann"
+   },
+   "expect": {
+    "key": "DM1-1",
+    "owner": "Ann",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "active",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "status-final-beats-open-regardless-of-time",
+   "rule": "3",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "active",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "done",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: status active was replaced by done"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "status-done-vs-dropped-newer-wins",
+   "rule": "3",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "dropped",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "dropped",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: status done was replaced by dropped"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "status-nonfinal-newer-wins",
+   "rule": "3",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "waiting",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "review",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "review",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: status waiting was replaced by review"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "done-with-new-open-item-reopens",
+   "rule": "3",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "export",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok",
+        "at": "2026-11-09T09:00:00Z",
+        "by": "human:Ann"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "export",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok",
+        "at": "2026-11-09T09:00:00Z",
+        "by": "human:Ann"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "export",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok",
+        "at": "2026-11-09T09:00:00Z",
+        "by": "human:Ann"
+       }
+      ]
+     },
+     {
+      "id": "c2",
+      "text": "tests",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "active",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "export",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok",
+        "at": "2026-11-09T09:00:00Z",
+        "by": "human:Ann"
+       }
+      ]
+     },
+     {
+      "id": "c2",
+      "text": "tests",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: reopened, a new checklist item came in"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "checklist-additions-union",
+   "rule": "4",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c3",
+      "text": "three",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c4",
+      "text": "four",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [
+     {
+      "done": false,
+      "id": "c1",
+      "text": "one",
+      "evidence": []
+     },
+     {
+      "done": false,
+      "id": "c2",
+      "text": "two",
+      "evidence": []
+     },
+     {
+      "id": "c3",
+      "text": "three",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c4",
+      "text": "four",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "checklist-edit-beats-delete",
+   "rule": "4",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one edited",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one edited",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "done": false,
+      "id": "c2",
+      "text": "two",
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "checklist-unedited-delete-removes",
+   "rule": "4",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "owner": "Ann"
+   },
+   "expect": {
+    "key": "DM1-1",
+    "owner": "Ann",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [
+     {
+      "done": false,
+      "id": "c1",
+      "text": "one",
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "checklist-same-id-clash-renumbers-newer",
+   "rule": "4",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c3",
+      "text": "theirs",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "why",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null,
+      "check": "c3"
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c3",
+      "text": "mine",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q2",
+      "text": "when",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null,
+      "check": "c3"
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [
+     {
+      "done": false,
+      "id": "c1",
+      "text": "one",
+      "evidence": []
+     },
+     {
+      "done": false,
+      "id": "c2",
+      "text": "two",
+      "evidence": []
+     },
+     {
+      "id": "c3",
+      "text": "theirs",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c4",
+      "text": "mine",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "why",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null,
+      "check": "c3"
+     },
+     {
+      "id": "q2",
+      "text": "when",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null,
+      "check": "c4"
+     }
+    ],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: c3 renumbered to c4 (both sides added one)"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "checklist-item-fields-newer-and-evidence-union",
+   "rule": "4",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "x",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "x",
+      "done": true,
+      "evidence": [
+       {
+        "type": "pr",
+        "ref": "pr-1",
+        "at": "2026-11-09T09:00:00Z",
+        "by": "human:Ann"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "x",
+      "done": true,
+      "evidence": [
+       {
+        "type": "pr",
+        "ref": "pr-2",
+        "at": "2026-11-09T10:00:00Z",
+        "by": "human:Ann"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "x",
+      "evidence": [
+       {
+        "type": "pr",
+        "ref": "pr-1",
+        "at": "2026-11-09T09:00:00Z",
+        "by": "human:Ann"
+       },
+       {
+        "type": "pr",
+        "ref": "pr-2",
+        "at": "2026-11-09T10:00:00Z",
+        "by": "human:Ann"
+       }
+      ]
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "question-answered-beats-unanswered",
+   "rule": "5",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": "csv",
+      "answered_by": "human:Ann",
+      "via": "cli"
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "history": [],
+    "revision": 2,
+    "owner": "Bob"
+   },
+   "expect": {
+    "key": "DM1-1",
+    "owner": "Bob",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [
+     {
+      "id": "q1",
+      "options": [],
+      "recommended": null,
+      "text": "which format?",
+      "answer": "csv",
+      "answered_by": "human:Ann",
+      "via": "cli"
+     }
+    ],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "question-both-answered-newer-wins-other-in-history",
+   "rule": "5",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": "csv",
+      "answered_by": "human:Ann",
+      "via": "cli"
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": "xlsx",
+      "answered_by": "human:Bob",
+      "via": "cli"
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [
+     {
+      "id": "q1",
+      "options": [],
+      "recommended": null,
+      "text": "which format?",
+      "answer": "xlsx",
+      "answered_by": "human:Bob",
+      "via": "cli"
+     }
+    ],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: another answer \"csv\" by human:Ann was replaced"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "question-id-clash-renumbers-newer",
+   "rule": "5",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     },
+     {
+      "id": "q2",
+      "text": "who pays?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "which format?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     },
+     {
+      "id": "q2",
+      "text": "by when?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [
+     {
+      "id": "q1",
+      "options": [],
+      "recommended": null,
+      "text": "which format?",
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     },
+     {
+      "id": "q2",
+      "text": "who pays?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     },
+     {
+      "id": "q3",
+      "text": "by when?",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: q2 renumbered to q3 (both sides added one)"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "refs-union-and-field-newer",
+   "rule": "6",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [
+     {
+      "kind": "web",
+      "url": "https://example.com/a",
+      "title": "A",
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann"
+     }
+    ],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [
+     {
+      "kind": "web",
+      "url": "https://example.com/a",
+      "title": "A (theirs)",
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann"
+     },
+     {
+      "kind": "web",
+      "url": "https://example.com/b",
+      "title": "B",
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann"
+     }
+    ],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [
+     {
+      "kind": "web",
+      "url": "https://example.com/a",
+      "title": "A (mine)",
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann"
+     }
+    ],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [
+     {
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann",
+      "kind": "web",
+      "title": "A (mine)",
+      "url": "https://example.com/a"
+     },
+     {
+      "kind": "web",
+      "url": "https://example.com/b",
+      "title": "B",
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann"
+     }
+    ],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "history-union-sorted-never-dropped",
+   "rule": "7",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann",
+      "text": "created"
+     }
+    ],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann",
+      "text": "created"
+     },
+     {
+      "at": "2026-11-09T10:00:00Z",
+      "by": "human:Ann",
+      "text": "their note"
+     }
+    ],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann",
+      "text": "created"
+     },
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "text": "my note"
+     }
+    ],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T08:00:00Z",
+      "by": "human:Ann",
+      "text": "created"
+     },
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "text": "my note"
+     },
+     {
+      "at": "2026-11-09T10:00:00Z",
+      "by": "human:Ann",
+      "text": "their note"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "sessions-larger-last-used-wins",
+   "rule": "8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "sessions": [
+     {
+      "agent": "my-agent",
+      "id": "s-old",
+      "host": "mac1",
+      "last_used": "2026-11-09T08:00:00Z"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "sessions": [
+     {
+      "agent": "my-agent",
+      "id": "s-theirs",
+      "host": "mac1",
+      "last_used": "2026-11-09T09:00:00Z"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "sessions": [
+     {
+      "agent": "my-agent",
+      "id": "s-mine",
+      "host": "mac1",
+      "last_used": "2026-11-09T10:00:00Z"
+     },
+     {
+      "agent": "my-agent",
+      "id": "s-pc",
+      "host": "pc2",
+      "last_used": "2026-11-09T08:00:00Z"
+     }
+    ]
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "sessions": [
+     {
+      "agent": "my-agent",
+      "id": "s-pc",
+      "host": "pc2",
+      "last_used": "2026-11-09T08:00:00Z"
+     },
+     {
+      "agent": "my-agent",
+      "id": "s-mine",
+      "host": "mac1",
+      "last_used": "2026-11-09T10:00:00Z"
+     }
+    ],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "ext-per-addon-key",
+   "rule": "9",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "ext": {
+     "automation": {
+      "cron": "0 9 * * *"
+     }
+    }
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "ext": {
+     "automation": {
+      "cron": "0 9 * * *",
+      "agent": "a1"
+     },
+     "relay": {
+      "n": 1
+     }
+    }
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "ext": {
+     "automation": {
+      "cron": "0 8 * * *"
+     }
+    }
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "ext": {
+     "automation": {
+      "agent": "a1",
+      "cron": "0 8 * * *"
+     },
+     "relay": {
+      "n": 1
+     }
+    },
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "ext-old-keys-union",
+   "rule": "D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "ext": {
+     "sync": {
+      "old_keys": [
+       "DM1-13"
+      ]
+     }
+    }
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "ext": {
+     "sync": {
+      "old_keys": [
+       "DM1-7"
+      ]
+     }
+    }
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "ext": {
+     "sync": {
+      "old_keys": [
+       "DM1-13",
+       "DM1-7"
+      ]
+     }
+    },
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "base-none-both-created",
+   "rule": "add",
+   "base": null,
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "owner": "Ann"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "x",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "owner": "Bob"
+   },
+   "expect": {
+    "key": "DM1-1",
+    "owner": "Bob",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "x",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: owner \"Ann\" was replaced"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "revision-and-updated-at",
+   "rule": "10",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 8
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 5
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 9,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "sync-line-not-added-twice",
+   "rule": "D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Export invoices",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: title \"CSV export\" was replaced"
+     }
+    ],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "CSV export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "key": "DM1-1",
+    "title": "CSV export",
+    "id": "t_abc123",
+    "schema": "orch.ticket/1",
+    "created_at": "2026-11-09T08:00:00Z",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: title \"CSV export\" was replaced"
+     },
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: title \"Export invoices\" was replaced"
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "invalid-different-ids",
+   "rule": "10",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_other99",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": null
+  },
+  {
+   "name": "invalid-malformed-checklist",
+   "rule": "10",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     "nope"
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": null
+  },
+  {
+   "name": "invalid-not-an-object",
+   "rule": "10",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": [
+    1,
+    2
+   ],
+   "expect": null
+  }
+ ],
+ "counter": [
+  {
+   "name": "highest-wins",
+   "base": {
+    "last": 3
+   },
+   "a": {
+    "last": 5
+   },
+   "b": {
+    "last": 4
+   },
+   "expect": {
+    "last": 5
+   }
+  },
+  {
+   "name": "keys-raise-last",
+   "base": {
+    "last": 3
+   },
+   "a": {
+    "last": 3
+   },
+   "b": {
+    "last": 3
+   },
+   "keys": [
+    "DM1-12",
+    "DM1-9"
+   ],
+   "expect": {
+    "last": 12
+   }
+  },
+  {
+   "name": "per-person-per-key-max",
+   "base": {
+    "last": 3,
+    "people": {
+     "MS": 1
+    }
+   },
+   "a": {
+    "last": 3,
+    "people": {
+     "MS": 2,
+     "AK": 7
+    }
+   },
+   "b": {
+    "last": 4,
+    "people": {
+     "MS": 1,
+     "TB": 1
+    }
+   },
+   "expect": {
+    "last": 4,
+    "people": {
+     "AK": 7,
+     "MS": 2,
+     "TB": 1
+    }
+   }
+  },
+  {
+   "name": "missing-sides",
+   "base": null,
+   "a": {
+    "last": 2
+   },
+   "b": null,
+   "expect": {
+    "last": 2
+   }
+  }
+ ],
+ "key_clash": [
+  {
+   "name": "later-created-renumbered-old-key-kept",
+   "counter": {
+    "last": 14
+   },
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T09:00:00Z",
+     "updated_at": "2026-11-09T09:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_ccc333": {
+     "schema": "orch.ticket/1",
+     "id": "t_ccc333",
+     "key": "DM1-14",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": {
+    "changed": {
+     "t_bbb222": {
+      "schema": "orch.ticket/1",
+      "id": "t_bbb222",
+      "key": "DM1-15",
+      "title": "Invoice export",
+      "status": "open",
+      "created_at": "2026-11-09T09:00:00Z",
+      "updated_at": "2026-11-09T09:00:00Z",
+      "checklist": [],
+      "refs": [],
+      "questions": [],
+      "history": [
+       {
+        "at": "2026-11-10T12:00:00Z",
+        "by": "agent:sync",
+        "text": "sync: key changed from DM1-13 to DM1-15 (another ticket had it)"
+       }
+      ],
+      "revision": 2,
+      "ext": {
+       "sync": {
+        "old_keys": [
+         "DM1-13"
+        ]
+       }
+      }
+     }
+    },
+    "counter": {
+     "last": 15
+    }
+   }
+  },
+  {
+   "name": "three-way-clash-and-counter-behind",
+   "counter": {
+    "last": 2
+   },
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-5",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-5",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_ccc333": {
+     "schema": "orch.ticket/1",
+     "id": "t_ccc333",
+     "key": "DM1-5",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T09:00:00Z",
+     "updated_at": "2026-11-09T09:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": {
+    "changed": {
+     "t_bbb222": {
+      "schema": "orch.ticket/1",
+      "id": "t_bbb222",
+      "key": "DM1-6",
+      "title": "Invoice export",
+      "status": "open",
+      "created_at": "2026-11-09T08:00:00Z",
+      "updated_at": "2026-11-09T08:00:00Z",
+      "checklist": [],
+      "refs": [],
+      "questions": [],
+      "history": [
+       {
+        "at": "2026-11-10T12:00:00Z",
+        "by": "agent:sync",
+        "text": "sync: key changed from DM1-5 to DM1-6 (another ticket had it)"
+       }
+      ],
+      "revision": 2,
+      "ext": {
+       "sync": {
+        "old_keys": [
+         "DM1-5"
+        ]
+       }
+      }
+     },
+     "t_ccc333": {
+      "schema": "orch.ticket/1",
+      "id": "t_ccc333",
+      "key": "DM1-7",
+      "title": "Invoice export",
+      "status": "open",
+      "created_at": "2026-11-09T09:00:00Z",
+      "updated_at": "2026-11-09T09:00:00Z",
+      "checklist": [],
+      "refs": [],
+      "questions": [],
+      "history": [
+       {
+        "at": "2026-11-10T12:00:00Z",
+        "by": "agent:sync",
+        "text": "sync: key changed from DM1-5 to DM1-7 (another ticket had it)"
+       }
+      ],
+      "revision": 2,
+      "ext": {
+       "sync": {
+        "old_keys": [
+         "DM1-5"
+        ]
+       }
+      }
+     }
+    },
+    "counter": {
+     "last": 7
+    }
+   }
+  },
+  {
+   "name": "no-clash-no-change",
+   "counter": {
+    "last": 3
+   },
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-1",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-2",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": {
+    "changed": {},
+    "counter": {
+     "last": 3
+    }
+   }
+  },
+  {
+   "name": "old-keys-raise-counter",
+   "counter": {
+    "last": 3
+   },
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-4",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1,
+     "ext": {
+      "sync": {
+       "old_keys": [
+        "DM1-9"
+       ]
+      }
+     }
+    }
+   },
+   "expect": {
+    "changed": {},
+    "counter": {
+     "last": 9
+    }
+   }
+  }
+ ]
+}
