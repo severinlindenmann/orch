@@ -57,7 +57,7 @@ What Level 1 does:
   symlink to `~` makes nothing a test path). Reference `home_ok`, vectors `home` (human-proof-v1).
   **Rationale.** Tests and e2e keep isolating with `env -i HOME=~/.orch-test/… ORCH_HOME=…` and never read or write the real
   `~/.orch-tool` (owner rule): they run from the source tree or a dev install, and their workspaces and homes are real
-  directories under the prefix; the check reads nothing in the real home. On a pilot user's normal install an agent cannot
+  directories under the prefix; the check reads nothing in the real home. Home pinning always has a test-safe mode that is on in the test environment: on a test install a real workspace never pairs with the account's orch home (guarded ops refused), and the test suite fails on any change under the real orch home. On a pilot user's normal install an agent cannot
   get a second, agent-made human key by moving a workspace under `~/.orch-test`, linking paths, or setting `HOME`/`ORCH_HOME`:
   there is no test path, so a non-default home is simply refused. **It does not stop** editing the install record or files in
   the default orch home directly (outside the boundary above); on a dev or test install, a workspace under the prefix is a

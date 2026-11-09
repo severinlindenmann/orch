@@ -70,7 +70,7 @@ def test_real_workspace_with_agent_chosen_home_refused(tmp_path, monkeypatch):
     ws = tmp_path / "elsewhere"
     ws.mkdir()
     monkeypatch.setattr(addons, "real_home", lambda: acct)
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "evil"))
     with pytest.raises(Refused, match="don't belong together"):
         hp.guarded_home(ws)
@@ -272,3 +272,16 @@ def test_keys_folder_loose_rights_refused_on_read(tws):
     (tws.parent / "home" / "keys").chmod(0o755)
     with pytest.raises(Refused, match="wrong rights"):
         hp.key_dir(tws, create=False)
+
+
+def test_test_install_never_uses_the_account_home(tmp_path, monkeypatch):
+    acct = tmp_path / "acct"
+    acct.mkdir()
+    ws = tmp_path / "elsewhere"
+    (ws / ".orch").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.delenv("ORCH_HOME", raising=False)
+    with pytest.raises(Refused, match="don't belong together"):
+        hp.human_key(ws)
+    assert list(acct.iterdir()) == []  # nothing created in the account home
