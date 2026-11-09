@@ -133,12 +133,12 @@ test('task outcomes and result cards use plain text without sizes', () => {
   const ev = {type:'file',ref:'seating-plan.md',text:'seating-plan.md · 109 B',by:'agent:claude'};
   assert.equal(helpers.outcome({done:true,evidence:[]}), 'Completed.');
   assert.equal(helpers.outcome({done:true,evidence:[ev]}), 'Seating plan');
-  const c = context({clean:String});
-  vm.runInContext(source.slice(source.indexOf('function ticketResultCard'), source.indexOf('function ticketArtifactPreview')), c);
+  const c = context({clean:String, ticketActor:() => 'Claude', ticketPreviewTile:() => 'preview', ticketButton:l => l, previewFile(){}, snapshot:false, state:{}});
+  vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function ticketArtifactPreview')), c);
   const card = c.ticketResultCard({id:'t_test'}, ev);
   const text = JSON.stringify(card);
   assert.match(text, /ticket-result/);
-  assert.doesNotMatch(text, /109|\.md|Agent says/);
+  assert.doesNotMatch(text, /109|Agent says|Completed/);
 });
 
 test('next question stays above every tab and Answer scrolls and focuses it', () => {

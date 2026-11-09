@@ -869,6 +869,10 @@ def parse_evidence(raw: str) -> dict:
         raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
     if "text" in ev and not isinstance(ev["text"], str):
         raise Refused("Evidence text must be a string.")
+    if "summary" in ev:
+        if not isinstance(ev["summary"], str) or not 1 <= len(ev["summary"].strip()) <= 200:
+            raise Refused("A proof summary is one line of 1 to 200 characters.")
+        ev["summary"] = " ".join(ev["summary"].split())
     return ev
 
 
@@ -1572,7 +1576,9 @@ def _too_big(name: str) -> str:
     return f"{name} is too big. A proof file can be at most 25 MB. Use --url or --note."
 
 
-def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | None) -> dict:
+def attach_file(
+    root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
+) -> dict:
     """Copy a workspace file into .orch/tickets/<tid>/evidence/ and return the evidence entry for it.
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
@@ -1656,6 +1662,8 @@ def attach_file(root: Path, tid: str, path: str, title: str | None, role: str | 
         ev["title"] = title.strip()
     if role:
         ev["role"] = role
+    if summary:
+        ev["summary"] = summary
     return ev
 
 

@@ -31,7 +31,7 @@ function ticketGroups(items) {
 }
 function boardParentLine(t) {
   const parent = boardParent(tickets(), t);
-  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, 'Part of ' + clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, 'Step of ' + clean(parent.title))) : null;
 }
 function ticketAttentionChip(t) {
   return questions(t).length && shown(t).status !== 'done' ? chip('Needs you', 'attn') : statusChip(t);
@@ -99,7 +99,7 @@ function treeBranch(rows, index) {
   const node = h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
     h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), ticketNext(t),
-      row.children ? h('p', {className:'meta'}, row.done + ' of ' + row.children + ' parts done') : null,
+      row.children ? h('p', {className:'meta'}, row.done + ' of ' + row.children + ' steps done') : null,
       row.parentMissing ? parentLine(t) : null),
     h('div', {className:'row ticket-meta'}, ticketAttentionChip(t), tasks.length ? h('span', {className:'meta'}, tasks.filter(task => task.done).length + '/' + tasks.length) : null,
       name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null,
@@ -121,7 +121,7 @@ function boardCard(t, nested = false) {
     h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), ticketAttentionChip(t),
     !nested ? boardParentLine(t) : null,
     parts.length ? h('div', {className:'board-parts'},
-      h('p', {className:'meta'}, 'Parts · ' + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
+      h('p', {className:'meta'}, 'Steps · ' + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
       parts.map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'mono'}, part.key || ''), h('span', {className:'part-title'}, clean(part.title)), ticketAttentionChip(part)))) : null,
     ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null, t.due ? h('span', {className:'due'}, date(t.due)) : null),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);

@@ -727,7 +727,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
         "Read .agents/skills/orch/SKILL.md first, then follow it for this ticket.",
         f'Before you start, add one task per piece of work: orch check add {tid} "<task>". '
         f"Mark the task you work on with orch check start {tid} <task id> and finish each with proof: "
-        f'orch check done {tid} <task id> --note "<what you did>". '
+        f'orch check done {tid} <task id> --summary "<what came out, one line>" --note "<what you did>". '
         f'When you stop, write where things stand: orch ticket summary {tid} "<summary>".',
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
