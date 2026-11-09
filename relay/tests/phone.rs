@@ -976,7 +976,11 @@ async fn review_question_is_stored_listed_and_answerable_but_not_pushed() {
         "options": ["accept", "changes"], "recommended": null, "review": true}});
     let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
     assert_eq!(s, 201, "{v}");
-    assert_eq!(t.push.sent.lock().unwrap().len(), 0, "no push for a review question");
+    assert_eq!(
+        t.push.sent.lock().unwrap().len(),
+        0,
+        "no push for a review question"
+    );
     let (_, qs) = t.phone(&p, "GET", "/v1/phone/questions", None).await;
     assert_eq!(qs["items"].as_array().unwrap().len(), 1);
     assert_eq!(qs["items"][0]["message"]["body"]["review"], true);
@@ -994,7 +998,11 @@ async fn review_marker_needs_the_review_format() {
         ("q1", json!(["accept", "changes"]), json!({})),
         ("review-1", json!(["DATE", "TIMESTAMP"]), json!({})),
         ("review-x", json!(["accept", "changes"]), json!({})),
-        ("review-1", json!(["accept", "changes"]), json!({"scope": "x"})),
+        (
+            "review-1",
+            json!(["accept", "changes"]),
+            json!({"scope": "x"}),
+        ),
     ] {
         let mut body = json!({"question_id": qid, "text": "Is this done?", "options": opts, "recommended": null, "review": true});
         if let Some(sc) = extra.get("scope") {
