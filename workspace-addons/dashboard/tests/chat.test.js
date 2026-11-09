@@ -8,7 +8,7 @@ function context() {
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), snapshot:false,
     state:{workspace:'Fish', chat:{messages:[]}}, ticketOf:() => null, time:() => '',
     MutationObserver:class {observe(){}}, document:{documentElement:{}}, CSS:{supports:() => false},
-    window:{}, location:{hash:''}, render(){}});
+    window:{addEventListener(){}}, location:{hash:''}, render(){}});
   vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/chat.js'), 'utf8'), c);
   return c;
 }
