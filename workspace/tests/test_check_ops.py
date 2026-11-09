@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from orch import filesig, saferead, tickets
+from orch import filesig, safegit, saferead, tickets
 
 
 def read(proj, tid):
@@ -227,7 +227,7 @@ def test_files_sig_without_git_or_on_timeout(proj, repo, monkeypatch):
         raise subprocess.TimeoutExpired("git", 3)
 
     with monkeypatch.context() as m:  # (undo() would also drop the autouse isolated ORCH_HOME)
-        m.setattr(filesig.subprocess, "run", slow)
+        m.setattr(safegit.subprocess, "run", slow)
         assert filesig.files_sig(repo) is None
     monkeypatch.setattr(filesig, "MAX_FILES", 2)
     (repo / "u1").write_text("1")
@@ -239,7 +239,7 @@ def test_files_sig_without_git_binary(repo, monkeypatch):
     def nogit(*a, **k):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(filesig.subprocess, "run", nogit)
+    monkeypatch.setattr(safegit.subprocess, "run", nogit)
     assert filesig.files_sig(repo) is None
 
 
@@ -427,7 +427,7 @@ def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     assert not marker.exists()
     seen = []
     real = subprocess.run
-    monkeypatch.setattr(filesig.subprocess, "run", lambda a, **k: seen.append(k["env"]) or real(a, **k))
+    monkeypatch.setattr(safegit.subprocess, "run", lambda a, **k: seen.append(k["env"]) or real(a, **k))
     filesig.files_sig(repo)
     assert seen and all(not any(k.startswith("GIT_") and k not in OURS for k in e) for e in seen)
 

@@ -172,23 +172,15 @@ def start_text(root: Path) -> str:
 
 def _git_exclude(root: Path) -> tuple[Path, str] | None:
     """(.git/info/exclude, path of the project below the git top folder) or None when this is no git repo."""
-    h = _hardened(root)
-    if h is None:
-        if _git_on_path():
+    sg = _safegit()
+    if not sg.have_git(root):
+        if sg.git_on_path():
             print("orch: git excludes skipped: no git that orch trusts was found.", file=sys.stderr)
         return None
-    try:
-        out = subprocess.run(
-            [*h[0], "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            env=h[1],
-            timeout=10,
-            check=True,
-        ).stdout.splitlines()
-    except (OSError, subprocess.SubprocessError):
+    rc, raw, _ = sg.run_bytes(["rev-parse", "--show-toplevel", "--git-path", "info/exclude"], root, 10)
+    if rc != 0:
         return None
+    out = raw.decode("utf-8", "surrogateescape").splitlines()
     if len(out) != 2:
         return None
     top, ex = Path(out[0]), Path(out[1])
@@ -280,49 +272,28 @@ def _tracked(root: Path, rel: str) -> bool:
             return False  # plain folder (or no git program there): nothing can be tracked
     except Refused:
         return True  # cannot tell: treat the file as the team's
-    h = _hardened(root)
-    if h is None:
-        return True  # no trusted git: cannot tell, treat the file as the team's
-    env = h[1]
-    try:
-        return (
-            subprocess.run(
-                [
-                    *h[0],
-                    "ls-files",
-                    "--error-unmatch",
-                    "--",
-                    f":(icase){rel}",
-                ],  # .ORCH/... tracked is this file too
-                cwd=root,
-                capture_output=True,
-                env=env,
-                timeout=10,
-            ).returncode
-            == 0
-        )
-    except (OSError, subprocess.SubprocessError):
-        return True  # cannot tell: treat the file as the team's
-
-
-def _git_on_path() -> bool:
-    """Is there SOME git program on the PATH (the hardened lookup may still refuse it: a planted one)?"""
-    name = "git.exe" if os.name == "nt" else "git"
-    return any(
-        d and os.path.isfile(os.path.join(d, name)) and os.access(os.path.join(d, name), os.X_OK)
-        for d in os.environ.get("PATH", "").split(os.pathsep)
-    )
+    # .ORCH/... tracked is this file too (icase)
+    rc, _, _ = _safegit().run_bytes(["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10)
+    if rc in (124, 125, 126, 127):
+        return True  # no trusted git, refused, cannot start, or timeout: cannot tell, treat the file as the team's
+    return rc == 0
 
 
 # What "closed" means when orch finds no git it trusts (hardened() is None), per caller:
 #   _in_git_repo / check_private_path / _ignored -> refuse (nothing private is stored);
 #   _tracked -> "tracked" (the team's file: not touched); _git_exclude -> skipped with a note;
 #   filesig.files_sig -> None (no signature).
-def _hardened(cwd: Path):
-    """safegit.hardened (imported late: safegit needs addons, addons needs this module)."""
+def _safegit():
+    """The safegit module (imported late: safegit needs addons, addons needs this module)."""
     from orch import safegit
 
-    return safegit.hardened(cwd)
+    return safegit
+
+
+def _hardened(cwd: Path):
+    """safegit.hardened, ONLY for `git check-ignore` (_ignored): it is not on safegit's allowlist of
+    subcommands (it takes no filters and prints nothing orch needs), so it keeps the hardened argv/env."""
+    return _safegit().hardened(cwd)
 
 
 is_tracked = _tracked  # public: other modules ask whether git tracks a file
@@ -331,22 +302,16 @@ is_tracked = _tracked  # public: other modules ask whether git tracks a file
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""
-    h = _hardened(root)
-    try:
-        if h is None:
-            if _git_on_path():  # a git exists but none is trusted (a planted one?): never "not a repo"
-                raise Refused(
-                    "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
-                )
-            raise FileNotFoundError("git")  # no git program at all
-        r = subprocess.run(
-            [*h[0], "rev-parse", "--is-inside-work-tree"],
-            cwd=root,
-            capture_output=True,
-            env=h[1],
-            timeout=10,
-        )
-    except FileNotFoundError:
+    sg = _safegit()
+    rc, out, err = 127, b"", ""
+    if not sg.have_git(root):
+        if sg.git_on_path():  # a git exists but none is trusted (a planted one?): never "not a repo"
+            raise Refused(
+                "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
+            )
+    else:
+        rc, out, err = sg.run_bytes(["rev-parse", "--is-inside-work-tree"], root, 10)
+    if rc == 127:
         # no git program: fine in a plain folder, but a folder that has .git cannot be checked, so refuse
         for d in (root.absolute(), *root.absolute().parents):
             if os.path.lexists(d / ".git"):
@@ -354,12 +319,12 @@ def _in_git_repo(root: Path) -> bool:
                     "git is not installed, so orch cannot tell what is ignored here. Nothing was stored."
                 ) from None
         return False
-    except (OSError, subprocess.SubprocessError):
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
-    if r.returncode == 0:
-        return r.stdout.strip() == b"true"
-    if b"not a git repository" in r.stderr.lower():
+    if rc == 0:
+        return out.strip() == b"true"
+    if rc not in (124, 125, 126) and "not a git repository" in err.lower():
         return False
+    if rc in (124, 125, 126):
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
     raise Refused("git cannot be read in this folder (is it owned by someone else?). Nothing was stored.")
 
 
@@ -438,28 +403,12 @@ def check_private_path(root: Path, path: Path) -> None:
     if not _in_git_repo(root):
         return
     rel = path.absolute().relative_to(root.absolute()).as_posix()
-    h = _hardened(root)
-    if h is None:
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
-    try:
-        t = subprocess.run(
-            [
-                *h[0],
-                "ls-files",
-                "--error-unmatch",
-                "--",
-                f":(icase){rel}",
-            ],  # .ORCH/... tracked is this file too
-            cwd=root,
-            capture_output=True,
-            env=h[1],
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
-    if t.returncode not in (0, 1):
+    rc, _, _ = _safegit().run_bytes(  # .ORCH/... tracked is this file too (icase)
+        ["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10
+    )
+    if rc not in (0, 1):
         raise Refused("git could not say whether private files are tracked here. Nothing was stored.")
-    if not _ignored(root, rel) or t.returncode == 0:
+    if not _ignored(root, rel) or rc == 0:
         raise Refused(
             f"git would not leave {rel} alone (a .gitignore of the project shows it, or it is tracked). "
             "Nothing was stored."

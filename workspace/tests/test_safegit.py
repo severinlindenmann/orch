@@ -248,8 +248,8 @@ def test_a_git_in_the_repo_or_in_a_path_entry_inside_it_is_never_used(tmp_path, 
 
 # ---------------------------------------------------------------- lint (AST)
 
-# Modules that still start git themselves. MUST SHRINK TO ZERO. filesig.py (B8) and B9's work-check join it
-# until they migrate onto safegit.
+# Modules that still start git themselves. MUST SHRINK TO ZERO (empty since B11b: filesig, work-check and
+# harness run git through safegit.run / run_bytes).
 ALLOW = set(safegit.LEGACY) | {"safegit.py"}
 _SPAWN = re.compile(
     r"^(subprocess\.\w+|os\.(exec\w+|spawn\w+|posix_spawn\w*|system|popen)|asyncio\.create_subprocess_\w+)$"
@@ -283,15 +283,50 @@ def _mentions_git(node, git_names):
     return False
 
 
+_GIT_NAME = re.compile(r"git(\.exe)?")
+_JOINERS = {"os.path.join", "pathlib.Path", "Path", "PurePath", "pathlib.PurePath"}
+
+
+def git_path_builders(source: str) -> list[int]:
+    """Line numbers where a module OTHER than safegit finds or builds the path of the git program: the blind
+    spot B9's work-check had (its own PATH loop, then a Popen of the resolved file, which the spawn check
+    above cannot tie to git). Flagged: `os.path.join(..., "git")`, `Path(...) / "git"`, `.joinpath("git")`
+    (also "git.exe"), any call of a function named *git_exe*, and `find_exe("git")`. Only safegit.py may
+    resolve the program; everyone else asks safegit.run / run_bytes / have_git."""
+    bad = []
+    for n in ast.walk(ast.parse(source)):
+        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div) and _is_git_const(n.right):
+            bad.append(n.lineno)
+        elif isinstance(n, ast.Call):
+            name = _dotted(n.func) or (n.func.attr if isinstance(n.func, ast.Attribute) else "")
+            last = name.rsplit(".", 1)[-1]
+            args = [*n.args, *[k.value for k in n.keywords]]
+            if (
+                (name in _JOINERS or last == "joinpath") and any(_is_git_const(a) for a in args)
+            ) or "git_exe" in last:
+                bad.append(n.lineno)
+            elif "find_exe" in last and n.args and _is_git_const(n.args[0]):
+                bad.append(n.lineno)
+    return sorted(set(bad))
+
+
+def _is_git_const(node) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and bool(_GIT_NAME.fullmatch(node.value))
+    )
+
+
 def git_spawns(source: str) -> list[int]:
     """Line numbers of process starts whose argv mentions git (a literal, a name bound to one, shutil.which),
-    and of any use of harness._git_env."""
+    and of any use of harness._git_env, and of building git's path (git_path_builders)."""
     tree = ast.parse(source)
     names = set()
     for n in ast.walk(tree):
         if isinstance(n, ast.Assign) and _mentions_git(n.value, set()):
             names.update(t.id for t in n.targets if isinstance(t, ast.Name))
-    bad = []
+    bad = list(git_path_builders(source))
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and _SPAWN.match(_dotted(n.func)):
             if any(_mentions_git(a, names) for a in [*n.args, *[k.value for k in n.keywords]]):
@@ -299,6 +334,34 @@ def git_spawns(source: str) -> list[int]:
         if isinstance(n, ast.Attribute) and n.attr == "_git_env":
             bad.append(n.lineno)
     return sorted(set(bad))
+
+
+# B9's work-check as it was before B11b: its own PATH loop for git, then a subprocess of the resolved file.
+_OLD_WORKCHECK = """
+import os, subprocess
+def _git_exe(root):
+    name = "git.exe" if os.name == "nt" else "git"
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand):
+            return cand
+def _git(root, args):
+    exe = _git_exe(root)
+    return subprocess.run([exe, *args], cwd=root)
+"""
+
+
+def test_the_old_workcheck_pattern_is_flagged():
+    assert git_spawns(_OLD_WORKCHECK)  # the function name, and the run of the resolved exe
+    # each ingredient alone is enough
+    assert git_path_builders('import os\nname = "git"\np = os.path.join("/usr/bin", "git")')
+    assert git_path_builders('from pathlib import Path\np = Path("/usr/bin") / "git.exe"')
+    assert git_path_builders('from pathlib import Path\np = Path("/usr/bin").joinpath("git")')
+    assert git_path_builders("from orch import safegit\nx = safegit.git_exe(cwd)")
+    assert git_path_builders('from orch import safegit\nsafegit.find_exe("git", set())')
+    assert not git_path_builders('x = os.path.join(a, ".git")')  # the .git folder is no program
+    assert not git_path_builders("from orch import safegit\nsafegit.find_exe(argv[0], safegit.avoid_for(w))")
+    assert not git_path_builders("from orch import safegit\nsafegit.have_git(cwd)")
 
 
 @pytest.mark.parametrize(
@@ -862,3 +925,23 @@ def test_env_sets_the_c_locale(monkeypatch):
     monkeypatch.setenv("LC_ALL", "de_CH.UTF-8")
     e = safegit.env(Path("/tmp"), None, "/bin/true")
     assert e["LC_ALL"] == e["LANG"] == "C"
+
+
+# ---------------------------------------------------------------- run_bytes
+
+
+def test_run_bytes_returns_raw_bounded_stdout_with_the_same_allowlist(proj):
+    sh_git = lambda *a: subprocess.run(["git", *a], cwd=proj, check=True, capture_output=True)  # noqa: E731
+    sh_git("init", "-q")
+    (proj / "aé.txt").write_text("x")
+    rc, out, _ = safegit.run_bytes(["ls-files", "-z", "--others", "--exclude-standard"], proj)
+    assert rc == 0 and isinstance(out, bytes) and out == "aé.txt".encode() + b"\0"
+    rc, out, err = safegit.run_bytes(["ls-files", "-z", "--others"], proj, max_bytes=3)
+    assert rc == safegit.TOO_LONG and out == b""
+    for bad in (
+        ["clean", "-fdx"],
+        ["checkout", "x"],
+        ["-c", "core.pager=x", "ls-files"],
+        ["config", "a", "b"],
+    ):
+        assert safegit.run_bytes(bad, proj)[0] == safegit.REFUSED

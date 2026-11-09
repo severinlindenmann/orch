@@ -7,7 +7,7 @@ Safety (the folder may be a repo someone else prepared):
 - git only LISTS files (`ls-files`, `rev-parse`). It never compares or filters content, so no clean/smudge
   filter, textconv or diff driver of the repo can run (`git status` and `git diff` stat-compare and then
   compare content, which runs those filters). Fixed argv lists, no shell, GIT_* removed, hooks/fsmonitor/
-  untracked cache off (same pattern as B8's filesig: dedupe with it after B8 merges).
+  untracked cache off: all of it is orch.safegit.run_bytes, the one git runner.
 - orch decides "changed" itself from lstat (mtime), never follows a link and never reads a file.
 - Any error, a timeout or a cap (too many files, too slow) means silence.
 
@@ -30,7 +30,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import threading
 import time
@@ -50,25 +49,10 @@ SKIP_DIRS = (".orch", ".git", "node_modules", ".venv", "__pycache__", "dist", "b
 SKIP_FILES = ("AGENTS.orch.md",)
 KEEP_MARKERS = 20
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-_GIT = [
-    "--no-pager",
-    "--no-optional-locks",
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "core.untrackedCache=false",
-    "-c",
-    "core.quotepath=off",
-]
 
 
 class _Stop(Exception):
     """A cap or the deadline: the answer is silence."""
-
-
-_GIT_EXE: list = []  # git's path, found once per process (the hook has a single root)
 
 
 def _tool_skips() -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -82,52 +66,23 @@ def _tool_skips() -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(dict.fromkeys(dirs)), tuple(dict.fromkeys(files))
 
 
-def _inside(path: str, folder: str) -> bool:
-    """path is folder or below it (commonpath of normalised real paths: right at a drive root too)."""
-    p, f = os.path.normcase(os.path.realpath(path)), os.path.normcase(os.path.realpath(folder))
-    try:
-        return os.path.commonpath([p, f]) == f
-    except ValueError:  # another drive
-        return False
-
-
-def _git_exe(root: Path) -> str | None:
-    """git as an ABSOLUTE path, found once on PATH. Windows resolves a bare "git" (and shutil.which) in the
-    current folder first (the project: a committed git.exe would run on every prompt), so each ABSOLUTE PATH
-    entry is checked for exactly `git.exe` (Windows) or `git` (POSIX) by hand: no relative entry, no .cmd,
-    no entry at or under the project or the current folder. Migrate to safegit (B11)."""
-    if _GIT_EXE:
-        return _GIT_EXE[0]
-    name = "git.exe" if os.name == "nt" else "git"
-    found = None
-    for d in os.environ.get("PATH", "").split(os.pathsep):
-        if not d or not os.path.isabs(d) or _inside(d, str(root)) or _inside(d, os.getcwd()):
-            continue
-        cand = os.path.join(d, name)
-        if os.path.isfile(cand) and os.access(cand, os.X_OK):
-            found = cand
-            break
-    _GIT_EXE.append(found)
-    return found
-
-
-def _git(root: Path, args: list[str], deadline: float) -> subprocess.CompletedProcess | None:
+def _git(root: Path, args: list[str], deadline: float) -> tuple[int, bytes] | None:
+    """(rc, stdout) of a read-only listing through safegit; None = no usable git (the folder is walked
+    instead). A timeout stops the scan. safegit is imported here: the hook only needs it in a git folder."""
     left = deadline - time.monotonic()
     if left <= 0:
         raise _Stop
-    exe = _git_exe(root)
-    if exe is None:
-        return None  # no (safe) git program: the folder is walked instead
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
-        return subprocess.run(  # fixed argv list, no shell; the child is killed when the timeout hits
-            [exe, *_GIT, *args], cwd=root, capture_output=True, timeout=left, env=env, check=False
-        )
-    except subprocess.TimeoutExpired:
-        raise _Stop from None
-    except OSError:
+        from orch import safegit
+
+        rc, out, _ = safegit.run_bytes(args, root, left, max_bytes=MAX_LIST, read_only=True, filters=False)
+    except Exception:  # noqa: BLE001 - the hook never fails: no safegit means "no git", the folder is walked
         return None
+    if rc in (124, 123):  # timeout, or a listing over MAX_LIST (safegit.TOO_LONG)
+        raise _Stop
+    if rc in (125, 126, 127):
+        return None  # no trusted git (or refused): the folder is walked instead
+    return rc, out
 
 
 def _exclude() -> list[str]:
@@ -137,14 +92,14 @@ def _exclude() -> list[str]:
 def _git_names(root: Path, deadline: float) -> list[str] | None:
     """Tracked and untracked-not-ignored paths, as git lists them; None = not a git folder (or no git)."""
     r = _git(root, ["rev-parse", "--is-inside-work-tree"], deadline)
-    if r is None or r.returncode != 0:
+    if r is None or r[0] != 0:
         return None
     out: list[str] = []
     for extra in ([], ["--others", "--exclude-standard"]):
         r = _git(root, ["ls-files", "-z", *extra, "--", ".", *_exclude()], deadline)
-        if r is None or r.returncode != 0 or len(r.stdout) > MAX_LIST:
+        if r is None or r[0] != 0:
             raise _Stop
-        out += [os.fsdecode(n) for n in r.stdout.split(b"\0") if n]
+        out += [os.fsdecode(n) for n in r[1].split(b"\0") if n]
     return list(dict.fromkeys(out))
 
 
