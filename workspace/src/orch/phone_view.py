@@ -580,16 +580,44 @@ def reference_views(root: Path, ticket: dict) -> list[dict]:
     return out
 
 
+def _without_delivery(text: str, *, task: bool = False) -> str:
+    """Remove only whole result-delivery sentences or a whole phone-delivery task."""
+    destination = r"(?:back )?to (?:the |your )?phones?(?: via (?:the )?relay)?"
+    if task and re.fullmatch(
+        rf"(?:send|deliver) (?:the |your )?results? {destination}[.!?]?", text.strip(), re.I
+    ):
+        return ""
+    cleaned = re.sub(
+        rf"(^|(?<=[.!?])\s+|\n+)(?:the )?results? (?:was |were |is )?"
+        rf"(?:sent|delivered) {destination}(?:[.!?](?=\s|$)|$)",
+        "",
+        text,
+        flags=re.I,
+    )
+    return cleaned.strip() if cleaned != text else text
+
+
+def _shown_checklist(ticket: dict) -> list[dict]:
+    return [
+        dict(c, text=text)
+        for c in ticket.get("checklist") or []
+        if (text := _without_delivery(c.get("text", ""), task=True)) or not c.get("text")
+    ]
+
+
 def shown_summary(ticket: dict) -> str:
     """The line the phone shows on top of the ticket chat: the summary, else the ticket's note (what the
     person asked for), so a fresh ticket made on the dashboard never shows an empty chat. Secrets cut."""
-    text = str(ticket.get("summary") or "").strip() or str(ticket.get("note") or "").strip()
+    summary = str(ticket.get("summary") or "").strip()
+    note = str(ticket.get("note") or "").strip()
+    summary = _without_delivery(summary)
+    text = summary or note
     return _clip(redact(text), 200) if text else ""
 
 
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
-    checklist = ticket.get("checklist") or []
-    done, total = tickets.checks_done(ticket)
+    checklist = _shown_checklist(ticket)
+    done, total = tickets.checks_done({"checklist": checklist})
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
@@ -597,7 +625,7 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
             continue
         pl = _phone_line(root, h)
         raw = pl[2] if pl else str(h.get("text", ""))
-        text = _clip(tickets.history_line(raw, checklist), 1000)
+        text = _clip(tickets.history_line(raw, ticket.get("checklist") or []), 1000)
         if not text:
             continue
         at = str(h.get("at") or "")
@@ -852,8 +880,8 @@ def result_text(ticket: dict) -> str:
     """The pushed "it is finished" text: the title, then where things stand."""
     word = "Ready for your review" if ticket.get("status") == "review" else "Done"
     text = f"{word}: {_clip(ticket.get('title', ''), 120)}"
-    if ticket.get("summary"):
-        text += f"\n{_clip(ticket['summary'], 400)}"
+    if summary := _without_delivery(ticket.get("summary") or ""):
+        text += f"\n{_clip(summary, 400)}"
     return text
 
 
@@ -906,7 +934,7 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     update_state(root, claim)
     sent = []
     for tid, to, t, finished, before, claimed in due:
-        done, total = tickets.checks_done(t)
+        done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
         try:
             if finished:
                 relay.send_text(root, to, result_text(t), tid, "result")
@@ -974,7 +1002,7 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
     for ph in phones:
         have = set(done_for.get(ph, []))
         for t in [t for t in open_[:OPEN_MAX] if t["id"] not in have]:
-            done, total = tickets.checks_done(t)
+            done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
             text = f"Tasks: {done} of {total} done" if total else NEW_TEXT
             try:
                 relay.send_text(root, ph, text, t["id"], "note", view=True)
