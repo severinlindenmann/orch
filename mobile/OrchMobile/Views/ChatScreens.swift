@@ -206,10 +206,13 @@ struct ConversationView: View {
                         Button("Go to Today") { goToToday?() }.buttonStyle(WideButtonStyle(color: Theme.brand))
                     } else {
                     if working(items, now: now) { StatusLine(isGeneral ? "\(workspaceName) helper is thinking…" : "\(workspaceName) is working…") }
-                    if let ticketId = resolved.ticket, let q = ReviewRules.reviewQuestion(ticket: ticket, workspaceId: resolved.workspace, ticketId: ticketId, questions: model.questions, answers: model.answers) {
-                        ReviewBar(question: q) { reply = ReplyPreview(messageId: q.id, title: "Changes:", quote: "", answering: q) }
+                    let reviewQuestion = resolved.ticket.flatMap { ticketId in
+                        ReviewRules.reviewQuestion(ticket: ticket, workspaceId: resolved.workspace, ticketId: ticketId, questions: model.questions, answers: model.answers)
                     }
-                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply)
+                    if let q = reviewQuestion {
+                        ReviewBar(question: q) { reply = ReplyPreview(messageId: q.id, title: "Changes:", quote: "", answering: q) }.id(q.id)
+                    }
+                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(running: ticket?.view?.running, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, currentReviewId: reviewQuestion?.id)
                     }
                 }
             }

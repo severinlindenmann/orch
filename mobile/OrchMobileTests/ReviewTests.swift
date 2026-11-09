@@ -3,9 +3,9 @@ import XCTest
 
 final class ReviewTests: XCTestCase {
     private func question(_ id: String = "q", review: Bool? = true, options: [String] = ["accept", "changes"],
-                          workspace: String = "ws", ticket: String = "t", at: String = "2026-11-09T10:00:00Z") -> Question {
+                          roundId: String = "review-1", workspace: String = "ws", ticket: String = "t", at: String = "2026-11-09T10:00:00Z") -> Question {
         Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: workspace, to: "phones", type: "question",
-            createdAt: at, ticket: ticket, body: QuestionBody(questionId: "review-1", title: "Fish", text: "Is this done?",
+            createdAt: at, ticket: ticket, body: QuestionBody(questionId: roundId, title: "Fish", text: "Is this done?",
                 options: options, recommended: nil, review: review)), workspaceName: "Workspace")
     }
     private func ticket(_ status: Ticket.Status = .review) -> Ticket {
@@ -41,6 +41,65 @@ final class ReviewTests: XCTestCase {
         XCTAssertEqual(pick(ticket(), [newer, q]), newer)
         XCTAssertEqual(pick(ticket(), [newer, q], [newer.id: "accept"]), q)
     }
+    func testReviewRoundOrderingAndFallbacks() {
+        func pick(_ questions: [Question]) -> Question? {
+            ReviewRules.reviewQuestion(ticket: ticket(), workspaceId: "ws", ticketId: "t", questions: questions, answers: [:])
+        }
+        let second = question("z", roundId: "review-2", at: "2026-11-09T11:00:00Z")
+        let tenth = question("a", roundId: "review-10")
+        XCTAssertEqual(pick([second, tenth]), tenth)
+        XCTAssertEqual(pick([tenth, second]), tenth)
+        let later = question("b", roundId: "review-10", at: "2026-11-09T12:00:00Z")
+        XCTAssertEqual(pick([later, tenth]), later)
+        let tie = question("c", roundId: "review-10", at: "2026-11-09T12:00:00Z")
+        XCTAssertEqual(pick([tie, later]), tie)
+        let fallback = question("fallback", roundId: "legacy", at: "2026-11-09T12:00:00Z")
+        XCTAssertEqual(pick([question(roundId: "legacy"), fallback]), fallback)
+        XCTAssertNil(ReviewRules.roundNumber(fallback))
+    }
+
+    func testReviewContractVectors() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func object(_ path: String) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("contracts/" + path))) as? [String: Any])
+        }
+        func decodeQuestion(_ message: [String: Any]) throws -> Question {
+            let data = try JSONSerialization.data(withJSONObject: ["message": message, "workspace_name": "Workspace"])
+            return try JSONCoding.decoder.decode(Question.self, from: data)
+        }
+        let vector = try object("vectors/review-question-v1.json")
+        let q = try decodeQuestion(XCTUnwrap(vector["question"] as? [String: Any]))
+        XCTAssertTrue(q.isReview)
+        XCTAssertEqual(ReviewRules.roundNumber(q), 2)
+        let cases = try XCTUnwrap(vector["cases"] as? [[String: Any]])
+        for item in cases {
+            let name = try XCTUnwrap(item["name"] as? String)
+            let answer = try XCTUnwrap(item["answer"] as? String)
+            if item["do"] as? String == "accept" {
+                XCTAssertTrue(ReviewRules.isReservedAnswer(answer), name)
+            }
+            if name == "changes-with-note" {
+                XCTAssertFalse(ReviewRules.isReservedAnswer(answer), name)
+                XCTAssertFalse(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            // A phone answer the workspace ignores while the review is current (e.g. a bare "changes") must never be sent
+            // as a change note: the person's request would be lost silently.
+            if item["do"] as? String == "nothing", (item["from"] as? String)?.hasPrefix("ph_") == true,
+               let state = item["state"] as? [String: Any], state["status"] as? String == "review", state["round"] as? Int == 2,
+               !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                XCTAssertTrue(ReviewRules.isReservedAnswer(answer), name)
+            }
+            if name == "empty-answer" {
+                // Composer.sendText rejects this before dispatching any answer.
+                XCTAssertTrue(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        let valid = try decodeQuestion(object("examples/message/valid-question-review.json"))
+        XCTAssertTrue(valid.isReview)
+        let invalid = try decodeQuestion(object("examples/message/invalid-question-review-false.json"))
+        XCTAssertNil(ReviewRules.roundNumber(invalid))
+    }
+
     func testReviewNeverBecomesQuestionCardOrNeedsYouTicket() {
         let q = question()
         var data = ConversationInputs(); data.questions = [q]
