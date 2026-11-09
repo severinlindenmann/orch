@@ -48,7 +48,8 @@ def lab(proj, monkeypatch):
     yield log
     if shutil.which("tmux"):
         runs_live.tmux(proj, "kill-server")
-    shutil.rmtree(lab_home, ignore_errors=True)
+    if lab_home.name.startswith("lab-") and lab_home.parent == base:  # only our own temp folder
+        shutil.rmtree(lab_home, ignore_errors=True)
 
 
 def _until(fn, timeout=20.0, what=""):

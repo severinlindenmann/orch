@@ -449,13 +449,17 @@ PRIVATE_FILES = (
 
 
 def tracked_private(root: Path) -> list[str]:
+    return _tracked_private(root) or []
+
+
+def _tracked_private(root: Path) -> list[str] | None:
     """The personal orch files that git already tracks in this folder's repo (project-relative, sorted, at most
     2000). [] outside a git repo or when git cannot say (the warning is advice; the trust check is `_tracked`)."""
     try:
         if not _in_git_repo(root):
             return []
     except Refused:
-        return []
+        return None
     try:
         r = subprocess.run(
             _git_argv(root, "ls-files", "-z", "--", *[f":(icase,literal){rel}" for rel, _ in PRIVATE_FILES]),
@@ -465,9 +469,9 @@ def tracked_private(root: Path) -> list[str]:
             timeout=20,
         )
     except (OSError, subprocess.SubprocessError):
-        return []
+        return None
     if r.returncode != 0:
-        return []
+        return None
     names = sorted({os.fsdecode(n) for n in r.stdout.split(b"\0") if n})
     return names[:2000]
 
@@ -503,7 +507,7 @@ def move_to_private(root: Path) -> list[str]:
     for i in range(0, len(files), 200):
         chunk = files[i : i + 200]
         r = subprocess.run(
-            _git_argv(root, "rm", "--cached", "-q", "--", *[f":(literal){f}" for f in chunk]),
+            _git_argv(root, "rm", "--cached", "-f", "-q", "--", *[f":(literal){f}" for f in chunk]),
             cwd=root,
             capture_output=True,
             env=_git_env(),
@@ -511,7 +515,11 @@ def move_to_private(root: Path) -> list[str]:
         )
         if r.returncode != 0:
             raise Refused("git could not remove the files from the team repo. Nothing else was changed.")
-    return [f for f in files if f not in set(tracked_private(root))]  # what really left the index
+    left = _tracked_private(root)
+    if left is None:  # git cannot say now: do not claim anything was moved
+        raise Refused("git ran, but orch could not check what was removed. Look at: git status")
+    still = set(left)
+    return [f for f in files if f not in still]  # what really left the index
 
 
 def safe_skill_name(name: str) -> bool:

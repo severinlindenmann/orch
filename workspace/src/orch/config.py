@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import tomllib
 from pathlib import Path
 
@@ -426,6 +427,11 @@ def add_agent(
             typed["prompt"] = prompt
         if _raw_entries(root).get(name) == typed:
             approve_agent(root, name, typed)
+        else:
+            print(
+                f"orch: '{name}' also has other settings in this folder, so it is not allowed yet: orch private",
+                file=sys.stderr,
+            )
 
 
 # ---- the one notice for a command that comes from a folder's settings
