@@ -10,8 +10,18 @@ from orch import agentsdata
 def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     base = json.loads((agentsdata.agents_dir() / "base.json").read_bytes())
     for name in agentsdata.FRAGMENTS:
-        assert json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes()) == {}
-    assert agentsdata.load() == base
+        got = json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes())
+        if name == "connections":  # W2b 1.10: only the settings locations (inventory.md)
+            assert {a: set(v) for a, v in got["adapters"].items()} == {
+                "claude": {"mcp_settings"},
+                "codex": {"mcp_settings"},
+            }
+        else:
+            assert got == {}
+    merged = agentsdata.load()
+    for adapter in merged["adapters"].values():
+        adapter.pop("mcp_settings", None)
+    assert merged == base
     assert {p.name for p in agentsdata.agents_dir().iterdir()} == {
         "base.json",
         "deny.json",
