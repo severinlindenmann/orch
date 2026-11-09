@@ -347,3 +347,75 @@ def test_extra_file_check_hook_counts_as_loose(tws, monkeypatch):
     assert hp.human_key(tws) != key
     monkeypatch.setattr(hp, "FILE_CHECKS", [])
     assert hp.take_notices(tws)
+
+
+# ---------------------------------------------------------------- a reset never widens, never accepts a proof
+
+
+def test_reset_holds_the_key_lock(tws, monkeypatch):
+    hp.human_key(tws)
+    d = hp.key_dir(tws)
+    seen = []
+    real = hp._write_private
+    monkeypatch.setattr(hp, "_write_private", lambda p, t: (seen.append(hp._lock_held(d)), real(p, t))[1])
+    hp.reset_protection(tws, "test:mode")
+    assert seen and all(seen)  # every write of the reset ran under keys.lock
+    assert not hp._lock_held(d)  # and it was released
+    with hp._key_lock(d), hp._key_lock(d):  # re-entrant for readers that already hold it
+        assert hp._lock_held(d)
+    assert not (d / "keys.lock").exists()
+
+
+def test_loose_nonce_store_during_verify_refuses_and_replay_stays_refused(tws):
+    key = hp.human_key(tws)
+    pr = hp.mint(key, hp.new_payload("run.takeover", TID, "human:pat"))
+    d = hp.key_dir(tws)
+    hp._write_private(d / "proofs-used.json", json.dumps({}))
+    (d / "proofs-used.json").chmod(0o644)  # loose: a reset happens inside the verify
+    with pytest.raises(Refused):
+        hp.verify_and_consume(tws, pr, "run.takeover", TID)  # valid for the old key, still refused
+    assert hp.human_key(tws) != key
+    with pytest.raises(Refused):
+        hp.verify_and_consume(tws, pr, "run.takeover", TID)  # replay after the reset
+    fresh = hp.mint(hp.human_key(tws), hp.new_payload("run.takeover", TID, "human:pat"))
+    assert hp.verify_and_consume(tws, fresh, "run.takeover", TID) == "human:pat"
+
+
+def test_loose_human_key_during_verify_refuses(tws):
+    key = hp.human_key(tws)
+    pr = hp.mint(key, hp.new_payload("run.takeover", TID, "human:pat"))
+    (hp.key_dir(tws) / "human.key").chmod(0o644)
+    with pytest.raises(Refused):
+        hp.verify_and_consume(tws, pr, "run.takeover", TID)
+
+
+def _open(rec, setting):
+    return rec if rec is not None else hp.SETTING_DEFAULTS[setting]
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_reset_never_opens_a_setting(tws, seed):
+    import random
+
+    rnd = random.Random(seed)
+    home = tws.parent / "home"
+    _, wkey = hp._settings_path(tws)
+    recs, before = {}, {}
+    for st in hp.SETTING_DEFAULTS:
+        v = rnd.choice([True, False, None])
+        if v is not None:
+            recs[st] = {"value": v, "by": "human:pat", "at": "2026-11-09T10:00:00Z"}
+        before[st] = bool(_open(v, st))
+    other = {"focus.live_session": {"value": False, "by": "file", "at": "2026-11-09T10:00:00Z"}}
+    body = {"schema": "orch.human-settings/1", "workspaces": {wkey: recs, "f" * 32: other}}
+    garbage = rnd.random() < 0.3
+    hp._write_private(home / "human-settings.json", "{broken" if garbage else json.dumps(body))
+    (home / "human-settings.json").chmod(0o644)  # loose: the next read resets
+    if garbage:
+        before = dict.fromkeys(before, False)  # an unreadable record means every widening is off (N12)
+    after = {st: hp.effective(tws, st, True) for st in hp.SETTING_DEFAULTS}
+    for st in hp.SETTING_DEFAULTS:
+        assert after[st] <= before[st], (seed, st, before, after)
+    saved = json.loads((home / "human-settings.json").read_text())["workspaces"]
+    if not garbage:  # tombstones in any workspace survive
+        assert saved["f" * 32] == other
