@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, procs, term
+from orch import config, procs, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -167,7 +167,7 @@ def next_key(root: Path) -> str:
         tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
         try:
             tmp.write_text(json.dumps({"last": n}) + "\n", encoding="utf-8")
-            os.replace(tmp, p)
+            syncgate.replace(tmp, p)
         finally:
             tmp.unlink(missing_ok=True)
     return f"{code}-{n}"
@@ -177,7 +177,20 @@ def load(root: Path, tid: str) -> dict:
     p = ticket_path(root, tid)
     if not p.exists():
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
-    return json.loads(p.read_text(encoding="utf-8"))
+    return _read_ticket(p, tid)
+
+
+def _read_ticket(p: Path, tid: str) -> dict:
+    """Read a ticket file. Invalid JSON is retried (3x, 100 ms: a sync step may be swapping the file in), then
+    reported as "being updated". Read-only: a reader never rewrites, quarantines or deletes a file."""
+    for attempt in range(4):
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except ValueError:
+            if attempt == 3:
+                raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
+        time.sleep(0.1)
+    raise AssertionError("unreachable")
 
 
 def _break_stale(lock: Path) -> bool:
@@ -233,6 +246,8 @@ def _locked(root: Path, tid: str):
                 raise Refused(f"Ticket {tid} is busy (retried for 5 s). Try again.") from None
             time.sleep(0.02)
     try:
+        if _ID_RE.fullmatch(tid) or tid == "key":  # synced files; chat / relay state is never synced
+            syncgate.wait_clear(root, f"ticket {tid}" if tid != "key" else "the ticket counter")
         yield
     finally:
         with contextlib.suppress(OSError):
@@ -359,8 +374,8 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                t = json.loads(p.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                t = _read_ticket(p, p.stem)
+            except (OSError, Refused):
                 continue
             if include_general or not (isinstance(t, dict) and t.get("general") is True):
                 out.append(t)
@@ -1719,6 +1734,7 @@ def attach_file(
     """Copy a workspace file into .orch/tickets/<tid>/evidence/ and return the evidence entry for it.
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
+    syncgate.wait_clear(root, f"ticket {tid}")
     if role is not None and role not in ROLES:
         raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
     if title is not None and not 1 <= len(title.strip()) <= 120:
@@ -1827,6 +1843,7 @@ def files_dir(root: Path, tid: str) -> Path:
     """.orch/tickets/<id>/files/ : files people send to the ticket (from the phone), created. A link anywhere
     on the way is refused."""
     load(root, tid)
+    syncgate.wait_clear(root, f"ticket {tid}")
     cur = root / ".orch"
     for part in ("tickets", tid, "files"):
         cur = cur / part
@@ -1842,6 +1859,7 @@ def files_dir(root: Path, tid: str) -> Path:
 def artifacts_dir(root: Path, tid: str) -> Path:
     """The ticket's artifacts folder, created. A link anywhere on the way is refused."""
     d = artifacts_path(root, tid)
+    syncgate.wait_clear(root, f"ticket {tid}")
     cur = root / ".orch"
     for part in ("tickets", tid, "artifacts"):
         cur = cur / part
@@ -1934,6 +1952,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
     means it was done before (returned with existed=True, nothing written)."""
     load(root, tid)  # the id has the shape of a ticket id and the ticket exists
+    syncgate.wait_clear(root, f"ticket {tid}")
     name = attach_name(exact or hint)
     if exact and name != exact:
         raise Refused("That file name is not allowed.")
