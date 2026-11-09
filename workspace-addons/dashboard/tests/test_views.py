@@ -437,3 +437,11 @@ def test_v1_home_and_ticket_controls():
     css = (WEBDIR / "pages" / "tickets.css").read_text()
     assert ".board .kanban-col{display:block" in css
     assert "prefers-reduced-motion:reduce" in (WEBDIR / "pages" / "home.css").read_text()
+
+
+def test_a_view_that_needs_a_few_seconds_is_not_stale(ws, fake_orch):
+    """fb20: the old 2 s limit turned a slow but working add-on view (Focus with live sessions) into "Not up to
+    date" and hid new sessions; the default limit leaves room for it."""
+    from orch_dashboard import views
+
+    assert views.TIMEOUT >= 10.0
