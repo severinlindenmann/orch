@@ -174,6 +174,8 @@ def _git_exclude(root: Path) -> tuple[Path, str] | None:
     """(.git/info/exclude, path of the project below the git top folder) or None when this is no git repo."""
     h = _hardened(root)
     if h is None:
+        if _git_on_path():
+            print("orch: git excludes skipped: no git that orch trusts was found.", file=sys.stderr)
         return None
     try:
         out = subprocess.run(
@@ -303,17 +305,24 @@ def _tracked(root: Path, rel: str) -> bool:
         return True  # cannot tell: treat the file as the team's
 
 
+def _git_on_path() -> bool:
+    """Is there SOME git program on the PATH (the hardened lookup may still refuse it: a planted one)?"""
+    name = "git.exe" if os.name == "nt" else "git"
+    return any(
+        d and os.path.isfile(os.path.join(d, name)) and os.access(os.path.join(d, name), os.X_OK)
+        for d in os.environ.get("PATH", "").split(os.pathsep)
+    )
+
+
+# What "closed" means when orch finds no git it trusts (hardened() is None), per caller:
+#   _in_git_repo / check_private_path / _ignored -> refuse (nothing private is stored);
+#   _tracked -> "tracked" (the team's file: not touched); _git_exclude -> skipped with a note;
+#   filesig.files_sig -> None (no signature).
 def _hardened(cwd: Path):
     """safegit.hardened (imported late: safegit needs addons, addons needs this module)."""
     from orch import safegit
 
     return safegit.hardened(cwd)
-
-
-def _git_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["LC_ALL"] = "C"
-    return env
 
 
 def _in_git_repo(root: Path) -> bool:
@@ -322,7 +331,11 @@ def _in_git_repo(root: Path) -> bool:
     h = _hardened(root)
     try:
         if h is None:
-            raise FileNotFoundError("git")  # no trusted git program: the same as none installed
+            if _git_on_path():  # a git exists but none is trusted (a planted one?): never "not a repo"
+                raise Refused(
+                    "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
+                )
+            raise FileNotFoundError("git")  # no git program at all
         r = subprocess.run(
             [*h[0], "rev-parse", "--is-inside-work-tree"],
             cwd=root,

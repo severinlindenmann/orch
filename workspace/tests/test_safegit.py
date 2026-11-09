@@ -784,3 +784,73 @@ def test_the_legacy_callers_never_run_a_workspace_git_hook_or_fsmonitor(proj, mo
     with pytest.raises(Refused):  # not ignored here: refused after asking the hardened git
         harness.check_private_path(r, r / ".orch" / "local" / "x.json")
     assert list(marker.parent.glob(marker.name + "*")) == []
+
+
+def _planted_only(proj, monkeypatch):
+    """The only git on the PATH is one inside the workspace: hardened() finds none it trusts."""
+    (proj / "bin").mkdir(exist_ok=True)
+    sh(proj / "bin" / "git", "exit 0")
+    monkeypatch.setenv("PATH", str(proj / "bin"))
+    monkeypatch.setattr(safegit, "_exes", {})
+
+
+def test_with_no_trusted_git_each_caller_closes_in_its_own_safe_direction(proj, monkeypatch, capsys):
+    from orch import filesig, harness
+
+    plain_git(proj, "init", "-q")
+    (proj / "a.txt").write_text("x\n")
+    (proj / ".orch").mkdir()
+    _planted_only(proj, monkeypatch)
+    assert safegit.hardened(proj) is None
+    assert filesig.files_sig(proj) is None  # no signature
+    with pytest.raises(Refused):
+        harness._in_git_repo(proj)  # a planted git must not read as "not a repo"
+    with pytest.raises(Refused):
+        harness.check_private_path(proj, proj / ".orch" / "local" / "x.json")
+    with pytest.raises(Refused):
+        harness._ignored(proj, "a.txt")
+    assert harness._tracked(proj, "a.txt") is True  # the team's file: left alone
+    assert harness._git_exclude(proj) is None
+    assert "git excludes skipped" in capsys.readouterr().err
+
+
+def test_with_no_git_at_all_a_plain_folder_is_fine(proj, monkeypatch):
+    from orch import harness
+
+    monkeypatch.setenv("PATH", "/nonexistent-dir")
+    monkeypatch.setattr(safegit, "_exes", {})
+    assert harness._in_git_repo(proj) is False
+
+
+def test_ignored_answers_from_the_hardened_git(proj):
+    from orch import harness
+
+    plain_git(proj, "init", "-q")
+    (proj / ".gitignore").write_text("secret.txt\n")
+    assert harness._ignored(proj, "secret.txt") is True
+    assert harness._ignored(proj, "other.txt") is False
+
+
+def test_source_sha_uses_the_hardened_git(tmp_path, monkeypatch):
+    plain_git(tmp_path, "init", "-q")
+    plain_git(tmp_path, "config", "user.email", "t@t")
+    plain_git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "f").write_text("x")
+    plain_git(tmp_path, "add", "-A")
+    plain_git(tmp_path, "commit", "-qm", "i")
+    head = plain_git(tmp_path, "rev-parse", "HEAD")
+    monkeypatch.setattr(addons, "repo", lambda: str(tmp_path))
+    monkeypatch.setattr(addons, "_is_local", lambda r: True)
+    seen = []
+    real = addons.subprocess.run
+    monkeypatch.setattr(addons.subprocess, "run", lambda a, **k: seen.append((a, k)) or real(a, **k))
+    assert addons._source_sha() == head
+    argv, kw = seen[-1]
+    assert os.path.isabs(argv[0]) and any(a.startswith("core.hooksPath=") for a in argv) and "env" in kw
+
+
+def test_env_sets_the_c_locale(monkeypatch):
+    monkeypatch.setenv("LANG", "de_CH.UTF-8")
+    monkeypatch.setenv("LC_ALL", "de_CH.UTF-8")
+    e = safegit.env(Path("/tmp"), None, "/bin/true")
+    assert e["LC_ALL"] == e["LANG"] == "C"

@@ -185,7 +185,7 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
     the strip, on purpose) nothing may open an editor, ask a password or prompt. `config`: (key, value) pairs
     given through GIT_CONFIG_COUNT/KEY_n/VALUE_n, so a repository-chosen name never has to survive `-c`."""
     e = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    e["LC_ALL"] = "C"
+    e["LC_ALL"] = e["LANG"] = "C"  # harness.py reads git's stderr text
     e["PATH"] = safe_path(cwd, root)
     e["GIT_TERMINAL_PROMPT"] = "0"
     e["GIT_EDITOR"] = e["GIT_SEQUENCE_EDITOR"] = e["GIT_ASKPASS"] = true
