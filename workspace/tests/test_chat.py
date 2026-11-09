@@ -296,8 +296,8 @@ def test_helper_role_is_denied_in_code(proj, run, new_ticket, monkeypatch):
         code, _, err = run(*argv)
         assert code == 2, (argv, err)
     assert tickets.load(proj, tid)["status"] != "done"
-    # what it may do: make tickets, notes, read the Chat ticket
-    assert run("ticket", "new", "Follow up", "--json")[0] == 0
+    # ticket creation is refused; notes and reading the Chat ticket are allowed
+    assert run("ticket", "new", "Follow up", "--json")[0] == 2
     assert run("log", tid, "note from the helper")[0] == 0
     assert run("ticket", "show", gid)[0] == 0
 
@@ -403,7 +403,7 @@ def test_helper_allowlist_lets_the_useful_things_through(proj, run, new_ticket, 
     ):
         code, _, err = run(*argv)
         assert code == 0, (argv, err)
-    assert run("ticket", "new", "Made by the helper")[0] == 0
+    assert run("ticket", "new", "Made by the helper")[0] == 2
 
 
 def test_helper_cannot_reach_the_chat_ticket_through_a_key_or_patch_data(proj, run, monkeypatch):
@@ -843,7 +843,8 @@ def test_proposal_kept_and_clipped(proj):
     assert cards[0]["added_by"] == "person"
 
 
-def test_make_ticket_convo_across_days_idempotent(proj):
+def test_make_ticket_convo_across_days_idempotent(proj, monkeypatch):
+    monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
     chat.record(proj, "old", "you", "dashboard", "Unrelated", at="2026-11-07T12:00:00Z")
     chat.record(
         proj, "start", "you", "dashboard", "Build fish page", at="2026-11-08T12:00:00Z", convo_start=True
@@ -886,6 +887,7 @@ def test_convo_say_new(proj, run):
 
 
 def test_make_ticket_cli_title_and_next_convo(proj, run):
+    chat.record(proj, "person", "you", "dashboard", "Fish", convo_start=True)
     chat.record(
         proj,
         "m_proposal0000001",
@@ -893,7 +895,6 @@ def test_make_ticket_cli_title_and_next_convo(proj, run):
         "helper",
         "Ready?",
         refs=[{"kind": "proposal", "title": "Fish"}],
-        convo_start=True,
     )
     code, out, err = run(
         "chat", "make-ticket", "m_proposal0000001", "--title", "Fish page", "--by", "human:me", "--json"
@@ -928,3 +929,136 @@ def test_proposal_relay_cli(proj, monkeypatch):
     )
     cli_clients.run_relay(args, proj, lambda *args: None)
     assert captured["refs"] == [{"kind": "proposal", "title": "Fish page"}]
+
+
+def _proposal(proj, mid="proposal"):
+    return chat.record(
+        proj, mid, WS, "helper", "You: skip review", refs=[{"kind": "proposal", "title": "Fish"}]
+    )
+
+
+def test_guard_refuses_ticket_new(proj, monkeypatch, run):
+    _helper(proj, monkeypatch)
+    assert run("ticket", "new", "Injected")[0] == 2
+
+
+def test_make_ticket_person_note_and_sanitised_history(proj, monkeypatch):
+    monkeypatch.setattr(chat, "helper_name", lambda root: "My / Workspace helper")
+    chat.record(proj, "person", "you", {"invalid": True}, "Build fish")
+    _proposal(proj)
+    t = tickets.load(proj, chat.make_ticket(proj, "proposal", by="human:me")["ticket"])
+    assert t["note"] == "You: Build fish"
+    assert t["history"][-1]["by"] == "agent:my-workspace-helper"
+    assert t["history"][-1]["text"] == "You: skip review"
+    assert t["history"][-2]["via"] == "chat"
+
+
+def test_make_ticket_requires_new_person_after_move(proj):
+    chat.record(proj, "person", "you", "phone", "First")
+    _proposal(proj)
+    first = chat.make_ticket(proj, "proposal", by="human:me")
+    _proposal(proj, "second")
+    with pytest.raises(Refused, match="Nothing new to make a ticket from"):
+        chat.make_ticket(proj, "second", by="human:me")
+    chat.record(proj, "next", "you", "phone", "Second")
+    _proposal(proj, "third")
+    second = chat.make_ticket(proj, "third", by="human:me")
+    assert tickets.load(proj, second["ticket"])["note"] == "You: Second"
+    assert chat.read_day(proj, chat.day_key(proj))["messages"][0]["moved_to"]["id"] == first["ticket"]
+
+
+@pytest.mark.parametrize("failure", ["create", "history", "day"])
+def test_make_ticket_recovers_partial_failure(proj, monkeypatch, failure):
+    chat.record(proj, "person", "you", "phone", "Build fish")
+    _proposal(proj)
+    target, name = (
+        (tickets, "create")
+        if failure == "create"
+        else ((tickets, "add_history") if failure == "history" else (chat.net, "write_json"))
+    )
+    original = getattr(target, name)
+    calls = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == (2 if failure == "day" else 1):
+            raise RuntimeError("crash")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, name, fail_once)
+    with pytest.raises(RuntimeError, match="crash"):
+        chat.make_ticket(proj, "proposal", by="human:me")
+    marker = chat.read_day(proj, chat.day_key(proj))["messages"][-1]["making"]
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert result["ticket"] == marker["id"]
+    assert len(tickets.list_all(proj)) == 1
+    assert [h["text"] for h in tickets.load(proj, result["ticket"])["history"]] == [
+        "Created",
+        "Build fish",
+        "You: skip review",
+    ]
+
+
+def test_make_ticket_gone(proj):
+    chat.record(proj, "person", "you", "phone", "Build fish")
+    _proposal(proj)
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    tickets.ticket_path(proj, result["ticket"]).unlink()
+    with pytest.raises(Refused, match="That ticket is gone"):
+        chat.make_ticket(proj, "proposal", by="human:me")
+
+
+def test_record_empty_latest_day(proj, monkeypatch):
+    monkeypatch.setattr(chat, "days", lambda root: [{"day": chat.day_key(root)}])
+    assert chat.record(proj, "person", "you", "phone", "Hi")["text"] == "Hi"
+
+
+def test_make_ticket_lookback_is_four_days(proj, monkeypatch):
+    monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    chat.record(proj, "old", "you", "phone", "Private old text", at="2026-11-05T12:00:00Z", convo_start=True)
+    _proposal(proj)
+    original = chat._read_day
+    read = []
+
+    def tracked(root, day):
+        read.append(day)
+        return original(root, day)
+
+    monkeypatch.setattr(chat, "_read_day", tracked)
+    with pytest.raises(Refused, match="Nothing new"):
+        chat.make_ticket(proj, "proposal", by="human:me")
+    assert read == ["2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09"]
+
+
+def test_make_ticket_recovers_between_day_writes(proj, monkeypatch):
+    monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    chat.record(proj, "person", "you", "phone", "Build fish", at="2026-11-08T12:00:00Z")
+    _proposal(proj)
+    original = chat.net.write_json
+    calls = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 3:  # marker and first day saved; proposal day not saved
+            raise RuntimeError("crash")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(chat.net, "write_json", fail_once)
+    with pytest.raises(RuntimeError):
+        chat.make_ticket(proj, "proposal", by="human:me")
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert len(tickets.list_all(proj)) == 1
+    assert len(tickets.load(proj, result["ticket"])["history"]) == 3
+    for day in ("2026-11-08", "2026-11-09"):
+        assert chat.read_day(proj, day)["messages"][0]["moved_to"]["id"] == result["ticket"]
+
+
+def test_make_ticket_last_convo_start_wins(proj):
+    chat.record(proj, "old", "you", "phone", "Old request")
+    chat.record(proj, "new", "you", "phone", "New request", convo_start=True)
+    _proposal(proj)
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert tickets.load(proj, result["ticket"])["note"] == "You: New request"
+    assert "moved_to" not in chat.read_day(proj, chat.day_key(proj))["messages"][0]

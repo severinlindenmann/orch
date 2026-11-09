@@ -494,7 +494,12 @@ def create(
     parent: str | None = None,
     ext: dict[str, dict] | None = None,
     fields: dict | None = None,
+    *,
+    tid: str | None = None,
 ) -> dict:
+    """Create a ticket; tid lets callers persist a reserved id before this write."""
+    if tid is not None:
+        ticket_path(root, tid)  # validate before using the id in a lock path
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
@@ -506,7 +511,7 @@ def create(
     t = now()
     ticket = {
         "schema": "orch.ticket/1",
-        "id": new_id(root),
+        "id": tid if tid is not None else new_id(root),
         "key": next_key(root),
         "title": title,
         "status": "open",
@@ -531,7 +536,11 @@ def create(
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
-    save(root, ticket)
+    with _locked(root, ticket["id"]):
+        if ticket_path(root, ticket["id"]).exists():
+            raise Refused("That ticket already exists.")
+        ticket["revision"] = 1
+        _write(root, ticket)
     return ticket
 
 
