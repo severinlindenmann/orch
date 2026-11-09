@@ -752,8 +752,11 @@ _DM_WS = re.compile(r"ws_[a-z0-9]{10}")
 def can_of(flags) -> dict:
     """Mirrors the relay's phone `can`: {chat, tasks, files} (contracts/relay-api.md)."""
     f = flags if isinstance(flags, dict) else {}
-    return {"chat": f.get("text") is True, "tasks": f.get("delegate") is True or f.get("start") is True,
-            "files": f.get("files") is True}
+    return {
+        "chat": f.get("text") is True,
+        "tasks": f.get("delegate") is True or f.get("start") is True,
+        "files": f.get("files") is True,
+    }
 
 
 def contacts(root: Path) -> list[dict]:
@@ -767,8 +770,11 @@ def contacts(root: Path) -> list[dict]:
         name = ws
         with contextlib.suppress(Exception):
             name = relay.name_of(root, ws)
-        item = {"ws": ws, "name": relay.clean_untrusted(name if isinstance(name, str) else ws, 100),
-                "can": can_of(row.get("can_send"))}
+        item = {
+            "ws": ws,
+            "name": relay.clean_untrusted(name if isinstance(name, str) else ws, 100),
+            "can": can_of(row.get("can_send")),
+        }
         if isinstance(row.get("look"), dict):
             item["look"] = row["look"]
         out[ws] = item
@@ -794,8 +800,11 @@ def _dm_path(root: Path, ws: str) -> Path:
 def _dm_read(root: Path, ws: str) -> dict:
     data = net.read_json(_dm_path(root, ws), {})
     rows = data.get("messages") if isinstance(data, dict) and data.get("ws", ws) == ws else None
-    return {"schema": "orch.chat-dm/1", "ws": ws,
-            "messages": [m for m in rows if isinstance(m, dict)] if isinstance(rows, list) else []}
+    return {
+        "schema": "orch.chat-dm/1",
+        "ws": ws,
+        "messages": [m for m in rows if isinstance(m, dict)] if isinstance(rows, list) else [],
+    }
 
 
 def _dm_write(root: Path, ws: str, data: dict) -> None:
@@ -848,14 +857,26 @@ def dm_thread(root: Path, ws: str) -> dict:
                 continue
             if not isinstance(mid, str) or mid in ids or not isinstance(body.get("text"), str):
                 continue
-            data["messages"].append({"id": mid, "at": str(msg.get("created_at") or ""), "by": ws,
-                                     "text": relay.clean_untrusted(body["text"], 2000), "state": "delivered"})
+            data["messages"].append(
+                {
+                    "id": mid,
+                    "at": str(msg.get("created_at") or ""),
+                    "by": ws,
+                    "text": relay.clean_untrusted(body["text"], 2000),
+                    "state": "delivered",
+                }
+            )
             ids.add(mid)
         for m in data["messages"]:
             rid = m.get("relay_id")
-            if (m.get("by") == "you" and m.get("state") == "sending" and not m.get("error")
-                    and isinstance(rid, str) and re.fullmatch(r"m_[a-z0-9]{16}", rid)
-                    and not (root / ".orch" / "outbox" / f"{rid}.json").exists()):
+            if (
+                m.get("by") == "you"
+                and m.get("state") == "sending"
+                and not m.get("error")
+                and isinstance(rid, str)
+                and re.fullmatch(r"m_[a-z0-9]{16}", rid)
+                and not (root / ".orch" / "outbox" / f"{rid}.json").exists()
+            ):
                 m["state"] = "delivered"
         _dm_write(root, ws, data)
     return {**contact, "messages": data["messages"]}
