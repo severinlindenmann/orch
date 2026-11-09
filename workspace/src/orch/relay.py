@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import harness, net, runs, skillrender, skills, tickets
+from orch import harness, humanproof, keystore, net, runs, skillrender, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -2409,7 +2409,7 @@ def refresh(root: Path) -> str:
     skipped: list[str] = []
     try:
         names = _stage(stage, snap, skipped)
-        _commit(root, stage, snap, names)
+        _commit(root, stage, snap, names, skipped)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     skillrender.refresh_skills(root)
@@ -2465,7 +2465,6 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     if not isinstance(mcp, dict) or not isinstance(cred, dict):
         raise Refused("The snapshot has bad MCP or credentials. Nothing changed.")
     net.write_json(stage / "mcp.json", {"mcpServers": mcp}, True)
-    net.write_json(stage / "credentials.json", cred, True)
     net.write_json(stage / "shared.json", {"version": snap["version"], "skills": names})
     ws = snap.get("workspaces")
     if not isinstance(ws, dict) or not isinstance(ws.get("workspaces"), list):
@@ -2474,7 +2473,22 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     return names
 
 
-def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
+def _admin_keys(root: Path, cred: dict, skipped: list[str]) -> None:
+    """The admin's keys go into the guarded orch home (keystore.set_admin: one rename, an interrupted refresh
+    keeps the old keys), never into the workspace. No keys and no usable guarded home (nothing could be stored
+    there): nothing to do. Keys but no usable home: Refused, the whole refresh stops (fail closed)."""
+    try:
+        humanproof.guarded_home(root)
+    except Refused:
+        if not cred:
+            return
+        raise
+    skipped.extend(keystore.set_admin(root, cred))
+    # an older refresh left the keys in the workspace: they are gone now (the store holds the current set)
+    (net.secrets_dir(root) / "credentials.json").unlink(missing_ok=True)
+
+
+def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list[str]) -> None:
     agents = root / ".agents" / "skills"
     for n in names:  # refuse before changing anything
         dest = agents / n
@@ -2485,7 +2499,7 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
     sec = net.secrets_dir(root)
     sec.mkdir(parents=True, exist_ok=True)
     skills.ensure_gitignore(root)
-    for fn in ("credentials.json", "mcp.json", "shared.json"):
+    for fn in ("mcp.json", "shared.json"):
         harness.check_private_path(root, sec / fn)  # refuse before changing anything
     (agents / "orch-relay").mkdir(parents=True, exist_ok=True)
     os.replace(stage / "workspaces.json", agents / "orch-relay" / "workspaces.json")
@@ -2499,8 +2513,9 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
             if d.is_dir() and not skills._is_link(d) and (d / SHARED_MARK).exists() and d.name not in names:
                 shutil.rmtree(d)
                 skills.unlink_skill(root, d.name)
-    net.replace_private(stage / "credentials.json", sec / "credentials.json")
     net.replace_private(stage / "mcp.json", sec / "mcp.json")
+    # before shared.json: a failure here leaves the old version, so the next refresh retries
+    _admin_keys(root, snap["credentials"], skipped)
     skills.apply_agent_files(root)
     net.replace_private(stage / "shared.json", sec / "shared.json")
 

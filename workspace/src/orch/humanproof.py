@@ -204,7 +204,48 @@ def key_dir(root: Path, create: bool = True) -> Path:
         _private_dir(d, home)
     else:
         _check_dir(d)
+    _check_binding(root, d, create)
     return d
+
+
+BINDING_MISMATCH = (
+    "Refused: this folder's key id belongs to another folder (it was copied or moved). "
+    "Its keys stay where they are."
+)
+
+
+def _check_binding(root: Path, d: Path, create: bool) -> None:
+    """Bind the workspace's local id (workspace-writable, so not trusted alone) to the workspace's real path,
+    in the guarded home (binding.json, 0600); refuse a mismatch (N17). The first use records the path. The
+    stored folder is compared by identity (samefile), so a case change on macOS is the same folder and a copy,
+    which is a different folder with the same id, is refused. A moved workspace is refused too: the person
+    reconnects it (a fresh id) rather than inheriting keys."""
+    f = d / "binding.json"
+    here = os.path.realpath(root)
+    try:
+        _check_file(f)
+        stored = json.loads(f.read_text(encoding="utf-8")).get("realpath")
+    except FileNotFoundError:
+        if not create:
+            raise Refused(BINDING_MISMATCH) from None
+        with _key_lock(d):
+            if not f.exists():  # re-checked inside the lock: two first uses race
+                _write_private(f, json.dumps({"schema": "orch.binding/1", "realpath": here}) + "\n")
+                return
+        _check_binding(root, d, create)
+        return
+    except (ValueError, AttributeError):
+        raise Refused("A record in the orch folder is unreadable.") from None
+    if not isinstance(stored, str):
+        raise Refused("A record in the orch folder is unreadable.")
+    if stored == here:
+        return
+    try:
+        same = os.path.samefile(stored, here)
+    except OSError:
+        same = False
+    if not same:
+        raise Refused(BINDING_MISMATCH)
 
 
 def _write_private(path: Path, text: str) -> None:
