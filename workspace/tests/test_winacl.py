@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from test_humanproof import READERS, TID, _loose_setup
+from test_humanproof import READERS, TID, _loose_setup, tws  # noqa: F401
 
 from orch import humanproof as hp
 from orch import winacl
