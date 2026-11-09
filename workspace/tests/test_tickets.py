@@ -441,10 +441,34 @@ def test_proof_state_failed_only_when_exit_recorded():
     assert tickets.proof_state(_t([zero]))["per_item"]["c1"] == "passed"
 
 
-def test_proof_state_uncovered_hint_and_covers():
-    ps = tickets.proof_state(_t([_c("c1")], done_when="CSV button; works on phone"))
-    assert ps["uncovered"] == ["Done when isn't linked to tasks"]
-    assert ps["line"] == '1 part of "Done when" has no task'
-    ps = tickets.proof_state(_t([_c("c1", covers="CSV button")], done_when="CSV button; works on phone"))
-    assert ps["uncovered"] == [] and ps["line"] == "1 check passed"
+def test_proof_state_real_coverage_count_and_level():
+    dw = "A CSV download button on the invoice list; and it works on the phone"
+    ps = tickets.proof_state(
+        _t([_c("c1", covers='"A CSV download button on the invoice list"')], done_when=dw)
+    )
+    assert ps["uncovered"] == ["and it works on the phone"]
+    assert ps["line"] == '1 part of "Done when" has no task' and ps["level"] == "warn"
+    ps = tickets.proof_state(_t([_c("c1", covers="Alpha"), _c("c2")], done_when="Alpha; Beta; Gamma"))
+    assert ps["uncovered"] == ["Beta", "Gamma"]
+    ps = tickets.proof_state(_t([_c("c1")], done_when="One.\nTwo; Three"))
+    assert ps["line"] == '3 parts of "Done when" have no task'
+    ps = tickets.proof_state(
+        _t(
+            [_c("c1", covers="one"), _c("c2", covers="two"), _c("c3", covers="three")],
+            done_when="One.\nTwo; Three",
+        )
+    )
+    assert ps["uncovered"] == [] and ps["line"] == "3 checks passed" and ps["level"] == "ok"
     assert tickets.proof_state(_t([_c("c1")]))["uncovered"] == []  # no done_when, nothing to cover
+
+
+def test_proof_state_levels():
+    assert tickets.proof_state(_t([]))["level"] == "note"
+    assert tickets.proof_state(_t([_c("c1", types=("note",))]))["level"] == "note"
+    bad = _c("c1")
+    bad["evidence"][0]["exit"] = 2
+    assert tickets.proof_state(_t([bad]))["level"] == "fail"
+    assert tickets.proof_state(_t([_c("c1", done=False, types=())]))["per_item"]["c1"] == "missing"
+    stale = _c("c1")
+    stale["evidence"][0]["stale"] = True  # a stored flag is never trusted
+    assert tickets.proof_state(_t([stale]))["per_item"]["c1"] == "passed"

@@ -67,17 +67,20 @@ def test_multiline_whitespace_and_clear(field):
     "checks",
     [[], [{"id": "c1", "text": "Export", "done": False}], [{"id": "c1", "text": "Export", "done": True}]],
 )
-def test_prompt_plans_criteria_only_without_checks(resume, checks):
+def test_prompt_plans_criteria_until_tasks_cover_them(resume, checks):
     ticket = {"id": "t_abcdef", "title": "Export", "done_when": TEXT, "checklist": checks}
     prompt = runs.resume_prompt(ticket, [], None, "codex") if resume else runs.fresh_prompt(ticket, [])
-    expected = (
-        "The person described what should be true when it is done: "
-        "The export opens. Every invoice is included.. Turn this into checks with "
-        "`orch check add` (one check per thing that must be true), then start."
-    )
-    assert (expected in prompt) == (not checks)
-    if checks:
-        assert "The person described" not in prompt
+    said = "what should be true when it is done: The export opens. Every invoice is included.."
+    assert said in prompt
+    assert "--covers" in prompt
+    assert ("Turn this into checks with `orch check add`" in prompt) == (not checks)
+    assert ("orch check edit t_abcdef <task id> --covers" in prompt) == bool(checks)
+
+
+def test_prompt_is_quiet_once_a_task_covers_done_when():
+    checks = [{"id": "c1", "text": "Export", "done": False, "covers": "The export opens"}]
+    ticket = {"id": "t_abcdef", "title": "Export", "done_when": TEXT, "checklist": checks}
+    assert runs._done_when_plan(ticket) == []
 
 
 def test_plan_missing_and_clipped():
