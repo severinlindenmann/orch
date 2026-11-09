@@ -746,7 +746,7 @@ def test_workflow_state_defaults_off_and_reads_core_config(ws):
     assert load_settings(ws, None)["agents_may_finish"] is True
 
 
-def test_human_review_done_and_workflow_reach_core_even_when_server_was_started_by_agent(
+def test_human_review_done_is_refused_without_a_proof_and_workflow_reaches_core_when_server_was_started_by_agent(
     ws, tmp_path, monkeypatch
 ):
     import sys
@@ -772,9 +772,12 @@ def test_human_review_done_and_workflow_reach_core_even_when_server_was_started_
         "ticket.patch",
         {"ticket": t["id"], "data": {"status": "done"}, "if_revision": t["revision"]},
     )
-    assert code == 200, text
-    saved = json.loads(p.read_text())
-    assert saved["status"] == "done" and saved["history"][-1]["by"].startswith("human:")
+    # Looks good is a person's verdict (H1): the real core refuses it without the page session's proof, even
+    # with a fake command path here (no proof is minted for a test fake). It must NOT be downgraded to the
+    # agent's "moved to Review" because the server was started by an agent: it is refused outright.
+    assert code == 422 and "dashboard on this computer" in text, text
+    assert json.loads(p.read_text())["status"] == "review"
+    # (the proven click is covered end to end by workspace/tests/test_human_proof_page_e2e.py)
     code, text, _ = actions.run_op(ws, str(command), "workflow.set", {"on": True})
     assert code == 200, text
     assert config.agents_may_finish(ws) is True
@@ -1035,14 +1038,26 @@ def test_check_wont_do_argv():
         supplied = args if reason is None else {**args, "reason": reason}
         flags = [f"--reason={reason}"] if reason and reason.strip() else []
         assert actions.build_argv("check.wont_do", supplied) == [
-            "check", "wont-do", "t_abcdef", "c1", *flags, *common
+            "check",
+            "wont-do",
+            "t_abcdef",
+            "c1",
+            *flags,
+            *common,
         ]
 
 
-@pytest.mark.parametrize("extra", [
-    {"reason": "x" * 201}, {"reason": 12}, {"reason": "a\nb"},
-    {"reason": "\x00"}, {"unexpected": True}, {"check": "bad"},
-])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"reason": "x" * 201},
+        {"reason": 12},
+        {"reason": "a\nb"},
+        {"reason": "\x00"},
+        {"unexpected": True},
+        {"check": "bad"},
+    ],
+)
 def test_check_wont_do_refuses_bad_args(extra):
     with pytest.raises(actions.BadRequest):
         actions.build_argv("check.wont_do", {"ticket": "t_abcdef", "check": "c1", **extra})
@@ -1051,11 +1066,16 @@ def test_check_wont_do_refuses_bad_args(extra):
 def test_check_reopen_argv_and_refusals():
     common = ["--by", actions.actor(), "--json"]
     assert actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2"}) == [
-        "check", "reopen", "t_abcdef", "c2", *common
+        "check",
+        "reopen",
+        "t_abcdef",
+        "c2",
+        *common,
     ]
     for bad in ({"check": "bad"}, {"unexpected": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2", **bad})
+
 
 @pytest.mark.parametrize("value", [True, False, None])
 def test_ticket_new_plan_first(value):
