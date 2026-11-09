@@ -60,6 +60,8 @@ long text or dropped files. Read them first; they are word for word what the per
 
 Do not copy the long text into the Note.
 
+To keep a text file or picture with a ticket yourself: `orch ticket attach <id> --name <file name> < file` (orch picks the final name).
+
 **Change the step list**
 
     orch check edit <id> <c> "<new text>"
