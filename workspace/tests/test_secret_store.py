@@ -274,14 +274,9 @@ def test_folders_are_0700_and_files_0600(tws):
 
 
 @posix_only
-def test_looser_rights_or_a_link_refuse_every_read(tws):
+def test_a_loose_folder_or_a_link_refuses_every_read(tws):
     keystore.add(tws, "k", "token", TOKEN)
     d = hp.key_dir(tws)
-    os.chmod(d / "keys.json", 0o644)
-    with pytest.raises(Refused, match="wrong rights"):
-        keystore.get_value(tws, "k")
-    os.chmod(d / "keys.json", 0o600)
-    assert keystore.get_value(tws, "k") == TOKEN
     os.chmod(d, 0o755)
     with pytest.raises(Refused, match="wrong rights"):
         keystore.list_keys(tws)
@@ -657,3 +652,145 @@ def test_an_empty_new_key_folder_is_bound_once_and_the_first_binding_wins(tws, a
     hp._bind_new(other, d)  # a later binding attempt never overwrites
     assert (d / "binding.json").read_text() == first
     assert not list(d.glob(".binding.*"))
+
+
+# ------------------------------------------------------------------------------ loose key files (set aside)
+
+SENTINEL = "sentinel-VALUE-never-used-0042"
+
+
+def _loose_setup(tws):
+    keystore.add(tws, "k1", "token", SENTINEL)
+    keystore.add(tws, "k2", "password", TOKEN2)
+    return hp.key_dir(tws)
+
+
+@posix_only
+@pytest.mark.parametrize("mode", [0o644, 0o660, 0o604, 0o666])
+def test_a_loose_keys_file_is_set_aside_and_its_values_are_never_used(tws, mode, caplog):
+    d = _loose_setup(tws)
+    os.chmod(d / "keys.json", mode)
+    with pytest.raises(Refused, match="must be entered again") as e:
+        keystore.get_value(tws, "k1")
+    assert SENTINEL not in str(e.value)
+    assert not (d / "keys.json").exists()  # renamed, not chmod'ed and trusted
+    aside = list(d.glob("keys.json.loose-*"))
+    assert len(aside) == 1 and _mode(aside[0]) == 0o600
+    assert "keys.json" in caplog.text and SENTINEL not in caplog.text and TOKEN2 not in caplog.text
+    items = keystore.list_keys(tws)
+    assert [(i["name"], i["state"], i["type"]) for i in items] == [
+        ("k1", "needs-reentry", None),
+        ("k2", "needs-reentry", None),
+    ]
+    assert all(i["note"] == "This key must be entered again." for i in items)
+    assert SENTINEL not in json.dumps(items) and TOKEN2 not in json.dumps(items)
+    assert not (d / "keys.json").exists()  # reading did not create anything
+
+
+@posix_only
+def test_re_entry_works_and_the_set_aside_file_is_cleaned_up(tws):
+    d = _loose_setup(tws)
+    os.chmod(d / "keys.json", 0o644)
+    keystore.add(tws, "k1", "token", TOKEN)  # a person enters one key again
+    assert keystore.get_value(tws, "k1") == TOKEN
+    with pytest.raises(Refused, match="must be entered again"):
+        keystore.get_value(tws, "k2")
+    assert len(list(d.glob("keys.json.loose-*"))) == 1  # k2 still needs it
+    assert {i["name"]: i["state"] for i in keystore.list_keys(tws)} == {"k1": "active", "k2": "needs-reentry"}
+    keystore.add(tws, "k2", "password", TOKEN2)
+    assert not list(d.glob("keys.json.loose-*"))  # nothing left to re-enter: deleted by exact path
+    assert [i["state"] for i in keystore.list_keys(tws)] == ["active", "active"]
+    assert SENTINEL not in (d / "keys.json").read_text()
+
+
+@posix_only
+def test_removing_a_key_that_needs_re_entry_clears_it(tws):
+    d = _loose_setup(tws)
+    os.chmod(d / "keys.json", 0o644)
+    keystore.remove(tws, "k1")
+    assert [i["name"] for i in keystore.list_keys(tws)] == ["k2"]
+    (aside,) = d.glob("keys.json.loose-*")
+    assert SENTINEL not in aside.read_text()  # rewritten without any value
+    keystore.remove(tws, "k2")
+    assert not list(d.glob("keys.json.loose-*")) and keystore.list_keys(tws) == []
+    with pytest.raises(Refused, match="no such key"):
+        keystore.remove(tws, "k2")
+
+
+@posix_only
+def test_a_loose_file_with_bad_names_lists_only_valid_plain_names(tws):
+    d = _loose_setup(tws)
+    doc = {
+        "schema": "orch.keys/1",
+        "keys": {"ok-name": {"value": SENTINEL}, "../evil": {}, "a b": {}, "x\nY": {}},
+    }
+    (d / "keys.json").write_text(json.dumps(doc))
+    os.chmod(d / "keys.json", 0o666)
+    assert [i["name"] for i in keystore.list_keys(tws)] == ["ok-name"]
+    with pytest.raises(Refused, match="must be entered again"):
+        keystore.get_value(tws, "ok-name")
+
+
+@posix_only
+def test_another_owner_counts_as_loose(tws, monkeypatch):
+    d = _loose_setup(tws)
+    monkeypatch.setattr(os, "getuid", lambda: os.stat(d).st_uid + 1)  # the file now looks foreign
+    assert keystore._is_loose(d / "keys.json")
+    monkeypatch.undo()
+    assert not keystore._is_loose(d / "keys.json")
+
+
+@posix_only
+def test_a_loose_admin_file_is_set_aside_and_the_next_refresh_restores_it(tws):
+    keystore.set_admin(tws, {"adm1": SENTINEL, "adm2": TOKEN2})
+    d = hp.key_dir(tws)
+    os.chmod(d / "admin-keys.json", 0o640)
+    with pytest.raises(Refused, match="must be entered again"):
+        keystore.get_value(tws, "adm1")
+    assert [(i["name"], i["source"], i["state"]) for i in keystore.list_keys(tws)] == [
+        ("adm1", "admin", "needs-reentry"),
+        ("adm2", "admin", "needs-reentry"),
+    ]
+    assert keystore.admin_names(tws) == []
+    keystore.set_admin(tws, {"adm1": TOKEN, "adm3": TOKEN2})  # the refresh is the whole truth
+    assert not list(d.glob("admin-keys.json.loose-*"))
+    assert keystore.get_value(tws, "adm1") == TOKEN
+    assert [i["name"] for i in keystore.list_keys(tws)] == ["adm1", "adm3"]
+
+
+@posix_only
+def test_a_loose_key_file_value_is_set_aside_and_never_read(tws):
+    keystore.add(tws, "kf", "key-file", SENTINEL.encode())
+    keystore.add(tws, "k", "token", TOKEN)
+    d = hp.key_dir(tws)
+    os.chmod(d / "files" / "kf", 0o644)
+    with pytest.raises(Refused, match="must be entered again") as e:
+        keystore.get_value(tws, "kf")
+    assert SENTINEL not in str(e.value)
+    assert not (d / "files" / "kf").exists() and len(list((d / "files").glob("kf.loose-*"))) == 1
+    states = {i["name"]: i["state"] for i in keystore.list_keys(tws)}
+    assert states == {"kf": "needs-reentry", "k": "active"}
+    assert keystore.get_value(tws, "k") == TOKEN  # the rest still works
+    keystore.add(tws, "kf", "key-file", b"fresh bytes")
+    assert keystore.get_value(tws, "kf") == b"fresh bytes"
+    assert not list((d / "files").glob("kf.loose-*"))
+    assert _mode(d / "files" / "kf") == 0o600
+
+
+@posix_only
+def test_a_loose_key_file_is_found_when_listing_and_when_removing(tws):
+    keystore.add(tws, "kf", "key-file", SENTINEL.encode())
+    d = hp.key_dir(tws)
+    os.chmod(d / "files" / "kf", 0o666)
+    assert [(i["name"], i["state"]) for i in keystore.list_keys(tws)] == [("kf", "needs-reentry")]
+    keystore.remove(tws, "kf")
+    assert not list((d / "files").glob("kf*")) and keystore.list_keys(tws) == []
+
+
+@posix_only
+def test_profiles_still_work_while_a_key_needs_re_entry(tws):
+    d = _loose_setup(tws)
+    os.chmod(d / "keys.json", 0o644)
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k1"}, "set": {"B": "plain host"}}})
+    assert keystore.read_profiles(tws)["p"]["env"] == {"A": "k1"}
+    assert not (d / "keys.json").exists()  # the loose file stayed set aside, never read for values

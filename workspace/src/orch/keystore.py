@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
+import stat
 import time
 import tomllib
 from pathlib import Path
@@ -55,6 +57,9 @@ RECORDS = frozenset({"relay", "dev"})  # allowlist: the other files of the key f
 
 TOO_SHORT = "This key is too short to hide safely in records: at least 8 characters."
 BAD_NAME = "A key name uses letters, digits, dot, dash and underscore, and starts with a letter or digit."
+NEEDS_REENTRY = "needs-reentry"
+REENTER = "This key must be entered again."
+_log = logging.getLogger("orch.keystore")
 READ_ONLY = "This key is managed by your admin and cannot be changed here."
 
 
@@ -120,6 +125,124 @@ def _store(d: Path, keys: dict, admin: bool = False) -> None:
     )
 
 
+# ------------------------------------------------------------------------------------ loose files
+# A key file that is wider than 0600 or has another owner may have been read or changed by someone else, so
+# its VALUES are never used again. It is renamed (under keys.lock) to <name>.loose-<UTC time>, set to 0600
+# and kept only so the key NAMES can be listed ("This key must be entered again"). Never chmod'ed and trusted.
+# Re-entry (add by a person, the next relay refresh for admin keys) writes a fresh 0600 entry; the set-aside
+# file is deleted by exact path when no name in it still needs re-entry, or when the key is removed.
+
+
+def _is_loose(p: Path) -> bool:
+    try:
+        st = p.lstat()
+    except OSError:
+        return False
+    return hp.POSIX and stat.S_ISREG(st.st_mode) and (st.st_uid != os.getuid() or bool(st.st_mode & 0o077))
+
+
+def _quarantine(path: Path) -> None:
+    """Rename a loose key file aside (caller holds keys.lock). Logs the file name, never a value."""
+    ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    dst = path.with_name(f"{path.name}.loose-{ts}")
+    n = 0
+    while dst.exists() or dst.is_symlink():
+        n += 1
+        dst = path.with_name(f"{path.name}.loose-{ts}-{n}")
+    os.rename(path, dst)
+    with contextlib.suppress(OSError):
+        os.chmod(dst, 0o600)
+    _log.warning("key file %s had loose rights and was set aside; its keys must be entered again", path.name)
+
+
+def _tighten_locked(d: Path) -> None:
+    for f in ("keys.json", "admin-keys.json"):
+        if _is_loose(d / f):
+            _quarantine(d / f)
+
+
+def _tighten(d: Path) -> None:
+    if any(_is_loose(d / f) for f in ("keys.json", "admin-keys.json")):
+        with hp._key_lock(d):
+            _tighten_locked(d)
+
+
+def _aside(d: Path, fname: str) -> list[Path]:
+    """The set-aside copies of fname (or of a key-file value under files/): <fname>.loose-<time>[-n]."""
+    base = d / fname
+    rx = re.compile(re.escape(base.name) + r"\.loose-\d{8}T\d{6}Z(-\d+)?$")
+    out = []
+    with contextlib.suppress(OSError):
+        out = [p for p in base.parent.iterdir() if rx.match(p.name) and not p.is_symlink() and p.is_file()]
+    return sorted(out)
+
+
+def _names_from(path: Path) -> set[str]:
+    """Key NAMES in a set-aside file, for display only. Values are never returned: the names are untrusted
+    (validated, plain text) and the rest of the file is dropped here."""
+    try:
+        if path.stat().st_size > 8 * 1024 * 1024:
+            return set()
+        raw = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return set()
+    keys = raw.get("keys") if isinstance(raw, dict) else None
+    if not isinstance(keys, dict):
+        return set()
+    return {n for n in keys if isinstance(n, str) and NAME_RE.match(n)}
+
+
+def _reentry(d: Path, admin: bool, live: dict) -> set[str]:
+    """Names that a set-aside key file listed and that nobody has entered again yet."""
+    names: set[str] = set()
+    for p in _aside(d, "admin-keys.json" if admin else "keys.json"):
+        names |= _names_from(p)
+    return names - set(live)
+
+
+def _file_loose_check(d: Path, name: str) -> None:
+    """A key-file value that is loose is set aside, under keys.lock, and never read."""
+    fp = d / "files" / name
+    if _is_loose(fp):
+        with hp._key_lock(d):
+            if _is_loose(fp):
+                _quarantine(fp)
+
+
+def _file_needs_reentry(d: Path, name: str) -> bool:
+    _file_loose_check(d, name)
+    fp = d / "files" / name
+    return not (fp.exists() or fp.is_symlink()) and bool(_aside(d, f"files/{name}"))
+
+
+def _dismiss(d: Path, name: str) -> None:
+    """The person removed key `name`: it no longer needs re-entry. Set-aside files are rewritten WITHOUT any
+    value (names only) and deleted when empty; the set-aside copy of a key-file value is deleted."""
+    for p in _aside(d, "keys.json"):
+        names = _names_from(p) - {name}
+        if names:
+            hp._write_private(
+                p, json.dumps({"schema": KEYS_SCHEMA, "keys": {n: {} for n in sorted(names)}}) + "\n"
+            )
+        else:
+            p.unlink(missing_ok=True)
+    for p in _aside(d, f"files/{name}"):
+        p.unlink(missing_ok=True)
+
+
+def _sweep(d: Path, mine: dict) -> None:
+    """Delete set-aside files that nothing needs any more (exact paths). `mine` = the live workspace keys."""
+    for p in _aside(d, "keys.json"):
+        if _names_from(p) <= set(mine):
+            p.unlink(missing_ok=True)
+    fdir = d / "files"
+    with contextlib.suppress(OSError):
+        for p in fdir.iterdir():
+            base, sep, _ = p.name.partition(".loose-")
+            if sep and p in _aside(d, f"files/{base}") and (base not in mine or (fdir / base).exists()):
+                p.unlink(missing_ok=True)
+
+
 def _check_value(type_: str, value) -> None:
     if type_ not in TYPES:
         raise Refused("Unknown key type. Use token, password, key-file or json.")
@@ -155,7 +278,9 @@ def _existing_dir(root: Path) -> Path | None:
     home = hp.guarded_home(root)  # refuses first: no answer about a home that does not pair
     if ws is None or not (home / "keys" / ws).is_dir():
         return None
-    return hp.key_dir(root, create=False)
+    d = hp.key_dir(root, create=False)
+    _tighten(d)
+    return d
 
 
 def _files_dir(d: Path, create: bool) -> Path:
@@ -175,6 +300,7 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
     _check_value(type_, value)
     d = hp.key_dir(root)
     with hp._key_lock(d):
+        _tighten_locked(d)
         keys = _load(d)
         entry: dict = {"type": type_, "source": "workspace", "added_at": _now()}
         old_bytes = None
@@ -183,6 +309,8 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
             fdir = _files_dir(d, True)
             fpath = fdir / name
             entry["file"] = name
+            if _is_loose(fpath):
+                _quarantine(fpath)
             try:
                 hp._check_file(fpath)
                 old_bytes = fpath.read_bytes()
@@ -198,6 +326,7 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
             if prev and prev["type"] == "key-file" and type_ != "key-file":  # no stale key file stays behind
                 with contextlib.suppress(OSError):
                     (d / "files" / name).unlink()
+            _sweep(d, keys)
         except BaseException:
             if fpath is not None:  # rollback: the old file content (or none) stays
                 if old_bytes is None:
@@ -228,37 +357,49 @@ def remove(root: Path, name: str) -> None:
     _name(name)
     d = hp.key_dir(root)
     with hp._key_lock(d):
+        _tighten_locked(d)
         keys = _load(d)
         e = keys.get(name)
-        if e is None:
-            if name in _load(d, admin=True):
+        pending = name in _reentry(d, False, keys) or bool(_aside(d, f"files/{name}"))
+        if e is None and not pending:
+            if name in _load(d, admin=True) or name in _reentry(d, True, _load(d, admin=True)):
                 raise Refused(READ_ONLY)
             raise Refused("There is no such key.")
-        del keys[name]
-        _store(d, keys)  # the entry goes first, then its file
-        if e["type"] == "key-file":
-            with contextlib.suppress(OSError):
-                (d / "files" / name).unlink()
+        if e is not None:
+            del keys[name]
+            _store(d, keys)  # the entry goes first, then its file
+            if e["type"] == "key-file":
+                with contextlib.suppress(OSError):
+                    (d / "files" / name).unlink()
+        _dismiss(d, name)
+        _sweep(d, keys)
 
 
 def get_value(root: Path, name: str):
     """The value of key `name` (str; bytes for a key-file). The workspace key wins over an admin key of the
     same name (see list_keys: the admin one shows as shadowed). The caller hands it straight to a command and
-    never prints it. Refused when there is none."""
+    never prints it. Refused when there is none, or when it must be entered again (its file was loose)."""
     _guard()
     _name(name)
     d = _existing_dir(root)
-    e = None
-    if d:
-        e = _load(d).get(name) or _load(d, admin=True).get(name)
+    if d is None:
+        raise Refused("There is no such key.")
+    mine, theirs = _load(d), _load(d, admin=True)
+    gone = Refused(f"Refused: the key {name} can't be used. {REENTER}")
+    if name in _reentry(d, False, mine):
+        raise gone
+    e = mine.get(name) or theirs.get(name)
     if e is None:
+        if name in _reentry(d, True, theirs):
+            raise gone
         raise Refused("There is no such key.")
     if e["type"] == "key-file":
-        fpath = d / "files" / name
         hp._check_dir(d / "files")
+        if _file_needs_reentry(d, name):
+            raise gone
         try:
-            hp._check_file(fpath)
-            return fpath.read_bytes()
+            hp._check_file(d / "files" / name)
+            return (d / "files" / name).read_bytes()
         except FileNotFoundError:
             raise Refused("The key file is missing.") from None
     v = e.get("value")
@@ -270,7 +411,8 @@ def get_value(root: Path, name: str):
 def list_keys(root: Path) -> list[dict]:
     """Names, types, sources and state. Never a value. A workspace key and an admin key of the same name are
     both stored: the workspace key is used (`active`) and the admin one shows as `shadowed`; removing the
-    workspace key makes the admin one active again."""
+    workspace key makes the admin one active again. A key whose file had loose rights shows as
+    `needs-reentry` with the words "This key must be entered again" (its type is not known: None)."""
     _guard()
     d = _existing_dir(root)
     mine = _load(d) if d else {}
@@ -279,6 +421,8 @@ def list_keys(root: Path) -> list[dict]:
     for n in sorted(set(mine) | set(theirs)):
         for e, state in ((mine.get(n), "active"), (theirs.get(n), "shadowed" if n in mine else "active")):
             if e:
+                if e["type"] == "key-file" and e["source"] == "workspace" and _file_needs_reentry(d, n):
+                    state = NEEDS_REENTRY
                 out.append(
                     {
                         "name": n,
@@ -286,6 +430,20 @@ def list_keys(root: Path) -> list[dict]:
                         "source": e["source"],
                         "state": state,
                         "added_at": e.get("added_at"),
+                        **({"note": REENTER} if state == NEEDS_REENTRY else {}),
+                    }
+                )
+    if d:
+        for admin, live in ((False, mine), (True, theirs)):
+            for n in sorted(_reentry(d, admin, live)):
+                out.append(
+                    {
+                        "name": n,
+                        "type": None,
+                        "source": "admin" if admin else "workspace",
+                        "state": NEEDS_REENTRY,
+                        "added_at": None,
+                        "note": REENTER,
                     }
                 )
     return out
@@ -297,6 +455,7 @@ def preflight(root: Path) -> None:
     replaces anything."""
     _guard()
     d = hp.key_dir(root)
+    _tighten(d)
     _load(d)
     _load(d, admin=True)
 
@@ -312,6 +471,7 @@ def set_admin(root: Path, items: dict) -> list[str]:
     d = hp.key_dir(root)
     skipped: list[str] = []
     with hp._key_lock(d):
+        _tighten_locked(d)
         _load(d)  # a damaged key file refuses here, before anything is written
         _load(d, admin=True)
         merged = {}
@@ -328,6 +488,8 @@ def set_admin(root: Path, items: dict) -> list[str]:
                 continue
             merged[n] = {"type": type_, "source": "admin", "value": value, "added_at": _now()}
         _store(d, merged, admin=True)
+        for p in _aside(d, "admin-keys.json"):  # the refresh is the whole truth: nothing is left to re-enter
+            p.unlink(missing_ok=True)
     return skipped
 
 
@@ -421,6 +583,7 @@ def write_profiles(root: Path, profiles: dict) -> None:
     _guard()
     d = hp.key_dir(root)
     with hp._key_lock(d):
+        _tighten_locked(d)
         values = set()
         for e in [*_load(d).values(), *_load(d, admin=True).values()]:
             if isinstance(e.get("value"), str):
