@@ -717,8 +717,15 @@ def test_import_runs_only_for_saved_workspace_texts_never_blocks_and_logs_once(t
     monkeypatch.setattr(chat, "_dm_sync_contacts", lambda *a, **k: calls.append(k) or real(*a, **k))
     phone = {"id": MID, "from": "ph_abcdefghij", "type": "text", "body": {"text": "x"}}
     group_free_ws_file = {"id": "m_filemessage00001", "from": OTHER, "type": "file", "body": {}}
+    chat._DM_CATCHUP.clear()
     chat.dm_import_on_pull(tmp_path, [phone, group_free_ws_file])
-    assert calls == []  # no workspace text saved: nothing to do
+    assert calls == [{"wait": 0.3}]  # the first pull of a process is also the catch-up
+    chat.dm_import_on_pull(tmp_path, [phone, group_free_ws_file])
+    assert calls == [{"wait": 0.3}]  # no workspace text saved and the catch-up ran just now: nothing to do
+    chat._DM_CATCHUP[str(tmp_path)] -= 301  # five minutes later any pull catches up
+    chat.dm_import_on_pull(tmp_path, [])
+    assert calls == [{"wait": 0.3}, {"wait": 0.3}]
+    calls.clear()
     ws_text = {"id": "m_wstext000000001a", "from": OTHER, "type": "text", "body": {"text": "hi"}}
     chat.dm_import_on_pull(tmp_path, [ws_text])
     assert calls == [{"wait": 0.3}]

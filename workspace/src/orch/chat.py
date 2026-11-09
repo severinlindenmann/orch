@@ -1140,12 +1140,14 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
 
 
 _DM_IMPORT_LOGGED = [0.0]
+_DM_CATCHUP: dict = {}
+_DM_CATCHUP_EVERY = 300.0
 
 
 def dm_import_on_pull(root: Path, saved: list | None = None) -> None:
     """Called by the workspace's own relay pull (never in an agent session): inbound workspace texts reach their thread
     within one pull cycle, whether or not anyone opens Chat. Same bounded import as `orch chat sync` (seen ids, caps,
-    link and id checks). It runs only when this pull saved a workspace text, waits at most 0.3 s for the chat lock
+    link and id checks). It runs when this pull saved a workspace text, or as a catch-up every 5 minutes; waits at most 0.3 s for the chat lock
     (a busy lock skips this cycle; the next pull imports), and a failure never disturbs the pull: it is logged at
     most once every 10 minutes."""
     import sys
@@ -1153,11 +1155,18 @@ def dm_import_on_pull(root: Path, saved: list | None = None) -> None:
 
     if tickets.agent_tool():
         return
-    if saved is not None and not any(
+    now = time.monotonic()
+    fresh = saved is None or any(
         isinstance(m, dict) and m.get("type") == "text" and str(m.get("from", "")).startswith("ws_")
         for m in saved
-    ):
+    )
+    # no new workspace text in this pull: a cheap catch-up at most every 5 minutes, so a text that an agent session's
+    # pull saved (and could not import) is never stuck for long
+    if not fresh and now - _DM_CATCHUP.get(str(root), -_DM_CATCHUP_EVERY) < _DM_CATCHUP_EVERY:
         return
+    _DM_CATCHUP[str(root)] = now
+    if len(_DM_CATCHUP) > 200:
+        _DM_CATCHUP.clear()
     try:
         peers = _contacts_list(root)
         if peers:
