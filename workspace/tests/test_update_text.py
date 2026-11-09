@@ -2,7 +2,6 @@
 
 import json
 import os
-from pathlib import Path
 
 import pytest
 from test_addons import run, uv_calls  # noqa: F401
@@ -557,7 +556,7 @@ def test_json_update_reports_skipped_entries(proj, run, source, monkeypatch):  #
     assert json.loads(out)["notes"][-1] == "x (w) not restarted; run orch stop"
 
 
-# ---- the environment a service was started with is what a restart starts it with ------------------
+# ---- restart environment: the caller's plus HOME (system) and ORCH_HOME; no record replayed ------
 
 
 def _real_home():
@@ -573,86 +572,81 @@ def _with_env(f, rec):
     services.running = f.running
 
 
-def test_capture_is_an_allowlist_without_tokens(monkeypatch):
-    from orch import launchenv
-
-    for k, v in {
-        "HOME": "/h", "PATH": "/usr/bin", "LANG": "de_CH.UTF-8", "LC_ALL": "C", "TMPDIR": "/t",
-        "ORCH_HOME": "/o", "ORCH_TICKET": "t_1", "ORCH_RUN": "r_1", "ORCH_VIA": "x",
-        "ANTHROPIC_API_KEY": "sk-secret", "CLAUDE_CODE_OAUTH_TOKEN": "tok", "XDG_CONFIG_HOME": "/c",
-        "GH_TOKEN": "g", "SHELL": "/bin/zsh",
-    }.items():  # fmt: skip
-        monkeypatch.setenv(k, v)
-    got = launchenv.capture(root=Path("/w"))
-    assert got["HOME"] == "/h" and got["PATH"] == "/usr/bin" and got["LC_ALL"] == "C"
-    assert got["ORCH_HOME"] == "/o" and got["ORCH_ROOT"] == "/w" and got["XDG_CONFIG_HOME"] == "/c"
-    for k in (
-        "ORCH_TICKET",
-        "ORCH_RUN",
-        "ORCH_VIA",
-        "ANTHROPIC_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "GH_TOKEN",
-        "SHELL",
-    ):
-        assert k not in got
-
-
-def test_restart_keeps_the_original_home_path_and_root(proj, tmp_path, monkeypatch):  # noqa: F811
+def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
-    rec = {"HOME": _real_home(), "PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8", "ORCH_ROOT": "/forged"}
-    _with_env(f, rec)
+    _with_env(f, {"HOME": _real_home(), "PATH": "/usr/bin:/bin"})
     other = tmp_path / "test-home"
     other.mkdir()
-    monkeypatch.setenv("HOME", str(other))  # the updater runs with another HOME and PATH
-    monkeypatch.setenv("PATH", "/somewhere/else")
+    monkeypatch.setenv("HOME", str(other))  # the updater runs with a test HOME
     lines = addons._restart_updated()
-    assert lines == ["Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)"]
-    got = f.envs  # what the last workspace was started with
-    assert got["dashboard"]["HOME"] == _real_home() and got["dashboard"]["PATH"] == "/usr/bin:/bin"
-    assert got["dashboard"]["LANG"] == "en_US.UTF-8"
-    assert got["dashboard"]["ORCH_ROOT"] == str(f.ws[1])  # the verified workspace, not the recorded value
+    assert f.envs["dashboard"]["HOME"] == _real_home()  # from pwd: the agent login is found again
+    assert f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
+    assert set(f.envs["dashboard"]) == {"HOME", "ORCH_HOME"}  # nothing else is overridden
+    assert "Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)" in lines
 
 
-def test_forged_path_entry_inside_a_workspace_is_rejected(proj, tmp_path, monkeypatch):  # noqa: F811
+def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
-    evil = f.ws[0] / "bin"
+    evil = tmp_path / "evil"
     evil.mkdir()
-    _with_env(f, {"HOME": _real_home(), "PATH": f"{evil}:/usr/bin"})
+    rec = {
+        "HOME": str(evil), "PATH": f"{evil}:/usr/bin", "CODEX_HOME": str(evil), "XDG_CONFIG_HOME": str(evil),
+        "CLAUDE_CONFIG_DIR": str(evil), "PYTHONPATH": str(evil), "LD_PRELOAD": str(evil / "x.so"),
+        "DYLD_INSERT_LIBRARIES": "x", "NODE_OPTIONS": "--require x", "GIT_SSH_COMMAND": "x",
+        "ORCH_REPO": "evil", "ORCH_ROOT": str(evil),
+    }  # fmt: skip
+    _with_env(f, rec)
     monkeypatch.setenv("PATH", "/caller/path")
+    addons._restart_updated()
+    got = f.envs["dashboard"]
+    assert got["HOME"] == _real_home() and set(got) == {"HOME", "ORCH_HOME"}  # none of the record
+    merged = launchenv_apply(got)
+    assert merged["PATH"] == "/caller/path"  # the caller's own, never the recorded one
+    for k in rec:
+        if k not in ("HOME", "PATH", "ORCH_ROOT"):
+            assert merged.get(k) != rec[k]
+
+
+def launchenv_apply(over):
+    from orch import launchenv
+
+    return launchenv.apply(dict(os.environ), over)
+
+
+def test_a_different_recorded_home_or_path_is_reported_once(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    _with_env(f, {"HOME": "/some/other/home", "PATH": "/old/path"})
+    monkeypatch.setenv("PATH", "/caller/path")
+    lines = "\n".join(addons._restart_updated())
+    assert "dashboard (Pilatus) started with a different HOME/PATH; restarted with this terminal's" in lines
+    _with_env(f, {"HOME": _real_home(), "PATH": "/caller/path"})
+    assert "different" not in "\n".join(addons._restart_updated())  # same HOME and PATH: no line
+
+
+def test_without_a_system_home_the_callers_home_is_kept_and_said(proj, tmp_path, monkeypatch):  # noqa: F811
+    from orch import launchenv
+
+    f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.setattr(launchenv, "user_home", lambda: None)
     lines = addons._restart_updated()
-    assert "dashboard (Pilatus): recorded PATH not trusted, kept the update's own" in lines
-    assert f.envs["dashboard"]["PATH"] == "/caller/path"  # the caller's, never the forged one
-    assert "HOME" in f.envs["dashboard"]  # the other variables stay
+    assert "HOME" not in f.envs["dashboard"] and f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
+    assert any("could not read this user's home folder; kept this terminal's HOME" in x for x in lines)
 
 
 @pytest.mark.parametrize(
-    "path,why",
-    [
-        ("relative/bin", "not an absolute path"),
-        ("/does/not/exist", "does not exist"),
-    ],
-)
-def test_path_entries_must_be_absolute_and_exist(path, why, tmp_path):
+    "name",
+    ["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "PYTHONSTARTUP", "NODE_OPTIONS",
+     "GIT_SSH_COMMAND", "BASH_ENV", "ENV", "PERL5LIB", "RUBYOPT"],
+)  # fmt: skip
+def test_code_loading_variables_are_never_taken_from_a_record(name):
     from orch import launchenv
 
-    assert launchenv.unsafe_dir(path, set()) == why
+    assert launchenv.denied(name)
+    assert launchenv.clean({name: "x", "HOME": "/h"}) == {"HOME": "/h"}
+    assert launchenv.apply({"A": "1"}, {name: "x", "HOME": "/h"}) == {"A": "1", "HOME": "/h"}
 
 
-def test_temp_dir_entries_and_foreign_home_are_rejected(tmp_path):
-    from orch import launchenv
-
-    d = tmp_path / "x"
-    d.mkdir()
-    assert launchenv.unsafe_dir(str(d), set()) == "inside a temp folder"
-    ok, bad = launchenv.validate(
-        {"HOME": str(tmp_path), "ORCH_HOME": str(tmp_path / "other")},
-        root=tmp_path, workspaces=set(), orch_home=tmp_path / "mine",
-    )  # fmt: skip
-    assert sorted(bad) == ["HOME", "ORCH_HOME"] and ok == {"ORCH_ROOT": str(tmp_path)}
-
-
-def test_call_starts_the_process_with_the_recorded_environment(proj, monkeypatch):
+def test_call_adds_the_overrides_to_the_callers_environment(proj, monkeypatch):
     seen = {}
 
     def fake_run(cmd, **kw):
@@ -662,16 +656,15 @@ def test_call_starts_the_process_with_the_recorded_environment(proj, monkeypatch
     monkeypatch.setattr(services.subprocess, "run", fake_run)
     monkeypatch.setenv("HOME", "/caller/home")
     monkeypatch.setenv("PATH", "/caller/path")
-    monkeypatch.setenv("XDG_CONFIG_HOME", "/caller/cfg")  # the service had none
-    services._call(
-        proj, "dashboard", {"run": "orch_dashboard"}, "start", {"HOME": "/svc/home", "PATH": "/svc/bin"}
-    )
-    assert seen["HOME"] == "/svc/home" and seen["PATH"] == "/svc/bin"
-    assert "XDG_CONFIG_HOME" not in seen  # not inherited from the caller
+    monkeypatch.setenv("CODEX_HOME", "/caller/codex")
+    over = {"HOME": "/system/home", "ORCH_HOME": "/orch/home"}
+    services._call(proj, "dashboard", {"run": "orch_dashboard"}, "start", over)
+    assert seen["HOME"] == "/system/home" and seen["ORCH_HOME"] == "/orch/home"
+    assert seen["PATH"] == "/caller/path" and seen["CODEX_HOME"] == "/caller/codex"  # the caller's, untouched
     assert seen["ORCH_ROOT"] == str(proj.resolve())
 
 
-def test_start_records_the_launch_environment_and_keeps_it_for_a_running_service(proj, monkeypatch):
+def test_start_records_home_and_path_for_information_only(proj, monkeypatch):
     (proj / ".orch").mkdir(exist_ok=True)
     monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
     monkeypatch.setattr(services, "workspace_rows", lambda root: [])
@@ -681,78 +674,8 @@ def test_start_records_the_launch_environment_and_keeps_it_for_a_running_service
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
     services.start(proj)
     rec = services.running()[0]["env"]
-    assert (
-        rec["HOME"] == "/first/home"
-        and rec["ORCH_ROOT"] == str(proj.resolve())
-        and "ANTHROPIC_API_KEY" not in rec
-    )
+    assert rec == {"HOME": "/first/home", "PATH": os.environ["PATH"]}
     assert "sk-secret" not in services.running_path().read_text()
-    monkeypatch.setenv("HOME", "/second/home")  # `orch start` again: the same pid keeps its first environment
+    monkeypatch.setenv("HOME", "/second/home")  # `orch start` again: the same pid keeps its first record
     services.start(proj)
     assert services.running()[0]["env"]["HOME"] == "/first/home"
-
-
-@pytest.mark.parametrize(
-    "path", ["/usr/bin::/bin", ":/usr/bin", "/usr/bin:", "", ".:/usr/bin", "bin:/usr/bin"]
-)
-def test_path_with_an_empty_or_relative_element_is_refused_whole(path, tmp_path):
-    from orch import launchenv
-
-    ok, bad = launchenv.validate({"PATH": path}, root=tmp_path, workspaces=set(), orch_home=tmp_path)
-    assert bad == ["PATH"] and "PATH" not in ok  # an empty element means the current folder
-
-
-def test_only_exact_orch_variables_are_recorded_and_restored(monkeypatch, tmp_path):
-    from orch import launchenv
-
-    for k in ("ORCH_REPO", "ORCH_REF", "ORCH_AGENT", "ORCH_HOME_STRICT", "ORCH_STATE_DIR", "ORCH_HOME"):
-        monkeypatch.setenv(k, "x" if k != "ORCH_HOME" else str(tmp_path))
-    got = launchenv.capture(root=tmp_path)
-    assert set(k for k in got if k.startswith("ORCH_")) == {"ORCH_HOME", "ORCH_ROOT"}
-    forged = {
-        "ORCH_REPO": "evil",
-        "ORCH_REF": "x",
-        "ORCH_AGENT": "claude",
-        "ORCH_RUN": "r",
-        "ORCH_HOME": str(tmp_path),
-    }
-    assert launchenv.clean(forged) == {"ORCH_HOME": str(tmp_path)}
-    ok, _ = launchenv.validate(forged, root=tmp_path, workspaces=set(), orch_home=tmp_path)
-    assert set(ok) == {"ORCH_HOME", "ORCH_ROOT"}
-
-
-def test_agent_markers_come_from_the_adapters_list(monkeypatch):
-    """Whatever the adapters say marks an agent run is never recorded or restored (one list, no drift)."""
-    from orch import adapters, launchenv
-
-    stripped = {
-        k
-        for k in ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
-    }
-    assert not any(launchenv.allowed(k) for k in stripped)
-    assert launchenv.apply({"CLAUDECODE": "1", "ORCH_RUN": "r", "HOME": "/c"}, {"HOME": "/h"}) == {
-        "HOME": "/h"
-    }
-    monkeypatch.setattr(adapters, "human_environ", lambda env: {k: v for k, v in env.items() if k != "HOME"})
-    assert launchenv.allowed("HOME") is False  # the helper decides, launchenv has no list of its own
-
-
-def test_locale_values_are_checked():
-    from orch import launchenv
-
-    ok, bad = launchenv.validate(
-        {"LANG": "en_US.UTF-8", "LC_ALL": "$(evil)"}, root=Path("/w"), workspaces=set(), orch_home=Path("/o")
-    )
-    assert ok["LANG"] == "en_US.UTF-8" and bad == ["LC_ALL"]
-
-
-def test_login_folder_variables_come_from_the_adapter_registry(tmp_path, monkeypatch):
-    from orch import adapters, launchenv
-
-    names = adapters.config_dir_envs()
-    assert names and all(launchenv.allowed(n) for n in names)  # recorded without launchenv naming any tool
-    n = sorted(names)[0]
-    monkeypatch.setenv(n, str(tmp_path))
-    assert launchenv.capture()[n] == str(tmp_path)
-    ok, bad = launchenv.validate({n: "relative"}, root=tmp_path, workspaces=set(), orch_home=tmp_path)
-    assert bad == [n]  # and checked like any folder

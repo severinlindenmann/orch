@@ -1660,9 +1660,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
         with services.locked():  # one lock around every stop + start + check
             for ws in sorted(by_ws):
                 try:
-                    ok, lines = _restart_locked(
-                        services, Path(ws), by_ws[ws], recorded.get(ws, {}), registered
-                    )
+                    ok, lines = _restart_locked(services, Path(ws), by_ws[ws], recorded.get(ws, {}))
                 except Exception as e:  # one workspace must not stop the others
                     why = services._printable(e)
                     ok, lines = (
@@ -1755,7 +1753,6 @@ def _restart_locked(
     root: Path,
     olds: dict[str, int],
     recorded: dict[str, dict] | None = None,
-    workspaces: set[Path] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Restart these add-ons of one workspace. Returns (labels restarted, lines for what went wrong)."""
     label = lambda n: f"{n} ({root.name})"  # noqa: E731
@@ -1783,24 +1780,21 @@ def _restart_locked(
     for n in sorted(names - stopped):
         why = services._printable(stops.get(n, {}).get("error") or "did not stop")
         lines.append(f"Restart {label(n)} to use the new version (stop failed: {why})")
-    # start with the environment the service had (checked: the record is writable by this user's processes)
+    # The environment: this terminal's, plus HOME from the system and ORCH_HOME (see launchenv). Nothing the
+    # service recorded is replayed (that file is writable by any process of this user); it is only compared.
     from orch import launchenv
 
-    envs: dict[str, dict[str, str]] = {}
+    over, env_notes = launchenv.overrides(home())
+    used = launchenv.apply(dict(os.environ), over)
+    envs = {n: over for n in names}
     for n in sorted(names):
-        ok_env, bad_env = launchenv.validate(
-            launchenv.clean((recorded or {}).get(n)),
-            root=root,
-            workspaces=workspaces or {root},
-            orch_home=home(),
-        )
-        for k in bad_env:  # a variable that fails its check comes from the caller instead
-            if k in os.environ:
-                ok_env[k] = os.environ[k]
-        envs[n] = ok_env
-        if bad_env:
+        for note in env_notes:
+            lines.append(f"{label(n)}: {note}")
+        diff = launchenv.differs((recorded or {}).get(n), used)
+        if diff:
             lines.append(
-                f"{label(n)}: recorded {', '.join(sorted(bad_env))} not trusted, kept the update's own"
+                f"{label(n)} started with a different {'/'.join(diff)}; restarted with this terminal's "
+                f"(run orch stop, then orch start, in {root} if that is wrong)"
             )
     errors: dict[str, str] = {}
     todo = set(stopped)

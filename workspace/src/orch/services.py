@@ -174,8 +174,8 @@ def _default_signals() -> None:
 
 
 def _call(root: Path, name: str, m: dict, sub: str, launch: dict[str, str] | None = None) -> dict:
-    """`launch`: the recorded launch environment of this service (validated): it replaces the caller's
-    allowlisted variables (HOME, PATH, ...), so a restart starts with what the service had."""
+    """`launch`: overrides over the caller's environment (a restart: the system's HOME and ORCH_HOME, see
+    launchenv). Nothing recorded is replayed."""
     base = launchenv.apply(dict(os.environ), launch) if launch else dict(os.environ)
     env = {**base, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
     try:
@@ -254,12 +254,10 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
         rows.append(row)
         if row["running"] and isinstance(row.get("pid"), int):
             old = next((e for e in before if e["workspace"] == str(root) and e["addon"] == name), None)
-            if name in envs:
-                launch = envs[name]  # a restart keeps what it had
-            elif old and old.get("pid") == row["pid"] and old.get("env"):
-                launch = old["env"]  # it was already running: its launch environment stays
+            if old and old.get("pid") == row["pid"] and old.get("env") and name not in envs:
+                launch = old["env"]  # it was already running: what it started with stays on record
             else:
-                launch = launchenv.capture(root=root)
+                launch = launchenv.capture(launchenv.apply(dict(os.environ), envs.get(name, {})))
             entries.append(
                 {
                     "workspace": str(root),
