@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -28,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, procs, runhooks, services, tickets
+from orch import adapters, addons, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -691,6 +692,112 @@ def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
         why = f"{e.__class__.__name__}: {e}"
         print(f"orch: could not check whether {tid} is worked on: {why}", file=sys.stderr)
         return False
+
+
+# ---------------------------------------------------------------- a start that never got an agent
+
+START_TIMEOUT_SECONDS = 60  # a started run has this long to get its agent going, then it is said not to have
+
+
+def start_timeout_seconds() -> float:
+    """START_TIMEOUT_SECONDS; ORCH_RUN_START_TIMEOUT_SECONDS changes it (tests)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_START_TIMEOUT_SECONDS", START_TIMEOUT_SECONDS))
+    except ValueError:
+        return START_TIMEOUT_SECONDS
+
+
+def agent_up(rec: dict) -> bool:
+    """The agent of this claim is going: its process exists (one turn at a time) or the live tool is up."""
+    if rec.get("agent_pid") or rec.get("up"):
+        return True
+    if rec.get("mode") == "live":
+        return (rec.get("live") or {"state": "starting"}).get("state") != "starting"
+    return False
+
+
+_NO_LOGIN = re.compile(r"not logged in|log ?in|sign ?in|authenticat|api key|unauthori[sz]ed|credential", re.I)
+
+
+def start_failure_reason(root: Path, rec: dict) -> str:
+    """Why no agent appeared, as far as known: command missing, no login, tmux, else a plain line."""
+    name = str(rec.get("agent") or "")
+    with contextlib.suppress(Exception):
+        binary = (adapters.load(name, root).get("detect") or {}).get("binary")
+        if binary and not shutil.which(binary):
+            return f"the {binary} command was not found"
+    tail = ""
+    log = rec.get("log")
+    if log:
+        with contextlib.suppress(OSError):
+            data = (root / log).read_bytes()[-2000:].decode("utf-8", "replace")
+            lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+            tail = lines[-1] if lines else ""
+    if tail and _NO_LOGIN.search(tail):
+        return "no login (" + _clip(tail, 120) + ")"
+    if rec.get("mode") == "live":
+        from orch import runs_live
+
+        if not shutil.which("tmux"):
+            return "tmux is not installed"
+        with contextlib.suppress(Exception):
+            if not runs_live.session_exists(root, rec["ticket"]):
+                return "tmux failed: the session is gone"
+    if tail:
+        return _clip(tail, 140)
+    return "no agent session appeared"
+
+
+def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | None:
+    """`orch run status` and Chat (polled): a run that had START_TIMEOUT_SECONDS and still has no agent
+    is ended, and a person is told why (the ticket waits with the reason; in Chat a message from the workspace
+    replaces "is thinking"). Returns the text said, else None. Never raises."""
+    at = time.time() if at is None else at
+    try:
+        rec = read(root, tid)
+        if not rec or agent_up(rec) or at - _parse(rec["started_at"]) < start_timeout_seconds():
+            return None
+        text = f"Couldn't start the agent: {start_failure_reason(root, rec)}"
+        with locked(root, tid):
+            cur = read(root, tid)
+            if not cur or cur["run"] != rec["run"] or agent_up(cur):
+                return None
+        pid = rec.get("pid")
+        if isinstance(pid, int) and _running(pid, rec.get("pid_started")):
+            kill_tree(pid)  # what is left of the start (a wrapper waiting for nothing)
+        if rec.get("mode") == "live":
+            from orch import runs_live
+
+            with contextlib.suppress(Exception):
+                runs_live.tmux(root, "kill-session", "-t", runs_live.target(tid))
+        if not release(root, tid, rec["run"])["released"]:
+            return None
+        _say_start_failed(root, tid, rec, text)
+        return text
+    except Exception as e:  # noqa: BLE001 - never fails the status call that asks, but is never silent
+        print(
+            f"orch: could not check whether {tid} got its agent: {e.__class__.__name__}: {e}", file=sys.stderr
+        )
+        return None
+
+
+def _say_start_failed(root: Path, tid: str, rec: dict, text: str) -> None:
+    """Where a person looks: the run line (ticket waits with the reason), Chat, ticket history, the log."""
+    by = f"agent:{rec.get('agent')}"
+    if rec.get("log"):
+        with contextlib.suppress(OSError), open_log(root / rec["log"]) as f:
+            f.write((text + "\n").encode("utf-8"))
+    with contextlib.suppress(Exception):
+        tickets.log(root, tid, text, "orch")
+    if tickets.is_general(root, tid):  # Chat: an answer from the workspace instead of "is thinking" for ever
+        from orch import chat, relay
+
+        with contextlib.suppress(Exception):
+            chat.record(root, relay.new_id(), addons.workspace_id(root) or "workspace", "orch", text)
+    else:
+        with contextlib.suppress(Exception):
+            tickets.wait_for_start(root, tid, text, by)
+    runhooks.fire("run_state", root=root, tid=tid, run=rec["run"], state="start_failed", reason=text)
 
 
 # ---------------------------------------------------------------- what the agent is told
