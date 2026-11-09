@@ -288,8 +288,8 @@ def check_private(path: str | os.PathLike) -> None:
     parse_aces(protected, aces, sid)
 
 
-def ensure_private(path: str | os.PathLike, is_dir: bool) -> None:
-    """check_private, but a folder or file that is OWNED by this user and too open (made before this check
+def ensure_private(path: str | os.PathLike) -> None:
+    """check_private, but a FOLDER that is OWNED by this user and too open (made before this check
     existed, or by an older version) is tightened to user+SYSTEM and verified, so nobody is locked out. That
     only narrows access. Refused: another owner, a link or junction, or when tightening or verifying fails."""
     if not _windows():
@@ -311,4 +311,21 @@ def ensure_private(path: str | os.PathLike, is_dir: bool) -> None:
         raise _no("Windows would not tell who owns it") from e
     if owner != user_sid():
         raise _no("it belongs to another account")
-    set_private(p, is_dir)
+    set_private(p, True)
+
+
+def file_check(path: str | os.PathLike) -> str | None:
+    """The hook for humanproof.FILE_CHECKS: a secret or integrity file is never tightened and trusted. Returns
+    "acl" (loose, a link, or not checkable: fail closed) and the caller resets the protection; None = private.
+    A missing file raises FileNotFoundError, like lstat."""
+    if not _windows():
+        return None
+    try:
+        check_private(path)
+    except FileNotFoundError:
+        raise
+    except Refused:
+        return "acl"
+    except Exception:  # noqa: BLE001 - fail closed
+        return "acl"
+    return None

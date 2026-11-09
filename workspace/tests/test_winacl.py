@@ -1,15 +1,19 @@
+# ruff: noqa: F811
 """Windows user+SYSTEM ACL for the guarded home (#405), simulated on POSIX with the ACEs the real Win32 API
 returned on Windows 11 (standard user). The flag winacl._windows and the API seams are replaced; any child
 process (icacls, whoami) fails the test."""
 
+import contextlib
 import inspect
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
+from test_humanproof import READERS, TID, _loose_setup
 
-from orch import addons, winacl
 from orch import humanproof as hp
+from orch import winacl
 from orch.errors import Refused
 
 SID = "S-1-5-21-2313884086-3657026201-3636488430-1002"
@@ -41,18 +45,25 @@ BAD = {
 @pytest.fixture
 def win(monkeypatch):
     calls = []
-    state = {"dacl": FILE_OK, "attrs": 0, "err": None, "set_err": None, "owner": SID}
+    state = {"dacl": FILE_OK, "attrs": 0, "err": None, "set_err": None, "owner": SID, "loose": set()}
 
     def read(p):
         calls.append(("read", str(p)))
         if state["err"]:
             raise state["err"]
+        if Path(p).name in state["loose"]:
+            return INHERITED
         return state["dacl"]
 
     def write(p, is_dir, sid):
         calls.append(("write", str(p), is_dir, sid))
         if state["set_err"]:
             raise state["set_err"]
+        name = Path(p).name
+        if name.startswith(".") and name.endswith(".tmp"):  # a file written anew is private again
+            state["loose"].discard(name[1:].rsplit(".", 2)[0])
+        if is_dir:
+            state["loose"].discard(name)
         state["dacl"] = DIR_OK if is_dir else FILE_OK  # what the real API leaves behind
 
     def owner(p):
@@ -166,13 +177,13 @@ def test_set_private_refuses_when_result_not_private(win, tmp_path, monkeypatch)
 
 def test_ensure_private_tightens_a_loose_folder_of_this_user(win, tmp_path):
     win["dacl"] = INHERITED  # an old home: user, SYSTEM, Administrators, inherited
-    winacl.ensure_private(tmp_path, True)
+    winacl.ensure_private(tmp_path)
     assert ("write", str(tmp_path), True, SID) in win["calls"]
     winacl.check_private(tmp_path)  # and it is private now
 
 
 def test_ensure_private_leaves_a_private_one_alone(win, tmp_path):
-    winacl.ensure_private(tmp_path, False)
+    winacl.ensure_private(tmp_path)
     assert not [c for c in win["calls"] if c[0] == "write"]
 
 
@@ -180,13 +191,13 @@ def test_ensure_private_refuses_foreign_owner_or_unknown_owner(win, tmp_path):
     win["dacl"] = INHERITED
     win["owner"] = OTHER
     with pytest.raises(Refused, match="another account"):
-        winacl.ensure_private(tmp_path, True)
+        winacl.ensure_private(tmp_path)
     win["owner"] = "S-1-5-32-544"  # created by an administrator
     with pytest.raises(Refused, match="another account"):
-        winacl.ensure_private(tmp_path, True)
+        winacl.ensure_private(tmp_path)
     win["owner"] = OSError("boom")
     with pytest.raises(Refused, match="who owns"):
-        winacl.ensure_private(tmp_path, True)
+        winacl.ensure_private(tmp_path)
     assert not [c for c in win["calls"] if c[0] == "write"]
 
 
@@ -194,7 +205,7 @@ def test_ensure_private_never_tightens_a_junction(win, tmp_path):
     win["dacl"] = INHERITED
     win["attrs"] = 0x400
     with pytest.raises(Refused, match="link or junction"):
-        winacl.ensure_private(tmp_path, True)
+        winacl.ensure_private(tmp_path)
     assert not [c for c in win["calls"] if c[0] == "write"]
 
 
@@ -202,23 +213,10 @@ def test_ensure_private_refuses_when_tightening_fails(win, tmp_path):
     win["dacl"] = INHERITED
     win["set_err"] = RuntimeError("denied")
     with pytest.raises(Refused, match="would not set"):
-        winacl.ensure_private(tmp_path, True)
+        winacl.ensure_private(tmp_path)
 
 
 # ---- humanproof wiring (POSIX modes stay; the Windows check is added)
-
-
-@pytest.fixture
-def tws(tmp_path, monkeypatch):
-    acct = tmp_path / "acct"
-    base = acct / ".orch-test"
-    ws = base / "ws"
-    (ws / ".orch").mkdir(parents=True)
-    (base / "home").mkdir()
-    monkeypatch.setattr(addons, "real_home", lambda: acct)
-    monkeypatch.setenv("ORCH_HOME", str(base / "home"))
-    monkeypatch.setattr(hp, "install_kind", lambda: "test")
-    return ws
 
 
 def test_humanproof_sets_and_checks_acl_on_every_file(win, tws):
@@ -233,12 +231,47 @@ def test_humanproof_sets_and_checks_acl_on_every_file(win, tws):
     assert len(win["calls"]) > n  # read-back checks the rights again
 
 
-def test_humanproof_tightens_an_old_loose_key_of_this_user(win, tws):
+def test_humanproof_tightens_an_old_loose_folder_of_this_user(win, tws):
     key = hp.human_key(tws)
     n = len(win["calls"])
-    win["dacl"] = BAD["admins"]  # made before this check existed: Administrators on it
-    assert hp.human_key(tws, create=False) == key  # not watch-only: tightened, verified, works
-    assert any(c[0] == "write" for c in win["calls"][n:])
+    win["loose"].add("keys")  # made before this check existed: inherited, Administrators on it
+    assert hp.human_key(tws, create=False) == key  # not watch-only: tightened, verified, same key
+    assert any(c[0] == "write" and c[1].endswith("keys") and c[2] for c in win["calls"][n:])
+    assert hp.take_notices(tws) == []
+
+
+@pytest.mark.parametrize("name", list(READERS))
+def test_loose_file_on_windows_is_never_tightened_it_resets_protection(win, tws, name):
+    key, old, d, home = _loose_setup(tws)
+    win["loose"].add(name)  # the ACL of this one file is loose
+    n = len(win["calls"])
+    with contextlib.suppress(Refused):
+        READERS[name](tws)
+    # never "tightened and trusted": no ACL write ever hits that file itself
+    assert not [c for c in win["calls"][n:] if c[0] == "write" and Path(c[1]).name == name]
+    assert hp.human_key(tws) != key  # human.key rotated
+    with pytest.raises(Refused):
+        hp.verify_and_consume(tws, old, "run.takeover", TID)
+    assert not (d / "proofs-used.json").exists() and not (d / "delivered.json").exists()
+    assert not (d / "handoffs.json").exists()
+    assert hp.effective(tws, "focus.session_typing", True) is False
+    assert [n["text"] for n in hp.take_notices(tws)] == [hp.RESET_NOTICE]
+
+
+def test_file_check_hook_is_registered_and_fails_closed(win, tmp_path):
+    assert winacl.file_check in hp.FILE_CHECKS
+    assert winacl.file_check(tmp_path / "k") is None
+    win["dacl"] = BAD["admins"]
+    assert winacl.file_check(tmp_path / "k") == "acl"
+    win["err"] = RuntimeError("boom")
+    assert winacl.file_check(tmp_path / "k") == "acl"
+    win["err"] = None
+    win["attrs"] = 0x400
+    assert winacl.file_check(tmp_path / "k") == "acl"  # a link in place of the file
+
+
+def test_file_check_is_a_no_op_on_posix(tmp_path):
+    assert winacl.file_check(tmp_path) is None
 
 
 def test_humanproof_refuses_a_loose_key_of_another_owner(win, tws):
