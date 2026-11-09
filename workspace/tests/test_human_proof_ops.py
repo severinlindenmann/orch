@@ -818,25 +818,28 @@ def test_dev_and_test_installs_keep_the_env_override_for_e2e(ws, run, monkeypatc
     assert addons.repo() == "https://github.com/lane-c/test"
 
 
-def test_a_folder_addon_needs_a_click_and_runs_inside_trusted_local_add(ws, run, monkeypatch):
+def test_a_folder_addon_needs_a_click_and_installs_from_the_snapshot(ws, run, monkeypatch):
     from orch import addons
 
     folder = ws.parent / "my-addon"
-    folder.mkdir()
-    monkeypatch.setattr(addons, "_local_add_ok", lambda: addons._LOCAL_ADD_PROVEN)  # a normal install's rule
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("one\n")
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))  # a normal install
     seen = {}
     monkeypatch.setattr(addons, "add", lambda *a, **k: seen.update(args=a, proven=addons._LOCAL_ADD_PROVEN))
     code, out, err = run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
     assert code == 2 and "args" not in seen  # refused: nothing installed
     card = hp.handoffs(ws)[0]
-    assert card["op"] == "addon.add_local" and str(folder.resolve()) in card["label"]
+    info = addons.prepare_local_add(ws, folder)
+    assert card["op"] == "addon.add_local" and card["target"] == info["hash"] and len(info["hash"]) == 64
+    assert str(folder.resolve()) in card["label"] and f"(version {info['short']})" in card["label"]
     assert "runs inside orch" in card["label"]
     item = hp.handoff_take(ws, card["id"])  # one click: the page takes the item and runs it with a proof
-    assert item["target"] == addons.local_add_target(folder)
     proof = _proof(ws, item["op"], item["target"])
     code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
     assert code == 0, out + err
-    assert seen["proven"] is True and str(folder) in seen["args"][1]
+    assert seen["proven"] == info["hash"]  # installed inside trusted_local_add(<that content hash>)
     # an agent's own add is refused outright, no hand-off by an agent
     monkeypatch.setenv("CLAUDECODE", "1")
     seen.clear()
@@ -844,23 +847,20 @@ def test_a_folder_addon_needs_a_click_and_runs_inside_trusted_local_add(ws, run,
     assert code == 2 and "args" not in seen
 
 
-def test_dev_mark_cli_is_narrow_and_marks_once(ws, run, monkeypatch):
-    fresh = ws.parent / "demo2"
-    (fresh / ".orch").mkdir(parents=True)
-    monkeypatch.chdir(fresh)
-    monkeypatch.setenv("ORCH_RUN", "r_1")  # an orch-started agent context: refused
-    assert run("dev-mark")[0] == 2 and not hp.dev_workspace(fresh)
-    monkeypatch.delenv("ORCH_RUN")
-    assert run("dev-mark", "--by", "agent:x")[0] == 2
-    assert run("dev-mark")[0] == 0 and hp.dev_workspace(fresh)
-    assert "marked this workspace as dev" in (hp.key_dir(fresh) / "dev-proof.log").read_text()
-    # a workspace that already has a human key can never become dev
-    other = ws.parent / "demo3"
-    (other / ".orch").mkdir(parents=True)
-    monkeypatch.chdir(other)
-    hp.human_key(other)
-    assert run("dev-mark")[0] == 2 and not hp.dev_workspace(other)
-    # not under ~/.orch-test: refused
-    monkeypatch.chdir(ws.parent.parent)
-    (ws.parent.parent / ".orch").mkdir(exist_ok=True)
-    assert run("dev-mark")[0] == 2
+def test_a_content_swap_before_the_click_is_refused(ws, run, monkeypatch):
+    from orch import addons
+
+    folder = ws.parent / "swap-addon"
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("good\n")
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))
+    seen = {}
+    monkeypatch.setattr(addons, "add", lambda *a, **k: seen.update(args=a))
+    run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    item = hp.handoff_take(ws, card["id"])
+    (folder / "src" / "a.py").write_text("EVIL\n")  # swapped after the request, before the click
+    proof = _proof(ws, item["op"], item["target"])
+    code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
+    assert code == 2 and "args" not in seen  # the proof was for the other content

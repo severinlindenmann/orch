@@ -43,17 +43,21 @@ def dispatch(args, root: Path) -> bool:
     elif sub == "add":
         if addons._is_path(args.name) and not addons._local_add_ok():
             # code from a folder runs inside orch itself: only a person's click (proof) may allow it (H1)
-            folder = Path(args.name).expanduser().resolve()
+            # Snapshot the folder NOW (request time): the card shows the path and a short content hash, the
+            # proof's target is the full hash. The proven add installs from the snapshot with that hash and is
+            # refused when the folder changed since (a content swap before the click).
+            info = addons.prepare_local_add(root, Path(args.name))
             who = humanproof.person_by(
                 root,
                 args,
                 "addon.add_local",
-                addons.local_add_target(folder),
-                label=f"Add the add-on from {folder} \u2014 it runs inside orch",
+                info["hash"],
+                label=f"Add the add-on from {info['path']} (version {info['short']}) "
+                "\u2014 it runs inside orch",
             )
             if not who.startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
-            with addons.trusted_local_add():
+            with addons.trusted_local_add(info["hash"]):
                 addons.add(root, args.name, args.yes, args.project_only)
         else:
             addons.add(root, args.name, args.yes, args.project_only)
