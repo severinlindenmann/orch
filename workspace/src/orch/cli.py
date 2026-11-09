@@ -31,6 +31,7 @@ from orch import (
     net,
     refs,
     relay,
+    runs,
     runs_live,
     services,
     term,
@@ -911,6 +912,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
+        if who.startswith("human:"):
+            runs.require_signing(root)  # a person's answer that could not be signed is refused, not half done
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
         with contextlib.suppress(
             Refused

@@ -629,3 +629,18 @@ def test_expired_secret_files_are_removed_on_read(ws, run):
     hp._write_private(d / "handoffs.json", json.dumps(items))
     assert hp.handoffs(ws) == []
     assert not list(d.glob("handoff-*.secret"))
+
+
+def test_an_unusable_key_folder_refuses_visibly_and_saves_nothing(ws, run, monkeypatch):
+    tid, q = _ask(ws, run)
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
+    monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)  # key folder unusable at write time
+    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")
+    assert code == 2 and "Not saved" in out + err and "key folder" in out + err
+    assert tickets.load(ws, tid)["questions"][0].get("answer") is None  # not half done
+    # Send back: the note is not queued without a MAC either, and the ticket stays in Review
+    rid = _review_ticket(ws, run)
+    proof = _proof(ws, "ticket.verdict", rid)
+    code, out, err = _cli(run, monkeypatch, proof, "ticket", "changes", rid, "more", "--json")
+    assert code == 2 and "Not saved" in out + err and tickets.load(ws, rid)["status"] == "review"
+    assert runs.undelivered(ws, rid) == []
