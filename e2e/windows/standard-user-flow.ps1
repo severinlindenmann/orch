@@ -46,8 +46,9 @@ function WaitFinish($out, $what, $since) {
     L "finisher ($what): no RESULT after 10 min"; return $false
 }
 $env:ORCH_AGENT = "claude"  # links .claude\skills (no agent is installed here; CI does the same)
-$p = "$env:USERPROFILE\orch-smoke"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+$p = "$env:USERPROFILE\.orch-test\orch-smoke"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 L "--- init"; O init | Out-String | % { L $_ }
+Remove-Item Env:ORCH_AGENT -ErrorAction SilentlyContinue  # init needed it for the .claude link; dev-mark and update must run as a person's command, not as an agent
 Check (Test-Path "$p\.agents\skills\orch\SKILL.md") "orch init wrote the skill"
 Check (((Get-Item "$p\.claude\skills\orch" -Force -ErrorAction SilentlyContinue).LinkType -eq "Junction") -or (Test-Path "$p\.claude\skills\orch\.orch-copy")) ".claude\skills\orch is a junction (or a copy where links are refused)"
 Check (Test-Path "$p\.claude\skills\orch\SKILL.md") "the skill is found through .claude\skills"
@@ -74,6 +75,9 @@ if ($LASTEXITCODE -ne 0 -and $out -match "dashboard on this computer|Waiting for
 Check ($LASTEXITCODE -eq 0) "orch update"
 Check (WaitFinish $out "update" $since) "update finished"
 Check ("$(O --version)" -match "^orch ") "orch still runs after the update"
+$rec = Get-Content "$(uv tool dir)\orch-workspace\orch-install.json" -Raw -ErrorAction SilentlyContinue
+L "install record after update: $rec"
+Check ("$rec" -match '"kind"\s*:\s*"test"') "the install record (kind test) survives the update (M1)"
 $list = O addon list | Out-String; L $list
 Check ($list -match "dashboard") "dashboard still installed after the update"
 Check (Test-Path "$p\.agents\skills\orch-dashboard") "dashboard skill in the workspace"
