@@ -884,7 +884,18 @@ def run(args: argparse.Namespace) -> None:
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
     elif cmd == "check" and sub == "wont-do":
-        t, c = tickets.check_wont_do(root, args.id, args.check, by(), args.reason)
+        who = humanproof.person_by(
+            root,
+            args,
+            "check.wont_do",
+            f"{args.id}:{args.check}",
+            value=args.reason or "",
+            parts={
+                "title": humanproof.ticket_name(root, args.id),
+                "step": humanproof.step_text(root, args.id, args.check),
+            },
+        )
+        t, c = tickets.check_wont_do(root, args.id, args.check, who, args.reason)
         _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
     elif cmd == "check" and sub == "record":
         t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
@@ -903,6 +914,19 @@ def run(args: argparse.Namespace) -> None:
             t, c = tickets.check_remove(root, args.id, args.check, who)
             msg = f"{c['id']} removed. It and its proof are kept in the history."
         elif sub == "reopen":
+            if humanproof.step_is_wont_do(root, args.id, args.check) and not (
+                who.startswith("agent:") or tickets.agent_tool()
+            ):  # undoing a person's Won't do is a person's decision (H1): proof or hand-off
+                who = humanproof.person_by(
+                    root,
+                    args,
+                    "check.wont_do_undo",
+                    f"{args.id}:{args.check}",
+                    parts={
+                        "title": humanproof.ticket_name(root, args.id),
+                        "step": humanproof.step_text(root, args.id, args.check),
+                    },
+                )
             t, c = tickets.check_reopen(root, args.id, args.check, who)
             msg = f"{c['id']} is open again. Its proof stays in the history."
         elif sub == "start":

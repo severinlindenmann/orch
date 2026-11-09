@@ -33,6 +33,8 @@
     },
     "run.human_input": function (p) { return ["Send a message to the agent on ", q(p.title), "?"]; },
     "chat.send": function (p) { return p.thread ? ["Send a message to ", plain(p.thread), "?"] : ["Send a message in Chat?"]; },
+    "check.wont_do": function (p) { return ["Mark ", q(p.step), " on ", q(p.title), " as won't do?"]; },
+    "check.wont_do_undo": function (p) { return ["Open ", q(p.step), " on ", q(p.title), " again?"]; },
     "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
     "update": function (p) { return ["Update orch from ", full(p.source), "?"]; },
     "relay.connect": function (p) { return ["Connect to ", full(p.host), "?"]; },

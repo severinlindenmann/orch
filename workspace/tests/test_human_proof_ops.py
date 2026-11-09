@@ -1095,3 +1095,69 @@ def test_free_text_is_cut_in_the_sentence_but_the_exact_block_keeps_it_whole(ws,
     card = hp.handoffs(ws)[0]
     assert card["value"] == long_answer  # whole
     assert len(card["parts"]["question"]) <= hp.PART_MAX + 1
+
+
+# ------------------------------------------------------------------ #386 Won't do: needs the proof
+
+
+def _ticket_with_step(ws, run):
+    code, out, _ = run("ticket", "new", "Plan", "--json", "--by", "agent:x")
+    tid = json.loads(out)["id"]
+    code, out, _ = run("check", "add", tid, "Write the file", "--json", "--by", "agent:x")
+    return tid, json.loads(out)["id"]
+
+
+def test_wont_do_needs_the_proof_and_hands_off_with_plain_parts(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    code, out, err = run(
+        "check", "wont-do", tid, cid, "--reason", "not needed", "--by", "human:pat", "--json"
+    )
+    assert code == 2 and "Continue" in out + err
+    assert not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    card = hp.handoffs(ws)[0]
+    assert (
+        card["op"] == "check.wont_do" and card["target"] == f"{tid}:{cid}" and card["value"] == "not needed"
+    )
+    assert card["parts"] == {"title": "Plan", "step": "Write the file"}
+    item = hp.handoff_take(ws, card["id"])
+    code, out, err = _cli(run, monkeypatch, _proof(ws, item["op"], item["target"]), *item["argv"])
+    assert code == 0, out + err
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert step["wont_do"] is True and step["by"] == "human:pat"  # by from the proof
+
+
+def test_wont_do_forged_flag_and_agent_are_refused(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    wrong = _proof(ws, "check.wont_do", f"{tid}:c9")
+    code, *_ = _cli(run, monkeypatch, wrong, "check", "wont-do", tid, cid, "--json")
+    assert code == 2 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    code, *_ = run("check", "wont-do", tid, cid, "--by", "agent:x", "--json")
+    assert code == 2 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+
+
+def test_undoing_a_wont_do_needs_a_proof_but_reopening_a_done_step_stays_free(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    _cli(
+        run, monkeypatch, _proof(ws, "check.wont_do", f"{tid}:{cid}"), "check", "wont-do", tid, cid, "--json"
+    )
+    code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
+    assert code == 2 and tickets.load(ws, tid)["checklist"][0].get("wont_do") is True  # still won't do
+    card = [h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"][0]
+    assert card["parts"] == {"title": "Plan", "step": "Write the file"}
+    code, *_ = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "check.wont_do_undo", f"{tid}:{cid}"),
+        "check",
+        "reopen",
+        tid,
+        cid,
+        "--json",
+    )
+    assert code == 0 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    # an ordinary done step reopens as before: no proof, no hand-off
+    code, out, _ = run("check", "add", tid, "Second", "--json", "--by", "agent:x")
+    c2 = json.loads(out)["id"]
+    run("check", "done", tid, c2, "--note", "x", "--json", "--by", "agent:x")
+    code, *_ = run("check", "reopen", tid, c2, "--by", "human:pat", "--json")
+    assert code == 0

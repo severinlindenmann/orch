@@ -119,6 +119,8 @@ PROOF_OPS = {
     "chat.say": ("chat.send", lambda a: "general"),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
     "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
+    "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
     "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
 }
 
@@ -127,6 +129,8 @@ def proof_for(op, args):
     """(core op, target) when this click needs a proof, else None."""
     if op == "ticket.patch" and isinstance(args.get("data"), dict) and "status" in args["data"]:
         return "ticket.verdict", args.get("ticket")
+    if op == "check.set" and args.get("done") is False:  # un-ticking may undo a Won't do (a person's decision)
+        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}"
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None
 

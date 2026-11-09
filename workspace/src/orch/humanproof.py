@@ -991,6 +991,8 @@ HANDOFF_HEADS = {
     "update": (("update",),),
     "addon.add_local": (("addon", "add"),),
     "chat.send": (("chat", "say"), ("chat", "send")),
+    "check.wont_do": (("check", "wont-do"),),
+    "check.wont_do_undo": (("check", "reopen"),),
     "chat.make_ticket": (("chat", "make-ticket"),),
 }
 
@@ -1085,6 +1087,29 @@ def question_text(root: Path, tid: str, qid: str) -> str:
     except (Refused, OSError, ValueError, AttributeError):
         t = ""
     return part(t.rstrip("?! ")) or "the question"
+
+
+def step_text(root: Path, tid: str, cid: str) -> str:
+    """The step's text (never its id) as one safe fragment."""
+    from orch import tickets
+
+    try:
+        t = tickets.load(root, tid)
+        item = next((c for c in t.get("checklist") or [] if c.get("id") == cid), None)
+        text = str((item or {}).get("text", ""))
+    except (Refused, OSError, ValueError, AttributeError):
+        text = ""
+    return part(text) or "this step"
+
+
+def step_is_wont_do(root: Path, tid: str, cid: str) -> bool:
+    from orch import tickets
+
+    try:
+        item = next((c for c in tickets.load(root, tid).get("checklist") or [] if c.get("id") == cid), None)
+    except (Refused, OSError, ValueError, AttributeError):
+        return False
+    return bool(item and item.get("wont_do"))
 
 
 def status_parts(root: Path, tid: str, data: str) -> dict:
