@@ -459,3 +459,61 @@ def test_packed_magic_anywhere_fails_closed(proj, run, new_ticket, conn, name, d
     artifact(proj, tid, name, data)
     assert run("ask", tid, f"See artifacts/{name}")[0] == 0
     assert phone_view.view_for(proj, tid)["attachments"] == []
+
+
+def test_a_page_and_its_picture_are_one_entry(proj, run, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Report")
+    artifact(proj, tid, "report.png", png())
+    artifact(proj, tid, "report.html", b"<h1>Report</h1>")
+    artifact(proj, tid, "other.png", png(_chunk(b"tRNS", b"\x00\x00")))
+    assert run("ask", tid, "See artifacts/report.png, artifacts/report.html and artifacts/other.png")[0] == 0
+    atts = phone_view.view_for(proj, tid)["attachments"]
+    names = [a["name"] for a in atts]
+    page, pic = atts[names.index("report.html")], atts[names.index("report.png")]
+    assert page["preview"] == pic["id"]
+    assert names.index("report.png") == names.index("report.html") + 1  # the picture follows its page
+    assert "preview" not in pic and "preview" not in atts[names.index("other.png")]
+
+
+def test_a_picture_that_was_not_sent_is_never_a_preview(proj, run, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Report")
+    artifact(proj, tid, "report.png", png(_chunk(b"tEXt", b"key\x00hidden")))  # fails the PNG check
+    artifact(proj, tid, "report.html", b"<h1>Report</h1>")
+    assert run("ask", tid, "See artifacts/report.png and artifacts/report.html")[0] == 0
+    atts = phone_view.view_for(proj, tid)["attachments"]
+    assert [a["name"] for a in atts] == ["report.html"] and "preview" not in atts[0]
+
+
+def _att(kind, name, at, aid):
+    blob = "b_0123456789abcdef"
+    return {
+        "kind": kind, "title": name, "name": name, "blob_id": blob, "size": 1, "at": at, "id": aid,
+        "rev": "r",
+    }  # fmt: skip
+
+
+def test_pairing_with_a_newer_picture_has_no_duplicates():
+    page = _att("file", "r.html", "2026-11-06T09:00:00Z", "a_000000000001")
+    pic = _att("image", "r.png", "2026-11-06T09:05:00Z", "a_000000000002")
+    out = phone_view.pair_previews([pic, page])  # newest first: the picture is before the page
+    assert [a["id"] for a in out] == ["a_000000000001", "a_000000000002"]
+    assert out[0]["preview"] == "a_000000000002"
+
+
+def test_two_pages_share_one_picture_only_once():
+    p1 = _att("file", "r.html", "2026-11-06T09:00:00Z", "a_000000000001")
+    p2 = _att("file", "r.htm", "2026-11-06T08:00:00Z", "a_000000000003")
+    pic = _att("image", "r.png", "2026-11-06T09:05:00Z", "a_000000000002")
+    out = phone_view.pair_previews([pic, p1, p2])
+    ids = [a["id"] for a in out]
+    assert sorted(ids) == ["a_000000000001", "a_000000000002", "a_000000000003"] and len(set(ids)) == 3
+    assert sum("preview" in a for a in out) == 1
+
+
+def test_preview_never_points_outside_the_list(monkeypatch):
+    monkeypatch.setattr(phone_view, "ATTACHMENTS", 1)
+    page = _att("file", "r.html", "2026-11-06T09:05:00Z", "a_000000000001")
+    pic = _att("image", "r.png", "2026-11-06T09:00:00Z", "a_000000000002")
+    # the real code cuts first; mimic it: the picture is cut off, so the page has no preview
+    out = phone_view.pair_previews([page, pic][: phone_view.ATTACHMENTS])
+    assert out == [page] and "preview" not in page

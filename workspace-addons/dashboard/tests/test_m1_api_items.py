@@ -17,7 +17,7 @@ def test_paste_creates_ticket_with_full_note(ws):
         assert result.returncode == 0, result.stderr + result.stdout
         return result.returncode
 
-    text = "\n  \n" + "A" * 100 + "\n" + "Details. " * 180
+    text = "\n  \n" + "A" * 100 + "\n" + "Details. " * 100
     argv = actions.build_argv("ticket.paste", {"text": text})
     assert invoke(argv) == 0
     created = next(t for t in data.load_tickets(ws)[0] if t.get("note") == text)
@@ -29,7 +29,7 @@ def test_paste_creates_ticket_with_full_note(ws):
                for t in data.load_tickets(ws)[0])
 
 
-@pytest.mark.parametrize("text", [None, "  \n", "x\x00y", "x" * 2001])
+@pytest.mark.parametrize("text", [None, "  \n", "x\x00y", "x" * 500_001])
 def test_paste_rejects_invalid_text(text):
     with pytest.raises(actions.BadRequest):
         actions.build_argv("ticket.paste", {"text": text})

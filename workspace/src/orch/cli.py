@@ -150,7 +150,7 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append(f"Done when: {t['done_when']}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
-        out.append(f"Part of: {p['title']} ({p['id']})" if p else f"Part of: {t['parent']} (parent missing)")
+        out.append(f"Step of: {p['title']} ({p['id']})" if p else f"Step of: {t['parent']} (parent missing)")
     if root is not None:
         cc = tickets.children_counts(tickets.list_all(root), t["id"])
         if cc["total"]:
@@ -311,6 +311,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
+        "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -345,6 +348,19 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
     x.add_argument("id")
+    x = t.add_parser(
+        "title", parents=[common], help="write the real title (and description) of a placeholder ticket"
+    )
+    x.add_argument("id")
+    x.add_argument("title")
+    x.add_argument(
+        "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
+    )
+    x = t.add_parser(
+        "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
+    )
+    x.add_argument("id")
+    x.add_argument("--name", required=True, help="a name hint; orch picks the final name")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
@@ -400,6 +416,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         x.add_argument(f"--{k}", metavar="TEXT", help=f"proof: a {k}")
     x.add_argument("--title", help="short name of the proof")
     x.add_argument("--role", help="result, check or support")
+    x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
 
     x = sub.add_parser("log", parents=[common], help="add a history entry")
     x.add_argument("id")
@@ -546,8 +563,9 @@ def run(args: argparse.Namespace) -> None:
             args.parent,
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
+            title_auto=args.title_auto,
         )
-        part = f" (part of: {_lookup(root, args.parent)['title']})" if args.parent else ""
+        part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,
             t,
@@ -620,6 +638,13 @@ def run(args: argparse.Namespace) -> None:
             )
             or "No files yet. Put them in: orch ticket artifacts-dir " + args.id,
         )
+    elif cmd == "ticket" and sub == "title":
+        t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
+        _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "attach":
+        data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
+        r = tickets.attach(root, args.id, args.name, data, by())
+        _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)
         rel = d.relative_to(root).as_posix()
@@ -673,14 +698,15 @@ def run(args: argparse.Namespace) -> None:
         _out(args, c, msg)
     elif cmd == "check":
         extra = {k: getattr(args, k) for k in ("title", "role") if getattr(args, k)}
-        shorthand = [
-            json.dumps({"type": k, "ref": getattr(args, k), **extra})
-            for k in ("command", "note", "pr", "commit", "url")
-            if getattr(args, k)
-        ]
+        # the summary says what came out of the step: it goes on ONE proof (the file, else the first one)
+        kinds = [k for k in ("command", "note", "pr", "commit", "url") if getattr(args, k)]
+        shorthand = [json.dumps({"type": k, "ref": getattr(args, k), **extra}) for k in kinds]
+        if args.summary and shorthand and not args.file:
+            shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
-            shorthand.append(json.dumps(tickets.attach_file(root, args.id, args.file, args.title, args.role)))
+            attached = tickets.attach_file(root, args.id, args.file, args.title, args.role, args.summary)
+            shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
         ev = c["evidence"][-1]
         copied = args.file and tickets.proof_present(root, ev)

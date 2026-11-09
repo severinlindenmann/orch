@@ -50,9 +50,7 @@ def mark(root: Path, tickets: list[dict]) -> None:
     The sent log currently omits receipts, so those messages have delivered=None.
     """
     asked = _object(_text(root, "secrets/questions-sent.json"))
-    records = [
-        _object(line) for line in _text(root, "run/relay/sent.jsonl").splitlines()
-    ]
+    records = [_object(line) for line in _text(root, "run/relay/sent.jsonl").splitlines()]
     queued = root / ".orch" / "outbox"
     if not (root / ".orch").is_symlink() and not queued.is_symlink():
         try:

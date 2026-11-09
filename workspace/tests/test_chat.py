@@ -1084,3 +1084,28 @@ def test_create_with_reserved_id_refuses_an_existing_ticket(proj):
     with pytest.raises(Refused):
         tickets.create(proj, "Two", "human:me", tid=tid)
     assert tickets.load(proj, tid)["title"] == "One"
+
+
+def _titled_proposal(proj, title):
+    chat.record(proj, "p1", "you", "dashboard", "Build the fish page", convo_start=True)
+    chat.record(proj, "pr", WS, "helper", "Ready?", refs=[{"kind": "proposal", "title": title}])
+
+
+def test_make_ticket_title_is_a_placeholder_the_agent_writes(proj):
+    _titled_proposal(proj, "Fish page")
+    r = chat.make_ticket(proj, "pr", by="human:me")
+    t = tickets.load(proj, r["ticket"])
+    assert t["title"] == "Fish page" and t.get("title_auto") is True
+    t = tickets.set_auto_title(
+        proj, t["id"], "Build the fish test page", "agent:x", "A small HTML page about fish."
+    )
+    assert t["title"] == "Build the fish test page" and "title_auto" not in t
+
+
+def test_make_ticket_person_title_is_never_overwritten(proj):
+    _titled_proposal(proj, "Fish page")
+    r = chat.make_ticket(proj, "pr", title="My own title", by="human:me")
+    t = tickets.load(proj, r["ticket"])
+    assert t["title"] == "My own title" and not t.get("title_auto")
+    with pytest.raises(Refused):
+        tickets.set_auto_title(proj, t["id"], "Agent title", "agent:x")

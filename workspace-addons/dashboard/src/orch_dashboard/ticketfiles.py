@@ -3,6 +3,7 @@
 A file is served only from `.orch/tickets/<ticket>/artifacts/` or `.orch/tickets/<ticket>/evidence/`, read through
 orch.safefile (the one hardened reader), and only plain text and pictures are shown (never as a page).
 """
+
 from __future__ import annotations
 
 import re
@@ -15,9 +16,39 @@ KINDS = ("artifacts", "evidence", "files")  # files: what a phone sent to the ti
 MAX_BYTES = 2 * 1024 * 1024
 MAX_PHONE = 25 * 1024 * 1024  # a voice note or photo from the phone
 MAX_NAME = 240
-TEXT = {"txt", "md", "csv", "tsv", "json", "log", "html", "htm", "xml", "yml", "yaml", "toml", "py", "js", "css", "ini"}
-AUDIO = {"m4a": "audio/mp4", "mp4": "audio/mp4", "aac": "audio/aac", "mp3": "audio/mpeg", "wav": "audio/wav", "caf": "audio/x-caf"}
-IMAGES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+TEXT = {
+    "txt",
+    "md",
+    "csv",
+    "tsv",
+    "json",
+    "log",
+    "html",
+    "htm",
+    "xml",
+    "yml",
+    "yaml",
+    "toml",
+    "py",
+    "js",
+    "css",
+    "ini",
+}
+AUDIO = {
+    "m4a": "audio/mp4",
+    "mp4": "audio/mp4",
+    "aac": "audio/aac",
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "caf": "audio/x-caf",
+}
+IMAGES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
 
 
 def listing(root: Path, orch_bin: str | None, tid: str) -> dict:
@@ -27,9 +58,21 @@ def listing(root: Path, orch_bin: str | None, tid: str) -> dict:
         return {"available": False, "files": []}
     files = []
     for r in rows[:200]:
-        if (isinstance(r, dict) and isinstance(r.get("name"), str) and 0 < len(r["name"]) <= MAX_NAME
-                and "\x00" not in r["name"] and isinstance(r.get("size"), int) and not isinstance(r.get("size"), bool)):
-            files.append({"name": r["name"], "size": r["size"], "mtime": r["mtime"] if isinstance(r.get("mtime"), str) else ""})
+        if (
+            isinstance(r, dict)
+            and isinstance(r.get("name"), str)
+            and 0 < len(r["name"]) <= MAX_NAME
+            and "\x00" not in r["name"]
+            and isinstance(r.get("size"), int)
+            and not isinstance(r.get("size"), bool)
+        ):
+            files.append(
+                {
+                    "name": r["name"],
+                    "size": r["size"],
+                    "mtime": r["mtime"] if isinstance(r.get("mtime"), str) else "",
+                }
+            )
     return {"available": True, "files": files}
 
 
@@ -61,8 +104,15 @@ def read_file(root: Path, tid: str, kind: str, name, download: bool = False) -> 
         return nope
     if download:
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", last)[:100] or "file"
-        return 200, data, "application/octet-stream", {"Content-Disposition": f'attachment; filename="{safe}"'}
+        return (
+            200,
+            data,
+            "application/octet-stream",
+            {"Content-Disposition": f'attachment; filename="{safe}"'},
+        )
     if phone and ext in AUDIO:
         return 200, data, AUDIO[ext], {}
-    ctype = IMAGES.get(ext) or "text/plain; charset=utf-8"  # a page or a picture format that can run code is shown as text
+    ctype = (
+        IMAGES.get(ext) or "text/plain; charset=utf-8"
+    )  # a page or a picture format that can run code is shown as text
     return 200, data, ctype, {}
