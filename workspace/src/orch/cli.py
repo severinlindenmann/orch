@@ -35,6 +35,7 @@ from orch import (
     sharedfolder,
     term,
     tickets,
+    workcheck,
 )
 from orch import init as init_mod
 from orch.errors import Refused
@@ -349,6 +350,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
+    x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
+    x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -637,6 +640,8 @@ def run(args: argparse.Namespace) -> None:
                 else ""
             ),
         )
+    elif cmd == "work-check":
+        workcheck.run(root, args.json)
     elif cmd == "update":
         report, notes = [], []
         done = addons.update(
@@ -993,11 +998,13 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
         args.on = "ticket:" + tickets.resolve(root, on[len("ticket:") :])
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, watchdog=None) -> int:
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
+        return workcheck.hook_main(argv, watchdog)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
     want_json = "--json" in argv
