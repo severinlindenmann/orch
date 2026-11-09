@@ -34,7 +34,7 @@ def add_parsers(sub, common) -> None:
     sh = sub.add_parser("share", parents=[common], help=argparse.SUPPRESS)
     sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     pv = sub.add_parser("private", parents=[common], help=argparse.SUPPRESS)
-    pv.add_argument("state", nargs="?", choices=("status", "move"), default="status")
+    pv.add_argument("state", nargs="?", choices=("status", "move", "allow"), default="status")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
     g.add_argument("key", nargs="?", choices=KEYS)
@@ -251,7 +251,14 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
-            config.add_agent(root, args.name, args.command, args.interactive, prompt=args.prompt_via)
+            config.add_agent(
+                root,
+                args.name,
+                args.command,
+                args.interactive,
+                prompt=args.prompt_via,
+                approve=not tickets.agent_tool(),
+            )
             tail = (
                 "starts fresh each run; no live steps"
                 if not args.interactive
@@ -294,8 +301,10 @@ def private_lines(root: Path) -> list[str]:
             harness.private_words(s),
             "Move to private: removes them from the team repo, keeps your files (orch private move).",
         ]
-    if (why := config.untrusted_note(root)) and s["config_tracked"]:
-        out.append(why)
+    out += [
+        f"This workspace asks to run `{p['command']}`. Allow on this machine: orch private allow"
+        for p in config.pending_agents(root)
+    ]
     return out
 
 
@@ -304,6 +313,12 @@ def _private(args, root: Path) -> None:
     action (git rm --cached; nothing is committed, the files stay)."""
     from orch import harness
 
+    if args.state == "allow":
+        if tickets.agent_tool():
+            raise Refused("Only a person can allow a command to run on this computer.")
+        done = config.allow_agent(root)
+        _out(args, {"allowed": done}, f"Allowed on this computer: {', '.join(done)}." if done else "Nothing to allow.")
+        return
     if args.state == "move":
         if tickets.agent_tool():
             raise Refused("Only a person can move these files out of the team repo.")
@@ -323,7 +338,8 @@ def _private(args, root: Path) -> None:
         "committed": s["counts"],
         "count": len(s["files"]),
         "config_tracked": s["config_tracked"],
-        "agent_command_ignored": config.untrusted_note(root) is not None,
+        "pending_agents": config.pending_agents(root),
+        "agent_command_ignored": bool(config.pending_agents(root)),
         "lines": private_lines(root),
     }
     _out(args, data, "\n".join(data["lines"]) or "Nothing personal is committed in the team repo.")

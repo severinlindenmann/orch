@@ -35,7 +35,7 @@ def calls(act_orch):
 
 def acts(act_orch):
     return [c for c in calls(act_orch) if c[0] not in ("addon", "needs", "status", "agents") and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"]) and c[:2] not in (["run", "status"], ["ticket", "list"], ["config", "get"], ["look", "show"], ["chat", "status"])
-            and c[:2] != ["look", "shared-pages"] and not (c[1:2] == ["profile"] and c[-1] == "--json")]
+            and c[:2] != ["private", "--json"] and c[:2] != ["look", "shared-pages"] and not (c[1:2] == ["profile"] and c[-1] == "--json")]
 
 
 def test_foreign_or_missing_origin_and_wrong_host_are_refused(act_server, act_orch):
@@ -153,6 +153,8 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         ({"op": "share.set", "args": {"on": True}}, ["share", "on", *common]),
         ({"op": "share.set", "args": {"on": False}}, ["share", "off", *common]),
+        ({"op": "private.move", "args": {}}, ["private", "move", *common]),
+        ({"op": "private.allow", "args": {}}, ["private", "allow", *common]),
         (
             {"op": "check.add", "args": {"ticket": "t_abcdef", "text": "--draft the page"}},
             ["check", "add", "t_abcdef", *common, "--", "--draft the page"],
@@ -399,7 +401,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             assert code == 200, (body, text)
             last = [c for c in calls(act_orch) if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
                     and c[0] not in ("needs", "status", "agents") and c[:2] not in (["config", "get"], ["chat", "status"])
-                    and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"]) and c[0] != "look"][-1]
+                    and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"]) and c[0] != "look" and c[:2] != ["private", "--json"]][-1]
             assert last == want, body
         n = len(calls(act_orch))
         bad = [
@@ -576,6 +578,8 @@ def test_check_add_and_permissions_are_checked(act_server, act_orch):
         ("config.permissions", {"mode": "full", "confirm": "yes"}),
         ("config.permissions", {}),
         ("config.permissions", {"mode": "ask", "x": 1}),
+        ("private.move", {"force": True}),
+        ("private.allow", {"name": "x"}),
         ("share.set", {}),
         ("share.set", {"on": "yes"}),
         ("share.set", {"on": True, "x": 1}),

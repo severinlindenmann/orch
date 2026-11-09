@@ -450,6 +450,27 @@ main.addEventListener('click', async event => {
     if (result.ok) window.orch.toast(on ? 'Shared. Your team can now see this workspace.' : 'Not shared any more.', 'ok');
     return;
   }
+  if (action === 'private-allow') {
+    if (settingsBusy.has('private')) return;
+    const cmd = array(state.settings?.git_private?.pending)[0]?.command || '';
+    const send = async () => {
+      const result = await settingsSend('private.allow', {}, 'private');
+      if (result.ok) window.orch.toast('Allowed on this computer.', 'ok');
+      return result;
+    };
+    settingsConfirm('Allow this command?', cmd, 'preserve-lines', 'Allow', send);
+    return;
+  }
+  if (action === 'private-move') {
+    if (settingsBusy.has('private')) return;
+    const send = async () => {
+      const result = await settingsSend('private.move', {}, 'private');
+      if (result.ok) window.orch.toast('Moved. Your files stay here.', 'ok');
+      return result;
+    };
+    settingsConfirm('Move to private?', 'Removes them from the team repo and keeps your files.', '', 'Move to private', send);
+    return;
+  }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;

@@ -33,27 +33,97 @@ def read(root: Path) -> dict:
         raise Refused(f"{p} is not valid TOML ({e}). Fix it, or remove the line you added last.") from None
 
 
-def agent_config_untrusted(root: Path) -> bool:
-    """True when `.orch/config.toml` is tracked by git (somebody committed it) or git cannot say: its agent
-    command is never run then (a teammate's commit must not decide what runs on this machine)."""
-    from orch import harness
+# ---- THE trust rule: orch runs a settings-supplied agent command only if THIS person approved exactly that
+# command on THIS machine. Approvals live in the orch home (like permissions.json), never in the workspace, and
+# do not depend on git, links or where the file came from. Any error = not approved.
 
-    return harness._tracked(root, ".orch/config.toml")
+
+def _approvals_path() -> Path:
+    from orch import addons
+
+    return addons.home() / "agent-approvals.json"
+
+
+def _entry_key(root: Path, name: str, e: dict) -> str:
+    ws = str(root.resolve())
+    doc = [ws, name, e.get("adapter"), e.get("command"), e.get("interactive"), e.get("prompt")]
+    return hashlib.sha256(json.dumps(doc).encode("utf-8")).hexdigest()
+
+
+def _runs_command(e: dict) -> bool:
+    return bool(e.get("command") or e.get("interactive"))
+
+
+def agent_approved(root: Path, name: str, e: dict) -> bool:
+    if not _runs_command(e):
+        return True
+    try:
+        data = json.loads(_approvals_path().read_text(encoding="utf-8"))
+        return isinstance(data, list) and _entry_key(root, name, e) in data
+    except Exception:  # noqa: BLE001 - fail closed on anything
+        return False
+
+
+def approve_agent(root: Path, name: str, e: dict) -> None:
+    """A person's yes for exactly this command here (the hash covers workspace, name, adapter, command,
+    interactive and prompt: any change asks again)."""
+    p = _approvals_path()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else []
+    except (OSError, ValueError):
+        data = []
+    if not isinstance(data, list):
+        data = []
+    k = _entry_key(root, name, e)
+    if k not in data:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_text(json.dumps(data[-500:] + [k]), encoding="utf-8")
+            os.replace(tmp, p)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+def _raw_entries(root: Path) -> dict[str, dict]:
+    out = {}
+    try:
+        agents = read(root).get("agents") or {}
+    except Refused:
+        return {}
+    for name, e in agents.items():
+        if isinstance(e, dict) and NAME_RE.match(name) and isinstance(e.get("adapter"), str):
+            out[name] = {
+                k: e[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(e.get(k), str)
+            }
+    return out
+
+
+def pending_agents(root: Path) -> list[dict]:
+    """Entries of this workspace's settings that name a command nobody approved here: [{name, command}]."""
+    return [
+        {"name": n, "command": (e.get("command") or e.get("interactive") or "")[:500]}
+        for n, e in _raw_entries(root).items()
+        if not agent_approved(root, n, e)
+    ]
+
+
+def allow_agent(root: Path, name: str | None = None) -> list[str]:
+    """Approve the pending commands (one name, or all) as they are now. A person only (the caller checks)."""
+    done = []
+    for n, e in _raw_entries(root).items():
+        if (name is None or n == name) and not agent_approved(root, n, e):
+            approve_agent(root, n, e)
+            done.append(n)
+    return done
 
 
 def untrusted_note(root: Path) -> str | None:
-    """The one line saying why a committed agent command is ignored; None when nothing was ignored."""
-    cfg = read(root)
-    named = (cfg.get("workspace") or {}).get("agent")
-    custom = any(
-        e.get("command") or e.get("interactive")
-        for e in (cfg.get("agents") or {}).values()
-        if isinstance(e, dict)
-    )
-    custom = custom or (isinstance(named, str) and named not in _builtin_names())
-    if not custom or not agent_config_untrusted(root):
+    """Plain line for a command this machine has not approved; None when nothing waits."""
+    p = pending_agents(root)
+    if not p:
         return None
-    return "The agent command in .orch/config.toml is ignored: that file is committed to git. Using your own default."
+    return f"This workspace asks to run `{p[0]['command']}`. Allow on this machine to use it: orch private allow"
 
 
 def _builtin_names() -> set[str]:
@@ -63,12 +133,12 @@ def _builtin_names() -> set[str]:
 
 
 def agent_name(root: Path) -> str | None:
-    """The agent that does the work here ([workspace] agent), or None when nobody chose. A committed
-    config.toml may only name a built-in agent."""
+    """The agent that does the work here ([workspace] agent), or None when nobody chose. A name that is not
+    built in counts only when its command is approved here."""
     v = (read(root).get("workspace") or {}).get("agent")
     if not (isinstance(v, str) and v):
         return None
-    if v not in _builtin_names() and agent_config_untrusted(root):
+    if v not in _builtin_names() and v not in agent_entries(root):
         return None
     return v
 
@@ -191,16 +261,8 @@ def set_code(root: Path, value: str) -> str:
 
 
 def agent_entries(root: Path) -> dict[str, dict]:
-    """The user's [agents.<name>] entries, only well-formed ones."""
-    out = {}
-    if agent_config_untrusted(root):
-        return out  # a committed file never supplies a command
-    for name, e in (read(root).get("agents") or {}).items():
-        if isinstance(e, dict) and NAME_RE.match(name) and isinstance(e.get("adapter"), str):
-            out[name] = {
-                k: e[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(e.get(k), str)
-            }
-    return out
+    """The [agents.<name>] entries that may be used: well-formed, and approved here when they run a command."""
+    return {n: e for n, e in _raw_entries(root).items() if agent_approved(root, n, e)}
 
 
 def _value(v: str | int | bool) -> str:
@@ -302,6 +364,7 @@ def add_agent(
     interactive: str | None = None,
     adapter: str = "generic",
     prompt: str | None = None,
+    approve: bool = True,
 ):
     if not NAME_RE.match(name):
         raise Refused(f"'{name}' is not a name orch can use. Use lowercase letters, digits and '-'.")
@@ -318,6 +381,10 @@ def add_agent(
         if prompt not in ("arg", "stdin"):
             raise Refused("The prompt goes in with 'arg' or 'stdin'.")
         set_key(root, f"agents.{name}", "prompt", prompt)
+    if approve:  # a person typed it here: that is the approval (an agent's entry waits for the person)
+        e = _raw_entries(root).get(name)
+        if e:
+            approve_agent(root, name, e)
 
 
 # ---- the one notice for a command that comes from a folder's settings

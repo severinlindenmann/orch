@@ -138,62 +138,111 @@ def test_a_tracked_file_with_a_hostile_name_is_handled(proj):
     assert harness.tracked_private(proj) == [] and weird.is_file()
 
 
-# ---- 3. trust gap
-
-def commit_config(proj, text):
-    repo(proj)
-    (proj / ".orch").mkdir(exist_ok=True)
-    (proj / ".orch" / "config.toml").write_text(text)
-    git(proj, "add", "-f", ".orch/config.toml")
-    git(proj, "commit", "-qm", "teammate settings")
-
+# ---- 3. trust: a settings command runs only when this person approved exactly it on this machine
 
 EVIL = '[workspace]\nagent = "mine"\n\n[agents.mine]\nadapter = "generic"\ncommand = "touch PWNED {prompt}"\n'
 
 
-def test_committed_agent_command_is_not_used(proj):
-    commit_config(proj, EVIL)
-    assert config.agent_config_untrusted(proj)
-    assert config.agent_entries(proj) == {}
-    assert config.agent_name(proj) is None
-    assert adapters.chosen(proj) == "claude"  # the person's own default
-    with pytest.raises(Refused):
-        adapters.load("mine", proj)
-    assert "ignored" in adapters.command_notice("claude", "oneshot", proj)
+def write_config(proj, text, commit=False):
+    repo(proj)
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch" / "config.toml").write_text(text)
+    if commit:
+        git(proj, "add", "-f", ".orch/config.toml")
+        git(proj, "commit", "-qm", "teammate settings")
 
 
-def test_committed_command_is_not_run(proj, new_ticket):
-    commit_config(proj, EVIL)
-    tid = new_ticket()
+def not_run(proj, tid):
     with pytest.raises(Refused):
         runs.start(proj, tid, "human:owner", agent="mine", mode="oneshot")
     assert not (proj / "PWNED").exists()
 
 
-def test_same_config_untracked_still_works(proj):
+def test_committed_command_waits_for_approval(proj, new_ticket):
+    write_config(proj, EVIL, commit=True)
+    assert config.agent_entries(proj) == {}
+    assert config.agent_name(proj) is None
+    assert adapters.chosen(proj) == "claude"  # the person's own default
+    assert config.pending_agents(proj) == [{"name": "mine", "command": "touch PWNED {prompt}"}]
+    assert "asks to run" in adapters.command_notice("claude", "oneshot", proj)
+    not_run(proj, new_ticket())
+
+
+def test_untracked_command_waits_too(proj, new_ticket):
+    write_config(proj, EVIL)
+    assert config.agent_entries(proj) == {} and adapters.chosen(proj) == "claude"
+    not_run(proj, new_ticket())
+
+
+def test_after_move_to_private_still_not_run(proj, new_ticket, run):
+    write_config(proj, EVIL, commit=True)
+    assert run("private", "move")[0] == 0
+    assert harness.tracked_private(proj) == []
+    assert config.agent_entries(proj) == {}
+    not_run(proj, new_ticket())
+
+
+def test_symlinked_config_is_not_run(proj, new_ticket):
     repo(proj)
     (proj / ".orch").mkdir()
-    (proj / ".orch" / "config.toml").write_text(EVIL)
-    assert not config.agent_config_untrusted(proj)
+    real = proj / "elsewhere.toml"
+    real.write_text(EVIL)
+    (proj / ".orch" / "config.toml").symlink_to(real)
+    assert config.agent_entries(proj) == {}
+    not_run(proj, new_ticket())
+
+
+def test_a_symlinked_orch_folder_is_not_run(proj, new_ticket, tmp_path_factory):
+    other = tmp_path_factory.mktemp("other")
+    (other / "config.toml").write_text(EVIL)
+    (proj / ".orch").symlink_to(other)
+    assert config.agent_entries(proj) == {}
+    not_run(proj, new_ticket())
+
+
+def test_approved_runs_and_a_changed_command_asks_again(proj, run):
+    write_config(proj, EVIL, commit=True)
+    assert run("private", "allow")[0] == 0
+    assert config.pending_agents(proj) == []
     assert adapters.chosen(proj) == "mine"
     assert adapters.load("mine", proj)["command"] == "touch PWNED {prompt}"
+    (proj / ".orch" / "config.toml").write_text(EVIL.replace("touch PWNED", "touch OTHER"))
+    assert config.agent_entries(proj) == {}
+    assert config.pending_agents(proj)[0]["command"] == "touch OTHER {prompt}"
 
 
-def test_a_committed_config_may_still_name_a_builtin_agent(proj):
-    commit_config(proj, '[workspace]\nagent = "claude"\ncode = "DM1"\n')
-    assert config.agent_name(proj) == "claude"
-    assert config.untrusted_note(proj) is None
+def test_approval_is_per_workspace(proj, tmp_path_factory):
+    write_config(proj, EVIL)
+    config.allow_agent(proj)
+    other = tmp_path_factory.mktemp("ws2")
+    (other / ".orch").mkdir()
+    (other / ".orch" / "config.toml").write_text(EVIL)
+    assert config.agent_entries(other) == {}
 
 
-def test_the_line_says_why(proj, run):
-    commit_config(proj, EVIL)
-    code, out, _ = run("private")
-    assert "agent command" in out and "committed to git" in out and "ignored" in out
-    code, out, _ = run("status")
-    assert "ignored" in out
+def test_a_broken_approvals_file_fails_closed(proj):
+    write_config(proj, EVIL)
+    config.allow_agent(proj)
+    config._approvals_path().write_text("not json")
+    assert config.agent_entries(proj) == {}
 
 
-def test_outside_git_nothing_changes(proj):
-    (proj / ".orch").mkdir()
-    (proj / ".orch" / "config.toml").write_text(EVIL)
-    assert adapters.chosen(proj) == "mine"
+def test_an_agent_cannot_allow_or_self_approve(proj, run, monkeypatch):
+    write_config(proj, EVIL)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert run("private", "allow")[0] == 2
+    assert run("config", "agent", "add", "sneaky", "--command", "touch X {prompt}")[0] == 0
+    assert "sneaky" not in config.agent_entries(proj)
+    assert any(p["name"] == "sneaky" for p in config.pending_agents(proj))
+
+
+def test_a_builtin_agent_needs_no_approval(proj):
+    write_config(proj, '[workspace]\nagent = "claude"\n', commit=True)
+    assert config.agent_name(proj) == "claude" and config.pending_agents(proj) == []
+
+
+def test_the_line_says_what_waits(proj, run):
+    write_config(proj, EVIL, commit=True)
+    out = run("private")[1]
+    assert "asks to run" in out and "Allow on this machine" in out
+    assert "Allow on this machine" in run("status")[1]

@@ -425,6 +425,16 @@ def _share_set(a):
     return ["share", "on" if a["on"] else "off"], [], []
 
 
+def _private_move(a):
+    _only(a, ())
+    return ["private", "move"], [], []
+
+
+def _private_allow(a):
+    _only(a, ())
+    return ["private", "allow"], [], []
+
+
 def _config_agent_test(a):
     """Try an agent: `orch agents test <name> --json` answers {name, ok, reason}. Changes nothing, so no --by."""
     _only(a, ("name",))
@@ -505,6 +515,8 @@ OPS = {
     "config.permissions": _config_permissions,
     "addon.set": _addon_set,
     "share.set": _share_set,
+    "private.move": _private_move,
+    "private.allow": _private_allow,
     **MOBILE_OPS,
     **LOOK_OPS,
     "ref.add": _ref_add,
@@ -698,6 +710,8 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
             "config.permissions",
             "workflow.set",
             "share.set",
+            "private.move",
+            "private.allow",
         ):
             _audit(root, op, args)
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):

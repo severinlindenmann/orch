@@ -90,3 +90,27 @@ test('Copy/Repeat capability is read from the real state.addons shape (active ad
   c.addons = () => [{name:'focus', dashboard:{panel:null}}];
   assert.equal(vm.runInContext('repeatsAddon()', c), null);
 });
+
+
+test('private settings card: move button, allow button, hidden when clear, no snapshot action', () => {
+  const c = context([], {snapshot:false, addons:() => []});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  assert.equal(c.privateCard({}), null);
+  assert.equal(c.privateCard({git_private:{count:0, lines:[], pending:[]}}), null);
+  const settings = {git_private:{count:2, lines:['<b>Two files.</b>'], pending:[{name:'mine', command:'run <x>'}]}};
+  const card = c.privateCard(settings);
+  assert.deepEqual(nodes(card, n => n.textContent != null).map(n => n.textContent),
+    ['Private files are in your team repo', '<b>Two files.</b>', 'Move to private',
+     'This workspace asks to run a command', 'run <x>', 'Allow on this computer']);
+  const buttons = nodes(card, n => n.tag === 'button');
+  assert.deepEqual(buttons.map(b => b.attrs['data-action']), ['private-move', 'private-allow']);
+  vm.runInContext("settingsBusy.add('private')", c);
+  assert.equal(nodes(c.privateCard(settings), n => n.tag === 'button')[0].attrs.disabled, true);
+  c.state.settings = settings;
+  const general = nodes(c.settingsPage(), n => n.attrs?.id === 'settings-panel-general')[0];
+  assert.equal(general.children[0].attrs['data-key'], 'settings-private');
+  c.snapshot = true;
+  assert.equal(nodes(c.privateCard(settings), n => n.tag === 'button').length, 0);
+  settings.git_private.count = 0;
+  assert.equal(nodes(c.privateCard(settings), n => n.tag === 'h3').length, 1);
+});

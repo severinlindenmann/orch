@@ -81,6 +81,12 @@ def load(name: str, root: Path | None = None) -> dict:
     base = entry["adapter"] if entry else name
     reg = _registry()
     if base not in reg:
+        for pend in config.pending_agents(root) if root is not None else []:
+            if pend["name"] == name:
+                raise Refused(
+                    f"This workspace asks to run `{pend['command']}`. "
+                    "Allow on this machine first (Settings, or: orch private allow)."
+                )
         raise Refused(f"No agent called '{name}'. See what is available: orch agents")
     a = copy.deepcopy(reg[base])
     a["name"], a["adapter"] = name, base

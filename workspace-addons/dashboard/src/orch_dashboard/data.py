@@ -506,6 +506,20 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         run_orch(orch_bin, ["agents", "--json"], root),
         run_orch(orch_bin, ["addon", "list", "--json"], root),
     )
+    private = run_orch(orch_bin, ["private", "--json"], root)
+    private = private if isinstance(private, dict) else {}
+    private_lines = private.get("lines")
+    git_private = {
+        "count": private.get("count") if type(private.get("count")) is int else 0,
+        "lines": [line[:300] for line in private_lines if isinstance(line, str)][:4]
+        if isinstance(private_lines, list) else [],
+        "agent_command_ignored": private.get("agent_command_ignored") is True,
+        "pending": [
+            {"name": str(x.get("name"))[:40], "command": str(x.get("command"))[:300]}
+            for x in (private.get("pending_agents") if isinstance(private.get("pending_agents"), list) else [])[:5]
+            if isinstance(x, dict)
+        ],
+    }
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
@@ -524,6 +538,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "agents_may_finish": agents_may_finish(root),
         "folder": str(root),
         "share": share,
+        "git_private": git_private,
         "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto
         "agents": [
             {k: a.get(k) for k in keep}

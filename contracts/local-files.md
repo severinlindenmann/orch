@@ -25,12 +25,12 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
 
 ```
 .orch/
-  tickets/<id>.json               one ticket per file (ticket.schema.json). Can be committed
+  tickets/<id>.json               one ticket per file (ticket.schema.json). NOT committed by default in a git repo (`.orch/.gitignore`); the person's, with history and phone texts
   tickets/<id>/evidence/<name>    proof files copied by `orch check done --file` (workspace files only, max 25 MB each). GITIGNORED.
                                   The ticket keeps the path; on another computer the file shows as "file on another computer"
   tickets/<id>/artifacts/<name>   files a ticket produces (reports, exports, drafts): the agent writes them here unless the person asks for a
                                   project file. `orch ticket artifacts-dir <id>` prints and creates the folder, `orch ticket artifacts <id>` lists
-                                  it. NOT gitignored (they are the work); proof (`--file`) may point at them
+                                  it. Ignored with the rest of `tickets/` in a git repo (personal by default); proof (`--file`) may point at them
                                   A person's pasted long text (over 1500 characters) or dropped files also land here: `note.md`, text types
                                   and pictures only, at most 2 MB each, named by orch (`orch ticket attach`), never a person's path
   secrets/                        GITIGNORED
@@ -46,9 +46,9 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
   inbox-seen.json                 {"m_…": "2026-11-04T11:00:00Z"} ids already handled. GITIGNORED
   inbox-notes.json                {"m_…": {"at", "note"}} why a message was dropped (shown by `orch relay inbox`). GITIGNORED
   outbox/<message id>.json        the exact bytes of a message being sent, kept until the relay took them. GITIGNORED
-  ticket-counter.json             {"last": 12}: the highest ticket key number handed out here (Ticket keys, below). Can be committed
-  config.toml                     one config file: [workspace] agent and code, [agents.<name>] (below), and one table per add-on ([<add-on name>])
-  addons.json                     {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
+  ticket-counter.json             {"last": 12}: the highest ticket key number handed out here (Ticket keys, below). Not committed by default
+  config.toml                     NOT committed by default. One config file: [workspace] agent and code, [agents.<name>] (below), and one table per add-on ([<add-on name>])
+  addons.json                     NOT committed by default. {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
   run/                            GITIGNORED, per machine, never committed
     tickets/<ticket id>.json      the claim of the one agent run on that ticket (run.schema.json); <ticket id>.lock = O_EXCL lock file
     pending/<ticket id>.jsonl     input waiting for a busy run, one line each (run-pending.schema.json)
@@ -110,7 +110,12 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   An agent without that data (generic, Codex) ignores the setting. Applies to oneshot and live starts. `orch init` prints the mode.
 - Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
-- A command from a folder's `.orch/config.toml` is used **without confirmation**. Its first use on a machine prints one
+- **A committed `config.toml` never supplies a command** (9 Nov, git step 1): when git tracks `.orch/config.toml` (or cannot say),
+  `[agents.*]` commands are ignored and `[workspace] agent` may only name a built-in agent; orch falls back to the person's own
+  default and says so in one line (`orch status`, `orch private`, the dashboard Settings, the run notes).
+- Already-tracked personal files: `orch private` lists them; `orch private move` (a person only) runs `git rm --cached` on them,
+  keeps the files and commits nothing (older commits keep their copies). `orch status` shows the same lines.
+- A command from a folder's `.orch/config.toml` that git does not track is used **without confirmation**. Its first use on a machine prints one
   notice line: `Using agent command from this folder's settings: <command>` (remembered per machine in the user's orch folder).
   This is a known trade-off (owner decision Q5, easy over secure): a cloned folder can name the command orch runs; the notice
   line is the only guard.

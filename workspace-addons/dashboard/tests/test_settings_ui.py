@@ -126,3 +126,24 @@ def test_load_addons_passes_only_known_panels():
 
     rows = load_addons(None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None)])
     assert {r["name"]: r["dashboard"]["panel"] for r in rows} == {"aaa": "links", "bbb": None, "ccc": None}
+
+
+def test_settings_git_private(ws, monkeypatch):
+    from orch_dashboard import data
+
+    default = {"count": 0, "lines": [], "agent_command_ignored": False, "pending": []}
+    assert data.load_settings(ws, None)["git_private"] == default
+    replies = [None, [], {}, {"count": "3", "lines": "bad", "agent_command_ignored": "yes"}]
+    replies.append({"count": 3, "lines": [None, "x" * 350, 1, "two", "three", "ignored", "five"],
+                    "agent_command_ignored": True})
+    for reply in replies:
+        calls = []
+        def run(binary, args, root):
+            calls.append((binary, args, root))
+            return reply if args == ["private", "--json"] else None
+        monkeypatch.setattr(data, "run_orch", run)
+        result = data.load_settings(ws, "orch")["git_private"]
+        assert ("orch", ["private", "--json"], ws) in calls
+        assert result == (default if reply is not replies[-1] else {
+            "count": 3, "lines": ["x" * 300, "two", "three", "ignored"], "agent_command_ignored": True,
+            "pending": []})
