@@ -2,15 +2,19 @@
 
     <guarded home>/keys/<workspace local id>/    0700 (humanproof.key_dir: guarded home, local-id binding)
         keys.json      0600  {"schema": "orch.keys/1", "keys": {name: {type, source, value | file, added_at}}}
+                             the keys a person added here (source "workspace")
+        admin-keys.json 0600 same shape, source "admin": written only by the relay refresh, read-only here
         files/<name>   0600  key-file values (at most 1 MB)
         profiles.toml  0600  names only, never a value
         <record>.json  0600  small records of orch itself (the relay record, written by relay.connect)
 
+WINDOWS FAILS CLOSED: the user-and-SYSTEM ACL of the contract is not implemented yet, so on Windows every
+function of this module refuses ("Keys can't be stored safely on Windows yet. Coming soon.") and nothing
+secret is written or read. Decided by the platform (os.name), never by an environment variable.
+
 Level 1 stops accidents and leaks (chat, logs, records, git, cloud sync of the workspace), not a hostile
 process of the same user; see secrets.md. Rights: POSIX folders 0700 and files 0600, checked on every read (a
-wrong owner, a looser mode or a link means Refused). WINDOWS: modes do not exist there; the folder is created
-in the user's profile and inherits the profile ACL. The explicit "user and SYSTEM only" ACL of the contract
-is NOT set yet (follow-up), and the mode checks are skipped, as in humanproof.
+wrong owner, a looser mode or a link means Refused).
 
 Every write is a new file plus one rename under keys.lock, so a failed or interrupted write leaves the old
 state. No message, error or log line of this module contains a key value; names are validated before use.
@@ -47,14 +51,28 @@ ENV_DENY = frozenset(
     "JAVA_TOOL_OPTIONS _JAVA_OPTIONS".split()
 )
 ENV_DENY_PREFIX = ("LD_", "DYLD_", "GIT_", "ORCH_")
-RECORD_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-RESERVED_RECORDS = frozenset(
-    {"keys", "profiles", "binding", "human"}
-)  # files of the key folder with other owners
+RECORDS = frozenset({"relay", "dev"})  # allowlist: the other files of the key folder have other owners
 
 TOO_SHORT = "This key is too short to hide safely in records: at least 8 characters."
 BAD_NAME = "A key name uses letters, digits, dot, dash and underscore, and starts with a letter or digit."
 READ_ONLY = "This key is managed by your admin and cannot be changed here."
+
+
+WINDOWS_MSG = "Keys can't be stored safely on Windows yet. Coming soon."
+
+
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def unsupported() -> bool:
+    """True where the key store refuses everything (Windows, until its ACL slice)."""
+    return _windows()
+
+
+def _guard() -> None:
+    if _windows():
+        raise Refused(WINDOWS_MSG)
 
 
 def _now() -> str:
@@ -70,11 +88,13 @@ def _name(name) -> str:
 # ------------------------------------------------------------------------------------------- keys.json
 
 
-def _load(d: Path) -> dict:
-    """The keys of folder d, validated. Unreadable or wrong shape: Refused (fail closed), never a guess."""
+def _load(d: Path, admin: bool = False) -> dict:
+    """The keys of keys.json (workspace) or admin-keys.json (admin), validated. Unreadable or wrong shape or a
+    source that does not belong in that file: Refused (fail closed), never a guess."""
+    fname, src = ("admin-keys.json", "admin") if admin else ("keys.json", "workspace")
     try:
-        hp._check_file(d / "keys.json")
-        raw = json.loads((d / "keys.json").read_text(encoding="utf-8"))
+        hp._check_file(d / fname)
+        raw = json.loads((d / fname).read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except ValueError:
@@ -87,14 +107,17 @@ def _load(d: Path) -> dict:
             NAME_RE.match(str(n))
             and isinstance(e, dict)
             and e.get("type") in TYPES
-            and e.get("source") in SOURCES
+            and e.get("source") == src
         ):
             raise Refused("The key file is damaged.")
     return keys
 
 
-def _store(d: Path, keys: dict) -> None:
-    hp._write_private(d / "keys.json", json.dumps({"schema": KEYS_SCHEMA, "keys": keys}, indent=2) + "\n")
+def _store(d: Path, keys: dict, admin: bool = False) -> None:
+    hp._write_private(
+        d / ("admin-keys.json" if admin else "keys.json"),
+        json.dumps({"schema": KEYS_SCHEMA, "keys": keys}, indent=2) + "\n",
+    )
 
 
 def _check_value(type_: str, value) -> None:
@@ -144,7 +167,8 @@ def _files_dir(d: Path, create: bool) -> Path:
 
 def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> None:
     """Create or replace key `name` (a person's action; the proof is the caller's job, slice 1.2). A name an
-    admin key holds is refused (admin keys are read-only here)."""
+    admin key holds is allowed: the workspace key is used and the admin key shows as shadowed."""
+    _guard()
     _name(name)
     if source != "workspace":
         raise Refused(READ_ONLY)  # admin keys come only from set_admin (the relay refresh)
@@ -152,8 +176,6 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
     d = hp.key_dir(root)
     with hp._key_lock(d):
         keys = _load(d)
-        if keys.get(name, {}).get("source") == "admin":
-            raise Refused(READ_ONLY)
         entry: dict = {"type": type_, "source": "workspace", "added_at": _now()}
         old_bytes = None
         fpath = None
@@ -169,9 +191,13 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
             _write_private_bytes(fpath, bytes(value))
         else:
             entry["value"] = value
+        prev = keys.get(name)
         keys[name] = entry
         try:
             _store(d, keys)
+            if prev and prev["type"] == "key-file" and type_ != "key-file":  # no stale key file stays behind
+                with contextlib.suppress(OSError):
+                    (d / "files" / name).unlink()
         except BaseException:
             if fpath is not None:  # rollback: the old file content (or none) stays
                 if old_bytes is None:
@@ -198,17 +224,18 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
 
 
 def remove(root: Path, name: str) -> None:
+    _guard()
     _name(name)
     d = hp.key_dir(root)
     with hp._key_lock(d):
         keys = _load(d)
         e = keys.get(name)
         if e is None:
+            if name in _load(d, admin=True):
+                raise Refused(READ_ONLY)
             raise Refused("There is no such key.")
-        if e["source"] == "admin":
-            raise Refused(READ_ONLY)
         del keys[name]
-        _store(d, keys)  # the entry goes first; a left-over file is harmless and swept below
+        _store(d, keys)  # the entry goes first, then its file
         if e["type"] == "key-file":
             with contextlib.suppress(OSError):
                 (d / "files" / name).unlink()
@@ -218,9 +245,12 @@ def get_value(root: Path, name: str):
     """The value of key `name` (str; bytes for a key-file). The workspace key wins over an admin key of the
     same name (see list_keys: the admin one shows as shadowed). The caller hands it straight to a command and
     never prints it. Refused when there is none."""
+    _guard()
     _name(name)
     d = _existing_dir(root)
-    e = _load(d).get(name) if d else None
+    e = None
+    if d:
+        e = _load(d).get(name) or _load(d, admin=True).get(name)
     if e is None:
         raise Refused("There is no such key.")
     if e["type"] == "key-file":
@@ -238,38 +268,42 @@ def get_value(root: Path, name: str):
 
 
 def list_keys(root: Path) -> list[dict]:
-    """Names, types, sources and state. Never a value. keys.json holds one entry per name (schema), so a
-    workspace key and an admin key of the same name cannot both be stored: `add` refuses a name an admin key
-    holds, and `set_admin` leaves a workspace key of that name alone (reported as shadowed). The contract's
-    `shadowed` list state is therefore never produced by this store."""
+    """Names, types, sources and state. Never a value. A workspace key and an admin key of the same name are
+    both stored: the workspace key is used (`active`) and the admin one shows as `shadowed`; removing the
+    workspace key makes the admin one active again."""
+    _guard()
     d = _existing_dir(root)
-    keys = _load(d) if d else {}
-    return [
-        {
-            "name": n,
-            "type": keys[n]["type"],
-            "source": keys[n]["source"],
-            "state": "active",
-            "added_at": keys[n].get("added_at"),
-        }
-        for n in sorted(keys)
-    ]
+    mine = _load(d) if d else {}
+    theirs = _load(d, admin=True) if d else {}
+    out = []
+    for n in sorted(set(mine) | set(theirs)):
+        for e, state in ((mine.get(n), "active"), (theirs.get(n), "shadowed" if n in mine else "active")):
+            if e:
+                out.append(
+                    {
+                        "name": n,
+                        "type": e["type"],
+                        "source": e["source"],
+                        "state": state,
+                        "added_at": e.get("added_at"),
+                    }
+                )
+    return out
 
 
 def set_admin(root: Path, items: dict) -> list[str]:
-    """Replace every admin key by `items` ({name: str or json object}) in ONE rename of keys.json (the relay
-    refresh, secrets.md "an interrupted refresh keeps the old keys"). Workspace keys are kept. An admin key
-    whose name a workspace key already holds is not stored (the workspace key is used); a name or value the
-    store refuses is skipped and reported by name, never by value.
-    Returns plain-words lines for the skipped ones. Raises Refused (nothing changed) when the folder is not
-    usable."""
+    """Replace every admin key by `items` ({name: str or json object}) in ONE rename of admin-keys.json (the
+    relay refresh, secrets.md "an interrupted refresh keeps the old keys"). Workspace keys are not touched. A
+    name or value the store refuses is skipped and reported by name, never by value. Returns plain-words lines
+    for the skipped ones. Raises Refused (nothing changed) when the folder is not usable."""
+    _guard()
     if not isinstance(items, dict):
         raise Refused("The admin keys are not a list of keys.")
     d = hp.key_dir(root)
     skipped: list[str] = []
     with hp._key_lock(d):
-        keys = _load(d)
-        merged = {n: e for n, e in keys.items() if e["source"] == "workspace"}
+        _load(d)  # a damaged workspace key file refuses here, before anything is written
+        merged = {}
         for n, v in items.items():
             if not isinstance(n, str) or not NAME_RE.match(n):
                 skipped.append("key with an unusable name")
@@ -281,17 +315,15 @@ def set_admin(root: Path, items: dict) -> list[str]:
             except Refused as e:
                 skipped.append(f"key {n}: {e}")
                 continue
-            if n in merged:
-                skipped.append(f"key {n}: shadowed by your own key of the same name")
-                continue
             merged[n] = {"type": type_, "source": "admin", "value": value, "added_at": _now()}
-        _store(d, merged)
+        _store(d, merged, admin=True)
     return skipped
 
 
 def admin_names(root: Path) -> list[str]:
+    _guard()
     d = _existing_dir(root)
-    return sorted(n for n, e in _load(d).items() if e["source"] == "admin") if d else []
+    return sorted(_load(d, admin=True)) if d else []
 
 
 # ------------------------------------------------------------------------------------------- profiles
@@ -375,10 +407,11 @@ def _toml(profiles: dict) -> str:
 
 def write_profiles(root: Path, profiles: dict) -> None:
     """Replace profiles.toml (a person's action: the proof is the caller's job, slice 1.2). Names only."""
+    _guard()
     d = hp.key_dir(root)
     with hp._key_lock(d):
         values = set()
-        for e in _load(d).values():
+        for e in [*_load(d).values(), *_load(d, admin=True).values()]:
             if isinstance(e.get("value"), str):
                 values.add(e["value"])
         _profile_check(profiles, values)
@@ -387,6 +420,7 @@ def write_profiles(root: Path, profiles: dict) -> None:
 
 def read_profiles(root: Path) -> dict:
     """The profiles ({} when none yet). Unreadable or invalid: Refused."""
+    _guard()
     d = _existing_dir(root)
     if d is None:
         return {}
@@ -408,7 +442,7 @@ def read_profiles(root: Path) -> dict:
 
 
 def _record_path(d: Path, record: str) -> Path:
-    if not RECORD_RE.match(record) or record in RESERVED_RECORDS:
+    if record not in RECORDS:
         raise Refused("Unknown record.")
     return d / f"{record}.json"
 
@@ -416,6 +450,7 @@ def _record_path(d: Path, record: str) -> Path:
 def record_write(root: Path, record: str, data: dict) -> None:
     """A small record of orch itself in the key folder (e.g. `relay`: {url, workspace, token, ...}, written by
     relay.connect). One file, new file + rename under keys.lock."""
+    _guard()
     if not isinstance(data, dict):
         raise Refused("A record is an object.")
     d = hp.key_dir(root)
@@ -426,6 +461,7 @@ def record_write(root: Path, record: str, data: dict) -> None:
 
 def record_read(root: Path, record: str) -> dict | None:
     """The record, or None when there is none. A damaged one is Refused, never guessed."""
+    _guard()
     d = _existing_dir(root)
     if d is None:
         return None

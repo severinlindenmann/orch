@@ -87,8 +87,9 @@ def test_keys_file_matches_the_contract_schema(tws):
     keystore.add(tws, "kf", "key-file", b"filebytes")
     keystore.set_admin(tws, {"adm": TOKEN2, "sa": {"type": "service_account", "k": "abcdefghij"}})
     schema = json.loads((Path(__file__).parents[2] / "contracts" / "secrets.schema.json").read_text())
-    doc = json.loads((hp.key_dir(tws) / "keys.json").read_text())
-    jsonschema.validate(doc, {"$ref": "#/$defs/keys_file", "$defs": schema["$defs"]})
+    for f in ("keys.json", "admin-keys.json"):
+        doc = json.loads((hp.key_dir(tws) / f).read_text())
+        jsonschema.validate(doc, {"$ref": "#/$defs/keys_file", "$defs": schema["$defs"]})
 
 
 @pytest.mark.parametrize(
@@ -116,20 +117,79 @@ def test_bad_names_are_refused(tws, name):
         keystore.add(tws, name, "token", TOKEN)
 
 
-def test_admin_keys_are_read_only_and_a_workspace_key_wins(tws):
+def test_admin_keys_are_read_only_and_a_workspace_key_shadows_the_admin_one(tws):
     keystore.add(tws, "mine", "token", TOKEN)
     skipped = keystore.set_admin(tws, {"mine": TOKEN2, "theirs": TOKEN2, "tiny": "abc"})
     assert keystore.get_value(tws, "mine") == TOKEN  # the workspace key is used
     assert keystore.get_value(tws, "theirs") == TOKEN2
-    assert any("mine" in s and "shadowed" in s for s in skipped)
-    assert any("tiny" in s and "too short" in s for s in skipped)
-    assert TOKEN2 not in " ".join(skipped) and "abc" not in " ".join(s.split(":")[-1] for s in skipped)
-    with pytest.raises(Refused, match="managed by your admin"):
-        keystore.add(tws, "theirs", "token", TOKEN)
+    assert [s.split(":")[0] for s in skipped] == ["key tiny"] and "too short" in skipped[0]
+    assert [(i["name"], i["source"], i["state"]) for i in keystore.list_keys(tws)] == [
+        ("mine", "workspace", "active"),
+        ("mine", "admin", "shadowed"),
+        ("theirs", "admin", "active"),
+    ]
     with pytest.raises(Refused, match="managed by your admin"):
         keystore.remove(tws, "theirs")
+    keystore.remove(tws, "mine")  # the admin key is active again
+    assert keystore.get_value(tws, "mine") == TOKEN2
+    assert [i["state"] for i in keystore.list_keys(tws)] == ["active", "active"]
+    keystore.add(tws, "theirs", "token", TOKEN)  # a person may shadow an admin key
+    assert keystore.get_value(tws, "theirs") == TOKEN
     keystore.set_admin(tws, {})  # the admin took everything back: workspace keys stay
-    assert [i["name"] for i in keystore.list_keys(tws)] == ["mine"]
+    assert [i["name"] for i in keystore.list_keys(tws)] == ["theirs"]
+
+
+def test_a_type_change_leaves_no_stale_key_file(tws):
+    keystore.add(tws, "k", "key-file", b"filebytes")
+    keystore.add(tws, "k", "token", TOKEN)
+    assert not (hp.key_dir(tws) / "files" / "k").exists()
+
+
+def test_records_are_an_allowlist(tws):
+    for bad in ("delivered", "proofs-used", "human-settings", "proposals", "keys", "admin-keys"):
+        with pytest.raises(Refused):
+            keystore.record_write(tws, bad, {})
+    keystore.record_write(tws, "dev", {"a": 1})
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda ws: keystore.add(ws, "k", "token", TOKEN),
+        lambda ws: keystore.remove(ws, "k"),
+        lambda ws: keystore.get_value(ws, "k"),
+        lambda ws: keystore.list_keys(ws),
+        lambda ws: keystore.set_admin(ws, {"a": TOKEN}),
+        lambda ws: keystore.admin_names(ws),
+        lambda ws: keystore.write_profiles(ws, PROFILES),
+        lambda ws: keystore.read_profiles(ws),
+        lambda ws: keystore.record_write(ws, "relay", {}),
+        lambda ws: keystore.record_read(ws, "relay"),
+    ],
+)
+def test_windows_fails_closed_and_writes_nothing(tws, acct, monkeypatch, call):
+    monkeypatch.setattr(keystore, "_windows", lambda: True)
+    with pytest.raises(Refused, match="can't be stored safely on Windows"):
+        call(tws)
+    assert not (acct / ".orch-test" / "home" / "keys").exists()
+
+
+def test_windows_refresh_skips_the_admin_keys_and_never_falls_back_to_the_workspace(
+    rel, run, tws, monkeypatch
+):
+    monkeypatch.chdir(tws)
+    turn_on(tws, "relay")
+    legacy = tws / ".orch" / "secrets" / "credentials.json"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text('{"OLD": "old-value-0123456789"}')
+    monkeypatch.setattr(keystore, "_windows", lambda: True)
+    assert run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)[0] == 0
+    _snap_keys(rel, DB_URL="pg://db.example/prod")
+    code, out, err = run("relay", "refresh")
+    assert code == 0, (out, err)
+    assert "can't be stored safely on Windows" in out and "pg://db.example/prod" not in out
+    assert not legacy.exists() and "pg://db.example/prod" not in _tree_text(tws / ".orch")
+    assert not (tws.parent / "home" / "keys").exists()
 
 
 # ------------------------------------------------------------------------------ profiles
@@ -192,7 +252,7 @@ def test_records_round_trip_and_reserved_names(tws):
     assert keystore.record_read(tws, "relay") is None
     keystore.record_write(tws, "relay", {"url": "http://r", "workspace": "ws_a", "token": "orn_" + TOKEN})
     assert keystore.record_read(tws, "relay")["workspace"] == "ws_a"
-    for bad in ("keys", "profiles", "binding", "human", "../x", "Relay"):
+    for bad in ("keys", "profiles", "binding", "human", "../x", "Relay", "other"):
         with pytest.raises(Refused):
             keystore.record_write(tws, bad, {})
 
@@ -272,7 +332,7 @@ def test_a_failed_add_keeps_the_old_state(tws, monkeypatch):
 
 def test_an_interrupted_admin_write_keeps_the_old_admin_keys(tws, monkeypatch):
     keystore.set_admin(tws, {"old-key": TOKEN})
-    with _failing_replace(monkeypatch, "keys.json"):
+    with _failing_replace(monkeypatch, "admin-keys.json"):
         with pytest.raises(OSError):
             keystore.set_admin(tws, {"new-key": TOKEN2})
     assert keystore.get_value(tws, "old-key") == TOKEN
@@ -475,3 +535,35 @@ def test_admin_keys_are_refused_when_the_home_does_not_pair_and_empty_is_a_no_op
     assert "pg://db.example/prod" not in str(e.value)
     assert not any(elsewhere.iterdir()) and not (acct / ".orch-tool").exists()
     assert not (ws / ".orch" / "secrets" / "credentials.json").exists()
+
+
+def test_a_refresh_with_keys_and_an_unpaired_home_changes_nothing(acct, monkeypatch, tmp_path):
+    import base64
+
+    from orch import relay
+
+    ws = acct / "projects" / "real"  # real workspace, ORCH_HOME elsewhere
+    (ws / ".orch").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("ORCH_HOME", str(elsewhere))
+    snap = {
+        "version": 3,
+        "skills": [
+            {
+                "name": "acme-sql",
+                "files": {"SKILL.md": base64.b64encode(b"---\nname: acme-sql\n---\n").decode()},
+            }
+        ],
+        "mcp": {"sql": {"command": "x"}},
+        "credentials": {"DB_URL": "pg://db.example/prod"},
+        "workspaces": {"workspaces": [{"id": "ws_x", "name": "X"}], "phones": []},
+    }
+    monkeypatch.setattr(relay, "_api", lambda *a, **k: (200, snap))
+    with pytest.raises(Refused, match="don't belong together"):
+        relay.refresh(ws)
+    assert not (ws / ".agents").exists()  # no skill, no workspaces.json
+    sec = ws / ".orch" / "secrets"
+    assert not (sec / "mcp.json").exists() and not (sec / "shared.json").exists()
+    assert not (sec / "credentials.json").exists() and not any(elsewhere.iterdir())
+    assert not (ws / ".orch" / "tmp-refresh").exists()
