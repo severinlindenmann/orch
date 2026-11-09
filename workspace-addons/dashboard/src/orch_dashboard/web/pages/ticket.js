@@ -456,29 +456,12 @@ async function previewFile(tid, kind, fileName) {
   d.append(stage, actions);
   window.orch.open(d);
   if (PREVIEW_EXT.image.test(fileName)) { const img = el('img'); img.alt = fileName; img.src = '/api/file' + q; stage.append(img); return; }
-  const code = el('div');
-  stage.append(code);
-  if (kind === 'evidence' && /\.html?$/i.test(fileName)) {
-    try {
-      const response = await fetch('/addon/focus/api/t/' + encodeURIComponent(tid));
-      const focus = response.ok ? await response.json() : null;
-      if (typeof focus?.page_key === 'string' && /^[0-9a-f]{16}$/.test(focus.page_key)) {
-        const frame = h('iframe', {className:'ticket-page-preview', title:fileName, sandbox:'allow-scripts', referrerpolicy:'no-referrer',
-          src:'/addon/focus/page/' + encodeURIComponent(tid) + '/' + focus.page_key + '/' + fileName.split('/').map(encodeURIComponent).join('/')});
-        const choose = page => { frame.hidden = !page; code.hidden = page; pageButton.setAttribute('aria-pressed', String(page)); codeButton.setAttribute('aria-pressed', String(!page)); };
-        const pageButton = ticketButton('Page', 'ghost', () => choose(true), {'aria-pressed':'true'});
-        const codeButton = ticketButton('Code', 'ghost', () => choose(false), {'aria-pressed':'false'});
-        stage.prepend(h('div', {className:'ticket-preview-switch', role:'group', 'aria-label':'Preview'}, pageButton, codeButton), frame);
-        choose(true);
-      }
-    } catch (_) { /* Focus is optional; the code view remains available. */ }
-  }
   try {
     const r = await fetch('/api/file' + q);
     if (!r.ok) throw new Error('no');
     const pre = el('pre'); pre.textContent = (await r.text()).slice(0, 200000);
-    code.append(pre);
-  } catch (_) { code.append(el('p', 'meta pad', 'This file cannot be shown here.')); }
+    stage.append(pre);
+  } catch (_) { stage.append(el('p', 'meta pad', 'This file cannot be shown here.')); }
 }
 function ticketActor(by) {
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(by);

@@ -38,11 +38,7 @@
 .ticket-review-tile>.meta,.ticket-review-tile>.btn{flex:none}
 .ticket-ask-line{display:flex;align-items:center;gap:8px}
 .ticket-ask-line input{flex:1;min-width:0}
-.ticket-preview-switch{display:flex;gap:8px;margin-bottom:12px}
-.ticket-preview-switch [aria-pressed=true]{background:var(--surface-3);color:var(--text)}
-.preview-stage .ticket-page-preview{display:block;width:100%;height:60vh;background:white;border:none}
-.preview-stage [hidden]{display:none}
-@media(max-width:760px){.ticket-review-tile,.ticket-ask-line{flex-wrap:wrap}.ticket-review-tile button,.ticket-ask-line button,.ticket-preview-switch button{min-height:44px}.ticket-ask-line input{flex-basis:60%}}
+@media(max-width:760px){.ticket-review-tile,.ticket-ask-line{flex-wrap:wrap}.ticket-review-tile button,.ticket-ask-line button.ticket-ask-line input{flex-basis:60%}}
 .ticket-task-collapse>summary{padding:16px;cursor:pointer}
 .ticket-part{color:var(--text);text-decoration:none;gap:12px}
 .ticket-part:hover{background:var(--surface-2)}
