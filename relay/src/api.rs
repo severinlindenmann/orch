@@ -255,8 +255,9 @@ async fn post_message(
         let stored = rules::authorize(&c, &app.key, &me, msg)?;
         store::insert_message(&c, &app.key, &stored, &digest)?;
         let to = stored["to"].as_str().unwrap_or("");
-        // a review question (body.review) is not pushed: the "Ready for your review" text was pushed
-        let quiet_review = stored["type"] == "question" && stored["body"]["review"] == true;
+        // a review question (body.review) and a ticket proposal (body.proposal) are not pushed: the "Ready for your review" text was pushed
+        let quiet_review = stored["type"] == "question"
+            && (stored["body"]["review"] == true || stored["body"]["proposal"] == "make_ticket");
         let push = matches!(stored["type"].as_str(), Some("question" | "text"))
             && (to == "phones" || to.starts_with("ph_"))
             && !quiet_review;

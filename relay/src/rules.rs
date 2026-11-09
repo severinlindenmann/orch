@@ -128,6 +128,7 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         }
         if typ == "question" {
             check_review_question(&msg)?;
+            check_proposal_question(&msg)?;
         }
         return Ok(msg);
     }
@@ -209,6 +210,33 @@ fn check_review_question(msg: &Value) -> Res<()> {
     } else {
         Err(invalid(
             "A review question has review true, question_id review-<n>, options accept and changes, and no scope.",
+        ))
+    }
+}
+
+/// body.proposal marks the General helper's ticket proposal (relay-api.md "Ticket proposal question"):
+/// proposal make_ticket, question_id proposal-<the message's own id>, title 1-120 chars, options exactly
+/// make and not_now, no scope, no review, no ticket on the message.
+fn check_proposal_question(msg: &Value) -> Res<()> {
+    let b = &msg["body"];
+    if b.get("proposal").is_none() {
+        return Ok(());
+    }
+    let own = msg["id"].as_str().unwrap_or("");
+    let title_len = b["title"].as_str().map_or(0, |t| t.chars().count());
+    let ok = b["proposal"] == "make_ticket"
+        && !own.is_empty()
+        && b["question_id"].as_str() == Some(format!("proposal-{own}").as_str())
+        && (1..=120).contains(&title_len)
+        && b["options"] == serde_json::json!(["make", "not_now"])
+        && b.get("scope").is_none()
+        && b.get("review").is_none()
+        && msg.get("ticket").map_or(true, |t| t.is_null());
+    if ok {
+        Ok(())
+    } else {
+        Err(invalid(
+            "A ticket proposal has proposal make_ticket, question_id proposal-<its own id>, a title of 1-120 characters, options make and not_now, no scope, no review and no ticket.",
         ))
     }
 }

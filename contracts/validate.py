@@ -452,6 +452,18 @@ for case in rqvec["cases"]:
     if case["do"] not in ("accept", "changes", "nothing") or (case["do"] == "changes" and not case.get("note")):
         fails.append(f"review-question vector {case['name']}: bad outcome")
 
+# Ticket proposal question (relay-api.md, Ticket proposal question).
+pqvec = json.loads((HERE / "vectors" / "proposal-question-v1.json").read_text())
+for v in pqvec["valid"]:
+    check("message", v["message"], True, f"proposal-question vector valid {v['name']}")
+for v in pqvec["invalid"]:
+    if v["name"] in ("question-id-not-own-id", "with-ticket"):  # relay-only rules, not schema
+        continue
+    check("message", v["message"], False, f"proposal-question vector invalid {v['name']}")
+for case in pqvec["cases"]:
+    if case["do"] not in ("make", "not_now", "nothing") or (case["do"] != "nothing" and not case.get("by")):
+        fails.append(f"proposal-question vector {case['name']}: bad outcome")
+
 # Mobile mode (relay-api.md, Mobile mode).
 mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())
 for case in mmvec["heartbeat"]:
