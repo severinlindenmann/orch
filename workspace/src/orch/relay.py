@@ -743,16 +743,35 @@ def _send_proposal(
         "recommended": None,
         "proposal": "make_ticket",
     }
+    # LOCAL FIRST: the proposal (chat entry + dashboard Make ticket card) exists whatever the relay says. The
+    # phone question is best effort afterwards: a refusal (an older relay without the proposal rule) or an
+    # outage never reaches the helper or the person and never removes the card.
+    local = {
+        "schema": "orch.msg/1",
+        "id": mid,
+        "to": to,
+        "type": "question",
+        "created_at": tickets.now(),
+        "body": body,
+    }
+    with contextlib.suppress(Refused, OSError):
+        _record_general(root, local, text, general_body, reply_to, refs)
     rec = {"ticket": None, "question_id": body["question_id"], "to": to, "proposal": True, "title": title}
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
+    # The caller (the helper's command) always gets "sent": relay trouble is not its business; a message that
+    # is only waiting offline goes out later from the outbox, the same bytes.
     try:
-        msg = _message(root, to, "question", body, None, reply_to, mid)
+        return {**_message(root, to, "question", body, None, reply_to, mid), "sent": True, "problem": None}
     except Refused:
         _asked_edit(root, lambda asked: asked.pop(mid, None))
-        raise
-    with contextlib.suppress(Refused, OSError):  # the question is sent; a missing history line never fails it
-        _record_general(root, msg, text, general_body, reply_to, refs)
-    return msg
+    try:  # the phone still hears the helper, as a plain text (no card), under the same message id
+        return {
+            **_message(root, to, "text", general_body, None, reply_to, mid),
+            "sent": True,
+            "problem": None,
+        }
+    except Refused:
+        return {**local, "sent": True}
 
 
 def send_file(root: Path, target: str, path: Path, text: str | None, ticket: str | None = None) -> dict:

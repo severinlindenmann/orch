@@ -246,3 +246,75 @@ def test_vector(proj, run, conn):
         run("relay", "inbox")
         grew = len(real_tickets(proj)) - before
         assert grew == (1 if case["do"] == "make" else 0), case["name"]
+
+
+def refuse_questions(rel):
+    """A relay from before the proposal rule: it refuses the proposal question (422)."""
+
+    def post(m, q, body):
+        msg = json.loads(body)
+        if msg["type"] == "question":
+            return 422, {"error": "invalid", "message": "A ticket proposal has nothing like this."}
+        rel.sent.append(msg)
+        return 201, {"id": msg["id"]}
+
+    rel.routes.insert(0, ("POST", "/v1/messages", post))
+
+
+def check_local_first(proj, conn, sent):
+    assert sent["sent"] is True and not sent.get("problem")
+    assert chat.proposal_state(proj, sent["id"]) == "open", "the dashboard card is there"
+    made = chat.make_ticket(proj, sent["id"], None, "human:dash")
+    assert [x["id"] for x in real_tickets(proj)] == [made["ticket"]]
+    assert chat.make_ticket(proj, sent["id"], None, "human:dash")["ticket"] == made["ticket"]
+
+
+def test_relay_refusal_keeps_the_dashboard_card(proj, run, conn):
+    refuse_questions(conn)
+    chat.record(proj, "m_you0000000000001", "you", "phone", "please rename field X", phone=PHONE)
+    sent = relay.send_text(
+        proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
+    )
+    assert not proposals(conn)
+    assert any(m["type"] == "text" and m["id"] == sent["id"] for m in conn.sent), "the phone still hears it"
+    check_local_first(proj, conn, sent)
+
+
+def test_relay_refusal_through_the_helper_command_says_nothing_about_the_relay(proj, run, conn):
+    refuse_questions(conn)
+    chat.record(proj, "m_you0000000000001", "you", "phone", "please rename field X", phone=PHONE)
+    gid = tickets.ensure_general(proj, "human:t")
+    code, out, err = run("relay", "send", "phones", SENTENCE, "--ticket", gid, "--ref", "proposal:Rename X")
+    assert code == 0, err
+    text = (out + err).lower()
+    assert "refus" not in text and "not sent" not in text and "relay" not in text.replace("sent to", "")
+    (entry,) = [m for m in chat.read_day(proj, chat.day_key(proj))["messages"] if m["by"] != "you"]
+    assert chat.proposal_state(proj, entry["id"]) == "open"
+
+
+def test_relay_offline_keeps_the_dashboard_card(proj, run, conn):
+    conn.server.shutdown()
+    conn.server.server_close()
+    chat.record(proj, "m_you0000000000001", "you", "phone", "please rename field X", phone=PHONE)
+    sent = relay.send_text(
+        proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
+    )
+    check_local_first(proj, conn, sent)
+
+
+def test_review_question_refused_or_offline_never_raises(proj, new_ticket, conn):
+    from orch import phone_view
+
+    def refuse(m, q, body):
+        return 422, {"error": "invalid", "message": "no"}
+
+    conn.routes.insert(0, ("POST", "/v1/messages", refuse))
+    tid = new_ticket("Review me")
+    tickets.set_status(proj, tid, "review", "human:t")
+    assert phone_view.sync_reviews(proj) == []  # refused: nothing raised, the ticket is untouched
+    assert tickets.load(proj, tid)["status"] == "review"
+    conn.server.shutdown()
+    conn.server.server_close()
+    tickets.set_status(proj, tid, "ready", "human:t")
+    tickets.set_status(proj, tid, "review", "human:t")
+    phone_view.sync_reviews(proj)  # offline: no exception either
