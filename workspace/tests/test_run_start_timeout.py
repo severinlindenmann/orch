@@ -57,12 +57,14 @@ def test_live_run_still_starting_counts_as_no_agent(proj, new_ticket, monkeypatc
     from orch import runs_live
 
     tid = new_ticket()
-    _start(proj, tid, mode="live", live={"state": "starting", "since": _ago(100)})
+    _start(proj, tid, mode="live", age=200, live={"state": "starting", "since": _ago(100)})
     monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
     monkeypatch.setattr(runs_live, "tmux", lambda *a, **k: None)
     assert runs.check_start_timeout(proj, tid) == "Couldn't start the agent: no agent session appeared"
     tid2 = new_ticket("Two")
-    _start(proj, tid2, mode="live", live={"state": "idle", "since": _ago(100)})  # the tool reported in
+    _start(
+        proj, tid2, mode="live", age=200, live={"state": "idle", "since": _ago(100)}
+    )  # the tool reported in
     assert runs.check_start_timeout(proj, tid2) is None
 
 
@@ -149,3 +151,76 @@ def test_orch_is_syncing_is_a_known_cause(proj, new_ticket, monkeypatch):
     _start(proj, tid)
     monkeypatch.setattr(syncgate, "live_holder", lambda root: {"pid": 1})
     assert runs.start_failure_reason(proj, runs.read(proj, tid)) == "orch is syncing"
+
+
+def test_live_runs_get_three_times_the_time_and_a_session_with_output_counts_as_alive(
+    proj, new_ticket, monkeypatch
+):
+    from orch import runs_live
+
+    tid = new_ticket()
+    _start(proj, tid, mode="live", age=100, live={"state": "starting", "since": _ago(100)})
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    monkeypatch.setattr(runs_live, "tmux", lambda *a, **k: None)
+    assert runs.check_start_timeout(proj, tid) is None  # 100 s < 180 s
+    _edit(proj, tid, started_at=_ago(200))
+    pane = type("P", (), {"returncode": 0, "stdout": "Welcome to the tool\n"})()
+    monkeypatch.setattr(runs_live, "tmux", lambda *a, **k: pane)
+    assert runs.check_start_timeout(proj, tid) is None  # the session shows output: it is starting up
+    assert runs.read(proj, tid)
+    pane.stdout = "   \n"
+    assert runs.check_start_timeout(proj, tid) is not None  # an empty pane after 200 s: no agent
+
+
+def test_another_machines_claim_is_not_ours_to_judge(proj, new_ticket):
+    tid = new_ticket()
+    _start(proj, tid, host="some-other-machine")
+    assert runs.check_start_timeout(proj, tid) is None and runs.read(proj, tid)
+    _edit(proj, tid, host=None)  # no host recorded either: skipped
+    assert runs.check_start_timeout(proj, tid) is None
+
+
+def test_a_run_that_gets_its_agent_while_we_decide_is_left_alone(proj, new_ticket, monkeypatch):
+    tid = new_ticket()
+    _start(proj, tid)
+    real = runs.start_failure_reason
+
+    def late(root, rec):  # the agent comes up between the first look and the locked decision
+        _edit(proj, tid, agent_pid=os.getpid())
+        return real(root, rec)
+
+    monkeypatch.setattr(runs, "start_failure_reason", late)
+    assert runs.check_start_timeout(proj, tid) is None
+    assert runs.read(proj, tid) and tickets.load(proj, tid)["status"] == "active"
+
+
+def test_the_wrapper_is_only_killed_after_the_release_and_only_with_a_recorded_start(
+    proj, new_ticket, monkeypatch
+):
+    tid = new_ticket()
+    seen = []
+    monkeypatch.setattr(runs, "kill_tree", lambda pid, *a, **k: seen.append((pid, runs.read(proj, tid))))
+    _start(proj, tid)
+    assert runs.check_start_timeout(proj, tid)
+    assert len(seen) == 1 and seen[0][1] is None  # the claim was already gone when it was killed
+    tid2 = new_ticket("Two")
+    _start(proj, tid2, pid_started=None)  # no start time recorded: never killed (the pid may be reused)
+    assert runs.check_start_timeout(proj, tid2)
+    assert len(seen) == 1
+
+
+def test_live_leftover_session_is_killed_by_exact_name(proj, new_ticket, monkeypatch):
+    from orch import runs_live
+
+    tid = new_ticket()
+    _start(proj, tid, mode="live", age=200, live={"state": "starting", "since": _ago(100)})
+    calls = []
+    monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
+    monkeypatch.setattr(
+        runs_live,
+        "tmux",
+        lambda root, *a, **k: calls.append(a) or type("P", (), {"returncode": 0, "stdout": ""})(),
+    )
+    assert runs.check_start_timeout(proj, tid)
+    kill = next(c for c in calls if c[0] == "kill-session")
+    assert kill == ("kill-session", "-t", f"={tid}:")  # exact match, not a prefix

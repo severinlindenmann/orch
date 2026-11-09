@@ -331,6 +331,7 @@ def _new_record(tid: str, by: str, agent: str, mode: str, ticket: dict, reason: 
         "tmux": None,
         "pid": None,
         "pid_started": None,
+        "host": host(),
         "started_at": t,
         "renewed_at": t,
         "pending": False,
@@ -625,19 +626,24 @@ def renew(root: Path, tid: str, run: str, ticket: dict | None = None, seen: bool
         return rec
 
 
+def _release_locked(root: Path, tid: str, rec: dict) -> None:
+    """Delete the claim and the files made for this run (the caller holds the run lock)."""
+    _drop_start_prompts_locked(root, tid)
+    _delete(root, tid)
+    for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
+        (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
+
+
 def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool = False) -> dict:
     """End a claim. With keep_if_pending the claim stays while input waits (the wrapper runs once more)."""
     with locked(root, tid):
         rec = read(root, tid)
         if not rec or (run and rec["run"] != run):
             return {"released": False, "pending": bool(undelivered(root, tid))}
-        _drop_start_prompts_locked(root, tid)
         waiting = bool(undelivered(root, tid))
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
-        _delete(root, tid)
-        for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
-            (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
+        _release_locked(root, tid, rec)
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
     return {"released": True, "pending": waiting}
 
@@ -762,6 +768,26 @@ def _log_detail(root: Path, rec: dict) -> str:
     return ""
 
 
+def _live_pane_has_output(root: Path, tid: str) -> bool:
+    """A live session that exists and already shows something is starting up, not missing."""
+    from orch import runs_live
+
+    with contextlib.suppress(Exception):
+        if runs_live.session_exists(root, tid):
+            pane = runs_live.tmux(root, "capture-pane", "-p", "-t", runs_live.target(tid))
+            return pane is not None and pane.returncode == 0 and bool(pane.stdout.strip())
+    return False
+
+
+def _stuck(rec: dict, at: float) -> bool:
+    """No agent after the limit (a live tool gets three times as long: it is a whole terminal start-up)."""
+    limit = start_timeout_seconds() * (3 if rec.get("mode") == "live" else 1)
+    try:
+        return not agent_up(rec) and at - _parse(rec["started_at"]) >= limit
+    except (KeyError, ValueError):
+        return False
+
+
 def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | None:
     """`orch run status` and Chat (polled): a run that had START_TIMEOUT_SECONDS and still has no agent
     is ended, and a person is told why (the ticket waits with the reason; in Chat a message from the workspace
@@ -769,23 +795,19 @@ def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | 
     at = time.time() if at is None else at
     try:
         rec = read(root, tid)
-        if not rec or agent_up(rec) or at - _parse(rec["started_at"]) < start_timeout_seconds():
+        # only this machine's own runs (a claim file that arrived by sync is not ours to judge)
+        if not rec or rec.get("host") != host() or not _stuck(rec, at):
+            return None
+        if rec.get("mode") == "live" and _live_pane_has_output(root, tid):
             return None
         text = f"Couldn't start the agent: {start_failure_reason(root, rec)}"
-        with locked(root, tid):
+        with locked(root, tid):  # decide and release in one step: a run that got its agent meanwhile stays
             cur = read(root, tid)
-            if not cur or cur["run"] != rec["run"] or agent_up(cur):
+            if not cur or cur["run"] != rec["run"] or not _stuck(cur, at):
                 return None
-        pid = rec.get("pid")
-        if isinstance(pid, int) and _running(pid, rec.get("pid_started")):
-            kill_tree(pid)  # what is left of the start (a wrapper waiting for nothing)
-        if rec.get("mode") == "live":
-            from orch import runs_live
-
-            with contextlib.suppress(Exception):
-                runs_live.tmux(root, "kill-session", "-t", runs_live.target(tid))
-        if not release(root, tid, rec["run"])["released"]:
-            return None
+            _release_locked(root, tid, cur)
+        runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])
+        _stop_leftovers(root, tid, rec)  # only after the claim is really gone
         _say_start_failed(root, tid, rec, text)
         return text
     except Exception as e:  # noqa: BLE001 - never fails the status call that asks, but is never silent
@@ -793,6 +815,20 @@ def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | 
             f"orch: could not check whether {tid} got its agent: {e.__class__.__name__}: {e}", file=sys.stderr
         )
         return None
+
+
+def _stop_leftovers(root: Path, tid: str, rec: dict) -> None:
+    """What is left of the start: its wrapper (only when the pid is the one recorded with its start time: a
+    reused pid is never killed) and a live run's terminal session (exact name)."""
+    pid = rec.get("pid")
+    if isinstance(pid, int) and rec.get("pid_started") and _running(pid, rec["pid_started"]):
+        with contextlib.suppress(Exception):
+            kill_tree(pid)
+    if rec.get("mode") == "live":
+        from orch import runs_live
+
+        with contextlib.suppress(Exception):
+            runs_live.tmux(root, "kill-session", "-t", runs_live.target(tid))  # "=name:" matches exactly
 
 
 def _say_start_failed(root: Path, tid: str, rec: dict, text: str) -> None:
