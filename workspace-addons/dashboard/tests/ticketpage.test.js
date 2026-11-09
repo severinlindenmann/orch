@@ -183,3 +183,24 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   assert.ok(pre.children[0].length <= 2048);
   assert.ok(pre.children[0].split('\n').length <= 8);
 });
+
+test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
+  const c = context({h, snapshot:false, safeHref:u => u, array:v => Array.isArray(v) ? v : [], clean:String, previewFile(){}, proofLabel:ev => ev.ref});
+  vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function ticketResultCard')), c);
+  vm.runInContext(source.slice(source.indexOf('// A small chip per proof'), source.indexOf('function taskRows')), c);
+  vm.runInContext('globalThis.evidenceFile = evidenceFile', c);
+  const t = {id:'t_a'}, base = '.orch/tickets/t_a/evidence/';
+  const hostile = ['../../t_b/artifacts/x.md', 'a/../../b', '/etc/passwd', 'a\\b.txt', 'a\0b', 'C:x.txt', 'a//b', './a.txt'];
+  for (const name of hostile) assert.equal(c.evidenceFile(t, {type:'file', ref:base + name}), null, name);
+  assert.equal(JSON.stringify(c.evidenceFile(t, {type:'file', ref:base + 'ok/plan.md', at:'x'})), JSON.stringify({name:'ok/plan.md', mtime:'x'}));
+  assert.equal(c.evidenceFile(t, {type:'file', ref:'.orch/tickets/t_b/evidence/x.md'}), null);
+  const row = ev => JSON.stringify(c.taskProofChips(t, {evidence:[ev]}));
+  assert.equal(row({type:'url', ref:'javascript:alert(1)'}), 'null');
+  assert.equal(row({type:'url', ref:'data:text/html,x'}), 'null');
+  assert.match(row({type:'url', ref:'HTTPS://example.com/x'}), /example\.com/);
+  assert.equal(row({type:'file', ref:base + '../x'}), 'null');
+  // the summary of the proof is the task line, even when a later proof has none
+  const task = {done:true, evidence:[{type:'file', ref:base + 'a.md', summary:'Connected as Dev Team.'}, {type:'file', ref:base + 'b.png'}]};
+  assert.equal(helpers.outcome(task), 'Connected as Dev Team.');
+});

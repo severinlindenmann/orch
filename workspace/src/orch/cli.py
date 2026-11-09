@@ -673,11 +673,11 @@ def run(args: argparse.Namespace) -> None:
             msg = f"{c['id']}: no longer marked as being worked on."
         _out(args, c, msg)
     elif cmd == "check":
-        extra = {k: getattr(args, k) for k in ("title", "role", "summary") if getattr(args, k)}
+        extra = {k: getattr(args, k) for k in ("title", "role") if getattr(args, k)}
+        # the summary says what came out of the step: it goes on ONE proof (the file, else the first one)
         shorthand = [
-            json.dumps({"type": k, "ref": getattr(args, k), **extra})
-            for k in ("command", "note", "pr", "commit", "url")
-            if getattr(args, k)
+            json.dumps({"type": k, "ref": getattr(args, k), **extra, **({"summary": args.summary} if args.summary and i == 0 and not args.file else {})})
+            for i, k in enumerate(k for k in ("command", "note", "pr", "commit", "url") if getattr(args, k))
         ]
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id

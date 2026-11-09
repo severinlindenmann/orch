@@ -870,9 +870,11 @@ def parse_evidence(raw: str) -> dict:
     if "text" in ev and not isinstance(ev["text"], str):
         raise Refused("Evidence text must be a string.")
     if "summary" in ev:
-        if not isinstance(ev["summary"], str) or not 1 <= len(ev["summary"].strip()) <= 200:
-            raise Refused("A proof summary is one line of 1 to 200 characters.")
-        ev["summary"] = " ".join(ev["summary"].split())
+        raw = ev["summary"]
+        line = " ".join(raw.split()) if isinstance(raw, str) else ""
+        if not 1 <= len(line) <= 200 or not line.isprintable():
+            raise Refused("A proof summary is one line of 1 to 200 printable characters.")
+        ev["summary"] = line
     return ev
 
 
@@ -1586,6 +1588,8 @@ def attach_file(
         raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
     if title is not None and not 1 <= len(title.strip()) <= 120:
         raise Refused("A proof title needs 1 to 120 characters.")
+    if summary:  # checked before anything is copied
+        summary = parse_evidence(json.dumps({"type": "file", "ref": "x", "summary": summary}))["summary"]
     base = Path(os.path.realpath(root))
     given = Path(os.path.abspath(os.path.expanduser(path)))
     rel = None

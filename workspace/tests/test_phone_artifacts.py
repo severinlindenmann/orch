@@ -482,3 +482,34 @@ def test_a_picture_that_was_not_sent_is_never_a_preview(proj, run, new_ticket, c
     assert run("ask", tid, "See artifacts/report.png and artifacts/report.html")[0] == 0
     atts = phone_view.view_for(proj, tid)["attachments"]
     assert [a["name"] for a in atts] == ["report.html"] and "preview" not in atts[0]
+
+
+def _att(kind, name, at, aid):
+    return {"kind": kind, "title": name, "name": name, "blob_id": "b_0123456789abcdef", "size": 1, "at": at, "id": aid, "rev": "r"}
+
+
+def test_pairing_with_a_newer_picture_has_no_duplicates():
+    page = _att("file", "r.html", "2026-11-06T09:00:00Z", "a_000000000001")
+    pic = _att("image", "r.png", "2026-11-06T09:05:00Z", "a_000000000002")
+    out = phone_view.pair_previews([pic, page])  # newest first: the picture is before the page
+    assert [a["id"] for a in out] == ["a_000000000001", "a_000000000002"]
+    assert out[0]["preview"] == "a_000000000002"
+
+
+def test_two_pages_share_one_picture_only_once():
+    p1 = _att("file", "r.html", "2026-11-06T09:00:00Z", "a_000000000001")
+    p2 = _att("file", "r.htm", "2026-11-06T08:00:00Z", "a_000000000003")
+    pic = _att("image", "r.png", "2026-11-06T09:05:00Z", "a_000000000002")
+    out = phone_view.pair_previews([pic, p1, p2])
+    ids = [a["id"] for a in out]
+    assert sorted(ids) == ["a_000000000001", "a_000000000002", "a_000000000003"] and len(set(ids)) == 3
+    assert sum("preview" in a for a in out) == 1
+
+
+def test_preview_never_points_outside_the_list(monkeypatch):
+    monkeypatch.setattr(phone_view, "ATTACHMENTS", 1)
+    page = _att("file", "r.html", "2026-11-06T09:05:00Z", "a_000000000001")
+    pic = _att("image", "r.png", "2026-11-06T09:00:00Z", "a_000000000002")
+    # the real code cuts first; mimic it: the picture is cut off, so the page has no preview
+    out = phone_view.pair_previews([page, pic][: phone_view.ATTACHMENTS])
+    assert out == [page] and "preview" not in page

@@ -361,7 +361,7 @@ function linkGroups(links) {
   return [...groups].sort(([a], [b]) => Number(a === 'References') - Number(b === 'References'));
 }
 // Preview text is cached by file revision; snapshot copies never request local files.
-const ticketPreviewText = new Map(), ticketPreviewDone = new Map();
+const ticketPreviewText = new Map(), ticketPreviewDone = new Map(), ticketPreviewPending = new Set();
 function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
@@ -390,7 +390,10 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
     } else if (data?.text) tile.append(h('pre', {}, data.text));
   };
   if (ticketPreviewDone.has(key)) fill(ticketPreviewDone.get(key));
-  else ticketPreviewText.get(key).then(data => { ticketPreviewDone.set(key, data); fill(data); if (route().kind === 'ticket') render(); });
+  else if (!ticketPreviewPending.has(key)) {  // one redraw per file, however often the page redraws meanwhile
+    ticketPreviewPending.add(key);
+    ticketPreviewText.get(key).then(data => { ticketPreviewDone.set(key, data); ticketPreviewPending.delete(key); fill(data); if (route().kind === 'ticket') render(); });
+  }
   return tile;
 }
 // A real artifact: its name, what kind it is, a preview and Open. A proof without a file shows no "Completed" filler.
@@ -398,7 +401,10 @@ const KIND_WORD = [[/\.(png|jpe?g|gif|webp)$/i, 'Picture'], [/\.(csv|tsv)$/i, 'T
 const kindWord = fileName => KIND_WORD.find(([re]) => re.test(fileName))?.[1] || 'File';
 const evidenceFile = (t, ev) => {
   const prefix = '.orch/tickets/' + t.id + '/evidence/', ref = String(ev.ref || '');
-  return (ev.type || ev.kind) === 'file' && !ev.missing && ref.startsWith(prefix) ? {name:ref.slice(prefix.length), mtime:ev.at} : null;
+  if ((ev.type || ev.kind) !== 'file' || ev.missing || !ref.startsWith(prefix)) return null;
+  const name = ref.slice(prefix.length);  // the server checks again; a path that climbs or is not plain never gets a chip
+  if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
+  return {name, mtime:ev.at};
 };
 function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   const helpers = window.DashHelpers;
@@ -483,7 +489,7 @@ function taskProofChips(t, task) {
     const kind = ev.type || ev.kind, file = evidenceFile(t, ev), label = proofLabel(ev);
     if (file && !snapshot) return h('button', {type:'button', className:'chip proof-chip', title:'Open', onclick:() => previewFile(t.id, 'evidence', file.name)}, clean(ev.title || file.name.split('/').pop()));
     if (file) return h('span', {className:'chip proof-chip'}, clean(ev.title || file.name.split('/').pop()));
-    if (['pr', 'url'].includes(kind) && /^https?:\/\//.test(String(ev.ref || ''))) return h('a', {className:'chip proof-chip', href:safeHref(ev.ref), target:'_blank', rel:'noopener noreferrer'}, label);
+    if (['pr', 'url'].includes(kind) && /^https?:\/\//i.test(String(ev.ref || ''))) return h('a', {className:'chip proof-chip', href:safeHref(ev.ref), target:'_blank', rel:'noopener noreferrer'}, label);
     return null;
   }).filter(Boolean);
   return chips.length ? h('div', {className:'task-proofs row'}, chips.slice(0, 4)) : null;
@@ -704,7 +710,7 @@ function detail(t) {
   }
   const menu = snapshot ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? ticketButton('Reopen', 'menu-item', () => moveTicket(t.id, 'active'), {role:'menuitem'}) : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
-      repeatsAddon() ? [ticketButton('Copy ticket', 'menu-item', () => copyTicket(t), {role:'menuitem', 'data-key':'ticket-copy'}), ticketButton('Repeat…', 'menu-item', () => repeatsDialog('repeat', t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
+      repeatsAddon() ? [ticketButton('Copy ticket', 'menu-item', () => copyTicket(t), {role:'menuitem', 'data-key':'ticket-copy'}), ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id}, h('header', {className:'stack ticket-heading'},
     parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,

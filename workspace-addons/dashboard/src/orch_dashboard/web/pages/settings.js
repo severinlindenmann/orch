@@ -300,7 +300,8 @@ function repeatsCard() {
 }
 // The add-on that declares the `repeats` panel (state.addons lists only active add-ons, with no `active` field); null when off (then no Copy/Repeat shows on a ticket).
 const repeatsAddon = () => addons().find(a => a.dashboard?.panel === 'repeats')?.name || null;
-function repeatsDialog(_verb, only = null, addonName = null) {
+// From a ticket's menu (`only`) the first schedule is preselected: "Repeat…" must not copy at once.
+function repeatsDialog(only = null, addonName = null) {
   if (snapshot) return;
   const {d, actions} = dialog('Repeat a ticket', 'dialog');
   const ticket = h('select', {className:'input', name:'ticket'});
@@ -308,9 +309,10 @@ function repeatsDialog(_verb, only = null, addonName = null) {
   const preset = h('select', {className:'input', name:'repeat'});
   preset.append(new Option('Just once, now', 'once'));
   repeatPresets.forEach(value => preset.append(new Option(capitalise(value).replace('monday', 'Monday'), value)));
+  if (only) preset.value = repeatPresets[0];
   const fields = h('div', {className:'form-fields'}, h('label', {}, 'Ticket', ticket), h('label', {}, 'How often', preset));
   if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
-  const save = button('Copy now', 'primary', async () => {
+  const save = button(only ? 'Save' : 'Copy now', 'primary', async () => {
     if (save.disabled || !ticket.value) return;
     save.disabled = true;
     const once = preset.value === 'once', verb = once ? 'copy' : 'repeat';
@@ -376,7 +378,7 @@ async function sharedLinkAction(control) {
 // Rebind after reconciliation: retained DOM nodes must use the current link data.
 function bindAddonControls(host) {
   host.querySelectorAll('[data-native]').forEach(control => {
-    control.onclick = () => control.dataset.native === 'repeat' ? repeatsDialog('repeat') : sharedLinkAction(control);
+    control.onclick = () => control.dataset.native === 'repeat' ? repeatsDialog() : sharedLinkAction(control);
   });
 }
 

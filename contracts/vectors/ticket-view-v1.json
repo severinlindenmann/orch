@@ -2260,6 +2260,49 @@
      }
     }
    }
+  },
+  {
+   "name": "preview-points-outside-the-list",
+   "ok": true,
+   "why": "Valid on the wire (the schema only checks the id format); a phone ignores a preview whose target is not an image in this list.",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "T",
+      "status": "open",
+      "running": false,
+      "checklist": [],
+      "done": 0,
+      "total": 0,
+      "history_tail": [],
+      "attachments": [
+       {
+        "kind": "file",
+        "title": "report.html",
+        "blob_id": "b_0123456789abcdef",
+        "name": "report.html",
+        "size": 900,
+        "at": "2026-11-06T09:38:00Z",
+        "id": "a_0123456789ab",
+        "rev": "r1",
+        "preview": "a_ba9876543210"
+       }
+      ]
+     }
+    }
+   }
   }
  ]
 }
