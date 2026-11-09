@@ -151,3 +151,71 @@ def test_posix_path_is_unchanged(tmp_path):
     r = tmp_path.resolve()
     assert saferead._DIRFD  # dir_fd walk on POSIX
     assert rp(r, "a.log") == b"{}" and tail(r, "a.log") == b"{}" and fs(r, "a.log").startswith("F:")
+
+
+# ---------------------------------------------------------------- W2a review fixes
+
+
+@pytest.mark.parametrize("name", ["CON", "nul", "Aux.txt", "COM1", "lpt9.log", "PRN.tar.gz", "CONIN$"])
+def test_dos_device_names_are_refused_before_any_open(win, name):
+    r = win["root"]
+    assert rp(r, name) is None and rp(r, f"d/{name}") is None
+    assert fs(r, name) == "?" and fs(r, f"d/{name}") == "?"
+    assert not win["raw"]  # CreateFileW was never called
+    mk(r, "console.log")
+    assert rp(r, "console.log") == b"{}"  # CON-prefixed but not a device
+
+
+@pytest.mark.parametrize("rel", ["", "/", "/abs", ".", "..", "../x", "a/./b", "a//b", "a/", "x\0y"])
+@pytest.mark.parametrize("windows", [False, True])
+def test_odd_rel_is_none_on_both_branches(tmp_path, monkeypatch, rel, windows):
+    if windows:
+        monkeypatch.setattr(saferead, "_DIRFD", False)
+        monkeypatch.setattr(winacl, "_windows", lambda: True)
+    r = tmp_path.resolve()
+    mk(r, "x")
+    assert saferead.read_private(r, rel, 100) is None  # no IndexError, no escape
+    assert saferead.file_state(r, rel, 100, [100]) == "?"
+    with pytest.raises(OSError):
+        saferead._anchor(r, ())
+
+
+def test_reparse_point_file_is_refused(win):
+    r = win["root"]
+    f = mk(r, "a.log")
+    win["reparse"] = {str(f)}  # CreateFileW reports FILE_ATTRIBUTE_REPARSE_POINT for the file itself
+    assert rp(r, "a.log") is None and fs(r, "a.log") == "?" and tail(r, "a.log") is None
+
+
+def test_not_a_disk_file_or_a_different_index_is_refused(win, monkeypatch):
+    r = win["root"]
+    mk(r, "a.log")
+    real = saferead._win_open_raw
+
+    def pipe(path):  # GetFileType != DISK makes the real _win_open_raw return None
+        return None
+
+    monkeypatch.setattr(saferead, "_win_open_raw", pipe)
+    assert rp(r, "a.log") is None
+    monkeypatch.setattr(saferead, "_win_open_raw", real)
+    lstat = os.lstat
+
+    def other(p, *a, **k):  # the path now names another file than the handle
+        st = lstat(p, *a, **k)
+        return os.stat_result((*tuple(st)[:1], st.st_ino + 7, *tuple(st)[2:]))
+
+    monkeypatch.setattr(saferead.os, "lstat", other)
+    assert rp(r, "a.log") is None and fs(r, "a.log") == "?" and tail(r, "a.log") is None
+
+
+def test_ctypes_argument_error_is_none(win, monkeypatch):
+    import ctypes
+
+    r = win["root"]
+    mk(r, "a.log")
+
+    def bad(path):
+        raise ctypes.ArgumentError("argument 1: wrong type")
+
+    monkeypatch.setattr(saferead, "_win_open_raw", bad)
+    assert rp(r, "a.log") is None and fs(r, "a.log") == "?" and tail(r, "a.log") is None
