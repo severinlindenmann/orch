@@ -380,7 +380,7 @@ def test_same_content_same_hash_and_build_output_ignored(tws, tmp_path):
     assert addons.prepare_local_add(tws, f)["hash"] != a
 
 
-# ---------------------------------------------------------------- simulated Windows (profile folder, case, reparse)
+# ---------------- simulated Windows (profile folder, case, reparse)
 
 
 @pytest.fixture
