@@ -16,12 +16,8 @@ REVIEW_MESSAGE = (
 def test_fresh_prompt_plain_words(proj, new_ticket):
     tid = new_ticket()
     prompt = runs.fresh_prompt(tickets.load(proj, tid), [])
-    assert (
-        "one task per piece of the person's work, in plain words (no ids, paths or commands)"
-    ) in prompt
-    assert (
-        f'orch ticket summary {tid} "<what was done and what is left>" in plain words.'
-    ) in prompt
+    assert ("one task per piece of the person's work, in plain words (no ids, paths or commands)") in prompt
+    assert (f'orch ticket summary {tid} "<what was done and what is left>" in plain words.') in prompt
     assert REVIEW_MESSAGE.replace("`", "") in prompt
     assert len(prompt) <= 12000
 
