@@ -198,11 +198,11 @@ def start_live(
         # The agent gets the environment of whoever starts this run, not of whoever started the tmux server.
         # It travels in a private file (never in argv, where `ps` shows it); the wrapper reads and removes it.
         env_file = runs.run_dir(root) / f"env-{run}.json"
-        runs._atomic(env_file, json.dumps(runs._agent_environ()), 0o600)
+        runs._atomic(env_file, json.dumps(runs._agent_environ(root)), 0o600)
         cmd += ["--env-file", str(env_file), "--"] + p["argv"]
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
-            "-s", tid, "-c", str(root), "--", *cmd,
+            "-s", tid, "-c", str(root), "-e", f"ORCH_ROOT={root}", "--", *cmd,
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
