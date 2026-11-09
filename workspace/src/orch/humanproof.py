@@ -316,8 +316,7 @@ def _check_binding(root: Path, d: Path) -> None:
     f = d / "binding.json"
     here = os.path.realpath(root)
     try:
-        _check_file(f)
-        stored = json.loads(f.read_text(encoding="utf-8")).get("realpath")
+        stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
     except FileNotFoundError:
         raise Refused(BINDING_MISMATCH) from None
     except (ValueError, AttributeError):

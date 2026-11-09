@@ -33,6 +33,7 @@ import tomllib
 from pathlib import Path
 
 from orch import humanproof as hp
+from orch import saferead
 from orch.errors import Refused
 
 KEYS_SCHEMA = "orch.keys/1"
@@ -98,7 +99,7 @@ def _load(d: Path, admin: bool = False) -> dict:
     fname, src = ("admin-keys.json", "admin") if admin else ("keys.json", "workspace")
     try:
         _check_file(d / fname)
-        raw = json.loads((d / fname).read_text(encoding="utf-8"))
+        raw = json.loads(_read(d / fname).decode("utf-8"))
     except FileNotFoundError:
         return {}
     except ValueError:
@@ -130,6 +131,17 @@ def _store(d: Path, keys: dict, admin: bool = False) -> None:
 # and kept only so the key NAMES can be listed ("This key must be entered again"). Never chmod'ed and trusted.
 # Re-entry (add by a person, the next relay refresh for admin keys) writes a fresh 0600 entry; the set-aside
 # file is deleted by exact path when no name in it still needs re-entry, or when the key is removed.
+
+
+def _read(path: Path, limit: int = 8 * 1024 * 1024) -> bytes:
+    """The bytes of a guarded key-store file: the rights check, then saferead.read_private (a link, FIFO, hard
+    link, swap or oversize file is refused). FileNotFoundError when it is not there."""
+    _check_file(path)
+    base, rel = hp._home_of(path)
+    data = saferead.read_private(base, rel, limit)
+    if data is None:
+        raise Refused(hp.WRONG_RIGHTS)
+    return data
 
 
 def _check_file(p: Path) -> None:
@@ -192,9 +204,11 @@ def _names_from(path: Path) -> set[str]:
     """Key NAMES in a set-aside file, for display only. Values are never returned: the names are untrusted
     (validated, plain text) and the rest of the file is dropped here."""
     try:
-        if path.stat().st_size > 8 * 1024 * 1024:
-            return set()
-        raw = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        base, rel = hp._home_of(path)
+        data = saferead.read_private(
+            base, rel, 8 * 1024 * 1024
+        )  # no rights check: its rights are why it is here
+        raw = json.loads(data.decode("utf-8", "replace")) if data is not None else None
     except (OSError, ValueError):
         return set()
     keys = raw.get("keys") if isinstance(raw, dict) else None
@@ -324,7 +338,7 @@ def add(root: Path, name: str, type_: str, value, source: str = "workspace") -> 
                 _quarantine(fpath)
             try:
                 _check_file(fpath)
-                old_bytes = fpath.read_bytes()
+                old_bytes = _read(fpath, FILE_MAX + 1)
             except FileNotFoundError:
                 pass
             _write_private_bytes(fpath, bytes(value))
@@ -409,8 +423,7 @@ def get_value(root: Path, name: str):
         if _file_needs_reentry(d, name):
             raise gone
         try:
-            _check_file(d / "files" / name)
-            return (d / "files" / name).read_bytes()
+            return _read(d / "files" / name, FILE_MAX + 1)
         except FileNotFoundError:
             raise Refused("The key file is missing.") from None
     v = e.get("value")
@@ -610,8 +623,7 @@ def read_profiles(root: Path) -> dict:
     if d is None:
         return {}
     try:
-        _check_file(d / "profiles.toml")
-        raw = tomllib.loads((d / "profiles.toml").read_text(encoding="utf-8"))
+        raw = tomllib.loads(_read(d / "profiles.toml").decode("utf-8"))
     except FileNotFoundError:
         return {}
     except (ValueError, UnicodeDecodeError):
