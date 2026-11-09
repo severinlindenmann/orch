@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch.collect_codex import CodexMapper, detail_name, map_stream
+from orch.collect_execjson import ExecJsonMapper, detail_name, map_stream
 
 ROOT = Path(__file__).resolve().parents[2]
 VECTORS = json.loads((ROOT / "contracts/vectors/activity-v1.json").read_text())
@@ -12,7 +12,7 @@ CTX = dict(run="r_cx00001", ticket="t_inv7c2", harness="codex", at="2026-11-16T0
 
 
 def mapper(**kwargs):
-    return CodexMapper(CTX["run"], CTX["ticket"], now=lambda: CTX["at"], **kwargs)
+    return ExecJsonMapper(CTX["run"], CTX["ticket"], CTX["harness"], now=lambda: CTX["at"], **kwargs)
 
 
 def item(typ="command_execution", **fields):
@@ -27,7 +27,7 @@ def test_vectors(case):
 @pytest.mark.parametrize("case", VECTORS["stream_mapping"], ids=lambda c: c["capture"])
 def test_captures(case):
     ctx = case["ctx"]
-    collector = CodexMapper(ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: "2026-11-16T09:00:00Z")
+    collector = ExecJsonMapper(ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: "2026-11-16T09:00:00Z")
     path = ROOT / "workspace/tests/fixtures/w2b/codex" / case["capture"]
     events = [event for line in path.read_bytes().splitlines() for event in collector.feed(line)]
     assert events == case["events"]

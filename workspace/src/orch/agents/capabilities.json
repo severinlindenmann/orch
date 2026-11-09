@@ -1,10 +1,1 @@
-{
-  "adapters": {
-    "claude": {
-      "capabilities": { "interactive_tmux": true, "hooks": true, "stream": true, "subagents": true, "usage": true }
-    },
-    "codex": {
-      "capabilities": { "interactive_tmux": false, "hooks": false, "stream": true, "subagents": false, "usage": false }
-    }
-  }
-}
+{}

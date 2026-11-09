@@ -1,4 +1,6 @@
-"""Pure mapping from Codex JSON lines to activity events; detail paths are pointers only.
+"""Pure mapping from "exec --json" item stream lines to activity events (format id in the agents data).
+
+Detail paths are pointers only.
 
 HOOK POINT — value hiding (slices 1.5/1.3): the mapper holds NO key values.
 Supply a hider to transform every emitted string. Without one, hidden is False.
@@ -58,12 +60,12 @@ def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-class CodexMapper:
+class ExecJsonMapper:
     def __init__(
         self,
         run: str,
         ticket: str,
-        harness: str = "codex",
+        harness: str,
         now: Callable[[], str] = _now,
         hider: Callable[[str], str] | None = None,
     ):
@@ -181,4 +183,6 @@ class CodexMapper:
 
 
 def map_stream(lines: Iterable[str | bytes], ctx: dict) -> list[dict]:
-    return list(CodexMapper(ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: ctx["at"]).events(lines))
+    return list(
+        ExecJsonMapper(ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: ctx["at"]).events(lines)
+    )
