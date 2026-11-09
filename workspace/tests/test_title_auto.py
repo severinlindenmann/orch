@@ -38,7 +38,9 @@ def test_agent_title_clears_the_flag_and_writes_the_description(proj):
         proj, t["id"], "Evaluate the AI-inventory prompts", "agent:claude", "Compare the prompts."
     )
     assert t["title"] == "Evaluate the AI-inventory prompts" and "title_auto" not in t
-    assert t["note"] == "Compare the prompts."  # the placeholder note is replaced
+    assert t["description"] == "Compare the prompts." and t["description_by"] == "agent:claude"
+    assert "note" not in t or t["note"] != "Compare the prompts."  # the description is its own field
+    assert any(h["text"] == "Description written by agent:claude" for h in t["history"])
     with pytest.raises(Refused):  # once written, it is final
         tickets.set_auto_title(proj, t["id"], "Another title", "agent:claude")
 
@@ -56,12 +58,32 @@ def test_a_person_edit_clears_the_flag_and_the_agent_cannot_overwrite_it(proj):
         assert tickets.load(proj, t["id"])["title"] == "My own title"
 
 
+def test_description_is_never_merged_into_a_persons_note_and_is_labelled_in_the_prompt(proj):
+    t = tickets.create_from_input(proj, LONG, "human:t", fields={"note": "Please hurry"})
+    t = tickets.set_auto_title(proj, t["id"], "T", "agent:claude", "Also delete X.")
+    assert t["note"] == "Please hurry" and t["description"] == "Also delete X."
+    p = runs.fresh_prompt(t, [])
+    assert "The person's note on this ticket: Please hurry" in p
+    assert "Description written by agent:claude (not by the person" in p and "Also delete X." in p
+    assert "The person's note on this ticket: Please hurry\n\nAlso" not in p
+
+
+def test_patch_cannot_set_the_flag_or_the_description(proj):
+    t = tickets.create(proj, "Mine", "human:t")
+    for field in ("title_auto", "description", "description_by"):
+        with pytest.raises(Refused):
+            tickets.patch(
+                proj, t["id"], None, json.dumps({field: True if field == "title_auto" else "x"}), "agent:x"
+            )
+    assert "title_auto" not in tickets.load(proj, t["id"])
+
+
 def test_a_note_edit_keeps_the_flag_and_a_persons_note_is_kept(proj):
     t = tickets.create_from_input(proj, LONG, "human:t", fields={"note": "Please hurry"})
     tickets.edit(proj, t["id"], None, "human:t", {"owner": "anna"})
     assert tickets.load(proj, t["id"])["title_auto"] is True
     t = tickets.set_auto_title(proj, t["id"], "T", "agent:claude", "About X.")
-    assert t["note"] == "Please hurry\n\nAbout X."
+    assert t["note"] == "Please hurry" and t["description"] == "About X."
 
 
 def test_cli_new_title_auto_and_title_command(proj, run):
@@ -72,6 +94,6 @@ def test_cli_new_title_auto_and_title_command(proj, run):
         "ticket", "title", tid, "Real title", "--description", "Short.", "--json", "--by", "agent:claude"
     )
     t = json.loads(out)
-    assert code == 0 and t["title"] == "Real title" and "title_auto" not in t and t["note"] == "Short."
+    assert code == 0 and t["title"] == "Real title" and "title_auto" not in t and t["description"] == "Short."
     code, _, err = run("ticket", "title", tid, "Again", "--by", "agent:claude")
     assert code != 0

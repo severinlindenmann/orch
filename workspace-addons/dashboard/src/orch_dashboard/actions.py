@@ -26,9 +26,29 @@ LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the No
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
 MAX_FILES = 5  # incl. note.md (the page takes 4 dropped files)
 # Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
-ATTACH_EXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "yml", "yaml", "toml", "ini", "png", "jpg", "jpeg", "gif", "webp"})
+ATTACH_EXT = frozenset(
+    {
+        "txt",
+        "md",
+        "csv",
+        "tsv",
+        "json",
+        "log",
+        "yml",
+        "yaml",
+        "toml",
+        "ini",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "webp",
+    }
+)
 ATTACH_MAX = 2 * 1024 * 1024
-LONG_NOTE = "The full text is attached as note.md. Read it, then give this ticket a short title and description."
+LONG_NOTE = (
+    "The full text is attached as note.md. Read it, then give this ticket a short title and description."
+)
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
@@ -445,7 +465,11 @@ def _link(a, extend=False):
         raise BadRequest("That is not a shared file id.")
     if extend and (type(a.get("days")) is not int or not 1 <= a["days"] <= 90):
         raise BadRequest("Choose a whole number of days from 1 to 90.")
-    return ["publish", "extend" if extend else "delete", fid], (["--days", str(a["days"])] if extend else []), []
+    return (
+        ["publish", "extend" if extend else "delete", fid],
+        (["--days", str(a["days"])] if extend else []),
+        [],
+    )
 
 
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
@@ -529,7 +553,9 @@ def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
 
 def _audit(root: Path, op: str, args: dict) -> None:
     """One line per settings change in .orch/run/dashboard/actions.log (local, gitignored): who, what, the exact command."""
-    keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode", "id", "days")}
+    keep = {
+        k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode", "id", "days")
+    }
     line = json.dumps(
         {
             "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -576,7 +602,7 @@ def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, byte
     for hint, raw in files:
         try:
             r = subprocess.run(
-                [orch_bin, "ticket", "attach", tid, "--name", hint, "--by", actor(), "--json"],
+                [orch_bin, "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
                 check=False,
                 cwd=root,
                 capture_output=True,
@@ -654,7 +680,16 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if r.returncode == 0:
         if op.startswith("look."):
             look_forget(root)
-        if op in ("link.extend", "link.stop", "config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
+        if op in (
+            "link.extend",
+            "link.stop",
+            "config.agent.add",
+            "addon.set",
+            "config.agent",
+            "config.permissions",
+            "workflow.set",
+            "share.set",
+        ):
             _audit(root, op, args)
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             out["attached"] = _attach_all(root, orch_bin, out["id"], files)

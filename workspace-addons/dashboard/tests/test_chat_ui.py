@@ -54,8 +54,20 @@ def test_group_talk_is_marked_by_the_data_layer(ws):
     path = next(tdir.glob("t_weekly01.json"))
     t = json.loads(path.read_text())
     t["history"] = [
-        {"at": "2026-11-08T10:00:00+01:00", "by": "agent:Home", "text": "hi", "via": "relay", "chat_message": True},
-        {"at": "2026-11-08T10:01:00+01:00", "by": "human:me", "text": "yo", "via": "dashboard", "chat_message": True},
+        {
+            "at": "2026-11-08T10:00:00+01:00",
+            "by": "agent:Home",
+            "text": "hi",
+            "via": "relay",
+            "chat_message": True,
+        },
+        {
+            "at": "2026-11-08T10:01:00+01:00",
+            "by": "human:me",
+            "text": "yo",
+            "via": "dashboard",
+            "chat_message": True,
+        },
         {"at": "2026-11-08T10:01:30+01:00", "by": "agent:Home", "text": "Added a task", "via": "relay"},
         {"at": "2026-11-08T10:01:40+01:00", "by": "agent:Home", "text": "Claude started", "via": "dashboard"},
         {"at": "2026-11-08T10:02:00+01:00", "by": "agent:x", "text": "note", "via": "cli"},
@@ -70,9 +82,15 @@ def test_legacy_lines_count_only_from_a_person_or_the_relay_phone_intake_never_v
     from orch_dashboard.mobile import is_chat_entry
 
     assert is_chat_entry({"at": "2026-11-01T10:00:00Z", "by": "human:me", "via": "dashboard", "text": "x"})
-    assert is_chat_entry({"at": "2026-11-01T10:00:00Z", "by": "agent:relay from ph_abc", "via": "phone", "text": "x"})
-    assert not is_chat_entry({"at": "2026-11-01T10:00:00Z", "by": "agent:x", "via": "phone", "text": "x"})  # ORCH_VIA=phone spoof
+    assert is_chat_entry(
+        {"at": "2026-11-01T10:00:00Z", "by": "agent:relay from ph_abc", "via": "phone", "text": "x"}
+    )
+    assert not is_chat_entry(
+        {"at": "2026-11-01T10:00:00Z", "by": "agent:x", "via": "phone", "text": "x"}
+    )  # ORCH_VIA=phone spoof
     assert not is_chat_entry({"by": "agent:x", "via": "relay", "text": "Added a task"})
     assert not is_chat_entry({"by": "human:me", "via": "dashboard", "text": "x", "chat_message": False})
     assert is_chat_entry({"by": "agent:x", "via": "cli", "text": "x", "chat_message": True})
-    assert not is_chat_entry({"at": "2026-12-01T10:00:00Z", "by": "human:me", "via": "dashboard", "text": "x"})  # unflagged and new
+    assert not is_chat_entry(
+        {"at": "2026-12-01T10:00:00Z", "by": "human:me", "via": "dashboard", "text": "x"}
+    )  # unflagged and new

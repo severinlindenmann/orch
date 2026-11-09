@@ -92,6 +92,8 @@ def test_chat_say_goes_through_the_act_fence(act_server, act_orch):
     ):
         assert post(act_server, body, h)[0] in (400, 403, 421), h
     assert post(act_server, {}, raw="x", headers={"Content-Type": "text/plain"})[0] == 415
-    assert [c for c in acts(act_orch) if c[:2] != ["chat", "status"]] == []  # nothing reached the orch command
+    assert [
+        c for c in acts(act_orch) if c[:2] != ["chat", "status"]
+    ] == []  # nothing reached the orch command
     assert post(act_server, body)[0] == 200  # the page itself (same origin, JSON) can write
     assert [c[:2] for c in acts(act_orch) if c[:2] != ["chat", "status"]] == [["chat", "say"]]

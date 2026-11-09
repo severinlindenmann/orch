@@ -73,6 +73,8 @@ def _sandboxed(csp: str | None) -> bool:
             }
             return not bad & {t.lower() for t in tok[1:]}
     return False
+
+
 PROXY_MAX_REPLY = 4 * 1024 * 1024
 
 
@@ -213,7 +215,9 @@ class Handler(BaseHTTPRequestHandler):
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
         if path == "/api/links":
-            return self._send(200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json")
+            return self._send(
+                200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
+            )
         if path == "/api/state":
             return self._send(
                 200,
@@ -281,7 +285,9 @@ class Handler(BaseHTTPRequestHandler):
             name.startswith("kit/") and name[4:] in KIT
         ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
-        if re.fullmatch(r"pages/(home|tickets|ticket|newticket|settings|chat)\.(js|css)", name):  # the page modules
+        if re.fullmatch(
+            r"pages/(home|tickets|ticket|newticket|settings|chat)\.(js|css)", name
+        ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (
             "index.html",

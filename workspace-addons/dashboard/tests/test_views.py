@@ -188,11 +188,7 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
-    js = (
-        (webjs.all_js() + (WEBDIR / "style.css").read_text())
-        .replace(".focus(", ".(")
-        .replace(":focus", ":")
-    )
+    js = (webjs.all_js() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(").replace(":focus", ":")
     for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", js, re.IGNORECASE), name
     assert "needs-pulse" not in js
@@ -357,10 +353,15 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     js = webjs.all_js()
     move = js[js.index("async function moveTicket") :]
     move = move[: move.index("function list()")]
-    assert "actRetry('ticket.patch', () => ({ticket:t.id, data:{status}, if_revision:(ticketOf(id) || t).revision})" in move
+    assert (
+        "actRetry('ticket.patch', () => ({ticket:t.id, data:{status}, if_revision:(ticketOf(id) || t).revision})"
+        in move
+    )
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
     card = js[js.index("function boardCard") : js.index("function board()")]
-    assert "statusItems(t, 'card', STATUS_CHOICES)" in card and "aria-label" in card  # the menu is the keyboard way to move
+    assert (
+        "statusItems(t, 'card', STATUS_CHOICES)" in card and "aria-label" in card
+    )  # the menu is the keyboard way to move
     assert "slice(0, cap)" in js and "boardMore" in js  # Done shows 3 until asked
     assert (
         "localStorage" in js
@@ -402,7 +403,9 @@ def test_settings_wording_and_one_toast_at_a_time():
 
 def test_no_waiting_for_your_answer_wording_left():
     """Same words as the phone: the chip and badge say "Needs you" / "N need you"."""
-    for f in list(WEBDIR.glob("*.js")) + list((WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")):
+    for f in list(WEBDIR.glob("*.js")) + list(
+        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
+    ):
         text = f.read_text().lower()
         assert "waiting for your answer" not in text and "waiting on you" not in text, f.name
 
@@ -411,7 +414,9 @@ def test_no_bare_waiting_status_label_left():
     """5A/10A: the status word for a waiting ticket is "Needs you" everywhere (ids like 'waiting' stay)."""
     import re
 
-    for f in list(WEBDIR.glob("*.js")) + list((WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")):
+    for f in list(WEBDIR.glob("*.js")) + list(
+        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
+    ):
         text = f.read_text()
         assert not re.search(r"""['"]Waiting['"]""", text), f.name  # a bare "Waiting" label
         assert not re.search(r"""\bstatus\s*=\s*['"]waiting['"]""", text), f.name  # "Agent · waiting"

@@ -1,4 +1,5 @@
 """Static single-file snapshot: the same pages with the data embedded. No inbox (private messages stay local)."""
+
 from __future__ import annotations
 
 import base64
@@ -32,12 +33,18 @@ def render_snapshot(root: Path, with_addons: bool = False, orch_bin: str | None 
     icon = base64.b64encode(web_file("favicon.svg")).decode()
     html = html.replace('href="favicon.svg"', f'href="data:image/svg+xml;base64,{icon}"')
     html = html.replace('<link rel="apple-touch-icon" href="apple-touch-icon.png">\n', "")
-    html = re.sub(r'<link rel="stylesheet" href="([\w./-]+)">',
-                  lambda m: f"<style>{web_file(m.group(1)).decode()}</style>", html)
+    html = re.sub(
+        r'<link rel="stylesheet" href="([\w./-]+)">',
+        lambda m: f"<style>{web_file(m.group(1)).decode()}</style>",
+        html,
+    )
     data = f"<script>window.ORCH_SNAPSHOT={_inline_json(state)};</script>"
     html = html.replace('<script src="blocks.js">', data + '<script src="blocks.js">', 1)
-    html = re.sub(r'<script src="([\w./-]+)"></script>',
-                  lambda m: f"<script>{web_file(m.group(1)).decode()}</script>", html)
+    html = re.sub(
+        r'<script src="([\w./-]+)"></script>',
+        lambda m: f"<script>{web_file(m.group(1)).decode()}</script>",
+        html,
+    )
     return html
 
 

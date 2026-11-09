@@ -852,14 +852,14 @@ def create_from_input(
 
 
 def set_auto_title(root: Path, tid: str, title: str, by: str, description: str | None = None) -> dict:
-    """The agent's real title (and description, in the Note) for a ticket whose title is a placeholder.
+    """The agent's real title (and its description, in its own field) for a placeholder ticket.
     Refused when a person set the title (or it was never a placeholder): a person's title is never
     overwritten."""
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
     if description is not None:
-        clean_field("note", description)
+        clean_field("note", description)  # the same plain-text rules and 2000 characters
 
     def op(ticket):
         if not ticket.get("title_auto"):
@@ -868,9 +868,13 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
         ticket.pop("title_auto", None)
         add_history(ticket, by, "Title written")
         if description:
-            old = str(ticket.get("note") or "")
-            ticket["note"] = description if not old or old == LONG_NOTE else old + "\n\n" + description
-            _set_field(ticket, "note", ticket["note"][:2000])
+            # The description is the agent's own field: it is never merged into the person's note (the
+            # note is shown and sent to the agent as "the person's words"). Only the placeholder note goes.
+            ticket["description"] = description
+            ticket["description_by"] = by[:100]
+            if ticket.get("note") == LONG_NOTE:
+                ticket.pop("note", None)
+            add_history(ticket, by, f"Description written by {by[:100]}")
 
     return apply_op(root, tid, op)[0]
 
@@ -1868,33 +1872,46 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
         dfd = _open_artifacts_fd(root, tid)
         opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
         remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
+        linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
         d0 = artifacts_dir(root, tid)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
+        linker = lambda a, b: os.link(d0 / a, d0 / b)  # noqa: E731
         close = lambda: None  # noqa: E731
+    tmp = f".{secrets.token_hex(6)}.part"  # written whole under a hidden name, then linked to its final name
     try:
-        for n in range(1, 100):
-            final = name if n == 1 else f"{stem} ({n}).{ext}"
-            if exact and n > 1:
+        fd = opener(tmp)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                remove(tmp)
+            raise
+        try:
+            for n in range(1, 100):
+                final = name if n == 1 else f"{stem} ({n}).{ext}"
+                if exact and n > 1:
+                    break
+                try:
+                    linker(tmp, final)  # never replaces a file that exists
+                except FileExistsError:
+                    if exact:
+                        return {
+                            "name": final,
+                            "size": len(data),
+                            "path": _art_rel(tid, final),
+                            "existed": True,
+                        }
+                    continue
                 break
-            try:
-                fd = opener(final)
-            except FileExistsError:
-                if exact:
-                    return {"name": final, "size": len(data), "path": _art_rel(tid, final), "existed": True}
-                continue
-            try:
-                with os.fdopen(fd, "wb") as f:
-                    f.write(data)
-            except BaseException:
-                with contextlib.suppress(OSError):
-                    remove(final)
-                raise
-            break
-        else:
-            raise Refused("Too many files with that name on this ticket.")
+            else:
+                raise Refused("Too many files with that name on this ticket.")
+        finally:
+            with contextlib.suppress(OSError):
+                remove(tmp)
     finally:
         close()
     apply_op(root, tid, lambda t: add_history(t, by, f"Attached {final}"))

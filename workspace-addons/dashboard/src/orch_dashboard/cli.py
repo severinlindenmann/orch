@@ -1,4 +1,5 @@
 """`orch dashboard` / `orch-dashboard`: serve, snapshot."""
+
 from __future__ import annotations
 
 import argparse
@@ -13,19 +14,30 @@ from .snapshot import publish_snapshot, write_snapshot
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="orch dashboard", description="Read-only dashboard of the workspace tickets.")
-    ap.add_argument("--dir", default=".", help="workspace folder (default: current, searched upwards for .orch/)")
+    ap = argparse.ArgumentParser(
+        prog="orch dashboard", description="Read-only dashboard of the workspace tickets."
+    )
+    ap.add_argument(
+        "--dir", default=".", help="workspace folder (default: current, searched upwards for .orch/)"
+    )
     sub = ap.add_subparsers(dest="cmd")
     sv = sub.add_parser("serve", help="serve on 127.0.0.1 (default command)")
     sv.add_argument("--port", type=int, default=DEFAULT_PORT)
     sv.add_argument("--auto-port", action="store_true", help=argparse.SUPPRESS)  # 8420, else any free port
-    sv.add_argument("--ready-file", help=argparse.SUPPRESS)  # background run: bound port written here after bind
-    for name, text in (("start", "serve in the background"), ("stop", "stop the background dashboard"),
-                       ("status", "is it running, and where?")):
+    sv.add_argument(
+        "--ready-file", help=argparse.SUPPRESS
+    )  # background run: bound port written here after bind
+    for name, text in (
+        ("start", "serve in the background"),
+        ("stop", "stop the background dashboard"),
+        ("status", "is it running, and where?"),
+    ):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
     sn = sub.add_parser("snapshot", help="write a static read-only HTML snapshot")
     sn.add_argument("--out", default="dashboard-snapshot.html")
-    sn.add_argument("--with-addons", action="store_true", help="include add-on tabs and ticket rows (left out by default)")
+    sn.add_argument(
+        "--with-addons", action="store_true", help="include add-on tabs and ticket rows (left out by default)"
+    )
     sn.add_argument("--publish", action="store_true", help="publish it as a private publish app")
     args = ap.parse_args(argv)
     root = find_workspace(Path(args.dir))
@@ -64,10 +76,16 @@ def _service(args, root: Path) -> int:
         try:
             cur = service.start(root)
         except RuntimeError as e:
-            print(json.dumps({"error": str(e)}) if args.json else f"Refused: {e}", file=None if args.json else sys.stderr)
+            print(
+                json.dumps({"error": str(e)}) if args.json else f"Refused: {e}",
+                file=None if args.json else sys.stderr,
+            )
             return 2
         u = service.url(cur["port"])
-        out({"running": True, "pid": cur["pid"], "url": u}, f"Dashboard for {root.name}: {u}  (stop: orch dashboard stop)")
+        out(
+            {"running": True, "pid": cur["pid"], "url": u},
+            f"Dashboard for {root.name}: {u}  (stop: orch dashboard stop)",
+        )
     elif args.cmd == "stop":
         try:
             res = service.stop(root)
@@ -78,8 +96,11 @@ def _service(args, root: Path) -> int:
         elif res == "not running":
             out({"stopped": False}, "The dashboard was not running.")
         else:
-            note = ("A file in .orch/run/dashboard/ names a process that is not this dashboard; nothing was stopped."
-                    if res == "not verified" else res)
+            note = (
+                "A file in .orch/run/dashboard/ names a process that is not this dashboard; nothing was stopped."
+                if res == "not verified"
+                else res
+            )
             out({"stopped": False, "note": note}, note)
     else:
         try:
