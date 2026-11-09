@@ -41,7 +41,7 @@ BAD = {
 @pytest.fixture
 def win(monkeypatch):
     calls = []
-    state = {"dacl": FILE_OK, "attrs": 0, "err": None, "set_err": None}
+    state = {"dacl": FILE_OK, "attrs": 0, "err": None, "set_err": None, "owner": SID}
 
     def read(p):
         calls.append(("read", str(p)))
@@ -53,6 +53,12 @@ def win(monkeypatch):
         calls.append(("write", str(p), is_dir, sid))
         if state["set_err"]:
             raise state["set_err"]
+        state["dacl"] = DIR_OK if is_dir else FILE_OK  # what the real API leaves behind
+
+    def owner(p):
+        if isinstance(state["owner"], Exception):
+            raise state["owner"]
+        return state["owner"]
 
     def no_process(*a, **k):
         pytest.fail("a child process was started (PATH/cwd lookup of icacls or whoami)")
@@ -60,6 +66,7 @@ def win(monkeypatch):
     monkeypatch.setattr(winacl, "_windows", lambda: True)
     monkeypatch.setattr(winacl, "_read_dacl", read)
     monkeypatch.setattr(winacl, "_write_dacl", write)
+    monkeypatch.setattr(winacl, "_owner_sid", owner)
     monkeypatch.setattr(winacl, "_sid_cache", SID)
     monkeypatch.setattr(winacl, "_attrs", lambda p: state["attrs"])
     monkeypatch.setattr(subprocess, "run", no_process)
@@ -150,10 +157,52 @@ def test_set_private_writes_user_and_system_then_verifies(win, tmp_path):
     assert win["calls"][-2][2] is False
 
 
-def test_set_private_refuses_when_result_not_private(win, tmp_path):
+def test_set_private_refuses_when_result_not_private(win, tmp_path, monkeypatch):
+    monkeypatch.setattr(winacl, "_write_dacl", lambda *a: None)  # the API "succeeds" but leaves it open
     win["dacl"] = INHERITED
     with pytest.raises(Refused):
         winacl.set_private(tmp_path, True)
+
+
+def test_ensure_private_tightens_a_loose_folder_of_this_user(win, tmp_path):
+    win["dacl"] = INHERITED  # an old home: user, SYSTEM, Administrators, inherited
+    winacl.ensure_private(tmp_path, True)
+    assert ("write", str(tmp_path), True, SID) in win["calls"]
+    winacl.check_private(tmp_path)  # and it is private now
+
+
+def test_ensure_private_leaves_a_private_one_alone(win, tmp_path):
+    winacl.ensure_private(tmp_path, False)
+    assert not [c for c in win["calls"] if c[0] == "write"]
+
+
+def test_ensure_private_refuses_foreign_owner_or_unknown_owner(win, tmp_path):
+    win["dacl"] = INHERITED
+    win["owner"] = OTHER
+    with pytest.raises(Refused, match="another account"):
+        winacl.ensure_private(tmp_path, True)
+    win["owner"] = "S-1-5-32-544"  # created by an administrator
+    with pytest.raises(Refused, match="another account"):
+        winacl.ensure_private(tmp_path, True)
+    win["owner"] = OSError("boom")
+    with pytest.raises(Refused, match="who owns"):
+        winacl.ensure_private(tmp_path, True)
+    assert not [c for c in win["calls"] if c[0] == "write"]
+
+
+def test_ensure_private_never_tightens_a_junction(win, tmp_path):
+    win["dacl"] = INHERITED
+    win["attrs"] = 0x400
+    with pytest.raises(Refused, match="link or junction"):
+        winacl.ensure_private(tmp_path, True)
+    assert not [c for c in win["calls"] if c[0] == "write"]
+
+
+def test_ensure_private_refuses_when_tightening_fails(win, tmp_path):
+    win["dacl"] = INHERITED
+    win["set_err"] = RuntimeError("denied")
+    with pytest.raises(Refused, match="would not set"):
+        winacl.ensure_private(tmp_path, True)
 
 
 # ---- humanproof wiring (POSIX modes stay; the Windows check is added)
@@ -184,11 +233,19 @@ def test_humanproof_sets_and_checks_acl_on_every_file(win, tws):
     assert len(win["calls"]) > n  # read-back checks the rights again
 
 
-def test_humanproof_refuses_a_loose_key_on_read(win, tws):
-    win["dacl"] = FILE_OK
+def test_humanproof_tightens_an_old_loose_key_of_this_user(win, tws):
+    key = hp.human_key(tws)
+    n = len(win["calls"])
+    win["dacl"] = BAD["admins"]  # made before this check existed: Administrators on it
+    assert hp.human_key(tws, create=False) == key  # not watch-only: tightened, verified, works
+    assert any(c[0] == "write" for c in win["calls"][n:])
+
+
+def test_humanproof_refuses_a_loose_key_of_another_owner(win, tws):
     hp.human_key(tws)
     win["dacl"] = BAD["admins"]
-    with pytest.raises(Refused, match="not private"):
+    win["owner"] = OTHER
+    with pytest.raises(Refused, match="another account"):
         hp.human_key(tws, create=False)
 
 

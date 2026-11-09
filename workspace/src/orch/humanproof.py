@@ -173,7 +173,7 @@ def _check_dir(p: Path) -> None:
         raise Refused(WRONG_RIGHTS)
     if POSIX and (st.st_uid != os.getuid() or st.st_mode & 0o077):
         raise Refused(WRONG_RIGHTS)
-    winacl.check_private(p)  # Windows only (no-op on POSIX)
+    winacl.ensure_private(p, True)  # Windows only: tightens an old loose folder of this user, else refuses
 
 
 def _check_file(p: Path) -> None:
@@ -182,7 +182,7 @@ def _check_file(p: Path) -> None:
         raise Refused(WRONG_RIGHTS)
     if POSIX and (st.st_uid != os.getuid() or st.st_mode & 0o077):
         raise Refused(WRONG_RIGHTS)
-    winacl.check_private(p)
+    winacl.ensure_private(p, False)
 
 
 def _private_dir(p: Path, stop: Path) -> None:
@@ -213,8 +213,11 @@ def key_dir(root: Path, create: bool = True) -> Path:
         home.mkdir(parents=True, exist_ok=True)
         if fresh:
             winacl.set_private(home, True)
+        else:
+            winacl.ensure_private(home, True)
         _private_dir(d, home)
     else:
+        winacl.ensure_private(home, True)
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
     return d

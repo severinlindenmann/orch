@@ -37,7 +37,7 @@ def _windows() -> bool:
 
 
 def _no(why: str) -> Refused:
-    return Refused(f"Refused: this orch folder is not private to you ({why}). Fix: orch doctor")
+    return Refused(f"Refused: this orch folder is not private to you ({why}).")
 
 
 # ------------------------------------------------------------------------------ Win32 (ctypes), Windows only
@@ -186,6 +186,21 @@ def _read_dacl(path: Path) -> tuple[bool, list[tuple[int, int, int, str]]]:
         k32.LocalFree(sd)
 
 
+def _owner_sid(path: Path) -> str:
+    """The SID that owns the file or folder. Raises Refused when it cannot tell."""
+    ctypes, wintypes, adv, k32 = _api()
+    owner, sd = ctypes.c_void_p(), ctypes.c_void_p()
+    rc = adv.GetNamedSecurityInfoW(  # OWNER_SECURITY_INFORMATION = 1
+        str(path), 1, 0x1, ctypes.byref(owner), None, None, None, ctypes.byref(sd)
+    )
+    if rc != 0 or not owner.value:
+        raise _no("Windows would not tell who owns it")
+    try:
+        return _sid_string(ctypes, adv, k32, owner.value)
+    finally:
+        k32.LocalFree(sd)
+
+
 def _attrs(path: Path) -> int:
     """st_file_attributes of the path itself (a link is not followed). Tests replace this."""
     st = os.lstat(path)
@@ -271,3 +286,29 @@ def check_private(path: str | os.PathLike) -> None:
     except Exception as e:  # noqa: BLE001 - fail closed
         raise _no("Windows would not tell its rights") from e
     parse_aces(protected, aces, sid)
+
+
+def ensure_private(path: str | os.PathLike, is_dir: bool) -> None:
+    """check_private, but a folder or file that is OWNED by this user and too open (made before this check
+    existed, or by an older version) is tightened to user+SYSTEM and verified, so nobody is locked out. That
+    only narrows access. Refused: another owner, a link or junction, or when tightening or verifying fails."""
+    if not _windows():
+        return
+    p = Path(path)
+    try:
+        check_private(p)
+        return
+    except FileNotFoundError:
+        raise
+    except Refused:
+        pass
+    no_reparse(p)  # a link or junction is never tightened
+    try:
+        owner = _owner_sid(p)
+    except Refused:
+        raise
+    except Exception as e:  # noqa: BLE001 - fail closed
+        raise _no("Windows would not tell who owns it") from e
+    if owner != user_sid():
+        raise _no("it belongs to another account")
+    set_private(p, is_dir)
