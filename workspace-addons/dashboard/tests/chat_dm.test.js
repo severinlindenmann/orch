@@ -146,3 +146,13 @@ test('Chat list route imports unopened conversations and sorts newest first', as
   const rows = c.chatList().children.filter(n => n.attrs?.['data-chat-action'] === 'select-dm');
   assert.deepEqual(Array.from(rows, n => n.attrs['data-id']), ['ws_0123456789', WS]);
 });
+test('a received text shows the sender time (shown_at) when there is one, else the arrival time', () => {
+  const c = context();
+  c.time = value => '[' + value + ']';
+  vm.runInContext(`chatDm.threads.set('${WS}', {messages:[{id:'1',by:'${WS}',text:'a',at:'2026-11-09T12:00:00Z',shown_at:'2026-11-09T11:59:00Z'},
+    {id:'2',by:'${WS}',text:'b',at:'2026-11-09T12:01:00Z'}, {id:'3',by:'you',text:'c',at:'2026-11-09T12:02:00Z',state:'delivered'}]});`, c);
+  const view = JSON.stringify(c.chatDmThread());
+  assert.match(view, /\[2026-11-09T11:59:00Z\]/);
+  assert.match(view, /\[2026-11-09T12:01:00Z\]/);
+  assert.doesNotMatch(view, /\[2026-11-09T12:02:00Z\]/); // my own messages show their delivery state, not a time
+});

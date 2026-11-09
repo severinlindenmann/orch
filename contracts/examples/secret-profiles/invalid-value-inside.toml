@@ -1,0 +1,4 @@
+schema = "orch.secret-profiles/1"
+[profile.databricks]
+env = { DATABRICKS_TOKEN = "databricks-token" }
+value = "dapi-fake-value-not-allowed"

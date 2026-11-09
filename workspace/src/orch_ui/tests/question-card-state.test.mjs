@@ -121,3 +121,36 @@ test('undo and a new choice are refused while the send is in flight', async () =
   assert.equal(card.getState().phase, 'sent');
   assert.equal(sent.length, 1);
 });
+
+test('immediate choice sends now, clears storage, and ignores taps in flight', async () => {
+  let release;
+  const {card, clock, sent, storage} = make(() => new Promise(r => { release = r; }));
+  const phases = [];
+  card.subscribe(s => phases.push(s.phase));
+  assert.equal(card.choose('Start work', {immediate:true}).ok, true);
+  assert.deepEqual(phases, ['pending', 'sending']);
+  assert.deepEqual(sent, [['Start work', 'a1']]);
+  assert.equal(storage.m.size, 0);
+  assert.equal(card.undo(), false);
+  assert.equal(card.choose('Again', {immediate:true}).ok, false);
+  await clock.advance(10000);
+  assert.equal(sent.length, 1);
+  release({status:200}); await tick();
+  assert.equal(card.getState().phase, 'sent');
+  assert.equal(storage.m.size, 0);
+});
+
+test('immediate choices validate, respect pending answers, and report failures', async () => {
+  for (const response of [{status:409, other:{text:'No'}}, {status:0, message:'Offline'}]) {
+    const {card, sent, storage} = make(() => response);
+    assert.equal(card.choose(' ', {immediate:true}).ok, false);
+    card.choose('Typed answer');
+    assert.equal(card.choose('Option', {immediate:true}).ok, false);
+    assert.equal(sent.length, 0);
+    card.undo();
+    card.choose('Option', {immediate:true});
+    await tick();
+    assert.equal(card.getState().phase, response.status === 409 ? 'conflict' : 'error');
+    assert.equal(storage.m.size, 0);
+  }
+});

@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from orch import adapters, net, runs, runs_live, sharedfolder, term, tickets
+from orch import adapters, cli_screen, net, runs, runs_live, sharedfolder, term, tickets
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -28,12 +28,16 @@ SUBCOMMANDS = (
     "event",
     "done",
     "input",
+    *cli_screen.SUBCOMMANDS,
 )
 
 
 def add_parsers(sub, common) -> None:
     r = sub.add_parser("run", help=argparse.SUPPRESS).add_subparsers(dest="sub")
+    cli_screen.add_run_parsers(r, common)
     for name in SUBCOMMANDS:
+        if name in cli_screen.SUBCOMMANDS:
+            continue
         x = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
         x.add_argument("ticket", nargs="?" if name in ("event", "done", "input") else None)
         if name in ("claim", "argv"):
@@ -166,6 +170,7 @@ def _status(args, root: Path) -> None:
     tid = args.ticket
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
+    runs.check_start_timeout(root, tid)  # a start that never got an agent says why
     rec = runs.read(root, tid)
     waiting = len(runs.undelivered(root, tid))
     if not rec:
@@ -292,6 +297,8 @@ def _send(args, root: Path, tid: str, by: str) -> None:
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "run":
         return False
+    if cli_screen.dispatch(args, root):
+        return True
     sub = args.sub
     if sub == "_wrap":
         _wrap_cmd(root, args.rest)

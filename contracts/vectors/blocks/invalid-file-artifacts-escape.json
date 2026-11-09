@@ -1,0 +1,16 @@
+{
+ "name": "file artifacts escape",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "file",
+    "path": ".orch/tickets/t_inv7c2/artifacts/../../secrets/x"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

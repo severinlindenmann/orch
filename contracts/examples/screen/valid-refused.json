@@ -1,0 +1,9 @@
+[
+ {
+  "v": 1,
+  "seq": 1,
+  "type": "error",
+  "error": "Live session is off in this workspace.",
+  "code": "switched_off"
+ }
+]

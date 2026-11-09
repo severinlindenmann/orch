@@ -164,3 +164,29 @@ test('the agent writes the title for long or multi-line text, a short one-liner 
   const c = setup(); c.input.value = 'Fix it\nand more'; await c.input.fire('input'); await c.form.fire('submit');
   assert.equal(c.calls[0].args.title_auto, true);
 });
+
+test('Show plan first creates a plan-first ticket and starts its agent', async () => {
+  const s = setup();
+  s.form.requestSubmit = () => s.form.fire('submit');
+  s.input.value = 'Make a plan'; await s.input.fire('input');
+  assert.ok(walk(s.d).some(n => n.textContent === '"Show plan first" waits for you before work starts.'));
+  await walk(s.d).find(n => n.textContent === 'Show plan first').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.calls[0].op, 'ticket.new');
+  assert.equal(s.calls[0].args.plan_first, true);
+  assert.equal(s.calls[1].op, 'run.start');
+  assert.equal(s.calls[1].args.ticket, 'new');
+});
+
+test('Create and Create & Start omit plan_first', async () => {
+  for (const label of ['Create', 'Create & Start']) {
+    const s = setup();
+    s.form.requestSubmit = () => s.form.fire('submit');
+    s.input.value = 'Work'; await s.input.fire('input');
+    await walk(s.d).find(n => n.textContent === label).click();
+    if (label === 'Create & Start') await s.form.fire('submit');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(s.calls[0].args.plan_first, undefined);
+    assert.equal(s.calls.length, label === 'Create' ? 1 : 2);
+  }
+});

@@ -1,4 +1,4 @@
-"""What an agent's adapter says about itself, read as DATA from core's agents.json (core code is never imported).
+"""What an agent's adapter says about itself, read as DATA from core's agents/ (core code is never imported).
 
 A user-named agent in .orch/config.toml ([agents.<name>] adapter = "<base>") uses its base adapter's data.
 """
@@ -14,11 +14,29 @@ from pathlib import Path
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}")
 
 
+def _merge(base: dict, fragment: dict) -> None:
+    for key, value in fragment.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = value
+
+
 def _registry() -> dict:
     spec = find_spec("orch")
     for base in (spec.submodule_search_locations or []) if spec else []:
         try:
-            doc = json.loads((Path(base) / "agents.json").read_text(encoding="utf-8"))
+            directory = Path(base) / "agents"
+            doc = json.loads((directory / "base.json").read_bytes())
+            names = set(doc["adapters"])
+            for name in ("deny", "capabilities", "connections", "readonly"):
+                fragment = json.loads((directory / f"{name}.json").read_bytes())
+                if not isinstance(fragment, dict):
+                    raise RuntimeError(f"agents/{name}.json must be an object")  # noqa: TRY004
+                adapters = fragment.get("adapters", {})
+                if not isinstance(adapters, dict) or set(adapters) - names:
+                    raise RuntimeError(f"agents/{name}.json must only extend existing adapters")
+                _merge(doc, fragment)
             return doc.get("adapters", {})
         except (OSError, ValueError):
             continue

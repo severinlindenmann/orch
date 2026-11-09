@@ -1,0 +1,17 @@
+{
+ "name": "link userinfo",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "link",
+    "url": "https://user:pw@example.com/x",
+    "label": "x"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

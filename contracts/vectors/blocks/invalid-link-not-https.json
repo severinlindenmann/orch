@@ -1,0 +1,17 @@
+{
+ "name": "link not https",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "link",
+    "url": "http://example.com",
+    "label": "Plain web"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}
