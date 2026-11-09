@@ -595,6 +595,8 @@ def test_shared_folder_maybe_stale_run_does_not_count_and_claim_takes_a_folder(p
     assert rec["folder"] == str(copy.resolve())
     assert [o["ticket"] for o in sharedfolder.alive_in(proj, copy)] == [c]
     assert sharedfolder.alive_in(proj, copy, exclude_ticket=c) == []
+
+
 def test_plan_first_with_done_when_does_not_say_then_start(proj):
     t = tickets.create(
         proj, "Online payments", "human:me", fields={"done_when": "Customers can pay"}, plan_first=True
