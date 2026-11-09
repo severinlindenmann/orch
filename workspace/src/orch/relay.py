@@ -1210,7 +1210,7 @@ def _to_waiting_agent(root: Path, tid: str, q: dict, by: str) -> None:
 
     with contextlib.suppress(Refused, OSError):
         if by.startswith("human:"):
-            runs_live.pass_answer(root, tid, q, by)
+            runs_live.pass_answer(root, tid, q, by, proven=True)
         elif (rec := runs.read(root, tid)) and runs.state(rec) == "alive":
             runs_live.send(
                 root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer"

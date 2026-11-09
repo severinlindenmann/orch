@@ -1,6 +1,8 @@
 import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -92,6 +94,10 @@ def pytest_sessionfinish(session, exitstatus):
     warn when a foreign process wrote them."""
     if hasattr(session.config, "workerinput"):
         return
+    stray = stray_tmux(str(_REAL_HOME_FN() / ".orch-test" / "pytest-page-"))
+    if stray:  # a page test left an agent session behind: fail the run (hard), name the sockets
+        print(f"\nSTRAY orch tmux servers from this suite: {stray}", file=sys.stderr)
+        session.exitstatus = 1
     files, trace = _snapshot_real_tool_home()
     bad = False
     for k in sorted(set(files) | set(_REAL_AT_START)):
@@ -229,3 +235,39 @@ def rel(proj, run):
     srv = make_relay()
     yield srv
     srv.stop()
+
+
+REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof")
+
+
+@pytest.fixture(autouse=True)
+def _legacy_trust(request, monkeypatch):
+    """TEST-ONLY (1.0a-2): older CLI tests act as `--by human:` without a proof. For them (a Python-level
+    patch, no env var, no config key; production has no such path) the human gate trusts --by as before, and
+    the pending read-back is the old by/via allowlist. Modules that test the real proof opt out by name."""
+    if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
+        return
+    from orch import humanproof, tickets
+
+    def legacy(root, args, op, target, **kw):
+        if tickets.agent_tool():
+            return "agent:" + str(tickets.agent_tool())
+        return tickets.current_actor(getattr(args, "by", None))
+
+    monkeypatch.setattr(humanproof, "person_by", legacy)
+    monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
+
+
+_TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
+
+
+def stray_tmux(under: str) -> list[str]:
+    """Socket names of orch tmux servers whose working folder is `under` or below (reads `ps` only)."""
+    out = subprocess.run(["/bin/ps", "-axo", "command="], check=False, capture_output=True, text=True).stdout
+    return sorted(
+        {
+            m.group(1)
+            for line in out.splitlines()
+            if (m := _TMUX.search(line)) and m.group(2).startswith(under)
+        }
+    )

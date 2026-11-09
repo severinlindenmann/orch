@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from orch import net, publish, relay, templates, term, tickets
+from orch import humanproof, net, publish, relay, templates, term, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -464,6 +464,15 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "group":
         return run_group(args, root, out)
     if sub == "connect":
+        # connecting (or changing the relay address) is a person's action (H1): proof for this relay host
+        if not humanproof.person_by(
+            root,
+            args,
+            "relay.connect",
+            _host(args.url),
+            label=f"Connect this workspace to the relay {_host(args.url)} (workspace {args.workspace})",
+        ).startswith("human:"):
+            raise Refused(humanproof.AGENT_REFUSED)
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
             args,
@@ -584,9 +593,14 @@ def run_relay(args, root: Path, out) -> None:
         b = msg.get("body", {})
         task = b.get("title") or b.get("key") or args.id
         mode = "once" if args.once else "permanent"
-        tickets.require_human(
-            f"Allow {msg.get('from')} to {msg.get('type')} {task}?", f"allowing {msg.get('from')} ({mode})"
-        )
+        if not humanproof.person_by(
+            root,
+            args,
+            "relay.allow",
+            f"{args.id}:{mode}",
+            label=f"Allow {msg.get('from')} ({mode}): {task}",
+        ).startswith("human:"):
+            raise Refused(humanproof.AGENT_REFUSED)
         m = relay.give_allow(root, args.id, mode)
         out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":

@@ -147,8 +147,12 @@ def test_a_listener_that_echoes_another_pid_gets_nothing_signalled(ws, kills, wh
     nonce = "a" * 32
     srv = _echo_server(lambda path: {"pid": pid, "mac": service.mac(nonce, path.partition("?c=")[2])})
     try:
-        rec = {"pid": pid, "port": srv.server_address[1], "nonce": nonce,
-               "started": service.runfiles.proc_start(pid) or "x"}
+        rec = {
+            "pid": pid,
+            "port": srv.server_address[1],
+            "nonce": nonce,
+            "started": service.runfiles.proc_start(pid) or "x",
+        }
         _rundir(ws).mkdir(parents=True)
         (_rundir(ws) / "server.json").write_text(json.dumps(rec))
         assert service.stop(ws) == "not verified" and kills == []
@@ -195,6 +199,8 @@ def test_command_line_must_name_exactly_this_folder(ws, kills, monkeypatch):
     rec = {"pid": me, "port": 1, "nonce": "b" * 32, "started": service.runfiles.proc_start(me)}
     _rundir(ws).mkdir(parents=True)
     (_rundir(ws) / "server.json").write_text(json.dumps(rec))
-    monkeypatch.setattr(service.runfiles, "command", lambda pid: f"python -P -m orch_dashboard --dir {root}2 serve")
+    monkeypatch.setattr(
+        service.runfiles, "command", lambda pid: f"python -P -m orch_dashboard --dir {root}2 serve"
+    )
     monkeypatch.setattr(service, "ident", lambda port, c: {"pid": me, "mac": service.mac("b" * 32, c)})
     assert service.stop(ws) == "not verified" and kills == []
