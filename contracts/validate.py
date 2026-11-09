@@ -723,6 +723,116 @@ def kind_addon_manifest():
     _examples("cli-error", lambda d: _msgs(verr, d))
 
 
+
+# --- screen (screen.md) ----------------------------------------------------------------------------------------------
+import codecs
+
+ALT_RE = re.compile(r"\x1b\[\?(1049|1047|47)([hl])")
+LAYOUT_RE = re.compile(r",(\d+)x(\d+),")
+OCTAL_RE = re.compile(rb"\\([0-7]{3})")
+
+
+def scr_unescape(data):
+    """tmux control mode: bytes below 0x20 and '\\' arrive as \\ooo; everything else raw."""
+    return OCTAL_RE.sub(lambda m: bytes([int(m.group(1), 8)]), data)
+
+
+def scr_from_control(lines, needles=()):
+    """Control-mode lines (bytes, without newline) -> stream lines after hello/snapshot (seq from 1)."""
+    out, dec, alt, size = [], codecs.getincrementaldecoder("utf-8")("replace"), False, None
+    longest = max((len(n) for n, _ in needles), default=1)
+    hold = [""]
+
+    def emit(**k):
+        out.append({"v": 1, "seq": len(out) + 1, **k})
+
+    for raw in lines:
+        if raw.startswith(b"%output "):
+            parts = raw.split(b" ", 2)
+            text = dec.decode(scr_unescape(parts[2] if len(parts) > 2 else b""))
+            buf = hold[0] + text
+            done, i = _hide_upto(buf, list(needles), max(0, len(buf) - (longest - 1)))
+            hold[0] = buf[i:]
+            if done:
+                emit(type="output", data=done)
+            for m in ALT_RE.finditer(text):
+                on = m.group(2) == "h"
+                if on != alt:
+                    alt = on
+                    emit(type="alt", on=on)
+        elif raw.startswith(b"%layout-change "):
+            m = LAYOUT_RE.search(raw.decode("utf-8", "replace"))
+            if m and (int(m.group(1)), int(m.group(2))) != size:
+                size = (int(m.group(1)), int(m.group(2)))
+                emit(type="resize", cols=size[0], rows=size[1])
+        elif raw.startswith(b"%exit"):
+            emit(type="end", reason="session-gone")
+    rest = hold[0] + dec.decode(b"", final=True)
+    if rest:
+        emit(type="output", data=sec_hide(rest, list(needles)))
+    return out
+
+
+def scr_takeover(c):
+    if not c["live_session"] or not c["session_typing"]:
+        return "switched_off"
+    if c["admin_lock"]:
+        return "locked_by_admin"
+    if not str(c["caller"]).startswith("human:") or c["from"] != "local-page":
+        return "not_allowed"
+    if not c["live"]:
+        return "not_available"
+    if c["held_by"] and c["held_by"] != c["caller"] and _t(c["now"]) < _t(c["expires_at"]):
+        return "conflict"
+    return "ok"
+
+
+def scr_expired(c):
+    return _t(c["now"]) >= _t(c["last_input_at"]) + timedelta(seconds=120)
+
+
+def _screen_stream_errors(v, doc):
+    if not isinstance(doc, list) or not doc:
+        return ["needs a non-empty list of stream lines"]
+    errs = [m for ln in doc for m in _msgs(v, ln)]
+    if errs:
+        return errs
+    if [ln["seq"] for ln in doc] != list(range(1, len(doc) + 1)):
+        return ["seq must be 1, 2, 3 ..."]
+    if doc[0]["type"] != "hello" and not (len(doc) == 1 and doc[0]["type"] == "error"):
+        return ["the first line must be hello (or a refusal: one error line)"]
+    ends = [i for i, ln in enumerate(doc) if ln["type"] in ("end", "error")]
+    if ends and ends[0] != len(doc) - 1:
+        return ["end or error must be the last line"]
+    return []
+
+
+def kind_screen():
+    v, vt = _w("screen"), _w("screen", "type_input")
+    _examples("screen", lambda d: _screen_stream_errors(v, d))
+    _examples("type-input", lambda d: _msgs(vt, d))
+    for f in sorted((HERE / "examples" / "run").glob("*takeover*")):
+        check("run", load(f), f.name.startswith("valid-"), f"examples/run/{f.name}")
+    vec = _vec("screen-v1.json")
+    for c in vec["control_mode"]:
+        lines = [ln.encode() for ln in c["lines"]]
+        got = scr_from_control(lines, sec_needles(c.get("keys", [])))
+        for ln in got:
+            for m in _msgs(v, ln):
+                fails.append(f"screen control_mode {c['name']} seq {ln['seq']}: {m}")
+        if "frames" in c:
+            _expect(f"screen control_mode {c['name']}", got, c["frames"])
+        if "joined" in c:
+            _expect(f"screen control_mode {c['name']} joined", "".join(x.get("data", "") for x in got), c["joined"])
+    for c in vec["utf8_split"]:
+        got = scr_from_control([("%output %0 ").encode() + bytes.fromhex(h) for h in c["chunks_hex"]])
+        _expect(f"screen utf8_split {c['name']}", [x["data"] for x in got if x["type"] == "output"], c["data"])
+    for c in vec["takeover"]:
+        _expect(f"screen takeover {c['name']}", scr_takeover(c), c["result"])
+    for c in vec["expiry"]:
+        _expect(f"screen expiry {c['name']}", scr_expired(c), c["expired"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
@@ -731,6 +841,7 @@ KINDS = {
     "blocks": kind_blocks,
     "inventory": kind_inventory,
     "addon-manifest": kind_addon_manifest,
+    "screen": kind_screen,
 }
 
 

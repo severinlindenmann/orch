@@ -1,0 +1,416 @@
+{
+ "v": 1,
+ "about": "screen.md reference cases (scr_from_control, scr_takeover, scr_expired in validate.py). control_mode 'real tmux 3.8 capture' = workspace/tests/fixtures/w2b/screen/control-mode.raw (branch w2b/p0-fixtures), lines verbatim.",
+ "control_mode": [
+  {
+   "name": "real tmux 3.8 capture",
+   "lines": [
+    "%begin 1794235422 317 0",
+    "%end 1794235422 317 0",
+    "%session-changed $0 fx",
+    "%client-session-changed client-9217 $0 fx",
+    "%window-renamed @0 bash",
+    "%output %0 export PS1='$ '; clear\\015\\012\\033[?2004l\\015",
+    "%output %0 \\033[H\\033[J",
+    "%output %0 \\033[?2004h$ ",
+    "%output %0 bash /tmp/fx/demo.sh\\015\\012\\033[?2004l\\015",
+    "%output %0 \\033[31mred\\033[0m \\033[1;32mbold green\\033[0m \\033[38;5;208morange256\\033[0m \\033[38;2;10;200;250mtruecolor\\033[0m \\033[4munder\\033[0m\\015\\012part1",
+    "%output %0  part2",
+    "%output %0  part3\\015\\012ä ö ü ß 😀 👩‍💻 ┌──┬──┐ │ ✓│ │ └──┴──┘ 日本語\\015\\012",
+    "%output %0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "%output %0 \\015\\012",
+    "%output %0 1\\015\\0122\\015\\0123\\015\\0124\\015\\0125\\015\\012",
+    "%output %0 \\033[?2004h$ ",
+    "%output %0 less /tmp/fx/doc.txt\\015\\012\\033[?2004l\\015",
+    "%output %0 \\033[?1049h\\033[40;1H\\033[?1h\\033=\\0151 lorem ipsum\\015\\0122 lorem ipsum\\015\\0123 lorem ipsum\\015\\0124 lorem ipsum\\015\\0125 lorem ipsum\\015\\0126 lorem ipsum\\015\\0127 lorem ipsum\\015\\0128 lorem ipsum\\015\\0129 lorem ipsum\\015\\01210 lorem ipsum\\015\\01211 lorem ipsum\\015\\01212 lorem ipsum\\015\\01213 lorem ipsum\\015\\01214 lorem ipsum\\015\\01215 lorem ipsum\\015\\01216 lorem ipsum\\015\\01217 lorem ipsum\\015\\01218 lorem ipsum\\015\\01219 lorem ipsum\\015\\01220 lorem ipsum\\015\\01221 lorem ipsum\\015\\01222 lorem ipsum\\015\\01223 lorem ipsum\\015\\01224 lorem ipsum\\015\\01225 lorem ipsum\\015\\01226 lorem ipsum\\015\\01227 lorem ipsum\\015\\01228 lorem ipsum\\015\\01229 lorem ipsum\\015\\01230 lorem ipsum\\015\\01231 lorem ipsum\\015\\01232 lorem ipsum\\015\\01233 lorem ipsum\\015\\01234 lorem ipsum\\015\\01235 lorem ipsum\\015\\01236 lorem ipsum\\015\\01237 lorem ipsum\\015\\01238 lorem ipsum\\015\\01239 lorem ipsum\\015\\012\\033[7m/tmp/fx/doc.txt\\033[27m\\033[K",
+    "%window-renamed @0 less",
+    "%output %0 \\015\\033[K40 lorem ipsum\\015\\012:\\033[K",
+    "%output %0 \\015\\033[K41 lorem ipsum\\015\\012:\\033[K",
+    "%output %0 \\015\\033[K42 lorem ipsum\\015\\01243 lorem ipsum\\015\\01244 lorem ipsum\\015\\01245 lorem ipsum\\015\\01246 lorem ipsum\\015\\01247 lorem ipsum\\015\\01248 lorem ipsum\\015\\01249 lorem ipsum\\015\\01250 lorem ipsum\\015\\01251 lorem ipsum\\015\\01252 lorem ipsum\\015\\01253 lorem ipsum\\015\\01254 lorem ipsum\\015\\01255 lorem ipsum\\015\\01256 lorem ipsum\\015\\01257 lorem ipsum\\015\\01258 lorem ipsum\\015\\01259 lorem ipsum\\015\\01260 lorem ipsum\\015\\01261 lorem ipsum\\015\\01262 lorem ipsum\\015\\01263 lorem ipsum\\015\\01264 lorem ipsum\\015\\01265 lorem ipsum\\015\\01266 lorem ipsum\\015\\01267 lorem ipsum\\015\\01268 lorem ipsum\\015\\01269 lorem ipsum\\015\\01270 lorem ipsum\\015\\01271 lorem ipsum\\015\\01272 lorem ipsum\\015\\01273 lorem ipsum\\015\\01274 lorem ipsum\\015\\01275 lorem ipsum\\015\\01276 lorem ipsum\\015\\01277 lorem ipsum\\015\\01278 lorem ipsum\\015\\01279 lorem ipsum\\015\\01280 lorem ipsum\\015\\012:\\033[K",
+    "%layout-change @0 a49d,90x30,0,0,0 a49d,90x30,0,0,0 *",
+    "%output %0 \\033[H\\033[J\\033[H42 lorem ipsum\\015\\01243 lorem ipsum\\015\\01244 lorem ipsum\\015\\01245 lorem ipsum\\015\\01246 lorem ipsum\\015\\01247 lorem ipsum\\015\\01248 lorem ipsum\\015\\01249 lorem ipsum\\015\\01250 lorem ipsum\\015\\01251 lorem ipsum\\015\\01252 lorem ipsum\\015\\01253 lorem ipsum\\015\\01254 lorem ipsum\\015\\01255 lorem ipsum\\015\\01256 lorem ipsum\\015\\01257 lorem ipsum\\015\\01258 lorem ipsum\\015\\01259 lorem ipsum\\015\\01260 lorem ipsum\\015\\01261 lorem ipsum\\015\\01262 lorem ipsum\\015\\01263 lorem ipsum\\015\\01264 lorem ipsum\\015\\01265 lorem ipsum\\015\\01266 lorem ipsum\\015\\01267 lorem ipsum\\015\\01268 lorem ipsum\\015\\01269 lorem ipsum\\015\\01270 lorem ipsum\\015\\012:\\033[K",
+    "%layout-change @0 aafd,120x40,0,0,0 aafd,120x40,0,0,0 *",
+    "%output %0 \\033[H\\033[J\\033[H42 lorem ipsum\\015\\01243 lorem ipsum\\015\\01244 lorem ipsum\\015\\01245 lorem ipsum\\015\\01246 lorem ipsum\\015\\01247 lorem ipsum\\015\\01248 lorem ipsum\\015\\01249 lorem ipsum\\015\\01250 lorem ipsum\\015\\01251 lorem ipsum\\015\\01252 lorem ipsum\\015\\01253 lorem ipsum\\015\\01254 lorem ipsum\\015\\01255 lorem ipsum\\015\\01256 lorem ipsum\\015\\01257 lorem ipsum\\015\\01258 lorem ipsum\\015\\01259 lorem ipsum\\015\\01260 lorem ipsum\\015\\01261 lorem ipsum\\015\\01262 lorem ipsum\\015\\01263 lorem ipsum\\015\\01264 lorem ipsum\\015\\01265 lorem ipsum\\015\\01266 lorem ipsum\\015\\01267 lorem ipsum\\015\\01268 lorem ipsum\\015\\01269 lorem ipsum\\015\\01270 lorem ipsum\\015\\01271 lorem ipsum\\015\\01272 lorem ipsum\\015\\01273 lorem ipsum\\015\\01274 lorem ipsum\\015\\01275 lorem ipsum\\015\\01276 lorem ipsum\\015\\01277 lorem ipsum\\015\\01278 lorem ipsum\\015\\01279 lorem ipsum\\015\\01280 lorem ipsum\\015\\012:\\033[K",
+    "%output %0 \\015\\033[K\\033[?1l\\033>\\033[?1049l",
+    "%output %0 \\033[?2004h$ ",
+    "%window-renamed @0 bash",
+    "%output %0 echo after-less\\015\\012\\033[?2004l\\015",
+    "%output %0 after-less\\015\\012\\033[?2004h$ "
+   ],
+   "frames": [
+    {
+     "v": 1,
+     "seq": 1,
+     "type": "output",
+     "data": "export PS1='$ '; clear\r\n\u001b[?2004l\r"
+    },
+    {
+     "v": 1,
+     "seq": 2,
+     "type": "output",
+     "data": "\u001b[H\u001b[J"
+    },
+    {
+     "v": 1,
+     "seq": 3,
+     "type": "output",
+     "data": "\u001b[?2004h$ "
+    },
+    {
+     "v": 1,
+     "seq": 4,
+     "type": "output",
+     "data": "bash /tmp/fx/demo.sh\r\n\u001b[?2004l\r"
+    },
+    {
+     "v": 1,
+     "seq": 5,
+     "type": "output",
+     "data": "\u001b[31mred\u001b[0m \u001b[1;32mbold green\u001b[0m \u001b[38;5;208morange256\u001b[0m \u001b[38;2;10;200;250mtruecolor\u001b[0m \u001b[4munder\u001b[0m\r\npart1"
+    },
+    {
+     "v": 1,
+     "seq": 6,
+     "type": "output",
+     "data": " part2"
+    },
+    {
+     "v": 1,
+     "seq": 7,
+     "type": "output",
+     "data": " part3\r\nä ö ü ß 😀 👩‍💻 ┌──┬──┐ │ ✓│ │ └──┴──┘ 日本語\r\n"
+    },
+    {
+     "v": 1,
+     "seq": 8,
+     "type": "output",
+     "data": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+     "v": 1,
+     "seq": 9,
+     "type": "output",
+     "data": "\r\n"
+    },
+    {
+     "v": 1,
+     "seq": 10,
+     "type": "output",
+     "data": "1\r\n2\r\n3\r\n4\r\n5\r\n"
+    },
+    {
+     "v": 1,
+     "seq": 11,
+     "type": "output",
+     "data": "\u001b[?2004h$ "
+    },
+    {
+     "v": 1,
+     "seq": 12,
+     "type": "output",
+     "data": "less /tmp/fx/doc.txt\r\n\u001b[?2004l\r"
+    },
+    {
+     "v": 1,
+     "seq": 13,
+     "type": "output",
+     "data": "\u001b[?1049h\u001b[40;1H\u001b[?1h\u001b=\r1 lorem ipsum\r\n2 lorem ipsum\r\n3 lorem ipsum\r\n4 lorem ipsum\r\n5 lorem ipsum\r\n6 lorem ipsum\r\n7 lorem ipsum\r\n8 lorem ipsum\r\n9 lorem ipsum\r\n10 lorem ipsum\r\n11 lorem ipsum\r\n12 lorem ipsum\r\n13 lorem ipsum\r\n14 lorem ipsum\r\n15 lorem ipsum\r\n16 lorem ipsum\r\n17 lorem ipsum\r\n18 lorem ipsum\r\n19 lorem ipsum\r\n20 lorem ipsum\r\n21 lorem ipsum\r\n22 lorem ipsum\r\n23 lorem ipsum\r\n24 lorem ipsum\r\n25 lorem ipsum\r\n26 lorem ipsum\r\n27 lorem ipsum\r\n28 lorem ipsum\r\n29 lorem ipsum\r\n30 lorem ipsum\r\n31 lorem ipsum\r\n32 lorem ipsum\r\n33 lorem ipsum\r\n34 lorem ipsum\r\n35 lorem ipsum\r\n36 lorem ipsum\r\n37 lorem ipsum\r\n38 lorem ipsum\r\n39 lorem ipsum\r\n\u001b[7m/tmp/fx/doc.txt\u001b[27m\u001b[K"
+    },
+    {
+     "v": 1,
+     "seq": 14,
+     "type": "alt",
+     "on": true
+    },
+    {
+     "v": 1,
+     "seq": 15,
+     "type": "output",
+     "data": "\r\u001b[K40 lorem ipsum\r\n:\u001b[K"
+    },
+    {
+     "v": 1,
+     "seq": 16,
+     "type": "output",
+     "data": "\r\u001b[K41 lorem ipsum\r\n:\u001b[K"
+    },
+    {
+     "v": 1,
+     "seq": 17,
+     "type": "output",
+     "data": "\r\u001b[K42 lorem ipsum\r\n43 lorem ipsum\r\n44 lorem ipsum\r\n45 lorem ipsum\r\n46 lorem ipsum\r\n47 lorem ipsum\r\n48 lorem ipsum\r\n49 lorem ipsum\r\n50 lorem ipsum\r\n51 lorem ipsum\r\n52 lorem ipsum\r\n53 lorem ipsum\r\n54 lorem ipsum\r\n55 lorem ipsum\r\n56 lorem ipsum\r\n57 lorem ipsum\r\n58 lorem ipsum\r\n59 lorem ipsum\r\n60 lorem ipsum\r\n61 lorem ipsum\r\n62 lorem ipsum\r\n63 lorem ipsum\r\n64 lorem ipsum\r\n65 lorem ipsum\r\n66 lorem ipsum\r\n67 lorem ipsum\r\n68 lorem ipsum\r\n69 lorem ipsum\r\n70 lorem ipsum\r\n71 lorem ipsum\r\n72 lorem ipsum\r\n73 lorem ipsum\r\n74 lorem ipsum\r\n75 lorem ipsum\r\n76 lorem ipsum\r\n77 lorem ipsum\r\n78 lorem ipsum\r\n79 lorem ipsum\r\n80 lorem ipsum\r\n:\u001b[K"
+    },
+    {
+     "v": 1,
+     "seq": 18,
+     "type": "resize",
+     "cols": 90,
+     "rows": 30
+    },
+    {
+     "v": 1,
+     "seq": 19,
+     "type": "output",
+     "data": "\u001b[H\u001b[J\u001b[H42 lorem ipsum\r\n43 lorem ipsum\r\n44 lorem ipsum\r\n45 lorem ipsum\r\n46 lorem ipsum\r\n47 lorem ipsum\r\n48 lorem ipsum\r\n49 lorem ipsum\r\n50 lorem ipsum\r\n51 lorem ipsum\r\n52 lorem ipsum\r\n53 lorem ipsum\r\n54 lorem ipsum\r\n55 lorem ipsum\r\n56 lorem ipsum\r\n57 lorem ipsum\r\n58 lorem ipsum\r\n59 lorem ipsum\r\n60 lorem ipsum\r\n61 lorem ipsum\r\n62 lorem ipsum\r\n63 lorem ipsum\r\n64 lorem ipsum\r\n65 lorem ipsum\r\n66 lorem ipsum\r\n67 lorem ipsum\r\n68 lorem ipsum\r\n69 lorem ipsum\r\n70 lorem ipsum\r\n:\u001b[K"
+    },
+    {
+     "v": 1,
+     "seq": 20,
+     "type": "resize",
+     "cols": 120,
+     "rows": 40
+    },
+    {
+     "v": 1,
+     "seq": 21,
+     "type": "output",
+     "data": "\u001b[H\u001b[J\u001b[H42 lorem ipsum\r\n43 lorem ipsum\r\n44 lorem ipsum\r\n45 lorem ipsum\r\n46 lorem ipsum\r\n47 lorem ipsum\r\n48 lorem ipsum\r\n49 lorem ipsum\r\n50 lorem ipsum\r\n51 lorem ipsum\r\n52 lorem ipsum\r\n53 lorem ipsum\r\n54 lorem ipsum\r\n55 lorem ipsum\r\n56 lorem ipsum\r\n57 lorem ipsum\r\n58 lorem ipsum\r\n59 lorem ipsum\r\n60 lorem ipsum\r\n61 lorem ipsum\r\n62 lorem ipsum\r\n63 lorem ipsum\r\n64 lorem ipsum\r\n65 lorem ipsum\r\n66 lorem ipsum\r\n67 lorem ipsum\r\n68 lorem ipsum\r\n69 lorem ipsum\r\n70 lorem ipsum\r\n71 lorem ipsum\r\n72 lorem ipsum\r\n73 lorem ipsum\r\n74 lorem ipsum\r\n75 lorem ipsum\r\n76 lorem ipsum\r\n77 lorem ipsum\r\n78 lorem ipsum\r\n79 lorem ipsum\r\n80 lorem ipsum\r\n:\u001b[K"
+    },
+    {
+     "v": 1,
+     "seq": 22,
+     "type": "output",
+     "data": "\r\u001b[K\u001b[?1l\u001b>\u001b[?1049l"
+    },
+    {
+     "v": 1,
+     "seq": 23,
+     "type": "alt",
+     "on": false
+    },
+    {
+     "v": 1,
+     "seq": 24,
+     "type": "output",
+     "data": "\u001b[?2004h$ "
+    },
+    {
+     "v": 1,
+     "seq": 25,
+     "type": "output",
+     "data": "echo after-less\r\n\u001b[?2004l\r"
+    },
+    {
+     "v": 1,
+     "seq": 26,
+     "type": "output",
+     "data": "after-less\r\n\u001b[?2004h$ "
+    }
+   ]
+  },
+  {
+   "name": "value split over two output lines is hidden",
+   "keys": [
+    {
+     "name": "api-token",
+     "type": "token",
+     "value": "fake-token-Q7xP2mK9vL4"
+    }
+   ],
+   "lines": [
+    "%output %0 export TOKEN=fake-tok",
+    "%output %0 en-Q7xP2mK9vL4\\015\\012$ "
+   ],
+   "joined": "export TOKEN=[hidden: api-token]\r\n$ "
+  },
+  {
+   "name": "pane exits",
+   "lines": [
+    "%output %0 bye\\015\\012",
+    "%exit"
+   ],
+   "frames": [
+    {
+     "v": 1,
+     "seq": 1,
+     "type": "output",
+     "data": "bye\r\n"
+    },
+    {
+     "v": 1,
+     "seq": 2,
+     "type": "end",
+     "reason": "session-gone"
+    }
+   ]
+  }
+ ],
+ "utf8_split": [
+  {
+   "name": "umlaut split across chunks",
+   "chunks_hex": [
+    "c3",
+    "a4206f6b"
+   ],
+   "data": [
+    "ä ok"
+   ]
+  },
+  {
+   "name": "emoji split in three",
+   "chunks_hex": [
+    "f09f",
+    "98",
+    "80"
+   ],
+   "data": [
+    "😀"
+   ]
+  },
+  {
+   "name": "invalid byte",
+   "chunks_hex": [
+    "61ff62"
+   ],
+   "data": [
+    "a�b"
+   ]
+  }
+ ],
+ "takeover": [
+  {
+   "name": "ok",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": true,
+   "held_by": null,
+   "expires_at": null,
+   "now": "2026-11-16T09:20:00Z",
+   "result": "ok"
+  },
+  {
+   "name": "live session off",
+   "live_session": false,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": true,
+   "held_by": null,
+   "expires_at": null,
+   "now": "2026-11-16T09:20:00Z",
+   "result": "switched_off"
+  },
+  {
+   "name": "typing off (default)",
+   "live_session": true,
+   "session_typing": false,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": true,
+   "held_by": null,
+   "expires_at": null,
+   "now": "2026-11-16T09:20:00Z",
+   "result": "switched_off"
+  },
+  {
+   "name": "admin lock",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": true,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": true,
+   "held_by": null,
+   "expires_at": null,
+   "now": "2026-11-16T09:20:00Z",
+   "result": "locked_by_admin"
+  },
+  {
+   "name": "agent caller",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "agent:main",
+   "from": "local-page",
+   "live": true,
+   "held_by": null,
+   "expires_at": null,
+   "now": "2026-11-16T09:20:00Z",
+   "result": "not_allowed"
+  },
+  {
+   "name": "remote page",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "remote-page",
+   "live": true,
+   "held_by": null,
+   "expires_at": null,
+   "now": "2026-11-16T09:20:00Z",
+   "result": "not_allowed"
+  },
+  {
+   "name": "no live session",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": false,
+   "held_by": null,
+   "expires_at": null,
+   "now": "2026-11-16T09:20:00Z",
+   "result": "not_available"
+  },
+  {
+   "name": "held by someone else",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": true,
+   "held_by": "human:anna",
+   "expires_at": "2026-11-16T09:21:00Z",
+   "now": "2026-11-16T09:20:00Z",
+   "result": "conflict"
+  },
+  {
+   "name": "held by someone else, expired",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": true,
+   "held_by": "human:anna",
+   "expires_at": "2026-11-16T09:19:59Z",
+   "now": "2026-11-16T09:20:00Z",
+   "result": "ok"
+  },
+  {
+   "name": "same person again",
+   "live_session": true,
+   "session_typing": true,
+   "admin_lock": false,
+   "caller": "human:severin",
+   "from": "local-page",
+   "live": true,
+   "held_by": "human:severin",
+   "expires_at": "2026-11-16T09:21:00Z",
+   "now": "2026-11-16T09:20:00Z",
+   "result": "ok"
+  }
+ ],
+ "expiry": [
+  {
+   "name": "119 s",
+   "last_input_at": "2026-11-16T09:20:00Z",
+   "now": "2026-11-16T09:21:59Z",
+   "expired": false
+  },
+  {
+   "name": "120 s",
+   "last_input_at": "2026-11-16T09:20:00Z",
+   "now": "2026-11-16T09:22:00Z",
+   "expired": true
+  }
+ ]
+}

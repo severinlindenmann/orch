@@ -46,7 +46,19 @@
       },
       "description": "Optional, live runs only."
     },
-    "log": { "type": "string", "pattern": "^\\.orch/run/logs/[A-Za-z0-9_.-]{1,120}$", "description": "Optional. Log file of a oneshot run, relative to the workspace root." }
+    "log": { "type": "string", "pattern": "^\\.orch/run/logs/[A-Za-z0-9_.-]{1,120}$", "description": "Optional. Log file of a oneshot run, relative to the workspace root." },
+    "takeover": {
+      "type": "object", "required": ["by", "from", "since", "last_input_at", "expires_at"], "additionalProperties": false,
+      "properties": {
+        "by": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$" },
+        "from": { "const": "local-page" },
+        "since": { "$ref": "#/$defs/time" },
+        "last_input_at": { "$ref": "#/$defs/time" },
+        "expires_at": { "$ref": "#/$defs/time" },
+        "keys": { "type": "integer", "minimum": 0 }
+      },
+      "description": "Optional, live runs only. A person typing in the session (screen.md, take-over). While present and not expired, pending input is held (not pasted). Removed on release, after 120 s without typing, when the run ends, or when the switch goes off."
+    }
   },
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$" }
