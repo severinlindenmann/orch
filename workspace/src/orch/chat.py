@@ -446,10 +446,14 @@ def make_ticket(root: Path, mid: str, title: str | None = None, by: str | None =
             if tickets.ticket_path(root, making["id"]).exists()
             else tickets.create(
                 root,
-                title if title is not None else proposals[0]["title"],
+                # The proposal's title is the helper's: only a placeholder (title_auto). The agent that works the
+                # ticket writes the real title and description (`orch ticket title`); a title the person typed
+                # (--title) is theirs and is never overwritten.
+                tickets.placeholder_title(title if title is not None else proposals[0]["title"]),
                 who,
                 fields={"note": note[:2000]},
                 tid=making["id"],
+                title_auto=title is None,
             )
         )
 

@@ -664,9 +664,15 @@ def load_state(
         "needs": needs if isinstance(needs, list) else [],
         "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
         "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
-        "groups": mobile.load_groups(root, orch_bin) if with_addons else None,  # group chats; snapshots carry none
-        "mobile_mode": mobile.load_mobile(root, orch_bin) if with_settings else None,  # the live page only, never a snapshot
-        "look": look.load_look(root, orch_bin, fresh) if with_settings else None,  # the live page only, never a snapshot
+        "groups": mobile.load_groups(root, orch_bin)
+        if with_addons
+        else None,  # group chats; snapshots carry none
+        "mobile_mode": mobile.load_mobile(root, orch_bin)
+        if with_settings
+        else None,  # the live page only, never a snapshot
+        "look": look.load_look(root, orch_bin, fresh)
+        if with_settings
+        else None,  # the live page only, never a snapshot
         "settings": load_settings(root, orch_bin)
         if with_settings
         else None,  # only the live local server: it holds the folder path
@@ -695,7 +701,11 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
     files = raw.get("files", []) if isinstance(raw, dict) else []
     links = []
     for f in files if isinstance(files, list) else []:
-        if not isinstance(f, dict) or not isinstance(f.get("id"), str) or not re.fullmatch(r"f_[a-z0-9]+", f["id"]):
+        if (
+            not isinstance(f, dict)
+            or not isinstance(f.get("id"), str)
+            or not re.fullmatch(r"f_[a-z0-9]+", f["id"])
+        ):
             continue
         expires = f.get("expires_at")
         try:
@@ -711,8 +721,17 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
             and re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
         )
         link = url.split("#", 1)[0] + "#k=" + key if ok else None
-        links.append({"id": f["id"], "name": f.get("name"), "size": f.get("size"),
-                      "expires_at": expires, "expired": expired, "link": link, "copy": link is not None})
+        links.append(
+            {
+                "id": f["id"],
+                "name": f.get("name"),
+                "size": f.get("size"),
+                "expires_at": expires,
+                "expired": expired,
+                "link": link,
+                "copy": link is not None,
+            }
+        )
     return {"links": links}
 
 

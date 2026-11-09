@@ -12,3 +12,23 @@
   color: var(--text-muted);
 }
 .new-ticket .input, .new-ticket .btn { min-height: 44px; }
+.new-ticket .new-ticket-drop {
+  width: 100%; padding: 11px 10px; border: 1px dashed var(--border);
+  border-radius: 7px; background: transparent; color: var(--text-muted);
+  text-align: left; font-size: 12px; white-space: normal;
+}
+.new-ticket-files { display: flex; flex-direction: column; gap: 7px; }
+.new-ticket .new-ticket-file { display: flex; padding: 0; border-radius: 7px; min-width: 0; }
+.new-ticket-file-main {
+  display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0;
+  border: 0; background: transparent; color: var(--text); padding: 9px 10px; text-align: left; font-size: 12px;
+}
+.new-ticket-file-main > :first-child { overflow-wrap: anywhere; }
+.new-ticket-file-main .meta { margin-left: auto; white-space: nowrap; }
+.new-ticket-file-remove { border: 0; background: transparent; color: var(--text-muted); padding: 8px 10px; }
+.new-ticket-file-error { white-space: pre-line; }
+.new-ticket-file-error:empty, .new-ticket-files:empty { display: none; }
+.new-ticket-help { margin: 0; }
+.new-ticket-preview { max-height: 65vh; overflow: auto; }
+.new-ticket-preview pre { white-space: pre; font-size: 12px; }
+.new-ticket-preview img { max-width: 100%; height: auto; }

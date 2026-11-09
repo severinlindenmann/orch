@@ -1131,6 +1131,8 @@ def _relay_ext(root: Path, tid: str) -> dict:
 
 
 def _phone_title(root: Path, text: str, frm: str) -> str:
+    if len(text) > tickets.LONG_TEXT:  # a long text: its first line (the agent writes a better title later)
+        text = next((x for x in clean_untrusted(text, 4000).splitlines() if x.strip()), "")
     line = " ".join(clean_untrusted(text, 400).split())[:120].strip()
     return line or f"Message from {name_of(root, frm)}"
 
@@ -1281,6 +1283,22 @@ def _more(n: int, what: str) -> str:
     return f"  (+{n} more {what} not shown)"
 
 
+def _long_phone_text(root: Path, tid: str, mid: str, who: str, raw: str, cut: bool = False) -> str:
+    """A long phone text is kept word for word as note-<hash of the message id>.md in the ticket's artifacts.
+    The file is named from the message, so a file that exists means this message was handled (a retry, a
+    crash in between): nothing is written twice. The history gets a short start and says where the rest is."""
+    tag = hashlib.sha256(mid.encode()).hexdigest()[:8]
+    done = tickets.attach(
+        root, tid, "", raw.encode("utf-8"), _line(who, 100) or "phone", exact=f"note-{tag}.md"
+    )["path"]
+    tail = f" Text cut at {len(raw)} characters." if cut else ""
+    return (
+        f"{_line(raw, 300)}…\n"
+        f"  (Long text, {len(raw)} characters, kept word for word in {done}.{tail} "
+        "Read it, then give the ticket a short title and description.)"
+    )
+
+
 def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool = False) -> str:
     """What a phone text says in plain words for the ticket's history and the agent: the text, the voice
     transcript (and its language), saved photos and files (paths), the location with a map link and the
@@ -1288,9 +1306,20 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
     from orch import phone_view
 
     lines = []
-    text = _line(body.get("text", ""), 2000)  # one line: it cannot fake the lines orch adds below
-    if text:
-        lines.append(text)
+    limit = tickets.ATTACH_MAX // 4  # characters: at most 2 MB in the file
+    raw_text = clean_untrusted(str(body.get("text") or ""), limit + 1).strip()
+    if len(raw_text) > tickets.LONG_TEXT:
+        try:
+            lines.append(_long_phone_text(root, tid, mid, who, raw_text[:limit], len(raw_text) > limit))
+        except (Refused, OSError):  # never fail the message on every retry: keep a start of it in the history
+            lines.append(
+                f"{_line(raw_text, 1500)}…\n"
+                f"  (Long text, {len(raw_text)} characters: the full text could not be saved.)"
+            )
+    else:
+        text = _line(body.get("text", ""), 2000)  # one line: it cannot fake the lines orch adds below
+        if text:
+            lines.append(text)
     voice = body.get("voice")
     if isinstance(voice, dict):
         said = _line(voice.get("transcript", ""), 2000)
@@ -1520,7 +1549,12 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         return f"added to {tid}", tid
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
-        t = tickets.create(root, _phone_title(root, str(body.get("text") or spoken or ""), frm), by)
+        said = str(body.get("text") or spoken or "")
+        t = (
+            tickets.create_from_input(root, said, by)
+            if said.strip()
+            else tickets.create(root, _phone_title(root, said, frm), by)
+        )
         tid = t["id"]
         tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
     if mid not in _v3_state(root)["described"]:

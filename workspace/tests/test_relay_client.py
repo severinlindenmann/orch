@@ -1090,7 +1090,7 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     code, out, _ = run("relay", "inbox")
     assert code == 0 and "new ticket t_" in out
     ts = _tickets(run)
-    assert len(ts) == 1 and ts[0]["title"] == "Prepare the Q3 summary please"
+    assert len(ts) == 1 and ts[0]["title"] == "Prepare the Q3 summary" and ts[0]["title_auto"] is True
     ext = ts[0]["ext"]["relay"]
     assert (ext["origin"], ext["from"], ext["message"]) == ("phone", PHONE, "m_phone00000000001")
     ack = rel.sent[-1]
@@ -1101,6 +1101,39 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     run("relay", "inbox")
     run("relay", "inbox")
     assert len(_tickets(run)) == 1 and len(rel.sent) == 1
+
+
+def test_phone_long_text_is_kept_as_a_file_and_the_history_stays_short(proj, run, rel):
+    _phone_setup(rel, run)
+    long = "Point one.\n" + ("The inventory has many lines. " * 200)
+    rel.inbox.append(msg("m_phone00000000009", "text", {"text": long}, frm=PHONE))
+    code, out, _ = run("relay", "inbox")
+    assert code == 0 and "new ticket t_" in out
+    t = _tickets(run)[0]
+    assert t["title"] == "Point one." and t["title_auto"] is True  # the agent writes the real title
+    kept = next((proj / ".orch" / "tickets" / t["id"] / "artifacts").glob("note-*.md"))
+    assert kept.read_text() == long.strip()  # word for word
+    said = "\n".join(h["text"] for h in t["history"] if h.get("via") == "phone")
+    assert kept.name in said and len(said) < 900 and "The inventory has many lines. " * 20 not in said
+    run("relay", "inbox")  # redelivered: no second file
+    assert [p.name for p in kept.parent.iterdir()] == [kept.name]  # named from the message: never twice
+
+
+def test_phone_long_text_that_cannot_be_saved_does_not_fail_the_message(proj, run, rel, monkeypatch):
+    from orch import tickets
+
+    _phone_setup(rel, run)
+
+    def boom(*a, **k):
+        raise OSError("disk says no")
+
+    monkeypatch.setattr(tickets, "attach", boom)
+    rel.inbox.append(msg("m_phone00000000010", "text", {"text": "Point\n" + "word " * 600}, frm=PHONE))
+    code, out, _ = run("relay", "inbox")
+    assert code == 0 and "new ticket t_" in out
+    t = _tickets(run)[0]
+    said = "\n".join(h["text"] for h in t["history"] if h.get("via") == "phone")
+    assert "could not be saved" in said and len(rel.sent) == 1  # described and acked once
 
 
 def test_phone_text_crash_before_seen_is_idempotent(proj, run, rel, monkeypatch):

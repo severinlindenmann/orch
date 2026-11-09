@@ -82,7 +82,11 @@ def _relay_reply(a):
 def _relay_topic(a):
     acts = _actions()
     acts._only(a, ("message", "title"))
-    return ["relay", "topic"], ["--from", _message_id(a.get("message"))], [acts._text(a.get("title"), "title")]
+    return (
+        ["relay", "topic"],
+        ["--from", _message_id(a.get("message"))],
+        [acts._text(a.get("title"), "title")],
+    )
 
 
 MOBILE_REQUIRED_ADDONS = {"relay.reply": "relay", "relay.topic": "relay"}
@@ -103,7 +107,11 @@ def _group_say(a):
     acts = _actions()
     if "ticket" in a:
         acts._only(a, ("ticket", "text"))
-        return ["relay", "group", "say", _group_ticket(a)], ["--dashboard"], [acts._text(a.get("text"), "message")]
+        return (
+            ["relay", "group", "say", _group_ticket(a)],
+            ["--dashboard"],
+            [acts._text(a.get("text"), "message")],
+        )
     acts._only(a, ("group", "host", "text"))
     host, group = a.get("host"), a.get("group")
     if not (isinstance(host, str) and PEER.fullmatch(host)):
@@ -217,7 +225,9 @@ def _num(v, hi=2**31 - 1):
 
 
 def _strs(d, keys, n=200):
-    return {k: _short(d.get(k), n) for k in keys if isinstance(d.get(k), str)} if isinstance(d, dict) else None
+    return (
+        {k: _short(d.get(k), n) for k in keys if isinstance(d.get(k), str)} if isinstance(d, dict) else None
+    )
 
 
 def _card(c):
@@ -329,8 +339,6 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
 CHAT_FLAG_SINCE = "2026-11-08T14:15:00+00:00"  # when the core began writing chat_message on every line
 
 
-
-
 def is_chat_entry(e: dict) -> bool:
     """A history line that is a real Chat message: the core's `chat_message: true` flag. Lines written before the
     flag existed (no key at all) count only when they came from a person on the dashboard (human:) or from the
@@ -346,9 +354,9 @@ def is_chat_entry(e: dict) -> bool:
     if at.tzinfo is None or at >= datetime.fromisoformat(CHAT_FLAG_SINCE):
         return False  # new lines always carry the flag: a missing one is never a message
     by, via = str(e.get("by", "")), e.get("via")
-    return (via == "dashboard" and by.startswith("human:")) or (via == "phone" and by.startswith("agent:relay from ph_"))
-
-
+    return (via == "dashboard" and by.startswith("human:")) or (
+        via == "phone" and by.startswith("agent:relay from ph_")
+    )
 
 
 def mark_chat_history(t: dict) -> None:

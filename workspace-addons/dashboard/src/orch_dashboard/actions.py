@@ -6,6 +6,7 @@ after `--` (or as `--flag=value`) so it can never be read as an option. The dash
 
 from __future__ import annotations
 
+import base64
 import getpass
 import json
 import os
@@ -21,6 +22,33 @@ from .look import forget as look_forget
 from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
 MAX_TEXT = 2000
+LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
+MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
+MAX_FILES = 5  # incl. note.md (the page takes 4 dropped files)
+# Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
+ATTACH_EXT = frozenset(
+    {
+        "txt",
+        "md",
+        "csv",
+        "tsv",
+        "json",
+        "log",
+        "yml",
+        "yaml",
+        "toml",
+        "ini",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "webp",
+    }
+)
+ATTACH_MAX = 2 * 1024 * 1024
+LONG_NOTE = (
+    "The full text is attached as note.md. Read it, then give this ticket a short title and description."
+)
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
@@ -81,13 +109,17 @@ def _qid(v) -> str:
     return v
 
 
-def _text(v, name="text", empty=False) -> str:
+def _text(v, name="text", empty=False, limit=MAX_TEXT) -> str:
     if not isinstance(v, str) or (not empty and not v.strip()):
         raise BadRequest(f"Please write the {name}.")
-    if len(v) > MAX_TEXT:
-        raise BadRequest(f"The {name} is too long (at most {MAX_TEXT} characters).")
+    if len(v) > limit:
+        raise BadRequest(f"The {name} is too long (at most {limit} characters).")
     if "\x00" in v:
         raise BadRequest(f"The {name} has a character that is not allowed.")
+    try:
+        v.encode("utf-8")  # a lone surrogate (valid in JSON) cannot be passed on
+    except UnicodeEncodeError:
+        raise BadRequest(f"The {name} has a character that is not allowed.") from None
     return v
 
 
@@ -121,22 +153,78 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note", "done_when"))
+    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files", "title_auto"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
+    if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
+        flags.append("--title-auto")
+    long_text = a.get("long_text")
+    if long_text is not None:
+        _text(long_text, "text", limit=MAX_LONG)
     for k in ("owner", "due", "note", "done_when"):
-        if a.get(k):
-            v = _text(a[k], k)
+        v = a.get(k)
+        if k == "note" and long_text is not None and not v:
+            v = LONG_NOTE
+        if v:
+            v = _text(v, k)
             if k == "due" and not DAY.fullmatch(v):
                 raise BadRequest("The due day must look like 2026-11-30.")
             flags.append(f"--{k.replace('_', '-')}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
 
+def attachments(op, args) -> list[tuple[str, bytes]]:
+    """The files a new ticket brings along: (name hint, bytes), checked before anything is created. The name is
+    only a hint, orch picks the real one; type, content and size are checked again by orch itself."""
+    if op not in ("ticket.new", "ticket.paste") or not isinstance(args, dict):
+        return []
+    out: list[tuple[str, bytes]] = []
+    long_text = args.get("long_text")
+    if op == "ticket.paste":
+        long_text = args.get("text") if len(args.get("text") or "") > LONG_TEXT else None
+    if long_text is not None:
+        out.append(("note.md", _text(long_text, "text", limit=MAX_LONG).encode("utf-8")))
+        if len(out[0][1]) > ATTACH_MAX:
+            raise BadRequest("The text is too long (at most 2 MB).")
+    files = args.get("files")
+    if files is None:
+        return out
+    if op != "ticket.new" or not isinstance(files, list) or len(files) + len(out) > MAX_FILES:
+        raise BadRequest(f"At most {MAX_FILES} files can be added.")
+    for f in files:
+        if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
+            raise BadRequest("That file could not be read.")
+        if len(f["name"]) > 240 or "\x00" in f["name"]:
+            raise BadRequest("That file name is not allowed.")
+        if isinstance(f.get("text"), str) and f.get("data") is None:
+            try:
+                raw = f["text"].encode("utf-8")
+            except UnicodeEncodeError:
+                raise BadRequest("That file could not be read.") from None
+        elif isinstance(f.get("data"), str) and f.get("text") is None:
+            try:
+                raw = base64.b64decode(f["data"], validate=True)
+            except ValueError:
+                raise BadRequest("That file could not be read.") from None
+        else:
+            raise BadRequest("That file could not be read.")
+        ext = f["name"].rsplit(".", 1)[-1].lower() if "." in f["name"] else ""
+        if ext not in ATTACH_EXT:
+            raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
+        if len(raw) > ATTACH_MAX:
+            raise BadRequest(f"{f['name'][:60]} is over 2 MB.")
+        out.append((f["name"], raw))
+    return out
+
+
 def _ticket_paste(a):
     _only(a, ("text", "parent"))
-    text = _text(a.get("text"))
-    title = next(line.strip() for line in text.splitlines() if line.strip())[:80]
-    return _ticket_new({"title": title, "note": text, "parent": a.get("parent")})
+    text = _text(a.get("text"), limit=MAX_LONG)
+    first = next(line.strip() for line in text.splitlines() if line.strip())
+    auto = len(text) > LONG_TEXT or len([x for x in text.splitlines() if x.strip()]) > 1 or len(first) > 80
+    args = {"title": first[:80], "parent": a.get("parent"), "title_auto": auto}
+    if len(text) > LONG_TEXT:  # kept as note.md (see attachments); the Note stays short
+        return _ticket_new({**args, "long_text": text})
+    return _ticket_new({**args, "note": text})
 
 
 def _ticket_patch(a):
@@ -385,7 +473,11 @@ def _link(a, extend=False):
         raise BadRequest("That is not a shared file id.")
     if extend and (type(a.get("days")) is not int or not 1 <= a["days"] <= 90):
         raise BadRequest("Choose a whole number of days from 1 to 90.")
-    return ["publish", "extend" if extend else "delete", fid], (["--days", str(a["days"])] if extend else []), []
+    return (
+        ["publish", "extend" if extend else "delete", fid],
+        (["--days", str(a["days"])] if extend else []),
+        [],
+    )
 
 
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
@@ -470,7 +562,9 @@ def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
 
 def _audit(root: Path, op: str, args: dict) -> None:
     """One line per settings change in .orch/run/dashboard/actions.log (local, gitignored): who, what, the exact command."""
-    keep = {k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode", "id", "days")}
+    keep = {
+        k: v for k, v in args.items() if k in ("name", "command", "prompt_via", "on", "mode", "id", "days")
+    }
     line = json.dumps(
         {
             "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -510,6 +604,31 @@ def _without_agent(environ) -> dict:
         ) from None
 
 
+def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]]) -> dict:
+    """Keep each file with the new ticket through `orch ticket attach` (orch picks the name and checks type,
+    content and size). A file that is refused does not undo the ticket: it is listed as failed."""
+    saved, failed = [], []
+    for hint, raw in files:
+        try:
+            r = subprocess.run(
+                [orch_bin, "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
+                check=False,
+                cwd=root,
+                capture_output=True,
+                input=raw,
+                timeout=60,
+                env=human_env(root, orch_bin),
+            )
+            out = json.loads(r.stdout.decode("utf-8", "replace")) if r.returncode == 0 else None
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            out = None
+        if isinstance(out, dict) and isinstance(out.get("name"), str):
+            saved.append(out["name"])
+        else:
+            failed.append(re.sub(r"[^A-Za-z0-9._ -]", "_", hint.rsplit("/", 1)[-1])[:60])
+    return {"saved": saved, "failed": failed}
+
+
 def human_env(root: Path, orch_bin: str) -> dict:
     """Browser actions are the person's actions, even if an agent launched the server."""
     try:
@@ -523,6 +642,7 @@ def human_env(root: Path, orch_bin: str) -> dict:
 def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
+    files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
@@ -569,8 +689,19 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
     if r.returncode == 0:
         if op.startswith("look."):
             look_forget(root)
-        if op in ("link.extend", "link.stop", "config.agent.add", "addon.set", "config.agent", "config.permissions", "workflow.set", "share.set"):
+        if op in (
+            "link.extend",
+            "link.stop",
+            "config.agent.add",
+            "addon.set",
+            "config.agent",
+            "config.permissions",
+            "workflow.set",
+            "share.set",
+        ):
             _audit(root, op, args)
+        if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
+            out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None
     if not msg:

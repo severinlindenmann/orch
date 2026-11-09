@@ -282,13 +282,145 @@ def input_text(items: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _screen_free(root: Path, tid: str, dialog: str | None) -> bool:
-    """Before orch types its notice: the pane is readable, not in copy mode, and shows no dialog."""
-    pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
-    d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}", timeout=QUICK)
-    if pane.returncode != 0 or d.returncode != 0 or (d.stdout.split() or ["?"])[0] != "0":
-        return False
-    return not _dialog_shows(pane.stdout, dialog)
+COPY_MODE_CANCEL_SECONDS = 30.0  # a pane scrolled up (copy mode) this long: orch leaves copy mode itself
+HOLD_WORDS = {
+    "scrolled": "Waiting: the agent's window is scrolled up.",
+    "dialog": "Waiting: the agent's window shows a question for a person.",
+    "text": "Waiting: clear the text in the agent's window.",
+    "unreadable": "Waiting: the agent's window cannot be read right now.",
+}
+_PROMPT_GLYPH = re.compile(r"^\s*[>\u276f\u203a]\s?")
+_ANSI = re.compile(r"\x1b\[([0-9;:?]*)([A-Za-z])")
+# INVARIANT (fb18, third review): orch types its notice only into a prompt box PROVEN empty: no characters at
+# all, or exactly the tool's own hint style as captured from the real tool (tests/fixtures/ prompt captures:
+# `ESC[2m` text `ESC[0m` on the default colour, cursor on the first character). Any other colour, attribute,
+# unknown or colon escape, or doubt holds. There is no colour guessing (no grey bands).
+_HINT_PLAIN = {"39", "0", "", "22"}  # codes around a hint that change nothing visible
+
+
+def _is_hint(raw_row: str) -> bool | None:
+    """True: every visible character of the row is drawn in the hint style, nothing else. False: some visible
+    character is not. None: an escape other than the exact hint style (any doubt)."""
+    dim = False
+    pos = 0
+    seen = False
+    for m in _ANSI.finditer(raw_row):
+        for c in raw_row[pos : m.start()]:
+            if c.strip():
+                seen = True
+                if not dim:
+                    return False
+        pos = m.end()
+        if m.group(2) != "m":
+            return None
+        if m.group(1) == "2":
+            dim = True
+        elif m.group(1) in ("0", "", "22"):
+            dim = False
+        elif m.group(1) != "39":
+            return None
+    for c in raw_row[pos:]:
+        if c.strip():
+            seen = True
+            if not dim:
+                return False
+    return seen or False
+
+
+def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str:
+    """What is in the prompt box ("" only when it is PROVEN empty, see the invariant above)."""
+    lines = pane.split("\n")
+    if sum(1 for ln in lines if _BORDER.match(ln)) < 2:
+        # a tool that draws no prompt box (a plain command-line agent): its prompt is the cursor's own line
+        cur = lines[cy] if 0 <= cy < len(lines) else ""  # no such row on the screen: nothing typed there
+        return "" if not _PROMPT_GLYPH.sub("", cur, count=1).strip() else cur.strip()
+    a, b = _box_rows(lines, cy)
+    rows = [_PROMPT_GLYPH.sub("", ln, count=1).strip() for ln in lines[a:b]]
+    text = " ".join(r for r in rows if r)
+    if not text:
+        return ""
+    if raw is None or cx is None:
+        return text
+    rl = raw.split("\n")
+    plain = [_ANSI.sub("", ln) for ln in rl]
+    if len(plain) != len(lines) or _box_rows(plain, cy) != (a, b):
+        return text
+    body = [
+        ln for ln, p in zip(rl[a:b], plain[a:b], strict=True) if _PROMPT_GLYPH.sub("", p, count=1).strip()
+    ]
+    if len(body) != 1:
+        return text
+    row = body[0]
+    glyph = re.match(r"^((?:\x1b\[[0-9;]*m)*)(\s*[>\u276f\u203a]\s?)", row)
+    if not glyph:
+        return text
+    tail = row[glyph.end() :]
+    if _is_hint(tail) is not True:
+        return text
+    first = plain[a:b][[i for i, r in enumerate(rows) if r][0]]
+    head = _PROMPT_GLYPH.match(first)
+    after = first[head.end() :] if head else first
+    start = (head.end() if head else 0) + len(after) - len(after.lstrip())
+    return "" if cx == start else text
+
+
+def _hold_reason(root: Path, tid: str, dialog: str | None) -> str | None:
+    """Why orch must not type its notice now (None: it may): the pane is unreadable, in copy mode
+    (scrolled up), shows a dialog, or the prompt box holds text a person typed (both would go as one line)."""
+    # ONE tmux call for the screen (with its colour codes) and the cursor: a key pressed between two calls
+    # could pair typed text with an "empty" verdict. The plain text is made from the same capture.
+    r = tmux(
+        root, "capture-pane", "-e", "-p", "-t", target(tid), ";",
+        "display-message", "-p", "-t", target(tid), "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x}",
+        timeout=QUICK,
+    )  # fmt: skip
+    body, _, state = r.stdout.rpartition("@@orch ")
+    fields = state.split()
+    if r.returncode != 0 or len(fields) < 3:
+        return "unreadable"
+    if fields[0] != "0":
+        return "scrolled"
+    raw = body[:-1] if body.endswith("\n") else body  # the newline before the marker is not the pane's
+    pane = _ANSI.sub("", raw)
+    if _dialog_shows(pane, dialog):
+        return "dialog"
+    try:
+        cy, cx = int(fields[1]), int(fields[2])
+    except ValueError:
+        return "unreadable"
+    return "text" if _box_text(pane, cy, cx, raw) else None
+
+
+def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
+    """Under the run lock: keep the reason input is held back (shown by `orch run status`), and after
+    COPY_MODE_CANCEL_SECONDS of a scrolled-up pane leave copy mode (a quiet pane: nobody is reading it)."""
+    cur = rec.get("hold")
+    if why is None:
+        if cur:
+            rec.pop("hold", None)
+            runs._write(root, rec)
+        return
+    if not cur or cur.get("why") != why:
+        rec["hold"] = {"why": why, "since": tickets.now()}
+        runs._write(root, rec)
+    elif why == "scrolled":
+        try:
+            age = time.time() - runs._parse(cur["since"])
+        except (KeyError, ValueError):
+            return
+        if age >= COPY_MODE_CANCEL_SECONDS and _client_idle(root, tid) >= COPY_MODE_CANCEL_SECONDS:
+            tmux(root, "send-keys", "-t", target(tid), "-X", "cancel", timeout=QUICK)
+
+
+def _client_idle(root: Path, tid: str) -> float:
+    """Seconds since ANY client attached to the session last pressed a key (the newest one counts); 0 when
+    unknown or nobody is attached: orch leaves copy mode only for a pane nobody has touched for a while."""
+    r = tmux(root, "list-clients", "-t", target(tid), "-F", "#{client_activity}", timeout=QUICK)
+    try:
+        newest = max(float(x) for x in r.stdout.split())
+    except ValueError:
+        return 0.0
+    return max(0.0, time.time() - newest) if r.returncode == 0 else 0.0
 
 
 def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:
@@ -327,16 +459,27 @@ def deliver(root: Path, tid: str, stop=None) -> int:
                 runs._write(root, rec)
             return 0
         line = notice_line(tid, any(i.get("via") == "start" for i in items))
-        if not _screen_free(root, tid, _dialog_rule(rec["agent"], root)):
-            return 0  # a dialog or a screen orch cannot read: the wrapper's watcher tries again shortly
+        why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root))
+        _note_hold(root, tid, rec, why)
+        if why:
+            return (
+                0  # held back (scrolled up, a dialog, unsent text): the wrapper's watcher tries again shortly
+            )
         if (stop is not None and stop.is_set()) or (runs.read(root, tid) or {}).get("stop_requested"):
             return 0
         if not _type_line(root, tid, line, QUICK):
             return 0
         rec = runs.read(root, tid) or rec
+        rec.pop("hold", None)
         rec["live"] = {"state": "working", "since": tickets.now()}
         rec["renewed_at"] = tickets.now()
-        rec["submit"] = {"at": tickets.now(), "line": line, "enters": 1, "nudges": nudges + 1}
+        rec["submit"] = {
+            "at": tickets.now(),
+            "line": line,
+            "enters": 1,
+            "nudges": nudges + 1,
+            "live_since": rec["live"]["since"],
+        }
         runs._write(root, rec)
         return len(items)
 
@@ -412,29 +555,32 @@ def _box_rows(lines: list[str], cy: int) -> tuple[int, int]:
     return max(0, cy - 2), cy + 1
 
 
-def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | None, str]:
-    """(unsent, pane hash). unsent: True when the notice line still sits in the prompt box, False when it does
-    not, None when that cannot be told safely: copy mode, the tool's dialog shows anywhere on the pane (an
-    Enter would answer it), or tmux failed."""
+def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | None, str, bool]:
+    """(unsent, pane hash, lost). lost: the notice is nowhere on the visible pane (not in the box, not
+    echoed above it): the tool dropped the typed keys. unsent: True when the notice line still sits in
+    the prompt box, False when it does not, None when that cannot be told safely: copy mode, the tool's
+    dialog shows anywhere on the pane (an Enter would answer it), or tmux failed."""
     pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
     if pane.returncode != 0:
-        return None, ""
+        return None, "", False
     digest = hashlib.sha256(pane.stdout.encode("utf-8")).hexdigest()[:16]
     d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}", timeout=QUICK)
     try:
-        in_mode, y = d.stdout.split()
+        in_mode, y = d.stdout.split()[:2]
         cy = int(y)
     except ValueError:
-        return None, digest
+        return None, digest, False
     if d.returncode != 0 or in_mode != "0":
-        return None, digest
+        return None, digest, False
     # the tool's dialog anywhere on the visible pane: no Enter (a false match only costs the extra Enter, and
     # such checks count towards the give-up); the box rows below only locate the notice line
     if _dialog_shows(pane.stdout, dialog):
-        return None, digest
+        return None, digest, False
     lines = pane.stdout.split("\n")
     a, b = _box_rows(lines, cy)
-    return _squeeze(line) in _squeeze("".join(lines[a:b])), digest
+    unsent = _squeeze(line) in _squeeze("".join(lines[a:b]))
+    lost = not unsent and _squeeze(line) not in _squeeze("".join(lines))
+    return unsent, digest, lost
 
 
 def check_submit(
@@ -471,7 +617,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             if age < SUBMIT_CHECK_SECONDS or not session_exists(root, tid):
                 return None
             dialog = _dialog_rule(rec["agent"], root)
-            unsent, digest = _look(root, tid, s.get("line") or "", dialog)
+            unsent, digest, lost = _look(root, tid, s.get("line") or "", dialog)
             if digest and digest != s.get("pane"):
                 s["pane"], s["quiet"] = digest, runs._iso(t)
             quiet = t - runs._parse(s.get("quiet") or s["at"])
@@ -489,7 +635,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             and not s.get("watchdog")
             and (enters == 1 or age >= SUBMIT_WATCHDOG_SECONDS)
         ):
-            again, _ = _look(root, tid, s.get("line") or "", dialog)  # the screen may have changed meanwhile
+            again, _, _ = _look(root, tid, s.get("line") or "", dialog)  # screen may have changed meanwhile
             if again is True and not (stop is not None and stop.is_set()) and _enter(root, tid, QUICK):
                 s["enters"] = enters + 1
                 if age >= SUBMIT_WATCHDOG_SECONDS:
@@ -501,6 +647,31 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
                     run,
                     f"Enter again ({s['enters']}): the notice still sat in the box at {int(age)} s",
                 )
+        elif (
+            not stuck
+            and not s.get("stale")
+            and lost
+            and not s.get("retyped")
+            and age < SUBMIT_WATCHDOG_SECONDS
+        ):
+            # fb18: the tool dropped the typed keys: the notice is nowhere on the pane. Type it once more, but
+            # only when nothing suggests it was taken or that a person is at the keyboard: the input still
+            # waits, the run has not moved on, the pane did not change between two looks, and (last moment,
+            # as for the first notice) no copy mode, dialog or unsent text.
+            if digest != s.get("lost_digest"):
+                s["lost_digest"], s["lost_at"] = digest, runs._iso(t)
+            elif (
+                t - runs._parse(s["lost_at"]) >= 1.0
+                and runs.undelivered(root, tid)
+                and (rec.get("live") or {}).get("state") == "working"
+                and (rec.get("live") or {}).get("since") == s.get("live_since")
+                and _hold_reason(root, tid, dialog) is None
+                and not (stop is not None and stop.is_set())
+                and _type_line(root, tid, s["line"], QUICK)
+            ):
+                s["retyped"] = True
+                did = "typed_again"
+                _log_submit(root, tid, run, f"typed the notice again: not on the screen at {int(age)} s")
         elif (
             not stuck
             and age >= SUBMIT_GIVE_UP_SECONDS + 60
@@ -1021,6 +1192,8 @@ def start_waiting(root: Path) -> None:
 def line(rec: dict, root: Path | None = None) -> str:
     """One plain sentence about a live run, for `orch run status`."""
     state = (rec.get("live") or {}).get("state", "starting")
+    if (rec.get("hold") or {}).get("why") in HOLD_WORDS:
+        return HOLD_WORDS[rec["hold"]["why"]]
     if (rec.get("live") or {}).get("why"):
         return rec["live"]["why"]
     words = {

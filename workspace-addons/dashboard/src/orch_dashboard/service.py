@@ -2,6 +2,7 @@
 server.json {pid, port, nonce, started}, the ready file, server.log. A pid from there is signalled only when that
 process started at the recorded moment, runs `-m orch_dashboard --dir <root>` (POSIX), and the server on the recorded
 port proves it knows the nonce (HMAC of a fresh challenge; the nonce itself is never served) and names that pid."""
+
 from __future__ import annotations
 
 import hashlib
@@ -70,8 +71,14 @@ def _record(root: Path) -> dict | None:
     if not d:
         return None
     pid, port, nonce, started = d.get("pid"), d.get("port"), d.get("nonce"), d.get("started")
-    if not (valid_pid(pid) and isinstance(port, int) and 0 < port < 65536 and isinstance(nonce, str)
-            and NONCE_RE.match(nonce) and isinstance(started, str)):
+    if not (
+        valid_pid(pid)
+        and isinstance(port, int)
+        and 0 < port < 65536
+        and isinstance(nonce, str)
+        and NONCE_RE.match(nonce)
+        and isinstance(started, str)
+    ):
         return None
     return {"pid": pid, "port": port, "nonce": nonce, "started": started}
 
@@ -102,11 +109,28 @@ def start(root: Path, port: int | None = None) -> dict:
     kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
     # -P: the workspace folder is never on the import path (a planted orch_dashboard.py there is not run)
     root = root.resolve()
-    cmd = [sys.executable, "-P", "-m", "orch_dashboard", "--dir", str(root), "serve", "--ready-file", str(ready),
-           *(["--port", str(port)] if port else ["--port", str(DEFAULT_PORT), "--auto-port"])]
+    cmd = [
+        sys.executable,
+        "-P",
+        "-m",
+        "orch_dashboard",
+        "--dir",
+        str(root),
+        "serve",
+        "--ready-file",
+        str(ready),
+        *(["--port", str(port)] if port else ["--port", str(DEFAULT_PORT), "--auto-port"]),
+    ]
     with runfiles.open_append(d / "server.log") as out:
-        proc = subprocess.Popen(cmd, cwd=root, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                env={**os.environ, "ORCH_DASHBOARD_NONCE": nonce}, **kw)
+        proc = subprocess.Popen(
+            cmd,
+            cwd=root,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            env={**os.environ, "ORCH_DASHBOARD_NONCE": nonce},
+            **kw,
+        )
     try:
         end = time.time() + 15
         info = None
@@ -133,7 +157,7 @@ def start(root: Path, port: int | None = None) -> dict:
 
 
 def stop(root: Path) -> str:
-    """"stopped", "not running", or "not verified" (a pid file that is not our dashboard: nothing is signalled)."""
+    """ "stopped", "not running", or "not verified" (a pid file that is not our dashboard: nothing is signalled)."""
     had = _record(root) is not None
     cur = running(root)
     if not cur:
