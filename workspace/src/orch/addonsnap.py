@@ -6,6 +6,7 @@ install and every later reinstall use the snapshot, after checking its hash agai
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import shutil
@@ -109,10 +110,78 @@ def _info(folder: Path, digest: str, dest: Path) -> dict:
     }
 
 
-def verify(snapshot_dir: Path, digest: str) -> bool:
-    """Is this a snapshot folder named `digest`, with exactly that content? (a tampered one: False)"""
+def _bases() -> list[Path]:
+    """The orch homes a snapshot may live in: the account's default home, and on a dev or test install also
+    the test home (ORCH_HOME under the real <account home>/.orch-test). Never an env-chosen home otherwise."""
+    account = humanproof.account_home()
+    bases = [account / ".orch-tool"]
+    env = os.environ.get("ORCH_HOME")
+    if (
+        env
+        and humanproof.install_kind() in ("dev", "test")
+        and humanproof._prefix_is_real_dir(account)
+        and humanproof._under(os.path.realpath(env), humanproof._join(account, ".orch-test"))
+    ):
+        bases.append(Path(env))
+    return bases
+
+
+def home_of(snapshot_dir: Path, digest: str) -> Path | None:
+    """The orch home this snapshot folder lies in, only when it is EXACTLY <home>/keys/<ws>/addon-snapshots/
+    <digest> with no link anywhere on the path (real path = plain path) and <home> is an allowed base."""
+    src = Path(snapshot_dir)
+    if not src.is_absolute() or os.path.realpath(src) != os.path.abspath(src):
+        return None
+    for base in _bases():
+        if base.is_symlink() or os.path.realpath(base) != os.path.abspath(base):
+            continue
+        parts, want = humanproof._parts(str(src)), humanproof._parts(str(base))
+        if (
+            len(parts) == len(want) + 4
+            and parts[: len(want)] == want
+            and parts[len(want)] == "keys"
+            and parts[len(want) + 2] == "addon-snapshots"
+            and parts[len(want) + 3] == (digest.lower() if humanproof._is_windows() else digest)
+            and len(parts[len(want) + 1]) == 32
+        ):
+            return base
+    return None
+
+
+ALLOWED = "addons-allowed.json"
+
+
+def _allowed(home: Path) -> list[str]:
+    raw = None
     try:
-        if Path(snapshot_dir).name != digest or Path(snapshot_dir).parent.name != "addon-snapshots":
+        if humanproof.file_problem(home / ALLOWED) is None:
+            raw = saferead.read_private(Path(os.path.realpath(home)), ALLOWED, 1 << 20)
+        data = json.loads(raw) if raw is not None else {}
+    except (OSError, ValueError):
+        return []
+    hashes = data.get("hashes") if isinstance(data, dict) else None
+    return [h for h in hashes if isinstance(h, str)] if isinstance(hashes, list) else []
+
+
+def allow(home: Path, digest: str) -> None:
+    """Record a person-allowed content hash in the guarded home (only inside addons.trusted_local_add)."""
+    have = _allowed(home)
+    if digest not in have:
+        humanproof._write_private(
+            Path(home) / ALLOWED, json.dumps({"hashes": [*have, digest][-200:]}, sort_keys=True)
+        )
+
+
+def is_allowed(snapshot_dir: Path, digest: str) -> bool:
+    """In the right place AND its hash is on the person-allowed list of that home."""
+    base = home_of(snapshot_dir, digest)
+    return base is not None and digest in _allowed(base)
+
+
+def verify(snapshot_dir: Path, digest: str) -> bool:
+    """Is this a snapshot folder named `digest` in the right place, with exactly that content?"""
+    try:
+        if home_of(snapshot_dir, digest) is None:
             return False
         return tree_hash(read_tree(snapshot_dir)) == digest
     except (Refused, OSError):

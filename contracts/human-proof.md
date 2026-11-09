@@ -140,6 +140,12 @@ person's own install, and a dev kit does not get it.
 `<profile folder>\\.orch-test`, and paths compare component by component, case-insensitively, with both separators; the
 prefix must `lstat` as a real folder with no reparse point (junction or symlink).
 
+**Folder add-on snapshots.** A person-allowed folder add-on lives only at exactly `<account home>/.orch-tool/keys/<ws>/addon-snapshots/<content hash>`
+(on a test install also under the test home), with no link on the path, and its hash must be on the person-allowed list
+`<home>/addons-allowed.json` (written only inside the hand-off). On a normal install the add-on list is read from the default
+orch home only, never from an `ORCH_HOME`. An install from before the record existed counts as `normal` and `orch update`
+writes that record (never an elevation); the Windows finisher writes it back and pins `UV_TOOL_DIR` too.
+
 **Install record.** `<sys.prefix>/orch-install.json` = `{"schema": "orch.install/1", "kind": "normal|dev|test", "root": "<real path of the tool environment>"}`; it counts only
 when it sits in the running interpreter's environment and `root` equals that environment's real path (no `uv`, no
 `UV_TOOL_DIR` / `XDG_DATA_HOME` decides; a reinstall by orch pins `UV_TOOL_DIR` to the dirname of `root`); written

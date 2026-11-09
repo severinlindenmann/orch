@@ -35,7 +35,23 @@ from orch.errors import Refused
 ENFORCE_PENDING_MAC = False
 
 HP_MAX_LIFE = 60
-NOT_TOGETHER = "Refused: this workspace and this orch home don't belong together."
+NOT_TOGETHER = "home_pairing"  # the code, for tests and logs; people read the plain texts below
+MSG_OTHER_HOME = (
+    "This workspace uses a different orch folder than your account's. "
+    "Start orch normally (without ORCH_HOME) to approve things here."
+)
+MSG_LINKED_HOME = (
+    "orch's folder in your account is a link to somewhere else, so orch won't trust it. "
+    "Move the real folder back to {path}."
+)
+MSG_TEST_WS = "This is a test workspace; start it with its own test orch folder."
+MSG_TEST_INSTALL = "This is a test install of orch; it only works in test folders."
+
+
+class HomeRefused(Refused):
+    code = NOT_TOGETHER
+
+
 WRONG_RIGHTS = "Refused: the key folder has the wrong rights. Fix: orch doctor"
 POSIX = os.name == "posix"
 
@@ -220,17 +236,17 @@ def guarded_home(root: Path) -> Path:
         if install == "test":
             # A source-tree/test run never touches the account's real orch home (owner rule). Children of the
             # test suite (subprocess tests) reach here with the real pwd home, so this must refuse, not fake.
-            raise Refused(NOT_TOGETHER)
+            raise HomeRefused(MSG_TEST_INSTALL)
         cand = account / ".orch-tool"
         home_real = _join(acct, ".orch-tool")
         env = os.environ.get("ORCH_HOME")
         # a real workspace pairs only with the default home: another home refuses, never a fallback
         if env and not _same(os.path.realpath(env), home_real):
-            raise Refused(NOT_TOGETHER)
-        if cand.is_symlink():
-            raise Refused(NOT_TOGETHER)  # the default folder is a link: never followed
+            raise HomeRefused(MSG_OTHER_HOME)
+        if cand.is_symlink():  # the default folder is a link: never followed
+            raise HomeRefused(MSG_LINKED_HOME.format(path=cand))
     if not home_ok(acct, install, real_dir, ws_real, home_real):
-        raise Refused(NOT_TOGETHER)
+        raise HomeRefused(MSG_TEST_WS if ws_test else MSG_OTHER_HOME)
     return cand
 
 

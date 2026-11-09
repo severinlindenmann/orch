@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _prefix(tmp_path, monkeypatch, record=None, kind=None):
     env = tmp_path / "toolenv"
-    env.mkdir()
+    env.mkdir(exist_ok=True)
     if kind is not None:
         record = hp.install_record_text(kind, env)
     if record is not None:
@@ -262,24 +262,208 @@ def test_lane_c_layout_tool_env_under_orch_test_testnet(tmp_path, monkeypatch):
     assert hp.install_kind() == "test"
 
 
-def test_planted_folder_entry_is_not_installed_on_a_normal_install(tws, tmp_path, monkeypatch, capsys):
-    proj = tws
+@pytest.fixture
+def rws(tmp_path, monkeypatch):
+    """A REAL workspace on a NORMAL install: guarded home = the (temp) account's default orch home."""
+    acct = tmp_path / "acct"
+    ws = acct / "work" / "ws"
+    (ws / ".orch").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.delenv("ORCH_HOME", raising=False)
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    return ws
+
+
+def test_planted_folder_entry_is_not_installed_on_a_normal_install(rws, tmp_path, capsys):
+    from orch import addonsnap
+
     evil = _folder_addon(tmp_path)
     planted = [
         {"name": "mine", "source": str(evil), "version": "0.1.0"},  # no approval
         {"name": "relay", "source": "built-in", "version": "0.1.0"},
     ]
-    snap = addons.prepare_local_add(proj, evil)
-    kept = [
-        {"name": "ok", "source": snap["snapshot"], "version": "0.1.0", "approved": True, "hash": snap["hash"]}
-    ]
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
     args = addons._tool_args(planted)
     assert str(evil) not in args and "--with" in args  # the built-in still goes in
     assert "only you can allow" in capsys.readouterr().err
-    assert snap["snapshot"] in addons._tool_args(kept)  # a person's earlier hand-off stays
-    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
-    assert str(evil) in addons._tool_args(planted)  # dev/test installs install any folder
+    snap = addons.prepare_local_add(rws, evil)
+    entry = {
+        "name": "ok",
+        "source": snap["snapshot"],
+        "version": "0.1.0",
+        "approved": True,
+        "hash": snap["hash"],
+    }
+    assert addons._missing_source(entry) is not None  # right place, but never allowed by a person
+    addonsnap.allow(hp.guarded_home(rws), snap["hash"])
+    assert snap["snapshot"] in addons._tool_args([entry])  # allowed hash in the right place: installed
+
+
+def test_snapshot_in_an_agent_chosen_home_is_skipped(tws, tmp_path, monkeypatch, capsys):
+    """H1: ORCH_HOME at an agent's folder holding a valid, 'allowed' snapshot must not get installed."""
+    from orch import addonsnap
+
+    f = _real_addon(tmp_path)
+    snap = addons.prepare_local_add(tws, f)  # under the test home (ORCH_HOME)
+    addonsnap.allow(hp.guarded_home(tws), snap["hash"])
+    entry = {
+        "name": "hello",
+        "source": snap["snapshot"],
+        "version": "0.1.0",
+        "approved": True,
+        "hash": snap["hash"],
+    }
+    assert addons._missing_source(entry) is None  # a test install may use its test home
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")  # the same layout on a normal install
+    assert "changed since you allowed it" in addons._missing_source(entry)
+    assert snap["snapshot"] not in addons._tool_args([entry])
+    # a snapshot folder with a link on the way is no snapshot either
+    link = tmp_path / "linkhome"
+    link.symlink_to(Path(snap["snapshot"]).parents[3])
+    via = link / "keys" / Path(snap["snapshot"]).parents[1].name / "addon-snapshots" / snap["hash"]
+    assert addonsnap.home_of(via, snap["hash"]) is None
+
+
+def test_registry_comes_from_the_default_home_on_a_normal_install(rws, tmp_path, monkeypatch):
+    agent = tmp_path / "agenthome"
+    agent.mkdir()
+    monkeypatch.setenv("ORCH_HOME", str(agent))
+    assert addons.registry_path() == tmp_path / "acct" / ".orch-tool" / "addons.json"
+
+
+def test_install_uses_the_snapshot_not_the_live_folder(tws, tmp_path, monkeypatch):
+    f = _real_addon(tmp_path)
+    snap = addons.prepare_local_add(tws, f)
+    assert addons.local_add_target(tws, f) == snap["hash"] and snap["short"] == snap["hash"][:8]
+    (f / "evil.py").write_text("print('swapped in after the click')")  # the live folder changes
+    got = _capture_reinstall(monkeypatch)
+    with addons.trusted_local_add(snap["hash"]), pytest.raises(Refused, match="changed since you allowed"):
+        addons.add(tws, str(f), yes=True)
+    (f / "evil.py").unlink()  # content back as allowed: installs, from the snapshot
+    with addons.trusted_local_add(snap["hash"]):
+        addons.add(tws, str(f), yes=True)
+    entry = got["entries"][-1]
+    assert entry["source"] == snap["snapshot"] and entry["hash"] == snap["hash"] and entry["approved"] is True
+    assert entry["folder"] == str(f.resolve())
+    assert not (Path(snap["snapshot"]) / "evil.py").exists()
+    from orch import addonsnap
+
+    assert snap["hash"] in addonsnap._allowed(hp.guarded_home(tws))  # recorded inside the hand-off
+
+
+def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, capsys):
+    from orch import addonsnap
+
+    f = _real_addon(tmp_path)
+    snap = addons.prepare_local_add(tws, f)
+    addonsnap.allow(hp.guarded_home(tws), snap["hash"])
+    entry = {
+        "name": "hello",
+        "source": snap["snapshot"],
+        "version": "0.1.0",
+        "approved": True,
+        "hash": snap["hash"],
+    }
+    assert addons._missing_source(entry) is None
+    (Path(snap["snapshot"]) / "evil.py").write_text("x = 1")  # tampered
+    assert "changed since you allowed it" in addons._missing_source(entry)
+    args = addons._tool_args([entry])
+    assert snap["snapshot"] not in args and "left out" in capsys.readouterr().err
+    entry2 = {**entry, "hash": "0" * 64, "source": str(f)}
+    assert "changed since you allowed it" in addons._missing_source(entry2)
+
+
+# ------------------------------------ M3 / M1: updates of installs that predate the record
+
+
+def _old_install(tmp_path, monkeypatch):
+    env = _prefix(tmp_path, monkeypatch)  # no record
+    (env / "bin").mkdir()
+    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    monkeypatch.setattr(addons, "_tool_args", lambda e: [])
+    return env
+
+
+def test_update_of_an_install_without_a_record_writes_a_normal_one(tmp_path, monkeypatch):
+    env = _old_install(tmp_path, monkeypatch)
+    seen = []
+    monkeypatch.setattr(addons, "run_uv", lambda a: seen.append(os.environ.get("UV_TOOL_DIR")))
+    addons._install_tool([])
+    assert seen == [os.path.realpath(tmp_path)]
+    assert hp.read_install_record() == "normal"
+    assert json.loads((env / "orch-install.json").read_text())["root"] == os.path.realpath(env)
+
+
+def test_an_update_never_changes_the_kind(tmp_path, monkeypatch):
+    for kind in ("test", "dev", "normal"):
+        env = _prefix(tmp_path, monkeypatch)
+        (env / "bin").mkdir(exist_ok=True)
+        monkeypatch.setattr(hp, "_source_tree", lambda: False)
+        monkeypatch.setattr(addons, "_tool_args", lambda e: [])
+        (env / "orch-install.json").write_text(hp.install_record_text(kind, env))
+        monkeypatch.setattr(addons, "run_uv", lambda a, e=env: (e / "orch-install.json").unlink())
+        addons._install_tool([])
+        assert hp.read_install_record() == kind
+        (env / "orch-install.json").unlink()
+    (env / "orch-install.json").write_text(
+        hp.install_record_text("test", tmp_path / "other")
+    )  # not for this env
+    monkeypatch.setattr(addons, "run_uv", lambda a: None)
+    addons._install_tool([])
+    assert hp.read_install_record() == "normal"  # a foreign record is never elevated to
+
+
+def test_windows_update_keeps_the_record_and_pins_the_tool_dir(tmp_path, monkeypatch):
+    from orch import winfinish
+
+    env = _old_install(tmp_path, monkeypatch)
+    for rec in (None, "test"):
+        if rec:
+            (env / "orch-install.json").write_text(hp.install_record_text(rec, env))
+        got: dict = {}
+        monkeypatch.setattr(winfinish, "needed", lambda: True)
+        monkeypatch.setattr(winfinish, "pending", lambda h: False)
+        monkeypatch.setattr(addons, "_which_uv", lambda: "uv")
+        monkeypatch.setattr(
+            winfinish,
+            "start",
+            lambda *a, _g=got, **k: _g.update(extra=a[6] if len(a) > 6 else k.get("extra")) or "log",
+        )
+        assert addons._reinstall([], save=False, then=[], root=tmp_path, done="x") is False
+        assert got["extra"]["env"] == {"UV_TOOL_DIR": os.path.realpath(tmp_path)}
+        path, text = got["extra"]["record"]
+        assert path == str(env / "orch-install.json")
+        assert json.loads(text)["kind"] == (rec or "normal") and json.loads(text)["root"] == os.path.realpath(
+            env
+        )
+
+
+def test_finisher_applies_env_and_record(tmp_path):
+    import subprocess
+    import sys
+
+    from orch import winfinish
+
+    (tmp_path / "finish.py").write_text(winfinish.FINISHER, encoding="utf-8")
+    rec = tmp_path / "orch-install.json"
+    code = f"import os,sys; open(r'{tmp_path}/seen','w').write(os.environ['UV_TOOL_DIR'])"
+    job = {
+        "uv": [sys.executable, "-c", code],
+        "free": [],
+        "wait": 5,
+        "uv_timeout": 30,
+        "registry": None,
+        "env": {"UV_TOOL_DIR": "/pinned"},
+        "record": [str(rec), '{"kind": "normal"}\n'],
+        "then": [],
+        "log": str(tmp_path / "finish.log"),
+        "done": "ok",
+        "pending": str(tmp_path / "finish.pending"),
+    }
+    (tmp_path / "finish.pending").write_text("1")
+    (tmp_path / "job.json").write_text(json.dumps(job))
+    r = subprocess.run([sys.executable, "-I", str(tmp_path / "finish.py"), str(tmp_path / "job.json")])
+    assert r.returncode == 0 and (tmp_path / "seen").read_text() == "/pinned"
+    assert json.loads(rec.read_text()) == {"kind": "normal"}
 
 
 def test_start_json_with_launch_urls_is_valid_json(proj, monkeypatch, capsys):
@@ -318,45 +502,6 @@ def _capture_reinstall(monkeypatch):
 
     monkeypatch.setattr(addons, "_reinstall", fake)
     return got
-
-
-def test_install_uses_the_snapshot_not_the_live_folder(tws, tmp_path, monkeypatch):
-    f = _real_addon(tmp_path)
-    snap = addons.prepare_local_add(tws, f)
-    assert addons.local_add_target(tws, f) == snap["hash"] and snap["short"] == snap["hash"][:8]
-    (f / "evil.py").write_text("print('swapped in after the click')")  # the live folder changes
-    got = _capture_reinstall(monkeypatch)
-    # the live folder now has another hash: the proof was for the old content
-    with addons.trusted_local_add(snap["hash"]), pytest.raises(Refused, match="changed since you allowed"):
-        addons.add(tws, str(f), yes=True)
-    (f / "evil.py").unlink()  # content back as allowed: installs, from the snapshot
-    with addons.trusted_local_add(snap["hash"]):
-        addons.add(tws, str(f), yes=True)
-    entry = got["entries"][-1]
-    assert entry["source"] == snap["snapshot"] and entry["hash"] == snap["hash"] and entry["approved"] is True
-    assert entry["folder"] == str(f.resolve())
-    assert not (Path(snap["snapshot"]) / "evil.py").exists()
-
-
-def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, monkeypatch, capsys):
-    f = _real_addon(tmp_path)
-    snap = addons.prepare_local_add(tws, f)
-    entry = {
-        "name": "hello",
-        "source": snap["snapshot"],
-        "version": "0.1.0",
-        "approved": True,
-        "hash": snap["hash"],
-    }
-    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
-    assert addons._missing_source(entry) is None
-    (Path(snap["snapshot"]) / "evil.py").write_text("x = 1")  # tampered
-    assert "changed since you allowed it" in addons._missing_source(entry)
-    args = addons._tool_args([entry])
-    assert snap["snapshot"] not in args and "left out" in capsys.readouterr().err
-    # a hash that does not match the entry's folder name is no snapshot either
-    entry2 = {**entry, "hash": "0" * 64, "source": str(f)}
-    assert "changed since you allowed it" in addons._missing_source(entry2)
 
 
 def test_snapshot_refuses_links_and_big_files(tws, tmp_path):
