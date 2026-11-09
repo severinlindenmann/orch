@@ -143,9 +143,17 @@ def guarded_home(root: Path) -> Path:
         cand = Path(env) if env else Path(os.environ.get("HOME", "")) / ".orch-tool"
         home_real = os.path.realpath(cand)
     else:
+        if install == "test":
+            # A source-tree/test run never touches the account's real orch home (owner rule). Children of the
+            # test suite (subprocess tests) reach here with the real pwd home, so this must refuse, not fake.
+            raise Refused(NOT_TOGETHER)
         cand = account / ".orch-tool"
         home_real = acct.rstrip("/") + "/.orch-tool"
-        if cand.exists() and os.path.realpath(cand) != os.path.realpath(home_real) or cand.is_symlink():
+        env = os.environ.get("ORCH_HOME")
+        # a real workspace pairs only with the default home: another home refuses, never a fallback
+        if env and os.path.realpath(env) != home_real:
+            raise Refused(NOT_TOGETHER)
+        if cand.is_symlink():
             raise Refused(NOT_TOGETHER)  # the default folder is a link: never followed
     if not home_ok(acct, install, real_dir, ws_real, home_real):
         raise Refused(NOT_TOGETHER)
@@ -199,6 +207,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
         home.mkdir(parents=True, exist_ok=True)
         _private_dir(d, home)
     else:
+        _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
     return d
 
