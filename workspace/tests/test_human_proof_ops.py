@@ -478,3 +478,51 @@ def test_looks_good_cannot_be_bypassed_in_two_steps(ws, run):
         "ticket", "patch", tid, '{"note": "n"}', "--if-revision", rev(), "--by", "human:x", "--json"
     )
     assert code == 0
+
+
+def test_relay_connect_handoff_keeps_the_token_out_of_handoffs_json(ws, run, monkeypatch):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    code, out, err = run(
+        "relay",
+        "connect",
+        "https://r.example",
+        "--workspace",
+        "ws_a",
+        "--token",
+        "orn_SECRETTOKEN",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    assert code == 2 and "orn_SECRETTOKEN" not in out + err
+    card = hp.handoffs(ws)[0]
+    assert card["op"] == "relay.connect" and "r.example" in card["label"] and "ws_a" in card["label"]
+    assert "orn_SECRETTOKEN" not in json.dumps(hp.handoffs(ws))
+    assert "orn_SECRETTOKEN" not in (hp.key_dir(ws) / "handoffs.json").read_text()
+    item = hp.handoff_take(ws, card["id"])  # what the page runs after the click
+    assert "orn_SECRETTOKEN" in item["argv"] and item["argv"][:2] == ["relay", "connect"]
+    assert not list(hp.key_dir(ws).glob("handoff-*.secret"))  # the secret is spent with the click
+    assert hp.handoff_take(ws, card["id"]) is None
+
+
+def test_dismiss_removes_the_secret_too(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    run(
+        "relay",
+        "connect",
+        "https://r.example",
+        "--workspace",
+        "w",
+        "--token",
+        "orn_X1",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    assert list(hp.key_dir(ws).glob("handoff-*.secret"))
+    hp.handoff_drop(ws, hp.handoffs(ws)[0]["id"])
+    assert not list(hp.key_dir(ws).glob("handoff-*.secret"))

@@ -878,6 +878,7 @@ HANDOFF_HEADS = {
     "run.human_input": (("run", "send"),),
     "ticket.verdict": (("ticket", "changes"), ("ticket", "patch")),
     "relay.allow": (("relay", "allow"),),
+    "relay.connect": (("relay", "connect"),),
     "update": (("update",),),
     "chat.send": (("chat", "say"),),
 }
@@ -914,6 +915,27 @@ def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
         return "a ticket"
 
 
+SECRET_MARK = "@secret"
+
+
+def _split_token(argv: list[str]) -> tuple[list[str], str | None]:
+    """A relay token never goes into handoffs.json: it is replaced by a mark and kept apart."""
+    out, token = list(argv), None
+    for i, a in enumerate(out):
+        if a == "--token" and i + 1 < len(out):
+            token, out[i + 1] = out[i + 1], SECRET_MARK
+        elif a.startswith("--token="):
+            token, out[i] = a[len("--token=") :], "--token=" + SECRET_MARK
+    return out, token
+
+
+def _join_token(argv: list[str], token: str) -> list[str]:
+    return [
+        token if a == SECRET_MARK else "--token=" + token if a == "--token=" + SECRET_MARK else a
+        for a in argv
+    ]
+
+
 def request_handoff(root: Path, op: str, target: str, label: str = "", value: str = "", argv=None) -> bool:
     """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
     by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
@@ -931,13 +953,25 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
         now = int(time.time())
         with _key_lock(d):
             items = [i for i in _read_json(root, path, []) if isinstance(i, dict) and i.get("exp", 0) > now]
-            if any(i.get("op") == op and i.get("target") == target and i.get("argv") == argv for i in items):
+            argv, token = _split_token(argv)
+            same = [
+                i for i in items if i.get("op") == op and i.get("target") == target and i.get("argv") == argv
+            ]
+            if same and token is None:
                 return True
+            items = [i for i in items if i not in same]  # a new pairing replaces the same request (new token)
             if sum(1 for i in items if i.get("op") == op) >= HANDOFF_PER_OP:
                 return False
+            hid = _b64u(secrets.token_bytes(9))
+            if token is not None:
+                _write_private(d / f"handoff-{hid}.secret", token)
+            for f in d.glob("handoff-*.secret"):  # a secret whose request is gone or expired
+                if f.name != f"handoff-{hid}.secret" and f.name[8:-7] not in {i.get("id") for i in items}:
+                    with contextlib.suppress(OSError):
+                        f.unlink()
             items.append(
                 {
-                    "id": _b64u(secrets.token_bytes(9)),
+                    "id": hid,
                     "op": op,
                     "target": target,
                     "label": label[:120],
@@ -975,9 +1009,18 @@ def handoff_take(root: Path, hid: str) -> dict | None:
             if hit is None:
                 return None
             _write_private(d / "handoffs.json", json.dumps([i for i in items if i is not hit]))
+            secret = d / f"handoff-{hid}.secret"
+            token = None
+            if SECRET_MARK in json.dumps(hit.get("argv")):
+                token = _read_guarded(secret).decode("utf-8").strip()
+            with contextlib.suppress(OSError):
+                secret.unlink()
     except (Refused, OSError, ValueError):
         return None
     argv = hit.get("argv")
+    if token is not None and isinstance(argv, list):
+        hit = {**hit, "argv": _join_token(argv, token)}
+        argv = hit["argv"]
     heads = HANDOFF_HEADS.get(hit.get("op"), ())
     if not isinstance(argv, list) or not any(argv[: len(h)] == list(h) for h in heads):
         return None
@@ -987,6 +1030,8 @@ def handoff_take(root: Path, hid: str) -> dict | None:
 
 
 def handoff_drop(root: Path, hid: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(hid)):
+        return
     try:
         d = key_dir(root, create=False)
         with _key_lock(d):
@@ -996,6 +1041,8 @@ def handoff_drop(root: Path, hid: str) -> None:
                 if isinstance(i, dict) and i.get("id") != hid
             ]
             _write_private(d / "handoffs.json", json.dumps(items))
+            with contextlib.suppress(OSError):
+                (d / f"handoff-{hid}.secret").unlink()
     except (Refused, OSError, ValueError):
         pass
 

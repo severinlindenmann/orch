@@ -177,3 +177,32 @@ def test_proof_flag_goes_before_the_double_dash():
         subprocess.run = real
     a = seen["argv"]
     assert a.index("--proof-stdin") < a.index("--") and a[-1] == "text"
+
+
+def test_relay_connect_via_hand_off_reaches_the_relay_with_a_proof(live, run):
+    """The person's terminal `relay connect` waits for one click; Continue runs it with a proof and the token
+    that was kept apart. The relay is not there (port 1): "can't reach" means the proof WAS accepted."""
+    from conftest import turn_on
+
+    root, port = live
+    turn_on(root, "relay")
+    code, out, err = run(
+        "relay",
+        "connect",
+        "http://127.0.0.1:1",
+        "--workspace",
+        "ws_a",
+        "--token",
+        "orn_T0KEN",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    assert code == 2 and "orn_T0KEN" not in out + err
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
+    item = json.loads(c.getresponse().read())[0]
+    assert item["op"] == "relay.connect" and "orn_T0KEN" not in json.dumps(item)
+    ck = signed_in(root, port)
+    st, _, body = http_post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": item["id"]}}, ck)
+    assert st == 422 and "reach" in body.lower() and "dashboard on this computer" not in body
