@@ -1075,6 +1075,7 @@
   {
    "name": "synced won't-do without relay attribution -> not the person's",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
    "item": {
     "ticket": "t_inv7c2",
     "check": "c2",
@@ -1087,6 +1088,7 @@
   {
    "name": "synced won't-do with by human: only",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
    "item": {
     "ticket": "t_inv7c2",
     "check": "c2",
@@ -1100,6 +1102,7 @@
   {
    "name": "recorded from a relay-authenticated phone sender",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
    "item": {
     "ticket": "t_inv7c2",
     "check": "c2",
@@ -1110,27 +1113,55 @@
    "human": true
   },
   {
-   "name": "receiving core's own MAC",
+   "name": "receiving core's own wontdo1 MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
    "item": {
     "ticket": "t_inv7c2",
     "check": "c2",
     "reason": "not needed"
    },
    "relay_authenticated_sender": false,
-   "mac": "sM1sTUDjZVKfGVov7WK3TfJmYL4DOoQ6lbGjcJ57aso",
+   "mac": "rp94TB3QmXKONkYBWgpZ5Y07qA2vSrKC-efxbRVcqjk",
    "human": true
   },
   {
    "name": "another machine's MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
    "item": {
     "ticket": "t_inv7c2",
     "check": "c2",
     "reason": "not needed"
    },
    "relay_authenticated_sender": false,
-   "mac": "OWD8xw9b4xV4P8eTNvPhOBhh-93h1aVombqOp4Etqp0",
+   "mac": "aexF4UZBK53dmbYWTZTXiZwQAym1_SoGhpKpOWyOqZk",
+   "human": false
+  },
+  {
+   "name": "MAC made for another workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "d2CinkJuyLMLdxb6u2AO_6pY2gch7hRefO942LgEV9w",
+   "human": false
+  },
+  {
+   "name": "a pending1 MAC over the same JSON is not a won't-do MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "5dlQ9ufItG_om8dULXlqhi-rE-p9X3TF4sM7xmzmmIQ",
    "human": false
   }
  ]

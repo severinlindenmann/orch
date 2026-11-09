@@ -1125,12 +1125,17 @@ def pending_deliver(c):
     return c["line"]["id"] not in c["delivered_ids"]
 
 
+def _wontdo_mac(key, workspace, item):
+    canon = json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{canon}".encode(), hashlib.sha256).digest())
+
+
 def wontdo_is_human(c):
-    """A synced won't-do is a person's only via the receiving core's relay-authenticated sender or its own MAC."""
+    """A synced won't-do is a person's only via the receiving core's relay-authenticated sender or its own wontdo1 MAC."""
     if c.get("relay_authenticated_sender"):
         return True
     m = c.get("mac")
-    return bool(m) and hmac.compare_digest(m, _b64u(hmac.new(bytes.fromhex(c["key"]), json.dumps(c["item"], sort_keys=True, separators=(",", ":")).encode(), hashlib.sha256).digest()))
+    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["item"]))
 
 
 def relay_conn(c):
