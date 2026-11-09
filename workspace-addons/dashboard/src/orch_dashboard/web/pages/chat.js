@@ -381,16 +381,16 @@ new MutationObserver(() => {
 }).observe(document.documentElement, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class']});
 
 // Workspace DMs are a separate layer, so group/Chat changes can merge independently.
-const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, error:false, lastFetch:-Infinity, timer:null};
+const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, loaded:false, picker:null, error:false, lastFetch:-Infinity, timer:null};
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
 const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
 function chatDmMessages(ws) {
   const saved = chatObjects(chatDm.threads.get(ws)?.messages), ids = new Set(saved.map(m => m.id));
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
 }
-async function chatDmLoad() {
+async function chatDmLoad(force = false) {
   if (snapshot || route().kind !== 'chat' || chatDm.loading) return;
-  const delay = 5000 - (Date.now() - chatDm.lastFetch);
+  const delay = force || (!chatDm.loaded && !chatDm.contacts.length) ? 0 : 5000 - (Date.now() - chatDm.lastFetch);
   if (delay > 0) {
     if (!chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, delay);
     return;
@@ -405,6 +405,7 @@ async function chatDmLoad() {
     const contacts = await response.json();
     if (!Array.isArray(contacts)) throw new Error('Contacts');
     chatDm.contacts = chatObjects(contacts).filter(c => chatDmId(c.ws));
+    chatDm.loaded = true;
     if (chatDmId(ws) && chatDmContact(ws)) {
       const synced = await window.orchAct('chat.sync_ws', {workspace:ws});
       if (!synced?.ok) throw new Error('Sync');
@@ -420,6 +421,7 @@ async function chatDmLoad() {
   } catch { chatDm.error = true; }
   finally {
     chatDm.loading = false;
+    if (chatDm.picker) chatDm.picker();
     if (route().kind === 'chat') {
       render();
       if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
@@ -455,19 +457,32 @@ chatList = function () {
 function chatDmContacts() {
   const {d, actions} = dialog('Contacts', 'dialog');
   d.classList.add('chat-page', 'chat-contacts');
-  for (const c of chatDm.contacts) {
-    const can = c.can || {}, allowed = can.chat || can.tasks || can.files;
-    const row = h('button', {type:'button', className:'chat-contact', disabled:!allowed}, chatText('strong', '', c.name),
-      h('span', {className:'chat-member-chips'},
-        can.chat ? chatText('small', 'chat-member-chip', can.files ? 'Can read and send messages and files' : 'Can read and send messages') : null,
-        can.files && !can.chat ? chatText('small', 'chat-member-chip', 'Files') : null,
-        can.tasks ? chatText('small', 'chat-member-chip', 'Give tasks') : null,
-        !allowed ? chatText('small', 'chat-member-chip', 'No access') : null));
-    row.addEventListener('click', async () => { await window.orch.close(d); chatDmSelect(c.ws); });
-    d.append(row);
-  }
-  if (!chatDm.contacts.length) d.append(chatText('p', 'chat-muted', chatDm.error ? 'Could not load contacts.' : 'No contacts.'));
-  d.append(actions); window.orch.open(d);
+  const body = h('div', {className:'chat-contact-list'});
+  const paint = () => {
+    const rows = [];
+    for (const c of chatDm.loaded ? chatDm.contacts : []) {
+      const can = c.can || {}, allowed = can.chat || can.tasks || can.files;
+      const row = h('button', {type:'button', className:'chat-contact', disabled:!allowed}, chatText('strong', '', c.name),
+        h('span', {className:'chat-member-chips'},
+          can.chat ? chatText('small', 'chat-member-chip', can.files ? 'Can read and send messages and files' : 'Can read and send messages') : null,
+          can.files && !can.chat ? chatText('small', 'chat-member-chip', 'Files') : null,
+          can.tasks ? chatText('small', 'chat-member-chip', 'Give tasks') : null,
+          !allowed ? chatText('small', 'chat-member-chip', 'No access') : null));
+      row.addEventListener('click', async () => { chatDm.picker = null; await window.orch.close(d); chatDmSelect(c.ws); });
+      rows.push(row);
+    }
+    if (!chatDm.loaded) {
+      if (chatDm.error && !chatDm.loading) {
+        const retry = h('button', {type:'button', className:'chat-button'}, 'Try again');
+        retry.addEventListener('click', () => { chatDm.error = false; paint(); chatDmLoad(true); });
+        rows.push(chatText('p', 'chat-muted', 'Could not load contacts.'), retry);
+      } else rows.push(chatText('p', 'chat-muted', 'Loading…'));
+    } else if (!chatDm.contacts.length) rows.push(chatText('p', 'chat-muted', 'No contacts.'));
+    body.replaceChildren(...rows);
+  };
+  chatDm.picker = paint; paint();
+  d.addEventListener('close', () => { if (chatDm.picker === paint) chatDm.picker = null; });
+  d.append(body, actions); window.orch.open(d);
 }
 function chatDmSelect(ws) {
   if (!chatDmId(ws)) return;
@@ -505,7 +520,7 @@ chatClick = async function (event) {
   const control = event.target.closest('[data-chat-action]');
   if (!control || control.disabled) return;
   const action = control.dataset.chatAction;
-  if (action === 'contacts') { await chatDmLoad(); return chatDmContacts(); }
+  if (action === 'contacts') { chatDmContacts(); return chatDmLoad(true); }
   if (action === 'select-dm') return chatDmSelect(control.dataset.id);
   if (action === 'retry-dm') return chatDmLoad();
   if (action === 'retry-send') {
