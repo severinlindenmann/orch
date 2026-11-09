@@ -5,6 +5,7 @@ seam is replaced and os.open must never get a dir_fd."""
 import hashlib
 import os
 import stat
+import types
 
 import pytest
 
@@ -219,3 +220,51 @@ def test_ctypes_argument_error_is_none(win, monkeypatch):
 
     monkeypatch.setattr(saferead, "_win_open_raw", bad)
     assert rp(r, "a.log") is None and fs(r, "a.log") == "?" and tail(r, "a.log") is None
+
+
+# ---------------------------------------------------------------- Opus B fixes (W1, W2)
+
+
+def test_cloud_placeholder_folder_and_file_are_not_links(win, monkeypatch):
+    """OneDrive Files On-Demand: a reparse point with a cloud tag is an ordinary file for saferead."""
+    r = win["root"]
+    f = mk(r, "d/a.log")
+    monkeypatch.undo()  # use the real _reparse with a fake lstat tag below
+    monkeypatch.setattr(saferead, "_DIRFD", False)
+    monkeypatch.setattr(winacl, "_windows", lambda: True)
+    lstat = os.lstat
+
+    def cloud(p, *a, **k):
+        st = lstat(p, *a, **k)
+        if str(p) in (str(r / "d"), str(f)):
+            return types.SimpleNamespace(
+                st_file_attributes=0x400,
+                st_reparse_tag=0x9000001A,
+                st_mode=st.st_mode,
+                st_dev=st.st_dev,
+                st_ino=st.st_ino,
+                st_nlink=st.st_nlink,
+                st_size=st.st_size,
+            )
+        return st
+
+    monkeypatch.setattr(saferead.os, "lstat", cloud)
+    assert saferead._reparse(r / "d") is False and saferead._reparse(f) is False
+    monkeypatch.setattr(
+        saferead.os,
+        "lstat",
+        lambda p, *a, **k: types.SimpleNamespace(st_file_attributes=0x400, st_reparse_tag=0xA0000003),
+    )
+    assert saferead._reparse(r / "d") is True  # a junction
+
+
+def test_open_checked_without_a_check_path_is_none_on_windows(win):
+    r = win["root"]
+    f = mk(r, "a.log")
+    assert saferead._open_checked(str(f), {}, None) is None  # no os.open fallback (it follows links)
+
+
+def test_a_final_path_as_long_as_the_buffer_is_a_failure():
+    import inspect
+
+    assert "< 32768" in inspect.getsource(saferead._win_open_raw)

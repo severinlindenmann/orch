@@ -98,10 +98,12 @@ def split_rel(rel: str) -> tuple[str, ...] | None:
 
 
 def _reparse(p: Path) -> bool:
-    """Windows: is `p` itself a symlink, junction or other reparse point (not followed)? POSIX: never (those
+    """Windows: is `p` itself a symlink or junction (not followed; cloud placeholders and other reparse
+    points are ordinary files, the final-path check still guards reads)? POSIX: never (those
     have O_NOFOLLOW and dir_fd). A path that can not be looked at counts as one: fail closed."""
     try:
-        return bool(getattr(os.lstat(p), "st_file_attributes", 0) & winacl.REPARSE)
+        st = os.lstat(p)
+        return winacl.link_reparse(getattr(st, "st_file_attributes", 0), getattr(st, "st_reparse_tag", 0))
     except OSError:
         return True
 
@@ -147,8 +149,8 @@ def _anchor(root: Path, parts: tuple[str, ...]) -> tuple[str, dict, int | None]:
 
 def _open_checked(name: str, kw: dict, check: str | None = None) -> tuple[int, os.stat_result] | None:
     """(fd, fstat) of a regular, single-name file opened without following a link; None for anything else."""
-    if not kw and check is not None and winacl._windows():
-        return _open_windows(name, check)
+    if not kw and winacl._windows():
+        return _open_windows(name, check) if check is not None else None  # never os.open (it follows links)
     try:
         fd = os.open(name, _FLAGS, **kw)
     except OSError:
@@ -227,7 +229,7 @@ def _win_open_raw(path: str):
         if (
             k32.GetFileType(h) != 1  # FILE_TYPE_DISK: not a pipe, console or other device
             or not k32.GetFileInformationByHandle(h, ctypes.byref(info))
-            or not k32.GetFinalPathNameByHandleW(h, buf, 32768, 0)
+            or not 0 < k32.GetFinalPathNameByHandleW(h, buf, 32768, 0) < 32768  # 0 = error, >= size = cut
         ):
             k32.CloseHandle(h)
             return None

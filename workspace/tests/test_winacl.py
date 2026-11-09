@@ -79,6 +79,7 @@ def win(monkeypatch):
     monkeypatch.setattr(winacl, "_write_dacl", write)
     monkeypatch.setattr(winacl, "_owner_sid", owner)
     monkeypatch.setattr(winacl, "_sid_cache", SID)
+    monkeypatch.setattr(winacl, "_floor", lambda: None)  # walk everything unless a test sets a floor
     monkeypatch.setattr(winacl, "_attrs", lambda p: state["attrs"])
     monkeypatch.setattr(subprocess, "run", no_process)
     monkeypatch.setattr(subprocess, "Popen", no_process)
@@ -264,7 +265,9 @@ def test_file_check_hook_is_registered_and_fails_closed(win, tmp_path):
     win["dacl"] = BAD["admins"]
     assert winacl.file_check(tmp_path / "k") == "acl"
     win["err"] = RuntimeError("boom")
-    assert winacl.file_check(tmp_path / "k") == "acl"
+    assert winacl.file_check(tmp_path / "k") == "unknown"  # not a finding: no reset for it
+    win["err"] = winacl._cant("Windows would not tell its rights")
+    assert winacl.file_check(tmp_path / "k") == "unknown"
     win["err"] = None
     win["attrs"] = 0x400
     assert winacl.file_check(tmp_path / "k") == "acl"  # a link in place of the file
@@ -287,3 +290,123 @@ def test_humanproof_refuses_junction_in_home_path(win, tws, monkeypatch):
     monkeypatch.setattr(winacl, "_attrs", lambda p: 0x400 if p == home else 0)
     with pytest.raises(Refused, match="link or junction"):
         hp.human_key(tws)
+
+
+# ---------------------------------------------------------------- Opus B fixes
+
+
+def test_unknown_is_refused_without_reset_protection(win, tws):
+    key = hp.human_key(tws)
+    n = len(win["calls"])
+    win["err"] = winacl._cant("Windows would not tell its rights")  # an API error on the file check
+    with pytest.raises(Refused) as e:
+        hp.human_key(tws, create=False)
+    assert not isinstance(e.value, hp.LooseFile)
+    win["err"] = None
+    assert hp.human_key(tws, create=False) == key  # same key: nothing was reset
+    assert hp.take_notices(tws) == []
+    assert not [c for c in win["calls"][n:] if c[0] == "write" and c[1].endswith("human.key")]
+
+
+def test_only_link_type_reparse_tags_are_refused(win, tmp_path, monkeypatch):
+    win["attrs"] = 0x400
+    for tag, ok in (
+        (0xA000000C, False),
+        (0xA0000003, False),
+        (0, False),
+        (0x9000001A, True),
+        (0x80000013, True),
+    ):
+        monkeypatch.setattr(winacl, "_tag", lambda p, tag=tag: tag)  # cloud (OneDrive) and dedup tags pass
+        if ok:
+            winacl.no_reparse(tmp_path)
+        else:
+            with pytest.raises(Refused, match="link or junction"):
+                winacl.no_reparse(tmp_path)
+
+
+def test_walk_starts_below_the_profile_folder(win, tmp_path, monkeypatch):
+    prof = tmp_path / "Users" / "x"
+    home = prof / ".orch-tool"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(winacl, "_floor", lambda: str(prof))
+    monkeypatch.setattr(winacl, "_tag", lambda p: 0xA0000003)
+    win["attrs"] = 0x400  # everything is a junction ...
+    with pytest.raises(Refused, match="link or junction"):
+        winacl.no_reparse(home)  # ... the home below the profile is refused
+    seen = []
+    monkeypatch.setattr(winacl, "_attrs", lambda p: seen.append(p) or 0x400)
+    with pytest.raises(Refused):
+        winacl.no_reparse(home)
+    assert seen == [home] or str(prof) not in map(
+        str, seen
+    )  # the profile folder and above are never looked at
+    monkeypatch.setattr(winacl, "_attrs", lambda p: seen.append(p) or 0)
+    seen.clear()
+    winacl.no_reparse(home)
+    assert seen == [home]
+
+
+def test_user_profile_comes_from_the_token_not_the_environment(monkeypatch, tmp_path):
+    from conftest import _REAL_HOME_FN  # the true real_home (the suite fakes addons.real_home)
+
+    monkeypatch.setattr(winacl, "_windows", lambda: True)
+    monkeypatch.setattr(winacl, "_profile_cache", None)
+    monkeypatch.setattr(winacl, "_profile_raw", lambda: "C:\\Users\\real")
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOMEDRIVE", "Z:")
+    monkeypatch.setenv("HOMEPATH", str(tmp_path))
+    assert str(_REAL_HOME_FN()) == "C:\\Users\\real"
+    assert str(tmp_path) not in str(_REAL_HOME_FN())
+
+
+def test_posix_real_home_is_unchanged(monkeypatch, tmp_path):
+    from conftest import _REAL_HOME_FN
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert _REAL_HOME_FN() != tmp_path  # the account database, not $HOME
+
+
+def test_profile_lookup_failure_is_refused(monkeypatch):
+    monkeypatch.setattr(winacl, "_profile_cache", None)
+    for bad in (None, "", "relative\\path"):
+        monkeypatch.setattr(winacl, "_profile_raw", lambda bad=bad: bad)
+        with pytest.raises(Refused):
+            winacl.profile_dir()
+    monkeypatch.setattr(winacl, "_profile_raw", lambda: (_ for _ in ()).throw(OSError("x")))
+    with pytest.raises(Refused):
+        winacl.profile_dir()
+
+
+def _read_fails_once(monkeypatch):
+    real, n = hp.saferead.read_private, []
+
+    def once(*a):
+        if not n:
+            n.append(1)
+            return None  # a transient read error, once
+        return real(*a)
+
+    monkeypatch.setattr(hp.saferead, "read_private", once)
+
+
+def test_read_none_with_a_clean_file_on_windows_is_unknown_not_a_reset(win, tws, monkeypatch):
+    key = hp.human_key(tws)
+    _read_fails_once(monkeypatch)
+    with pytest.raises(winacl.Unknown):
+        hp.human_key(tws, create=False)
+    assert hp.human_key(tws, create=False) == key and hp.take_notices(tws) == []
+
+
+def test_read_none_with_a_real_finding_still_resets(win, tws, monkeypatch):
+    key = hp.human_key(tws)
+    d = hp.key_dir(tws, create=False)
+    os.link(d / "human.key", d / "second-name")  # a second name: a finding, not a transient error
+    assert hp.human_key(tws) != key  # read_private is None for it: reset_protection rotates the key
+    assert [n["text"] for n in hp.take_notices(tws)] == [hp.RESET_NOTICE]
+
+
+def test_posix_read_none_is_still_a_loose_file(tws, monkeypatch):
+    key = hp.human_key(tws)
+    _read_fails_once(monkeypatch)
+    assert hp.human_key(tws) != key  # POSIX behaviour unchanged: reset

@@ -218,6 +218,8 @@ def file_problem(p: Path) -> str | None:
 
 def _check_file(p: Path) -> None:
     why = file_problem(p)
+    if why == "unknown":  # Windows could not tell: refuse this call, reset nothing
+        raise Refused("Windows would not tell the rights of a protected file. Try again.")
     if why:
         raise LooseFile(f"{p.name}:{why}")
 
@@ -239,8 +241,22 @@ def _read_guarded(path: Path) -> bytes:
     base, rel = _home_of(path)
     data = saferead.read_private(base, rel, MAX_READ)
     if data is None:
-        raise LooseFile(f"{path.name}:read")
+        _read_refused(path)
     return data
+
+
+def _read_refused(path: Path) -> None:
+    """read_private said None. A real finding (loose rights, a link, a special file, a second name, too big)
+    is a LooseFile: the caller resets the protection. On Windows, when the file passes every check and still
+    could not be read (a transient error), refuse this call only: winacl.Unknown, no reset."""
+    why = file_problem(path)
+    if why == "unknown":
+        raise winacl.Unknown("Windows would not tell the rights of a protected file. Try again.")
+    if why is None and winacl._windows():
+        st = path.lstat()
+        if stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_size <= MAX_READ:
+            raise winacl.Unknown("Windows would not let orch read a protected file. Try again.")
+    raise LooseFile(f"{path.name}:{why or 'read'}")
 
 
 def _private_dir(p: Path, stop: Path) -> None:
@@ -261,7 +277,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
     from orch import addons
 
     home = guarded_home(root)
-    winacl.no_reparse(home)  # a junction anywhere on the path to the home (Windows)
+    winacl.no_reparse(home)  # a symlink or junction below the profile folder (Windows)
     ws = addons.workspace_id(root, create=create)
     if ws is None:
         raise Refused("This folder has no local id yet.")
