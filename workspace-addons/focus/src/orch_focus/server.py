@@ -75,7 +75,7 @@ class Tracker:
         self.status_cache: dict[str, tuple[float, dict]] = {}
         # ticket -> run id, for the runs Focus started (kept in .orch/run/focus/ so a crash is recoverable)
         self.started: dict[str, str] = self._load_started()
-        self.pins: dict[str, dict] = self._load_pins()  # ticket -> {run, pid, start}: who a stop may signal
+        self.pins: dict[str, dict] = {t: p for t, p in self._load_pins().items() if self.started.get(t) == p["run"]}  # ticket -> {run, pid, start}: who a stop may signal
         self.perms = Permissions(root, orch_bin)
         self.last_agent: dict[str, tuple[str, str]] = {}  # ticket -> (agent, mode) of its latest run
         self.ticket_cache: dict[str, tuple[float, dict | None]] = {}
@@ -194,7 +194,7 @@ class Tracker:
     def pin_started(self, tid: str, run: str) -> bool:
         """Right after Focus started a run: record {run, pid, start} of its process. Only a run with this pin
         is ever listed or stopped (nothing is pinned later, on first sight, from a claim someone else could write)."""
-        for _ in range(8):  # a live session writes its pid a moment after the start
+        for _ in range(60):  # a live session writes its pid a moment after the start (up to 30 s)
             self.status_cache.pop(tid, None)
             claim = self.run_status(tid).get("claim") or {}
             pid = self._claim_pid(claim)
@@ -207,6 +207,9 @@ class Tracker:
                     self._save_pins()
                 return True
             time.sleep(0.5)
+        import sys
+
+        print(f"focus: no process id for run {run} on {tid} after 30 s; it stays out of Running now", file=sys.stderr)
         return False
 
     def _ours(self, tid: str, run: str, claim: dict, running: bool) -> bool:
