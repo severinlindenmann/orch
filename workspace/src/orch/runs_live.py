@@ -286,7 +286,7 @@ COPY_MODE_CANCEL_SECONDS = 30.0  # a pane scrolled up (copy mode) this long: orc
 HOLD_WORDS = {
     "scrolled": "Waiting: the agent's window is scrolled up.",
     "dialog": "Waiting: the agent's window shows a question for a person.",
-    "text": "Waiting: there is unsent text in the agent's window.",
+    "text": "Waiting: clear the text in the agent's window.",
     "unreadable": "Waiting: the agent's window cannot be read right now.",
 }
 _PROMPT_GLYPH = re.compile(r"^\s*[>\u276f\u203a]\s?")
@@ -363,25 +363,28 @@ def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str
 def _hold_reason(root: Path, tid: str, dialog: str | None) -> str | None:
     """Why orch must not type its notice now (None: it may): the pane is unreadable, in copy mode
     (scrolled up), shows a dialog, or the prompt box holds text a person typed (both would go as one line)."""
-    pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
-    fmt = "#{pane_in_mode} #{cursor_y} #{cursor_x}"
-    d = tmux(root, "display-message", "-p", "-t", target(tid), fmt, timeout=QUICK)
-    if pane.returncode != 0 or d.returncode != 0 or not d.stdout.split():
+    # ONE tmux call for the screen (with its colour codes) and the cursor: a key pressed between two calls
+    # could pair typed text with an "empty" verdict. The plain text is made from the same capture.
+    r = tmux(
+        root, "capture-pane", "-e", "-p", "-t", target(tid), ";",
+        "display-message", "-p", "-t", target(tid), "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x}",
+        timeout=QUICK,
+    )  # fmt: skip
+    body, _, state = r.stdout.rpartition("@@orch ")
+    fields = state.split()
+    if r.returncode != 0 or len(fields) < 3:
         return "unreadable"
-    fields = d.stdout.split()
     if fields[0] != "0":
         return "scrolled"
-    if _dialog_shows(pane.stdout, dialog):
+    raw = body[:-1] if body.endswith("\n") else body  # the newline before the marker is not the pane's
+    pane = _ANSI.sub("", raw)
+    if _dialog_shows(pane, dialog):
         return "dialog"
     try:
-        cy = int(fields[1])
-        cx = int(fields[2]) if len(fields) > 2 else None
-    except (ValueError, IndexError):
+        cy, cx = int(fields[1]), int(fields[2])
+    except ValueError:
         return "unreadable"
-    raw = tmux(root, "capture-pane", "-p", "-e", "-t", target(tid), timeout=QUICK)
-    if _box_text(pane.stdout, cy, cx, raw.stdout if raw.returncode == 0 else None):
-        return "text"
-    return None
+    return "text" if _box_text(pane, cy, cx, raw) else None
 
 
 def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:

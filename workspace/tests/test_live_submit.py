@@ -177,6 +177,12 @@ def test_an_enter_the_tool_dropped_is_sent_again_and_submits_once(proj, run, tui
 B = "─" * 40
 
 
+def _combo(a, plain, raw, mode, cy, cx):
+    """The answer of the one-call screen+cursor read (capture-pane -e -p ; display-message)."""
+    shown = raw if raw is not None else plain
+    return subprocess.CompletedProcess(a, 0, f"{shown}\n@@orch {mode} {cy} {cx}\n", "")
+
+
 def _screen(box="", above="", below="  auto mode on"):
     return "\n".join([above, B, f"> {box}", B, below, ""])
 
@@ -199,6 +205,9 @@ def _stuck(proj, run, monkeypatch, pane=None, mode="0", text="Please add a rain 
             sent.append(a[-1])
         if a[0] in ("load-buffer", "paste-buffer"):
             raise AssertionError("orch never pastes")
+        if a[0] == "capture-pane" and ";" in a:
+            pn = screen["pane"]
+            return _combo(a, pn() if callable(pn) else pn, screen["raw"], screen["mode"], 49, screen["cx"])
         if a[0] == "capture-pane":
             pn = screen["pane"]
             if "-e" in a and screen["raw"] is not None:
@@ -764,6 +773,8 @@ def _held(proj, run, monkeypatch, box="", mode="0", cx=2, raw=None):
     def fake(root, *a, **k):
         if a[0] == "send-keys":
             sent.append(a[-1])
+        if a[0] == "capture-pane" and ";" in a:
+            return _combo(a, _screen(screen["box"]), screen["raw"], screen["mode"], 49, screen["cx"])
         if a[0] == "capture-pane":
             pane = _screen(screen["box"])
             if "-e" in a and screen["raw"] is not None:
@@ -788,7 +799,7 @@ def test_a_prompt_with_the_persons_unsent_text_is_not_typed_into(proj, run, monk
     assert runs_live.deliver(proj, tid) == 0 and sent == []
     rec = runs.read(proj, tid)
     assert rec["hold"]["why"] == "text"
-    assert "unsent text" in runs_live.line(rec, proj)
+    assert "clear the text" in runs_live.line(rec, proj)
     screen["box"] = ""  # the person sent or cleared it
     assert runs_live.deliver(proj, tid) == 1 and sent == [runs_live.notice_line(tid, False), "Enter"]
     assert "hold" not in runs.read(proj, tid)
@@ -845,10 +856,10 @@ def _real(name, monkeypatch, proj, run):
     orig = runs_live.tmux
 
     def fake(root, *a, **k):
+        if a[0] == "capture-pane" and ";" in a:
+            return _combo(a, plain, raw, "0", cy, cx)
         if a[0] == "capture-pane":
             return subprocess.CompletedProcess(a, 0, raw if "-e" in a else plain, "")
-        if a[0] == "display-message" and a[-1].startswith("#{pane_in_mode}"):
-            return subprocess.CompletedProcess(a, 0, f"0 {cy} {cx}\n", "")
         return orig(root, *a, **k)
 
     monkeypatch.setattr(runs_live, "tmux", fake)
@@ -875,3 +886,20 @@ def test_typing_the_notice_does_not_mark_the_input_delivered(proj, run, monkeypa
     """The retype and the stale count depend on it: only the agent's own read marks input delivered."""
     tid, rn, item, sent, screen = _stuck(proj, run, monkeypatch)
     assert [i["id"] for i in runs.undelivered(proj, tid)] == [item["id"]]
+
+
+def test_the_placeholder_fixture_has_no_reverse_video_cursor():
+    """The real tool draws no fake cursor (ESC[7m) in the empty prompt: the hint style needs no exception."""
+    for name in ("placeholder", "after-turn"):
+        assert "\x1b[7m" not in (FIX / f"{name}.raw").read_text(encoding="utf-8"), name
+
+
+@_tmux
+def test_the_real_tmux_accepts_the_one_call_read_and_the_client_target(proj, run, tui):
+    """The `;` joined capture + display-message and `list-clients -t =<session>:` against a real tmux."""
+    start, out = tui
+    tid = _ticket(run)
+    start(tid)
+    assert runs_live._hold_reason(proj, tid, None) is None  # an empty box, no dialog, not scrolled
+    assert runs_live.tmux(proj, "list-clients", "-t", runs_live.target(tid)).returncode == 0
+    assert runs_live._client_idle(proj, tid) == 0.0  # nobody attached: unknown, never cancels
