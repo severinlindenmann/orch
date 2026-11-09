@@ -1442,7 +1442,7 @@ def _source_sha() -> str | None:
             from orch import safegit
 
             rc, out, _ = safegit.run(  # the add-on source folder: same hardening as every git call
-                ["rev-parse", "HEAD"], Path(repo()), 5, read_only=True, filters=False
+                ["rev-parse", "HEAD"], Path(repo()), 5, read_only=True, filters=False, root=Path(repo())
             )
             if rc != 0:
                 return None

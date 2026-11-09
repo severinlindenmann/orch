@@ -118,31 +118,60 @@ def _inside(path: str, folder: str) -> bool:
     return False
 
 
+def _is_home(f: Path) -> bool:
+    try:
+        return f == Path.home().resolve()
+    except (OSError, RuntimeError, KeyError):
+        return False  # a failing home lookup never makes a folder "home" (and so never relaxes anything)
+
+
+def _is_anchor(f: Path) -> bool:
+    return f.parent == f
+
+
 def _broad(folder: Path) -> bool:
     """A folder whose whole subtree must not be avoided: a filesystem anchor (`/`, `C:\\`: cron, systemd,
-    Docker WORKDIR /), the user's home (git in ~/.local/bin, Homebrew in home), or an ancestor of the
-    standard system bin folders. There only a PATH entry equal to it is avoided."""
+    Docker WORKDIR /), the user's home, or an ancestor of the standard system bin folders. Used ONLY for the
+    process cwd. Any failure answers False: full avoidance stays."""
     try:
         f = folder.resolve()
-        if f.parent == f or f == Path.home().resolve():
+        if _is_anchor(f) or _is_home(f):
             return True
         return any(_inside(b, str(f)) for b in _SYSTEM_BINS if os.path.isdir(b))
-    except (OSError, RuntimeError):
-        return True
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def _entry(folder: Path) -> str:
+    """The avoid entry for the PROCESS cwd: exact-only when it is broad, else its whole subtree."""
     return _EXACT + str(folder) if _broad(folder) else str(folder)
 
 
+def unusable_root(root: Path | None) -> str | None:
+    """A workspace root that is the user's home or a filesystem anchor cannot be told apart from "everything":
+    git is refused there (the caller sees rc 125 and this message)."""
+    if root is None:
+        return None
+    try:
+        f = Path(root).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if _is_anchor(f) or _is_home(f):
+        return (
+            "orch can't use git when the workspace is your whole home folder or a drive root; "
+            "open a project folder instead"
+        )
+    return None
+
+
 def _avoid(cwd: Path, root: Path | None) -> frozenset:
-    out = {_entry(cwd)}
+    out = {str(cwd)}  # the caller's folder and the root: always the whole subtree
     try:
         out.add(_entry(Path.cwd()))  # always: whatever the caller passes, never a git from our own cwd
     except OSError:
         pass
     if root is not None:
-        out.add(_entry(root))
+        out.add(str(root))
     homes = list(addons.home_candidates())
     try:
         homes.append(addons.home(root))
@@ -598,9 +627,9 @@ def driver_args(
     return pairs
 
 
-def _prepare(args, cwd, timeout, filters, read_only, root):
+def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
     """(argv, config) for git `args`, or (None, (rc, reason)) when orch refuses to run it."""
-    why = refusal(args)
+    why = refusal(args) or unusable_root(guard if guard is not None else root)
     if why:
         return None, (REFUSED, why)
     top: list[str] = []  # options before the subcommand
@@ -679,7 +708,8 @@ def run_bytes(
     stdout) when git printed more than `max_bytes`. Same allowlist, hardening and environment. Defaults are
     for read-only listings (ls-files, rev-parse), which run no filter: pass filters=True for anything that
     reads file content."""
-    argv, extra = _prepare(args, cwd, timeout, filters, read_only, root)
+    # the folder git runs in counts as the root when none is given (home / a drive root: refused, rc 125)
+    argv, extra = _prepare(args, cwd, timeout, filters, read_only, root, root if root is not None else cwd)
     if argv is None:
         return extra[0], b"", extra[1]
     return _raw_bytes(argv, cwd, timeout, None, root, extra or None, max_bytes)
