@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import sys
 import tempfile
 import time
@@ -791,8 +792,13 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
+PROTECTED_FIELDS = ("title_auto", "description", "description_by")  # only orch ticket title writes these
+
+
 def clean_field(key: str, value):
     """Validate a plain field (None or empty clears it); returns the value to store."""
+    if key in PROTECTED_FIELDS:
+        raise Refused(f"{key} is written by orch itself (orch ticket title), not set like a field.")
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if not isinstance(value, str):
@@ -1913,20 +1919,27 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
         dfd = _open_artifacts_fd(root, tid)
         opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
         remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
-        linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd)  # noqa: E731
+        linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)  # noqa: E731
+        lstat = lambda n: os.stat(n, dir_fd=dfd, follow_symlinks=False)  # noqa: E731
+        names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
     else:  # Windows: no handles on folders; the folders are checked one by one
         d0 = artifacts_dir(root, tid)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
-        linker = lambda a, b: os.link(d0 / a, d0 / b)  # noqa: E731
+        linker = lambda a, b: os.link(d0 / a, d0 / b, follow_symlinks=False)  # noqa: E731
+        lstat = lambda n: os.lstat(d0 / n)  # noqa: E731
+        names = lambda: os.listdir(d0)  # noqa: E731
         close = lambda: None  # noqa: E731
     tmp = f".{secrets.token_hex(6)}.part"  # written whole under a hidden name, then linked to its final name
     try:
+        _sweep_parts(names, lstat, remove)
         fd = opener(tmp)
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
+                f.flush()
+                written = os.fstat(f.fileno())
         except BaseException:
             with contextlib.suppress(OSError):
                 remove(tmp)
@@ -1937,7 +1950,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
                 if exact and n > 1:
                     break
                 try:
-                    linker(tmp, final)  # never replaces a file that exists
+                    _publish(linker, opener, remove, lstat, tmp, final, data, written)
                 except FileExistsError:
                     if exact:
                         return {
@@ -1959,6 +1972,40 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
     return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
 
 
+def _publish(linker, opener, remove, lstat, tmp: str, final: str, data: bytes, written) -> None:
+    """Give the finished temp file its final name without replacing anything: a hard link (then the file is
+    checked to be the very one we wrote). A file system that cannot link (FAT, some network drives) gets an
+    O_EXCL create of the final name and a copy instead. FileExistsError means the name is taken."""
+    try:
+        linker(tmp, final)
+    except FileExistsError:
+        raise
+    except OSError:
+        fd = opener(final)  # O_EXCL | O_NOFOLLOW; FileExistsError is the same "taken"
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                remove(final)
+            raise
+        return
+    st = lstat(final)
+    if (st.st_dev, st.st_ino) != (written.st_dev, written.st_ino) or not stat.S_ISREG(st.st_mode):
+        with contextlib.suppress(OSError):
+            remove(final)
+        raise Refused("The file was replaced while it was saved. Not kept.")
+
+
+def _sweep_parts(names, lstat, remove) -> None:
+    """Leftovers of a killed attach (hidden .part files older than an hour) are removed."""
+    with contextlib.suppress(OSError):
+        for n in names():
+            if n.startswith(".") and n.endswith(".part") and time.time() - lstat(n).st_mtime > 3600:
+                with contextlib.suppress(OSError):
+                    remove(n)
+
+
 def _art_rel(tid: str, name: str) -> str:
     return f".orch/tickets/{tid}/artifacts/{name}"
 
@@ -1969,7 +2016,7 @@ def artifacts_list(root: Path, tid: str) -> list[dict]:
     out = []
     if d.is_dir() and not d.is_symlink():
         for f in sorted(d.rglob("*")):
-            if f.is_symlink() or not f.is_file():
+            if f.is_symlink() or not f.is_file() or any(p.startswith(".") for p in f.relative_to(d).parts):
                 continue
             st = f.stat()
             out.append(

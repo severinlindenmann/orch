@@ -353,7 +353,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument("id")
     x.add_argument("title")
-    x.add_argument("--description", help="what it is about, 1 to 3 sentences (goes in the Note)")
+    x.add_argument(
+        "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
+    )
     x = t.add_parser(
         "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
     )

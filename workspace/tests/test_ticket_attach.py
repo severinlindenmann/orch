@@ -135,3 +135,62 @@ def test_attach_exact_name_is_written_once(proj, run):
 def test_attach_name_edges():
     assert tickets.attach_name("CON.txt") == "_CON.txt"
     assert tickets.attach_name(("a" * 79) + " .md").endswith("a.md")
+
+
+def test_edit_and_fields_refuse_the_protected_ones(proj, run):
+    tid = _new(run)
+    for k in ("title_auto", "description", "description_by"):
+        with pytest.raises(Refused):
+            tickets.edit(proj, tid, None, "agent:x", {k: "x"})
+        with pytest.raises(Refused):
+            tickets.clean_field(k, "x")
+        with pytest.raises(Refused):
+            tickets.create(proj, "T", "agent:x", fields={k: "x"})
+    assert "description" not in tickets.load(proj, tid)
+
+
+def test_a_file_system_without_hard_links_still_keeps_the_file(proj, run, monkeypatch):
+    tid = _new(run)
+
+    def no_link(*a, **k):
+        raise OSError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "link", no_link)
+    r = tickets.attach(proj, tid, "", b"text", "human:t", exact="note-aaaa1111.md")
+    assert (proj / r["path"]).read_bytes() == b"text"
+    again = tickets.attach(proj, tid, "", b"other", "human:t", exact="note-aaaa1111.md")
+    assert again["existed"] is True and (proj / r["path"]).read_bytes() == b"text"
+    two = tickets.attach(proj, tid, "x.md", b"1", "human:t")
+    three = tickets.attach(proj, tid, "x.md", b"2", "human:t")
+    assert (two["name"], three["name"]) == ("x.md", "x (2).md")
+    assert [p.name for p in (proj / r["path"]).parent.iterdir() if p.name.startswith(".")] == []
+
+
+def test_a_file_swapped_in_after_linking_is_refused(proj, run, monkeypatch):
+    tid = _new(run)
+    real = os.link
+
+    def link_then_swap(src, dst, *a, **k):
+        real(src, dst, *a, **k)
+        d = proj / ".orch" / "tickets" / tid / "artifacts"
+        (d / dst).unlink()
+        (d / dst).write_bytes(b"someone else")  # a different file under the final name
+
+    monkeypatch.setattr(os, "link", link_then_swap)
+    with pytest.raises(Refused):
+        tickets.attach(proj, tid, "n.md", b"mine", "human:t")
+    assert not (proj / ".orch" / "tickets" / tid / "artifacts" / "n.md").exists()
+
+
+def test_part_files_are_hidden_and_old_ones_swept(proj, run):
+    tid = _new(run)
+    d = tickets.artifacts_dir(proj, tid)
+    old = d / ".abc.part"
+    old.write_bytes(b"x")
+    os.utime(old, (1, 1))
+    fresh = d / ".fresh.part"
+    fresh.write_bytes(b"y")
+    assert tickets.artifacts_list(proj, tid) == []  # dotfiles are not listed
+    tickets.attach(proj, tid, "n.md", b"z", "human:t")
+    assert not old.exists() and fresh.exists()
+    assert [f["name"] for f in tickets.artifacts_list(proj, tid)] == ["n.md"]
