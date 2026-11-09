@@ -10,6 +10,7 @@ local instruction file (named in agents.json); all of them are listed in .git/in
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -243,14 +244,30 @@ ORCH_IGNORE = [
 
 def _general_lines(root: Path) -> list[str]:
     """The hidden General (Chat) ticket keeps the person's private Chat history: its file is local too.
-    Its id is random, so the pattern is the exact file name, found when the file exists."""
-    try:
-        from orch import tickets
+    Its id is random, so the line is the exact file name. Only a safe file STEM is ever written (never the
+    JSON's own id field, which an agent could fill with newlines or globs), and a file git already tracks
+    is left alone (the team owns it)."""
+    import re
 
-        gid = tickets.general_id(root)
-    except Exception:  # noqa: BLE001 - unreadable tickets must never stop the protection itself
+    out: list[str] = []
+    try:
+        d = root / ".orch" / "tickets"
+        for f in sorted(d.glob("t_*.json")):
+            stem = f.stem
+            if f.is_symlink() or not re.fullmatch(r"t_[a-z0-9]{6,16}", stem):
+                continue
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict) or data.get("general") is not True or data.get("id") != stem:
+                continue
+            if _tracked(root, f".orch/tickets/{f.name}"):
+                continue  # already committed by the team: ignoring it would change nothing
+            out.append(f"tickets/{stem}.json")
+    except OSError:
         return []
-    return [f"tickets/{gid}.json"] if gid else []
+    return out
 
 
 def _tracked(root: Path, rel: str) -> bool:

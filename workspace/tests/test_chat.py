@@ -852,3 +852,16 @@ def test_chat_ticket_and_locks_stay_out_of_git(proj, run):
         ["git", "status", "--porcelain", "-uall"], cwd=proj, capture_output=True, text=True, env=env
     ).stdout
     assert ".orch/tickets" not in out, out
+
+
+def test_hostile_general_id_never_reaches_the_ignore_file(proj, run):
+    from orch import harness
+
+    d = proj / ".orch" / "tickets"
+    d.mkdir(parents=True)
+    bad = {"schema": "orch.ticket/1", "id": "t_x\n!secrets/", "general": True, "title": "General"}
+    (d / "t_abcdef.json").write_text(json.dumps(bad))  # id differs from the file stem
+    (d / "t_ghijkl.json").write_text(json.dumps({**bad, "id": "t_ghijkl"}))  # a good one
+    assert harness._general_lines(proj) == ["tickets/t_ghijkl.json"]
+    (d / "t_x\n!secrets.json").write_text(json.dumps({**bad, "id": "t_x\n!secrets"}))
+    assert harness._general_lines(proj) == ["tickets/t_ghijkl.json"]
