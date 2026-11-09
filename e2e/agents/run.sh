@@ -15,11 +15,16 @@ while [ $# -gt 0 ]; do
 done
 [ "$MODE" = live ] || { echo "agent scenarios run in live mode only"; exit 2; }
 REAL_HOME=$HOME
-mkdir -p "$REAL_HOME/orch-dev"
-TMP=$(mktemp -d "$REAL_HOME/orch-dev/.tf-agents-XXXX")
-trap 'rm -rf "$TMP/codex"; rm -rf "$TMP"' EXIT INT TERM
+# agent homes (they hold a copy of the Codex login) live outside every git repo: never under ~/orch-dev
+mkdir -p "$REAL_HOME/.orch-test"
+TMP=$(mktemp -d "$REAL_HOME/.orch-test/agents-XXXX")
+case "$TMP" in "$REAL_HOME"/.orch-test/agents-????*) ;; *) echo "unexpected temp dir $TMP"; exit 2 ;; esac
 OHOME=$(mktemp -d "$REAL_HOME/.orch-e2e-XXXX")  # ORCH_HOME is only trusted under the real home without a .git above
-trap 'rm -rf "$TMP/codex"; rm -rf "$TMP" "$OHOME"' EXIT INT TERM
+case "$OHOME" in "$REAL_HOME"/.orch-e2e-????*) ;; *) echo "unexpected temp dir $OHOME"; rm -rf "$TMP"; exit 2 ;; esac
+cleanup() { rm -rf "$TMP/codex"; rm -rf "$TMP" "$OHOME"; }  # exactly the paths made above
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$TMP/home" "$TMP/tools"
 
 if [ -z "${E2E_PUBLISH_ADMIN_TOKEN:-}" ] && [ -x "$REAL_HOME/orch-dev/scripts/pass-login.sh" ]; then
