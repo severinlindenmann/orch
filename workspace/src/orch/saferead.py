@@ -229,3 +229,38 @@ def _state_at(name: str, kw: dict, full: str, hash_limit: int, budget: list[int]
         os.close(fd)
     budget[0] -= st.st_size
     return f"F:{exe}:{h.hexdigest()}"
+
+
+def read_private(root: Path, rel: str, limit: int) -> bytes | None:
+    """All bytes of the guarded file root/rel (rel `/` separated, fixed names: no name rules), at most
+    `limit`. None for a missing file, a link, a hard-linked or special file (FIFO, device, folder), a file
+    swapped while we look, a file bigger than `limit` or any read error: the caller takes its fail-closed
+    path. Opened like everything here (`_walk`, `_open_checked`): nothing outside root, never blocks.
+    `root` must be a real path."""
+    parts = tuple(p for p in rel.split("/") if p)
+    try:
+        name, kw, dfd = _anchor(Path(root), parts)
+    except OSError:
+        return None
+    try:
+        opened = _open_checked(name, kw, None if kw else str(Path(root).joinpath(*parts)))
+    finally:
+        if dfd is not None:
+            os.close(dfd)
+    if opened is None:
+        return None
+    fd, st = opened
+    try:
+        if st.st_size > limit:
+            return None
+        out = b""
+        while len(out) <= st.st_size:
+            data = os.read(fd, min(CHUNK, st.st_size - len(out) + 1))
+            if not data:
+                break
+            out += data
+        return out if len(out) == st.st_size else None  # it grew or shrank under us: not trusted
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
