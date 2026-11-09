@@ -8,10 +8,12 @@ from test_addons_upgrade import _write_registry, github  # noqa: F401
 
 from orch import addons, services
 
+A40, B40 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
 
 @pytest.fixture
 def source(proj, github, uv_calls, monkeypatch):  # noqa: F811
-    state = {"orch": "0.9.3", "addon": "0.3.1", "sha": "aaaaaaaa1234", "title": None}
+    state = {"orch": "0.9.3", "addon": "0.3.1", "sha": A40, "title": None}
     _write_registry([{"name": "dashboard", "source": "built-in", "version": "0.3.1"}])
     (addons.home() / "installed.json").write_text(json.dumps({"sha": state["sha"]}))
     monkeypatch.setattr(
@@ -26,11 +28,15 @@ def source(proj, github, uv_calls, monkeypatch):  # noqa: F811
     def install(args):
         uv_calls.append(args)
         snapshot = json.loads((addons.home() / "update-before.json").read_text())
-        assert snapshot == {"orch": "0.9.3", "addons": {"dashboard": "0.3.1"}, "sha": state["sha"]}
+        assert {k: snapshot[k] for k in ("orch", "addons", "sha")} == {
+            "orch": "0.9.3",
+            "addons": {"dashboard": "0.3.1"},
+            "sha": state["sha"],
+        }
         state.update(state.get("next", {}))
 
     monkeypatch.setattr(addons, "run_uv", install)
-    state["next"] = {"orch": "0.9.4", "addon": "0.3.2", "sha": "bbbbbbbb5678"}
+    state["next"] = {"orch": "0.9.4", "addon": "0.3.2", "sha": B40}
     return state
 
 
@@ -42,7 +48,7 @@ def test_versions_and_sha(proj, run, source):  # noqa: F811
         "Updating dashboard 0.3.1 → 0.3.2",
     ]
     assert not (addons.home() / "update-before.json").exists()
-    assert json.loads((addons.home() / "installed.json").read_text()) == {"sha": "bbbbbbbb5678"}
+    assert json.loads((addons.home() / "installed.json").read_text()) == {"sha": B40}
 
 
 def test_release_title(proj, run, source):  # noqa: F811
@@ -63,13 +69,16 @@ def test_unchanged_does_not_restart(proj, run, source, monkeypatch):  # noqa: F8
 
 @pytest.mark.parametrize("failure", [None, "row", "stop", "start"])
 def test_restart_only_running_here(proj, run, source, monkeypatch, failure):  # noqa: F811
+    (proj / ".orch").mkdir(exist_ok=True)
+    monkeypatch.setattr(services, "pid_alive", lambda pid: pid != 999)
     monkeypatch.setattr(
         services,
         "running",
         lambda: [
-            {"workspace": str(proj.resolve()), "addon": "dashboard"},
-            {"workspace": str(proj.resolve()), "addon": "focus"},
-            {"workspace": str(proj / "elsewhere"), "addon": "automation"},
+            {"workspace": str(proj.resolve()), "addon": "dashboard", "pid": 1},
+            {"workspace": str(proj.resolve()), "addon": "focus", "pid": 2},
+            {"workspace": str(proj.resolve()), "addon": "dead", "pid": 999},
+            {"workspace": str(proj / "elsewhere"), "addon": "automation", "pid": 3},
         ],
     )
     calls = []
@@ -93,13 +102,14 @@ def test_restart_only_running_here(proj, run, source, monkeypatch, failure):  # 
         (c, proj, {"dashboard", "focus"}) for c in (["stop"] if failure == "stop" else ["stop", "start"])
     ]
     if failure:
-        assert "Restart focus to use the new version\n" in out
+        assert "focus stopped, start it with: orch start" in out
+        assert "Restart focus to use" not in out
     if failure == "row":
         assert "Restarting dashboard… done\n" in out
     elif failure is None:
         assert "Restarting dashboard, focus… done\n" in out
     else:
-        assert "Restart dashboard to use the new version\n" in out
+        assert "dashboard stopped, start it with: orch start" in out
         assert "… done" not in out
 
 
@@ -117,7 +127,7 @@ def test_json(proj, run, source, args):  # noqa: F811
 
 
 def test_sha_only(proj, run, source):  # noqa: F811
-    source["next"] = {"sha": "bbbbbbbb5678"}
+    source["next"] = {"sha": B40}
     code, out, err = run("update")
     assert code == 0, err
     assert out == "Updating orch 0.9.3 (main aaaaaaaa → bbbbbbbb)\n"
@@ -143,8 +153,8 @@ def test_service_filter_preserves_other_records(proj, monkeypatch):
 @pytest.mark.parametrize(
     "old_sha,new_sha,suffix",
     [
-        (None, "bbbbbbbb5678", " (main → bbbbbbbb)"),
-        ("aaaaaaaa1234", None, ""),
+        (None, B40, " (main → bbbbbbbb)"),
+        (A40, None, ""),
     ],
 )
 def test_missing_sha(proj, run, source, old_sha, new_sha, suffix):  # noqa: F811
@@ -178,3 +188,83 @@ def test_release_metadata(github, monkeypatch, release, expected):  # noqa: F811
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     assert addons._release_title() == expected
     assert calls == [("https://api.github.com/repos/o/orch/releases/latest", 5)]
+
+
+def _snap(ws, **kw):
+    import time
+
+    d = {
+        "nonce": "n1",
+        "root": str(ws.resolve()),
+        "time": time.time(),
+        "orch": "0.9.3",
+        "addons": {"dashboard": "0.3.1"},
+        "sha": None,
+    }
+    d.update(kw)
+    (addons.home() / "update-before.json").write_text(json.dumps(d) if d else "")
+    return d
+
+
+@pytest.mark.parametrize("junk", ["{not json", "[]", '{"orch": "1"}', '{"nonce": "n1", "orch": 3}'])
+def test_corrupt_snapshot_never_breaks_project_step(proj, run, source, junk):  # noqa: F811
+    (addons.home() / "update-before.json").write_text(junk)
+    code, out, err = run("update", "--project-only", "--update-nonce", "n1")
+    assert code == 0, err
+    assert out == "Refreshed: nothing\n"
+    assert not (addons.home() / "update-before.json").exists()
+
+
+def test_stale_or_foreign_snapshot_is_ignored(proj, run, source):  # noqa: F811
+    _snap(proj, time=1.0)  # far too old: deleted
+    assert run("update", "--project-only", "--update-nonce", "n1")[1] == "Refreshed: nothing\n"
+    assert not (addons.home() / "update-before.json").exists()
+    _snap(proj)  # no nonce / wrong nonce / other workspace: left alone, nothing printed about an update
+    assert run("update", "--project-only")[1] == "Refreshed: nothing\n"
+    assert run("update", "--project-only", "--update-nonce", "zz")[1] == "Refreshed: nothing\n"
+    assert (addons.home() / "update-before.json").exists()
+    _snap(proj, **{"root": str(proj / "other")})
+    assert run("update", "--project-only", "--update-nonce", "n1")[1] == "Refreshed: nothing\n"
+
+
+def test_matching_snapshot_is_consumed(proj, run, source):  # noqa: F811
+    _snap(proj)
+    code, out, err = run("update", "--project-only", "--update-nonce", "n1")
+    assert code == 0, err
+    assert out.startswith("Updating orch 0.9.3")
+    assert not (addons.home() / "update-before.json").exists()
+
+
+@pytest.mark.parametrize(
+    "bad", ["\x1b[2J" + "a" * 36, "A" * 40, "g" * 40, "a" * 39, "a" * 41, "a" * 40 + "\n\x1b"]
+)
+def test_only_full_hex_shas(bad):
+    assert addons._sha_or_none(bad) is None
+    assert addons._sha_or_none("0123456789abcdef" * 2 + "01234567") == "0123456789abcdef" * 2 + "01234567"
+
+
+def test_network_sha_alone_does_not_restart(proj, run, source, monkeypatch):  # noqa: F811
+    source["next"] = {"sha": B40}  # same versions, GitHub sha moved
+    monkeypatch.setattr(addons, "_restart_updated", lambda root: pytest.fail("restart on a network sha"))
+    code, out, err = run("update")
+    assert code == 0, err
+    assert out.startswith("Updating orch 0.9.3 (main")
+
+
+def test_title_strips_c1_and_bidi(github, monkeypatch):  # noqa: F811
+    import io
+    import urllib.request
+
+    name = "Fix\x9b2J \u202eevil\u2066 ok"
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda url, timeout: io.BytesIO(json.dumps({"name": name}).encode())
+    )
+    assert addons._release_title() == "Fix2J evil ok"
+
+
+def test_helper_may_not_update(proj, run, monkeypatch):  # noqa: F811
+    from test_chat import _helper
+
+    _helper(proj, monkeypatch)
+    for argv in (("update", "--project-only"), ("update", "--project-only", "--update-nonce", "x")):
+        assert run(*argv)[0] == 2, argv

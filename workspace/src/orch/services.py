@@ -135,9 +135,15 @@ def _call(root: Path, name: str, m: dict, sub: str) -> dict:
     return data
 
 
+_BIDI = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+
+
 def _printable(v: object) -> str:
-    """Add-on text for the terminal: no control characters (no escape sequences), at most 200 characters."""
-    return "".join(c for c in str(v) if c.isprintable())[:200]
+    """Add-on text for the terminal: no control characters (no escape sequences, also C1 ones) and no
+    direction overrides, at most 200 characters."""
+    return "".join(c for c in str(v) if c.isprintable() and not 0x80 <= ord(c) <= 0x9F and c not in _BIDI)[
+        :200
+    ]
 
 
 def _workspace_root(root: Path) -> Path:
