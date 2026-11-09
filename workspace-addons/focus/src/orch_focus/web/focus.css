@@ -370,3 +370,4 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-none{padding:12px 16px;margin:0}
 .fx-live[data-hold]{flex:0 1 auto;min-width:0;max-width:100%}
 .fx-live[data-hold] [role=status]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.fx-live[data-hold] .t{display:none}
