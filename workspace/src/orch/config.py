@@ -92,7 +92,7 @@ def _raw_entries(root: Path) -> dict[str, dict]:
     except Refused:
         return {}
     for name, e in agents.items():
-        if isinstance(e, dict) and NAME_RE.match(name) and isinstance(e.get("adapter"), str):
+        if isinstance(e, dict) and NAME_RE.fullmatch(name) and isinstance(e.get("adapter"), str):
             out[name] = {
                 k: e[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(e.get(k), str)
             }
@@ -401,7 +401,7 @@ def add_agent(
     prompt: str | None = None,
     approve: bool = True,
 ):
-    if not NAME_RE.match(name):
+    if not NAME_RE.fullmatch(name):
         raise Refused(f"'{name}' is not a name orch can use. Use lowercase letters, digits and '-'.")
     for k, v in (("command", command), ("interactive", interactive)):
         if v is not None and not (1 <= len(v) <= 500 and "\n" not in v and "\r" not in v):
@@ -416,10 +416,16 @@ def add_agent(
         if prompt not in ("arg", "stdin"):
             raise Refused("The prompt goes in with 'arg' or 'stdin'.")
         set_key(root, f"agents.{name}", "prompt", prompt)
-    if approve:  # a person typed it here: that is the approval (an agent's entry waits for the person)
-        e = _raw_entries(root).get(name)
-        if e:
-            approve_agent(root, name, e)
+    if (
+        approve
+    ):  # a person typed it here: approve ONLY what they typed, and only if the file says exactly that
+        typed = {"adapter": adapter, "command": command}
+        if interactive:
+            typed["interactive"] = interactive
+        if prompt:
+            typed["prompt"] = prompt
+        if _raw_entries(root).get(name) == typed:
+            approve_agent(root, name, typed)
 
 
 # ---- the one notice for a command that comes from a folder's settings

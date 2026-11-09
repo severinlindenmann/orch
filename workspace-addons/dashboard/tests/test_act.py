@@ -956,3 +956,19 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
     ):
         assert _post_raw(act_server, {"op": "ticket.new", "args": args})[0] == 400, args
     assert acts(act_orch) == []  # nothing was created
+
+
+def test_approval_ops_sit_behind_the_origin_fence(act_server, act_orch):
+    """private.allow and config.agent.add are the approval paths: a foreign page, a missing Origin or a
+    cross-site request never reaches orch. (Same-user processes are out of scope: the sandbox stops an agent.)"""
+    port = act_server.rsplit(":", 1)[1]
+    bodies = (
+        {"op": "private.allow", "args": {"name": "mine", "key": "a" * 64}},
+        {"op": "config.agent.add", "args": {"name": "mine", "command": "x {prompt}"}},
+    )
+    for body in bodies:
+        for h in ({"Origin": "https://evil.example"}, {"Origin": None},
+                  {"Origin": "http://evil.example:" + port, "Host": "evil.example:" + port},
+                  {"Sec-Fetch-Site": "cross-site"}):
+            assert post(act_server, body, h)[0] in (403, 421, 400), (body["op"], h)
+    assert acts(act_orch) == []

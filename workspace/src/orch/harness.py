@@ -175,7 +175,7 @@ def _git_exclude(root: Path) -> tuple[Path, str] | None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
+            _git_argv(root, "rev-parse", "--show-toplevel", "--git-path", "info/exclude"),
             cwd=root,
             capture_output=True,
             text=True,
@@ -286,13 +286,9 @@ def _tracked(root: Path, rel: str) -> bool:
     try:
         return (
             subprocess.run(
-                [
-                    "git",
-                    "ls-files",
-                    "--error-unmatch",
-                    "--",
-                    f":(icase){rel}",
-                ],  # .ORCH/... tracked is this file too
+                _git_argv(
+                    root, "ls-files", "--error-unmatch", "--", f":(icase){rel}"
+                ),  # .ORCH/... tracked is this file too
                 cwd=root,
                 capture_output=True,
                 env=env,
@@ -307,7 +303,13 @@ def _tracked(root: Path, rel: str) -> bool:
 def _git_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["LC_ALL"] = "C"
+    env["GIT_CONFIG_NOSYSTEM"] = "1"  # no system-wide git config either
     return env
+
+
+def _git_argv(root: Path, *args: str) -> list[str]:
+    """git for a repo that may be someone else's: no fsmonitor program, no hooks, always `-C root`."""
+    return ["git", "-C", str(root), "-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}", *args]
 
 
 def _in_git_repo(root: Path) -> bool:
@@ -315,7 +317,7 @@ def _in_git_repo(root: Path) -> bool:
     index, ...) refuses: an unknown state is never treated as "no repo"."""
     try:
         r = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            _git_argv(root, "rev-parse", "--is-inside-work-tree"),
             cwd=root,
             capture_output=True,
             env=_git_env(),
@@ -341,7 +343,7 @@ def _in_git_repo(root: Path) -> bool:
 def _ignored(root: Path, rel: str) -> bool:
     try:
         r = subprocess.run(
-            ["git", "check-ignore", "-q", "--", rel],
+            _git_argv(root, "check-ignore", "-q", "--", rel),
             cwd=root,
             capture_output=True,
             env=_git_env(),
@@ -412,13 +414,7 @@ def check_private_path(root: Path, path: Path) -> None:
     rel = path.absolute().relative_to(root.absolute()).as_posix()
     try:
         t = subprocess.run(
-            [
-                "git",
-                "ls-files",
-                "--error-unmatch",
-                "--",
-                f":(icase){rel}",
-            ],  # .ORCH/... tracked is this file too
+            _git_argv(root, "ls-files", "--error-unmatch", "--", f":(icase){rel}"),  # .ORCH/... too
             cwd=root,
             capture_output=True,
             env=_git_env(),
@@ -462,7 +458,7 @@ def tracked_private(root: Path) -> list[str]:
         return []
     try:
         r = subprocess.run(
-            ["git", "ls-files", "-z", "--", *[f":(icase,literal){rel}" for rel, _ in PRIVATE_FILES]],
+            _git_argv(root, "ls-files", "-z", "--", *[f":(icase,literal){rel}" for rel, _ in PRIVATE_FILES]),
             cwd=root,
             capture_output=True,
             env=_git_env(),
@@ -472,7 +468,7 @@ def tracked_private(root: Path) -> list[str]:
         return []
     if r.returncode != 0:
         return []
-    names = sorted({n for n in r.stdout.decode("utf-8", "replace").split("\0") if n})
+    names = sorted({os.fsdecode(n) for n in r.stdout.split(b"\0") if n})
     return names[:2000]
 
 
@@ -507,7 +503,7 @@ def move_to_private(root: Path) -> list[str]:
     for i in range(0, len(files), 200):
         chunk = files[i : i + 200]
         r = subprocess.run(
-            ["git", "rm", "--cached", "-q", "--ignore-unmatch", "--", *[f":(literal){f}" for f in chunk]],
+            _git_argv(root, "rm", "--cached", "-q", "--", *[f":(literal){f}" for f in chunk]),
             cwd=root,
             capture_output=True,
             env=_git_env(),
@@ -515,7 +511,7 @@ def move_to_private(root: Path) -> list[str]:
         )
         if r.returncode != 0:
             raise Refused("git could not remove the files from the team repo. Nothing else was changed.")
-    return files
+    return [f for f in files if f not in set(tracked_private(root))]  # what really left the index
 
 
 def safe_skill_name(name: str) -> bool:

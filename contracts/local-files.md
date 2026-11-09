@@ -118,6 +118,11 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   `orch private` lists waiting entries in full with a key; `orch private allow <name> --key <key>` (a person only) approves that ONE
   entry and only if it still matches the key. The dashboard shows every field in full before its Allow click; entries over 500
   characters cannot be shown, so they cannot be allowed. `orch config agent add` by a person approves its own entry; an agent's does not.
+- **Boundary:** an agent with full access on the same user account is stopped by its sandbox, not by orch. For Claude in ask and auto
+  mode the adapter denies `orch private`, `orch config agent` and the approval file (`--disallowedTools`); "a person only" is an
+  environment check plus the dashboard's Origin fence, not a barrier against a process that runs as you. Permissions
+  (`permissions.json`) and add-on consent already live per machine in the orch home, so a committed `config.toml` or
+  `addons.json` cannot raise them or switch add-ons on.
 - Already-tracked personal files: `orch private` lists them; `orch private move` (a person only) runs `git rm --cached` on them,
   keeps the files and commits nothing (older commits keep their copies). `orch status` shows the same lines. This is information
   only: trust does not depend on it.

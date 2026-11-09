@@ -69,10 +69,6 @@ def load(name: str, root: Path | None = None) -> dict:
     """The adapter for an agent name: the built-in one, or the one a [agents.<name>] entry picks, with the
     user's command and interactive command added."""
     entry = config.agent_entries(root).get(name) if root is not None else None
-    if name in _registry() and root is not None and name in config._raw_entries(root):
-        entry = entry or {
-            "adapter": "generic"
-        }  # a folder entry named like a built-in agent (approved or not)
     if entry and name in _registry():
         if name not in _warned:
             _warned.add(name)

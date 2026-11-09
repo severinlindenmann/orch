@@ -701,7 +701,7 @@ def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypat
     real = subprocess.run
 
     def broken(cmd, *a, **k):
-        if cmd[:2] == ["git", "check-ignore"]:
+        if "check-ignore" in cmd[:8]:
             return subprocess.CompletedProcess(cmd, 128, b"", b"fatal: detected dubious ownership")
         return real(cmd, *a, **k)
 
