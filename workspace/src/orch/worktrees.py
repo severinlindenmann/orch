@@ -444,7 +444,8 @@ def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
             exe = safegit.find_exe(argv[0], safegit.avoid_for(work, root))  # same rules as git
     if not exe:
         return [
-            f"The copy setup command '{argv[0] if argv else cmd}' was not found. The copy is used as it is."
+            f"The copy setup command '{argv[0] if argv else cmd}' was not found."
+            " The copy is used as it is (on Windows only .exe programs are run, not .cmd or .bat)."
         ]
     argv[0] = exe
     log = root / ".orch" / "run" / "logs" / f"{ticket}-copy-setup.log"
@@ -528,7 +529,7 @@ def _scoped(root: Path):
         _ctx.root = before
 
 
-def route(root: Path, ticket: str):
+def route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
     """See _route."""
     with _scoped(root):
         return _route(root, ticket)
@@ -573,16 +574,17 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
     notes: list[str] = []
 
     def after() -> list[str]:
-        _note(
-            root,
-            ticket,
-            "copies hold the committed files as they are (line-ending attributes are not applied)",
-            "",
-        )
-        notes.extend(_prepare_files(root, entry))
-        notes.extend(_setup(root, ticket, entry))
-        with contextlib.suppress(Exception):  # a failed write must not stop the start
-            _record_on_ticket(root, ticket, entry)
-        return notes
+        with _scoped(root):  # the slow steps run outside the lock and outside route(): same root
+            _note(
+                root,
+                ticket,
+                "copies hold the committed files as they are (line-ending attributes are not applied)",
+                "",
+            )
+            notes.extend(_prepare_files(root, entry))
+            notes.extend(_setup(root, ticket, entry))
+            with contextlib.suppress(Exception):  # a failed write must not stop the start
+                _record_on_ticket(root, ticket, entry)
+            return notes
 
     return work_dir(entry), [], [after]

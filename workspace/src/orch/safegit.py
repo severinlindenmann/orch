@@ -53,7 +53,16 @@ EMPTY_TREE = {  # by `rev-parse --show-object-format`
 TIMEOUT = 60
 REFUSED = 125  # rc: orch would not run this git call (could not check the repository's drivers)
 _DRIVER = re.compile(r"^(filter\.(.+)\.(smudge|clean|process)|merge\.(.+)\.driver)$")
-_DIFFLIKE = {"diff", "log", "show", "format-patch", "blame", "grep", "whatchanged", "range-diff"}
+_DIFFLIKE = {
+    "diff",
+    "log",
+    "show",
+    "format-patch",
+    "blame",
+    "grep",
+    "whatchanged",
+    "range-diff",
+}  # (`git cherry` takes none of these flags and runs no diff driver)
 _GLOBAL_WITH_VALUE = {
     "-C",
     "-c",
@@ -203,6 +212,29 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
     return _trees[key]
 
 
+_EXTERNAL_TOOLS = {"difftool", "mergetool"}  # they run external programs by design
+_INTERACTIVE = {"add", "checkout", "reset", "restore", "stash"}
+
+
+def refusal(args: list[str]) -> str | None:
+    """Why orch will not run this git call at all (None = fine): difftool/mergetool start external programs,
+    and the interactive patch modes (-p/--patch, -i) of add/checkout/reset/restore/stash are never needed."""
+    k = subcommand_index(args)
+    if k >= len(args):
+        return None
+    cmd, rest = args[k], args[k + 1 :]
+    if cmd in _EXTERNAL_TOOLS:
+        return f"git {cmd} runs external programs; orch does not run it"
+    if cmd in _INTERACTIVE:
+        flags = rest[: rest.index("--")] if "--" in rest else rest
+        if any(
+            a in ("-p", "--patch", "-i", "--interactive") or re.fullmatch(r"-[A-Za-z]*[pi][A-Za-z]*", a)
+            for a in flags
+        ):
+            return f"git {cmd} in an interactive mode is not run by orch"
+    return None
+
+
 def subcommand_index(args: list[str]) -> int:
     """Index of the git subcommand in `args`, past leading global options (-C x, -c k=v, --literal-pathspecs,
     --opt=value ...); len(args) when there is none."""
@@ -256,6 +288,9 @@ def run(
     """(exit code, stdout, stderr) of git `args` in `cwd`, hardened as the module says. rc 127: git missing,
     124: timeout, 125: refused (the repository's drivers could not be listed). `root`: the workspace root (its
     folder is never searched for the git program)."""
+    why = refusal(args)
+    if why:
+        return REFUSED, "", why
     top: list[str] = []  # options before the subcommand
     extra: list[str] = []
     if filters:
@@ -274,7 +309,10 @@ def run(
             top = [f"--attr-source={tree}"]  # the branch's .gitattributes is not read at all
     sub = list(args)
     k = subcommand_index(sub)
-    if k < len(sub) and sub[k] in _DIFFLIKE:
+    if k + 1 < len(sub) and sub[k] == "stash" and sub[k + 1] == "show":
+        k += 1  # the subcommand pair `stash show`
+        sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"]
+    elif k < len(sub) and sub[k] in _DIFFLIKE:
         sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"] if sub[k] != "grep" else ["--no-textconv"]
     rc, out, err = _raw(["git", *top, *base_args(read_only), *extra, *sub], cwd, timeout, data, root)
     return rc, out.strip() if strip else out, err

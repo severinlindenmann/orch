@@ -716,3 +716,26 @@ def test_a_committed_link_in_the_skill_folder_is_not_followed(repo, tmp_path):
     config.set_copies_mode(repo, "always")
     f, notes = _route(repo, a)
     assert f != repo and list(out.iterdir()) == []
+
+
+def test_the_slow_steps_run_with_the_workspace_root_in_scope(repo, monkeypatch):
+    a, _ = repo.tids
+    config.set_copies_mode(repo, "always")
+    seen = []
+    real = safegit.run
+
+    def spy(args, cwd, timeout=60, **kw):
+        seen.append(kw.get("root"))
+        return real(args, cwd, timeout, **kw)
+
+    monkeypatch.setattr(safegit, "run", spy)
+    folder, notes, after = worktrees.route(repo, a)
+    assert worktrees._ctx.root is None  # route() reset its scope
+    seen.clear()
+    monkeypatch.setattr(
+        worktrees, "_prepare_files", lambda root, entry: seen.append(worktrees._ctx.root) or []
+    )
+    monkeypatch.setattr(worktrees, "_setup", lambda root, t, entry: [])
+    for step in after:
+        step()
+    assert seen == [repo] and worktrees._ctx.root is None

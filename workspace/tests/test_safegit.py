@@ -459,3 +459,41 @@ def test_find_exe_never_returns_a_committed_program(tmp_path, monkeypatch):
 def test_global_options_with_a_value_are_skipped():
     for opt in ("--config-env", "--super-prefix", "-C", "-c", "--attr-source"):
         assert safegit.subcommand_index([opt, "v", "whatchanged"]) == 2
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["difftool"],
+        ["-C", ".", "mergetool", "x"],
+        ["add", "-p"],
+        ["add", "--patch", "f"],
+        ["checkout", "-p"],
+        ["reset", "-p"],
+        ["restore", "--patch"],
+        ["stash", "push", "-p"],
+        ["add", "-i"],
+        ["add", "-pf"],
+    ],
+)
+def test_external_tools_and_interactive_modes_are_refused(args, tmp_path):
+    rc, _, err = safegit.run(args, tmp_path, filters=False)
+    assert rc == safegit.REFUSED and err
+
+
+@pytest.mark.parametrize(
+    "args", [["add", "-A"], ["add", "--", "-p"], ["checkout", "-b", "x"], ["stash", "list"]]
+)
+def test_ordinary_calls_are_not_refused(args):
+    assert safegit.refusal(args) is None
+
+
+def test_stash_show_gets_the_no_textconv_flags(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    safegit.run(["stash", "show", "--stat"], tmp_path, filters=False)
+    i = seen[-1].index("show")
+    assert seen[-1][i + 1 : i + 3] == ["--no-ext-diff", "--no-textconv"]
+    assert safegit.refusal(["cherry", "-v"]) is None  # git cherry takes no diff flags: left as it is
