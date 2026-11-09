@@ -270,7 +270,8 @@ async function act(op, args) {
   writing++;
   mutation++;
   try {
-    const res = await fetch('/api/act', {method:'POST', keepalive:true, headers:{'Content-Type':'application/json'}, body:JSON.stringify({op, args})});
+    const body = JSON.stringify({op, args});
+    const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers:{'Content-Type':'application/json', 'X-Orch-Op':String(op)}, body});
     if (res.status !== 200) return {ok:false, status:res.status, text:await res.text()};
     const next = await res.json();
     succeeded = true;

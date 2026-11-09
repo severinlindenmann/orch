@@ -81,7 +81,7 @@ function messageTicket(text) {
     if (!title.value.trim()) { title.reportValidity(); return; }
     if (changeUnavailable()) return;
     create.disabled = true;
-    const result = await act('ticket.new', {title:title.value.trim(), note:note.value});
+    const result = await act('ticket.new', {title:title.value.trim(), ...(note.value.length > 1500 ? {long_text:note.value} : {note:note.value})});
     create.disabled = false;
     if (result.ok) { await window.orch.close(d); window.orch.toast('Ticket created', 'ok'); }
     else window.orch.toast(changeError(result), 'error');

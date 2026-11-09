@@ -311,6 +311,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
+        "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
+    )
+    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -345,6 +348,19 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
     x.add_argument("id")
+    x = t.add_parser(
+        "title", parents=[common], help="write the real title (and description) of a placeholder ticket"
+    )
+    x.add_argument("id")
+    x.add_argument("title")
+    x.add_argument(
+        "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
+    )
+    x = t.add_parser(
+        "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
+    )
+    x.add_argument("id")
+    x.add_argument("--name", required=True, help="a name hint; orch picks the final name")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
@@ -547,6 +563,7 @@ def run(args: argparse.Namespace) -> None:
             args.parent,
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
+            title_auto=args.title_auto,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -621,6 +638,13 @@ def run(args: argparse.Namespace) -> None:
             )
             or "No files yet. Put them in: orch ticket artifacts-dir " + args.id,
         )
+    elif cmd == "ticket" and sub == "title":
+        t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
+        _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "attach":
+        data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
+        r = tickets.attach(root, args.id, args.name, data, by())
+        _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)
         rel = d.relative_to(root).as_posix()

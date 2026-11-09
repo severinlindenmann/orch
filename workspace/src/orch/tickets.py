@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import sys
 import tempfile
 import time
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from orch import config, procs, term
 from orch.errors import Refused
+from orch.text import clean_untrusted
 
 STATUSES = ("open", "active", "waiting", "ready", "review", "done", "dropped")
 STATUS_WORDS = {
@@ -501,7 +503,10 @@ def create(
     parent: str | None = None,
     ext: dict[str, dict] | None = None,
     fields: dict | None = None,
+    title_auto: bool = False,
 ) -> dict:
+    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    writes the real one (`orch ticket title`). The flag clears when anyone sets the title."""
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
@@ -534,6 +539,8 @@ def create(
     }
     if parent is not None:
         ticket["parent"] = parent
+    if title_auto:
+        ticket["title_auto"] = True
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -785,8 +792,13 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
+PROTECTED_FIELDS = ("title_auto", "description", "description_by")  # only orch ticket title writes these
+
+
 def clean_field(key: str, value):
     """Validate a plain field (None or empty clears it); returns the value to store."""
+    if key in PROTECTED_FIELDS:
+        raise Refused(f"{key} is written by orch itself (orch ticket title), not set like a field.")
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     if not isinstance(value, str):
@@ -837,6 +849,8 @@ def edit(
 
     def op(ticket):
         if title is not None:
+            if title != ticket.get("title"):
+                ticket.pop("title_auto", None)  # a person's (or anyone's) own title is final
             ticket["title"] = title
             add_history(ticket, by, "Title changed")
         for k, v in fields.items():
@@ -845,6 +859,71 @@ def edit(
             add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
 
     return apply_op(root, tid, op, if_revision=if_revision)[0]
+
+
+LONG_NOTE = (
+    "The full text is attached as note.md. Read it, then give this ticket a short title and description."
+)
+PLACEHOLDER_TITLE = 80  # characters of a person's text kept as the title until the agent writes one
+
+
+def placeholder_title(text: str) -> str:
+    """The first words of what a person wrote, on one line: the title until the agent writes the real one."""
+    first = next((x for x in clean_untrusted(str(text), 4000).splitlines() if x.strip()), "")
+    return " ".join(first.split())[:PLACEHOLDER_TITLE].strip() or "New ticket"
+
+
+def needs_agent_title(text: str) -> bool:
+    """Short one-line text is its own title. A long or multi-line text gets a title from the agent."""
+    lines = [x for x in clean_untrusted(str(text), 100000).splitlines() if x.strip()]
+    return (
+        len(lines) > 1
+        or len(" ".join(lines[0].split()) if lines else "") > PLACEHOLDER_TITLE
+        or len(text) > LONG_TEXT
+    )
+
+
+def create_from_input(
+    root: Path,
+    text: str,
+    by: str,
+    parent: str | None = None,
+    fields: dict | None = None,
+    ext: dict[str, dict] | None = None,
+) -> dict:
+    """THE way a ticket is made from what a person wrote or said (dashboard paste box, phone text, Open
+    agent): the title is the first words (a placeholder, flag `title_auto`, when the text is long or has
+    several lines)
+    and the agent writes the real title and the description first (runs.fresh_prompt, `orch ticket title`)."""
+    return create(root, placeholder_title(text), by, parent, ext, fields, title_auto=needs_agent_title(text))
+
+
+def set_auto_title(root: Path, tid: str, title: str, by: str, description: str | None = None) -> dict:
+    """The agent's real title (and its description, in its own field) for a placeholder ticket.
+    Refused when a person set the title (or it was never a placeholder): a person's title is never
+    overwritten."""
+    title = title.strip()
+    if not title or len(title) > 200:
+        raise Refused("A title needs 1 to 200 characters.")
+    if description is not None:
+        clean_field("note", description)  # the same plain-text rules and 2000 characters
+
+    def op(ticket):
+        if not ticket.get("title_auto"):
+            raise Refused("This title was set by a person (or already written). It is left as it is.")
+        ticket["title"] = title
+        ticket.pop("title_auto", None)
+        add_history(ticket, by, "Title written")
+        if description:
+            # The description is the agent's own field: it is never merged into the person's note (the
+            # note is shown and sent to the agent as "the person's words"). Only the placeholder note goes.
+            ticket["description"] = description
+            ticket["description_by"] = by[:100]
+            if ticket.get("note") == LONG_NOTE:
+                ticket.pop("note", None)
+            add_history(ticket, by, f"Description written by {by[:100]}")
+
+    return apply_op(root, tid, op)[0]
 
 
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
@@ -1545,6 +1624,8 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
 
     def op(ticket):
         if "title" in obj:
+            if obj["title"].strip() != ticket.get("title"):
+                ticket.pop("title_auto", None)
             ticket["title"] = obj["title"].strip()
         status = obj.get("status", ticket["status"])
         if status not in STATUSES:
@@ -1760,13 +1841,200 @@ def artifacts_dir(root: Path, tid: str) -> Path:
     return d
 
 
+# What a person may attach to a ticket from the dashboard or the phone: plain text and pictures.
+# Never a page or a program that runs: html, xml, svg and scripts are not accepted.
+# (The dashboard's actions.py mirrors these limits to refuse early; orch here is the one that decides.)
+ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "yml", "yaml", "toml", "ini"})
+ATTACH_IMAGES = {
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    "jpg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "gif": (b"GIF87a", b"GIF89a"),
+    "webp": (b"RIFF",),
+}
+ATTACH_MAX = 2 * 1024 * 1024  # one attached file (the dashboard shows at most this much of a file)
+LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
+PASTED_NAME = "note.md"
+
+
+def attach_name(hint) -> str:
+    """The file name the SERVER keeps: the base name of the hint only, safe characters, an allowed type.
+    A name from a browser or a phone is a hint, never a path."""
+    base = re.split(r"[\\/]", clean_untrusted(str(hint), 1000))[-1].strip().strip(". ")
+    base = re.sub(r"[^A-Za-z0-9._ -]", "_", base)
+    base = re.sub(r"\.{2,}", ".", base)
+    stem, dot, ext = base.rpartition(".")
+    ext = ext.lower()
+    stem = stem.strip()[:80].strip(". ")
+    if not dot or not stem.strip("._ -") or (ext not in ATTACH_TEXT and ext not in ATTACH_IMAGES):
+        raise Refused("That kind of file cannot be attached. Text files and pictures can.")
+    if stem.split(".")[0].lower() in _WIN_RESERVED:
+        stem = "_" + stem
+    return stem + "." + ext
+
+
+def _check_attach(name: str, data) -> str:
+    ext = name.rsplit(".", 1)[-1]
+    if not isinstance(data, bytes) or not data:
+        raise Refused("That file is empty.")
+    if len(data) > ATTACH_MAX:
+        raise Refused(f"A file is at most {ATTACH_MAX // (1024 * 1024)} MB.")
+    if ext in ATTACH_IMAGES:
+        if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
+            raise Refused("That picture is not what its name says.")
+    else:
+        if b"\x00" in data:
+            raise Refused("That file is not plain text.")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Refused("That file is not plain text (UTF-8).") from None
+    return ext
+
+
+def _open_artifacts_fd(root: Path, tid: str) -> int:
+    """A handle on .orch/tickets/<id>/artifacts (created), every folder opened from the workspace root with
+    O_NOFOLLOW|O_DIRECTORY: a folder swapped for a link meanwhile is refused, never followed."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in (".orch", "tickets", tid, "artifacts"):
+            try:
+                nxt = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                os.mkdir(part, dir_fd=fd)
+                nxt = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        return fd
+    except OSError:
+        os.close(fd)
+        raise Refused(
+            "The artifacts folder of this ticket is a link or blocked by a file. orch will not use it."
+        ) from None
+
+
+def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None) -> dict:
+    """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
+    ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
+    without NUL bytes, a picture must start with its type's signature. One history line says what was
+    attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
+    means it was done before (returned with existed=True, nothing written)."""
+    load(root, tid)  # the id has the shape of a ticket id and the ticket exists
+    name = attach_name(exact or hint)
+    if exact and name != exact:
+        raise Refused("That file name is not allowed.")
+    ext = _check_attach(name, data)
+    stem = name[: -len(ext) - 1]
+    wflags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    if hasattr(os, "O_DIRECTORY") and os.open in os.supports_dir_fd:
+        dfd = _open_artifacts_fd(root, tid)
+        opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
+        remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
+        linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd, **_nofollow_link())  # noqa: E731
+        lstat = lambda n: os.stat(n, dir_fd=dfd, follow_symlinks=False)  # noqa: E731
+        names = lambda: os.listdir(dfd)  # noqa: E731
+        close = lambda: os.close(dfd)  # noqa: E731
+    else:  # Windows: no handles on folders; the folders are checked one by one
+        d0 = artifacts_dir(root, tid)
+        opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
+        remove = lambda n: (d0 / n).unlink()  # noqa: E731
+        linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
+        lstat = lambda n: os.lstat(d0 / n)  # noqa: E731
+        names = lambda: os.listdir(d0)  # noqa: E731
+        close = lambda: None  # noqa: E731
+    tmp = f".{secrets.token_hex(6)}.part"  # written whole under a hidden name, then linked to its final name
+    try:
+        _sweep_parts(names, lstat, remove)
+        fd = opener(tmp)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+                f.flush()
+                written = os.fstat(f.fileno())
+        except BaseException:
+            with contextlib.suppress(OSError):
+                remove(tmp)
+            raise
+        try:
+            for n in range(1, 100):
+                final = name if n == 1 else f"{stem} ({n}).{ext}"
+                if exact and n > 1:
+                    break
+                try:
+                    _publish(linker, opener, remove, lstat, tmp, final, data, written)
+                except FileExistsError:
+                    if exact:
+                        return {
+                            "name": final,
+                            "size": len(data),
+                            "path": _art_rel(tid, final),
+                            "existed": True,
+                        }
+                    continue
+                break
+            else:
+                raise Refused("Too many files with that name on this ticket.")
+        finally:
+            with contextlib.suppress(OSError):
+                remove(tmp)
+    finally:
+        close()
+    apply_op(root, tid, lambda t: add_history(t, by, f"Attached {final}"))
+    return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
+
+
+def _nofollow_link() -> dict:
+    # Windows CPython has no linkat: follow_symlinks=False raises NotImplementedError there. The identity
+    # check after linking (device + inode) covers a swapped file either way.
+    return {"follow_symlinks": False} if os.link in os.supports_follow_symlinks else {}
+
+
+def _publish(linker, opener, remove, lstat, tmp: str, final: str, data: bytes, written) -> None:
+    """Give the finished temp file its final name without replacing anything: a hard link (then the file is
+    checked to be the very one we wrote). A file system that cannot link (FAT, some network drives) gets an
+    O_EXCL create of the final name and a copy instead. FileExistsError means the name is taken."""
+    try:
+        linker(tmp, final)
+    except FileExistsError:
+        raise
+    except (OSError, NotImplementedError):
+        fd = opener(final)  # O_EXCL | O_NOFOLLOW; FileExistsError is the same "taken"
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                remove(final)
+            raise
+        return
+    st = lstat(final)
+    if (st.st_dev, st.st_ino) != (written.st_dev, written.st_ino) or not stat.S_ISREG(st.st_mode):
+        with contextlib.suppress(OSError):
+            remove(final)
+        raise Refused("The file was replaced while it was saved. Not kept.")
+
+
+def _sweep_parts(names, lstat, remove) -> None:
+    """Leftovers of a killed attach (hidden .part files older than an hour) are removed."""
+    with contextlib.suppress(OSError):
+        for n in names():
+            if n.startswith(".") and n.endswith(".part") and time.time() - lstat(n).st_mtime > 3600:
+                with contextlib.suppress(OSError):
+                    remove(n)
+
+
+def _art_rel(tid: str, name: str) -> str:
+    return f".orch/tickets/{tid}/artifacts/{name}"
+
+
 def artifacts_list(root: Path, tid: str) -> list[dict]:
     """The files in the ticket's artifacts folder (sub-folders included): name, size, mtime, path."""
     d = artifacts_path(root, tid)
     out = []
     if d.is_dir() and not d.is_symlink():
         for f in sorted(d.rglob("*")):
-            if f.is_symlink() or not f.is_file():
+            if f.is_symlink() or not f.is_file() or any(p.startswith(".") for p in f.relative_to(d).parts):
                 continue
             st = f.stat()
             out.append(
