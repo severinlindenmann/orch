@@ -2303,6 +2303,392 @@
      }
     }
    }
+  },
+  {
+   "name": "wont-do-step",
+   "ok": true,
+   "why": "A Won't do step: wont_do true, done false, optional reason; done counts it as resolved.",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Read the Q3 sheet",
+        "done": true
+       },
+       {
+        "text": "Email finance",
+        "done": false,
+        "wont_do": true,
+        "reason": "Finance pulls it themselves"
+       },
+       {
+        "text": "Archive the sheet",
+        "done": false,
+        "wont_do": true
+       }
+      ],
+      "done": 3,
+      "total": 3,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wont-do-and-done",
+   "ok": false,
+   "why": "wont_do excludes done=true",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Email finance",
+        "done": true,
+        "wont_do": true
+       }
+      ],
+      "done": 1,
+      "total": 1,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wont-do-false",
+   "ok": false,
+   "why": "wont_do is only ever true; absent otherwise",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Email finance",
+        "done": false,
+        "wont_do": false
+       }
+      ],
+      "done": 0,
+      "total": 1,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "reason-without-wont-do",
+   "ok": false,
+   "why": "reason only next to wont_do",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Email finance",
+        "done": false,
+        "reason": "later"
+       }
+      ],
+      "done": 0,
+      "total": 1,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "reason-too-long",
+   "ok": false,
+   "why": "reason at most 200 characters",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tv00000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-06T09:41:00Z",
+    "ticket": "t_q3sum1",
+    "body": {
+     "text": "Charts are next.",
+     "update": {
+      "kind": "note",
+      "title": "Q3 summary for the board"
+     },
+     "ticket_view": {
+      "title": "Q3 summary for the board",
+      "status": "active",
+      "agent": "Claude",
+      "summary": "Numbers pulled, charts next.",
+      "running": true,
+      "checklist": [
+       {
+        "text": "Email finance",
+        "done": false,
+        "wont_do": true,
+        "reason": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       }
+      ],
+      "done": 0,
+      "total": 1,
+      "history_tail": [
+       {
+        "at": "2026-11-06T09:34:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Read the Q3 sheet"
+       },
+       {
+        "at": "2026-11-06T09:40:00Z",
+        "who": "Severin",
+        "role": "person",
+        "text": "Please add last year's numbers too."
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "link",
+        "title": "Board deck draft",
+        "url": "https://docs.example.ch/deck",
+        "at": "2026-11-06T09:38:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "q3-summary-draft.pdf",
+        "blob_id": "b_abcdef0123456789",
+        "name": "q3-summary-draft.pdf",
+        "size": 217088,
+        "at": "2026-11-06T09:39:00Z"
+       }
+      ]
+     }
+    }
+   }
   }
  ]
 }

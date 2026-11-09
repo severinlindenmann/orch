@@ -85,12 +85,17 @@
         "done": { "type": "boolean" },
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
         "state": { "const": "doing", "description": "Optional. 'doing' = someone works on this item now (by, at say who and since when). Absent = not started or done (see done)." },
+        "wont_do": { "const": true, "description": "Optional. true = a person decided this step will not be done (\"Won't do\"). It counts as resolved for finishing the ticket, needs no evidence and is never done=true. Set and cleared only by a person; an agent can only ask (a question). Absent = a normal step." },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional, only with wont_do: one plain line, why. Cleared with wont_do." },
         "by": { "$ref": "#/$defs/who" },
         "at": { "$ref": "#/$defs/time" }
       },
-      "if": { "properties": { "done": { "const": true } } },
-      "then": { "properties": { "evidence": { "minItems": 1 } } },
-      "description": "Evidence-based: done=true needs at least one evidence entry."
+      "allOf": [
+        { "if": { "properties": { "done": { "const": true } } }, "then": { "properties": { "evidence": { "minItems": 1 } } } },
+        { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } } } },
+        { "if": { "required": ["reason"] }, "then": { "required": ["wont_do"] } }
+      ],
+      "description": "Evidence-based: done=true needs at least one evidence entry. wont_do=true (a person's decision) is resolved without evidence and excludes done=true."
     },
     "ref": {
       "type": "object",
