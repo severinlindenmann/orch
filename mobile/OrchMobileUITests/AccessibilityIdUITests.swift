@@ -39,9 +39,19 @@ final class AccessibilityIdUITests: XCTestCase {
 
     @MainActor
     private func assertUniqueIds(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-        let duplicates = duplicateIds(in: app)
-        let details = duplicates.keys.sorted().map { "\($0): \(duplicates[$0]!)" }.joined(separator: "\n")
-        XCTAssertTrue(duplicates.isEmpty, "Duplicate accessibility identifiers (id: count):\n\(details)", file: file, line: line)
+        // Only a duplicate that STAYS is a propagation bug. During a push/pop transition both screens exist for a moment
+        // and their ids appear twice (slow CI runners snapshot mid-transition): re-check until the screen settles.
+        var duplicates = duplicateIds(in: app)
+        let deadline = Date().addingTimeInterval(8)
+        while !duplicates.isEmpty && Date() < deadline {
+            usleep(500_000)
+            let now = duplicateIds(in: app)
+            duplicates = duplicates.filter { now[$0.key] != nil }.merging(now.filter { duplicates[$0.key] != nil }) { _, b in b }
+            if now.isEmpty { duplicates = [:] }
+        }
+        // One line: CI's failure summary only shows the first line of a message.
+        let details = duplicates.keys.sorted().map { "\($0)=\(duplicates[$0]!)" }.joined(separator: ", ")
+        XCTAssertTrue(duplicates.isEmpty, "Duplicate accessibility identifiers (id=count): \(details)", file: file, line: line)
     }
 
     @MainActor
