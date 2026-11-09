@@ -134,7 +134,7 @@ test('overview file chips preview artifacts and are absent in snapshots or witho
   assert.equal(s.c.ticketFiles({id:'t'}), null);
   vm.runInContext("artifactData.set('t', {data:{files:[{name:'folder/note.md',size:20000}]}})", s.c);
   const section = s.c.ticketFiles({id:'t'});
-  assert.equal(walk(section).find(n => n.tag === 'span').textContent, 'note.md');
+  assert.equal(walk(section).find(n => n.tag === 'span').textContent, 'folder/note.md');
   await walk(section).find(n => n.tag === 'button').click();
   assert.deepEqual(previews, [['t','artifacts','folder/note.md']]);
   s.c.snapshot = true; assert.equal(s.c.ticketFiles({id:'t'}), null);
