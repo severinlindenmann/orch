@@ -1,4 +1,4 @@
-// "Requested by a command": a terminal asked for something only you may do. Shows the full request; ONE click
+// "Requested by a command": a terminal asked for something only you may do. Shows the request in plain words; ONE click
 // (Continue) lets the dashboard do it. Never focuses a button, no typed words. No token is shown here.
 (function () {
   var box = null, seen = "";
@@ -6,48 +6,126 @@
   function post(op, id) {
     return fetch("/api/act", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({op: op, args: {id: id}})});
   }
-  var WORDS = {"ticket.answer": "Send an answer", "run.human_input": "Send a message to the agent", "ticket.verdict": "Decide on a ticket", "relay.allow": "Allow another workspace", "update": "Update orch", "relay.connect": "Connect to a relay", "chat.send": "Write in Chat", "chat.make_ticket": "Make a ticket"};
+  // ONE element in the page layout (right under the top bar, above the page), never floating over the page: it
+  // can not cover the review bar or any other action. One request = one sentence and two buttons; several =
+  // "2 requests waiting" that opens a list, each row with its own buttons. Plain words only: the sentence comes
+  // from orch as structured parts; the person's own text is a separate "Exact text" block.
+  var open = false;
+  // One FIXED template per op. Every untrusted fragment (a title, a question, a path, a host, a name) goes into its
+  // own <span> with textContent: nothing is ever substituted into a string, so a title that says "{value}" or
+  // carries quotes can only ever be shown as itself. The exact text the person approves is a separate block.
+  function cap(t) { t = String(t == null ? "" : t).replace(/\s+/g, " ").replace(/[\u201c\u201d\u201e\u00ab\u00bb"]/g, "'"); return t.length > 120 ? t.slice(0, 120) + "\u2026" : t; }
+  function q(t) { var s = el("span"); s.className = "ho-part"; s.style.fontWeight = "600"; s.textContent = "\u201c" + cap(t) + "\u201d"; return s; }
+  function plain(t) { var s = el("span"); s.style.fontWeight = "600"; s.textContent = cap(t); return s; }
+  function say(parts) {  // [string | element]...
+    var s = el("span"); s.className = "ho-sentence"; s.style.cssText = "flex:1;min-width:200px";
+    parts.forEach(function (p) { s.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
+    return s;
+  }
+  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
+  var TEMPLATES = {
+    "ticket.answer": function (p) { return ["Answer to ", q(p.question), " on ", q(p.title), "?"]; },
+    "ticket.verdict": function (p) {
+      if (p.status) { var w = STATUS[p.status] || STATUS.back; return [w[0], q(p.title), w[1] + (p.also && p.also.length ? " (it also changes: " + p.also.map(cap).join(", ") + ")" : "")]; }
+      return ["Send ", q(p.title), " back with a note?"];
+    },
+    "run.human_input": function (p) { return ["Send a message to the agent on ", q(p.title), "?"]; },
+    "chat.send": function (p) { return p.thread ? ["Send a message to ", plain(p.thread), "?"] : ["Send a message in Chat?"]; },
+    "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
+    "update": function (p) { return ["Update orch from ", plain(p.source), "?"]; },
+    "relay.connect": function (p) { return ["Connect to ", plain(p.host), "?"]; },
+    "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
+    "addon.add_local": function (p) { return ["Add the add-on from ", plain(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
+  };
+  function sentence(i) {
+    var p = i.parts && typeof i.parts === "object" ? i.parts : {};
+    var f = TEMPLATES[i.op];
+    return say(f ? f(p) : ["Do something on this computer?"]);
+  }
+  function exact(i) {  // the exact text that will be sent, never merged into the sentence
+    if (!i.value) return null;
+    var d = el("div"); d.className = "ho-exact"; d.style.cssText = "flex-basis:100%;margin-top:4px";
+    var l = el("div", "Exact text:", "meta"); l.style.cssText = "font-size:12px;opacity:.75";
+    var pre = el("pre"); pre.textContent = String(i.value); pre.style.cssText = "margin:2px 0 0;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font:13px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto";
+    d.appendChild(l); d.appendChild(pre);
+    return d;
+  }
+  function buttons(i) {
+    var row = el("span", "", "ho-btns");
+    var ok = el("button", "Continue", "btn primary"), no = el("button", "Not now", "btn");
+    ok.type = no.type = "button";
+    ok.onclick = function () {
+      ok.disabled = true;
+      post("handoff.confirm", i.id).then(function (r) {
+        if (r.ok) {
+          if (r.status === 202) { r.text().then(function (t) { banner(t); }); }
+          poll();
+        } else { return r.text().then(function (t) { ok.disabled = false; banner(t); }); }
+      });
+    };
+    no.onclick = function () { post("handoff.dismiss", i.id).then(poll); };
+    row.appendChild(ok); row.appendChild(no);
+    return row;
+  }
+  function slot() {
+    if (box) return box;
+    box = el("section", "", "banner attn orch-handoff"); box.id = "handoff"; box.setAttribute("aria-live", "polite");
+    box.style.cssText = "margin:8px 16px 0;flex-direction:column;align-items:stretch;gap:8px";
+    var anchor = document.getElementById("content");
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(box, anchor); else document.body.insertBefore(box, document.body.firstChild);
+    return box;
+  }
   function render(items) {
-    var key = JSON.stringify(items);
+    var key = JSON.stringify(items) + open;
     if (key === seen) return;
     seen = key;
-    if (!box) { box = el("section", "", "orch-handoff"); box.setAttribute("aria-live", "polite"); box.style.cssText = "position:fixed;right:16px;bottom:16px;max-width:380px;z-index:50;display:flex;flex-direction:column;gap:8px"; document.body.appendChild(box); }
-    box.textContent = "";
-    items.forEach(function (i) {
-      var c = el("div", "", "orch-handoff-card");
-      c.style.cssText = "background:#fff;color:#111;border:1px solid #c9c9c9;border-radius:10px;padding:12px;box-shadow:0 4px 16px rgba(0,0,0,.15)";
-      c.appendChild(el("div", "Requested by a command", "orch-handoff-from")).style.cssText = "font-size:12px;opacity:.7";
-      c.appendChild(el("div", WORDS[i.op] || "Do something", "")).style.fontWeight = "600";
-      if (i.label) c.appendChild(el("div", i.label));
-      if (i.value) c.appendChild(el("div", i.value)).style.cssText = "white-space:pre-wrap;margin-top:4px";
-      var row = el("div"); row.style.cssText = "margin-top:8px;display:flex;gap:8px";
-      var ok = el("button", "Continue"), no = el("button", "Not now");
-      ok.type = no.type = "button";
-      ok.onclick = function () { ok.disabled = true; post("handoff.confirm", i.id).then(function (r) { if (r.ok) { if (r.status === 202) { r.text().then(function (t) { var b = el("div", t, "orch-notice"); b.setAttribute("role", "status"); b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px"; document.body.appendChild(b); setTimeout(function () { b.remove(); }, 15000); }); } poll(); } else { return r.text().then(function (t) { ok.disabled = false; alert(t); }); } }); };
-      no.onclick = function () { post("handoff.dismiss", i.id).then(poll); };
-      row.appendChild(ok); row.appendChild(no); c.appendChild(row); box.appendChild(c);
+    var b = slot();
+    b.textContent = "";
+    b.hidden = !items.length;
+    if (!items.length) { open = false; return; }
+    var head = el("div"); head.style.cssText = "display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center";
+    var small = el("span", "Requested by a command", "meta"); small.style.cssText = "flex-basis:100%;font-size:12px;opacity:.75";
+    head.appendChild(small);
+    if (items.length === 1) {
+      head.appendChild(sentence(items[0])); head.appendChild(buttons(items[0])); b.appendChild(head);
+      var x1 = exact(items[0]); if (x1) b.appendChild(x1);
+      return;
+    }
+    var sum = el("span", items.length + " requests waiting"); sum.style.cssText = "flex:1;font-weight:600";
+    var tog = el("button", open ? "Hide" : "Show", "btn"); tog.type = "button"; tog.setAttribute("aria-expanded", String(open));
+    tog.onclick = function () { open = !open; seen = ""; render(items); };
+    head.appendChild(sum); head.appendChild(tog); b.appendChild(head);
+    if (open) items.forEach(function (i) {
+      var r = el("div"); r.style.cssText = "display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;border-top:1px solid var(--border);padding-top:8px";
+      r.appendChild(sentence(i)); r.appendChild(buttons(i));
+      var x = exact(i); if (x) r.appendChild(x);
+      b.appendChild(r);
     });
   }
   function poll() {
     fetch("/api/handoffs", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(render).catch(function () {});
   }
+  function place(b) {
+    var anchor = document.getElementById("content");
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(b, anchor); else document.body.insertBefore(b, document.body.firstChild);
+  }
   function notices() {
     fetch("/api/notices", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(function (items) {
       items.forEach(function (n) {
         var b = el("div", "", "orch-notice"); b.setAttribute("role", "status");
-        b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px;box-shadow:0 4px 16px rgba(0,0,0,.15)";
+        b.className = "banner info orch-notice"; b.style.cssText = "margin:8px 16px 0";
         b.appendChild(el("div", n.text));
         var x = el("button", "Got it"); x.type = "button"; x.style.marginTop = "8px"; x.onclick = function () { b.remove(); };
-        b.appendChild(x); document.body.appendChild(b);
+        b.appendChild(x); place(b);
       });
     }).catch(function () {});
   }
   var shown = "";
   function banner(text) {
     var b = el("div", text, "orch-notice"); b.setAttribute("role", "status");
-    b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px";
+    b.className = "banner info orch-notice"; b.style.cssText = "margin:8px 16px 0";
     var x = el("button", "Got it"); x.type = "button"; x.style.cssText = "margin-left:12px"; x.onclick = function () { b.remove(); };
-    b.appendChild(x); document.body.appendChild(b);
+    b.appendChild(x); place(b);
   }
   // the detached update: "Update finished" / "Update failed: <reason>" (also after the page reconnects)
   function updateStatus() {

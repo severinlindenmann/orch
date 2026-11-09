@@ -1112,6 +1112,55 @@ def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
         return "a ticket"
 
 
+PART_MAX = 120
+
+
+def part(text) -> str:
+    """One untrusted fragment (a title, a question, a task, a path) for the card: one line, quotes normalised
+    so it cannot fake the quotes around it, at most 120 characters with an ellipsis. The page shows it as
+    plain text in its own element; `{value}` and the like stay literal."""
+    t = " ".join(str(text if text is not None else "").split())
+    t = t.translate({ord(c): "'" for c in '"\u201c\u201d\u201e\u2033\u00ab\u00bb'})
+    return t[:PART_MAX] + "\u2026" if len(t) > PART_MAX else t
+
+
+def ticket_name(root: Path, tid: str) -> str:
+    """The ticket's title (never its id), as one safe fragment."""
+    from orch import tickets
+
+    try:
+        t = str(tickets.load(root, tid).get("title", ""))
+    except (Refused, OSError, ValueError, AttributeError):
+        t = ""
+    return part(t) or "this ticket"
+
+
+def question_text(root: Path, tid: str, qid: str) -> str:
+    from orch import tickets
+
+    try:
+        q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
+        t = str((q or {}).get("text", ""))
+    except (Refused, OSError, ValueError, AttributeError):
+        t = ""
+    return part(t.rstrip("?! ")) or "the question"
+
+
+def status_parts(root: Path, tid: str, data: str) -> dict:
+    """A person's ticket patch as fields: {title, status, also: [other keys]} (never the JSON)."""
+    try:
+        obj = json.loads(data)
+    except ValueError:
+        obj = {}
+    obj = obj if isinstance(obj, dict) else {}
+    st = obj.get("status")
+    return {
+        "title": ticket_name(root, tid),
+        "status": st if st in ("done", "review") else "back",
+        "also": [part(k) for k in list(obj)[:6] if k != "status"],
+    }
+
+
 SECRET_MARK = "@secret"
 
 
@@ -1133,7 +1182,9 @@ def _join_token(argv: list[str], token: str) -> list[str]:
     ]
 
 
-def request_handoff(root: Path, op: str, target: str, label: str = "", value: str = "", argv=None) -> bool:
+def request_handoff(
+    root: Path, op: str, target: str, label: str = "", value: str = "", argv=None, parts=None
+) -> bool:
     """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
     by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
     The item holds the command to run once the person clicks. Best effort: a failure here only means the item
@@ -1171,7 +1222,8 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
                     "id": hid,
                     "op": op,
                     "target": target,
-                    "label": label[:300],
+                    "label": label[:400],
+                    "parts": {k: v for k, v in (parts or {}).items() if isinstance(k, str)},
                     "value": value,
                     "argv": argv,
                     "at": now,
@@ -1288,7 +1340,16 @@ def _dashboard_note(root: Path, open_ok: bool = True) -> str:
 
 
 def person_by(
-    root: Path, args, op: str, target: str, *, label: str = "", value: str = "", argv=None, no_handoff=None
+    root: Path,
+    args,
+    op: str,
+    target: str,
+    *,
+    label: str = "",
+    value: str = "",
+    argv=None,
+    no_handoff=None,
+    parts=None,
 ) -> str:
     """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
     comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
@@ -1308,7 +1369,7 @@ def person_by(
     if no_handoff:
         raise Refused(no_handoff)  # this command cannot be approved on the page as typed
     clean = _clean_argv(CURRENT_ARGV) if argv is None else argv
-    queued = request_handoff(root, op, target, label, value, clean)
+    queued = request_handoff(root, op, target, label, value, clean, parts)
     if not queued:
         raise Refused(HANDOFF)
     raise Refused(_dashboard_note(root, open_ok=queued is True))

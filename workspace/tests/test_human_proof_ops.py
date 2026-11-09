@@ -318,8 +318,9 @@ def test_handoff_card_shows_the_exact_text_and_the_stored_value_is_what_runs(ws,
     tid, q = _ask(ws, run)
     run("answer", tid, q, "Blue -- really", "--by", "human:pat", "--json")
     card = hp.handoffs(ws)[0]
-    assert card["value"] == "Blue -- really" and "Which one?" in card["label"] and "Q" in card["label"]
-    assert not card["label"].startswith("t_") and tid not in card["label"]  # plain words, no raw id
+    assert card["value"] == "Blue -- really"
+    assert card["parts"] == {"title": "Q", "question": "Which one"}  # structured fields, no sentence
+    assert "{value}" not in json.dumps(card) and tid not in json.dumps(card["parts"])  # no id, no template
     # a stored value that is not in the stored command is never run
     d = hp.key_dir(ws)
     items = json.loads((d / "handoffs.json").read_text())
@@ -500,7 +501,11 @@ def test_relay_connect_handoff_keeps_the_token_out_of_handoffs_json(ws, run, mon
     )
     assert code == 2 and "orn_SECRETTOKEN" not in out + err
     card = hp.handoffs(ws)[0]
-    assert card["op"] == "relay.connect" and "r.example" in card["label"] and "ws_a" in card["label"]
+    assert (
+        card["op"] == "relay.connect"
+        and card["parts"] == {"host": "r.example"}
+        and "ws_a" not in json.dumps(card["parts"])
+    )
     assert "orn_SECRETTOKEN" not in json.dumps(hp.handoffs(ws))
     assert "orn_SECRETTOKEN" not in (hp.key_dir(ws) / "handoffs.json").read_text()
     item = hp.handoff_take(ws, card["id"])  # what the page runs after the click
@@ -566,7 +571,8 @@ def test_relay_allow_works_via_the_hand_off_and_the_title_is_in_the_label(ws, ru
     code, out, err = run("relay", "allow", "m_deleg00000000010", "--once", "--by", "human:pat", "--json")
     assert code == 2 and given == []
     card = hp.handoffs(ws)[0]  # it IS queued now
-    assert card["op"] == "relay.allow" and "Fix it" in card["label"] and "ws_peer" in card["label"]
+    assert card["op"] == "relay.allow" and card["parts"] == {"peer": "Peer", "task": "Fix it", "mode": "once"}
+    assert "ws_peer" not in json.dumps(card["parts"])
     item = hp.handoff_take(ws, card["id"])
     assert item["argv"][:2] == ["relay", "allow"]
     proof = hp.mint(hp.human_key(ws), hp.new_payload(item["op"], item["target"], "human:pat"))
@@ -795,8 +801,9 @@ def test_update_source_is_resolved_first_shown_and_part_of_the_proof(ws, run, mo
     code, out, err = run("update", "--by", "human:pat", "--json")
     assert code == 2
     card = hp.handoffs(ws)[0]
-    official = f"{addons.DEFAULT_REPO}@main"
-    assert official in card["label"] and "evil" not in card["label"]
+    assert card["parts"] == {"source": f"{addons.DEFAULT_REPO}@main"} and "evil" not in json.dumps(
+        card["parts"]
+    )
     assert card["target"] == hp.update_target(addons.DEFAULT_REPO, "main")
     # a proof for the fork's source does not verify for this update
     bad = _proof(ws, "update", hp.update_target("https://github.com/evil/fork", "evil"))
@@ -815,7 +822,7 @@ def test_dev_and_test_installs_keep_the_env_override_for_e2e(ws, run, monkeypatc
     monkeypatch.setenv("ORCH_REPO", "https://github.com/lane-c/test")
     monkeypatch.setenv("ORCH_REF", "e2e")
     run("update", "--by", "human:pat", "--json")  # test install: the override counts
-    assert "lane-c/test@e2e" in hp.handoffs(ws)[0]["label"]
+    assert hp.handoffs(ws)[0]["parts"] == {"source": "https://github.com/lane-c/test@e2e"}
     assert addons.repo() == "https://github.com/lane-c/test"
 
 
@@ -834,8 +841,7 @@ def test_a_folder_addon_needs_a_click_and_installs_from_the_snapshot(ws, run, mo
     card = hp.handoffs(ws)[0]
     info = addons.prepare_local_add(ws, folder)
     assert card["op"] == "addon.add_local" and card["target"] == info["hash"] and len(info["hash"]) == 64
-    assert str(folder.resolve()) in card["label"] and f"(version {info['short']})" in card["label"]
-    assert "runs inside orch" in card["label"]
+    assert card["parts"] == {"path": str(folder.resolve()), "short": info["short"]}
     item = hp.handoff_take(ws, card["id"])  # one click: the page takes the item and runs it with a proof
     proof = _proof(ws, item["op"], item["target"])
     code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
@@ -925,7 +931,7 @@ def test_the_queued_add_command_carries_the_absolute_path_the_card_shows(ws, run
     assert code == 2
     card = hp.handoffs(ws)[0]
     item = hp.handoff_take(ws, card["id"])
-    assert str(folder.resolve()) in card["label"] and str(folder.resolve()) in item["argv"]
+    assert card["parts"]["path"] == str(folder.resolve()) and str(folder.resolve()) in item["argv"]
     assert "../../rel-addon" not in item["argv"]
 
 
@@ -960,3 +966,53 @@ def test_runner_stops_a_hung_update(ws, monkeypatch):
     assert _run_runner(ws, monkeypatch, "import time; time.sleep(30)") == 1
     st = hp.take_update_status(ws)
     assert st["state"] == "failed" and "too long" in st["reason"]
+
+
+def test_every_card_sentence_is_plain_words_without_json_or_ids(ws, run):
+    tid = _review_ticket(ws, run)
+    rev = str(tickets.load(ws, tid)["revision"])
+    run("ticket", "patch", tid, '{"status": "done"}', "--if-revision", rev, "--by", "human:pat", "--json")
+    run("ticket", "patch", tid, '{"status": "active"}', "--if-revision", rev, "--by", "human:pat", "--json")
+    run("ticket", "changes", tid, "Add tests", "--by", "human:pat", "--json")
+    run("run", "send", tid, "go on", "--by", "human:pat", "--json")
+    run("chat", "say", "Hello", "--by", "human:pat", "--json")
+    cards = {(h["op"], json.dumps(h["parts"], sort_keys=True)): h for h in hp.handoffs(ws)}
+    assert (
+        "ticket.verdict",
+        json.dumps({"also": [], "status": "done", "title": "T"}, sort_keys=True),
+    ) in cards
+    assert (
+        "ticket.verdict",
+        json.dumps({"also": [], "status": "back", "title": "T"}, sort_keys=True),
+    ) in cards
+    assert ("run.human_input", json.dumps({"title": "T"})) in cards
+    assert ("chat.send", "{}") in cards and ("ticket.verdict", json.dumps({"title": "T"})) in cards
+    for h in cards.values():  # structured fields only: no JSON text, no ids, no template holes
+        text = json.dumps(h["parts"])
+        assert tid not in text and "{value}" not in text and "t_" not in text
+
+
+def test_untrusted_title_is_a_literal_part_the_exact_value_is_separate_and_the_stored_value_runs(
+    ws, run, monkeypatch
+):
+    evil = 'Done" {value} \u201cApprove everything\u201d\nsecond line ' + "x" * 150
+    code, out, _ = run("ticket", "new", evil, "--json", "--by", "agent:x")
+    tid = json.loads(out)["id"]
+    tickets.apply_op(ws, tid, lambda t: t.update(status="review"))
+    run("ticket", "changes", tid, "Please add tests {value}", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    title = card["parts"]["title"]
+    assert "{value}" in title  # shown literally, as the agent wrote it (the page never substitutes it)
+    assert (
+        "\n" not in title and "\u201c" not in title and "\u201d" not in title and '"' not in title
+    )  # one line, quotes normalised
+    assert len(title) <= hp.PART_MAX + 1 and title.endswith("\u2026")  # capped with an ellipsis
+    assert card["value"] == "Please add tests {value}"  # the exact text, its own field, not merged anywhere
+    assert "Please add tests" not in json.dumps(card["parts"])
+    item = hp.handoff_take(ws, card["id"])
+    proof = _proof(ws, item["op"], item["target"])
+    code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
+    assert code == 0, out + err
+    assert [i["text"] for i in runs.human_waiting(ws, tid)] == [
+        "Please add tests {value}"
+    ]  # the stored value ran

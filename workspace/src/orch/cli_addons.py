@@ -59,8 +59,7 @@ def dispatch(args, root: Path) -> bool:
                 "addon.add_local",
                 info["hash"],
                 argv=queued,
-                label=f"Add the add-on from {info['path']} (version {info['short']}) "
-                "\u2014 it runs inside orch",
+                parts={"path": humanproof.part(info["path"]), "short": humanproof.part(info["short"])},
             )
             if not who.startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
