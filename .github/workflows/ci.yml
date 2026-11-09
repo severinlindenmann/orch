@@ -11,11 +11,15 @@ on:
         default: false
   push:
     branches: [develop, main]
-# one run per PR / branch: a new push cancels the older run that is still going (the newest commit covers it; the
-# merge gate is the PR's own run). Manual runs have their own group; main is never cancelled.
+  # Nightly on develop (the default branch): the mobile suite with UI tests, even when no push ran it to the end.
+  schedule:
+    - cron: "0 1 * * *"
+# one run per PR: a new push cancels the PR's older run (the newest commit covers it; the merge gate is the PR's own
+# run). Pushes to develop/main are never cancelled: the path filter only sees the newest push, so a cancelled run of a
+# mobile merge would never run the mobile UI tests (they only run after the merge). Each push gets its own group.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ github.event.pull_request.number || format('{0}-{1}-{2}', github.event_name, github.ref, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
@@ -32,6 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: f
+        if: github.event_name != 'schedule'
         uses: dorny/paths-filter@v3
         with:
           filters: |
@@ -69,7 +74,7 @@ jobs:
     uses: ./.github/workflows/relay.yml
   mobile:
     needs: changes
-    if: needs.changes.outputs.mobile == 'true'
+    if: needs.changes.outputs.mobile == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/mobile.yml
   gate:
     if: always()

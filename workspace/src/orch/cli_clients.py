@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from orch import humanproof, net, publish, relay, templates, term, tickets
 from orch.errors import Refused
@@ -471,7 +472,7 @@ def run_relay(args, root: Path, out) -> None:
             args,
             "relay.connect",
             address,
-            parts={"host": address},
+            parts={"host": address, "scheme": urlsplit(args.url.strip()).scheme},
             exact=address,
         ).startswith("human:"):
             raise Refused(humanproof.AGENT_REFUSED)

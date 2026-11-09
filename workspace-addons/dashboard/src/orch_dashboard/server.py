@@ -474,6 +474,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.headers, self.server.server_address[1]
             ):
                 mint = self.session.mint
+            if body.get("op") == "notice.ack":
+                if mint is None:  # only a page with a session may clear a notice
+                    raise actions.NeedsPerson("Open the dashboard from this computer to do this.")
+                from . import handoff
+
+                handoff.ack_notice(self.root, (body.get("args") or {}).get("id"))
+                return self._send(200, b"{}", "application/json")
             if body.get("op") in ("handoff.confirm", "handoff.dismiss"):
                 from . import handoff
 

@@ -24,6 +24,10 @@
     parts.forEach(function (p) { s.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
     return s;
   }
+  function stepName(p) {  // "step 3, “text”": the number is orch's, the text is the agent's
+    var n = Number(p.n) > 0 ? "step " + Number(p.n) + ", " : "";
+    var s = el("span"); s.appendChild(document.createTextNode(n)); s.appendChild(q(p.step)); return s;
+  }
   var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
   var TEMPLATES = {
     "ticket.answer": function (p) { return ["Answer to ", q(p.question), " on ", q(p.title), "?"]; },
@@ -33,11 +37,17 @@
     },
     "run.human_input": function (p) { return ["Send a message to the agent on ", q(p.title), "?"]; },
     "chat.send": function (p) { return p.thread ? ["Send a message to ", plain(p.thread), "?"] : ["Send a message in Chat?"]; },
-    "check.wont_do": function (p) { return ["Mark ", q(p.step), " on ", q(p.title), " as won't do?"]; },
-    "check.wont_do_undo": function (p) { return ["Open ", q(p.step), " on ", q(p.title), " again?"]; },
+    "check.wont_do": function (p) { return ["Mark ", stepName(p), " on ", q(p.title), " as won't do?"]; },
+    "check.wont_do_undo": function (p) {
+      var verb = {edit: "Rename ", remove: "Remove "}[p.action] || "Open ";
+      return [verb, stepName(p), " on ", q(p.title), p.action === "edit" || p.action === "remove" ? "?" : " again?"];
+    },
     "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
     "update": function (p) { return ["Update orch from ", full(p.source), "?"]; },
-    "relay.connect": function (p) { return ["Connect to ", full(p.host), "?"]; },
+    "relay.connect": function (p) {
+      var s = p.scheme === "http" ? "http://" : "https://";
+      return ["Connect to ", full(s + p.host), "?" + (p.scheme === "http" ? " This address is not encrypted." : "")];
+    },
     "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
     "addon.add_local": function (p) { return ["Add the add-on from ", full(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
   };
@@ -119,13 +129,19 @@
     var anchor = document.getElementById("content");
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(b, anchor); else document.body.insertBefore(b, document.body.firstChild);
   }
-  function notices() {
+  var noticed = {};
+  function notices() {  // reading never clears a notice: only "Got it" does (the id goes back to the server)
     fetch("/api/notices", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(function (items) {
       items.forEach(function (n) {
+        if (noticed[n.id]) return;
+        noticed[n.id] = true;
         var b = el("div", "", "orch-notice"); b.setAttribute("role", "status");
         b.className = "banner info orch-notice"; b.style.cssText = "margin:8px 16px 0";
         b.appendChild(el("div", n.text));
-        var x = el("button", "Got it"); x.type = "button"; x.style.marginTop = "8px"; x.onclick = function () { b.remove(); };
+        var x = el("button", "Got it"); x.type = "button"; x.style.marginTop = "8px";
+        x.onclick = function () {
+          fetch("/api/act", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({op: "notice.ack", args: {id: n.id}})}).then(function (r) { if (r.ok) b.remove(); });
+        };
         b.appendChild(x); place(b);
       });
     }).catch(function () {});

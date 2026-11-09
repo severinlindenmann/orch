@@ -3,6 +3,9 @@
 (function () {
   var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
   if (!m) return;
+  // The app must NOT start (and fetch, and read a one-time notice) while the page is only a bootstrap: stop loading the
+  // rest of the page, hand the token over, and reload; everything starts after the reload with the session.
+  if (window.stop) window.stop();
   history.replaceState(null, "", location.pathname + location.search);
   fetch("/session", {
     method: "POST",

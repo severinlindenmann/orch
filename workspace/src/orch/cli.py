@@ -639,6 +639,27 @@ def _init_guard(cwd: Path) -> None:
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 
+def _undo_gated(root: Path, args, who: str, action: str, call, value: str = ""):
+    """check reopen / edit / remove on a step that may be a Won't do: the requirement is decided UNDER THE
+    TICKET LOCK (tickets.NeedsProof), so there is no check-then-act gap and a ticket that cannot be read
+    refuses. `call(who, proven)` runs the locked operation."""
+    target = f"{args.id}:{args.check}"
+    if getattr(args, "proof_stdin", False):
+        return call(humanproof.person_by(root, args, "check.wont_do_undo", target), True)
+    try:
+        return call(who, False)
+    except tickets.NeedsProof:
+        who = humanproof.person_by(
+            root,
+            args,
+            "check.wont_do_undo",
+            target,
+            value=value,
+            parts=humanproof.step_parts(root, args.id, args.check, action=action),
+        )  # raises (hand-off) unless a person is proven
+        return call(who, who.startswith("human:"))
+
+
 def _patch_is_verdict(root: Path, args) -> bool:
     """A person's `ticket patch` to Done, or one that moves a ticket away from Review, is a verdict and needs
     the person's proof (no two-step bypass: Review -> active -> done)."""
@@ -890,10 +911,7 @@ def run(args: argparse.Namespace) -> None:
             "check.wont_do",
             f"{args.id}:{args.check}",
             value=args.reason or "",
-            parts={
-                "title": humanproof.ticket_name(root, args.id),
-                "step": humanproof.step_text(root, args.id, args.check),
-            },
+            parts=humanproof.step_parts(root, args.id, args.check),
         )
         t, c = tickets.check_wont_do(root, args.id, args.check, who, args.reason)
         _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
@@ -903,31 +921,37 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":
-            t, c = tickets.check_edit(
-                root, args.id, args.check, args.text, who, args.if_revision, args.was, args.covers
+            t, c = _undo_gated(
+                root,
+                args,
+                who,
+                "edit",
+                lambda w, p: tickets.check_edit(
+                    root, args.id, args.check, args.text, w, args.if_revision, args.was, args.covers, proven=p
+                ),
+                value=args.text or "",
             )
             msg = f"{c['id']} renamed."
         elif sub == "move":
             t, c = tickets.check_move(root, args.id, args.check, args.after, who)
             msg = f"{c['id']} now follows {args.after}."
         elif sub == "remove":
-            t, c = tickets.check_remove(root, args.id, args.check, who)
+            t, c = _undo_gated(
+                root,
+                args,
+                who,
+                "remove",
+                lambda w, p: tickets.check_remove(root, args.id, args.check, w, proven=p),
+            )
             msg = f"{c['id']} removed. It and its proof are kept in the history."
         elif sub == "reopen":
-            if humanproof.step_is_wont_do(root, args.id, args.check) and not (
-                who.startswith("agent:") or tickets.agent_tool()
-            ):  # undoing a person's Won't do is a person's decision (H1): proof or hand-off
-                who = humanproof.person_by(
-                    root,
-                    args,
-                    "check.wont_do_undo",
-                    f"{args.id}:{args.check}",
-                    parts={
-                        "title": humanproof.ticket_name(root, args.id),
-                        "step": humanproof.step_text(root, args.id, args.check),
-                    },
-                )
-            t, c = tickets.check_reopen(root, args.id, args.check, who)
+            t, c = _undo_gated(
+                root,
+                args,
+                who,
+                "reopen",
+                lambda w, p: tickets.check_reopen(root, args.id, args.check, w, proven=p),
+            )
             msg = f"{c['id']} is open again. Its proof stays in the history."
         elif sub == "start":
             t, c = tickets.check_start(root, args.id, args.check, who)
@@ -1155,6 +1179,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         _resolve_keys(args, root)
         run(args)
         cli_run.after_command(args, root, want_json)
+        for text in humanproof.cli_notices(root):  # e.g. "orch reset its protection ...": said once, in words
+            print(text, file=sys.stderr)
     except Refused as e:
         return refuse(e)
     return 0
