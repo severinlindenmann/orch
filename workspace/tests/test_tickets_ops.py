@@ -377,7 +377,6 @@ def test_ticket_new_plan_first_flag(proj, run):
     assert "plan_first" not in plain
 
 
-def test_plan_first_is_not_a_patchable_field(proj, new_ticket):
-    tid = new_ticket()
+def test_plan_first_is_not_a_patchable_field():
     with pytest.raises(tickets.Refused):
         tickets.clean_field("plan_first", "true")

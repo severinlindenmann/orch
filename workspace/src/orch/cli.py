@@ -315,7 +315,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
     )
     x.add_argument(
-        "--plan-first", action="store_true", help="the agent makes a plan and waits for you before work starts"
+        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
     )
     x.add_argument(
         "--ext",

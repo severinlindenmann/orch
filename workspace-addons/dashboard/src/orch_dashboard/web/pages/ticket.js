@@ -528,7 +528,7 @@ function focusTicketAnswer() {
   const card = main.querySelector('.next-question');
   if (!card) return;
   card.scrollIntoView({block:'center', behavior:'smooth'});
-  const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea');
+  const target = card.querySelector('[data-question] button, [data-question] input, [data-question] textarea, .ticket-plan-actions button');
   target?.focus({preventScroll:true});
 }
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
@@ -720,20 +720,68 @@ function ticketQuestion(t, q, next = false) {
 }
 // "PIL-2 · Title": the key says which ticket, the title what it is.
 const partName = p => (typeof p.key === 'string' && p.key ? p.key + ' · ' : '') + clean(p.title);
-function ticketParts(t, children) {
-  const add = snapshot ? null : ticketButton('+ Add a step', 'ghost add-row', () => {
-    const {d, actions} = dialog('What is this step about?');
-    const input = h('input', {className:'input', 'aria-label':'What is this step about?', maxlength:200});
-    const send = ticketButton('Add', 'primary', async () => {
-      const title = input.value.trim(); if (!title || send.disabled) return;
-      send.disabled = true;
-      const result = await act('ticket.new', {title, parent:t.id});
-      if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
-    });
-    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
-    actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
+function ticketAddStep(t) {
+  const {d, actions} = dialog('What is this step about?');
+  const input = h('input', {className:'input', 'aria-label':'What is this step about?', maxlength:200});
+  const send = ticketButton('Add', 'primary', async () => {
+    const title = input.value.trim(); if (!title || send.disabled) return;
+    send.disabled = true;
+    const result = await act('ticket.new', {title, parent:t.id});
+    if (result.ok) window.orch.close(d); else { send.disabled = false; window.orch.toast(changeError(result), 'error'); }
   });
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } };
+  actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
+}
+function ticketParts(t, children) {
+  const add = snapshot ? null : ticketButton('+ Add a step', 'ghost add-row', () => ticketAddStep(t));
   return card('parts', 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [!children.length ? emptyRow('No steps yet.') : null, children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'meta'}, child.key || ''), h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+}
+const ticketPlanEditing = new Set();
+function ticketRenameStep(child) {
+  const {d, actions} = dialog('Rename step');
+  const input = h('input', {className:'input', 'aria-label':'Step title', maxlength:200, value:child.title});
+  const save = ticketButton('Save', 'primary', async () => {
+    const title = input.value.trim(); if (!title || save.disabled) return;
+    save.disabled = true;
+    const result = await act('ticket.edit', {ticket:child.id, title, if_revision:child.revision});
+    if (result.ok) window.orch.close(d);
+    else { save.disabled = false; window.orch.toast(changeError(result), 'error'); }
+  });
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } };
+  actions.append(save); d.append(input, actions); window.orch.open(d); input.focus();
+}
+function ticketPlan(t, q, children) {
+  const editing = ticketPlanEditing.has(t.id);
+  const start = snapshot ? null : ticketButton('Start work', 'primary', async () => {
+    const lock = 'plan-answer-' + t.id;
+    if (locks.has(lock)) return;
+    locks.add(lock); start.disabled = true;
+    try {
+      const result = await act('answer', {ticket:t.id, question:q.id, answer:'Start work'});
+      window.orch.toast(result.ok ? 'Answered · Start work · dashboard' : result.text, result.ok ? 'ok' : 'error');
+      if (result.ok) { ticketPlanEditing.delete(t.id); render(); refresh(); }
+    } finally { locks.delete(lock); start.disabled = false; }
+  });
+  return h('section', {className:'card next-step next-question ticket-plan'},
+    chip("Waiting for you · work hasn't started", 'attn'),
+    h('h2', {}, clean(q.text)),
+    h('ol', {className:'ticket-plan-steps'}, children.filter(c => c.status !== 'dropped').map(child =>
+      h('li', {}, h('div', {className:'stack'}, h('strong', {}, clean(child.title)),
+        child.done_when ? h('p', {className:'meta preserve-lines'}, 'Done when ' + clean(child.done_when)) : null,
+        editing && !snapshot && ['open', 'ready'].includes(child.status) && !array(child.checklist).some(c => c.done)
+          ? h('div', {className:'row'},
+            ticketButton('Rename', 'outline sm', () => ticketRenameStep(child)),
+            ticketButton('Remove', 'outline sm', async function () {
+              if (this.disabled) return;
+              this.disabled = true;
+              const result = await act('ticket.patch', {ticket:child.id, data:{status:'dropped'}, if_revision:child.revision});
+              if (!result.ok) { this.disabled = false; window.orch.toast(changeError(result), 'error'); }
+              render();
+            })) : null)))),
+    snapshot ? null : h('div', {className:'row ticket-plan-actions'}, start,
+      ticketButton('Change a step', 'outline', () => { if (editing) ticketPlanEditing.delete(t.id); else ticketPlanEditing.add(t.id); render(); }),
+      editing ? [ticketButton('+ Add a step', 'ghost', () => ticketAddStep(t)),
+        ticketButton('Done editing', 'ghost', () => { ticketPlanEditing.delete(t.id); render(); })] : null));
 }
 function ticketDoneLine(t) {
   if (t.status !== 'done') return null;
@@ -769,7 +817,7 @@ function detail(t) {
       h('h2', {}, agent + ' finished' + (file ? ': ' + clean(window.DashHelpers.plainFileName(file.name)) : '')),
       at ? h('p', {className:'meta'}, 'Completed ' + window.DashHelpers.stamp(at, Date.now())) : null,
       ticketReviewTile(t, file), snapshot ? null : ticketChangesEditor(t)) : null;
-    if (openQuestions.length || review) next = [openQuestions.length ? ticketQuestion(t, openQuestions[0], true) : null, review];
+    if (openQuestions.length || review) next = [openQuestions.length ? (t.plan_first && String(openQuestions[0].text || '').startsWith('Plan ready') ? ticketPlan(t, openQuestions[0], children) : ticketQuestion(t, openQuestions[0], true)) : null, review];
     else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start agent', 'primary', () => act('run.start', {ticket:t.id})));
   }
   const menu = snapshot ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon', 'aria-label':'More ticket actions'}, iconEl('more')),

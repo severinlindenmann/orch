@@ -808,7 +808,7 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
-PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # only orch ticket title writes these
+PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # orch writes these itself
 
 
 def clean_field(key: str, value):

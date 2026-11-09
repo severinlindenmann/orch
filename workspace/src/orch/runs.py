@@ -720,11 +720,11 @@ def _done_when_plan(ticket: dict) -> list[str]:
     ]
 
 
-PLAN_READY = "Plan ready"  # the one question of a "Show plan first" ticket (the dashboard looks for this text)
+PLAN_READY = "Plan ready"  # the one question of a "Show plan first" ticket (dashboard keys on it)
 
 
 def _plan_first_plan(ticket: dict) -> list[str]:
-    """"Show plan first": plan, ask once, stop. Not again once that question exists (answered or open)."""
+    """ "Show plan first": plan, ask once, stop. Not again once that question exists (answered or open)."""
     if not ticket.get("plan_first") or any(
         str(q.get("text", "")).startswith(PLAN_READY) for q in ticket.get("questions") or []
     ):
