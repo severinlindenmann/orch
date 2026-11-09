@@ -703,7 +703,7 @@ def test_a_failed_result_send_is_retried_once(proj, run, new_ticket, conn, monke
 
 
 def _failing_post(monkeypatch, status, store):
-    """The first post carrying a ticket_view fails with `status` (None = timeout); `store`: the relay kept it."""
+    """First post with a ticket_view fails with `status` (None = timeout); `store`: relay kept it."""
     from orch import relay
     from orch.errors import Refused
 
