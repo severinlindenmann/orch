@@ -491,27 +491,26 @@ def test_ps_comes_first_and_proc_is_the_fallback(monkeypatch):
         stdout = "Mon Nov  9 15:00:00 2026"
 
     monkeypatch.setattr(procs.os, "name", "posix")
-    monkeypatch.setattr(procs, "_proc_started", lambda pid: "PROC~")
+    monkeypatch.setattr(procs, "_proc_started", lambda pid: "2026-01-01T00:00:00Z")
     monkeypatch.setattr(procs.subprocess, "run", lambda *a, **k: R())
-    assert procs.pid_started(4242) not in (None, "PROC~")
+    assert procs.pid_started(4242) not in (None, "2026-01-01T00:00:00Z")
     R.stdout = ""
-    assert procs.pid_started(4242) == "PROC~"
+    assert procs.pid_started(4242) == "2026-01-01T00:00:00Z"
 
     def no_ps(*a, **k):
         raise FileNotFoundError("ps")
 
     monkeypatch.setattr(procs.subprocess, "run", no_ps)
-    assert procs.pid_started(4242) == "PROC~"
+    assert procs.pid_started(4242) == "2026-01-01T00:00:00Z"
 
 
-def test_same_start_exact_for_ps_and_tolerant_for_proc_values():
+def test_same_start_tolerates_two_seconds_for_all_values():
     a = "2026-11-09T15:00:00Z"
     assert procs.same_start(a, a)
-    assert not procs.same_start(a, "2026-11-09T15:00:01Z")  # ps values: exact
-    assert procs.same_start(a + "~", "2026-11-09T15:00:02Z~")  # /proc: +-2 s
-    assert procs.same_start(a, "2026-11-09T15:00:01Z~")  # mixed: tolerant
-    assert not procs.same_start(a + "~", "2026-11-09T15:00:03Z~")
-    assert not procs.same_start(a, None)
+    assert procs.same_start(a, "2026-11-09T15:00:02Z")
+    assert not procs.same_start(a, "2026-11-09T15:00:03Z")
+    assert not procs.same_start(a, "2026-11-09T14:59:56Z")
+    assert not procs.same_start(a, None) and not procs.same_start(a, "garbage")
 
 
 def test_proc_boot_time_is_read_once(monkeypatch):
@@ -527,4 +526,4 @@ def test_proc_boot_time_is_read_once(monkeypatch):
         return real_open(path, *a, **k)
 
     monkeypatch.setattr("builtins.open", no_stat)
-    assert procs._proc_started(os.getpid()) == first and first.endswith("~")
+    assert procs._proc_started(os.getpid()) == first and "~" not in first and first.endswith("Z")

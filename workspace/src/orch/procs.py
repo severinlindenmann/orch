@@ -61,14 +61,13 @@ def pid_started(pid: int) -> str | None:
 
 
 _btime: int | None = None
-APPROX = "~"  # suffix of a /proc-derived start time: the kernel's boot time drifts by a second or so
-APPROX_SECONDS = 2
+APPROX_SECONDS = 2  # start times of one pid compare within this (boot time drifts a second; ps has 1 s steps)
 
 
 def _proc_started(pid: int) -> str | None:
     """Linux: start time from /proc (no ps, no locale: minimal containers have no procps), else None.
-    Marked approximate (APPROX suffix); the boot time is read once per process so one process always sees
-    one value."""
+    Plain ISO like every stored start time; the boot time is read once per process so one process always
+    sees one value."""
     global _btime
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
@@ -77,22 +76,20 @@ def _proc_started(pid: int) -> str | None:
         if _btime is None:
             with open("/proc/stat", encoding="utf-8") as f:
                 _btime = next(int(line.split()[1]) for line in f if line.startswith("btime "))
-        return _iso(_btime + ticks // os.sysconf("SC_CLK_TCK")) + APPROX
+        return _iso(_btime + ticks // os.sysconf("SC_CLK_TCK"))
     except (OSError, IndexError, ValueError, StopIteration, AttributeError):
         return None
 
 
 def same_start(a: str, b: str) -> bool:
-    """Two start times of one pid are the same process: exact for ps values, within APPROX_SECONDS when either
-    comes from /proc."""
+    """Two start times of one pid are the same process: equal within APPROX_SECONDS. (A reused pid with a start
+    time that close would need a full pid wraparound within 2 s.)"""
     if not isinstance(a, str) or not isinstance(b, str):
         return False
     if a == b:
         return True
-    if not (a.endswith(APPROX) or b.endswith(APPROX)):
-        return False
     try:
-        fa, fb = (datetime.strptime(x.removesuffix(APPROX), "%Y-%m-%dT%H:%M:%SZ") for x in (a, b))
+        fa, fb = (datetime.strptime(x, "%Y-%m-%dT%H:%M:%SZ") for x in (a, b))
     except ValueError:
         return False
     return abs((fa - fb).total_seconds()) <= APPROX_SECONDS
