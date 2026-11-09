@@ -320,11 +320,11 @@
         const showSource = () => area.replaceChildren(h('pre', {class: 'fx-pv-pre code', tabindex: '0'}, highlight(src.text, false)));
         const showPage = () => area.replaceChildren(h('p', {class: 'fx-pv-cap', text: 'Agent preview. Scripts in this page run in a closed box, apart from Focus. Don’t type secrets into this preview.'}),
           h('iframe', {class: 'fx-pv-frame', sandbox: 'allow-scripts', referrerpolicy: 'no-referrer', src: url(ev, 'page'), title: title(ev, kind)}));
-        const seg = [['Source', showSource], ['Page', showPage]].map(([t, fn], n) => {
+        const seg = [['Page', showPage], ['Code', showSource]].map(([t, fn], n) => {
           const b = h('button', {type: 'button', class: 'btn sm ' + (n ? 'ghost' : ''), 'aria-pressed': String(!n), text: t, onclick: () => { seg.forEach(x => { x.classList.toggle('ghost', x !== b); x.setAttribute('aria-pressed', String(x === b)); }); fn(); }});
           return b;
         });
-        showSource();
+        showPage();
         return put(h('div', {class: 'fx-pv-stack'}, h('div', {class: 'fx-pv-seg', role: 'group', 'aria-label': 'Show the page as'}, seg), area), signal);
       }
       const src = await fetchText(ev, signal);
