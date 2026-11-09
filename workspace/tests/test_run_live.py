@@ -78,7 +78,11 @@ def _fake_claude(tmp_path, monkeypatch):
     calls, typed = tmp_path / "claude-calls.txt", tmp_path / "claude-typed.txt"
     f = d / "claude"
     f.write_text(
-        f'#!/bin/sh\necho "$@" >> {shlex.quote(str(calls))}\nexec cat >> {shlex.quote(str(typed))}\n'
+        f'#!/bin/sh\necho "$@" >> {shlex.quote(str(calls))}\n'
+        # a boxed tool: border, empty prompt, border (the adapter says claude draws a box)
+        + f"printf '%s\\n> \\n%s\\n' {'─' * 60} {'─' * 60}\n"
+        f"exec cat >> {shlex.quote(str(typed))}\n",
+        encoding="utf-8",
     )
     f.chmod(f.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])

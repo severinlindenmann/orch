@@ -26,7 +26,8 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(topic.waitForExistence(timeout: 10))
         app.reveal(topic)
         topic.tap()
-        XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10) || app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 5))
+        // The ticket chat is open: its status line (tasks toggle). A finished topic has no composer hint any more (round 9).
+        XCTAssertTrue(app.descendants(matching: .any)["tasks-toggle"].waitForExistence(timeout: 10))
     }
 
     /// A working topic is listed under Open.

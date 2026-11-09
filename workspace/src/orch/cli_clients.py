@@ -146,7 +146,7 @@ def add_parsers(sub, common) -> None:
         action="append",
         default=[],
         metavar="KIND:VALUE",
-        help="a card in Chat: ticket:<KEY>, reference:<url> or file:<path> (repeat)",
+        help="a card in Chat: ticket:<KEY>, proposal:<title>, reference:<url> or file:<path> (repeat)",
     )
     x = rel.add_parser(
         "topic", parents=[common], help="turn a phone message (from General) into a ticket of its own"
@@ -561,7 +561,7 @@ def run_relay(args, root: Path, out) -> None:
         elif args.text:
             speak = relay.speak_hint(root, t, args.text, args.summary) if args.speak else None
             refs = [
-                {"kind": k, ("key" if k == "ticket" else "url" if k == "reference" else "path"): v}
+                {"kind": k, {"ticket": "key", "reference": "url", "proposal": "title"}.get(k, "path"): v}
                 for k, _, v in (r.partition(":") for r in args.ref)
             ]
             m = relay.send_text(

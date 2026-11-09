@@ -284,6 +284,8 @@ def art(ws, act_orch):
     (d / "artifacts" / "notes.md").write_text("# hello")
     (d / "artifacts" / "page.html").write_text("<script>alert(1)</script>")
     (d / "artifacts" / "pic.png").write_bytes(b"\x89PNG")
+    (d / "artifacts" / "data.json").write_text('{"a": 1}')
+    (d / "artifacts" / "feed.xml").write_text("<x/>")
     (d / "artifacts" / "pic.svg").write_text("<svg onload=alert(1)/>")
     (d / "artifacts" / "sub" / "a.txt").write_text("deep")
     (d / "artifacts" / "big.txt").write_bytes(b"x" * (2 * 1024 * 1024 + 1))
@@ -335,6 +337,10 @@ def test_files_are_shown_as_text_or_picture_only(art):
     code, body, h = _get(art, q + "page.html")  # a page is text, never a page
     assert code == 200 and h["Content-Type"].startswith("text/plain")
     assert _get(art, q + "pic.png")[2]["Content-Type"] == "image/png"
+    assert _get(art, q + "pic.png")[2]["X-Content-Type-Options"] == "nosniff"
+    for name in ("data.json", "feed.xml"):  # never served with their own type
+        h = _get(art, q + name)[2]
+        assert h["Content-Type"].startswith("text/plain") and h["X-Content-Type-Options"] == "nosniff"
     assert _get(art, q + "pic.svg")[0] == 404  # svg can run code: no preview
     assert _get(art, q + "sub/a.txt")[1] == b"deep"
     assert _get(art, "/api/file?t=t_other000x&k=evidence&n=proof.txt")[1] == b"proof"

@@ -16,7 +16,7 @@ STATUS = {
     "helper": "Pilatus helper",
     "ticket": "t_chat0001",
     "day": "2026-11-08",
-    "messages": [{"id": "m_a", "by": "you", "via": "phone", "text": "hi", "refs": []}],
+    "messages": [{"id": "m_a", "by": "you", "via": "phone", "text": "hi", "convo_start": True, "moved_to": {"id": "t_fish", "key": "FS-1", "title": "Fish"}, "refs": [{"kind": "proposal", "title": "Fish", "made": {"id": "t_fish", "key": "FS-1"}}]}],
     "activity": {"day": "2026-11-08", "phone_today": 1, "from_workspaces": {"Home": 2}, "running": 3},
     "days": [{"day": "2026-11-07", "count": 4, "last": "bye"}],
 }
@@ -28,7 +28,7 @@ def orch(tmp_path):
     f.write_text(f"""#!{sys.executable}
 import json, sys
 a = sys.argv[1:]
-if a[:2] == ["chat", "status"]: print(json.dumps({json.dumps(STATUS)}))
+if a[:2] == ["chat", "status"]: print(json.dumps({STATUS!r}))
 elif a[:2] == ["chat", "days"]: print(json.dumps({json.dumps(STATUS["days"])}))
 elif a[:2] == ["chat", "day"]: print(json.dumps({{"day": a[2], "today": False, "messages": [{{"id": "m_o", "text": "old"}}]}}))
 else: sys.exit(2)
@@ -39,6 +39,7 @@ else: sys.exit(2)
 
 def test_chat_data_is_read_through_the_orch_command(ws, orch):
     assert load_chat(ws, orch)["activity"]["running"] == 3
+    assert load_chat(ws, orch)["messages"] == STATUS["messages"]
     assert load_chat_days(ws, orch)[0]["day"] == "2026-11-07"
     assert load_chat_day(ws, orch, "2026-11-07")["messages"][0]["text"] == "old"
     assert load_chat_day(ws, orch, "../../etc") is None

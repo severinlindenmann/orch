@@ -310,6 +310,32 @@ pub fn parse_ws_list(s: &str) -> Vec<String> {
     l
 }
 
+/// The workspace list of a phone row, parsed with `parse_ws_list` exactly as `auth::phone` parses it
+/// (send decisions use auth's own list; this is for the display `can` only).
+pub fn phone_list(c: &Connection, phone_id: &str) -> Vec<String> {
+    c.query_row(
+        "SELECT workspaces FROM phones WHERE id=?1",
+        [phone_id],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .map(|l| parse_ws_list(&l))
+    .unwrap_or_default()
+}
+
+/// The one send rule: `ws` is on the phone's list (`list` = what `auth::phone` returned) and exists.
+/// /v1/phone/send decides with this (a bool, never JSON); the display `can` is built from it.
+pub fn phone_may_send(c: &Connection, list: &[String], ws: &str) -> bool {
+    list.iter().any(|w| w == ws) && ws_exists(c, ws)
+}
+
+/// Display only (a UI hint, never authorization): `files` is NOT a file permission, uploads are checked in send.
+/// Tasks reach a workspace as a chat text its helper may turn into a ticket, so tasks follows chat.
+pub fn phone_can(c: &Connection, phone_id: &str, ws: &str) -> Value {
+    let allowed = phone_may_send(c, &phone_list(c, phone_id), ws);
+    json!({"chat": allowed, "tasks": allowed, "files": allowed})
+}
+
 pub fn parse_list(s: &str) -> Vec<String> {
     serde_json::from_str(s).unwrap_or_default()
 }

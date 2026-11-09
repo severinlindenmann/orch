@@ -25,6 +25,12 @@ OLD = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def source_metadata(monkeypatch):
+    monkeypatch.setattr(addons, "_source_sha", lambda: None)
+    monkeypatch.setattr(addons, "_release_title", lambda: None)
+
+
 @pytest.fixture
 def github(monkeypatch):
     monkeypatch.delenv("ORCH_REPO", raising=False)

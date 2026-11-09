@@ -1,6 +1,6 @@
 'use strict';
 // Classic-script page: rendering is side-effect free; events own requests and UI state.
-let chatUi = {open:'chat', day:null, listOpen:true, sheet:null, panel:null, search:'', historySearch:'', menu:false,
+let chatUi = {open:'chat', agentConversation:false, newConversation:false, day:null, listOpen:true, sheet:null, panel:null, search:'', historySearch:'', menu:false,
   drafts:Object.create(null), sending:new Set(), pending:new Map(), files:new Set(), historyFocus:null};
 let chatDays = {status:'idle', rows:[]}, chatArchive = new Map();
 const chatScroll = new WeakMap();
@@ -79,13 +79,33 @@ function chatList() {
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null,
     groups.length ? chatButton('Done groups → History', 'history', {className:'chat-button chat-list-footer'}) : null);
 }
+function chatOpenAgent() {
+  if (snapshot) return;
+  chatUi.agentConversation = true; chatUi.newConversation = true; chatUi.drafts.chat = '';
+  chatUi.open = 'chat'; chatUi.day = null; chatUi.listOpen = false; chatUi.sheet = null; chatUi.panel = null;
+  location.hash = '#chat'; render();
+}
+function chatConversation() {
+  const messages = chatObjects(state?.chat?.messages);
+  if (chatUi.newConversation) return [];
+  if (!chatUi.agentConversation) return messages;
+  const start = messages.findLastIndex(m => m.convo_start);
+  return messages.slice(Math.max(0, start));
+}
+function chatMovedBanner(moved) {
+  return h('div', {className:'chat-archive-banner'}, 'This conversation now belongs to ticket ', clean(moved.key), ' · ',
+    h('a', {href:chatLink(moved.id)}, 'Open ticket'));
+}
 function chatHeader(g, history) {
+  const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}),
-      h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(history ? 'History' : g?.title || 'Chat · ' + chatWorkspace())),
+      h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(history ? 'History' : g?.title || (agent ? 'New conversation with your agent' : 'Chat · ' + chatWorkspace()))),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null,
       history ? null : chatButton('History', 'history')),
-    history ? null : h('div', {className:'chat-member-chips'}, (g ? chatObjects(g.members) : [{name:chatWorkspace()}]).map(m =>
+    agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the agent can make the ticket.') : null,
+    moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(moved.title)) : null,
+    history || agent ? null : h('div', {className:'chat-member-chips'}, (g ? chatObjects(g.members) : [{name:chatWorkspace()}]).map(m =>
       h('span', {className:'chat-member-chip' + (m.running === false ? ' chat-stopped' : '')}, chatAvatar(m), clean(m.name), m.running === false ? ' · not running' : ''))),
     g ? h(ticketOf(g.ticket) ? 'a' : 'span', {className:'chat-ticket-link', href:ticketOf(g.ticket) ? chatLink(g.ticket) : null}, 'From ticket ', clean(g.key), ' ›') : null);
 }
@@ -99,9 +119,10 @@ function chatActivity() {
   return fragment(h('div', {className:'chat-activity', 'data-key':'activity'}, toggles.map(([id, label]) => chatButton(label, 'activity', {'data-key':id, 'data-id':id, 'aria-expanded':String(chatUi.panel === id), 'aria-controls':'chat-activity-panel'}))),
     chatUi.panel ? h('div', {className:'chat-panel', id:'chat-activity-panel'}, body?.length === 0 ? chatText('p', 'chat-muted', 'Nothing here today.') : body) : null);
 }
-function chatRefs(refs, prefix) {
+function chatRefs(refs, prefix, mid, readOnly = false) {
   return chatObjects(refs).map((ref, i) => {
     const key = prefix + '-ref-' + i;
+    if (ref.kind === 'proposal') return ref.made ? h('a', {className:'chat-member-chip', 'data-key':key, href:chatLink(ref.made.id)}, clean(ref.made.key)) : chatButton('Make ticket: ' + clean(ref.title).slice(0, 80), 'make-ticket', {className:'btn outline', 'data-key':key, 'data-id':mid, disabled:snapshot || readOnly || chatUi.pending.has(mid)});
     if (ref.kind === 'ticket' && ref.id) {
       const ticket = ticketOf(ref.id);
       return h('a', {className:'chat-card', 'data-key':key, href:chatLink(ref.id)}, chatText('strong', '', [ref.key, ref.title].filter(Boolean).join(' · ')), ticket?.status ? chatText('small', '', window.DashHelpers.statusWord(ticket.status)) : null);
@@ -144,20 +165,20 @@ function chatMessage(m, previous, g, index, readOnly, lastMine) {
   const key = 'message-' + (m.id || index), mine = m.by === 'you';
   if (g && m.group_event) return m.group_event.kind === 'approval_needed' ? chatApproval(m, g, index, readOnly) : chatText('div', 'chat-system', chatEvent(m.group_event, g));
   const member = g ? chatObjects(g.members).find(item => item.ws === m.by) || {name:m.name} : {name:chatWorkspace()};
-  const sender = mine ? 'You' : clean(g ? m.name || (member.name ? member.name + ' helper' : 'Helper') : state?.chat?.helper || chatWorkspace() + ' helper');
+  const sender = mine ? 'You' : clean(g ? m.name || (member.name ? member.name + ' helper' : 'Helper') : chatWorkspace());
   const grouped = previous && !previous.group_event && previous.by === m.by;
   return h('article', {className:'chat-message' + (mine ? ' chat-out' : '') + (grouped ? ' chat-grouped' : ''), 'data-key':key, 'data-message-id':m.id, tabindex:'-1'},
     !mine && !grouped ? h('div', {className:'chat-who'}, chatAvatar(member, true), sender) : null,
     h('div', {className:'chat-bubble'}, m.question_to ? chatText('small', 'chat-question', 'Question to ' + clean(m.question_to)) : null,
-      chatText('div', 'chat-message-text', m.text), chatRefs(m.refs, key),
+      chatText('div', 'chat-message-text', m.text), chatRefs(m.refs, key, m.id, readOnly),
       g && m.task ? chatTask(m.task, g, readOnly) : null,
       g && m.added_to ? h('a', {className:'chat-card', href:chatLink(g.ticket)}, 'Added to ', clean(m.added_to.key), ' › ', clean(m.added_to.label)) : null,
       m.share ? chatText('span', 'chat-file-chip', m.share.title || m.share.kind) : null),
     chatText('small', 'chat-message-time', [mine ? 'You' : '', time(m.at), m.via, m.to_everyone ? 'to everyone' : ''].filter(Boolean).join(' · ')),
     mine && index === lastMine && g?.delivered?.text ? chatText('small', 'chat-delivery', g.delivered.text) : null);
 }
-function chatThinking(who) {
-  const label = / helper$/.test(who) ? who : who + ' helper';
+function chatThinking(who, plain = false) {
+  const label = plain || / helper$/.test(who) ? who : who + ' helper';
   return h('div', {className:'chat-message', 'data-key':'thinking-' + who}, h('div', {className:'chat-bubble chat-muted'}, h('span', {className:'chat-dots', 'aria-hidden':'true'}, h('i'), h('i'), h('i')), clean(label) + ' is thinking…'));
 }
 function chatSharedTicket(g) {
@@ -168,17 +189,17 @@ function chatSharedTicket(g) {
     h('ul', {}, chatObjects(ticket.checklist).slice(0, 6).map(item => h('li', {}, h('span', {'aria-hidden':'true'}, item.done ? '☑ ' : '☐ '), h('span', {className:'chat-sr'}, item.done ? 'done: ' : 'open: '), clean(item.text)))));
 }
 function chatThread(g, archived) {
-  const messages = chatObjects(archived ? archived.messages : g ? g.messages : state?.chat?.messages);
+  const messages = chatObjects(archived ? archived.messages : g ? g.messages : chatConversation());
   const readOnly = snapshot || !!archived || !!(g?.done || g?.closed || g?.readOnly), last = messages[messages.length - 1];
   const lastMine = messages.reduce((found, m, i) => m.by === 'you' ? i : found, -1);
   const since = Date.now() - Date.parse(last?.at);
-  const thinking = readOnly ? [] : g ? array(g.thinking).filter(n => typeof n === 'string') : state?.chat?.running || (last?.by === 'you' && since >= 0 && since < 600000) ? [clean(state?.chat?.helper) || chatWorkspace() + ' helper'] : [];
+  const thinking = readOnly ? [] : g ? array(g.thinking).filter(n => typeof n === 'string') : state?.chat?.running || (last?.by === 'you' && since >= 0 && since < 600000) ? [chatWorkspace()] : [];
   const logKey = 'log-' + (archived ? chatUi.day : g?.id || 'chat');
   return fragment(g ? chatSharedTicket(g) : null,
     g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Done · read only') : g?.readOnly ? chatText('div', 'chat-archive-banner', 'Read only here. Write in ' + chatHost(g) + '.') : null,
     h('div', {className:'chat-log', 'data-key':logKey, role:'log', 'aria-live':'polite', 'aria-label':g ? 'Group messages' : 'Chat messages'},
       h('div', {className:'chat-divider'}, archived ? date(chatUi.day) : 'Today'),
-      messages.length ? messages.map((m, i) => chatMessage(m, messages[i - 1], g, i, readOnly, lastMine)) : chatText('p', 'chat-empty', readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(chatThinking)),
+      messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : chatUi.agentConversation && !g && !archived ? null : chatText('p', 'chat-empty', readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g))),
     readOnly ? snapshot ? chatText('p', 'chat-readonly', 'This is a shared copy.') : null : chatComposer(g));
 }
 function chatComposer(g) {
@@ -189,7 +210,7 @@ function chatComposer(g) {
       g ? chatButton('+', 'menu', {'aria-label':'Add to conversation', 'aria-haspopup':'menu', 'aria-expanded':String(chatUi.menu), 'aria-controls':'chat-compose-menu'}) : null,
       h('textarea', {rows:1, className:'chat-draft', 'data-key':'draft-' + id, 'data-chat-input':'draft', 'data-thread':id, 'aria-label':g ? 'Message the group' : 'Message ' + chatWorkspace(), placeholder:g ? 'Message the group' : 'Message ' + chatWorkspace()}, draft),
       h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'send', disabled:sending || !draft.trim(), 'data-state':sending ? 'sending' : draft.trim() ? 'ready' : 'empty'}, sending ? h('span', {className:'spinner', 'aria-hidden':'true'}) : iconEl('send'), sending ? 'Sending' : 'Send')),
-    h('div', {className:'chat-context'}, g ? 'Everyone in this group sees what you write here · ' : 'Context cleared daily at 04:00 · ',
+    !g && chatUi.agentConversation ? null : h('div', {className:'chat-context'}, g ? 'Everyone in this group sees what you write here · ' : 'Context cleared daily at 04:00 · ',
       h('details', {'data-key':'context-details'}, h('summary', {}, 'Details'), h('p', {}, g ? "Members see the group's messages from when they joined. They do not see the rest of the " + chatHost(g) + ' ticket.' : "Every night at 04:00 the helper starts fresh. Today's messages move to History; nothing is deleted."))));
 }
 function chatDayLabel(day) {
@@ -233,7 +254,7 @@ function chatSheet(g, readOnly) {
 function chatPage() {
   const g = chatGroup(), history = chatUi.open === 'history';
   const page = h('section', {className:'chat-page' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, chatList(),
-    h('div', {className:'chat-main', 'data-key':'chat-main'}, chatHeader(g, history), history ? chatHistory() : fragment(g ? null : chatActivity(), chatThread(g, null)),
+    h('div', {className:'chat-main', 'data-key':'chat-main'}, chatHeader(g, history), history ? chatHistory() : fragment(g || chatUi.agentConversation ? null : chatActivity(), chatThread(g, null)),
       g && chatUi.sheet ? chatSheet(g, snapshot || g.done || g.closed || g.readOnly) : null));
   page.addEventListener('click', chatClick);
   page.addEventListener('input', chatInput);
@@ -246,6 +267,7 @@ function chatPage() {
 }
 function chatFocus(selector) { document.querySelector('.chat-page ' + selector)?.focus(); }
 function chatSelect(id) {
+  chatUi.agentConversation = false; chatUi.newConversation = false;
   chatUi.open = id; chatUi.day = null; chatUi.listOpen = false; chatUi.sheet = null; chatUi.menu = false; chatUi.panel = null;
   render(); chatFocus('[data-key="chat-title"]');
 }
@@ -282,7 +304,8 @@ async function chatSend() {
   if (!text) return;
   const original = field.value;
   chatUi.drafts[id] = original; chatUi.sending.add(id); render();
-  const ok = await chatOperation(g ? 'group.say' : 'chat.say', g ? {ticket:g.ticket, text} : {text}, g ? 'Could not send to the group.' : 'Could not send your message.');
+  const ok = await chatOperation(g ? 'group.say' : 'chat.say', g ? {ticket:g.ticket, text} : {text, ...(chatUi.newConversation || chatConversation().at(-1)?.moved_to ? {new:true} : {})}, g ? 'Could not send to the group.' : 'Could not send your message.');
+  if (ok && !g) chatUi.newConversation = false;
   chatUi.sending.delete(id);
   if (ok && chatUi.drafts[id] === original) { chatUi.drafts[id] = ''; if (field.isConnected) { field.value = ''; field.style.height = ''; } }
   render(); if (field.isConnected) field.focus();
@@ -310,6 +333,12 @@ async function chatClick(event) {
   if (action === 'activity') { chatUi.panel = chatUi.panel === control.dataset.id ? null : control.dataset.id; return render(); }
   if (action === 'jump') { const node = [...document.querySelectorAll('.chat-page [data-message-id]')].find(n => n.dataset.messageId === control.dataset.id); node?.scrollIntoView({block:'center'}); node?.focus(); return; }
   if (action === 'file') { const id = control.dataset.id; chatUi.files.has(id) ? chatUi.files.delete(id) : chatUi.files.add(id); return render(); }
+  if (action === 'make-ticket') {
+    if (snapshot || chatUi.open === 'history' || chatUi.pending.has(control.dataset.id)) return;
+    const id = control.dataset.id; chatUi.pending.set(id, true); render();
+    await chatOperation('chat.make_ticket', {id}, 'Could not make the ticket.');
+    chatUi.pending.delete(id); render(); return;
+  }
   if (!g) return;
   if (action === 'members' || action === 'add') { if (action === 'add' && (snapshot || g.done || g.closed)) return; chatUi.sheet = action === 'add' ? 'add' : 'members'; chatUi.menu = false; render(); return chatFocus('[data-chat-action="close-sheet"]'); }
   if (action === 'close-sheet') { chatUi.sheet = null; render(); return chatFocus('#chat-members-button'); }

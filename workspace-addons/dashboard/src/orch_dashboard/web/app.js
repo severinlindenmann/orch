@@ -270,7 +270,8 @@ async function act(op, args) {
   writing++;
   mutation++;
   try {
-    const res = await fetch('/api/act', {method:'POST', keepalive:true, headers:{'Content-Type':'application/json'}, body:JSON.stringify({op, args})});
+    const body = JSON.stringify({op, args});
+    const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers:{'Content-Type':'application/json', 'X-Orch-Op':String(op)}, body});
     if (res.status !== 200) return {ok:false, status:res.status, text:await res.text()};
     const next = await res.json();
     succeeded = true;
@@ -327,6 +328,8 @@ function dialog(title, cls = 'dialog', lock = '') {
 }
 document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
+document.getElementById('open-agent').hidden = snapshot;
+document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
 const toggle = document.getElementById('menu-toggle');
 toggle.addEventListener('click', () => {
   const open = toggle.getAttribute('aria-expanded') !== 'true';

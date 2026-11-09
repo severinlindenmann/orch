@@ -13,7 +13,7 @@ function ticketTitle(t, needsYou = false) {
 }
 function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);
-  return parent ? h('p', {className:'meta'}, 'Part of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta'}, 'Step of ', h('a', {href:href(parent.id)}, clean(parent.title))) : null;
 }
 function ticketRow(t) {
   return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t));
@@ -81,7 +81,7 @@ function messageTicket(text) {
     if (!title.value.trim()) { title.reportValidity(); return; }
     if (changeUnavailable()) return;
     create.disabled = true;
-    const result = await act('ticket.new', {title:title.value.trim(), note:note.value});
+    const result = await act('ticket.new', {title:title.value.trim(), ...(note.value.length > 1500 ? {long_text:note.value} : {note:note.value})});
     create.disabled = false;
     if (result.ok) { await window.orch.close(d); window.orch.toast('Ticket created', 'ok'); }
     else window.orch.toast(changeError(result), 'error');

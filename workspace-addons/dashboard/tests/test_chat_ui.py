@@ -76,3 +76,23 @@ def test_legacy_lines_count_only_from_a_person_or_the_relay_phone_intake_never_v
     assert not is_chat_entry({"by": "human:me", "via": "dashboard", "text": "x", "chat_message": False})
     assert is_chat_entry({"by": "agent:x", "via": "cli", "text": "x", "chat_message": True})
     assert not is_chat_entry({"at": "2026-12-01T10:00:00Z", "by": "human:me", "via": "dashboard", "text": "x"})  # unflagged and new
+
+
+def test_open_agent_proposal_and_moved_conversation():
+    app = (webjs.WEB / "app.js").read_text()
+    index = (webjs.WEB / "index.html").read_text()
+    assert 'data-action="open-agent"' in index
+    assert "getElementById('open-agent').hidden = snapshot" in app
+    for text in ("New conversation with your agent", "Talk it through first. When you are ready, the agent can make the ticket.", "Make ticket", "This conversation now belongs to ticket", "chat.make_ticket", "convo_start", "moved_to"):
+        assert text in JS
+
+
+def test_open_agent_button_sits_directly_left_of_new_ticket():
+    from pathlib import Path
+
+    web = Path(__file__).parents[1] / "src" / "orch_dashboard" / "web"
+    html = (web / "index.html").read_text(encoding="utf-8")
+    css = (web / "style.css").read_text(encoding="utf-8")
+    assert html.index('id="open-agent"') < html.index('id="new-ticket"')
+    assert html.index('id="new-ticket"') - html.index('id="open-agent"') < 400  # adjacent buttons
+    assert "#open-agent:not([hidden])+.btn.primary{margin-left:0}" in css

@@ -135,9 +135,15 @@ def _call(root: Path, name: str, m: dict, sub: str) -> dict:
     return data
 
 
+_BIDI = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+
+
 def _printable(v: object) -> str:
-    """Add-on text for the terminal: no control characters (no escape sequences), at most 200 characters."""
-    return "".join(c for c in str(v) if c.isprintable())[:200]
+    """Add-on text for the terminal: no control characters (no escape sequences, also C1 ones) and no
+    direction overrides, at most 200 characters."""
+    return "".join(c for c in str(v) if c.isprintable() and not 0x80 <= ord(c) <= 0x9F and c not in _BIDI)[
+        :200
+    ]
 
 
 def _workspace_root(root: Path) -> Path:
@@ -148,13 +154,17 @@ def _workspace_root(root: Path) -> Path:
     return root
 
 
-def start(root: Path) -> list[dict]:
+def start(root: Path, only: set[str] | None = None) -> list[dict]:
     """Start the background process of every active add-on here. One row per add-on."""
     root = _workspace_root(root).resolve()
     skills.ensure_gitignore(root)  # .orch/run/ (runtime files of the add-ons) stays out of git
     rows = []
-    entries = [e for e in running() if e["workspace"] != str(root)]
+    entries = [
+        e for e in running() if e["workspace"] != str(root) or (only is not None and e["addon"] not in only)
+    ]
     for name, m in _services(root).items():
+        if only is not None and name not in only:
+            continue
         res = _call(root, name, m, "start")
         row = {"addon": name, "running": bool(res.get("running")) and "error" not in res}
         if pid_alive(res.get("pid")):
@@ -180,19 +190,23 @@ def start(root: Path) -> list[dict]:
     return rows
 
 
-def stop(root: Path) -> list[dict]:
+def stop(root: Path, only: set[str] | None = None) -> list[dict]:
     """Stop every background process of this workspace. An add-on that is no longer on here is not run:
     its process sees that and ends by itself."""
     root = root.resolve()
     workspace_rows(root)  # notes that they were running now
     rows = []
     for name, m in _services(root).items():
+        if only is not None and name not in only:
+            continue
         res = _call(root, name, m, "stop")
         row = {"addon": name, "stopped": bool(res.get("stopped"))}
         if "error" in res:
             row["error"] = _printable(res["error"])
         rows.append(row)
-    _save([e for e in running() if e["workspace"] != str(root)])
+    _save(
+        [e for e in running() if e["workspace"] != str(root) or (only is not None and e["addon"] not in only)]
+    )
     return rows
 
 

@@ -65,6 +65,7 @@
                 "fresh": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "const": "{interactive}" }] },
                 "resume": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "type": "null" }] },
                 "send": { "enum": ["notice-line+Enter"], "description": "How input goes in: orch types one fixed ASCII line (send-keys -l) telling the agent to run `orch run input <ticket>`, then Enter as its own key. A person's text never reaches the screen." },
+                "prompt_box": { "type": "boolean", "description": "Optional, default true. True: the tool draws a bordered prompt box; orch types its notice only into a box it can see and proves empty, else it waits. False: a plain command-line tool; the cursor's own line is its prompt (and any doubt waits)." },
                 "dialog": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Optional. Case-insensitive multi-line regex for the tool's own dialogs (permission prompts): while one shows anywhere on the pane, orch never sends Enter." },
                 "interrupt_keys": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,16}$" }, "description": "tmux send-keys names that stop the current turn." },
                 "idle_signal": { "$ref": "#/$defs/signal" },
