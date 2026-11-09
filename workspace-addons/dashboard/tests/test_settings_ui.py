@@ -138,7 +138,7 @@ def test_settings_git_private(ws, monkeypatch):
                     "agent_command_ignored": True})
     for reply in replies:
         calls = []
-        def run(binary, args, root):
+        def run(binary, args, root, calls=calls, reply=reply):
             calls.append((binary, args, root))
             return reply if args == ["private", "--json"] else None
         monkeypatch.setattr(data, "run_orch", run)
