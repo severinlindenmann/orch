@@ -1105,14 +1105,32 @@ def hp_settle(c):
     return out
 
 
+def _pending_mac(key, workspace, ticket, line):
+    body = {"workspace": workspace, "ticket": ticket, "line": {k: x for k, x in line.items() if k not in ("mac", "delivered_at")}}
+    raw = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return _b64u(hmac.new(bytes.fromhex(key), raw, hashlib.sha256).digest())
+
+
 def pending_is_human(c):
-    """A pending line counts as a person's only with a valid MAC (guarded human key), checked on read; by is ignored."""
-    line = dict(c["line"])
-    mac = line.pop("mac", None)
+    """A pending line is a person's only with a valid MAC bound to this workspace and ticket; by/via/human are ignored."""
+    line = c["line"]
+    mac = line.get("mac")
     if not mac or line.get("kind") not in ("answer", "message", "text"):
         return False
-    want = _b64u(hmac.new(bytes.fromhex(c["key"]), json.dumps(line, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(), hashlib.sha256).digest())
-    return hmac.compare_digest(want, mac)
+    return hmac.compare_digest(_pending_mac(c["key"], c["workspace"], c["ticket"], line), mac)
+
+
+def pending_deliver(c):
+    """Deliver a line only when its id is not in the guarded delivered record (delivered_at is display only)."""
+    return c["line"]["id"] not in c["delivered_ids"]
+
+
+def wontdo_is_human(c):
+    """A synced won't-do is a person's only via the receiving core's relay-authenticated sender or its own MAC."""
+    if c.get("relay_authenticated_sender"):
+        return True
+    m = c.get("mac")
+    return bool(m) and hmac.compare_digest(m, _b64u(hmac.new(bytes.fromhex(c["key"]), json.dumps(c["item"], sort_keys=True, separators=(",", ":")).encode(), hashlib.sha256).digest()))
 
 
 def relay_conn(c):
@@ -1169,6 +1187,10 @@ def kind_human():
         _expect(f"human concurrent {c['name']}", got, c["results"])
     for c in vec["pending"]:
         _expect(f"human pending {c['name']}", pending_is_human(c), c["human"])
+    for c in vec["deliver"]:
+        _expect(f"human deliver {c['name']}", pending_deliver(c), c["deliver"])
+    for c in vec["wont_do"]:
+        _expect(f"human wont_do {c['name']}", wontdo_is_human(c), c["human"])
     for c in vec["relay"]:
         _expect(f"human relay {c['name']}", relay_conn(c), c["expect"])
     for c in vec["dev_mark"]:

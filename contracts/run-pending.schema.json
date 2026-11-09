@@ -2,21 +2,69 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/run-pending.schema.json",
   "title": "orch pending input v1 (one line of .orch/run/pending/<ticket id>.jsonl)",
-  "description": "Input for a ticket whose agent is busy, appended under the ticket lock. Live runs get it pasted when idle; oneshot runs get one more (resume) turn with what is left. Delivery is at-least-once, deduped by id, and survives a crash: delivered_at is set only after delivery. Gitignored.",
+  "description": "Input for a ticket whose agent is busy, appended under the ticket lock. Live runs get it pasted when idle; oneshot runs get one more (resume) turn with what is left. Delivery is at-least-once, deduped by line id in a record in the guarded orch home (not by delivered_at, which is display only), and survives a crash. Gitignored.",
   "type": "object",
-  "required": ["id", "at", "by", "kind", "text"],
+  "required": [
+    "id",
+    "at",
+    "by",
+    "kind",
+    "text"
+  ],
   "properties": {
-    "id": { "type": "string", "pattern": "^p_[a-z0-9]{6,32}$", "description": "Random, unique per line; the dedupe key." },
-    "at": { "$ref": "#/$defs/time" },
-    "by": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f]+$", "description": "Free actor name, as in run.by." },
-    "via": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$", "description": "Optional free word: the surface it came from." },
-    "kind": { "enum": ["answer", "message", "event", "text"] },
-    "text": { "type": "string", "minLength": 1, "maxLength": 8000, "description": "What the agent is told, plain text." },
-    "delivered_at": { "$ref": "#/$defs/time", "description": "Set once the agent got it." },
-    "mac": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Optional. base64url HMAC-SHA256 with the workspace's human key over the line without mac, written by the core for a person's input (human-proof.md, read-back rule). Verified on every read; without a valid mac the line is an agent's." },
-    "human": { "type": "boolean", "description": "Optional. True when a person wrote it (the owner on a page, the CLI or the phone); false for an agent's (agent:*, or written from inside an agent). Only a person's input may make a background host start a run. Absent (older lines): human when by starts with human: or via is phone." }
+    "id": {
+      "type": "string",
+      "pattern": "^p_[a-z0-9]{6,32}$",
+      "description": "Random, unique per line; the dedupe key."
+    },
+    "at": {
+      "$ref": "#/$defs/time"
+    },
+    "by": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^\\u0000-\\u001f]+$",
+      "description": "Free actor name, as in run.by."
+    },
+    "via": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,15}$",
+      "description": "Optional free word: the surface it came from."
+    },
+    "kind": {
+      "enum": [
+        "answer",
+        "message",
+        "event",
+        "text"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000,
+      "description": "What the agent is told, plain text."
+    },
+    "delivered_at": {
+      "$ref": "#/$defs/time",
+      "description": "Set once the agent got it. Not covered by mac and not authority: delivery is deduped by line id in a record in the guarded orch home (human-proof.md), so removing delivered_at never re-delivers."
+    },
+    "mac": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "description": "Optional. base64url HMAC-SHA256 with this workspace's human key (guarded orch home) over the canonical JSON of {workspace, ticket, line without mac and delivered_at}, written by the core when it accepted a person's input with a proof (page) or from its own relay client (phone). Verified on every read; without a valid mac the line is an agent's. delivered_at is not covered."
+    },
+    "human": {
+      "type": "boolean",
+      "description": "Informational only, never trusted: a self-written human: true (or a human: by, or via phone) does not make a line a person's. Only a valid mac does (human-proof.md, read-back rule)."
+    }
   },
   "$defs": {
-    "time": { "type": "string", "format": "date-time", "pattern": "Z$" }
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    }
   }
 }

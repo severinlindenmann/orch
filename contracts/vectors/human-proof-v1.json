@@ -862,6 +862,8 @@
   {
    "name": "pending line with by human: and no proof -> agent input, no run start",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
    "line": {
     "id": "p_aaaaaaaa",
     "at": "2026-11-16T09:00:00Z",
@@ -873,8 +875,10 @@
    "human": false
   },
   {
-   "name": "pending line with a valid core MAC",
+   "name": "human: true written by the line itself, no MAC -> agent input",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
    "line": {
     "id": "p_aaaaaaaa",
     "at": "2026-11-16T09:00:00Z",
@@ -882,13 +886,80 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "K-IXPjhg9urMglULWWw-wRcxgYdblC7Z3GjF0va9X9E"
+    "human": true
+   },
+   "human": false
+  },
+  {
+   "name": "valid core MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+   },
+   "human": true
+  },
+  {
+   "name": "valid line copied into another ticket -> agent input",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_other99",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+   },
+   "human": false
+  },
+  {
+   "name": "valid line copied into another workspace -> agent input",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_bbbbbbbbbb",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+   },
+   "human": false
+  },
+  {
+   "name": "delivered_at added after the MAC keeps it valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs",
+    "delivered_at": "2026-11-16T09:05:00Z"
    },
    "human": true
   },
   {
    "name": "MAC from another key",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
    "line": {
     "id": "p_aaaaaaaa",
     "at": "2026-11-16T09:00:00Z",
@@ -896,13 +967,15 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "yes, add the VAT column",
-    "mac": "_4BntOb41yLAnfbubLhuT7gpTkwvJ5zgdZ_cxIpd2xU"
+    "mac": "4YNifkT8x0ls9_M62qXUxoIdtobqwdCtuiFrIoMJ5vs"
    },
    "human": false
   },
   {
    "name": "text changed after the MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
    "line": {
     "id": "p_aaaaaaaa",
     "at": "2026-11-16T09:00:00Z",
@@ -910,27 +983,15 @@
     "via": "dashboard",
     "kind": "answer",
     "text": "deploy to production",
-    "mac": "K-IXPjhg9urMglULWWw-wRcxgYdblC7Z3GjF0va9X9E"
+    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
    },
    "human": false
   },
   {
-   "name": "by changed after the MAC",
+   "name": "phone line without MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
-   "line": {
-    "id": "p_aaaaaaaa",
-    "at": "2026-11-16T09:00:00Z",
-    "by": "human:anna",
-    "via": "dashboard",
-    "kind": "answer",
-    "text": "yes, add the VAT column",
-    "mac": "K-IXPjhg9urMglULWWw-wRcxgYdblC7Z3GjF0va9X9E"
-   },
-   "human": false
-  },
-  {
-   "name": "phone line without MAC (via phone, phone id)",
-   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
    "line": {
     "id": "p_aaaaaaaa",
     "at": "2026-11-16T09:00:00Z",
@@ -945,6 +1006,8 @@
   {
    "name": "event kind never a person's",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
    "line": {
     "id": "p_aaaaaaaa",
     "at": "2026-11-16T09:00:00Z",
@@ -952,8 +1015,103 @@
     "via": "dashboard",
     "kind": "event",
     "text": "yes, add the VAT column",
-    "mac": "M_8wSaQyAyi3FsipHF9-FKItu_ey5Lvvb6_AZGkg9io"
+    "mac": "MOh7h2yuGAFCxJGWd6XnaIGBZY4SoyJyhC_CpEClX40"
    },
+   "human": false
+  }
+ ],
+ "deliver": [
+  {
+   "name": "new line delivered",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+   },
+   "delivered_ids": [],
+   "deliver": true
+  },
+  {
+   "name": "delivered_at removed by an agent -> not re-delivered",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "CYhaP4_xbSv_HwURw2Wqkl-sU_0yt8lo7Caan27aYcs"
+   },
+   "delivered_ids": [
+    "p_aaaaaaaa"
+   ],
+   "deliver": false
+  }
+ ],
+ "wont_do": [
+  {
+   "name": "synced won't-do without relay attribution -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": null,
+   "human": false
+  },
+  {
+   "name": "synced won't-do with by human: only",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed",
+    "by": "human:severin"
+   },
+   "relay_authenticated_sender": false,
+   "mac": null,
+   "human": false
+  },
+  {
+   "name": "recorded from a relay-authenticated phone sender",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": true,
+   "mac": null,
+   "human": true
+  },
+  {
+   "name": "receiving core's own MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "sM1sTUDjZVKfGVov7WK3TfJmYL4DOoQ6lbGjcJ57aso",
+   "human": true
+  },
+  {
+   "name": "another machine's MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "OWD8xw9b4xV4P8eTNvPhOBhh-93h1aVombqOp4Etqp0",
    "human": false
   }
  ]

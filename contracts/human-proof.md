@@ -178,6 +178,25 @@ rows add a named case.
 lowering comes through the CLI or the page.
 
 **Read-back rule (pending input, synced ticket data).** A line in `.orch/run/pending/<tid>.jsonl` counts as a person's (and
+may make a background host start a run) only when it carries `mac` = HMAC-SHA256(`human.key`, canonical JSON of
+`{workspace, ticket, line}` where `line` is the line without `mac` and `delivered_at`). The core writes the MAC when it
+accepted the input with a valid proof (page) or from its own relay client (phone, above), and **verifies it on every read**,
+not only when writing. `by`, `via` and the `human` field are informational and never trusted: a line without a valid MAC is
+agent input. Binding ticket and workspace means a valid line copied into another ticket or workspace is agent input.
+`delivered_at` is outside the MAC and is display only: delivery is deduped by line id in
+`<guarded orch home>/keys/<ws>/delivered.json`, so deleting `delivered_at` never re-delivers (reference `pending_is_human`,
+`pending_deliver`, vectors `pending`, `deliver`).
+**Synced "won't do"** (`check.wont_do` arriving through a sync merge): another machine's human key cannot be checked here, so it
+counts as a person's only when the receiving core's relay client recorded it from a relay-authenticated sender (a phone, or a
+person-attributed message the relay authenticated), or when it carries the receiving core's own MAC. Anything else is an
+agent's (reference `wontdo_is_human`, vectors `wont_do`).
+
+*Implementing slice 1.0a must* (N8) find "the caller's own run" (for `run.stop` of its own run and for the check-up's
+`propose`) as a run whose recorded agent process (pid + start time) is an ancestor of the caller, not from `ORCH_RUN`; and
+(N12) treat a missing or unreadable `human-settings.json` as every widening off, and write the tombstone at once when a
+lowering comes through the CLI or the page.
+
+**Read-back rule (pending input, synced ticket data).** A line in `.orch/run/pending/<tid>.jsonl` counts as a person's (and
 may make a background host start a run) only when it carries `mac` = HMAC-SHA256(`human.key`, canonical JSON of the line
 without `mac`), written by the core when it accepted the input with a valid proof (page) or from the relay channel (phone,
 above); the core **verifies it on every read**, not only when writing. A line without a valid `mac` is agent input, whatever
