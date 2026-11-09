@@ -399,3 +399,102 @@ def test_done_vs_wont_do_is_one_side_wholesale():
     b2 = up(base, T2, checklist=[_step(**DONE)])
     for x, y in ((a2, b2), (b2, a2)):
         assert merge_ticket(base, x, y, NOW)["checklist"][0] == _step(**WONT)
+
+
+def test_two_recorded_runs_of_the_same_command_are_both_kept():
+    run = lambda at, code: {"type": "command", "ref": "pytest -q", "ran_at": at, "exit": code, "at": at}
+    first, second = run("2026-11-09T10:00:00Z", 1), run("2026-11-09T11:00:00Z", 0)
+    base = tk(checklist=[{"id": "c1", "text": "x", "done": False, "evidence": [first]}])
+    ours = [{"id": "c1", "text": "x", "done": False, "evidence": [first, second]}]
+    m = merge_ticket(base, up(base, T2, checklist=ours), up(base, T3), NOW)
+    assert [e["exit"] for e in m["checklist"][0]["evidence"]] == [1, 0]
+
+
+def test_hostile_ran_at_does_not_crash_and_runs_are_capped():
+    def run(at, code, **kw):
+        return {"type": "command", "ref": "pytest -q", "ran_at": at, "exit": code, "at": at, **kw}
+
+    runs = [run(f"2026-11-09T10:00:0{i}Z", i) for i in range(8)]
+    bad = [
+        {"type": "command", "ref": ["x"], "ran_at": {"a": 1}},
+        {"type": ["t"], "ref": "y", "ran_at": [1]},
+        "junk",
+    ]
+    base = tk(checklist=[{"id": "c1", "text": "x", "done": False, "evidence": []}])
+    a = [{"id": "c1", "text": "x", "done": False, "evidence": runs[:6] + bad}]
+    b = [{"id": "c1", "text": "x", "done": False, "evidence": runs[3:] + bad}]
+    m = merge_ticket(base, up(base, T2, checklist=a), up(base, T3, checklist=b), NOW)
+    got = [e["exit"] for e in m["checklist"][0]["evidence"] if e.get("ref") == "pytest -q"]
+    assert got == [3, 4, 5, 6, 7]  # newest five, both replicas end the same
+    m2 = merge_ticket(base, up(base, T3, checklist=b), up(base, T2, checklist=a), NOW)
+    assert [e.get("exit") for e in m2["checklist"][0]["evidence"]] == [
+        e.get("exit") for e in m["checklist"][0]["evidence"]
+    ]
+
+
+def test_only_well_formed_runs_count_and_each_check_is_capped():
+    base = tk(checklist=[{"id": "c1", "text": "x", "done": False, "evidence": []}])
+    odd = [
+        {"type": "command", "ref": "pytest", "ran_at": f"bad{i}", "at": f"2026-11-09T09:00:{i:02d}Z"}
+        for i in range(8)
+    ]
+    runs = [
+        {
+            "type": "command",
+            "ref": f"c{c}",
+            "ran_at": f"2026-11-09T10:{c:02d}:{i:02d}Z",
+            "at": f"2026-11-09T10:{c:02d}:{i:02d}Z",
+        }
+        for c in range(15)
+        for i in range(5)
+    ]
+    side = [{"id": "c1", "text": "x", "done": False, "evidence": odd + runs}]
+    m = merge_ticket(base, up(base, T2, checklist=side), up(base, T3), NOW)
+    ev = m["checklist"][0]["evidence"]
+    assert all(e in ev for e in odd) and len([e for e in ev if e in runs]) == 45  # only runs are capped
+    assert runs[-1] in ev
+
+
+def test_core_and_merge_trim_runs_identically(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "workspace" / "src"))
+    from orch import tickets
+
+    from orch_sync import merge
+
+    def run(ref, at, **kw):
+        return {"type": "command", "ref": ref, "ran_at": at, **kw}
+
+    hostile = [
+        run("a", "2026-99-99T99:00:00Z"),
+        run("a", "2026-11-09T10:00:00Z\n"),
+        run("a", 5),
+        run(["x"], "2026-11-09T10:00:00Z"),
+        {"type": "note", "ref": "n"},
+        "junk",
+    ]
+    ties = [run(ref, "2026-11-09T10:00:00Z", exit=i) for i, ref in enumerate("abcdefgh" * 8)]
+    many = [run("r", f"2026-11-09T11:00:{i:02d}Z", exit=i) for i in range(9)]
+    notes = [{"type": "note", "ref": f"n{i}"} for i in range(75)]
+    odd = {"type": "note", "ref": "Grüße 日本語 \u2603", "z": [1, {"b": 2, "a": 3}]}
+    assert merge._canon(odd) == tickets._canon(odd)
+    for case in (hostile + many, ties, ties + hostile + many, notes + many + ties, many[:3]):
+        assert tickets.trim_runs(list(case)) == merge.trim_runs(list(case))
+
+
+def test_one_sided_forged_wont_do_is_dropped():
+    base = tk(checklist=[_step()])
+    forged = _step(wont_do=True, reason="x", by="agent:claude", at=T2)
+    new_item = _step(id="c2", text="New", wont_do=True, by="agent:claude")
+    a = up(base, T2, checklist=[forged, new_item])  # edited-vs-unchanged and a one-sided new item
+    for x, y in ((a, base), (base, a)):
+        for c in merge_ticket(base, x, y, NOW)["checklist"]:
+            assert "wont_do" not in c and "reason" not in c
+
+
+def test_conflict_pick_with_done_and_no_evidence_is_not_done():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])
+    b = up(base, T3, checklist=[_step(done=True, evidence=[])])
+    for x, y in ((a, b), (b, a)):
+        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        assert c["done"] is False

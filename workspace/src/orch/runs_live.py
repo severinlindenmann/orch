@@ -30,7 +30,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, procs, runs, tickets
+from orch import adapters, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 MAX_LIVE = 4
@@ -198,11 +198,11 @@ def start_live(
         # The agent gets the environment of whoever starts this run, not of whoever started the tmux server.
         # It travels in a private file (never in argv, where `ps` shows it); the wrapper reads and removes it.
         env_file = runs.run_dir(root) / f"env-{run}.json"
-        runs._atomic(env_file, json.dumps(runs._agent_environ()), 0o600)
+        runs._atomic(env_file, json.dumps(runs._agent_environ(root)), 0o600)
         cmd += ["--env-file", str(env_file), "--"] + p["argv"]
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
-            "-s", tid, "-c", str(root), "--", *cmd,
+            "-s", tid, "-c", str(root), "-e", f"ORCH_ROOT={root}", "--", *cmd,
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -505,6 +505,8 @@ def deliver(root: Path, tid: str, stop=None) -> int:
                 0  # held back (scrolled up, a dialog, unsent text): the wrapper's watcher tries again shortly
             )
         if (stop is not None and stop.is_set()) or (runs.read(root, tid) or {}).get("stop_requested"):
+            return 0
+        if not runhooks.gate(root=root, tid=tid, run=rec["run"]):
             return 0
         if not _type_line(root, tid, line, QUICK):
             return 0
@@ -852,7 +854,8 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         rec["renewed_at"] = tickets.now()
         rec.pop("maybe_stale_since", None)
         runs._write(root, rec)
-        return True
+    runhooks.fire("run_state", root=root, tid=tid, run=run, state=state)  # after the lock is released
+    return True
 
 
 def find_run(root: Path, run: str | None, tid: str | None) -> dict | None:
@@ -906,14 +909,20 @@ def event(
     elif kind == "attention" and idle_notice(rec["agent"], root, payload):
         # "still waiting for your input": input may go in only if the run is idle already (after Stop); in any
         # other state (a dialog may be open) nothing changes, and the next Stop sets idle.
-        return deliver(root, tid)
+        result = deliver(root, tid)
+        runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
+        return result
     elif kind == "working":  # a prompt went in (also one a person typed in the live session): never paste now
         up("working")
+        runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
     else:  # a permission prompt or any other notice: a person answers it; nothing is pasted
         _set_state(root, tid, run, "attention")
+        runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
-    return deliver(root, tid)
+    result = deliver(root, tid)
+    runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
+    return result
 
 
 def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:

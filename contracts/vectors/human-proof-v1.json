@@ -1,0 +1,1168 @@
+{
+ "v": 1,
+ "about": "human-proof.md reference cases (hp_verify, hp_effective in validate.py). The key is a test key; now and iat/exp are unix seconds.",
+ "verify": [
+  {
+   "name": "valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "ok"
+  },
+  {
+   "name": "forged flags, no proof (--by human:x --from local-page)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": "human:x",
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "missing proof",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "expired",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300060,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "expired"
+  },
+  {
+   "name": "not yet valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794299990,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "expired"
+  },
+  {
+   "name": "lifetime over 60 s",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAxMjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.AoTgyjQyMSdbetm34b705GFziwEygqsqQTZgaJCWLX8",
+   "result": "expired"
+  },
+  {
+   "name": "proof for another ticket",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_other99",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "wrong_target"
+  },
+  {
+   "name": "proof for another action",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.release",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "wrong_op"
+  },
+  {
+   "name": "typing proof cannot change settings",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "focus.settings",
+   "target": "focus.session_typing",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "wrong_op"
+  },
+  {
+   "name": "replayed nonce",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [
+    "AAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "replayed"
+  },
+  {
+   "name": "signed with another key",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.GpEuvRCbP0xv8XgSbloGVa3mcqQV3GpDdp01XPhvbTk",
+   "result": "forged"
+  },
+  {
+   "name": "payload changed after signing",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X290aGVyOTkifQ.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged"
+  },
+  {
+   "name": "--by differs from the proof",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": "human:anna",
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged"
+  },
+  {
+   "name": "not hp1",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp0.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged"
+  },
+  {
+   "name": "agent tool in the environment",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": true,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "agent_env"
+  },
+  {
+   "name": "settings: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "focus.settings",
+   "target": "focus.session_typing",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJmb2N1cy5zZXR0aW5ncyIsInRhcmdldCI6ImZvY3VzLnNlc3Npb25fdHlwaW5nIn0.tct4CKh-ZEK7x_eCOQbiS8rFi3Gbwf2OXbqE8QcMgeY",
+   "result": "ok"
+  },
+  {
+   "name": "delete detail: proof for another ticket",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "record.delete_detail",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJyZWNvcmQuZGVsZXRlX2RldGFpbCIsInRhcmdldCI6InRfenp6enp6In0.U0stk-Z4QCjiuqidcctZ8EEYfl9usJ0F1JBelmwaY3c",
+   "result": "wrong_target"
+  },
+  {
+   "name": "conn allow: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "conn.allow",
+   "target": "slack",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJjb25uLmFsbG93IiwidGFyZ2V0Ijoic2xhY2sifQ.0Fb-qHv1zN1K2hMtxWZ5QhxBQHFpA1PMSIRMgNmn4iY",
+   "result": "ok"
+  },
+  {
+   "name": "check-up accept: missing",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "checkup.accept",
+   "target": "pr_7k2m9x4q",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "key profile: expired",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "secret.profile",
+   "target": "ci-deploy",
+   "now": 1794300100,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJzZWNyZXQucHJvZmlsZSIsInRhcmdldCI6ImNpLWRlcGxveSJ9.u6bfFODFp5-VKuZLyB5jA56ay50VGxeEiLWsWebZN94",
+   "result": "expired"
+  },
+  {
+   "name": "orch_home_env: a real workspace with an env-chosen home",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged",
+   "home_trusted": false
+  },
+  {
+   "name": "ticket verdict: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "ticket.verdict",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJ0aWNrZXQudmVyZGljdCIsInRhcmdldCI6InRfaW52N2MyIn0.2YUXdT7JNQW-oxteS1AxTOEKnZrQAuj01Ca4Hef7Fn0",
+   "result": "ok"
+  },
+  {
+   "name": "ticket answer: proof for another question",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "ticket.answer",
+   "target": "t_inv7c2:q2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJ0aWNrZXQuYW5zd2VyIiwidGFyZ2V0IjoidF9pbnY3YzI6cTEifQ.NJWxah12CKrdo--kKRWZSTQWqljVK70LWGDLXMUCHos",
+   "result": "wrong_target"
+  },
+  {
+   "name": "relay connect: forged flags only",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "relay.connect",
+   "target": "relay.example.com",
+   "now": 1794300010,
+   "by_flag": "human:severin",
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "private allow: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "private.allow",
+   "target": "deploy:abc123",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJwcml2YXRlLmFsbG93IiwidGFyZ2V0IjoiZGVwbG95OmFiYzEyMyJ9.JwyRFZDQHo3qLrh_p-lFCtcjuUNol8jh4emrABllobo",
+   "result": "ok"
+  },
+  {
+   "name": "dev proof on a real workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "dev_record": false,
+   "result": "dev_on_real"
+  },
+  {
+   "name": "dev proof on a dev workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "dev_record": true,
+   "result": "ok"
+  },
+  {
+   "name": "dev proof signed with the human key",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.S5quaxL9P1dTVDNhk0hoTol-qJ3AG3-jFseuPQaU_4k",
+   "dev_record": true,
+   "result": "forged"
+  },
+  {
+   "name": "dev proof as another person",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.cjV-_yZq2oPawrErI5lOvgdB56JypP6MEX48-3nHbH8",
+   "dev_record": true,
+   "result": "forged"
+  },
+  {
+   "name": "normal proof on a dev workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "dev_record": true,
+   "result": "ok"
+  },
+  {
+   "name": "listed in the dev file but no record",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "dev_record": false,
+   "result": "dev_on_real",
+   "dev_file_lists": true
+  },
+  {
+   "name": "relay allow: proof for once used as permanent",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "relay.allow",
+   "target": "m_aaaaaaaaaaaaaaaa:permanent",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwib3AiOiJyZWxheS5hbGxvdyIsInRhcmdldCI6Im1fYWFhYWFhYWFhYWFhYWFhYTpvbmNlIn0.T41spxNOx8zTbDilluHl2NNxN6Xh0F2dKvjaD94brcc",
+   "result": "wrong_target"
+  }
+ ],
+ "settings": [
+  "focus.live_session",
+  "focus.session_typing",
+  "insights.share_counts",
+  "insights.share_names",
+  "secret.allow_get",
+  "conn.allow"
+ ],
+ "settle": [
+  {
+   "name": "typing on in the file only (agent edit)",
+   "setting": "focus.session_typing",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  },
+  {
+   "name": "typing on with a proof",
+   "setting": "focus.session_typing",
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    }
+   ],
+   "effective": [
+    true
+   ]
+  },
+  {
+   "name": "on(proof) -> off(file) -> on(file) stays off",
+   "setting": "focus.session_typing",
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    },
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "name": "share_counts default on, no events",
+   "setting": "insights.share_counts",
+   "events": [],
+   "effective": []
+  },
+  {
+   "name": "share_counts off(file) -> on(file) stays off",
+   "setting": "insights.share_counts",
+   "events": [
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false,
+    false
+   ]
+  },
+  {
+   "name": "share_counts off(file) -> on(proof)",
+   "setting": "insights.share_counts",
+   "events": [
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "proof",
+     "value": true
+    }
+   ],
+   "effective": [
+    false,
+    true
+   ]
+  },
+  {
+   "name": "live_session default on, file says on",
+   "setting": "focus.live_session",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    true
+   ]
+  },
+  {
+   "name": "live_session off by person then agent edits on",
+   "setting": "focus.live_session",
+   "events": [
+    {
+     "by": "proof",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false,
+    false
+   ]
+  },
+  {
+   "name": "share_names file only",
+   "setting": "insights.share_names",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  },
+  {
+   "name": "allow_get file only",
+   "setting": "secret.allow_get",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  },
+  {
+   "name": "allow_get proof then off",
+   "setting": "secret.allow_get",
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    },
+    {
+     "by": "file",
+     "value": false
+    }
+   ],
+   "effective": [
+    true,
+    false
+   ]
+  },
+  {
+   "name": "conn allow file only",
+   "setting": "conn.allow",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  }
+ ],
+ "concurrent": [
+  {
+   "name": "two calls with the same nonce",
+   "calls": [
+    {
+     "key": "0000000000000000000000000000000011111111111111111111111111111111",
+     "op": "run.takeover",
+     "target": "t_inv7c2",
+     "now": 1794300010,
+     "by_flag": null,
+     "agent_env": false,
+     "used_nonces": [],
+     "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do"
+    },
+    {
+     "key": "0000000000000000000000000000000011111111111111111111111111111111",
+     "op": "run.takeover",
+     "target": "t_inv7c2",
+     "now": 1794300010,
+     "by_flag": null,
+     "agent_env": false,
+     "used_nonces": [],
+     "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do"
+    }
+   ],
+   "results": [
+    "ok",
+    "replayed"
+   ]
+  }
+ ],
+ "home": [
+  {
+   "name": "normal install, real workspace, default home",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/Users/pat/.orch-tool",
+   "ok": true
+  },
+  {
+   "name": "normal install: workspace moved under ~/.orch-test, test home -> refused",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/x/ws",
+   "home_realpath": "/Users/pat/.orch-test/x/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "normal install: workspace under ~/.orch-test is a real workspace, default home",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/x/ws",
+   "home_realpath": "/Users/pat/.orch-tool",
+   "ok": true
+  },
+  {
+   "name": "test install (source tree), test workspace, test home",
+   "account_home": "/Users/pat",
+   "install": "test",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/w2b-1/ws",
+   "home_realpath": "/Users/pat/.orch-test/w2b-1/.orch-tool",
+   "ok": true
+  },
+  {
+   "name": "dev install, test workspace, test home",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/e2e/ws",
+   "home_realpath": "/Users/pat/.orch-test/e2e/.orch-tool",
+   "ok": true
+  },
+  {
+   "name": "dev install: ~/.orch-test is a symlink -> not a test prefix",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": false,
+   "workspace_realpath": "/Users/pat/.orch-test/e2e/ws",
+   "home_realpath": "/Users/pat/.orch-test/e2e/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: symlinked workspace path resolves outside the prefix (moved workspace) -> real",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/Users/pat/.orch-test/e2e/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: ~/.orch-testX is not under the prefix",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-testX/ws",
+   "home_realpath": "/Users/pat/.orch-testX/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: real workspace, agent sets ORCH_HOME under the prefix",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/Users/pat/.orch-test/evil/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: test workspace without a test home (would touch the real home)",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/e2e/ws",
+   "home_realpath": "/Users/pat/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "real workspace, agent sets HOME elsewhere",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/tmp/evil/.orch-tool",
+   "ok": false
+  }
+ ],
+ "dev_mark": [
+  {
+   "name": "dev install creating a demo workspace",
+   "install_dev": true,
+   "creating": true,
+   "has_human_key": false,
+   "ok": true
+  },
+  {
+   "name": "normal install",
+   "install_dev": false,
+   "creating": true,
+   "has_human_key": false,
+   "ok": false
+  },
+  {
+   "name": "dev install, existing workspace",
+   "install_dev": true,
+   "creating": false,
+   "has_human_key": false,
+   "ok": false
+  },
+  {
+   "name": "workspace that already has a human key",
+   "install_dev": true,
+   "creating": true,
+   "has_human_key": true,
+   "ok": false
+  }
+ ],
+ "relay": [
+  {
+   "name": "record only",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
+   },
+   "file": null,
+   "env": {},
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "proxy": null,
+    "trust": "fixed",
+    "token_from": "record"
+   }
+  },
+  {
+   "name": "workspace file matches",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
+   },
+   "file": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "env": {},
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "proxy": null,
+    "trust": "fixed",
+    "token_from": "record"
+   }
+  },
+  {
+   "name": "workspace file points elsewhere",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
+   },
+   "file": {
+    "url": "https://evil.example",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "env": {},
+   "expect": "refused"
+  },
+  {
+   "name": "HTTPS_PROXY set is ignored",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
+   },
+   "file": null,
+   "env": {
+    "HTTPS_PROXY": "http://127.0.0.1:8888",
+    "SSL_CERT_FILE": "/tmp/evil-ca.pem"
+   },
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "proxy": null,
+    "trust": "fixed",
+    "token_from": "record"
+   }
+  },
+  {
+   "name": "no record (file alone)",
+   "record": null,
+   "file": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "env": {},
+   "expect": "not_connected"
+  },
+  {
+   "name": "workspace relay.json with a token: token ignored",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
+   },
+   "file": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_agent_copied_token"
+   },
+   "env": {},
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token_from": "record",
+    "proxy": null,
+    "trust": "fixed"
+   }
+  }
+ ],
+ "pending": [
+  {
+   "name": "pending line with by human: and no proof -> agent input, no run start",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column"
+   },
+   "human": false
+  },
+  {
+   "name": "human: true written by the line itself, no MAC -> agent input",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "human": true
+   },
+   "human": false
+  },
+  {
+   "name": "valid core MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
+   },
+   "human": true
+  },
+  {
+   "name": "valid line copied into another ticket -> agent input",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_other99",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
+   },
+   "human": false
+  },
+  {
+   "name": "valid line copied into another workspace -> agent input",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_bbbbbbbbbb",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
+   },
+   "human": false
+  },
+  {
+   "name": "delivered_at and human added after the MAC keep it valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc",
+    "delivered_at": "2026-11-16T09:05:00Z",
+    "human": true
+   },
+   "human": true
+  },
+  {
+   "name": "MAC from another key",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "sKW-trFEOkqG8Svfoeu2AU9n8IecJPNYAhHk-HqoPZ0"
+   },
+   "human": false
+  },
+  {
+   "name": "text changed after the MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "deploy to production",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
+   },
+   "human": false
+  },
+  {
+   "name": "phone line without MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:ph_aaaaaaaaaa",
+    "via": "phone",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "phone": "ph_aaaaaaaaaa"
+   },
+   "human": false
+  },
+  {
+   "name": "event kind never a person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "event",
+    "text": "yes, add the VAT column",
+    "mac": "-ob99D_BNiwFjvuLqUWv-RufA1blUP2O0h4i-IBFK8k"
+   },
+   "human": false
+  }
+ ],
+ "deliver": [
+  {
+   "name": "new line delivered",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
+   },
+   "delivered_ids": [],
+   "deliver": true
+  },
+  {
+   "name": "delivered_at stripped by an agent -> not re-delivered",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc"
+   },
+   "delivered_ids": [
+    "p_aaaaaaaa"
+   ],
+   "deliver": false
+  },
+  {
+   "name": "consumed line re-appended (replay after consume) -> refused",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "bRpx-ScQz7xnP4Zore80M4Yp_ky-i9tiJvwwDf3y2Pc",
+    "delivered_at": null
+   },
+   "delivered_ids": [
+    "p_aaaaaaaa",
+    "p_bbbbbbbb"
+   ],
+   "deliver": false
+  }
+ ],
+ "wont_do": [
+  {
+   "name": "synced won't-do without relay attribution -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": null,
+   "human": false
+  },
+  {
+   "name": "synced won't-do with by human: only",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed",
+    "by": "human:severin"
+   },
+   "relay_authenticated_sender": false,
+   "mac": null,
+   "human": false
+  },
+  {
+   "name": "recorded from a relay-authenticated phone sender",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": true,
+   "mac": null,
+   "human": true
+  },
+  {
+   "name": "receiving core's own wontdo1 MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "rp94TB3QmXKONkYBWgpZ5Y07qA2vSrKC-efxbRVcqjk",
+   "human": true
+  },
+  {
+   "name": "another machine's MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "aexF4UZBK53dmbYWTZTXiZwQAym1_SoGhpKpOWyOqZk",
+   "human": false
+  },
+  {
+   "name": "MAC made for another workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "d2CinkJuyLMLdxb6u2AO_6pY2gch7hRefO942LgEV9w",
+   "human": false
+  },
+  {
+   "name": "a pending1 MAC over the same JSON is not a won't-do MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "item": {
+    "ticket": "t_inv7c2",
+    "check": "c2",
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "5dlQ9ufItG_om8dULXlqhi-rE-p9X3TF4sM7xmzmmIQ",
+   "human": false
+  }
+ ]
+}

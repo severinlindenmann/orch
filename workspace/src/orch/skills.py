@@ -44,20 +44,36 @@ def harness_skill(root: Path, name: str) -> Path:
     return harness.harness_dir(root) / "skills" / name
 
 
+def skill_text(source: Path) -> str:
+    """The skill text as installed: SKILL.md, then every topics/*.md in sorted name order.
+
+    Lanes add their own topic files (e.g. topics/40-keys.md, 50-record.md, 60-jobs.md, 70-wrappers.md)
+    instead of editing SKILL.md. Bytes are kept as they are (no newline translation).
+    """
+    text = (source / "SKILL.md").read_bytes()
+    topics = source / "topics"
+    if topics.is_dir():
+        text += b"".join(p.read_bytes() for p in sorted(topics.glob("*.md")))
+    return text.decode("utf-8")
+
+
 def install_skill(root: Path, name: str, source: Path) -> None:
     """Copy a skill folder to .orch/harness/skills/<name>/ (replaced whole, minus the block file); the
     links come from apply_agent_files. Files an add-on wrote into the folder (relay's workspaces.json) stay."""
     dest = harness_skill(root, name)
     check_inside(root, dest)
     keep = {}
+    source_names = {p.name for p in source.iterdir()}
     if dest.is_dir():
         for f in dest.iterdir():
-            if f.is_file() and f.name not in {p.name for p in source.iterdir()} and not harness.is_link(f):
+            if f.is_file() and f.name not in source_names and not harness.is_link(f):
                 keep[f.name] = f.read_bytes()
         shutil.rmtree(dest)
-    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(*BLOCK_FILES, "description.toml"))
+    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(*BLOCK_FILES, "description.toml", "topics"))
     for fn, data in keep.items():
         (dest / fn).write_bytes(data)
+    if (source / "topics").is_dir():
+        (dest / "SKILL.md").write_bytes(skill_text(source).encode("utf-8"))
 
 
 def remove_skill(root: Path, name: str) -> None:

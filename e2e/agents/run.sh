@@ -1,5 +1,6 @@
 #!/bin/sh
 # e2e with REAL agents (claude -p, codex exec): e2e/run.sh agents|AG-<id>[,AG-<id>] [--mode live]
+# AG-ADH (adherence benchmark, opt-in, slow/costly): e2e/agents/run.sh AG-ADH [--quick] [--repeats N]; env ADH_AGENTS ADH_MODES ADH_PROMPTS ADH_PARALLEL ADH_TIMEOUT
 # Same clean environment as e2e/run.sh (env -i, temp HOME). Secrets: admin tokens + Claude setup-token from Proton Pass
 # (never printed); Codex auth.json is copied into <tmp>/codex and deleted at the end.
 set -eu
@@ -7,19 +8,27 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 WHAT=${1:-agents}; [ $# -gt 0 ] && shift
 MODE=live
+ADH_FLAGS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --mode) MODE=$2; shift 2 ;;
+    --repeats) ADH_FLAGS="$ADH_FLAGS --repeats $2"; shift 2 ;;   # AG-ADH only
+    --quick) ADH_FLAGS="$ADH_FLAGS --quick"; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
 [ "$MODE" = live ] || { echo "agent scenarios run in live mode only"; exit 2; }
 REAL_HOME=$HOME
-mkdir -p "$REAL_HOME/orch-dev"
-TMP=$(mktemp -d "$REAL_HOME/orch-dev/.tf-agents-XXXX")
-trap 'rm -rf "$TMP/codex"; rm -rf "$TMP"' EXIT INT TERM
+# agent homes (they hold a copy of the Codex login) live outside every git repo: never under ~/orch-dev
+mkdir -p "$REAL_HOME/.orch-test"
+TMP=$(mktemp -d "$REAL_HOME/.orch-test/agents-XXXX")
+case "$TMP" in "$REAL_HOME"/.orch-test/agents-????*) ;; *) echo "unexpected temp dir $TMP"; exit 2 ;; esac
 OHOME=$(mktemp -d "$REAL_HOME/.orch-e2e-XXXX")  # ORCH_HOME is only trusted under the real home without a .git above
-trap 'rm -rf "$TMP/codex"; rm -rf "$TMP" "$OHOME"' EXIT INT TERM
+case "$OHOME" in "$REAL_HOME"/.orch-e2e-????*) ;; *) echo "unexpected temp dir $OHOME"; rm -rf "$TMP"; exit 2 ;; esac
+cleanup() { rm -rf "$TMP/codex"; rm -rf "$TMP" "$OHOME"; }  # exactly the paths made above
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$TMP/home" "$TMP/tools"
 
 if [ -z "${E2E_PUBLISH_ADMIN_TOKEN:-}" ] && [ -x "$REAL_HOME/orch-dev/scripts/pass-login.sh" ]; then
@@ -51,6 +60,8 @@ done
 env -i HOME="$TMP/home" PATH="$(dirname "$(command -v uv)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb ORCH_HOME_STRICT=1 \
   E2E_PUBLISH_ADMIN_TOKEN="${E2E_PUBLISH_ADMIN_TOKEN:-}" E2E_RELAY_ADMIN_TOKEN="${E2E_RELAY_ADMIN_TOKEN:-}" \
   E2E_CLAUDE_TOKEN="${E2E_CLAUDE_TOKEN:-}" E2E_AGENT_RUNS="${E2E_AGENT_RUNS:-$REAL_HOME/orch-dev/state/fresh-start-2026-11-04/agent-runs}" \
+  ADH_REPEATS="${ADH_REPEATS:-}" ADH_AGENTS="${ADH_AGENTS:-}" ADH_MODES="${ADH_MODES:-}" ADH_PROMPTS="${ADH_PROMPTS:-}" \
+  ADH_PARALLEL="${ADH_PARALLEL:-}" ADH_TIMEOUT="${ADH_TIMEOUT:-}" ADH_QUICK="${ADH_QUICK:-}" \
   E2E_PATH_EXTRA="$EXTRA_PATH" E2E_ORCH_HOME="$OHOME" E2E_REAL_HOME="$REAL_HOME" UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" \
   uv run --no-project --quiet --with cryptography --with jsonschema --with rfc3339-validator \
-  python "$HERE/main.py" "$WHAT" --mode "$MODE" --tmp "$TMP" --repo "$REPO"
+  python "$HERE/main.py" "$WHAT" --mode "$MODE" --tmp "$TMP" --repo "$REPO" $ADH_FLAGS

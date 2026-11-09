@@ -734,7 +734,7 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
 
 # Workspace direct messages: a separate operation from phone/group chat.
 def _chat_send_ws(a):
-    _only(a, ("workspace", "text", "retry"))
+    _only(a, ("workspace", "text", "retry", "client_id"))
     ws = a.get("workspace")
     if not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         raise BadRequest("That is not a workspace.")
@@ -744,11 +744,17 @@ def _chat_send_ws(a):
     retry = a.get("retry")
     if retry is not None and (not isinstance(retry, str) or not re.fullmatch(r"m_[a-z0-9]{16}", retry)):
         raise BadRequest("That is not a message.")
-    return ["chat", "send", ws], ["--retry", retry] if retry else [], [text]
+    client_id = a.get("client_id")
+    if client_id is not None and (not isinstance(client_id, str) or not re.fullmatch(r"m_[a-z0-9]{16}", client_id)):
+        raise BadRequest("That is not a message.")
+    flags = (["--retry", retry] if retry else []) + (["--client-id", client_id] if client_id else [])
+    return ["chat", "send", ws], flags, [text]
 
 
 def _chat_sync_ws(a):
     _only(a, ("workspace",))
+    if "workspace" not in a:
+        return ["chat", "sync"], [], []
     ws = a.get("workspace")
     if not isinstance(ws, str) or not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         raise BadRequest("That is not a workspace.")

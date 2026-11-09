@@ -44,6 +44,8 @@ HUMAN_ONLY = {
 }
 
 
+RESERVED = {"secret", "record", "job", "conn", "run screen", "run type"}
+
 PENDING: set[str] = set()
 
 
@@ -107,7 +109,7 @@ def test_agents_block_is_short(name):
         lines = [x for x in block.strip().splitlines() if x.strip() and not x.startswith("<!--")]
         assert block.strip(), f"{name} has no AGENTS block"
         assert lines[0].startswith("## ")
-        assert len(lines) <= 4, f"{name} {f}: AGENTS block is {len(lines)} lines (heading + 3 at most)"
+        assert len(lines) <= 12, f"{name} {f}: AGENTS block is {len(lines)} lines (12 at most)"
 
 
 @pytest.mark.parametrize("name", sorted(SKILLS))
@@ -236,8 +238,8 @@ def test_every_user_command_is_in_some_skill():
     missing = [
         c
         for c in _leaves(core)
-        if c.split()[0] not in HUMAN_ONLY
-        and c not in HUMAN_ONLY
+        if c.split()[0] not in HUMAN_ONLY | RESERVED
+        and c not in HUMAN_ONLY | RESERVED
         and not re.search(rf"\borch {re.escape(c)}\b", text)
     ]
     assert not missing, f"commands no skill mentions (add them or put them in HUMAN_ONLY): {missing}"
@@ -340,3 +342,13 @@ def test_write_atomic_replaces_a_planted_link(tmp_path):
     net.write_atomic(tmp_path / "x.json", b"{}")  # private=True outside .orch is refused (test_init)
     assert victim.read_text() == "keep me" and not (tmp_path / "x.json").is_symlink()
     assert not list(tmp_path.glob(".*.tmp"))
+
+
+def test_orch_block_is_five_numbered_rules():
+    block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
+    numbered = [x for x in block.splitlines() if re.match(r"[1-5]\. ", x)]
+    assert len(numbered) == 5
+    assert "orch ticket new" in numbered[0] and "orch check add" in numbered[1]
+    assert "orch check done" in numbered[2] and "orch ask" in numbered[3]
+    assert "orch ticket summary" in numbered[4]
+    assert "There are no signing or planning gates" in block
