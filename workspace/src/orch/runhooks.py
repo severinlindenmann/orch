@@ -1,4 +1,8 @@
-"""Optional in-process run hooks. Callbacks run outside the registry lock."""
+"""Optional in-process run hooks. Callbacks run outside the registry lock.
+
+run_start / run_state / run_end fire after the run lock is released. The `before_paste` gate is the one
+exception: deliver() asks it while holding the run lock (the paste decision and the record update must stay
+atomic), so a gate function must be quick and must not take the run lock itself."""
 
 from threading import Lock
 

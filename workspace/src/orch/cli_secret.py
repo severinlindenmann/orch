@@ -17,4 +17,6 @@ def add_parsers(sub, common) -> None:
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "secret":
         return False
+    if not args.sub:
+        raise Refused("`orch secret` is not built yet. Subcommands: " + ", ".join(SUBCOMMANDS) + ".")
     raise Refused(f"`orch secret {args.sub}` is not built yet.")

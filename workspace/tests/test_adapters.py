@@ -327,7 +327,7 @@ def test_detect_finds_binaries_and_versions(tmp_path, monkeypatch):
 
 NAME = re.compile(r"claude|codex", re.I)
 SKIP_DIRS = {"agents", "tests", ".venv", "node_modules", "__pycache__", ".pytest_cache", "templates"}
-SKIP_FILES = {"adapters.py", "agents.json", "uv.lock"}
+SKIP_FILES = {"adapters.py", "uv.lock"}
 
 
 def _hits() -> dict[str, int]:

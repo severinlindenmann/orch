@@ -854,8 +854,8 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         rec["renewed_at"] = tickets.now()
         rec.pop("maybe_stale_since", None)
         runs._write(root, rec)
-        runhooks.fire("run_state", root=root, tid=tid, run=run, state=state)
-        return True
+    runhooks.fire("run_state", root=root, tid=tid, run=run, state=state)  # after the lock is released
+    return True
 
 
 def find_run(root: Path, run: str | None, tid: str | None) -> dict | None:

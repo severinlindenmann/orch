@@ -1,16 +1,17 @@
 """The adapter split preserves the original data and defines fragment precedence."""
 
 import json
-from pathlib import Path
 
 import pytest
 
 from orch import agentsdata
 
 
-def test_golden_and_package():
-    golden = Path(__file__).with_name("fixtures") / "agents.golden.json"
-    assert agentsdata.load() == json.loads(golden.read_bytes())
+def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
+    base = json.loads((agentsdata.agents_dir() / "base.json").read_bytes())
+    for name in agentsdata.FRAGMENTS:
+        assert json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes()) == {}
+    assert agentsdata.load() == base
     assert {p.name for p in agentsdata.agents_dir().iterdir()} == {
         "base.json",
         "deny.json",

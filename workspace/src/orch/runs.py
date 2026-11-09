@@ -637,8 +637,8 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         _delete(root, tid)
         for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
             (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
-        runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])
-        return {"released": True, "pending": waiting}
+    runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
+    return {"released": True, "pending": waiting}
 
 
 # A Working ticket with no run gets this long for its agent to start. A start writes
