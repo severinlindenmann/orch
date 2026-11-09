@@ -107,12 +107,13 @@ let needsOpen = false;
 function needsFold(rows, count) {
   const oldest = rows.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))[0]?.row;
   const t = oldest && ticketOf(oldest.ticket);
-  const text = oldest ? clean(window.DashHelpers.plainWhy(array(t?.questions).find(q => q.id === oldest.answer?.question)?.text || oldest.title || oldest.text, 'The agent')) : '';
+  const text = !oldest ? '' : clean(window.DashHelpers.plainWhy(array(t?.questions).find(q => q.id === oldest.answer?.question)?.text || oldest.title || oldest.text, 'The agent'));
   return h('div', {className:'card-row home-need needs-fold', 'data-key':'needs-fold'},
     h('div', {className:'row'}, h('p', {className:'grow'}, h('span', {className:'meta'}, 'Oldest · '), text), button('Show all', 'outline sm', () => { needsOpen = true; render(); })));
 }
 function home() {
   const needs = needsList(), groupedNeeds = homeNeeds(needs), all = tickets();
+  if (groupedNeeds.length < 3) needsOpen = false;
   const failed = all.map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const review = sorted(all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)));

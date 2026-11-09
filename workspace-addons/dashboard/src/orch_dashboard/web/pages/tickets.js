@@ -152,7 +152,8 @@ function moveTicket(id, status, undoing = false) {
   const set = value => { state.tickets = state.tickets.map(x => x.id === id ? {...x, status:value} : x); };
   document.querySelectorAll('[data-key="ticket-' + id + '"],[data-key="family-' + id + '"]').forEach(n => n.classList.add('status-leaving'));
   set(status);
-  const fade = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160)).then(() => render());
+  const unfade = () => document.querySelectorAll('.status-leaving').forEach(n => n.classList.remove('status-leaving'));
+  const fade = new Promise(resolve => setTimeout(resolve, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 160)).then(() => { unfade(); render(); });
   const label = STATUS_CHOICES.find(([value]) => value === status)?.[1] || status;
   const toast = window.orch.toast(undoing ? 'Moved back' : 'Moved to ' + label, 'ok');
   if (!undoing && toast?.querySelector) {
@@ -161,10 +162,13 @@ function moveTicket(id, status, undoing = false) {
     toast.querySelector('button[aria-label="Dismiss notification"]')?.before(undo);
   }
   const run = (async () => {
-    const result = await actRetry('ticket.patch', () => ({ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision}), () => { const now = ticketOf(id); return !!now && now.status === previous; });
+    let result;
+    try { result = await actRetry('ticket.patch', () => ({ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision}), () => { const now = ticketOf(id); return !!now && now.status === previous; }); }
+    catch (err) { result = {ok:false, status:0, text:String(err?.message || err)}; }
     await fade;
     locks.delete(lock);
     if (!result.ok) { set(previous); toast?.remove?.(); window.orch.toast(changeError(result), 'error'); }
+    unfade();
     render();
   })();
   movePending.set(id, run);
