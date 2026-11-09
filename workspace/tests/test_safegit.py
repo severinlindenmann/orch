@@ -349,6 +349,16 @@ def _bindings(tree) -> dict[str, set[str]]:
 _GIT_PART = re.compile(r"[/\\]git(\.exe)?$", re.IGNORECASE)  # a path ending in git (a bare "git" is no path)
 
 
+def _git_fstring(node) -> bool:
+    """An f-string that ends in a placeholder + the constant "git"/"git.exe" (f"{d}{os.sep}git")."""
+    return (
+        isinstance(node, ast.JoinedStr)
+        and len(node.values) > 1
+        and isinstance(node.values[-1], ast.Constant)
+        and bool(_GIT_NAME.fullmatch(str(node.values[-1].value)))
+    )
+
+
 def _is_git(node, env) -> bool:
     vals = _fold(node, env)
     return bool(vals) and any(_GIT_NAME.fullmatch(v) for v in vals)
@@ -378,12 +388,9 @@ def git_path_builders(source: str) -> list[int]:
                 if a.name == "find_exe":
                     find_aliases.add(a.asname or a.name)
     for n in ast.walk(tree):
-        if (
-            isinstance(n, ast.Constant)
-            and isinstance(n.value, str)
-            and _GIT_PART.search(n.value)
-            and (n.value.lower() not in ("git", "git.exe") and True)
-        ):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and _GIT_PART.search(n.value):
+            bad.append(n.lineno)
+        elif _git_fstring(n):
             bad.append(n.lineno)
         elif isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Div, ast.Add)) and _is_git(n.right, env):
             bad.append(n.lineno)
@@ -475,6 +482,8 @@ def _run(root, args):
         "from orch import safegit\nsafegit.hardened(cwd)",
         'from orch.safegit import find_exe as fe\nfe("git", set())',
         'import os\np = f"{d}/git"',
+        'import os\np = f"{d}{os.sep}git"',
+        'import os\np = f"{d}{os.sep}git.exe"',
         'import os\np = "%s/git" % d',
         'import os\np = d + os.sep + "git"',
         'p = "/".join([d, "git.exe"])',
@@ -1142,8 +1151,11 @@ def test_run_bytes_kills_git_and_its_child_on_timeout(proj, tmp_path, monkeypatc
 
 
 @posix_only
-def test_a_child_left_behind_by_a_finished_git_is_killed_and_the_output_kept(proj, tmp_path, monkeypatch):
-    """git exits at once but a background child still holds the pipes: no hang, no late data, child killed."""
+def test_a_child_left_behind_by_a_finished_git_is_killed_and_the_call_fails_closed(
+    proj, tmp_path, monkeypatch
+):
+    """git exits at once but a background child still holds the pipes: the call ends at the timeout with 124
+    and no data (never a partial result as success), and the child is killed."""
     import time
 
     gpid = tmp_path.parent / (tmp_path.name + "_gpid")
@@ -1151,9 +1163,49 @@ def test_a_child_left_behind_by_a_finished_git_is_killed_and_the_output_kept(pro
     monkeypatch.setenv("PATH", os.pathsep.join([str(d), "/usr/bin", "/bin"]))
     monkeypatch.setattr(safegit, "_exes", {})
     t = time.monotonic()
-    rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 20)
-    assert (rc, out) == (0, b"hi") and time.monotonic() - t < 10
+    rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 2)
+    assert rc == 124 and out == b"" and time.monotonic() - t < 10
     assert _gone(gpid)
+
+
+def test_run_bytes_needs_no_waitid(proj, monkeypatch):
+    """os.waitid is missing on macOS Python < 3.13: nothing may depend on it."""
+    monkeypatch.delattr(os, "waitid", raising=False)
+    plain_git(proj, "init", "-q")
+    rc, out, _ = safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj, 10)
+    assert (rc, out.strip()) == (0, b"true")
+
+
+def test_taskkill_is_found_by_full_path_in_the_system_folder(tmp_path, monkeypatch):
+    import types
+
+    sysdir = tmp_path / "System32"
+    sysdir.mkdir()
+    (sysdir / "taskkill.exe").write_text("x")
+
+    def get_dir(buf, size):
+        buf.value = str(sysdir)
+        return len(buf.value)
+
+    fake = types.SimpleNamespace(kernel32=types.SimpleNamespace(GetSystemDirectoryW=get_dir))
+    monkeypatch.setattr("ctypes.windll", fake, raising=False)
+    monkeypatch.delenv("SystemRoot", raising=False)
+    assert safegit.taskkill_exe() == str(sysdir / "taskkill.exe")
+    (sysdir / "taskkill.exe").unlink()
+    assert safegit.taskkill_exe() is None  # not found: never a bare name
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    (tmp_path / "System32" / "taskkill.exe").write_text("x")
+    assert safegit.taskkill_exe() == str(tmp_path / "System32" / "taskkill.exe")  # the %SystemRoot% route
+
+
+def test_without_a_findable_taskkill_a_windows_kill_fails_closed(monkeypatch):
+    import types
+
+    monkeypatch.setattr(safegit.os, "name", "nt")
+    monkeypatch.setattr(safegit, "taskkill_exe", lambda: None)
+    killed = []
+    p = types.SimpleNamespace(returncode=None, pid=1234, kill=lambda: killed.append(1))
+    assert safegit._kill(p, safegit.threading.Lock()) is False and killed
 
 
 @posix_only
@@ -1171,7 +1223,7 @@ def test_output_is_never_returned_while_a_reader_is_still_running(proj, monkeypa
     monkeypatch.setattr(safegit.threading, "Thread", Stuck)
     plain_git(proj, "init", "-q")
     rc, out, err = safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj, 10)
-    assert rc == 124 and out == b"" and "did not end" in err
+    assert rc == 124 and out == b""  # (a reader past the timeout or past its join: never data)
 
 
 @pytest.mark.parametrize("bad", [["--std"], ["--stdi"], ["-qz"], ["-z"], ["--stdin"], ["-q", "-e"], ["-p"]])

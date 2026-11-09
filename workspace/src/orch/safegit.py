@@ -318,56 +318,72 @@ def _spawn(*a, **k):
 STDERR_KEEP = 64 * 1024
 
 
-def _kill(p, lock) -> None:
-    """Kill git and everything it started. POSIX: SIGKILL to its process group (it has its own session; the
-    children would keep the pipes open), only while git is not yet reaped, so a reused pid is never hit.
-    Windows: `taskkill /T /F` (the process tree). Best effort."""
+def _system_directory() -> str | None:
+    """Windows' system folder (GetSystemDirectoryW); None elsewhere or on failure."""
+    try:
+        import ctypes
+
+        buf = ctypes.create_unicode_buffer(260)
+        n = ctypes.windll.kernel32.GetSystemDirectoryW(buf, 260)
+        return buf.value if 0 < n < 260 else None
+    except (AttributeError, OSError, ImportError):
+        return None
+
+
+def taskkill_exe() -> str | None:
+    """taskkill.exe by its FULL path in the system folder, never by bare name (a bare name is looked up in the
+    folder of python.exe (maybe a project .venv\\Scripts) and the current folder first). None = not found."""
+    cands = []
+    d = _system_directory()
+    if d:
+        cands.append(os.path.join(d, "taskkill.exe"))
+    root = os.environ.get("SystemRoot")
+    if root and os.path.isabs(root):
+        cands.append(os.path.join(root, "System32", "taskkill.exe"))
+    return next((c for c in cands if os.path.isfile(c)), None)
+
+
+def _kill(p, lock) -> bool:
+    """Kill git and everything it started. POSIX: SIGKILL to its process group (git has its own session; its
+    children would keep the pipes open), only while git is not yet reaped: an unreaped git (even a zombie)
+    keeps its group id reserved, so no reused id is ever hit. Windows: `taskkill /T /F` by full path. True =
+    the whole tree was reached (always on POSIX); False = Windows without a findable taskkill (the caller
+    fails closed)."""
+    ok = True
     with lock:
         if p.returncode is not None:
-            return
+            return True
+        pid = getattr(p, "pid", None)
         try:
-            pid = getattr(p, "pid", None)
-            if os.name != "nt" and isinstance(pid, int) and pid > 1:
-                os.killpg(pid, signal.SIGKILL)
-            elif os.name == "nt":
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=5)
-        except (OSError, subprocess.SubprocessError):
+            if os.name != "nt":
+                if isinstance(pid, int) and pid > 1:
+                    os.killpg(pid, signal.SIGKILL)
+            else:
+                exe = taskkill_exe()
+                if exe is None:
+                    ok = False
+                else:
+                    subprocess.run(
+                        [exe, "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=5, check=False
+                    )
+        except (OSError, subprocess.SubprocessError):  # ESRCH: the group is already gone
             pass
         try:
             p.kill()
         except OSError:
             pass
-
-
-def _wait(p, timeout) -> bool:
-    """Wait until git has exited WITHOUT reaping it (POSIX waitid + WNOWAIT), so the process group can still
-    be killed safely afterwards. True = exited, False = still running at the timeout."""
-    pid = getattr(p, "pid", None)
-    if os.name == "nt" or not isinstance(pid, int) or pid <= 1:
-        try:
-            p.wait(timeout=timeout)
-            return True
-        except subprocess.TimeoutExpired:
-            return False
-    end = time.monotonic() + timeout
-    delay = 0.001
-    while True:
-        if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None:
-            return True
-        if time.monotonic() >= end:
-            return False
-        time.sleep(delay)
-        delay = min(delay * 2, 0.02)
+    return ok
 
 
 def _stream(argv, cwd, env_, timeout, data, max_bytes):
     """(rc, stdout, stderr) reading stdout WHILE git runs: past `max_bytes` the child is killed at once
     (rc TOO_LONG); on timeout it is killed and subprocess.TimeoutExpired is raised. stderr is drained on a
     thread and only its first STDERR_KEEP bytes are kept, so a chatty git cannot fill the pipe or memory.
-    When git has ended, its whole process group is killed anyway (a leftover child holding the pipe cannot
-    hang us or feed us late data). If a reader is still alive after that, the call FAILS (124): output is
-    only returned once every reader is finished. Windows gap: no Job object; the tree is killed with
-    `taskkill /T /F`, and a reader that outlives that fails the call the same way."""
+    Order (portable, nothing platform-specific to wait with): wait for both readers to reach EOF, bounded
+    by the timeout; then ALWAYS kill git's whole process group before git is reaped; then reap. If a reader
+    is still running after that, the call FAILS (124) with no output: data is only returned once every
+    reader is finished. Windows: no Job object; the tree goes with `taskkill /T /F` (full path); without a
+    findable taskkill the call fails closed (124)."""
     p = _spawn(
         argv,
         cwd=cwd,
@@ -409,16 +425,23 @@ def _stream(argv, cwd, env_, timeout, data, max_bytes):
         except OSError:
             pass
 
-    threads = [threading.Thread(target=f, daemon=True) for f in (pump_out, pump_err)]
+    readers = [threading.Thread(target=f, daemon=True) for f in (pump_out, pump_err)]
+    threads = list(readers)
     if data is not None:
         threads.append(threading.Thread(target=feed, daemon=True))
     for t in threads:
         t.start()
-    exited = False
+    timed_out = False
+    killed = True
     try:
-        exited = _wait(p, timeout)
+        end = time.monotonic() + timeout
+        for t in readers:
+            t.join(max(0.0, end - time.monotonic()))
+            if t.is_alive():
+                timed_out = True
+                break
     finally:
-        _kill(p, lock)  # always: also after a normal exit, before git is reaped (no pid reuse)
+        killed = _kill(p, lock)  # always: also after a normal end, while git is still unreaped
         with lock:
             p.wait()
         for t in threads:
@@ -430,9 +453,9 @@ def _stream(argv, cwd, env_, timeout, data, max_bytes):
                     f.close()
                 except OSError:
                     pass
-    if not exited:
+    if timed_out:
         raise subprocess.TimeoutExpired(argv, timeout)
-    if stuck:
+    if stuck or not killed:
         return 124, b"", "git's output did not end: orch dropped it"
     if over.is_set():
         return TOO_LONG, b"", f"git printed more than {max_bytes} bytes"
