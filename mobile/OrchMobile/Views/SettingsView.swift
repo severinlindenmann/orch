@@ -37,6 +37,7 @@ struct SettingsView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    section("Notifications") { MuteAllSettings() }
                     ModelMessage()
                     section("WORKSPACES") {
                         VStack(spacing: 0) {

@@ -53,9 +53,7 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     var can: WorkspaceCan? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
-        guard let m = mutedUntil else { return false }
-        if m == "forever" { return true }
-        return (ISO8601DateFormatter().date(from: m)).map { $0 > now } ?? false
+        MuteRules.isMuted(mutedUntil, now: now)
     }
     /// Online while the last call is at most 5 minutes old (Presence.swift).
     func presence(now: Date = Date()) -> Presence { Presence.of(lastSeen: lastSeen, now: now) }
@@ -521,6 +519,8 @@ struct PhoneSettings: Codable, Sendable, Equatable {
     var swissGerman: Bool = false
     var ttsCapUsd: Double = 10
     var ttsUsedUsdMonth: Double = 0
+    var muteAllUntil: String? = nil
+    var groupMutes: [GroupMute]? = nil
     /// Read-aloud budget left this month (never below 0).
     var ttsLeftUsd: Double { max(0, ttsCapUsd - ttsUsedUsdMonth) }
 }
