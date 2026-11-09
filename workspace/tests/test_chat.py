@@ -1121,3 +1121,10 @@ def test_helper_prompt_names_the_ticket_the_last_talk_became(proj):
     other = proj / "other"
     other.mkdir()
     assert chat.last_moved(other) is None
+
+
+def test_helper_prompt_does_not_say_tap_for_phone_conversations(proj):
+    gid = tickets.ensure_general(proj, "human:me")
+    prompt = chat.helper_prompt(proj, tickets.load(proj, gid), [], "")
+    assert "never tell them to tap or click Make ticket" in prompt
+    assert "Never make the ticket yourself" in prompt

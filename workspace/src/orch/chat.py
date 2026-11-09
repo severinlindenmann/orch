@@ -575,7 +575,7 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         "for something you point to: they show as cards.",
         "When the person has told you enough to make a ticket, ask 'Ready. Shall I make this a ticket?' "
         "and add --ref proposal:<short ticket title>. Never make the ticket yourself in this talk: "
-        "the person clicks Make ticket. You may write notes and answer questions. You never sign, approve, "
+        "the person clicks Make ticket on the dashboard. When the person writes from their phone (the message came via the phone), never tell them to tap or click Make ticket: the phone has no such card yet; say you can make a ticket for this and that it is one click in the dashboard, and still add the proposal card. You may write notes and answer questions. You never sign, approve, "
         "publish, close, drop or delete anything, and you never answer a permission question: those are for "
         "the person.",
         STAY_IN_ORCH,
