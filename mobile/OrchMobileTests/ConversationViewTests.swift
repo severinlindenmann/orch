@@ -84,6 +84,47 @@ final class ConversationViewTests: XCTestCase {
         XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 steps done")
     }
 
+    func testSummaryRepeatsResultAfterTrimming() {
+        let result = ConvItem(id: "r", at: "1", side: .them, text: "\n Page is ready  ", label: "Result")
+        XCTAssertTrue(ConversationRules.summaryRepeatsResult("  Page is ready\n", in: [result]))
+    }
+
+    func testSummaryContainedInResult() {
+        let result = ConvItem(id: "r", at: "1", side: .them, text: "Page is ready. Added a preview.", label: "Result")
+        XCTAssertTrue(ConversationRules.summaryRepeatsResult("Page is ready.", in: [result]))
+    }
+
+    func testResultContainedInSummary() {
+        let result = ConvItem(id: "r", at: "1", side: .them, text: "Page is ready.", label: "Result")
+        XCTAssertTrue(ConversationRules.summaryRepeatsResult("Page is ready. Added a preview.", in: [result]))
+    }
+
+    func testDifferentSummaryDoesNotRepeatResult() {
+        let result = ConvItem(id: "r", at: "1", side: .them, text: "Page is ready.", label: "Result")
+        XCTAssertFalse(ConversationRules.summaryRepeatsResult("Fixed the login.", in: [result]))
+    }
+
+    func testSummaryRepeatsResultWithDifferentWhitespace() {
+        let result = ConvItem(id: "r", at: "1", side: .them, text: "Page\n\n is\tready.  Added a preview.", label: "Result")
+        XCTAssertTrue(ConversationRules.summaryRepeatsResult("Page is ready.\r\nAdded   a\tpreview.", in: [result]))
+    }
+
+    func testSummaryRepeatsResultIgnoresNonResultItems() {
+        let plain = ConvItem(id: "p", at: "1", side: .them, text: "Page is ready.")
+        let working = ConvItem(id: "w", at: "2", side: .them, text: "Page is ready.", label: "Working")
+        XCTAssertFalse(ConversationRules.summaryRepeatsResult("Page is ready.", in: [plain, working]))
+        let result = ConvItem(id: "r", at: "3", side: .them, text: "Page is ready.", label: "Result")
+        XCTAssertTrue(ConversationRules.summaryRepeatsResult("Page is ready.", in: [plain, working, result]))
+    }
+
+    func testSummaryRepeatsResultIgnoresEmptyTexts() {
+        let empty = ConvItem(id: "e", at: "1", side: .them, text: " \n\t", label: "Result")
+        let result = ConvItem(id: "r", at: "2", side: .them, text: "Page is ready.", label: "Result")
+        XCTAssertFalse(ConversationRules.summaryRepeatsResult("Page is ready.", in: [empty]))
+        XCTAssertFalse(ConversationRules.summaryRepeatsResult(" \n\t", in: [result]))
+        XCTAssertFalse(ConversationRules.summaryRepeatsResult("Page is ready.", in: []))
+    }
+
     func testResultCardsMergeOnlyConsecutiveAgentResults() {
         let file = MessageAttachment(blobId: "b_html", kind: .file, name: "fish.html", size: 10, mime: "text/html")
         let first = ConvItem(id: "r1", at: "1", side: .them, text: "Page is ready", attachments: [file], label: "RESULT",
