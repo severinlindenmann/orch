@@ -598,7 +598,7 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
     elif cmd == "update":
-        report = []
+        report, notes = [], []
         done = addons.update(
             root,
             args.project_only,
@@ -606,11 +606,13 @@ def run(args: argparse.Namespace) -> None:
             json_output=args.json,
             report=report,
             nonce=args.update_nonce,
+            notes=notes,
         )
         if args.after_install:
             pass
         elif args.project_only and (args.json or not report):
-            _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
+            data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
+            _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
     elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
