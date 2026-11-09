@@ -1571,21 +1571,17 @@ def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str]
     return lines, restart
 
 
-def _restart_updated(root: Path) -> list[str]:
+def _restart_updated() -> list[str]:
+    """Restart EVERY service ORCH_HOME's running.json records (all workspaces), whoever runs the update and
+    whatever its cwd or HOME: an update replaces the code of all of them. One lock around the whole thing."""
     from orch import services
 
-    lines = []
-    try:
-        root = services._workspace_root(root).resolve()  # the same root start/stop use
-    except Refused:
-        return lines
-    names = {
-        e["addon"]
-        for e in services.running()
-        if Path(e["workspace"]) == root and services.pid_alive(e.get("pid"))
-    }
-    if not names:
-        return lines
+    by_ws: dict[str, dict[str, int]] = {}
+    for e in services.running():
+        if services.pid_alive(e.get("pid")):
+            by_ws.setdefault(e["workspace"], {})[e["addon"]] = e["pid"]
+    if not by_ws:
+        return []
     import signal
     import threading
 
@@ -1596,15 +1592,34 @@ def _restart_updated(root: Path) -> list[str]:
     if hasattr(signal, "SIGHUP") and threading.current_thread() is threading.main_thread():
         old_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
     _output_failure_proof()
+    done, bad = [], []
     try:
-        with services.locked():  # one lock around stop + start + check: no other orch start/stop in between
-            return _restart_locked(services, root, names)
-    except Exception as e:  # a restart failure must not hide a successful update
+        with services.locked():  # one lock around every stop + start + check
+            for ws in sorted(by_ws):
+                try:
+                    ok, lines = _restart_locked(services, Path(ws), by_ws[ws])
+                except Exception as e:  # one workspace must not stop the others
+                    why = services._printable(e)
+                    ok, lines = (
+                        [],
+                        [
+                            f"Restart {n} ({Path(ws).name}) to use the new version ({why})"
+                            for n in sorted(by_ws[ws])
+                        ],
+                    )
+                done += ok
+                bad += lines
+    except Exception as e:  # e.g. the lock timed out
         why = services._printable(e)
-        return [f"Restart {n} to use the new version ({why})" for n in sorted(names)]
+        return [
+            f"Restart {n} ({Path(w).name}) to use the new version ({why})"
+            for w in sorted(by_ws)
+            for n in sorted(by_ws[w])
+        ]
     finally:
         if old_hup is not None:
             signal.signal(signal.SIGHUP, old_hup)
+    return ([f"Restarted: {', '.join(done)}"] if done else []) + bad
 
 
 def _output_failure_proof() -> None:
@@ -1628,24 +1643,35 @@ def _say(text: str) -> None:
         _output_failure_proof()
 
 
-def _is_up(services, root: Path, name: str) -> bool:
+def _is_up(services, root: Path, name: str, old_pid: int | None) -> bool:
+    """Running again under a NEW pid (the old process is gone)."""
     return any(
-        e.get("addon") == name and e["workspace"] == str(root) and services.pid_alive(e.get("pid"))
+        e.get("addon") == name
+        and e["workspace"] == str(root)
+        and e.get("pid") != old_pid
+        and services.pid_alive(e.get("pid"))
         for e in services.running()
     )
 
 
-def _restart_locked(services, root: Path, names: set[str]) -> list[str]:
+def _restart_locked(services, root: Path, olds: dict[str, int]) -> tuple[list[str], list[str]]:
+    """Restart these add-ons of one workspace. Returns (labels restarted, lines for what went wrong)."""
+    label = lambda n: f"{n} ({root.name})"  # noqa: E731
+    names = set(olds)
+    if not (root / ".orch").is_dir():
+        return [], [
+            f"Restart {label(n)} to use the new version (workspace folder is gone)" for n in sorted(names)
+        ]
     lines = []
     try:
         stops = {r["addon"]: r for r in services.stop(root, only=names)}
     except Exception as e:
         why = services._printable(e)
-        return [f"Restart {n} to use the new version (stop failed: {why})" for n in sorted(names)]
+        return [], [f"Restart {label(n)} to use the new version (stop failed: {why})" for n in sorted(names)]
     stopped = {n for n in names if stops.get(n, {}).get("stopped")}
     for n in sorted(names - stopped):
         why = services._printable(stops.get(n, {}).get("error") or "did not stop")
-        lines.append(f"Restart {n} to use the new version (stop failed: {why})")
+        lines.append(f"Restart {label(n)} to use the new version (stop failed: {why})")
     errors: dict[str, str] = {}
     todo = set(stopped)
     for _attempt in range(2):  # one retry for what did not come up
@@ -1659,17 +1685,16 @@ def _restart_locked(services, root: Path, names: set[str]) -> list[str]:
             continue
         by = {r["addon"]: r for r in rows}
         for n in list(todo):
-            if by.get(n, {}).get("running") and _is_up(services, root, n):
+            if by.get(n, {}).get("running") and _is_up(services, root, n, olds[n]):
                 todo.discard(n)
                 errors.pop(n, None)
             elif by.get(n, {}).get("error"):
                 errors.setdefault(n, services._printable(by[n]["error"]))
-    ok = sorted(stopped - todo)
-    if ok:
-        lines.insert(0, f"Restarting {', '.join(ok)}… done")
     for n in sorted(todo):
-        lines.append(f"{n} stopped, start it with: orch start" + (f" ({errors[n]})" if n in errors else ""))
-    return lines
+        lines.append(
+            f"{label(n)} stopped, start it with: orch start" + (f" ({errors[n]})" if n in errors else "")
+        )
+    return [label(n) for n in sorted(stopped - todo)], lines
 
 
 def update(
@@ -1753,13 +1778,12 @@ def update(
         _save_active(root, a)
     sha = _source_sha()
     if before is not None:
-        lines, restart = _update_lines(before, found, sha)
+        lines, _changed = _update_lines(before, found, sha)
         if not json_output:
             _say("\n".join(lines))
-        if restart:
-            restart_lines = _restart_updated(root)
-            if restart_lines and not json_output:
-                _say("\n".join(restart_lines))
+        restart_lines = _restart_updated()  # whatever changed: what runs is the old install
+        if restart_lines and not json_output:
+            _say("\n".join(restart_lines))
         if report is not None:
             report.extend(lines)
         reg = registry()
