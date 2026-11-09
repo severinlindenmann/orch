@@ -533,7 +533,7 @@ async fn settings_defaults_patch_and_monthly_usage() {
     assert_eq!(s, 200);
     assert_eq!(
         v,
-        json!({"speak": "auto", "swiss_german": false, "tts_cap_usd": 10, "tts_used_usd_month": 0})
+        json!({"speak": "auto", "swiss_german": false, "tts_cap_usd": 10, "tts_used_usd_month": 0, "mute_all_until": null, "group_mutes": []})
     );
     let (s, v) = t
         .phone(

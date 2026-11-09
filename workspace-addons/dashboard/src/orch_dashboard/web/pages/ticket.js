@@ -306,6 +306,24 @@ function liveLinkFor(t) {
   const own = (t.ext || {})[a.name]?.page;
   return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : a.page.path)};
 }
+// Live session: two commands to copy. Watch cannot type; Take over can (the agent waits while you type).
+function liveSessionStrip(t) {
+  const run = state.runs?.[t.id];
+  if (snapshot || !run?.running || run.claim?.mode === 'oneshot') return null;
+  const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
+  const copy = (label, command) => {
+    const control = button('', 'outline', async () => {
+      try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
+      catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
+    });
+    control.dataset.key = 'live-copy-' + (command.includes('--watch') ? 'watch' : 'take');
+    control.title = command;
+    control.append(iconEl('copy'), label, h('span', {className:'meta'}, 'Copy'));
+    return control;
+  };
+  return h('section', {className:'card live-strip', 'data-key':'live-session'}, h('h2', {}, 'Live session'),
+    copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref));
+}
 function agentBar(t) {
   const liveLink = liveLinkFor(t), run = state.runs?.[t.id];
   const line = window.DashHelpers.agentLine(t, run, Date.now(), liveLink, state.settings);
@@ -735,7 +753,7 @@ function detail(t) {
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
-      !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null,
+      !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),
       panel('overview', [t.description ? h('p', {className:'muted preserve-lines', 'data-key':'description'}, clean(t.description), ' ', h('small', {className:'meta'}, '— written by ' + ticketActor(t.description_by))) : null, t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, children.length || (!parent && !t.parent) ? ticketParts(t, children) : null, ticketFiles(t), tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
       panel('tasks', tasksCard('tasks')),

@@ -1,34 +1,25 @@
 """Settings contracts shared with delegated shell handlers and the API lane."""
-
 from tests import webjs
 
 
 def test_settings_navigation_and_cards():
     src = webjs.all_js()
     for text in (
-        "role:'tablist'",
-        "'data-action':'settings-tab'",
-        "'data-key':'settings-switch-'",
-        "a.dashboard?.panel === 'phone'",
-        "href:'#addon/' + phoneAddon.name",
-        "className:'settings-details'",
-        "h('summary', {}, 'Details')",
-        "OrchMobileMode?.settingsSection(h)",
-        "OrchLook?.settingsSection()",
-        "agent-card",
-        "role:'status', className:'meta test-note'",
-        "'data-action':'agent-test'",
-        "'data-action':'settings-addon'",
+        "role:'tablist'", "'data-action':'settings-tab'", "'data-key':'settings-switch-'",
+        "a.dashboard?.panel === 'phone'", "href:'#addon/' + phoneAddon.name",
+        "OrchMobileMode?.settingsSection(h)", "OrchLook?.settingsSection()",
+        "agent-card", "role:'status', className:'meta test-note'",
+        "'data-action':'agent-test'", "'data-action':'settings-addon'",
         "settingsText('p', {className:'meta'}, addon.description)",
-        "panelOf(id) === 'repeats'",
-        "panelOf(id) === 'links'",
-        "a?.dashboard?.label",
+        "panelOf(id) === 'repeats'", "panelOf(id) === 'links'", "a?.dashboard?.label",
     ):
         assert text in src
-    css = (webjs.WEB / "pages/settings.css").read_text()
-    assert "@media(max-width:760px)" in css
-    assert "overflow-x:auto" in css
-    assert "min-height:44px" in css
+    assert "className:'settings-details'" not in src  # fb11: the folder is shown directly
+    assert "h('span', {className:'set-label'}, 'Folder')" in src
+    css = (webjs.WEB / 'pages/settings.css').read_text()
+    assert '@media(max-width:760px)' in css
+    assert 'overflow-x:auto' in css
+    assert 'min-height:44px' in css
 
 
 def test_repeat_uses_only_presets_and_open_tickets():
@@ -46,29 +37,21 @@ def test_shared_links_are_optional_and_use_plain_actions():
     for text in (
         "fetch('/api/links', {cache:'no-store'})",
         "if (res.status !== 200) { sharedLinks = null; return; }",
-        "Array.isArray(data.links)",
-        "catch (_) { sharedLinks = null; }",
-        "sharedLinks !== null",
-        "No shared links yet.",
-        "Link valid until ",
-        "No end date",
-        "'Expired'",
-        "if (!link.copy) return;",
+        "Array.isArray(data.links)", "catch (_) { sharedLinks = null; }",
+        "sharedLinks !== null", "No shared links yet.", "Link valid until ",
+        "No end date", "'Expired'", "if (!link.copy) return;",
         "navigator.clipboard.writeText(link.link)",
-        "act('link.extend', {id:link.id, days:7})",
-        "act('link.stop', {id:link.id})",
-        "'The link stops working.'",
-        "'Stop sharing', send",
-        "bindAddonControls(host)",
+        "act('link.extend', {id:link.id, days:7})", "act('link.stop', {id:link.id})",
+        "'The link stops working.'", "'Stop sharing', send", "bindAddonControls(host)",
     ):
         assert text in src
 
 
 def test_reply_is_optional_and_never_invented():
     src = webjs.all_js()
-    part = src[src.index("function messageSend(") : src.index("async function copyText(")]
-    assert "const args = {workspace:peer, text};" in part
-    assert "if (control.dataset.replyTo !== undefined) args.reply_to = control.dataset.replyTo;" in part
+    part = src[src.index('function messageSend('):src.index('async function copyText(')]
+    assert 'const args = {workspace:peer, text};' in part
+    assert 'if (control.dataset.replyTo !== undefined) args.reply_to = control.dataset.replyTo;' in part
     assert "act('message.send', args)" in part
 
 
@@ -78,8 +61,8 @@ def test_actions_and_feature_detection_in_node():
 
     import pytest
 
-    if not shutil.which("node"):
-        pytest.skip("node not installed")
+    if not shutil.which('node'):
+        pytest.skip('node not installed')
     script = r"""
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
 const source = fs.readFileSync(process.argv[1], 'utf8');
@@ -128,10 +111,8 @@ loadAddon = async () => {};
 })().catch(err => { console.error(err); process.exitCode = 1; });
 """
     subprocess.run(
-        ["node", "-e", script, str(webjs.WEB / "pages/settings.js")],
-        check=True,
-        capture_output=True,
-        text=True,
+        ['node', '-e', script, str(webjs.WEB / 'pages/settings.js')],
+        check=True, capture_output=True, text=True,
     )
 
 

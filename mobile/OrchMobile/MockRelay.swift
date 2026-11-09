@@ -40,6 +40,12 @@ actor MockRelay: RelayAPI {
     private let empty = UserDefaults.standard.bool(forKey: "mockEmpty")
 
     init(latency: Duration? = nil) {
+        if UserDefaults.standard.bool(forKey: "mockReview") {
+            all.append(Self.reviewQuestion)
+            updateLog.append(TicketUpdate(id: "m_reviewupdate001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
+                ticket: Self.reviewTicketId, kind: "result", title: Self.reviewView.title, text: "Your fish test page is ready.", replyTo: nil,
+                at: Self.now(), key: "DT-2", ticketView: Self.reviewView))
+        }
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
@@ -121,7 +127,17 @@ actor MockRelay: RelayAPI {
                      key: "RGS-4", ticketView: MockRelay.invoiceView),
     ]
 
-    /// The question the relay add-on asks when a workspace hands over a task that is not allowed yet (relay:allow).
+    /// Ready-for-review fixture enabled with -mockReview YES.
+    static let reviewTicketId = "t_reviewfish"
+    static let reviewView = TicketSnapshot(title: "Test HTML page about fish", status: "review",
+        checklist: ["Create page", "Add fish facts", "Review page"].map { .init(text: $0, done: true) }, running: false)
+    static var reviewQuestion: Question {
+        Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_review000000001", from: pilatus, to: "phones", type: "question",
+            createdAt: now(), ticket: reviewTicketId, body: QuestionBody(questionId: "review-1", title: reviewView.title,
+                text: "Is this done?", options: ["accept", "changes"], recommended: nil, review: true), key: "DT-2"),
+            workspaceName: "Pilatus Workspace")
+    }
+
     static let allowQuestion = Question(
         message: QuestionMessage(schema: "orch.msg/1", id: "m_q3allow00000003", from: pilatus, to: "phones", type: "question",
                                  createdAt: "2026-11-05T09:30:00Z", ticket: "t_a110w1",
@@ -187,7 +203,7 @@ actor MockRelay: RelayAPI {
     func workspaces() async throws -> [Workspace] {
         try await check()
         if empty { return [] }
-        func open(_ ws: String) -> Int { all.filter { $0.message.from == ws && answered[$0.id] == nil }.count }
+        func open(_ ws: String) -> Int { all.filter { !$0.isReview && $0.message.from == ws && answered[$0.id] == nil }.count }
         var list = [
             Workspace(id: Self.pilatus, name: "Pilatus Workspace", description: "Data pipelines for the Pilatus client",
                       tags: ["client", "data", "ingestion"], online: true, lastSeen: "2026-11-04T10:41:00Z", openQuestions: open(Self.pilatus),
@@ -331,7 +347,28 @@ actor MockRelay: RelayAPI {
         guard let m = (updateLog.map(\.id) + received.map(\.id)).first(where: { $0 == messageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Nothing to read aloud.") }
         return Data("ID3-mock-mp3-\(m)-\(lang ?? "en")".utf8)
     }
-    func settings() async throws -> PhoneSettings { try await check(); return phoneSettings }
+    func settings() async throws -> PhoneSettings {
+        try await check()
+        phoneSettings.groupMutes = phoneSettings.groupMutes?.filter { MuteRules.isMuted($0.mutedUntil) }
+        return phoneSettings
+    }
+    func muteAll(_ mute: Mute) async throws -> PhoneSettings {
+        try await check()
+        phoneSettings.muteAllUntil = mute.wire
+        return try await settings()
+    }
+    func setGroupMute(_ key: GroupKey, mute: Mute) async throws -> GroupMute {
+        try await check()
+        guard reachable(key.host) else { throw RelayError.api(status: 404, code: "not_found", message: "Workspace not found.") }
+        let result = GroupMute(host: key.host, id: key.id, mutedUntil: mute.wire)
+        var active = (phoneSettings.groupMutes ?? []).filter { $0.key != key && MuteRules.isMuted($0.mutedUntil) }
+        if MuteRules.isMuted(result.mutedUntil) {
+            guard active.count < 100 else { throw Self.invalid("group mutes") }
+            active.append(result)
+        }
+        phoneSettings.groupMutes = active
+        return result
+    }
     func updateSettings(_ p: SettingsPatch) async throws -> PhoneSettings {
         try await check()
         guard p.isValid else { throw Self.invalid("settings") }

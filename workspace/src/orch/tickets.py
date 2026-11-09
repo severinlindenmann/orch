@@ -315,9 +315,16 @@ def apply_op(
         if expect is not None and _get(ticket, expect[0]) != expect[1]:
             parent, _, leaf = expect[0].rpartition(".")
             raise _conflict(ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
+        was_review = ticket.get("status") == "review"
         result = fn(ticket)
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
+        if was_review and ticket.get("status") != "review":
+            # leaving Review closes the phones' review round in the same lock (fb8): an old "accept"
+            # can never apply to work that came back to Review later
+            from orch import phone_view  # phone_view imports tickets
+
+            phone_view.close_rounds(root, tid)
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
@@ -603,7 +610,41 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
     return status, by
 
 
-def ask_for_changes(root: Path, tid: str, text: str, by: str) -> dict:
+def note_history(root: Path, tid: str, by: str, text: str, via: str | None = None) -> None:
+    """One history line, nothing else changes (e.g. a phone answer that was too late)."""
+    apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via))
+
+
+def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
+    """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
+    (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
+    second accept is refused. The relay's phone path calls it only for a phone-verified answer to the
+    current review question (relay._apply_review_answer)."""
+    if not by.startswith("human:") or agent_tool():
+        raise Refused("Only a person can accept.")
+
+    def op(ticket):
+        if ticket.get("general") is True:
+            raise Refused(GENERAL_REFUSAL)
+        if ticket["status"] != "review":
+            raise Refused("This ticket is not waiting for your review.")
+        ticket["status"] = "done"
+        ticket["waiting_on"] = None
+        add_history(ticket, by, "Status review -> done", via)
+
+    return apply_op(root, tid, op)[0]
+
+
+def ask_for_changes(
+    root: Path,
+    tid: str,
+    text: str,
+    by: str,
+    *,
+    via: str | None = None,
+    phone: str | None = None,
+    pid: str | None = None,
+) -> dict:
     """A person sends a Review ticket back with a note, in ONE step: the note becomes a task, the ticket is
     Ready (Working only when a run claims it) and the note is queued as the person's own input, so the
     automation host starts exactly one run for it (a person's pending input is what starts runs; #287)."""
@@ -627,14 +668,14 @@ def ask_for_changes(root: Path, tid: str, text: str, by: str) -> dict:
             }
         )
         ticket["status"] = "ready"  # any wait the ticket has is not this review's: left as it is
-        add_history(ticket, by, "Asked for changes: " + note[:200])
+        add_history(ticket, by, "Asked for changes: " + note[:200], via)
 
     from orch import runs  # runs imports tickets
 
     if load(root, tid)["status"] != "review":
         raise Refused("This ticket is not waiting for your review.")
     # Queue the note first, then commit the ticket: a failure of either leaves nothing half done.
-    item = runs.pending_add(root, tid, by, "message", note, _env_via())
+    item = runs.pending_add(root, tid, by, "message", note, via or _env_via(), pid, phone=phone)
     try:
         return apply_op(root, tid, op)[0]
     except BaseException:

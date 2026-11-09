@@ -193,6 +193,11 @@ struct ConversationView: View {
                 }
                 if historyDay == nil {
                 ToolbarItem(placement: .topBarTrailing) {
+                    ChatMuteButton(name: workspaceName, muted: model.workspace(resolved.workspace)?.isMuted(now: now) ?? false) { mute in
+                        Task { await model.setMute(resolved.workspace, mute) }
+                    }
+                }.chatCircleBackground()
+                ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                         headerIcon("info.circle")
                     }.buttonStyle(.plain).accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
@@ -208,7 +213,13 @@ struct ConversationView: View {
                         Button("Go to Today") { goToToday?() }.buttonStyle(WideButtonStyle(color: Theme.brand))
                     } else {
                     if working(items, now: now) { StatusLine(isGeneral ? "\(workspaceName) is thinking…" : "\(workspaceName) is working…") }
-                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(workspaceName: workspaceName, running: ticket.map { TopicStatus($0) == .working }, review: ticket.map { TopicStatus($0) == .review } ?? false, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply)
+                    let reviewQuestion = resolved.ticket.flatMap { ticketId in
+                        ReviewRules.reviewQuestion(ticket: ticket, workspaceId: resolved.workspace, ticketId: ticketId, questions: model.questions, answers: model.answers)
+                    }
+                    if let q = reviewQuestion {
+                        ReviewBar(question: q) { reply = ReplyPreview(messageId: q.id, title: "Changes:", quote: "", answering: q) }.id(q.id)
+                    }
+                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(workspaceName: workspaceName, running: ticket.map { TopicStatus($0) == .working }, review: ticket.map { TopicStatus($0) == .review } ?? false, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, currentReviewId: reviewQuestion?.id)
                     }
                 }
             }
@@ -479,7 +490,7 @@ struct TicketStatusChip: View {
 }
 
 // iOS 26 otherwise joins adjacent toolbar actions in one glass pill.
-private extension ToolbarItem {
+extension ToolbarItem {
     @ToolbarContentBuilder func chatCircleBackground() -> some ToolbarContent {
         if #available(iOS 26.0, *) { self.sharedBackgroundVisibility(.hidden) }
         else { self }
