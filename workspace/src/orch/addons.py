@@ -118,7 +118,7 @@ _LOCAL_ADD_PROVEN = False
 
 @contextlib.contextmanager
 def trusted_local_add():
-    """Inside the person's hand-off (op `addon.add_local`, proof verified): a folder add-on may be installed."""
+    """Inside the person's hand-off (op `addon.add_local`, proof verified): a folder add-on may be added."""
     global _LOCAL_ADD_PROVEN
     prev, _LOCAL_ADD_PROVEN = _LOCAL_ADD_PROVEN, True
     try:
