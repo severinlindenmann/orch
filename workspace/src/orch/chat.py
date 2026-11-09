@@ -1139,7 +1139,9 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
             _dm_write(root, ws, data[ws])
 
 
-_DM_IMPORT_LOGGED = [0.0]
+_DM_IMPORT_LOGGED: list = [
+    None
+]  # monotonic time of the last failure line (None = never; monotonic() may start near 0)
 _DM_CATCHUP: dict = {}
 _DM_CATCHUP_EVERY = 300.0
 
@@ -1173,6 +1175,9 @@ def dm_import_on_pull(root: Path, saved: list | None = None) -> None:
             _dm_sync_contacts(root, peers, wait=0.3)
     except Exception as e:  # noqa: BLE001 - bookkeeping, the pull itself must go on
         busy = "busy" in str(e)
-        if not busy and time.monotonic() - _DM_IMPORT_LOGGED[0] > 600:
-            _DM_IMPORT_LOGGED[0] = time.monotonic()
+        last = _DM_IMPORT_LOGGED.get(str(root))
+        if not busy and (last is None or time.monotonic() - last > 600):
+            if len(_DM_IMPORT_LOGGED) > 200:
+                _DM_IMPORT_LOGGED.clear()
+            _DM_IMPORT_LOGGED[str(root)] = time.monotonic()
             print(f"orch: could not import workspace messages into Chat: {str(e)[:200]}", file=sys.stderr)

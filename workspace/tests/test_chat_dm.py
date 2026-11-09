@@ -13,6 +13,17 @@ OTHER = "ws_0123456789"
 MID = "m_abcdefghijklmnop"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_import_timers():
+    """The pull import keeps a catch-up timer and a log window per workspace folder in module state: every test starts
+    and ends with none, so no test depends on another (or on xdist's order)."""
+    chat._DM_CATCHUP.clear()
+    chat._DM_IMPORT_LOGGED.clear()
+    yield
+    chat._DM_CATCHUP.clear()
+    chat._DM_IMPORT_LOGGED.clear()
+
+
 @pytest.fixture
 def dm(tmp_path, monkeypatch):
     directory = {
@@ -741,7 +752,7 @@ def test_import_runs_only_for_saved_workspace_texts_never_blocks_and_logs_once(t
     lock.unlink()
     # a failure is logged, but only once per 10 minutes
     monkeypatch.setattr(chat, "_contacts_list", lambda root: (_ for _ in ()).throw(RuntimeError("boom")))
-    chat._DM_IMPORT_LOGGED[0] = 0.0
+    chat._DM_CATCHUP.clear()
     chat.dm_import_on_pull(tmp_path, [ws_text])
     chat.dm_import_on_pull(tmp_path, [ws_text])
     assert capsys.readouterr().err.count("could not import") == 1
@@ -752,3 +763,20 @@ def test_display_time_clamps(tmp_path):
     assert chat._shown_at("2026-11-08T11:00:00Z", arrival, []) == arrival  # more than 24 h before arrival
     assert chat._shown_at("1970-01-01T00:00:00Z", arrival, []) == arrival
     assert chat._shown_at("2026-11-08T13:00:00Z", arrival, []) == "2026-11-08T13:00:00Z"
+
+
+def test_failure_log_window_works_when_the_monotonic_clock_is_small(tmp_path, monkeypatch, capsys):
+    # a fresh Linux runner: time.monotonic() can be below 600 s; the first failure must still be logged once
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    monkeypatch.setattr(chat, "_contacts_list", lambda root: (_ for _ in ()).throw(RuntimeError("boom")))
+    import time as _time
+
+    clock = {"t": 5.0}
+    monkeypatch.setattr(_time, "monotonic", lambda: clock["t"])
+    chat._DM_CATCHUP.clear()
+    chat.dm_import_on_pull(tmp_path, None)
+    chat.dm_import_on_pull(tmp_path, None)
+    assert capsys.readouterr().err.count("could not import") == 1
+    clock["t"] = 700.0  # a new window
+    chat.dm_import_on_pull(tmp_path, None)
+    assert capsys.readouterr().err.count("could not import") == 1
