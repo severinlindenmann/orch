@@ -655,7 +655,7 @@ def shown_summary(ticket: dict) -> str:
 
 def _view_step(c: dict) -> dict:
     step = {"text": _clip(c.get("text", ""), 500) or "Task", "done": bool(c.get("done"))}
-    if c.get("wont_do") is True and not step["done"]:  # a person's "Won't do": struck through on the phone
+    if c.get("wont_do") and not step["done"]:  # a person's "Won't do": struck through on the phone
         step["wont_do"] = True
         if reason := _clip(redact(str(c.get("reason") or "")), 200):
             step["reason"] = reason
@@ -740,7 +740,7 @@ def view_for(root: Path, tid: str) -> dict | None:
 def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     """What the phone's snapshot depends on: tasks, status and whether an agent runs now (so "<agent> is
     working" on the phone ends when the agent stops, not only when a task changes)."""
-    items = [[c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist") or []]
+    items = [[c.get("text"), bool(c.get("done")), *([True] if c.get("wont_do") else [])] for c in ticket.get("checklist") or []]
     running = _agent(root, ticket)[1] if root is not None else None
     data = [items, ticket.get("status"), running]
     if ticket.get("started") is True:

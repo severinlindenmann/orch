@@ -229,7 +229,7 @@ def _merge(base, a, b, now):
     cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
                 lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
     out["checklist"] = _order(cl, ids(base.get("checklist", [])))
-    if out["status"] == "done" and any(not c.get("done") for c in out["checklist"]):
+    if out["status"] == "done" and any(not (c.get("done") or c.get("wont_do")) for c in out["checklist"]):
         out["status"] = "active"
         ctx.say("reopened, a new checklist item came in")
     qs = _keyed(base.get("questions", []), a["questions"], b["questions"], lambda x: x["id"],

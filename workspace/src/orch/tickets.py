@@ -1123,6 +1123,8 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
 
     def op(t):
         item = _item(t, cid)
+        if item.get("wont_do") and (not by.startswith("human:") or agent_tool()):
+            _refuse_if_wont_do(item, tid, cid)  # an agent cannot undo a person's decision by deleting the step
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"

@@ -759,7 +759,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
     out.extend(_description_plan(ticket))
-    todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
+    todo = [c for c in ticket.get("checklist") or [] if not c.get("done") and not c.get("wont_do")]
     if todo:
         out.append(
             "Still to do:\n" + "\n".join(f"- {c['id']}: {_clip(c.get('text', ''), 200)}" for c in todo[:20])

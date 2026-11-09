@@ -227,3 +227,22 @@ def test_wont_do_reason_and_done_step(proj, run, new_ticket):
     run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
     assert run("check", "wont-do", tid, "c1", "--by", "human:tester")[0] == 2  # done: reopen first
     assert run("check", "wont-do", tid, "c9", "--by", "human:tester")[0] == 2  # unknown step
+
+
+def test_agent_cannot_remove_a_wont_do_step(proj, run, new_ticket, monkeypatch):
+    tid = with_checks(proj, run, new_ticket)
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    assert run("check", "remove", tid, "c1", "--by", "agent:claude")[0] == 2
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert run("check", "remove", tid, "c1")[0] == 2
+    monkeypatch.delenv("CLAUDECODE")
+    assert run("check", "remove", tid, "c1", "--by", "human:tester")[0] == 0
+
+
+def test_run_prompt_skips_wont_do_steps(proj, run, new_ticket):
+    from orch import runs
+
+    tid = with_checks(proj, run, new_ticket, n=2)
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    text = runs.fresh_prompt(tickets.load(proj, tid), [])
+    assert "c2: step 2" in text and "c1: step 1" not in text
