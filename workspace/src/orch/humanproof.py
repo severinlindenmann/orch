@@ -898,11 +898,33 @@ def _clean_argv(argv) -> list[str] | None:
     return out if all(isinstance(x, str) and len(x) <= 4000 for x in out) and len(out) <= 20 else None
 
 
+VALUE_MAX = 4000  # the exact text a person approves is shown whole; longer is not queued
+
+
+def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
+    """The ticket (and question) in plain words for the hand-off card: title, never a raw id."""
+    from orch import tickets
+
+    try:
+        t = tickets.load(root, tid)
+        text = f"\u201c{t.get('title', '')}\u201d"
+        q = next((x for x in t.get("questions") or [] if qid and x.get("id") == qid), None)
+        return text + (f", question: {q.get('text', '')}" if q else "")
+    except (Refused, OSError, ValueError, AttributeError):
+        return "a ticket"
+
+
 def request_handoff(root: Path, op: str, target: str, label: str = "", value: str = "", argv=None) -> bool:
     """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
     by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
     The item holds the command to run once the person clicks. Best effort: a failure here only means the item
-    is missing. Returns True when queued."""
+    is missing. Returns True when queued. The exact value the person will see is the value that runs: it must
+    be one of the command's own words (checked here and again when the page takes the item)."""
+    heads = HANDOFF_HEADS.get(op, ())
+    if not isinstance(argv, list) or not any(argv[: len(h)] == list(h) for h in heads):
+        return False  # never queue what the page could not run
+    if len(value) > VALUE_MAX or (value and value not in argv):
+        return False
     try:
         d = key_dir(root)
         path = d / "handoffs.json"
@@ -919,7 +941,7 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
                     "op": op,
                     "target": target,
                     "label": label[:120],
-                    "value": value[:300],
+                    "value": value,
                     "argv": argv,
                     "at": now,
                     "exp": now + 600,
@@ -959,6 +981,8 @@ def handoff_take(root: Path, hid: str) -> dict | None:
     heads = HANDOFF_HEADS.get(hit.get("op"), ())
     if not isinstance(argv, list) or not any(argv[: len(h)] == list(h) for h in heads):
         return None
+    if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
+        return None
     return hit
 
 
@@ -995,7 +1019,7 @@ def _dashboard_note(root: Path) -> str:
     return "Waiting for your click: open the dashboard on this computer and press Continue."
 
 
-def person_by(root: Path, args, op: str, target: str, *, label: str = "", value: str = "") -> str:
+def person_by(root: Path, args, op: str, target: str, *, label: str = "", value: str = "", argv=None) -> str:
     """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
     comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
     its own, unprivileged, identity. Anything claiming to be a person without a proof is refused and handed
@@ -1011,7 +1035,9 @@ def person_by(root: Path, args, op: str, target: str, *, label: str = "", value:
     explicit = getattr(args, "by", None)
     if explicit and explicit.startswith("agent:"):
         return tickets.current_actor(explicit)
-    request_handoff(root, op, target, label, value, _clean_argv(CURRENT_ARGV))
+    clean = _clean_argv(CURRENT_ARGV) if argv is None else argv
+    if not request_handoff(root, op, target, label, value, clean):
+        raise Refused(HANDOFF)
     raise Refused(_dashboard_note(root))
 
 

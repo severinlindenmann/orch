@@ -645,7 +645,9 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "update":
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
-            if not humanproof.person_by(root, args, "update", "orch").startswith("human:"):
+            if not humanproof.person_by(
+                root, args, "update", "orch", label="Update orch to the latest version"
+            ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
         report, notes = [], []
         done = addons.update(
@@ -775,13 +777,27 @@ def run(args: argparse.Namespace) -> None:
         rel = d.relative_to(root).as_posix()
         _out(args, {"path": rel}, rel)
     elif cmd == "ticket" and sub == "changes":
-        who = humanproof.person_by(root, args, "ticket.verdict", args.id)
-        t = tickets.ask_for_changes(root, args.id, args.text, who, proven=True)
+        who = humanproof.person_by(
+            root,
+            args,
+            "ticket.verdict",
+            args.id,
+            label="Send back " + humanproof.plain_ticket(root, args.id),
+            value=args.text,
+        )
+        t = tickets.ask_for_changes(root, args.id, args.text, who, proven=who.startswith("human:"))
         _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
         who = by()
         if _patch_is_verdict(root, args):  # Looks good: Review -> Done by a person needs the person's proof
-            who = humanproof.person_by(root, args, "ticket.verdict", args.id)
+            who = humanproof.person_by(
+                root,
+                args,
+                "ticket.verdict",
+                args.id,
+                label="Change " + humanproof.plain_ticket(root, args.id),
+                value=args.data,
+            )
         t = tickets.patch(root, args.id, args.if_revision, args.data, who)
         warn = _child_warning(root, t)
         _out(
@@ -876,7 +892,14 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "answer":
         # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says
-        who = humanproof.person_by(root, args, "ticket.answer", f"{args.id}:{args.question}")
+        who = humanproof.person_by(
+            root,
+            args,
+            "ticket.answer",
+            f"{args.id}:{args.question}",
+            label="Answer " + humanproof.plain_ticket(root, args.id, args.question),
+            value=args.answer,
+        )
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)

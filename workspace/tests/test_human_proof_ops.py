@@ -245,8 +245,8 @@ def test_dev_workspace_accepts_the_test_human(ws, run, monkeypatch):
 
 def test_handoff_cap_drops_new_requests(ws):
     for i in range(3):
-        assert hp.request_handoff(ws, "update", f"orch{i}") is True
-    assert hp.request_handoff(ws, "update", "orch9") is False  # dropped, nothing evicted
+        assert hp.request_handoff(ws, "update", f"orch{i}", argv=["update", str(i)]) is True
+    assert hp.request_handoff(ws, "update", "orch9", argv=["update", "9"]) is False  # dropped, nothing evicted
     assert [h["target"] for h in hp.handoffs(ws)] == ["orch0", "orch1", "orch2"]
 
 
@@ -300,14 +300,51 @@ def test_terminal_answer_queues_a_handoff_with_the_command_and_no_token(ws, run)
     )  # a hand-off writes no token for the caller to read
 
 
-def test_handoff_take_only_runs_the_allowed_command_words(ws):
-    hp.request_handoff(ws, "ticket.answer", "t_a:q1", argv=["config", "set", "x", "y"])
+def test_handoff_is_not_queued_for_words_the_page_cannot_run(ws):
+    assert hp.request_handoff(ws, "ticket.answer", "t_a:q1", argv=["config", "set", "x", "y"]) is False
+    assert hp.request_handoff(ws, "no.such.op", "t_a", argv=["answer"]) is False
+    assert hp.handoffs(ws) == []
+    assert hp.request_handoff(ws, "ticket.answer", "t_a:q1", argv=["answer", "t_a", "q1", "--", "x"]) is True
     hid = hp.handoffs(ws)[0]["id"]
-    assert hp.handoff_take(ws, hid) is None  # wrong words for this op
-    hp.request_handoff(ws, "ticket.answer", "t_a:q1", argv=["answer", "t_a", "q1", "--", "x"])
-    hid = [h for h in hp.handoffs(ws) if h["argv"][0] == "answer"][0]["id"]
     assert hp.handoff_take(ws, hid)["argv"][0] == "answer"
     assert hp.handoff_take(ws, hid) is None  # one click, one run
+
+
+def test_handoff_card_shows_the_exact_text_and_the_stored_value_is_what_runs(ws, run):
+    tid, q = _ask(ws, run)
+    run("answer", tid, q, "Blue -- really", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    assert card["value"] == "Blue -- really" and "Which one?" in card["label"] and "Q" in card["label"]
+    assert not card["label"].startswith("t_") and tid not in card["label"]  # plain words, no raw id
+    # a stored value that is not in the stored command is never run
+    d = hp.key_dir(ws)
+    items = json.loads((d / "handoffs.json").read_text())
+    items[0]["argv"] = [w.replace("Blue -- really", "Something else") for w in items[0]["argv"]]
+    hp._write_private(d / "handoffs.json", json.dumps(items))
+    assert hp.handoff_take(ws, card["id"]) is None
+
+
+def test_handoff_values_over_the_limit_are_not_queued(ws, run):
+    tid, _ = _ask(ws, run)
+    code, out, err = run("run", "send", tid, "x" * (hp.VALUE_MAX + 1), "--by", "human:pat", "--json")
+    assert code == 2 and hp.handoffs(ws) == []
+
+
+def test_run_send_file_is_refused_without_a_proof(ws, run):
+    tid, _ = _ask(ws, run)
+    f = ws / "msg.txt"
+    f.write_text("secret plan")
+    code, out, err = run("run", "send", tid, "--file", str(f), "--by", "human:pat", "--json")
+    assert code == 2 and hp.handoffs(ws) == []
+
+
+def test_every_caller_shows_its_text_on_the_card(ws, run):
+    tid = _review_ticket(ws, run)
+    run("ticket", "changes", tid, "Please fix the tests", "--by", "human:pat", "--json")
+    run("chat", "say", "Hello team", "--by", "human:pat", "--json")
+    run("run", "send", tid, "go on", "--by", "human:pat", "--json")
+    vals = sorted(h["value"] for h in hp.handoffs(ws))
+    assert vals == ["Hello team", "Please fix the tests", "go on"]
 
 
 def test_handoff_click_delivers_the_answer_and_it_counts_as_a_person(ws, run, monkeypatch):

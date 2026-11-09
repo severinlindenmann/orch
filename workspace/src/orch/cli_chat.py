@@ -55,8 +55,8 @@ def dispatch(args, root: Path) -> bool:
             )
         from orch import humanproof
 
-        who = humanproof.person_by(root, args, "chat.send", "general")
-        r = chat.say(root, args.text, who, new=args.new, proven=True)
+        who = humanproof.person_by(root, args, "chat.send", "general", label="Write in Chat", value=args.text)
+        r = chat.say(root, args.text, who, new=args.new, proven=who.startswith("human:"))
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
         )
