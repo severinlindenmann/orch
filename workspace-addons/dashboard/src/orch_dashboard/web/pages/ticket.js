@@ -742,14 +742,19 @@ function ticketProofLine(t) {
   const p = t.proof;
   if (!p || typeof p.line !== 'string' || !p.line) return null;
   const per = p.per_item && typeof p.per_item === 'object' ? p.per_item : {};
-  const level = /failed/.test(p.line) ? 'bad' : array(p.uncovered).length || /haven't been checked/.test(p.line) ? 'warn' : p.line === 'No checks recorded' ? 'none' : 'ok';
+  const level = ({ok:'ok', note:'none', warn:'warn', fail:'bad'})[p.level] || 'none';
   const mark = {ok:'✓', bad:'×', warn:'!', none:'–'}[level];
   const rows = array(t.checklist).map(task => { const [cls, glyph] = PROOF_MARK[per[task.id]] || PROOF_MARK.missing;
     return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing)); });
   return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
     h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
-    array(p.uncovered).length ? h('p', {className:'meta'}, array(p.uncovered)[0]) : null,
-    rows.length && !snapshot ? h('details', {className:'ticket-proof-details'}, h('summary', {}, 'Details'), h('ul', {}, rows)) : null);
+    (rows.length || array(p.uncovered).length) && !snapshot ? h('details', {className:'ticket-proof-details'}, h('summary', {}, 'Details'), h('ul', {}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “' + clean(part) + '” ', h('span', {className:'meta'}, 'No task covers this'))))) : null);
+}
+
+// Header line: only in review (the card shows it there) and done, only with tasks; never a warning on a finished ticket.
+function headerProof(t) {
+  if (t.status !== 'done' || !array(t.checklist).length || array(t.proof?.uncovered).length) return null;
+  return ticketProofLine(t);
 }
 
 function ticketDoneLine(t) {
@@ -796,7 +801,7 @@ function detail(t) {
     parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
-    ticketStepper(t, run), ticketDoneLine(t), t.status === 'review' ? null : ticketProofLine(t)),
+    ticketStepper(t, run), ticketDoneLine(t), headerProof(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
       !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),

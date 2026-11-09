@@ -574,13 +574,34 @@ def _ev_failed(ev: dict) -> bool:
     return isinstance(code, int) and not isinstance(code, bool) and code != 0
 
 
+def _norm_words(text: str) -> str:
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split())
+
+
+def _covered(part: str, cover: str) -> bool:
+    """One contains the other at word boundaries (the shorter one at least 3 characters)."""
+    a, b = _norm_words(part), cover
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 3 and f" {short} " in f" {long_} "
+
+
+def done_when_parts(done_when: str) -> list[str]:
+    """done_when split into its parts: one per line, ';' or sentence end. Plain and cheap on purpose."""
+    parts = []
+    for line in done_when.splitlines():
+        for chunk in line.split(";"):
+            parts += re.split(r"(?<=[.!?])\s+", chunk.strip())
+    return [p.strip() for p in parts if _norm_words(p)]
+
+
 def proof_state(ticket: dict) -> dict:
     """Honest proof summary of a ticket, pure (no I/O).
     per_item: id -> passed | failed | changed | note | missing.
     done + a failed recorded exit = failed; done + any proof that is not a note = passed;
-    done + note proof only = note; not done = missing. `changed` is reserved for recorded checks whose
-    files changed since (set by B8, `stale`). uncovered: one hint when done_when is set and no task has
-    `covers`. line: the one-line summary."""
+    done + note proof only = note; not done = missing. `changed` is reserved (B8 computes it from files_sig).
+    uncovered: the parts of done_when that no task `covers` (a part is covered when a task's covers text
+    and the part contain one another, ignoring case and punctuation); one hint when done_when cannot be
+    split and nothing is linked. level: ok | note | warn | fail, so views never parse `line`."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and isinstance(c.get("id"), str)]
     per: dict[str, str] = {}
     for c in items:
@@ -589,38 +610,42 @@ def proof_state(ticket: dict) -> dict:
             per[c["id"]] = "missing"
         elif any(_ev_failed(e) for e in evs):
             per[c["id"]] = "failed"
-        elif any(e.get("stale") is True for e in evs):
-            per[c["id"]] = "changed"
         elif any(e.get("type") != "note" for e in evs):
             per[c["id"]] = "passed"
         else:
             per[c["id"]] = "note" if evs else "missing"
     done_when = ticket.get("done_when")
-    linked = any(isinstance(c.get("covers"), str) and c["covers"].strip() for c in items)
-    uncovered = (
-        ["Done when isn't linked to tasks"]
-        if isinstance(done_when, str) and done_when.strip() and not linked
-        else []
-    )
+    covers = [_norm_words(c["covers"]) for c in items if isinstance(c.get("covers"), str)]
+    covers = [c for c in covers if c]
+    uncovered: list[str] = []
+    if isinstance(done_when, str) and done_when.strip():
+        parts = done_when_parts(done_when)
+        uncovered = [p for p in parts if not any(_covered(p, c) for c in covers)]
+        if not parts and not covers:
+            uncovered = ["Done when isn't linked to tasks"]
     n = {k: list(per.values()).count(k) for k in ("passed", "failed", "changed", "note")}
 
     def plural(count: int, word: str) -> str:
         return f"{count} {word}" + ("" if count == 1 else "s")
 
     if n["failed"]:
-        line = f"{plural(n['failed'], 'check')} failed"
+        line, level = f"{plural(n['failed'], 'check')} failed", "fail"
     elif n["changed"]:
-        line = "Changes haven't been checked yet"
+        line, level = "Changes haven't been checked yet", "warn"
     elif uncovered:
-        line = '1 part of "Done when" has no task'
+        count = len(uncovered)
+        one = count == 1 or uncovered == ["Done when isn't linked to tasks"]
+        noun = "1 part" if one else f"{count} parts"
+        line = f'{noun} of "Done when" {"has" if one else "have"} no task'
+        level = "warn"
     elif n["passed"] or n["note"]:
         bits = ([f"{plural(n['passed'], 'check')} passed"] if n["passed"] else []) + (
             [plural(n["note"], "note")] if n["note"] else []
         )
-        line = " · ".join(bits)
+        line, level = " · ".join(bits), "ok" if n["passed"] else "note"
     else:
-        line = "No checks recorded"
-    return {"per_item": per, "uncovered": uncovered, "line": line}
+        line, level = "No checks recorded", "note"
+    return {"per_item": per, "uncovered": uncovered, "line": line, "level": level}
 
 
 def _check_can_finish(ticket: dict) -> None:

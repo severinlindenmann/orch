@@ -720,7 +720,7 @@ def _done_when_plan(ticket: dict) -> list[str]:
         return [
             "The person described what should be true when it is done: "
             f"{_clip(ticket['done_when'], 2000)}. Link each existing task to the part it covers with "
-            f'`orch check edit <ticket> <task id> --covers "<quote>"`, '
+            f'`orch check edit {ticket["id"]} <task id> --covers "<quote>"`, '
             "and add a task for any part that has none."
         ]
     return [
