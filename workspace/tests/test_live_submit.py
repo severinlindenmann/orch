@@ -1085,3 +1085,23 @@ def test_the_client_list_covers_the_whole_tmux_server(proj, monkeypatch):
     monkeypatch.setattr(runs_live, "tmux", fake)
     assert runs_live._client_idle(proj, "t_abc123xyz") < 10  # the newest of all clients counts
     assert "-t" not in seen[0]
+
+
+def test_run_status_json_says_why_a_run_waits(proj, run, monkeypatch, capsys):
+    """fb18: `orch run status --json` carries `hold`, the core's words; gone once the hold clears."""
+    import json
+
+    from orch import cli
+
+    tid, rn, sent, screen = _held(proj, run, monkeypatch, box="commit the pptx skill too", cx=27)
+    assert runs_live.deliver(proj, tid) == 0
+
+    def status():
+        capsys.readouterr()
+        cli.main(["run", "status", tid, "--json"])
+        return json.loads(capsys.readouterr().out)
+
+    assert status()["hold"] == runs_live.HOLD_WORDS["text"]
+    screen["box"] = ""
+    assert runs_live.deliver(proj, tid) == 1
+    assert "hold" not in status()

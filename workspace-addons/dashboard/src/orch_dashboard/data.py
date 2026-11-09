@@ -586,6 +586,10 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
         with ThreadPoolExecutor(max_workers=6) as pool:
             got = list(pool.map(lambda i: run_orch(orch_bin, ["run", "status", i, "--json"], root), todo))
         for i, r in zip(todo, got, strict=True):
+            if isinstance(r, dict) and "hold" in r:  # the core's one-line reason a live run waits: text only
+                r["hold"] = " ".join(r["hold"].split())[:200] if isinstance(r["hold"], str) else None
+                if not r["hold"]:
+                    r.pop("hold")
             _RUNS[(str(root), i)] = (now, r if isinstance(r, dict) else None)
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 
