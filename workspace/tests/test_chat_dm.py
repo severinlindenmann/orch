@@ -1,5 +1,8 @@
 """Workspace DMs: permissions, durable sends, inbox isolation, and helper default deny."""
 
+import json
+import os
+
 import pytest
 
 from orch import chat, cli, net, relay, tickets
@@ -39,7 +42,13 @@ def test_permission_mapping(flags, expected):
 def test_contacts_only_workspaces_and_malformed(dm, monkeypatch):
     root, directory = dm
     assert chat.contacts(root) == [
-        {"ws": WS, "name": "Home", "can": {"chat": True, "tasks": False, "files": True}}
+        {
+            "ws": WS,
+            "name": "Home",
+            "can": {"chat": True, "tasks": False, "files": True},
+            "count": 0,
+            "last_at": "",
+        }
     ]
     for bad in (None, [], {"workspaces": None}, {"workspaces": [None, {"id": WS}], "phones": None}):
         monkeypatch.setattr(relay, "_read_dir", lambda root, value=bad: value)
@@ -110,7 +119,8 @@ def test_refusal_is_saved_and_cleaned(dm, monkeypatch):
     assert chat.dm_thread(root, WS)["messages"] == [entry]
 
 
-def test_inbox_clean_idempotent_sorted_and_isolated(dm):
+@pytest.mark.parametrize("all_contacts", [False, True])
+def test_inbox_clean_idempotent_sorted_and_isolated(dm, all_contacts):
     root, _ = dm
     text = "<b>hi</b>\x1b[31m<!--hidden-->" + "x" * 2100
     for i, (peer, body, kind) in enumerate(
@@ -135,8 +145,10 @@ def test_inbox_clean_idempotent_sorted_and_isolated(dm):
             True,
         )
     assert chat.dm_read(root, WS)["messages"] == []
+    if all_contacts:
+        chat.dm_sync_all(root)
     msgs = chat.dm_sync(root, WS)["messages"]
-    assert [m["text"] for m in msgs] == ["earlier", relay.clean_untrusted(text, 2000)]
+    assert [m["text"] for m in msgs] == [relay.clean_untrusted(text, 2000), "earlier"]  # arrival order
     assert chat.dm_thread(root, WS)["messages"] == msgs
     with pytest.raises(Refused):
         chat.dm_thread(root, "../" + OTHER)
@@ -159,7 +171,7 @@ def test_store_cap(dm):
 
 
 @pytest.mark.parametrize(
-    "sub,args", [("contacts", []), ("thread", [WS]), ("sync", [WS]), ("send", [WS, "hello"])]
+    "sub,args", [("contacts", []), ("thread", [WS]), ("sync", []), ("sync", [WS]), ("send", [WS, "hello"])]
 )
 def test_helper_default_denies_new_commands(dm, monkeypatch, sub, args):
     parsed = cli.build_parser(show_all=True).parse_args(["chat", sub, *args, "--json"])
@@ -193,20 +205,17 @@ def test_thread_cannot_read_another_workspaces_store(dm):
     assert chat.dm_thread(root, WS)["messages"] == []
 
 
-def test_thread_sorts_actual_instants(dm):
+def test_thread_keeps_append_order_not_a_peer_clock(dm):
     root, _ = dm
     net.write_json(
         chat._dm_path(root, WS),
         {
             "ws": WS,
-            "messages": [
-                {"id": "later", "at": "2026-11-09T09:00:00Z", "text": "later"},
-                {"id": "earlier", "at": "2026-11-09T10:00:00+02:00", "text": "earlier"},
-            ],
+            "messages": [{"id": "a", "at": "2026-11-09T09:00:00Z", "text": "a"}, {"id": "b", "text": "b"}],
         },
         True,
     )
-    assert [m["id"] for m in chat.dm_thread(root, WS)["messages"]] == ["earlier", "later"]
+    assert [m["id"] for m in chat.dm_thread(root, WS)["messages"]] == ["a", "b"]
 
 
 def test_hostile_look(dm):
@@ -225,7 +234,8 @@ def test_hostile_look(dm):
     assert chat.contacts(root)[0]["look"] == {"icon": look.ICON_IDS[0], "color": look.COLOR_IDS[0]}
 
 
-def test_pure_reads_and_inbox_limits(dm):
+@pytest.mark.parametrize("all_contacts", [False, True])
+def test_pure_reads_and_inbox_limits(dm, all_contacts):
     root, _ = dm
     inbox = root / ".orch/inbox"
     for i, mid in enumerate([MID, 'x"]', "m_short"]):
@@ -241,7 +251,11 @@ def test_pure_reads_and_inbox_limits(dm):
     assert chat.dm_read(root, WS)["messages"] == []
     chat.contacts(root)
     assert before == {p: p.stat().st_mtime_ns for p in root.rglob("*")}
-    assert [m["id"] for m in chat.dm_sync(root, WS)["messages"]] == [MID]
+    if all_contacts:
+        chat.dm_sync_all(root)
+        assert [m["id"] for m in chat.dm_read(root, WS)["messages"]] == [MID]
+    else:
+        assert [m["id"] for m in chat.dm_sync(root, WS)["messages"]] == [MID]
 
 
 def test_inbox_directory_links(dm, tmp_path):
@@ -257,6 +271,10 @@ def test_inbox_directory_links(dm, tmp_path):
     linked.mkdir()
     (linked / ".orch").symlink_to(root / ".orch", target_is_directory=True)
     assert list(chat._dm_inbox(linked)) == []
+    chat.dm_sync_all(root)
+    assert chat.dm_read(root, WS)["messages"] == []
+    with pytest.raises(Refused):
+        chat.dm_sync_all(linked)
 
 
 def test_newest_500_inbox_files(dm):
@@ -367,3 +385,245 @@ def test_contacts_and_thread_are_person_only(dm, monkeypatch):
         cli_chat.dispatch(args, dm[0])
     args = cli.build_parser(show_all=True).parse_args(["chat", "contacts", "--json"])
     assert cli_chat.dispatch(args, dm[0])
+
+
+def test_client_id_is_idempotent(dm, monkeypatch):
+    root, _ = dm
+    calls = []
+    monkeypatch.setattr(relay, "send_text", lambda *args: calls.append(args) or {"id": MID, "sent": True})
+    first = chat.dm_send(root, WS, "hello", client_id=MID)
+    assert chat.dm_send(root, WS, "hello", client_id=MID) == first
+    with pytest.raises(Refused):
+        chat.dm_send(root, WS, "different", client_id=MID)
+    assert first["id"] == MID
+    assert len(calls) == 1
+    assert chat.dm_read(root, WS)["messages"] == [first]
+    with pytest.raises(Refused):
+        chat.dm_send(root, WS, "hello", client_id="m_bad")
+
+
+def test_round_trip_sync_all(dm, monkeypatch):
+    a, _ = dm
+    b = a / "receiver"
+    monkeypatch.setattr(
+        relay,
+        "_read_dir",
+        lambda root: {"workspaces": [{"id": WS if root == a else OTHER, "can_send": {"text": True}}]},
+    )
+
+    def send(root, ws, text):
+        net.write_json(
+            b / ".orch/inbox" / f"{MID}.json",
+            {
+                "id": MID,
+                "from": OTHER,
+                "type": "text",
+                "body": {"text": text},
+                "created_at": "2026-11-09T10:00:00Z",
+            },
+            True,
+        )
+        return {"id": MID, "sent": False}
+
+    monkeypatch.setattr(relay, "send_text", send)
+    chat.dm_send(a, WS, "hello", client_id=MID)
+    relay._record_posted(a, MID)
+    chat.dm_sync_all(a)
+    chat.dm_sync_all(b)
+    assert chat.dm_read(a, WS)["messages"][0]["state"] == "delivered"
+    received = chat.dm_read(b, OTHER)["messages"]
+    assert len(received) == 1 and received[0]["by"] == OTHER and received[0]["text"] == "hello"
+    path = chat._dm_path(b, OTHER)
+    before = path.stat().st_mtime_ns
+    chat.dm_sync_all(b)
+    assert path.stat().st_mtime_ns == before
+    assert chat.contacts(b)[0]["count"] == 1
+    assert chat.contacts(b)[0]["last_at"] == received[0]["at"]
+    assert path.stat().st_mtime_ns == before
+
+
+def test_cli_pure_and_all(dm, capsys, monkeypatch):
+    from orch import cli_chat
+
+    root, _ = dm
+    net.write_json(
+        root / ".orch/inbox" / f"{MID}.json",
+        {"id": MID, "from": WS, "type": "text", "body": {"text": "hello"}},
+        True,
+    )
+
+    def run(*command):
+        cli_chat.dispatch(cli.build_parser(show_all=True).parse_args(["chat", *command, "--json"]), root)
+        return capsys.readouterr().out
+
+    before = {p: p.stat().st_mtime_ns for p in root.rglob("*")}
+    assert '"messages": []' in run("thread", WS)  # read-only by default
+    assert before == {p: p.stat().st_mtime_ns for p in root.rglob("*")}
+    assert "hello" in run("thread", WS, "--sync")
+    run("sync")
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
+    with pytest.raises(Refused):
+        run("sync", "--by", "human:spoof")
+
+
+def test_sync_all_scans_once_for_multiple_contacts(dm, monkeypatch):
+    root, directory = dm
+    directory["workspaces"].append({"id": OTHER})
+    scanned = []
+
+    def inbox(root):
+        scanned.append(root)
+        return iter(
+            [
+                {"id": f"m_{i:016d}", "from": ws, "type": "text", "body": {"text": ws}}
+                for i, ws in enumerate((WS, OTHER))
+            ]
+        )
+
+    monkeypatch.setattr(chat, "_dm_inbox", inbox)
+    chat.dm_sync_all(root)
+    assert scanned == [root]
+    for ws in (WS, OTHER):
+        assert chat.dm_read(root, ws)["messages"][0]["text"] == ws
+
+
+def test_retry_cli_client_id(dm, monkeypatch, capsys):
+    import json
+
+    from orch import cli_chat
+
+    root, _ = dm
+    monkeypatch.setattr(relay, "send_text", lambda *a: (_ for _ in ()).throw(Refused("offline")))
+    failed = chat.dm_send(root, WS, "keep me", client_id=MID)
+    assert failed["state"] == "failed" and failed["error"] == "offline"
+    monkeypatch.setattr(relay, "send_text", lambda *a: {"id": MID, "sent": True})
+    args = cli.build_parser(show_all=True).parse_args(
+        ["chat", "send", WS, "keep me", "--retry", MID, "--client-id", "m_0123456789abcdef", "--json"]
+    )
+    cli_chat.dispatch(args, root)
+    entry = json.loads(capsys.readouterr().out)
+    assert entry["state"] == "delivered"
+    assert entry["id"] == "m_0123456789abcdef"
+    assert chat.dm_read(root, WS)["messages"] == [entry]
+
+
+def test_idempotent_only_for_my_own_message_and_relay_id_is_separate(dm, monkeypatch):
+    root, _ = dm
+    cid = "m_abcdefghij012345"
+    sent = []
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: sent.append(a) or {"id": MID, "sent": True})
+    first = chat.dm_send(root, WS, "hello", client_id=cid)
+    assert first["relay_id"] != first["id"] == cid
+    assert chat.dm_send(root, WS, "hello", client_id=cid)["id"] == cid and len(sent) == 1
+    with pytest.raises(Refused):  # same id, other text
+        chat.dm_send(root, WS, "something else", client_id=cid)
+    peer = "m_peermessage00001"
+    net.write_json(
+        root / ".orch/inbox" / f"{peer}.json",
+        {"id": peer, "from": WS, "type": "text", "body": {"text": "hi"}},
+        True,
+    )
+    chat.dm_sync(root, WS)
+    with pytest.raises(Refused):  # a peer's imported id is never "my message"
+        chat.dm_send(root, WS, "hi", client_id=peer)
+    assert len(sent) == 1
+
+
+def test_a_peer_clock_never_orders_or_evicts(dm):
+    root, _ = dm
+    net.write_json(
+        chat._dm_path(root, WS),
+        {
+            "ws": WS,
+            "messages": [
+                {
+                    "id": "m_own0000000000001",
+                    "at": "2026-11-09T10:00:00Z",
+                    "by": "you",
+                    "text": "mine",
+                    "state": "delivered",
+                }
+            ],
+        },
+        True,
+    )
+    for n in range(520):
+        mid = f"m_future{n:010d}"
+        net.write_json(
+            root / ".orch/inbox" / f"{mid}.json",
+            {
+                "id": mid,
+                "from": WS,
+                "type": "text",
+                "created_at": "2999-01-01T00:00:00Z",
+                "body": {"text": f"t{n}"},
+            },
+            True,
+        )
+    chat.dm_sync(root, WS)
+    msgs = chat.dm_read(root, WS)["messages"]
+    assert len(msgs) <= 500
+    imported = [m for m in msgs if m["by"] == WS]
+    assert imported and all(not m["at"].startswith("2999") for m in imported)
+    assert all(m["peer_at"].startswith("2999") for m in imported)
+    assert not msgs[-1]["at"].startswith("2999")
+
+
+def test_thread_and_sync_are_not_helper_commands():
+    for pair in (("chat", "thread"), ("chat", "sync"), ("chat", "contacts"), ("chat", "send")):
+        assert pair not in chat.HELPER_COMMANDS
+
+
+def test_600_inbound_texts_keep_the_newest_500_and_a_second_sync_imports_nothing(dm):
+    root, _ = dm
+    for n in range(600):
+        mid = f"m_flood{n:011d}"
+        net.write_json(
+            root / ".orch/inbox" / f"{mid}.json",
+            {"id": mid, "from": WS, "type": "text", "body": {"text": f"t{n}"}},
+            True,
+        )
+        os.utime(root / ".orch/inbox" / f"{mid}.json", (1_700_000_000 + n, 1_700_000_000 + n))
+    chat.dm_sync(root, WS)
+    first = chat.dm_read(root, WS)["messages"]
+    assert len(first) == 500
+    assert [m["text"] for m in first][-1] == "t599"  # the newest inbox files, appended in import order
+    chat.dm_sync(root, WS)
+    chat.dm_sync_all(root)
+    again = chat.dm_read(root, WS)["messages"]
+    assert [m["id"] for m in again] == [m["id"] for m in first]  # nothing re-imported, nothing resurrected
+    stored = json.loads(chat._dm_path(root, WS).read_text())
+    assert len(stored["seen"]) >= 500 and set(m["id"] for m in first) <= set(stored["seen"])
+
+
+def test_corrupt_thread_file_fails_closed_and_other_threads_still_sync(dm, monkeypatch, capsys):
+    root, directory = dm
+    directory["workspaces"].append({"id": OTHER, "can_send": {"text": True}})
+    seen_id = "m_seenbefore0000001"
+    net.write_json(
+        chat._dm_path(root, WS),
+        {"ws": WS, "messages": [], "seen": [seen_id]},
+        True,
+    )
+    net.write_json(
+        root / ".orch/inbox" / f"{seen_id}.json",
+        {"id": seen_id, "from": WS, "type": "text", "body": {"text": "old"}},
+        True,
+    )
+    net.write_json(
+        root / ".orch/inbox" / "m_other0000000000a.json",
+        {"id": "m_other0000000000a", "from": OTHER, "type": "text", "body": {"text": "fresh"}},
+        True,
+    )
+    chat._dm_path(root, WS).write_text("{ not json", encoding="utf-8")
+    with pytest.raises(Refused):
+        chat.dm_read(root, WS)
+    chat.dm_sync_all(root)
+    assert (
+        chat._dm_path(root, WS).read_text(encoding="utf-8") == "{ not json"
+    )  # untouched, nothing re-imported
+    assert [m["text"] for m in chat.dm_read(root, OTHER)["messages"]] == ["fresh"]
+    assert "skipped" in capsys.readouterr().err
+    with pytest.raises(Refused):
+        chat.dm_send(root, WS, "hi")
+    assert [c["ws"] for c in chat.contacts(root)].count(WS) == 1  # the list still works (count 0)

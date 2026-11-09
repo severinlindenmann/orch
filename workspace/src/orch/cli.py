@@ -34,14 +34,55 @@ from orch import (
 from orch import init as init_mod
 from orch.errors import Refused
 
+_HINT = "Unset ORCH_ROOT, or point it at a folder with .orch in it."
+_noted = False
 
-def _find_root() -> Path:
-    """The workspace root: nearest folder upwards with .orch/ or .agents/, else the current folder."""
-    cwd = Path.cwd()
+
+def _env_root() -> Path | None:
+    """ORCH_ROOT, when set and not empty (an empty value counts as unset): the workspace of whoever started
+    this process (an agent in a copy of the folder must write to the real tickets). Strict: absolute, an
+    existing folder with .orch/ in it, symlinks resolved; anything else is refused, never a silent fall back
+    to walking up (that could write a second, stale store)."""
+    raw = os.environ.get("ORCH_ROOT")
+    if not raw:
+        return None
+    p = Path(raw)
+    if not p.is_absolute():
+        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. {_HINT} Nothing was changed.")
+    try:
+        p = p.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise Refused(
+            f"ORCH_ROOT points to a folder that cannot be opened: {raw}. {_HINT} Nothing was changed."
+        ) from None
+    if not p.is_dir() or not (p / ".orch").is_dir():
+        raise Refused(f"ORCH_ROOT points to a folder without orch in it: {raw}. {_HINT} Nothing was changed.")
+    return p
+
+
+def _walk_up() -> Path:
+    cwd = Path.cwd().resolve()
     for p in (cwd, *cwd.parents):
         if (p / ".orch").is_dir() or (p / ".agents").is_dir():
             return p
     return cwd
+
+
+def _find_root() -> Path:
+    """The workspace root, always resolved (parent and child must agree on the string): ORCH_ROOT when set,
+    else the nearest folder upwards with .orch/ or .agents/, else the current folder."""
+    global _noted
+    env = _env_root()
+    if env is None:
+        return _walk_up()
+    if not _noted:  # a stale export in a shell sends every command to that workspace: say so once
+        _noted = True
+        here = _walk_up()
+        if here != env and not any(
+            (h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()
+        ):
+            print(f"Note: ORCH_ROOT sends this to {env}, not to {here}.", file=sys.stderr)
+    return env
 
 
 def _out(args, data, text: str) -> None:
@@ -149,6 +190,10 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append(f"Note: {t['note']}")
     if t.get("done_when"):
         out.append(f"Done when: {t['done_when']}")
+    if t.get("status") == "done" and t.get("outcome"):
+        for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
+            if t["outcome"].get(k):
+                out.append(f"{label}: {t['outcome'][k]}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(f"Step of: {p['title']} ({p['id']})" if p else f"Step of: {t['parent']} (parent missing)")
@@ -350,6 +395,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("summary", parents=[common], help="where things stand, one or two sentences")
     x.add_argument("id")
     x.add_argument("text")
+    x = t.add_parser("outcome", parents=[common], help="what changed and why, for the Notes page")
+    x.add_argument("id")
+    x.add_argument("--changed", help="what changed, one or two sentences (empty clears)")
+    x.add_argument("--why", help="why it was done (empty clears)")
+    x.add_argument("--not-included", dest="not_included", help="what was left out (empty clears)")
     x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
     x.add_argument("id")
     x = t.add_parser(
@@ -517,6 +567,19 @@ def _child_warning(root: Path, t: dict) -> list[str]:
     return [f"{len(kids)} sub-tickets are still open: " + ", ".join(k["id"] for k in kids)]
 
 
+def _init_guard(cwd: Path) -> None:
+    """`orch init` works on the current folder, so it refuses where that folder is a copy of a workspace."""
+    here = cwd.resolve()
+    env = _env_root()
+    if env is not None and env != here:
+        raise Refused(
+            f"ORCH_ROOT is set to {env}. Run orch init there, "
+            "or unset ORCH_ROOT to start a new workspace here."
+        )
+    if any((h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()):
+        raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
+
+
 def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
@@ -527,6 +590,7 @@ def run(args: argparse.Namespace) -> None:
 
     if cmd == "init":
         root = Path.cwd()
+        _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
         lines = init_mod.init(root, args.code)
@@ -548,7 +612,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "work-check":
         workcheck.run(root, args.json)
     elif cmd == "update":
-        report = []
+        report, notes = [], []
         done = addons.update(
             root,
             args.project_only,
@@ -556,11 +620,13 @@ def run(args: argparse.Namespace) -> None:
             json_output=args.json,
             report=report,
             nonce=args.update_nonce,
+            notes=notes,
         )
         if args.after_install:
             pass
         elif args.project_only and (args.json or not report):
-            _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
+            data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
+            _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
     elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
@@ -640,6 +706,11 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "summary":
         t = tickets.set_summary(root, args.id, args.text, by())
         _out(args, t, "Summary saved.")
+    elif cmd == "ticket" and sub == "outcome":
+        t = tickets.set_outcome(
+            root, args.id, by(), changed=args.changed, why=args.why, not_included=args.not_included
+        )
+        _out(args, t, "Outcome saved.")
     elif cmd == "ticket" and sub == "artifacts":
         rows = tickets.artifacts_list(root, args.id)
         _out(
@@ -889,7 +960,6 @@ def main(argv: list[str] | None = None) -> int:
         return workcheck.hook_main()
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
-    root = _find_root()
     want_json = "--json" in argv
 
     def refuse(e: Refused) -> int:
@@ -900,6 +970,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
         parser = build_parser(show_all, lines)
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):
