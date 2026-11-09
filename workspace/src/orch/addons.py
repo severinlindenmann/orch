@@ -113,6 +113,33 @@ def trusted_env_source():
         _ENV_SOURCE_PROVEN = prev
 
 
+_LOCAL_ADD_PROVEN = False
+
+
+@contextlib.contextmanager
+def trusted_local_add():
+    """Inside the person's hand-off (op `addon.add_local`, proof verified): a folder add-on may be installed."""
+    global _LOCAL_ADD_PROVEN
+    prev, _LOCAL_ADD_PROVEN = _LOCAL_ADD_PROVEN, True
+    try:
+        yield
+    finally:
+        _LOCAL_ADD_PROVEN = prev
+
+
+def local_add_target(folder: Path) -> str:
+    """The proof target of `addon.add_local`: sha256 of the folder's real path (the card shows the path)."""
+    return hashlib.sha256(str(Path(folder).expanduser().resolve()).encode()).hexdigest()[:32]
+
+
+def _local_add_ok() -> bool:
+    """Code from a folder runs inside orch's own tool environment (every orch process, page servers too):
+    only a dev or test install, or a person's hand-off, may put it there."""
+    from orch import humanproof
+
+    return _LOCAL_ADD_PROVEN or humanproof.install_kind() in ("dev", "test")
+
+
 def _env_source_ok() -> bool:
     """ORCH_REPO / ORCH_REF choose where code is installed from: an agent could aim them at its own code. They
     count only on a dev or test install, or inside the person-gated `orch update`."""
@@ -437,6 +464,9 @@ def run_uv(args: list[str]) -> None:
         raise Refused(f"uv failed: {(r.stderr or r.stdout).strip()[-600:]}")
 
 
+_REAL_RUN_UV = run_uv
+
+
 def _same_python() -> list[str]:
     """On Windows a reinstall keeps the Python orch runs on. On Windows on ARM the installer chose an x64
     Python (cryptography has no ARM64 Windows wheel); uv's own pick would try to compile it and fail."""
@@ -462,11 +492,18 @@ def _tool_args(entries: list[dict]) -> list[str]:
     return args
 
 
+def _reinstall_anywhere() -> bool:
+    """Tests replace run_uv and run from the source tree: they may 'reinstall' without a tool folder."""
+    return run_uv is not _REAL_RUN_UV
+
+
 def _install_tool(entries: list[dict]) -> None:
     from orch import humanproof
 
-    kind = humanproof.read_install_record()  # the reinstall drops the record: carry the installer's kind over
     env = Path(sys.prefix)
+    if not (env / "uv-receipt.toml").is_file() and not _reinstall_anywhere():
+        raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
+    kind = humanproof.read_install_record()  # the reinstall drops the record: carry the installer's kind over
     run_uv(_tool_args(entries))
     if kind and ((env / "bin").exists() or (env / "Scripts").exists()):
         humanproof.write_install_record(env, kind)
@@ -1238,6 +1275,11 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
     reg = registry()
     if _is_path(source):
         folder = Path(source).expanduser().resolve()
+        if not _local_add_ok():
+            raise Refused(
+                "An add-on from a folder runs inside orch itself, so only you can allow it: "
+                "do it in the dashboard on this computer."
+            )
         if not (folder / "pyproject.toml").is_file():
             raise Refused(f"{folder} is not an add-on folder (no pyproject.toml).")
         m = folder_manifest(folder)

@@ -1,4 +1,6 @@
-param([ValidateSet("normal","dev","test")][string]$InstallKind = $(if ($env:ORCH_INSTALL_KIND) { $env:ORCH_INSTALL_KIND } else { "normal" }))
+param([string]$InstallKind = "normal")
+if ($env:ORCH_INSTALL_KIND -and $PSBoundParameters.Count -eq 0) { $InstallKind = $env:ORCH_INSTALL_KIND }
+if ($InstallKind -notin @("normal","dev","test")) { throw "InstallKind must be normal, dev or test." }
 # orch installer (Windows): installs uv if missing, then orch.
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
 # -InstallKind test|dev (given by the person running this installer) marks a test or dev install; default normal.
@@ -38,7 +40,9 @@ uv tool install --reinstall --refresh @py $spec
 if ($LASTEXITCODE -ne 0) { throw "uv tool install failed" }
 # The install record is written here, by this installer, into orch's own tool environment (no orch command does).
 $toolDir = Join-Path (uv tool dir) "orch-workspace"
-[System.IO.File]::WriteAllText((Join-Path $toolDir "orch-install.json"), ('{"kind": "' + $InstallKind + '", "schema": "orch.install/1"}' + "`n"))
+$record = [ordered]@{ kind = $InstallKind; schema = "orch.install/1" } | ConvertTo-Json -Compress
+[System.IO.File]::WriteAllText((Join-Path $toolDir "orch-install.json"), $record + "`n")
+if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTALL: this orch is marked as a $InstallKind install. ***" }
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 $toolBin = (uv tool dir --bin)
 if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }

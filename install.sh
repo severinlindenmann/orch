@@ -39,6 +39,7 @@ uv tool install --reinstall --refresh "$SPEC"
 # No orch command writes it: an agent cannot make its own workspace a test or dev install.
 TOOL_DIR="$(uv tool dir)/orch-workspace"
 printf '{"kind": "%s", "schema": "orch.install/1"}\n' "$KIND" > "$TOOL_DIR/orch-install.json"
+case "$KIND" in normal) ;; *) echo "*** $(echo "$KIND" | tr a-z A-Z) INSTALL: this orch is marked as a $KIND install. ***" ;; esac
 BIN="$HOME/.local/bin"
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$BIN")"

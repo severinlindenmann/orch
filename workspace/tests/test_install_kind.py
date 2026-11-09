@@ -171,3 +171,63 @@ def test_start_refuses_print_launch_url_outside_test(proj, monkeypatch, run):
     monkeypatch.setattr(hp, "install_kind", lambda: "normal")
     code, out, err = run("start", "--no-open", "--print-launch-url")
     assert code == 2 and "only on a test install" in (out + err)
+
+
+# ---------------------------------------------------------------- folder add-ons, tool env guard, json
+
+
+def _folder_addon(tmp_path):
+    f = tmp_path / "mine"
+    f.mkdir()
+    (f / "pyproject.toml").write_text('[project]\nname = "orch-mine"\nversion = "0.1.0"\n')
+    return f
+
+
+def test_normal_install_refuses_a_folder_addon_without_a_handoff(proj, tmp_path, monkeypatch):
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    f = _folder_addon(tmp_path)
+    with pytest.raises(Refused, match="only you can allow it"):
+        addons.add(proj, str(f), yes=True)
+    assert addons.registry() == []  # nothing recorded, nothing installed
+
+
+def test_folder_addon_passes_the_core_check_on_dev_test_and_with_the_handoff(proj, tmp_path, monkeypatch):
+    f = _folder_addon(tmp_path)
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    assert not addons._local_add_ok()
+    with addons.trusted_local_add():
+        assert addons._local_add_ok()
+    assert not addons._local_add_ok()
+    for kind in ("dev", "test"):
+        monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
+        assert addons._local_add_ok()
+    assert len(addons.local_add_target(f)) == 32 and "addon.add_local" in hp.OPS
+
+
+def test_reinstall_refused_outside_the_tool_environment(tmp_path, monkeypatch):
+    env = _prefix(tmp_path, monkeypatch)  # no uv-receipt.toml: a source checkout
+    monkeypatch.setattr(addons, "run_uv", addons._REAL_RUN_UV)
+    called = []
+    monkeypatch.setattr(addons, "_tool_args", lambda e: called.append(1) or [])
+    with pytest.raises(Refused, match="tool folder"):
+        addons._install_tool([])
+    assert not called
+    (env / "uv-receipt.toml").write_text("")
+
+
+def test_start_json_with_launch_urls_is_valid_json(proj, monkeypatch, capsys):
+    from orch import cli, services
+
+    monkeypatch.setattr(hp, "is_test_workspace", lambda r: True)
+    monkeypatch.setattr(services, "start", lambda root: [{"addon": "focus", "url": "http://127.0.0.1:9"}])
+    monkeypatch.setattr(hp, "printable_launch_url", lambda r, s, b: b + "/#launch=tok")
+    assert cli.main(["start", "--json", "--print-launch-url"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["launch"] == [{"addon": "focus", "url": "http://127.0.0.1:9/#launch=tok"}]
+
+
+def test_installers_print_a_visible_line_and_validate_the_kind():
+    sh = (ROOT / "install.sh").read_text()
+    ps = (ROOT / "install.ps1").read_text()
+    assert "INSTALL: this orch is marked" in sh and "INSTALL: this orch is marked" in ps
+    assert "ConvertTo-Json" in ps and "-notin" in ps and "ORCH_INSTALL_KIND" in ps

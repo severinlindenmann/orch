@@ -71,13 +71,15 @@ def _pick(running: list[dict]) -> list[Path]:
     raise Refused(f"'{ans}' is not on the list. Nothing was stopped.")
 
 
-def _print_launch_urls(root: Path, rows: list[dict]) -> None:
+def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
     from orch import humanproof
 
+    out = []
     for r in rows:
         base = services.local_url(r.get("url"))
         if base and r.get("addon") in humanproof.LAUNCH_SERVERS:
-            print(f"launch {r['addon']}: {humanproof.printable_launch_url(root, r['addon'], base)}")
+            out.append((r["addon"], humanproof.printable_launch_url(root, r["addon"], base)))
+    return out
 
 
 def _services_cmd(args, root: Path) -> None:
@@ -88,16 +90,20 @@ def _services_cmd(args, root: Path) -> None:
             if not humanproof.is_test_workspace(root):
                 raise Refused("--print-launch-url works only on a test install, in a test folder.")
         rows = services.start(root)
+        launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
-            print(json.dumps({"workspace": str(root.resolve()), "addons": rows}, indent=2))
+            data = {"workspace": str(root.resolve()), "addons": rows}
+            if args.print_launch_url:
+                data["launch"] = [{"addon": a, "url": u} for a, u in launch]
+            print(json.dumps(data, indent=2))
         elif not rows:
             print("No add-on that is on here runs in the background. Nothing to start.")
         else:
             print(f"Started in {root.name}:")
             print("\n".join(_service_line(r) for r in rows))
             print("Stop: orch stop")
-        if args.print_launch_url:
-            _print_launch_urls(root, rows)
+        if launch and not args.json:
+            print("\n".join(f"launch {a}: {u}" for a, u in launch))
         url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
         opens = not args.no_open and not args.print_launch_url and not args.json
         if url and opens and term.is_terminal(sys.stdout):
