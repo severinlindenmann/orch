@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import ntpath
 import os
 import stat
 from pathlib import Path
@@ -22,7 +23,12 @@ from orch import winacl
 from orch.errors import Refused
 
 _FLAGS = (
-    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_NOCTTY", 0)
+    | getattr(os, "O_BINARY", 0)  # Windows: os.open reads in text mode (CRLF -> LF, Ctrl-Z ends the file)
+    | getattr(os, "O_NOINHERIT", 0)
 )
 CHUNK = 64 * 1024
 SECRETISH = (
@@ -54,6 +60,15 @@ _DIRFD = os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY")
 _DIRFLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 
 
+def _reparse(p: Path) -> bool:
+    """Windows: is `p` itself a symlink, junction or other reparse point (not followed)? POSIX: never (those
+    have O_NOFOLLOW and dir_fd). A path that can not be looked at counts as one: fail closed."""
+    try:
+        return bool(getattr(os.lstat(p), "st_file_attributes", 0) & winacl.REPARSE)
+    except OSError:
+        return True
+
+
 def _walk(root: Path, parts: tuple[str, ...]) -> int:
     """POSIX: an fd of the folder root/parts, opened one folder at a time with dir_fd and O_NOFOLLOW, starting
     from root (a real path: callers resolve it once). A link anywhere on the way (also one swapped in
@@ -81,6 +96,11 @@ def _anchor(root: Path, parts: tuple[str, ...]) -> tuple[str, dict, int | None]:
         fd = _walk(root, parts[:-1])
         return parts[-1], {"dir_fd": fd}, fd
     full = Path(root).joinpath(*parts)
+    if any(p in (".", "..") or "\\" in p or ":" in p for p in parts):  # no .., backslash, stream name (ADS)
+        raise OSError("not a plain name")
+    for i in range(len(parts)):  # root and every folder below it: no link, junction or other reparse point
+        if _reparse(Path(root).joinpath(*parts[:i])):
+            raise OSError("a link on the way")
     if not Path(os.path.realpath(full.parent)).is_relative_to(Path(os.path.realpath(root))):
         raise OSError("outside the workspace")
     return str(full), {}, None
@@ -88,6 +108,8 @@ def _anchor(root: Path, parts: tuple[str, ...]) -> tuple[str, dict, int | None]:
 
 def _open_checked(name: str, kw: dict, check: str | None = None) -> tuple[int, os.stat_result] | None:
     """(fd, fstat) of a regular, single-name file opened without following a link; None for anything else."""
+    if not kw and check is not None and winacl._windows():
+        return _open_windows(name, check)
     try:
         fd = os.open(name, _FLAGS, **kw)
     except OSError:
@@ -98,10 +120,113 @@ def _open_checked(name: str, kw: dict, check: str | None = None) -> tuple[int, o
         if ok and check is not None:  # no dir_fd: the handle must be the file the real path names
             real = os.stat(os.path.realpath(check))
             named = os.lstat(check)  # the path itself must be that regular file, not a link to one
-            ok = stat.S_ISREG(named.st_mode) and (st.st_dev, st.st_ino) == (real.st_dev, real.st_ino) == (
-                named.st_dev,
-                named.st_ino,
+            ok = (
+                stat.S_ISREG(named.st_mode)
+                and not _reparse(Path(check))
+                and (st.st_dev, st.st_ino) == (real.st_dev, real.st_ino) == (named.st_dev, named.st_ino)
             )
+    except OSError:
+        os.close(fd)
+        return None
+    except BaseException:
+        os.close(fd)
+        raise
+    if not ok:
+        os.close(fd)
+        return None
+    return fd, st
+
+
+# ------------------------------------------------------------------ Windows: the one open path (no dir_fd)
+# Every Windows read of saferead ends here (read_private, file_state, safe_read_tail). The folders were
+# checked one by one by `_anchor`, but a junction swapped in after that must not redirect the open: the
+# handle is asked for its own final path, and it must be exactly the path we meant.
+
+
+def _win_open_raw(path: str):
+    """Windows only. CreateFileW (read, share all, FILE_FLAG_OPEN_REPARSE_POINT: a link is opened itself,
+    never followed; no backup semantics: a folder can not be opened) -> (fd, file attributes, number of
+    links, final path of the handle) or None. The fd is a binary os-level file that owns the handle. Tests
+    replace this."""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    V, D = ctypes.c_void_p, wintypes.DWORD
+    k32.CreateFileW.argtypes = [wintypes.LPCWSTR, D, D, V, D, D, V]
+    k32.CreateFileW.restype = V
+    k32.CloseHandle.argtypes = [V]
+    k32.GetFinalPathNameByHandleW.argtypes = [V, wintypes.LPWSTR, D, D]
+    k32.GetFinalPathNameByHandleW.restype = D
+
+    class Info(ctypes.Structure):
+        _fields_ = [
+            ("attrs", D),
+            ("ctime", wintypes.FILETIME),
+            ("atime", wintypes.FILETIME),
+            ("mtime", wintypes.FILETIME),
+            ("volume", D),
+            ("size_high", D),
+            ("size_low", D),
+            ("links", D),
+            ("index_high", D),
+            ("index_low", D),
+        ]
+
+    k32.GetFileInformationByHandle.argtypes = [V, ctypes.POINTER(Info)]
+    # GENERIC_READ, share read|write|delete, OPEN_EXISTING, OPEN_REPARSE_POINT | ATTRIBUTE_NORMAL
+    h = k32.CreateFileW(path, 0x80000000, 7, None, 3, 0x00200000 | 0x80, None)
+    if h is None or h == ctypes.c_void_p(-1).value:
+        return None
+    try:
+        info = Info()
+        buf = ctypes.create_unicode_buffer(32768)
+        # VOLUME_NAME_DOS | FILE_NAME_NORMALIZED = 0
+        if not k32.GetFileInformationByHandle(h, ctypes.byref(info)) or not k32.GetFinalPathNameByHandleW(
+            h, buf, 32768, 0
+        ):
+            k32.CloseHandle(h)
+            return None
+        fd = msvcrt.open_osfhandle(h, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except BaseException:
+        k32.CloseHandle(h)
+        raise
+    return fd, info.attrs, info.links, buf.value
+
+
+def _same_path(a: str, b: str) -> bool:
+    """Windows path equality: case-insensitive, slash = backslash, and the long-path prefixes dropped."""
+
+    def norm(p: str) -> str:
+        if p.startswith("\\\\?\\UNC\\"):
+            p = "\\\\" + p[8:]
+        elif p.startswith("\\\\?\\"):
+            p = p[4:]
+        return ntpath.normcase(ntpath.normpath(p))
+
+    return norm(a) == norm(b)
+
+
+def _open_windows(path: str, expected: str) -> tuple[int, os.stat_result] | None:
+    """(fd, fstat) of the regular, single-name file at `path` (a plain, already checked path); None when the
+    handle is a folder or a link, has more than one name, or its final path is not `expected` (a junction was
+    swapped in after the folders were checked). Any error: None."""
+    try:
+        got = _win_open_raw(path)
+    except (OSError, ImportError, AttributeError, ValueError):
+        return None
+    if got is None:
+        return None
+    fd, attrs, links, final = got
+    try:
+        st = os.fstat(fd)
+        ok = (
+            not attrs & (0x10 | winacl.REPARSE)  # a folder, or a symlink/junction/other reparse point itself
+            and links == 1
+            and _same_path(final, expected)
+            and stat.S_ISREG(st.st_mode)
+        )
     except OSError:
         os.close(fd)
         return None
@@ -237,10 +362,8 @@ def read_private(root: Path, rel: str, limit: int) -> bytes | None:
     `limit`. None for a missing file, a link, a hard-linked or special file (FIFO, device, folder), a file
     swapped while we look, a file bigger than `limit` or any read error: the caller takes its fail-closed
     path. Opened like everything here (`_walk`, `_open_checked`): nothing outside root, never blocks.
-    `root` must be a real path. Windows has its own branch (`_read_private_windows`)."""
+    `root` must be a real path."""
     parts = tuple(p for p in rel.split("/") if p)
-    if winacl._windows():
-        return _read_private_windows(Path(root), parts, limit)
     try:
         name, kw, dfd = _anchor(Path(root), parts)
     except OSError:
@@ -263,45 +386,6 @@ def read_private(root: Path, rel: str, limit: int) -> bytes | None:
                 break
             out += data
         return out if len(out) == st.st_size else None  # it grew or shrank under us: not trusted
-    except OSError:
-        return None
-    finally:
-        os.close(fd)
-
-
-def _read_private_windows(root: Path, parts: tuple[str, ...], limit: int) -> bytes | None:
-    """read_private on Windows, where there is no dir_fd, no O_NOFOLLOW and os.open reads in text mode.
-    Every part from `root` down is checked to be no link, junction or other reparse point (winacl). The file
-    is opened in BINARY mode (text mode would turn CRLF into LF and stop at Ctrl-Z, so the size check would
-    fail for a file written with CRLF). The handle must be a regular file with ONE name and the same volume
-    and file index as the path's own lstat (a swap in between, or a link that was followed, is refused). The
-    read is bounded by `limit` and must match the size. None for anything else (fail closed)."""
-    if not parts or any(p in (".", "..") or "\\" in p or ":" in p for p in parts):
-        return None
-    full = Path(root).joinpath(*parts)
-    try:
-        for c in (Path(root).joinpath(*parts[:i]) for i in range(len(parts) + 1)):
-            if winacl._attrs(c) & winacl.REPARSE:  # the root itself too
-                return None
-        named = os.lstat(full)
-        if not stat.S_ISREG(named.st_mode):
-            return None
-        fd = os.open(full, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0))
-    except (OSError, Refused):
-        return None
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > limit:
-            return None
-        if (st.st_dev, st.st_ino) != (named.st_dev, named.st_ino):
-            return None
-        out = b""
-        while len(out) <= st.st_size:
-            data = os.read(fd, min(CHUNK, st.st_size - len(out) + 1))
-            if not data:
-                break
-            out += data
-        return out if len(out) == st.st_size else None
     except OSError:
         return None
     finally:
