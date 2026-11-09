@@ -76,6 +76,9 @@ a switch is off.
 - keys on the following stdin lines of the same process (`$defs/type_input`, one JSON object per line: `{"text": "…"}` typed literally with `send-keys -l`, or
   `{"key": "Enter" | "Escape" | "C-c" | …}`): accepted only while this person holds the lock; each line updates
   `last_input_at`, `expires_at` and `keys`. The text is never logged or recorded.
+- *Implementing slice 4.2 must* key the lock by the proof nonce (not `by`: every tab is the same OS user), re-check it under
+  the lock for every key line, end the `type` process on idle release, run end or switch off, and send keys and read the
+  screen only for the pane id pinned at run start (never the active pane).
 - `--release --json` → removes the lock, answer `{"takeover": null}`.
 - **Pending input is held.** While a `takeover` is present and not expired, the paste-when-idle queue (run-pending.schema.json)
   does not deliver; messages wait and are delivered after release, as today.

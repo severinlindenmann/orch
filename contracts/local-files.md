@@ -66,7 +66,7 @@ received/                         files saved by `orch relay download` (visible,
 ## Local-only lines (`.orch/.gitignore`, written first by `orch init` and before any secret is stored)
 
 ```
-.gitignore  .local-id  secrets/  inbox/  inbox-seen.json  inbox-notes.json  outbox/  addons/  run/  harness/  tickets/*/evidence/  record/
+.gitignore  .local-id  secrets/  inbox/  inbox-seen.json  inbox-notes.json  outbox/  addons/  run/  harness/  tickets/*/evidence/  record/  .usage-salt
 ```
 
 The team's `.gitignore` is never edited. An active add-on adds its own lines from its manifest `gitignore` key

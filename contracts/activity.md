@@ -118,7 +118,8 @@ Vectors `retention` fix the order.
   Without `--since` it starts at the first retained event; events of one run come in `seq` order, runs interleave by `at`.
   Readers already dedupe (above), so a reconnect with the last cursor never shows a step twice.
 - Cursors are opaque strings `rc1.<base64url>` (no padding). Producers encode `{"<run>": <last seq>, …}` as compact JSON;
-  consumers never look inside and keep the newest cursor they got.
+  consumers never look inside and keep the newest cursor they got. *Implementing slice 1.6 must* check every decoded run id
+  and detail id against its pattern before it becomes a file path (a cursor `{"../x": 1}` → `invalid`).
 - `orch record query [--ticket T] [--run R] [--kind K]… [--from <time>] [--to <time>] [--limit N] [--after <cursor>] --json`
   → a page `{"items": [event…], "next": "<cursor>" | null}` (cli-answer.schema.json `page`), newest first, limit 1–500
   (default 100). `--detail <id> --run R` → one detail file.

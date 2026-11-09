@@ -46,6 +46,8 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    `human:<user>` of the OS account the server runs as, `exp − iat ≤ 60 s`, `nonce` 16 random bytes. Proof =
    `hp1.` + base64url(compact sorted JSON of payload) + `.` + base64url(HMAC-SHA256(human key, `hp1.` + that first part)),
    no padding.
+   *Implementing slice 4.6 must* add `args_sha256` (sha256 of the canonical JSON of the values set: `keep_days`, the
+   connection actions, …) to the payload so a proof also binds the value, not only the target.
 5. **Hand over.** The server runs the CLI with `--proof-stdin` and writes the proof as the **first line of stdin** (keys for
    `orch run type` follow on the next lines). Never argv, never env.
 6. **Verify (core).** Refuse unless: the proof parses; the HMAC matches (constant-time compare); `op` and `target` equal

@@ -45,6 +45,8 @@ What Level 1 does:
 - POSIX: folders 0700 and files 0600, checked on every read; looser rights, another owner, or a symlink anywhere on the path
   → refused (`Refused: the key folder has the wrong rights. Fix: orch doctor`). Windows: an ACL with only the user and
   SYSTEM, set at creation, checked the same way.
+- *Implementing slice 1.1 must* bind `.orch/.local-id` to the workspace's real path in the trusted orch home and refuse a
+  mismatch (the id file is workspace-writable).
 - Writes: new file + rename, under `keys.lock` (O_EXCL). Read once per command; never cached on disk elsewhere.
 - **Sources.** `workspace` = added by a person on this computer. `admin` = assigned by the relay admin and written by
   `orch relay refresh` straight into this folder (replacing `.orch/secrets/credentials.json`, slice 1.1; an interrupted
@@ -84,7 +86,8 @@ run = ["pass-cli"]
 
 A profile maps variables to key names (`env`: the value in the variable; `files`: a temp file path in the variable), may set
 plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false).
-Variables that change how programs load are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*, ORCH_*, …). Profiles are
+Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
+ORCH_*, proxies, CA bundles, JAVA_TOOL_OPTIONS, …). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
 only with a matching settings record (human-proof.md, Settings: records and tombstones), so editing the file alone does not enable `get`.
 
@@ -139,6 +142,10 @@ prints a header).
 - **Streams**: the hider keeps back the last `L-1` characters (L = longest needle) until more text comes or the stream
   ends, so a value split across chunks (pipe reads, `%output` lines, log lines) is still hidden. The streamed result equals
   hiding the whole text at once (vectors `hide`, each case is checked both ways).
+- *Implementing slice 1.3/1.5 must* always hide **before** cutting (detail 1 MB cap, `text` 200/500, the 8 KB line, `log`
+  cuts), then drop a trailing prefix (4+ characters) of any hidden form; add the forms `\uXXXX` (ensure_ascii), `\/`,
+  lowercase `%xx` and `quote_plus`; add `human.key`, the relay workspace token and the page session cookie as needles; and
+  hash or refuse an identifier field (`command`, ids) that matches a needle instead of breaking its pattern.
 - **Error paths**: exception messages, tracebacks (exit 1), stderr of failed children, refusals and HTTP error bodies go
   through the same hider before they are printed, logged or recorded. A writer that cannot get a hider refuses
   (activity.md, Fail closed).

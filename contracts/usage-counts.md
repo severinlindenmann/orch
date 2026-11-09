@@ -22,7 +22,7 @@ relay-api.md (Usage counts and policy).
   no ticket titles, no chats, no key values, no versions, no file paths. The schema has no field for text.
 - **Names** (invariant P1, common.md): sent as they are only for `admin`, `builtin`, `marketplace` sources (the admin knows
   them already, or they are public). For every other source (`workspace`, `harness`, `none`, anything unknown) the name is replaced by `ref` = `h_` + the first 16 hex of
-  HMAC-SHA256(key = a random salt in `.orch/.local-id`'s folder, message = `<kind>:<name>`), stable per workspace so the
+  HMAC-SHA256(key = a random salt in `.orch/.usage-salt` (0600, created on first use, in `.orch/.gitignore`), message = `<kind>:<name>`), stable per workspace so the
   admin sees "own skill h_3fa9… used 14×" without the name, unless `share_names = true` (in effect only with its settings record, human-proof.md). The body says `share_names`.
 - **Queue**: each closed day is written to `.orch/record/outbox-usage/<day>.json` first, then sent oldest first on the next
   relay call (inbox pull, refresh) or the daily timer; deleted after a 2xx. Kept at most 60 days, older ones are dropped.
@@ -49,6 +49,7 @@ relay-api.md (Usage counts and policy).
 
 ## Admin portal
 
+The portal renders every name with `textContent` (names are workspace-chosen text).
 Insights for the admin: per shared skill / connection / key, "used in 6 of 9 workspaces this week, 3 refusals", own names
 shown as "own skill (hidden)". Buttons in a workspace's Insights that ask the admin ("Ask admin", "Send to admin") appear only
 when a relay is connected.
