@@ -273,8 +273,8 @@ def _tracked(root: Path, rel: str) -> bool:
         return True  # cannot tell: treat the file as the team's
     # .ORCH/... tracked is this file too (icase)
     rc, _, _ = _safegit().run_bytes(["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10)
-    if rc in (124, 125, 126, 127):
-        return True  # no trusted git, refused, cannot start, or timeout: cannot tell, treat the file as the team's
+    if rc not in (0, 1):  # 0 = tracked, 1 = not tracked; anything else (123, no git, a crash) = cannot tell
+        return True  # ... and that means "the team's file": the safe direction
     return rc == 0
 
 

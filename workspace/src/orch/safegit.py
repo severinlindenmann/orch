@@ -90,10 +90,24 @@ _lock = threading.Lock()
 # ---------------------------------------------------------------- which git
 
 
+_EXACT = "="  # an avoid entry that starts with this means "this folder only", not its subtree
+_SYSTEM_BINS = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin", "/usr/sbin", "/sbin")
+_TRUE_HINT = (
+    " On Windows: run orch from outside the project's virtual environment folder, or use a virtual "
+    "environment located elsewhere."
+)
+
+
 def _inside(path: str, folder: str) -> bool:
-    """`path` is in `folder`: by its name or where it really is (links resolved); commonpath."""
-    b = os.path.normcase(os.path.realpath(folder))
+    """`path` is in `folder` (a subtree), by its name or where it really is (links resolved); commonpath.
+    A folder written `=<folder>` matches only a path whose own folder is exactly that one."""
+    exact = folder.startswith(_EXACT)
+    b = os.path.normcase(os.path.realpath(folder[1:] if exact else folder))
     for a in (os.path.normcase(os.path.realpath(path)), os.path.normcase(os.path.abspath(path))):
+        if exact:
+            if os.path.normcase(os.path.dirname(a)) == b or a == b:
+                return True
+            continue
         try:
             if os.path.commonpath([a, b]) == b:
                 return True
@@ -102,10 +116,31 @@ def _inside(path: str, folder: str) -> bool:
     return False
 
 
+def _broad(folder: Path) -> bool:
+    """A folder whose whole subtree must not be avoided: a filesystem anchor (`/`, `C:\\`: cron, systemd,
+    Docker WORKDIR /), the user's home (git in ~/.local/bin, Homebrew in home), or an ancestor of the
+    standard system bin folders. There only a PATH entry equal to it is avoided."""
+    try:
+        f = folder.resolve()
+        if f.parent == f or f == Path.home().resolve():
+            return True
+        return any(_inside(b, str(f)) for b in _SYSTEM_BINS if os.path.isdir(b))
+    except (OSError, RuntimeError):
+        return True
+
+
+def _entry(folder: Path) -> str:
+    return _EXACT + str(folder) if _broad(folder) else str(folder)
+
+
 def _avoid(cwd: Path, root: Path | None) -> frozenset:
-    out = {str(cwd)}
+    out = {_entry(cwd)}
+    try:
+        out.add(_entry(Path.cwd()))  # always: whatever the caller passes, never a git from our own cwd
+    except OSError:
+        pass
     if root is not None:
-        out.add(str(root))
+        out.add(_entry(root))
     homes = list(addons.home_candidates())
     try:
         homes.append(addons.home(root))
@@ -153,7 +188,7 @@ def avoid_for(cwd: Path, root: Path | None = None) -> frozenset:
 def git_exe(cwd: Path, root: Path | None = None) -> str | None:
     """The one git program orch runs (see find_exe). Cached per set of avoided folders and the PATH."""
     avoid = _avoid(cwd, root)
-    key = avoid | {"PATH=" + os.environ.get("PATH", "")}
+    key = avoid | {"PATH=" + os.environ.get("PATH", ""), "CWD=" + os.getcwd()}
     with _lock:
         if key not in _exes:
             _exes[key] = find_exe("git", avoid)
@@ -336,7 +371,11 @@ def _raw_bytes(
     runs and git is killed once it passes the cap (rc 123, nothing returned)."""
     true = trivial("true", cwd, root)
     if true is None:
-        return REFUSED, b"", "orch could not find a trusted `true` program, so it did not run git here"
+        return (
+            REFUSED,
+            b"",
+            "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
+        )
     exe = git_exe(cwd, root)
     if exe is None:
         return 127, b"", "git is not installed (or only found inside the project, which orch does not run)"
@@ -549,7 +588,10 @@ def _prepare(args, cwd, timeout, filters, read_only, root):
         sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"] if sub[k] != "grep" else ["--no-textconv"]
     true = trivial("true", cwd, root)
     if true is None:
-        return None, (REFUSED, "orch could not find a trusted `true` program, so it did not run git here")
+        return None, (
+            REFUSED,
+            "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
+        )
     return ["git", *top, *base_args(true, read_only), *sub], extra
 
 

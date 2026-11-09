@@ -910,7 +910,8 @@ def test_no_bare_true_anywhere(tmp_path, monkeypatch):
     assert inspect.signature(safegit.env).parameters["true"].default is inspect.Parameter.empty
 
 
-def test_a_project_python_is_not_a_trusted_trivial_command_on_windows(tmp_path):
+def test_a_project_python_is_not_a_trusted_trivial_command_on_windows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # (our own cwd is always avoided; the test runs from the venv's folder)
     import sys
 
     assert safegit._python_trivial("true", tmp_path, tmp_path).startswith(f'"{sys.executable}"')
@@ -1088,3 +1089,104 @@ def test_check_ignore_is_allowed_with_paths_only(proj):
     assert safegit.run_bytes(["check-ignore", "-q", "--", "s.txt"], proj)[0] == 0
     assert safegit.run_bytes(["check-ignore", "-q", "--", "o.txt"], proj)[0] == 1
     assert safegit.run_bytes(["check-ignore", "--stdin"], proj)[0] == safegit.REFUSED
+
+
+@pytest.mark.parametrize("rc", [123, 2, 128, -11])
+def test_tracked_cannot_tell_means_tracked(proj, monkeypatch, rc):
+    from orch import harness
+
+    plain_git(proj, "init", "-q")
+    (proj / "a.txt").write_text("x\n")
+    real = safegit.subprocess.Popen
+
+    class Done:  # a finished git process (safegit streams through Popen)
+        returncode = rc
+
+        def __init__(self):
+            import io
+
+            self.stdout, self.stderr = io.BufferedReader(io.BytesIO(b"")), io.BufferedReader(io.BytesIO(b""))
+
+        def wait(self, timeout=None):
+            return rc
+
+    def fake(argv, **kw):
+        return Done() if "ls-files" in argv else real(argv, **kw)
+
+    monkeypatch.setattr(safegit.subprocess, "Popen", fake)
+    assert harness._tracked(proj, "a.txt") is True  # unexpected exit code: the team's file
+    monkeypatch.setattr(safegit.subprocess, "Popen", real)
+    assert harness._tracked(proj, "a.txt") is False  # git's own answer: not tracked
+    plain_git(proj, "add", "a.txt")
+    assert harness._tracked(proj, "a.txt") is True
+
+
+def test_a_git_in_our_own_cwd_is_never_used_even_without_cwd_or_root(tmp_path, monkeypatch):
+    ran = tmp_path / "CWD-GIT-RAN"
+    here = tmp_path / "agentrepo"
+    here.mkdir()
+    sh(here / "git", f"touch {ran}")
+    real = _exe(tmp_path)
+    for path in (os.pathsep.join([str(here), str(real.parent)]), str(here)):
+        monkeypatch.setenv("PATH", path)
+        monkeypatch.setattr(safegit, "_exes", {})
+        monkeypatch.chdir(here)
+        exe = safegit.git_exe(tmp_path / "elsewhere")  # the caller names another cwd and no root
+        assert exe in (None, str(real))
+        safegit.run(["--version"], tmp_path, filters=False)
+        assert not ran.exists()
+    assert str(here.resolve()) in safegit._avoid(tmp_path, None)
+
+
+def test_a_broad_cwd_does_not_switch_git_off(tmp_path, monkeypatch):
+    real = _exe(tmp_path)
+    monkeypatch.setattr(safegit, "_exes", {})
+    monkeypatch.setenv("PATH", str(real.parent))
+    for broad in (Path("/"), tmp_path / "fakehome"):
+        if broad != Path("/"):
+            (broad / ".local" / "bin").mkdir(parents=True)
+            monkeypatch.setattr(Path, "home", classmethod(lambda cls, h=broad: h))
+            sh(broad / ".local" / "bin" / "git", "exec " + str(real) + ' "$@"')
+            monkeypatch.setenv("PATH", os.pathsep.join([str(broad / ".local" / "bin"), str(real.parent)]))
+        monkeypatch.setattr(safegit, "_exes", {})
+        monkeypatch.chdir(broad)
+        assert safegit.git_exe(broad) is not None, broad  # cwd `/` or home: git is still found
+    # but a PATH entry that IS the cwd is still avoided there
+    monkeypatch.setattr(safegit, "_exes", {})
+    monkeypatch.setenv("PATH", os.pathsep.join([str(tmp_path / "fakehome"), str(real.parent)]))
+    sh(tmp_path / "fakehome" / "git", "exit 1")
+    monkeypatch.chdir(tmp_path / "fakehome")
+    assert safegit.git_exe(tmp_path / "fakehome") == str(real)
+
+
+def test_in_a_project_cwd_the_whole_subtree_is_still_avoided(tmp_path, monkeypatch):
+    real = _exe(tmp_path)
+    proj = tmp_path / "project"
+    (proj / "node_modules" / ".bin").mkdir(parents=True)
+    sh(proj / "node_modules" / ".bin" / "git", "exit 1")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(proj / "node_modules" / ".bin"), str(real.parent)]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    monkeypatch.chdir(proj)
+    assert safegit.git_exe(proj) == str(real)
+    assert safegit._avoid(proj, None) >= {str(proj)}
+
+
+def test_the_git_cache_does_not_survive_a_chdir_into_an_avoided_folder(tmp_path, monkeypatch):
+    real = _exe(tmp_path)
+    bindir = tmp_path / "work" / "bin"
+    bindir.mkdir(parents=True)
+    # a git that is only visible because of where we stand
+    sh(bindir / "git", "exit 1")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bindir), str(real.parent)]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    monkeypatch.chdir(tmp_path)
+    first = safegit.git_exe(tmp_path)  # bindir is not inside the cwd (tmp_path): it is chosen... or tmp_path
+    monkeypatch.chdir(tmp_path / "work")
+    second = safegit.git_exe(tmp_path / "work")
+    assert second == str(real) and first is not None
+
+
+def test_the_windows_hint_is_in_the_refusal(tmp_path, monkeypatch):
+    monkeypatch.setattr(safegit, "trivial", lambda *a, **k: None)
+    rc, _, err = safegit.run(["status"], tmp_path, filters=False)
+    assert rc == safegit.REFUSED and "virtual environment located elsewhere" in err
