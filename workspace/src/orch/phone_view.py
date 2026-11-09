@@ -966,6 +966,91 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     return sent
 
 
+def sync_reviews(root: Path) -> list[str]:
+    """fb8: a ticket that enters Review sends the phones ONE review question ("Is this done?", options
+    accept / changes, relay.send_review_question); the round (review-<n>) is open while the ticket stays in
+    Review. A ticket that leaves Review (dashboard, CLI, an answer) closes its round: the question is stale
+    and the next time it enters Review is a new round. Nothing goes out without a paired phone.
+    Returns the ticket ids sent."""
+    from orch import relay
+
+    phones = _paired(root)
+    due: list[tuple[str, dict, int, str]] = []
+
+    def claim(state):
+        rv = state.setdefault("reviews", {})
+        for t in tickets.list_all(root):
+            tid, rec = t["id"], rv.get(t["id"])
+            if t.get("status") == "review" and t.get("general") is not True:
+                if phones and not (rec and rec.get("open")):
+                    n = int((rec or {}).get("round", 0)) + 1
+                    mid = relay.new_id()  # the round is bound to this message: only an answer to it counts
+                    rv[tid] = {"round": n, "open": True, "msg": mid}
+                    due.append((tid, t, n, mid))
+            elif rec and rec.get("open"):
+                rec["open"] = False
+
+    update_state(root, claim)
+    sent = []
+    for tid, t, n, mid in due:
+        try:
+            relay.send_review_question(root, t, n, mid)
+            sent.append(tid)
+        except (
+            Refused,
+            OSError,
+        ):  # not sent: the round is burned (review-n is never used twice), next pull retries
+
+            def undo(st, tid=tid, n=n, mid=mid):
+                rec = st.get("reviews", {}).get(tid)
+                if rec and rec.get("round") == n and rec.get("msg") == mid:
+                    rec["open"] = False
+
+            with contextlib.suppress(Refused):
+                update_state(root, undo)
+    return sent
+
+
+def close_rounds(root: Path, tid: str) -> None:
+    """The ticket left Review: its open review round is stale at once (called by tickets.apply_op under the
+    ticket lock, before the new status is written). Reads first: without phones nothing is written."""
+    rec = load_state(root).get("reviews", {}).get(tid)
+    if not (isinstance(rec, dict) and rec.get("open")):
+        return
+
+    def op(st):
+        r = st.get("reviews", {}).get(tid)
+        if r:
+            r["open"] = False
+
+    update_state(root, op)
+
+
+def close_review(root: Path, tid: str, n, msg_id) -> bool:
+    """Close review round n of a ticket (compare and set), only for an answer to the round's own question
+    message. True only for the call that closed it: the one answer that may act. A closed, older, unknown
+    or other-message round is False."""
+    won = []
+
+    def op(st):
+        rec = st.get("reviews", {}).get(tid)
+        if rec and rec.get("open") and rec.get("round") == n and msg_id and rec.get("msg") == msg_id:
+            rec["open"] = False
+            won.append(True)
+
+    update_state(root, op)
+    return bool(won)
+
+
+def reopen_review(root: Path, tid: str, n, msg_id) -> None:
+    def op(st):
+        rec = st.get("reviews", {}).get(tid)
+        if rec and rec.get("round") == n and rec.get("msg") == msg_id:
+            rec["open"] = True
+
+    update_state(root, op)
+
+
 NEW_TEXT = "Ticket on your workspace"
 OPEN_MAX = 20  # open tickets the phone gets a chat for (newest first)
 DONE_HOURS = 24  # a finished ticket stays on the phone this long

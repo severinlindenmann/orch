@@ -97,7 +97,7 @@ struct ChatData {
     /// Phone-local "Delete": chat key -> messages up to this time are hidden (ArchiveStore).
     var erased: [String: String] = [:]
 
-    func isOpen(_ q: Question) -> Bool { answers[q.id] == nil }
+    func isOpen(_ q: Question) -> Bool { !q.isReview && answers[q.id] == nil }
 }
 
 enum ChatBuilder {
@@ -128,7 +128,7 @@ enum ChatBuilder {
             }
         }
         for t in d.tickets where t.workspace == ws && t.ticket != nil { out.append(ChatItem(id: "card-" + t.id, at: t.at + "~", kind: .card(t))) }
-        for q in d.questions where q.message.from == ws { out.append(ChatItem(id: q.id, at: q.message.createdAt, kind: .question(q))) }
+        for q in d.questions where !q.isReview && q.message.from == ws { out.append(ChatItem(id: q.id, at: q.message.createdAt, kind: .question(q))) }
         for q in d.outbox where q.workspace == ws && q.ticket == nil { out.append(ChatItem(id: "q-" + q.id, at: q.at, kind: .mine(q.text, queued: true))) }
         return out.sorted { ($0.at, $0.id) < ($1.at, $1.id) }
     }
@@ -152,7 +152,7 @@ enum ChatBuilder {
             out.append(ChatItem(id: "h\(i)-" + line.id, at: at, kind: isMine(line) ? .mine(line.text, queued: false) : .theirs(line.text, label: nil, sender: line.by.map { "\($0) · \(line.role ?? "agent")" })))
         }
         for a in t?.view?.attachments ?? [] { out.append(ChatItem(id: "a-" + a.id, at: (a.at ?? t?.at ?? "0000") + "~", kind: .attachment(a))) }
-        for q in d.questions where q.message.from == ws && q.message.ticket == ticketId { out.append(ChatItem(id: q.id, at: q.message.createdAt, kind: .question(q))) }
+        for q in d.questions where !q.isReview && q.message.from == ws && q.message.ticket == ticketId { out.append(ChatItem(id: q.id, at: q.message.createdAt, kind: .question(q))) }
         for q in d.outbox where q.workspace == ws && q.ticket == ticketId { out.append(ChatItem(id: "q-" + q.id, at: q.at, kind: .mine(q.text, queued: true))) }
         return out.sorted { ($0.at, $0.id) < ($1.at, $1.id) }
     }

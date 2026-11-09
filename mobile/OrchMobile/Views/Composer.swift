@@ -19,6 +19,7 @@ struct Composer: View {
     var note: String?
     var autoFocus: Bool
     @Binding var reply: ReplyPreview?
+    var currentReviewId: String?
     var onSent: (() -> Void)?
     /// Accessibility ids of the text field and send button (the New topic screen keeps its older ids).
     var fieldId = "composer-field"
@@ -56,13 +57,13 @@ struct Composer: View {
     private func draftKey(_ target: SendTarget) -> DraftKey { DraftKey(target: target, group: groupKey) }
 
     init(target: SendTarget?, placeholder: String = "Message…", note: String? = nil, autoFocus: Bool = false,
-         reply: Binding<ReplyPreview?>, onSent: (() -> Void)? = nil,
+         reply: Binding<ReplyPreview?>, currentReviewId: String? = nil, onSent: (() -> Void)? = nil,
          fieldId: String = "composer-field", sendId: String = "composer-send", groupKey: GroupKey? = nil,
          unavailableText: String = "Starting topic…") {
         self.groupKey = groupKey; self.unavailableText = unavailableText
         self.fieldId = fieldId; self.sendId = sendId
         self.target = target; self.placeholder = placeholder; self.note = note; self.autoFocus = autoFocus
-        _reply = reply; self.onSent = onSent
+        _reply = reply; self.currentReviewId = currentReviewId; self.onSent = onSent
     }
     private var showMic: Bool { reply?.answering == nil && !locked && segments.isEmpty && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var recording: Bool { recorder?.isRecording == true }
@@ -82,7 +83,7 @@ struct Composer: View {
                     Rectangle().fill(Theme.brand).frame(width: 3)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(reply.title).themeFont(13, .semibold).foregroundStyle(Theme.brand)
-                        Text(reply.quote).themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                        if !reply.quote.isEmpty { Text(reply.quote).themeFont(13).foregroundStyle(Theme.muted).lineLimit(1) }
                     }
                     Spacer(minLength: 0)
                     control("xmark", "Cancel reply", "reply-close") { self.reply = nil }
@@ -137,12 +138,19 @@ struct Composer: View {
                 }
                 text = draft; discard()
             }
+            .onChange(of: currentReviewId) { _, id in
+                // Not while our own send runs: sendText handles its own outcome (our answer closes the question too).
+                if !busy, let q = reply?.answering, q.isReview, q.id != id {
+                    // nil = no open review any more (answered elsewhere or left Review); else a newer round replaced it.
+                    endAnsweringClosed(message: id == nil ? "This review is closed." : "This review was updated.")
+                }
+            }
             .onChange(of: model.answerTick) { _, _ in
-                if let q = reply?.answering, !Self.isOpen(q, in: model) { endAnsweringClosed() }
+                if !busy, let q = reply?.answering, !q.isReview, !Self.isOpen(q, in: model) { endAnsweringClosed() }
             }
             // Answered on the dashboard or another phone: the question leaves the open list, answering mode ends.
             .onChange(of: model.questions.map(\.id)) { _, _ in
-                if let q = reply?.answering, !Self.isOpen(q, in: model) { endAnsweringClosed() }
+                if !busy, let q = reply?.answering, !q.isReview, !Self.isOpen(q, in: model) { endAnsweringClosed() }
             }
             .onChange(of: recorder?.error) { _, value in if let value { error = value; micError = true; collect() } }
             .onDisappear { holding = false; holdTask?.cancel(); hintTask?.cancel(); discard() }
@@ -154,7 +162,7 @@ struct Composer: View {
     private var composeRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             control("plus", "Attach", "composer-attach") { focused = false; attaching = true }.disabled(target == nil || busy || reply?.answering != nil)
-            TextField(target == nil ? unavailableText : placeholder, text: $text, axis: .vertical)
+            TextField(target == nil ? unavailableText : (reply?.answering?.isReview == true ? "What should change?" : placeholder), text: $text, axis: .vertical)
                 .themeFont(17).lineLimit(1...5).padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous).stroke(Theme.borderStrong))
@@ -247,9 +255,15 @@ struct Composer: View {
         defer { busy = false }
         do {
             if let q = reply?.answering {
+                if q.isReview && q.id != currentReviewId {
+                    endAnsweringClosed(message: currentReviewId == nil ? "This review is closed." : "This review was updated."); return
+                }
+                if q.isReview && ReviewRules.isReservedAnswer(trimmedText) {
+                    error = "Write what should change."; return
+                }
                 // Closed meanwhile (answered here, elsewhere, or an option is being sent): keep what was typed, say why.
-                if !Self.isOpen(q, in: model) || model.pendingAnswers[q.id] != nil {
-                    endAnsweringClosed(sending: model.pendingAnswers[q.id] != nil); return
+                if !Self.isOpen(q, in: model) || model.pendingAnswers[q.id] != nil || model.queuedAnswers[q.id] != nil {
+                    endAnsweringClosed(sending: model.pendingAnswers[q.id] != nil || model.queuedAnswers[q.id] != nil); return
                 }
                 await model.answer(q, with: String(String.UnicodeScalarView(trimmedText.unicodeScalars.prefix(2000))))
                 if model.answers[q.id] == nil && model.queuedAnswers[q.id] == nil {
@@ -279,12 +293,12 @@ struct Composer: View {
     /// option is being sent). Typed answer text is never dropped or silently re-targeted: with text, it stays in the field,
     /// the chip goes and the person is told why (the next Send is then a plain message they can see coming); without text
     /// the conversation draft comes back.
-    private func endAnsweringClosed(sending: Bool = false) {
+    private func endAnsweringClosed(sending: Bool = false, message: String? = nil) {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             reply = nil; restoreDraft()
         } else {
             savedDraft = nil; reply = nil
-            error = sending ? "Your chosen answer is being sent." : "This question is already answered."
+            error = message ?? (sending ? "Your chosen answer is being sent." : "This question is already answered.")
         }
     }
     private func restoreDraft() {

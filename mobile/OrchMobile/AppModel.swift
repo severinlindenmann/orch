@@ -200,7 +200,7 @@ final class AppModel {
     }
     /// The "Got it" line the workspace sent for a text of this phone.
     func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
-    var openQuestionCount: Int { questions.filter { answers[$0.id] == nil }.count }
+    var openQuestionCount: Int { questions.filter { !$0.isReview && answers[$0.id] == nil }.count }
 
     // MARK: Onboarding
 

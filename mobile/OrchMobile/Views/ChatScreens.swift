@@ -208,7 +208,13 @@ struct ConversationView: View {
                         Button("Go to Today") { goToToday?() }.buttonStyle(WideButtonStyle(color: Theme.brand))
                     } else {
                     if working(items, now: now) { StatusLine(isGeneral ? "\(workspaceName) is thinking…" : "\(workspaceName) is working…") }
-                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(workspaceName: workspaceName, running: ticket.map { TopicStatus($0) == .working }, review: ticket.map { TopicStatus($0) == .review } ?? false, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply)
+                    let reviewQuestion = resolved.ticket.flatMap { ticketId in
+                        ReviewRules.reviewQuestion(ticket: ticket, workspaceId: resolved.workspace, ticketId: ticketId, questions: model.questions, answers: model.answers)
+                    }
+                    if let q = reviewQuestion {
+                        ReviewBar(question: q) { reply = ReplyPreview(messageId: q.id, title: "Changes:", quote: "", answering: q) }.id(q.id)
+                    }
+                    Composer(target: resolved.target, note: resolved.ticket == nil ? nil : ChatBuilder.composerNote(workspaceName: workspaceName, running: ticket.map { TopicStatus($0) == .working }, review: ticket.map { TopicStatus($0) == .review } ?? false, finished: ticket.map { [.done, .dropped, .stopped, .didntWork].contains(TopicStatus($0)) } ?? false), reply: $reply, currentReviewId: reviewQuestion?.id)
                     }
                 }
             }
