@@ -82,7 +82,7 @@ struct Composer: View {
                     Rectangle().fill(Theme.brand).frame(width: 3)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(reply.title).themeFont(13, .semibold).foregroundStyle(Theme.brand)
-                        Text(reply.quote).themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                        if !reply.quote.isEmpty { Text(reply.quote).themeFont(13).foregroundStyle(Theme.muted).lineLimit(1) }
                     }
                     Spacer(minLength: 0)
                     control("xmark", "Cancel reply", "reply-close") { self.reply = nil }
@@ -154,7 +154,7 @@ struct Composer: View {
     private var composeRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             control("plus", "Attach", "composer-attach") { focused = false; attaching = true }.disabled(target == nil || busy || reply?.answering != nil)
-            TextField(target == nil ? unavailableText : placeholder, text: $text, axis: .vertical)
+            TextField(target == nil ? unavailableText : (reply?.answering?.isReview == true ? "What should change?" : placeholder), text: $text, axis: .vertical)
                 .themeFont(17).lineLimit(1...5).padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xl - 8, style: .continuous).stroke(Theme.borderStrong))
@@ -247,9 +247,12 @@ struct Composer: View {
         defer { busy = false }
         do {
             if let q = reply?.answering {
+                if q.isReview && ReviewRules.isReservedAnswer(trimmedText) {
+                    error = "Write what should change."; return
+                }
                 // Closed meanwhile (answered here, elsewhere, or an option is being sent): keep what was typed, say why.
-                if !Self.isOpen(q, in: model) || model.pendingAnswers[q.id] != nil {
-                    endAnsweringClosed(sending: model.pendingAnswers[q.id] != nil); return
+                if !Self.isOpen(q, in: model) || model.pendingAnswers[q.id] != nil || model.queuedAnswers[q.id] != nil {
+                    endAnsweringClosed(sending: model.pendingAnswers[q.id] != nil || model.queuedAnswers[q.id] != nil); return
                 }
                 await model.answer(q, with: String(String.UnicodeScalarView(trimmedText.unicodeScalars.prefix(2000))))
                 if model.answers[q.id] == nil && model.queuedAnswers[q.id] == nil {

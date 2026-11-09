@@ -319,7 +319,7 @@ enum ConversationBuilder {
         for o in d.outbox where o.kind == .send && o.workspace == id.workspace && !listed.contains(o.clientId) && outboxConversation(o) == id {
             out.append(queuedBubble(o))
         }
-        for q in d.questions where q.message.from == id.workspace {
+        for q in d.questions where !q.isReview && q.message.from == id.workspace {
             let qid: ConversationID = q.message.ticket.map { .topic(workspace: id.workspace, ticket: $0) } ?? .general(workspace: id.workspace)
             guard qid == id else { continue }
             var item = ConvItem(id: q.id, at: q.message.createdAt, side: .them, kind: .question, text: q.message.body.text)
@@ -378,7 +378,7 @@ enum ConversationBuilder {
         d.workspaces.map { w in
             WorkspaceSummary(workspace: w, presence: w.presence(now: d.now), general: general(workspace: w.id, d, read: read),
                              topics: topics(workspace: w.id, d, read: read),
-                             openQuestions: d.questions.filter { $0.message.from == w.id && d.answers[$0.id] == nil }.count)
+                             openQuestions: d.questions.filter { !$0.isReview && $0.message.from == w.id && d.answers[$0.id] == nil }.count)
         }.sorted { ($0.openQuestions > 0 ? 1 : 0, $0.lastAt ?? "") > ($1.openQuestions > 0 ? 1 : 0, $1.lastAt ?? "") }
     }
 }
