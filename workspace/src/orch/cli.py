@@ -1179,6 +1179,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         _resolve_keys(args, root)
         run(args)
         cli_run.after_command(args, root, want_json)
+        for text in humanproof.cli_notices(root):  # e.g. "orch reset its protection ...": said once, in words
+            print(text, file=sys.stderr)
     except Refused as e:
         return refuse(e)
     return 0

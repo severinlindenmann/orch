@@ -129,13 +129,19 @@
     var anchor = document.getElementById("content");
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(b, anchor); else document.body.insertBefore(b, document.body.firstChild);
   }
-  function notices() {
+  var noticed = {};
+  function notices() {  // reading never clears a notice: only "Got it" does (the id goes back to the server)
     fetch("/api/notices", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(function (items) {
       items.forEach(function (n) {
+        if (noticed[n.id]) return;
+        noticed[n.id] = true;
         var b = el("div", "", "orch-notice"); b.setAttribute("role", "status");
         b.className = "banner info orch-notice"; b.style.cssText = "margin:8px 16px 0";
         b.appendChild(el("div", n.text));
-        var x = el("button", "Got it"); x.type = "button"; x.style.marginTop = "8px"; x.onclick = function () { b.remove(); };
+        var x = el("button", "Got it"); x.type = "button"; x.style.marginTop = "8px";
+        x.onclick = function () {
+          fetch("/api/act", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({op: "notice.ack", args: {id: n.id}})}).then(function (r) { if (r.ok) b.remove(); });
+        };
         b.appendChild(x); place(b);
       });
     }).catch(function () {});

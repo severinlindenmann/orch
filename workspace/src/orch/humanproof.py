@@ -774,7 +774,11 @@ def reset_protection(root: Path, reason: str) -> None:
             except (FileNotFoundError, LooseFile, ValueError):
                 notes = []
             if not any(isinstance(n, dict) and n.get("kind") == "protection_reset" for n in notes):
-                notes.append({"kind": "protection_reset", "at": _now(), "text": RESET_NOTICE})
+                at = _now()
+                notes.append(
+                    {"id": _notice_id("protection_reset", at, RESET_NOTICE), "kind": "protection_reset",
+                     "at": at, "text": RESET_NOTICE}
+                )  # fmt: skip
                 _write_private(nf, json.dumps(notes))
 
 
@@ -817,6 +821,75 @@ def _reset_settings(root: Path, home: Path) -> None:
     _write_private(
         path, json.dumps({"schema": "orch.human-settings/1", "workspaces": out}, indent=2, sort_keys=True)
     )
+
+
+def _notice_id(kind: str, at: str, text: str) -> str:
+    return hashlib.sha256(f"{kind}|{at}|{text}".encode()).hexdigest()[:12]
+
+
+def _notices_load(root: Path) -> tuple[Path, list[dict]]:
+    nf = key_dir(root, create=False) / "notices.json"
+    notes = json.loads(_read_guarded(nf))
+    return nf, [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+
+
+def read_notices(root: Path) -> list[dict]:
+    """The notices for the person (dashboard). Reading NEVER clears them: only the person's "Got it"
+    (ack_notice) does, so a page that is reloaded or left before it showed the notice loses nothing."""
+    try:
+        _, notes = _notices_load(root)
+    except (OSError, ValueError, Refused):
+        return []
+    return [
+        {
+            "id": n.get("id") or _notice_id(str(n.get("kind")), str(n.get("at")), str(n.get("text"))),
+            "kind": str(n.get("kind"))[:40],
+            "text": str(n.get("text"))[:600],
+        }
+        for n in notes
+    ]
+
+
+def ack_notice(root: Path, nid: str) -> bool:
+    """The person pressed "Got it": remove that notice (session-only on the page)."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            nf, notes = _notices_load(root)
+            keep = [
+                n
+                for n in notes
+                if (n.get("id") or _notice_id(str(n.get("kind")), str(n.get("at")), str(n.get("text"))))
+                != nid
+            ]
+            if len(keep) == len(notes):
+                return False
+            if keep:
+                _write_private(nf, json.dumps(keep))
+            else:
+                with contextlib.suppress(OSError):
+                    nf.unlink()
+            return True
+    except (OSError, ValueError, Refused):
+        return False
+
+
+def cli_notices(root: Path) -> list[str]:
+    """The texts of notices the CLI has not shown yet, each marked shown (cli_shown) so a command says it
+    ONCE. The notice itself stays for the page until "Got it"."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            nf, notes = _notices_load(root)
+            fresh = [n for n in notes if not n.get("cli_shown")]
+            if not fresh:
+                return []
+            for n in fresh:
+                n["cli_shown"] = True
+            _write_private(nf, json.dumps(notes))
+            return [str(n.get("text"))[:600] for n in fresh]
+    except (OSError, ValueError, Refused):
+        return []
 
 
 def take_notices(root: Path) -> list[dict]:

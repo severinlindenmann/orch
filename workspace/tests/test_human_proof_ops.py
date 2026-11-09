@@ -1302,3 +1302,37 @@ def test_wont_do_cards_show_the_step_number_and_the_connect_card_the_scheme(ws, 
     )
     card = [h for h in hp.handoffs(ws) if h["op"] == "relay.connect"][0]
     assert card["parts"] == {"host": "r.example:8080", "scheme": "http"}
+
+
+# ------------------------------------------------------------ notices: reading never clears, only "Got it"
+
+
+def _queue_notice(ws):
+    d = hp.key_dir(ws)
+    at = "2026-11-10T00:00:00Z"
+    nid = hp._notice_id("protection_reset", at, hp.RESET_NOTICE)
+    note = {"id": nid, "kind": "protection_reset", "at": at, "text": hp.RESET_NOTICE}
+    hp._write_private(d / "notices.json", json.dumps([note]))
+    return note["id"]
+
+
+def test_reading_a_notice_never_clears_it_only_the_ack_does(ws):
+    nid = _queue_notice(ws)
+    first, second = hp.read_notices(ws), hp.read_notices(ws)
+    assert (
+        first == second and first[0]["id"] == nid and first[0]["text"] == hp.RESET_NOTICE
+    )  # read twice: there
+    assert hp.ack_notice(ws, "nope") is False and hp.read_notices(ws)
+    assert hp.ack_notice(ws, nid) is True
+    assert hp.read_notices(ws) == []  # acknowledged: gone
+    assert hp.ack_notice(ws, nid) is False
+
+
+def test_the_cli_says_the_notice_once_and_the_page_still_has_it(ws, run, capsys):
+    _queue_notice(ws)
+    code, out, err = run("ticket", "list", "--json")
+    assert code == 0 and hp.RESET_NOTICE in err  # said once, in words, on stderr (stdout stays JSON)
+    json.loads(out)
+    code, out, err = run("ticket", "list", "--json")
+    assert hp.RESET_NOTICE not in err  # not twice
+    assert [n["text"] for n in hp.read_notices(ws)] == [hp.RESET_NOTICE]  # the page still shows it
