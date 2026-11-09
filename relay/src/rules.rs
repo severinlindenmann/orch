@@ -126,6 +126,9 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         if typ == "text" {
             check_ticket_view(c, sender, &msg)?;
         }
+        if typ == "question" {
+            check_review_question(&msg)?;
+        }
         return Ok(msg);
     }
     match typ.as_str() {
@@ -187,6 +190,31 @@ pub const MAX_TICKET_VIEW: usize = 16384;
 
 /// `body.ticket_view` (schema-checked already): at most 16 KB, and every attachment blob is one the sender
 /// uploaded, with its size. A blob of someone else answers exactly like a missing one (no existence oracle).
+/// body.review marks the review question (relay-api.md): question_id review-<n>, options exactly
+/// accept and changes, no scope. Anything else with the marker is refused, so no other question can
+/// show up as a review bar.
+fn check_review_question(msg: &Value) -> Res<()> {
+    let b = &msg["body"];
+    if b.get("review").is_none() {
+        return Ok(());
+    }
+    let qid = b["question_id"].as_str().unwrap_or("");
+    let n = qid.strip_prefix("review-").unwrap_or("");
+    let ok = b["review"] == true
+        && !n.is_empty()
+        && n.len() <= 4
+        && n.bytes().all(|c| c.is_ascii_digit())
+        && b["options"] == serde_json::json!(["accept", "changes"])
+        && b.get("scope").is_none();
+    if ok {
+        Ok(())
+    } else {
+        Err(invalid(
+            "A review question has review true, question_id review-<n>, options accept and changes, and no scope.",
+        ))
+    }
+}
+
 fn check_ticket_view(c: &Connection, sender: &str, msg: &Value) -> Res<()> {
     let view = &msg["body"]["ticket_view"];
     if view.is_null() {

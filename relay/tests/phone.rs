@@ -984,3 +984,25 @@ async fn review_question_is_stored_listed_and_answerable_but_not_pushed() {
     question(&t, &a, "DATE?", "q1").await;
     assert_eq!(t.push.sent.lock().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn review_marker_needs_the_review_format() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let _p = t.pair_phone(&[&a]).await;
+    for (qid, opts, extra) in [
+        ("q1", json!(["accept", "changes"]), json!({})),
+        ("review-1", json!(["DATE", "TIMESTAMP"]), json!({})),
+        ("review-x", json!(["accept", "changes"]), json!({})),
+        ("review-1", json!(["accept", "changes"]), json!({"scope": "x"})),
+    ] {
+        let mut body = json!({"question_id": qid, "text": "Is this done?", "options": opts, "recommended": null, "review": true});
+        if let Some(sc) = extra.get("scope") {
+            body["scope"] = sc.clone();
+        }
+        let m = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": "phones", "type": "question", "ticket": "t_7k3f9q",
+            "created_at": "2026-11-09T10:00:00Z", "body": body});
+        let (s, v) = t.call(&a, "POST", "/v1/messages", Some(m)).await;
+        assert_eq!(s, 422, "{qid}: {v}");
+    }
+}

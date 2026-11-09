@@ -314,9 +314,16 @@ def apply_op(
         if expect is not None and _get(ticket, expect[0]) != expect[1]:
             parent, _, leaf = expect[0].rpartition(".")
             raise _conflict(ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
+        was_review = ticket.get("status") == "review"
         result = fn(ticket)
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
+        if was_review and ticket.get("status") != "review":
+            # leaving Review closes the phones' review round in the same lock (fb8): an old "accept"
+            # can never apply to work that came back to Review later
+            from orch import phone_view  # phone_view imports tickets
+
+            phone_view.close_rounds(root, tid)
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)

@@ -784,9 +784,10 @@ REVIEW_TEXT = "Is this done?"
 REVIEW_OPTIONS = ["accept", "changes"]
 
 
-def send_review_question(root: Path, ticket: dict, n: int) -> dict:
-    """fb8: the review question of round n to the phones (contracts/relay-api.md 'Review question'). A
-    normal question with body.review true; the relay does not push it (the Ready-for-review text did)."""
+def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
+    """fb8: the review question of round n to the phones (contracts/relay-api.md 'Review question'), as the
+    message `mid` the round is bound to. The asked record is written BEFORE the send. A normal question with
+    body.review true; the relay does not push it (the Ready-for-review text did)."""
     qid = f"review-{n}"
     body = {
         "question_id": qid,
@@ -796,11 +797,16 @@ def send_review_question(root: Path, ticket: dict, n: int) -> dict:
         "recommended": None,
         "review": True,
     }
-    msg = _message(root, "phones", "question", body, ticket["id"])
     asked = net.read_json(_asked_path(root), {})
-    asked[msg["id"]] = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
+    asked[mid] = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
     net.write_json(_asked_path(root), asked, True)
-    return msg
+    try:
+        return _message(root, "phones", "question", body, ticket["id"], mid=mid)
+    except Refused:
+        asked = net.read_json(_asked_path(root), {})
+        if asked.pop(mid, None) is not None:
+            net.write_json(_asked_path(root), asked, True)
+        raise
 
 
 def _review_asked(root: Path, msg: dict) -> dict | None:
@@ -808,28 +814,39 @@ def _review_asked(root: Path, msg: dict) -> dict | None:
     return asked if isinstance(asked, dict) and asked.get("review") is True else None
 
 
-_ACTOR_RE = re.compile(r"human:[A-Za-z0-9_.@ -]{1,64}")
+def _paired_phone(root: Path, frm: str) -> dict | None:
+    """The record of a phone paired with THIS workspace (the local directory), else None."""
+    for p in _read_dir(root).get("phones", []):
+        if isinstance(p, dict) and p.get("id") == frm:
+            return p
+    return None
 
 
 def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
-    """An answer to a review question. It acts only when ALL hold: it comes from a paired phone (ph_, never a
-    subscriber or another workspace), it answers THIS question (checked by _answer_asked), the round is
-    still the open current one (closed by exactly one answer: compare and set), and the ticket is still in
-    Review. "accept" = the dashboard Accept; other text = "Ask for changes" with that note. Anything else is
-    a history line only. Never an agent: tickets.accept_review / ask_for_changes refuse one."""
+    """An answer to a review question. It acts only when ALL hold: it comes from a phone paired with this
+    workspace (the relay-authenticated `from`, not a group-routed message), it answers THIS question message
+    (reply_to is the one the round was bound to), the round is still the open current one (closed by exactly
+    one answer: compare and set; leaving Review closes it too), and the ticket is still in Review. "accept"
+    = the dashboard Accept; other text = "Ask for changes" with that note. Anything else is a history line
+    only. The actor is human:<stored phone name>, never taken from the body. Never an agent."""
     from orch import phone_view
 
     tid, n = asked["ticket"], asked.get("round")
     frm = str(msg.get("from", ""))
-    if not frm.startswith("ph_"):
-        return "ignored: only a paired phone answers a review question", None
+    phone = _paired_phone(root, frm) if frm.startswith("ph_") else None
+    if phone is None or msg_group(msg):
+        return "ignored: only a phone paired with this workspace answers a review question", None
     ans = clean_untrusted(str(msg.get("body", {}).get("answer")), 2000).strip()
     if not ans:
         return "ignored: an empty review answer", None
-    by, via = _answer_by(msg, asked)
-    if not _ACTOR_RE.fullmatch(by):
-        by = f"human:{frm}"
-    if not phone_view.close_review(root, tid, n):
+    name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
+    by, via = f"human:{name or frm}", "phone"
+    if ans.casefold() == "changes":  # the option word alone says nothing to change
+        with contextlib.suppress(Refused):
+            tickets.note_history(root, tid, by, "Asked for changes from the phone, but without a note", via)
+        return f"ignored: changes without a note on {tid}", None
+    mid = str(msg.get("reply_to"))
+    if not phone_view.close_review(root, tid, n, mid):
         with contextlib.suppress(Refused):
             tickets.note_history(root, tid, by, "A review answer from the phone came too late and was ignored", via)
         return f"not applied to {tid}: not the current review", None
@@ -844,7 +861,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
             tickets.note_history(root, tid, by, "A review answer from the phone was not used: " + str(e)[:120], via)
         return f"not applied to {tid}: {e}", None
     except BaseException:
-        phone_view.reopen_review(root, tid, n)
+        phone_view.reopen_review(root, tid, n, mid)
         raise
 
 
