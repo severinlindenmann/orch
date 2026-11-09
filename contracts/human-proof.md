@@ -28,10 +28,19 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 2. **Who holds it.** Only the page servers a person starts (Focus, dashboard) read it, at start, into memory. They refuse
    to start when an agent tool is in their environment, and they never pass it to a child (agent runs, add-on commands
    get a cleaned environment as today).
-3. **Page session.** On the first page load the server sets a random session cookie (`HttpOnly; SameSite=Strict; Path=/`,
-   new on every server start) and the page gets nothing else secret. A click is a POST with Origin + Host checked (as
-   today) and the cookie; a remote browser (through the relay or any non-loopback address) never gets a typing or settings
-   proof: it is watch-only.
+3. **Page session.** The session cookie is bootstrapped only from a **one-time launch token**: when a person starts or
+   opens the page (`orch start`, the dashboard's Open button, the CLI hand-off below), the core writes a random token to
+   `<trusted orch home>/keys/<ws>/launch-<server>.token` (0600, single use, 120 s) and opens the browser at
+   `http://127.0.0.1:<port>/#launch=<token>` (a URL fragment, never sent in a request line or logged). The page posts it
+   once to `/session`; the server compares it with the file, deletes the file, and sets the cookie (`HttpOnly;
+   SameSite=Strict; Path=/`, new on every server start). A first GET without a token gets a read-only page and no cookie.
+   **Mint routes exist only on the loopback listener**; every request, GET included, must carry `Host: 127.0.0.1:<port>` or
+   `localhost:<port>`; any `X-Forwarded-*` or `Forwarded` header, or a request that arrived through a remote-access path
+   (relay or any proxy, even when the peer is 127.0.0.1), never gets a proof: it is watch-only. Origin is checked on POST as today.
+   **Servers that may hold the key:** only the orch-shipped page servers of the Focus and dashboard add-ons
+   (`workspace-addons/focus`, `workspace-addons/dashboard`, installed from orch's own source; the core checks the installed
+   manifest hash against the shipped one before it writes a launch token for them). A local or marketplace add-on never gets a
+   launch token. (The key file itself is protected only by Level 1, below.)
 4. **Mint.** For a human-only click the server builds `payload = {op, target, by, iat, exp, nonce}` (`$defs/payload`):
    `op` from the fixed table below, `target` the exact ticket / run / setting / key / connection / proposal, `by` =
    `human:<user>` of the OS account the server runs as, `exp − iat ≤ 60 s`, `nonce` 16 random bytes. Proof =
@@ -61,23 +70,69 @@ keyed by the workspace's real path like `permissions.json` (`$defs/settings_reco
 So an agent that edits `session_typing = true` changes nothing, and once a person switched `share_counts` or `live_session`
 off, an agent editing the file back to on changes nothing either. Reference `hp_settle`, vectors `settle`.
 
-## Human-only actions in the draft-02 contracts
+## Phone actions (verdict, answer from the phone)
 
-| op | Command / click | target | How it is proven |
-|---|---|---|---|
-| `run.takeover` | `orch run type <ticket> --takeover` (Session tab: Type in the session) | ticket | proof (local page only) |
-| `run.type` | keys on the same stdin after a valid `run.takeover` proof | ticket | the same proof + holding the lock |
-| `run.release` | `orch run type <ticket> --release` (Hand back) | ticket | proof; auto release needs none |
-| `focus.settings` | Settings > Add-ons > Focus: turn `live_session` / `session_typing` **on** | setting name | proof + settings record; off needs none |
-| `insights.settings` | Insights > Settings: `share_names` on, `share_counts` on again, `keep_days` / `max_mb` | setting name | proof + settings record; less sharing needs none |
-| `record.delete_detail` | `orch record delete-detail <ticket>` (ticket page) | ticket | proof |
-| `secret.add`, `secret.remove`, `secret.profile` | key store and profile changes, incl. `allow_get = true` | key or profile name | proof (+ settings record for `allow_get`) |
-| `conn.allow` | `orch conn allow <name> …` (Allow in Used tab / Insights) | connection name | proof |
-| `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons (proposal.md) | proposal id | proof |
-| relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network only, relay-api.md); never a workspace token |
+No proof is minted and the person sees no extra step. The proof is the relay channel itself: the workspace applies a phone
+verdict or answer only (1) from a message it fetched from the relay **in the same process** over TLS with its workspace token
+(`GET /v1/inbox`), never from a file read back from `.orch/inbox/` (agents can write there; saved files are for display and
+replay of non-human messages only), (2) when `from` is a `ph_` id in the `phones` list of its last refresh (the relay builds
+phone messages itself and checks sender = caller, so no workspace or agent can post as a phone), and (3) when `reply_to` names a
+question this workspace sent (relay.py `_answer_asked`, `_apply_review_answer`). `by` is `human:<phone>` from that channel,
+never from the body's own label (as relay.py `_answer_by` does today).
+
+## Dev mode: the test human persona (demo workspaces only)
+
+e2e drives owner-only steps in demo workspaces with a scripted test human. Its proofs carry `"dev": true` in the payload and
+are signed with a separate **dev key** (`<trusted orch home>/keys/<ws>/dev-human.key`), which the core creates only for a
+workspace whose real path is listed as dev in the host state dir (`<state dir>/orch/dev-workspaces.json`; the state dir is
+honoured only when pinned at install, like `ORCH_HOME`). The verifier: a `dev: true` proof on a workspace that is not marked dev
+→ refused (`dev_on_real`), whatever key signed it; on a dev workspace it must verify with the dev key. A real workspace never
+has a dev key, and `by` of a dev proof is always `human:test-human` (vectors `verify` "dev proof on a real workspace",
+"dev proof on a dev workspace").
+
+## A person in their own terminal
+
+A human-only command run without a proof is refused with a **hand-off to the dashboard**: the CLI opens the local page at
+that action (with a fresh launch token, step 3) and prints "Opened the dashboard: click <button> to finish." The person
+clicks; no typed confirm words (owner rule). A confirmation on `/dev/tty` is not used: a live agent runs in its own tmux pane
+with a terminal too, so a tty proves nothing. What Level 1 promises: an agent cannot finish a human-only action with flags,
+environment, a tty or a forged file; it can open the page but needs the launch token, which lives in the key folder.
+
+## Human-only actions (every op that trusts person detection or env today)
+
+Minted by: **page** = the local Focus or dashboard page (proof on stdin, steps 3–6); **phone** = the relay channel (above);
+**terminal** = the CLI hand-off to the page. Vector class: every op is covered by the same `verify` vectors (forged
+flags, missing, expired, other target, other op, replay, other key, tampered, untrusted home, dev on real); the op-specific
+rows add a named case.
+
+| op | Command / click | target | Minted by | Named vector |
+|---|---|---|---|---|
+| `run.takeover`, `run.type`, `run.release` | Session tab: Type in the session / Hand back (keys follow the proof on stdin) | ticket | page | screen `takeover` |
+| `focus.settings` | Settings > Add-ons > Focus: `live_session` / `session_typing` on | setting | page | `settle` |
+| `insights.settings` | Insights > Settings: `share_names`, `share_counts` on, `keep_days`, `max_mb` | setting | page | `settle` |
+| `record.delete_detail` | Delete detail for this ticket | ticket | page, terminal | `verify` delete detail |
+| `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get` | key / profile | page, terminal | `verify` key profile, `settle` allow_get |
+| `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
+| `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<change_sha256>` / id | page | proposal `steps` |
+| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review | ticket | page, phone | `verify` ticket verdict |
+| `ticket.answer` | answering a Needs-you question | `<ticket>:<question>` | page, phone | `verify` ticket answer |
+| `relay.connect` | `orch relay connect`, changing the relay address | relay host | page, terminal | `verify` relay connect |
+| `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` | page, terminal | `verify` private allow |
+| `private.move` | `orch private move` | name | page, terminal | – (same class) |
+| `config.agent_add` | `orch config agent add` by a person (an agent's entry needs a person's OK) | agent name | page, terminal | – |
+| `check.wont_do`, `check.wont_do_undo` | `orch check wont-do <id> <c> [--reason]` and undo | `<ticket>:<check>` | page, terminal | – |
+| `chat.make_ticket` | `orch chat make-ticket <id>` | chat id | page, terminal | – |
+| `chat.send`, `chat.sync`, `chat.contacts`, `chat.thread_sync` | `orch chat send/sync/contacts`, `thread --sync`; dashboard `chat.send_ws`, `chat.sync_ws` | chat / workspace | page, terminal | – |
+| `update` | `orch update` | – (target `orch`) | page, terminal | – |
+| `run.stop` | Focus Stop / Stop all (today `by=focus`) | ticket or `all` | page | – (an agent may still stop its own run, `ORCH_RUN` = that run) |
+| relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network), never a workspace token | – |
+
+The rows from `ticket.verdict` down exist in v2 today and still trust `--by human:` / person detection: making them check a
+proof is **W2b slice 1.0a** (tracked follow-up); this contract is its spec.
 
 ## Honest limit (Level 1, owner decision R1)
 
 An agent runs as the same OS user. One that deliberately reads `human.key` despite the deny rules can mint proofs, the same
 way it could read keys. H1 removes the trivial paths (flags, env, workspace files, argv, a forged click from another
-origin); it is not a wall against a hostile agent. No OS sandbox is planned.
+origin); it is not a wall against a hostile agent. An agent that scripts HTTP against the local page (reading the launch
+token from the key folder, or racing the person for it) can get proofs the same way. No OS sandbox is planned.

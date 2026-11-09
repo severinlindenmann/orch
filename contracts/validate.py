@@ -1001,14 +1001,22 @@ def hp_verify(c):
     parts = proof.split(".")
     if len(parts) != 3 or parts[0] != "hp1":
         return "forged"
-    want = _b64u(hmac.new(bytes.fromhex(c["key"]), f"hp1.{parts[1]}".encode(), hashlib.sha256).digest())
-    if not hmac.compare_digest(want, parts[2]):
-        return "forged"
     try:
         p = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
     except ValueError:
         return "forged"
-    if _msgs(_w("human-proof", "payload"), p):
+    if not isinstance(p, dict) or _msgs(_w("human-proof", "payload"), p):
+        return "forged"
+    if p.get("dev"):  # test-human proof: only on a dev workspace, only with its dev key, only as human:test-human
+        if not c.get("workspace_dev"):
+            return "dev_on_real"
+        key = c.get("dev_key")
+        if not key or p["by"] != "human:test-human":
+            return "forged"
+    else:
+        key = c["key"]
+    want = _b64u(hmac.new(bytes.fromhex(key), f"hp1.{parts[1]}".encode(), hashlib.sha256).digest())
+    if not hmac.compare_digest(want, parts[2]):
         return "forged"
     if c.get("by_flag") is not None and c["by_flag"] != p["by"]:
         return "forged"
@@ -1050,6 +1058,14 @@ def kind_human():
     vec = _vec("human-proof-v1.json")
     for c in vec["verify"]:
         _expect(f"human verify {c['name']}", hp_verify(c), c["result"])
+    for c in vec["concurrent"]:  # one nonce store under the key lock: the first call wins, the second is a replay
+        used, got = [], []
+        for call in c["calls"]:
+            r = hp_verify({**call, "used_nonces": list(used)})
+            if r == "ok":
+                used.append(json.loads(base64.urlsafe_b64decode(call["proof"].split(".")[1] + "=="))["nonce"])
+            got.append(r)
+        _expect(f"human concurrent {c['name']}", got, c["results"])
     for c in vec["settle"]:
         _expect(f"human settle {c['name']}", hp_settle(c), c["effective"])
     if set(SETTING_DEFAULTS) != set(json.loads((HERE / "vectors" / "human-proof-v1.json").read_text())["settings"]):

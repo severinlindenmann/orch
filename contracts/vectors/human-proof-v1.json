@@ -256,6 +256,124 @@
    "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
    "result": "forged",
    "home_trusted": false
+  },
+  {
+   "name": "ticket verdict: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "ticket.verdict",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJ0aWNrZXQudmVyZGljdCIsInRhcmdldCI6InRfaW52N2MyIn0.2YUXdT7JNQW-oxteS1AxTOEKnZrQAuj01Ca4Hef7Fn0",
+   "result": "ok"
+  },
+  {
+   "name": "ticket answer: proof for another question",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "ticket.answer",
+   "target": "t_inv7c2:q2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJ0aWNrZXQuYW5zd2VyIiwidGFyZ2V0IjoidF9pbnY3YzI6cTEifQ.NJWxah12CKrdo--kKRWZSTQWqljVK70LWGDLXMUCHos",
+   "result": "wrong_target"
+  },
+  {
+   "name": "relay connect: forged flags only",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "relay.connect",
+   "target": "relay.example.com",
+   "now": 1794300010,
+   "by_flag": "human:severin",
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "private allow: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "private.allow",
+   "target": "deploy:abc123",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJwcml2YXRlLmFsbG93IiwidGFyZ2V0IjoiZGVwbG95OmFiYzEyMyJ9.JwyRFZDQHo3qLrh_p-lFCtcjuUNol8jh4emrABllobo",
+   "result": "ok"
+  },
+  {
+   "name": "dev proof on a real workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "workspace_dev": false,
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "result": "dev_on_real"
+  },
+  {
+   "name": "dev proof on a dev workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "workspace_dev": true,
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.T9D1dfa75ouKMmvRyTjtciv2vEKBLM2yXt_XlM2muUs",
+   "result": "ok"
+  },
+  {
+   "name": "dev proof signed with the human key",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "workspace_dev": true,
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnRlc3QtaHVtYW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.S5quaxL9P1dTVDNhk0hoTol-qJ3AG3-jFseuPQaU_4k",
+   "result": "forged"
+  },
+  {
+   "name": "dev proof as another person",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "workspace_dev": true,
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJkZXYiOnRydWUsImV4cCI6MTc5NDMwMDA2MCwiaWF0IjoxNzk0MzAwMDAwLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJvcCI6InJ1bi50YWtlb3ZlciIsInRhcmdldCI6InRfaW52N2MyIn0.cjV-_yZq2oPawrErI5lOvgdB56JypP6MEX48-3nHbH8",
+   "result": "forged"
+  },
+  {
+   "name": "normal proof on a dev workspace",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "workspace_dev": true,
+   "dev_key": "3333333333333333333333333333333333333333333333333333333333333333",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "ok"
   }
  ],
  "settings": [
@@ -444,6 +562,37 @@
    ],
    "effective": [
     false
+   ]
+  }
+ ],
+ "concurrent": [
+  {
+   "name": "two calls with the same nonce",
+   "calls": [
+    {
+     "key": "0000000000000000000000000000000011111111111111111111111111111111",
+     "op": "run.takeover",
+     "target": "t_inv7c2",
+     "now": 1794300010,
+     "by_flag": null,
+     "agent_env": false,
+     "used_nonces": [],
+     "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do"
+    },
+    {
+     "key": "0000000000000000000000000000000011111111111111111111111111111111",
+     "op": "run.takeover",
+     "target": "t_inv7c2",
+     "now": 1794300010,
+     "by_flag": null,
+     "agent_env": false,
+     "used_nonces": [],
+     "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do"
+    }
+   ],
+   "results": [
+    "ok",
+    "replayed"
    ]
   }
  ]

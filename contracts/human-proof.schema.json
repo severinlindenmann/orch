@@ -4,7 +4,7 @@
   "title": "orch human proof v1 (hp1): proof that a person clicked on the local page (invariant H1)",
   "description": "See human-proof.md. The proof string is hp1.<base64url payload>.<base64url HMAC-SHA256>, passed as the first stdin line with --proof-stdin.",
   "$defs": {
-    "op": { "enum": ["run.takeover", "run.type", "run.release", "focus.settings", "insights.settings", "record.delete_detail", "secret.add", "secret.remove", "secret.profile", "conn.allow", "checkup.accept", "checkup.rollback", "checkup.send_to_admin", "checkup.reject"] },
+    "op": { "enum": ["run.takeover", "run.type", "run.release", "focus.settings", "insights.settings", "record.delete_detail", "secret.add", "secret.remove", "secret.profile", "conn.allow", "checkup.accept", "checkup.rollback", "checkup.send_to_admin", "checkup.reject", "ticket.verdict", "ticket.answer", "relay.connect", "private.allow", "private.move", "config.agent_add", "check.wont_do", "check.wont_do_undo", "chat.make_ticket", "chat.send", "chat.sync", "chat.contacts", "chat.thread_sync", "update", "run.stop"] },
     "payload": {
       "type": "object", "required": ["op", "target", "by", "iat", "exp", "nonce"], "additionalProperties": false,
       "properties": {
@@ -13,7 +13,8 @@
         "by": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$" },
         "iat": { "type": "integer", "minimum": 0, "description": "Unix seconds." },
         "exp": { "type": "integer", "minimum": 0, "description": "Unix seconds, at most iat + 60." },
-        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$", "description": "16 random bytes, base64url." }
+        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$", "description": "16 random bytes, base64url." },
+        "dev": { "const": true, "description": "Test-human proof (dev mode): valid only on a workspace marked dev, signed with its dev key; by is human:test-human." }
       }
     },
     "settings_record": {
