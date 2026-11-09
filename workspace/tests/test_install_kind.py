@@ -114,13 +114,12 @@ def test_dev_and_test_installs_honour_repo_and_ref(tmp_path, monkeypatch, kind):
     assert addons.ignored_source_note() is None
 
 
-def test_update_with_proof_honours_them_on_a_normal_install(tmp_path, monkeypatch):
+def test_normal_install_never_honours_repo_and_ref_not_even_inside_an_update(monkeypatch):
     monkeypatch.setattr(hp, "install_kind", lambda: "normal")
     monkeypatch.setenv("ORCH_REF", "v2")
-    assert addons.ref() != "v2"
-    with addons.trusted_env_source():
-        assert addons.ref() == "v2"
-    assert addons.ref() != "v2"
+    monkeypatch.setenv("ORCH_REPO", "/tmp/x")
+    assert addons.ref() != "v2" and addons.repo() == addons.DEFAULT_REPO
+    assert not hasattr(addons, "trusted_env_source") and not hasattr(addons, "_ENV_SOURCE_PROVEN")
 
 
 def test_addon_add_says_so_on_a_normal_install(proj, monkeypatch, capsys):
@@ -379,3 +378,61 @@ def test_same_content_same_hash_and_build_output_ignored(tws, tmp_path):
     assert addons.prepare_local_add(tws, f)["hash"] == a
     (f / "pyproject.toml").write_text("changed = 1")
     assert addons.prepare_local_add(tws, f)["hash"] != a
+
+
+# ---------------------------------------------------------------- simulated Windows (profile folder, case, reparse)
+
+
+@pytest.fixture
+def win(monkeypatch):
+    monkeypatch.setattr(hp, "_is_windows", lambda: True)
+    monkeypatch.setattr(os.path, "realpath", lambda p: str(p))  # the simulated paths are already real
+
+
+PROFILE = "C:\\Users\\Pat"
+
+
+def test_windows_prefix_is_case_insensitive_and_component_wise(win):
+    ok = hp.home_ok
+    ws = PROFILE + "\\.orch-test\\e2e\\ws"
+    home = PROFILE + "\\.orch-test\\e2e\\.orch-tool"
+    assert ok(PROFILE, "test", True, ws, home)
+    assert ok(PROFILE, "dev", True, ws.upper(), home.lower())  # NTFS ignores case
+    assert ok(PROFILE.lower(), "test", True, ws, home)
+    assert not ok(PROFILE, "test", True, PROFILE + "\\.orch-testX\\ws", PROFILE + "\\.orch-testX\\h")
+    assert not ok(PROFILE, "normal", True, ws, home)  # no test path on a normal install
+    assert not ok(PROFILE, "test", False, ws, home)  # prefix is a link / reparse point
+    assert ok(PROFILE, "normal", True, "D:\\work\\acme", PROFILE + "\\.ORCH-TOOL")  # default home
+    assert not ok(PROFILE, "test", True, "D:\\work\\acme", PROFILE + "\\.orch-test\\evil\\h")
+
+
+def test_windows_forward_slashes_compare_like_backslashes(win):
+    assert hp._under("C:/Users/Pat/.orch-test/x", PROFILE + "\\.orch-test")
+    assert not hp._under("C:\\Users\\Pat\\.orch-test", PROFILE + "\\.orch-test")  # the prefix itself
+
+
+class _St:
+    def __init__(self, attrs=0, mode=0o40700):
+        self.st_mode, self.st_file_attributes = mode, attrs
+
+
+def test_windows_reparse_point_is_no_test_prefix(win, monkeypatch):
+    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
+    assert hp._prefix_is_real_dir(Path(PROFILE))
+    monkeypatch.setattr(hp, "_lstat", lambda p: _St(hp.REPARSE))  # a junction or symlink
+    assert not hp._prefix_is_real_dir(Path(PROFILE))
+    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0, 0o100600))  # a file
+    assert not hp._prefix_is_real_dir(Path(PROFILE))
+
+
+def test_windows_is_test_workspace(win, monkeypatch):
+    monkeypatch.setattr(hp, "account_home", lambda: Path(PROFILE))
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
+    assert hp.is_test_workspace(Path(PROFILE + "\\.ORCH-TEST\\testnet\\ws"))
+    assert not hp.is_test_workspace(Path(PROFILE + "\\Documents\\ws"))
+    monkeypatch.setattr(hp, "_lstat", lambda p: _St(hp.REPARSE))
+    assert not hp.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))
+    monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
+    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
+    assert not hp.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))  # test installs only
