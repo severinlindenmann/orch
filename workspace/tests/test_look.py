@@ -66,8 +66,9 @@ def test_unwritable_home_is_a_skippable_refusal_not_a_traceback(ws, monkeypatch)
         raise PermissionError(1, "Operation not permitted")
 
     monkeypatch.setattr(net, "write_json", deny)
-    with pytest.raises(Refused, match="optional: skip it"):
+    with pytest.raises(Refused, match="optional: skip it") as e:
         look.set_look(ws, icon="bank", by="agent:codex", push=False)
+    assert str(ws) not in str(e.value) and "Operation not permitted" not in str(e.value)
 
 
 def test_agent_in_environment_counts_as_agent(ws, run, monkeypatch):

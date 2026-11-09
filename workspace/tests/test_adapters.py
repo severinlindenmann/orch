@@ -195,8 +195,69 @@ def test_no_codex_argv_widens_the_sandbox():
                 assert bad not in text, (kind, perm, bad)
             assert (
                 argv.count("-c") == 2 and 'sandbox_mode="workspace-write"' in argv
-            )  # workspace only: no extra roots
+            )  # orch adds no root of its own (the person's own writable_roots/network settings still apply)
             assert argv[argv.index("--") - 1] == 'approval_policy="never"'  # nothing after it but the prompt
+
+
+@pytest.fixture
+def codex_home(proj, tmp_path_factory, monkeypatch):  # after proj: it clears CODEX_*
+    d = tmp_path_factory.mktemp("codexhome")
+    monkeypatch.setenv("CODEX_HOME", str(d))
+    return d
+
+
+def test_flag_like_prompt_stays_after_the_separator(codex_home):
+    for prompt in (
+        "-c",
+        "--",
+        "-c sandbox_mode=danger-full-access",
+        "--dangerously-bypass-approvals-and-sandbox",
+    ):
+        argv = adapters.render("codex", "fresh", "oneshot", {"prompt": prompt, "permissions": "auto"})
+        assert argv[-2:] == ["--", prompt] and argv[:-2].count("-c") == 2 and argv.count("--") >= 1
+
+
+@pytest.mark.parametrize(
+    "toml, stricter",
+    [
+        ('sandbox_mode = "read-only"\n', True),
+        ('sandbox_mode = "workspace-write"\n', False),
+        ('sandbox_mode = "danger-full-access"\n', False),  # capped to workspace-write
+        ("this is [not toml", False),
+        ("", False),
+        ('profile = "p"\nsandbox_mode = "workspace-write"\n[profiles.p]\nsandbox_mode = "read-only"\n', True),
+        (
+            'profile = "p"\nsandbox_mode = "read-only"\n[profiles.p]\nsandbox_mode = "workspace-write"\n',
+            False,
+        ),
+    ],
+)
+def test_a_stricter_personal_codex_setting_is_not_lifted(codex_home, proj, toml, stricter):
+    (codex_home / "config.toml").write_text(toml)
+    for perm in ("ask", "auto", "full"):
+        got = adapters.permission_args("codex", proj, perm)
+        assert got == ([] if stricter else SANDBOX), (toml, perm)
+    note = adapters.permission_note("codex", proj, "auto")
+    assert (note == "Codex is set to read-only on this computer: it can't change files.") is stricter
+
+
+def test_missing_codex_config_gets_the_sandbox(codex_home, proj):
+    assert (
+        adapters.permission_args("codex", proj, "ask") == SANDBOX
+        and adapters.permission_note("codex", proj) is None
+    )
+
+
+def test_codex_refuses_to_start_where_orch_home_is_inside(proj, monkeypatch, tmp_path_factory):
+    monkeypatch.setenv("ORCH_HOME", str(proj / "oh"))
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    with pytest.raises(Refused, match="Start it from a smaller folder") as e:
+        adapters.check_start_folder("codex", proj)
+    assert str(proj) not in str(e.value)
+    monkeypatch.setattr("orch.addons.home", lambda root=None: tmp_path_factory.mktemp("elsewhere"))
+    adapters.check_start_folder("codex", proj)  # outside: fine
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    adapters.check_start_folder("claude", proj)  # only tools kept to their folder are checked
 
 
 def test_agents_without_a_mapping_ignore_the_mode(proj):

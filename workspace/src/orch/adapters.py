@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -207,8 +208,9 @@ def _help_text(binary: str) -> str:
 def permission_args(name: str, root: Path | None = None, mode: str | None = None) -> list[str]:
     """The tool's flags for the workspace's permission mode (ask | auto | full), from the adapter's
     `permissions`. An agent without that data (a generic command) gets none: it ignores the mode.
-    Codex maps every mode to its workspace-write sandbox (exec cannot ask, and is never given more).
-    An entry may depend on the installed tool: `if_help_has` (text in its --help), else `else`."""
+    Codex maps every mode to workspace-write (exec cannot ask): ask/auto/full never widen it beyond that, and a
+    stricter personal setting (read-only in its config) is left alone (no flags).
+    An entry may depend on the installed tool: `if_help_has` (its --help text), else `else`."""
     a = load(name, root)
     table = a.get("permissions")
     if not table:
@@ -218,11 +220,66 @@ def permission_args(name: str, root: Path | None = None, mode: str | None = None
         return []
     if isinstance(entry, list):
         return list(entry)
+    if _person_is_stricter(entry.get("unless_config")):
+        return []  # never lift a stricter personal setting
+    if "if_help_has" not in entry:
+        return list(entry["args"])
     binary = (a.get("detect") or {}).get("binary")
     path = shutil.which(binary) if binary else None
-    if path and entry.get("if_help_has") in _help_text(path):
+    if path and entry["if_help_has"] in _help_text(path):
         return list(entry["args"])
     return list(entry.get("else") or [])
+
+
+def _person_is_stricter(rule) -> bool:
+    """True when the person's own tool config (TOML; CODEX_HOME or ~/.codex, and the active profile) sets
+    rule["key"] to rule["value"]. A missing or malformed file counts as not set."""
+    if not rule:
+        return False
+    base = Path(os.environ.get(rule.get("home_env") or "") or Path.home() / rule["home"])
+    try:
+        doc = tomllib.loads((base / rule["file"]).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    tables = [doc]
+    prof = doc.get(rule.get("profile_key") or "")
+    sub = (doc.get(rule.get("profiles") or "") or {}).get(prof) if isinstance(prof, str) else None
+    if isinstance(sub, dict):
+        tables.insert(0, sub)  # the profile wins over the top level
+    for t in tables:
+        if rule["key"] in t:
+            return t[rule["key"]] == rule["value"]
+    return False
+
+
+def permission_note(name: str, root: Path | None = None, mode: str | None = None) -> str | None:
+    """One line for the run start when the person's own setting keeps the tool stricter than orch's mode."""
+    table = load(name, root).get("permissions") or {}
+    entry = table.get(mode or config.permissions(root))
+    if isinstance(entry, dict) and entry.get("say") and _person_is_stricter(entry.get("unless_config")):
+        return entry["say"]
+    return None
+
+
+def check_start_folder(name: str, root: Path) -> None:
+    """A tool kept to its start folder (permissions entry `confine_home`) must not start where ORCH_HOME is
+    inside that folder: it could then write permissions.json, add-ons and the human-choice markers."""
+    table = load(name, root).get("permissions") or {}
+    entry = table.get(config.permissions(root))
+    if not (isinstance(entry, dict) and entry.get("confine_home")) or permission_args(name, root) == []:
+        return
+    from orch import addons
+
+    try:
+        h = addons.home(root).resolve()
+    except Refused:
+        return
+    r = root.resolve()
+    if h == r or r in h.parents:
+        raise Refused(
+            f"{load(name, root)['label']} could write orch's own settings if it started here "
+            "(orch's folder is inside this one). Start it from a smaller folder. Nothing was started."
+        )
 
 
 def permission_line(root: Path) -> str:

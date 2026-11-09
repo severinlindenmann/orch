@@ -831,6 +831,7 @@ def plan(
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
+    adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
     if sid and adapters.transcript_exists(name, sid, root) is False:
@@ -961,6 +962,9 @@ def start(
     )
     try:
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
+        note = adapters.permission_note(name, root)
+        if note:
+            notes.append(note)
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)

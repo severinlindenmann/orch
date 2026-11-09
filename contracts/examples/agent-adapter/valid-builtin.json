@@ -57,9 +57,9 @@
       },
       "live": null,
       "permissions": {
-        "ask": ["-c", "sandbox_mode=\"workspace-write\"", "-c", "approval_policy=\"never\""],
-        "auto": ["-c", "sandbox_mode=\"workspace-write\"", "-c", "approval_policy=\"never\""],
-        "full": ["-c", "sandbox_mode=\"workspace-write\"", "-c", "approval_policy=\"never\""]
+        "ask": { "args": ["-c", "sandbox_mode=\"workspace-write\"", "-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "profile_key": "profile", "profiles": "profiles" }, "confine_home": true, "say": "Codex is set to read-only on this computer: it can't change files." },
+        "auto": { "args": ["-c", "sandbox_mode=\"workspace-write\"", "-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "profile_key": "profile", "profiles": "profiles" }, "confine_home": true, "say": "Codex is set to read-only on this computer: it can't change files." },
+        "full": { "args": ["-c", "sandbox_mode=\"workspace-write\"", "-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "profile_key": "profile", "profiles": "profiles" }, "confine_home": true, "say": "Codex is set to read-only on this computer: it can't change files." }
       },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id" },

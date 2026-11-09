@@ -135,6 +135,24 @@
                   "else": { "type": "array", "items": { "$ref": "#/$defs/arg" } }
                 }
               }
+              ,{
+                "type": "object", "required": ["args"], "additionalProperties": false,
+                "description": "Flags kept off when the person's own tool config is stricter (unless_config: that TOML file, key and value, optionally via the active profile; then no flags and the run start says `say`), and with confine_home the tool is refused a start folder that contains the orch home.",
+                "properties": {
+                  "args": { "type": "array", "items": { "$ref": "#/$defs/arg" } },
+                  "unless_config": {
+                    "type": "object", "additionalProperties": false, "required": ["home", "file", "key", "value"],
+                    "properties": {
+                      "home_env": { "type": "string", "maxLength": 64 }, "home": { "type": "string", "maxLength": 100 },
+                      "file": { "type": "string", "maxLength": 100 }, "key": { "type": "string", "maxLength": 100 },
+                      "value": { "type": "string", "maxLength": 100 }, "profile_key": { "type": "string", "maxLength": 100 },
+                      "profiles": { "type": "string", "maxLength": 100 }
+                    }
+                  },
+                  "confine_home": { "type": "boolean" },
+                  "say": { "type": "string", "minLength": 1, "maxLength": 200 }
+                }
+              }
             ]
           }
         },
