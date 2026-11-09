@@ -113,23 +113,39 @@ def trusted_env_source():
         _ENV_SOURCE_PROVEN = prev
 
 
-_LOCAL_ADD_PROVEN = False
+_LOCAL_ADD_PROVEN: str | None = None  # the content hash a person allowed (op addon.add_local), while inside
 
 
 @contextlib.contextmanager
-def trusted_local_add():
-    """Inside the person's hand-off (op `addon.add_local`, proof verified): a folder add-on may be added."""
+def trusted_local_add(content_hash: str):
+    """Inside the person's hand-off (op `addon.add_local`, proof verified for THIS content hash): the folder
+    add installs from the snapshot with that hash, never from the live folder."""
     global _LOCAL_ADD_PROVEN
-    prev, _LOCAL_ADD_PROVEN = _LOCAL_ADD_PROVEN, True
+    prev, _LOCAL_ADD_PROVEN = _LOCAL_ADD_PROVEN, content_hash
     try:
         yield
     finally:
         _LOCAL_ADD_PROVEN = prev
 
 
-def local_add_target(folder: Path) -> str:
-    """The proof target of `addon.add_local`: sha256 of the folder's real path (the card shows the path)."""
-    return hashlib.sha256(str(Path(folder).expanduser().resolve()).encode()).hexdigest()[:32]
+def prepare_local_add(root: Path, folder: Path) -> dict:
+    """Request time: snapshot the folder into the guarded home. Returns {hash, short, path, snapshot}; the
+    hand-off card shows `path` and `short`, the proof's target is `hash` (local_add_target)."""
+    from orch import addonsnap
+
+    return addonsnap.snapshot(root, Path(folder).expanduser())
+
+
+def local_add_target(root: Path, folder: Path) -> str:
+    """The proof target of `addon.add_local`: the content hash of the folder's snapshot."""
+    return prepare_local_add(root, folder)["hash"]
+
+
+def _entry_snapshot_ok(e: dict) -> bool:
+    from orch import addonsnap
+
+    h = e.get("hash")
+    return isinstance(h, str) and addonsnap.verify(Path(e["source"]), h)
 
 
 def _local_add_ok() -> bool:
@@ -137,7 +153,7 @@ def _local_add_ok() -> bool:
     only a dev or test install, or a person's hand-off, may put it there."""
     from orch import humanproof
 
-    return _LOCAL_ADD_PROVEN or humanproof.install_kind() in ("dev", "test")
+    return _LOCAL_ADD_PROVEN is not None or humanproof.install_kind() in ("dev", "test")
 
 
 def _env_source_ok() -> bool:
@@ -401,7 +417,11 @@ def _missing_source(e: dict) -> str | None:
     if e["source"] == "built-in":
         local = _is_local(repo()) and not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
         return "it no longer ships with orch" if local else None
-    if not (e.get("approved") is True or _local_add_ok()):
+    if e.get("hash") is not None or e.get("approved") is True:  # a person's allowed snapshot: still the same?
+        if not _entry_snapshot_ok(e):
+            return f"it changed since you allowed it ({e['name']})"
+        return None
+    if not _local_add_ok():
         return "it comes from a folder, and only you can allow that (in the dashboard on this computer)"
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
 
@@ -1301,14 +1321,24 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 "An add-on from a folder runs inside orch itself, so only you can allow it: "
                 "do it in the dashboard on this computer."
             )
+        origin = None
+        if _LOCAL_ADD_PROVEN is not None:  # a person's hand-off: install from the snapshot they allowed
+            from orch import addonsnap
+
+            snap = prepare_local_add(root, folder)
+            if snap["hash"] != _LOCAL_ADD_PROVEN:
+                raise Refused("This add-on changed since you allowed it. Ask for it again.")
+            if not addonsnap.verify(Path(snap["snapshot"]), snap["hash"]):
+                raise Refused("The saved copy of this add-on was changed. Ask for it again.")
+            origin, folder = folder, Path(snap["snapshot"])
         if not (folder / "pyproject.toml").is_file():
             raise Refused(f"{folder} is not an add-on folder (no pyproject.toml).")
         m = folder_manifest(folder)
         _check_requires(root, m)
         _confirm(m, True, yes)
         entry = {"name": m["name"], "source": str(folder), "version": m["version"]}
-        if _LOCAL_ADD_PROVEN:  # a person's hand-off on a normal install: later reinstalls keep it
-            entry["approved"] = True
+        if origin is not None:  # bound to the snapshot's content hash: later reinstalls re-check it
+            entry.update({"approved": True, "hash": _LOCAL_ADD_PROVEN, "folder": str(origin)})
     else:
         name = source
         if not NAME_RE.match(name) or name in RESERVED:
