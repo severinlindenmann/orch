@@ -441,14 +441,20 @@ def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
 
 
 def _client_idle(root: Path, tid: str) -> float:
-    """Seconds since ANY client attached to the session last pressed a key (the newest one counts); 0 when
-    unknown or nobody is attached: orch leaves copy mode only for a pane nobody has touched for a while."""
+    """Seconds since ANY client attached to the session last pressed a key (the newest one counts). No client
+    attached at all is idle for good (inf): a pane left scrolled up after the person closed the terminal must
+    be released. 0 (never cancel) only when tmux fails or its answer cannot be read."""
     r = tmux(root, "list-clients", "-t", target(tid), "-F", "#{client_activity}", timeout=QUICK)
+    if r.returncode != 0:
+        return 0.0
+    words = r.stdout.split()
+    if not words:
+        return float("inf")
     try:
-        newest = max(float(x) for x in r.stdout.split())
+        newest = max(float(x) for x in words)
     except ValueError:
         return 0.0
-    return max(0.0, time.time() - newest) if r.returncode == 0 else 0.0
+    return max(0.0, time.time() - newest)
 
 
 def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:
