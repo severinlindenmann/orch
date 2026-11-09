@@ -1,0 +1,306 @@
+{
+ "v": 1,
+ "about": "human-proof.md reference cases (hp_verify, hp_effective in validate.py). The key is a test key; now and iat/exp are unix seconds.",
+ "verify": [
+  {
+   "name": "valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "ok"
+  },
+  {
+   "name": "forged flags, no proof (--by human:x --from local-page)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": "human:x",
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "missing proof",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "expired",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300060,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "expired"
+  },
+  {
+   "name": "not yet valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794299990,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "expired"
+  },
+  {
+   "name": "lifetime over 60 s",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAxMjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.AoTgyjQyMSdbetm34b705GFziwEygqsqQTZgaJCWLX8",
+   "result": "expired"
+  },
+  {
+   "name": "proof for another ticket",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_other99",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "wrong_target"
+  },
+  {
+   "name": "proof for another action",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.release",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "wrong_op"
+  },
+  {
+   "name": "typing proof cannot change settings",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "focus.settings",
+   "target": "focus.session_typing",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "wrong_op"
+  },
+  {
+   "name": "replayed nonce",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [
+    "AAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "replayed"
+  },
+  {
+   "name": "signed with another key",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.GpEuvRCbP0xv8XgSbloGVa3mcqQV3GpDdp01XPhvbTk",
+   "result": "forged"
+  },
+  {
+   "name": "payload changed after signing",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X290aGVyOTkifQ.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged"
+  },
+  {
+   "name": "--by differs from the proof",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": "human:anna",
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged"
+  },
+  {
+   "name": "not hp1",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp0.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "forged"
+  },
+  {
+   "name": "agent tool in the environment",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "run.takeover",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": true,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJydW4udGFrZW92ZXIiLCJ0YXJnZXQiOiJ0X2ludjdjMiJ9.ALaziW4jN9h11RxPVWX_voV3Rru5JhS1r-MJrPQ_0Do",
+   "result": "agent_env"
+  },
+  {
+   "name": "settings: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "focus.settings",
+   "target": "focus.session_typing",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJmb2N1cy5zZXR0aW5ncyIsInRhcmdldCI6ImZvY3VzLnNlc3Npb25fdHlwaW5nIn0.tct4CKh-ZEK7x_eCOQbiS8rFi3Gbwf2OXbqE8QcMgeY",
+   "result": "ok"
+  },
+  {
+   "name": "delete detail: proof for another ticket",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "record.delete_detail",
+   "target": "t_inv7c2",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJyZWNvcmQuZGVsZXRlX2RldGFpbCIsInRhcmdldCI6InRfenp6enp6In0.U0stk-Z4QCjiuqidcctZ8EEYfl9usJ0F1JBelmwaY3c",
+   "result": "wrong_target"
+  },
+  {
+   "name": "conn allow: valid",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "conn.allow",
+   "target": "slack",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJjb25uLmFsbG93IiwidGFyZ2V0Ijoic2xhY2sifQ.0Fb-qHv1zN1K2hMtxWZ5QhxBQHFpA1PMSIRMgNmn4iY",
+   "result": "ok"
+  },
+  {
+   "name": "check-up accept: missing",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "checkup.accept",
+   "target": "pr_7k2m9x4q",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": null,
+   "result": "missing"
+  },
+  {
+   "name": "key profile: expired",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "secret.profile",
+   "target": "ci-deploy",
+   "now": 1794300100,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJzZWNyZXQucHJvZmlsZSIsInRhcmdldCI6ImNpLWRlcGxveSJ9.u6bfFODFp5-VKuZLyB5jA56ay50VGxeEiLWsWebZN94",
+   "result": "expired"
+  }
+ ],
+ "effective": [
+  {
+   "name": "typing on in the file only (agent edit)",
+   "setting": "focus.session_typing",
+   "file": true,
+   "record": null,
+   "effective": false
+  },
+  {
+   "name": "typing on with a record",
+   "setting": "focus.session_typing",
+   "file": true,
+   "record": true,
+   "effective": true
+  },
+  {
+   "name": "typing off in the file wins",
+   "setting": "focus.session_typing",
+   "file": false,
+   "record": true,
+   "effective": false
+  },
+  {
+   "name": "share names on in the file only",
+   "setting": "insights.share_names",
+   "file": true,
+   "record": null,
+   "effective": false
+  },
+  {
+   "name": "share names on with a record",
+   "setting": "insights.share_names",
+   "file": true,
+   "record": true,
+   "effective": true
+  },
+  {
+   "name": "live session default on needs no record",
+   "setting": "focus.live_session",
+   "file": true,
+   "record": null,
+   "effective": true
+  },
+  {
+   "name": "share counts default on needs no record",
+   "setting": "insights.share_counts",
+   "file": true,
+   "record": null,
+   "effective": true
+  },
+  {
+   "name": "share counts off from the file",
+   "setting": "insights.share_counts",
+   "file": false,
+   "record": null,
+   "effective": false
+  }
+ ]
+}

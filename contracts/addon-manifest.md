@@ -150,9 +150,12 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
 | `orch job start\|step\|progress\|artifact\|metric\|table\|link\|log\|end\|run …` | the stored `orch.job/1` event | job-events.md |
 | `orch secret env\|file\|exec\|list\|get …` | child's exit code / page of names | secrets.md |
 | `orch run screen <ticket> --follow --json` | NDJSON `orch.screen/1` stream | screen.md |
-| `orch run type <ticket> --takeover\|--release\|(keys on stdin) --by human:<user> --from local-page --json` | take-over state | screen.md |
+| `orch run type <ticket> --takeover\|--release --proof-stdin --json` (proof, then keys, on stdin) | take-over state | screen.md |
 | `orch conn list\|show\|allow …` | page of connections / one connection | inventory.md |
 
+- **Human-only commands** (take-over, typing, widening settings, delete-detail, key and profile changes, connection
+  grants, check-up decisions) need a proof from the human channel on stdin (`--proof-stdin`, invariant H1,
+  human-proof.md); `--by` is never proof. Add-ons cannot mint one: only the page servers a person started hold the key.
 - **Paged answers.** A list that can grow answers `{"items": [...], "next": "<cursor>" | null}` (`cli-answer.schema.json`
   `page`), newest first, `--limit` 1–500 (default 100), `--after <next>`. The cursor is opaque (letters, digits, `._~-`).
 - **Errors.** Exit 2, stdout `{"error": "<plain words>", "code": "<code>"}` (`cli-answer.schema.json` `error`; `code` is

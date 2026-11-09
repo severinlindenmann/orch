@@ -13,7 +13,9 @@ T0: `… contracts/validate.py screen`.
 
 ## Switches (owner decision 3C)
 
-`.orch/config.toml` `[focus] live_session = true` and `[focus] session_typing = false` for a new workspace. The relay admin
+`.orch/config.toml` `[focus] live_session = true` and `[focus] session_typing = false` for a new workspace. `session_typing = true`
+counts only with a settings record made through a `focus.settings` proof (human-proof.md, Widening settings): an agent editing
+the file cannot turn typing on. The relay admin
 can lock live sessions off for all its workspaces (usage-counts.md, policy `live_session: "locked_off"`). **Off means off:**
 the core refuses `orch run screen` and `orch run type` (exit 2, `code: switched_off` / `locked_by_admin`), not only the tab.
 Turning either switch off during a take-over releases it at once; turning `live_session` off ends open streams
@@ -50,14 +52,16 @@ arrives more than 200 ms apart may show. Known limit (Level 1): a value split by
 
 ## `orch run type <ticket>` (take-over)
 
-A person only, only from the local dashboard (the page served by the Focus add-on to a browser on this computer, checked the
-same way as the other owner-only clicks); the page passes `--by human:<user> --from local-page`. The core refuses agents
-(an agent tool or `ORCH_RUN` in the environment), any other `--from`, and every call while a switch is off.
+A person only, only from the local dashboard, proven by the human channel (invariant H1, human-proof.md): the page server
+mints a proof for `run.takeover` / `run.release` and this ticket and passes it as the first stdin line with `--proof-stdin`.
+The core reads `by` from the proof; `--by` / `--from` flags are never trusted (a different `--by` is refused). A remote
+browser never gets a proof, so it can only watch. The core also refuses when an agent tool is in the environment and while
+a switch is off.
 
 - `--takeover --json` → takes the lock: run record `takeover` = `{by, from, since, last_input_at, expires_at = last_input_at + 120 s, keys}`
   (written under the ticket lock), answer `{"takeover": {...}}`. Held by another person and not expired → `conflict`
   ("Someone else is typing in this session."). The same person again → the lock is refreshed.
-- keys on stdin (`$defs/type_input`, one JSON object per line: `{"text": "…"}` typed literally with `send-keys -l`, or
+- keys on the following stdin lines of the same process (`$defs/type_input`, one JSON object per line: `{"text": "…"}` typed literally with `send-keys -l`, or
   `{"key": "Enter" | "Escape" | "C-c" | …}`): accepted only while this person holds the lock; each line updates
   `last_input_at`, `expires_at` and `keys`. The text is never logged or recorded.
 - `--release --json` → removes the lock, answer `{"takeover": null}`.
@@ -68,5 +72,5 @@ same way as the other owner-only clicks); the page passes `--by human:<user> --f
   `session.input` activity event (activity.md: `by`, `from`, `since`, `ended`, `reason`, `keys`; never the text).
 
 Decisions (reference `scr_takeover` in validate.py, vectors `takeover`): switch off → `switched_off`; admin lock →
-`locked_by_admin`; caller not a person or not `local-page` → `not_allowed`; no live session → `not_available`; held by
-someone else and not expired → `conflict`; else `ok`.
+`locked_by_admin`; proof not valid (missing, forged, expired, other ticket or action, replayed) → `not_allowed`; no live
+session → `not_available`; held by someone else and not expired → `conflict`; else `ok`.

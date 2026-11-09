@@ -774,15 +774,16 @@ def scr_from_control(lines, needles=()):
 
 
 def scr_takeover(c):
+    """c["proof"] = the hp_verify result of the call (human-proof.md); c["proof_by"] = by from the proof. No flag is read."""
     if not c["live_session"] or not c["session_typing"]:
         return "switched_off"
     if c["admin_lock"]:
         return "locked_by_admin"
-    if not str(c["caller"]).startswith("human:") or c["from"] != "local-page":
+    if c["proof"] != "ok":
         return "not_allowed"
     if not c["live"]:
         return "not_available"
-    if c["held_by"] and c["held_by"] != c["caller"] and _t(c["now"]) < _t(c["expires_at"]):
+    if c["held_by"] and c["held_by"] != c["proof_by"] and _t(c["now"]) < _t(c["expires_at"]):
         return "conflict"
     return "ok"
 
@@ -908,6 +909,72 @@ def kind_counts():
         _expect(f"counts idempotent {c['name']}", {"results": results, "days": len(store)}, c["expect"])
 
 
+
+# --- human proof (human-proof.md, invariant H1) ----------------------------------------------------------------------
+HP_MAX_LIFE = 60
+WIDENING = {"focus.session_typing": True, "insights.share_names": True}
+
+
+def _b64u(b):
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+
+def hp_mint(key_hex, payload):
+    body = "hp1." + _b64u(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+    return body + "." + _b64u(hmac.new(bytes.fromhex(key_hex), body.encode(), hashlib.sha256).digest())
+
+
+def hp_verify(c):
+    """Reference check of a human-only call. Flags (--by, --from) and the environment are never trusted."""
+    if c.get("agent_env"):
+        return "agent_env"
+    proof = c.get("proof")
+    if not proof:
+        return "missing"
+    parts = proof.split(".")
+    if len(parts) != 3 or parts[0] != "hp1":
+        return "forged"
+    want = _b64u(hmac.new(bytes.fromhex(c["key"]), f"hp1.{parts[1]}".encode(), hashlib.sha256).digest())
+    if not hmac.compare_digest(want, parts[2]):
+        return "forged"
+    try:
+        p = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except ValueError:
+        return "forged"
+    if _msgs(_w("human-proof", "payload"), p):
+        return "forged"
+    if c.get("by_flag") is not None and c["by_flag"] != p["by"]:
+        return "forged"
+    if p["op"] != c["op"]:
+        return "wrong_op"
+    if p["target"] != c["target"]:
+        return "wrong_target"
+    if p["exp"] - p["iat"] > HP_MAX_LIFE or not p["iat"] <= c["now"] < p["exp"]:
+        return "expired"
+    if p["nonce"] in c.get("used_nonces", []):
+        return "replayed"
+    return "ok"
+
+
+def hp_effective(c):
+    """A widening value counts only with a matching settings record; lowering always works."""
+    file_val = c["file"]
+    if c["setting"] in WIDENING and file_val == WIDENING[c["setting"]]:
+        rec = c.get("record")
+        return file_val if rec is not None and rec == file_val else (not file_val)
+    return file_val
+
+
+def kind_human():
+    vs = _w("human-proof", "settings_record")
+    _examples("human-settings", lambda d: _msgs(vs, d))
+    vec = _vec("human-proof-v1.json")
+    for c in vec["verify"]:
+        _expect(f"human verify {c['name']}", hp_verify(c), c["result"])
+    for c in vec["effective"]:
+        _expect(f"human effective {c['name']}", hp_effective(c), c["effective"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
@@ -918,6 +985,7 @@ KINDS = {
     "addon-manifest": kind_addon_manifest,
     "screen": kind_screen,
     "counts": kind_counts,
+    "human": kind_human,
 }
 
 

@@ -92,7 +92,7 @@ text, output was cut, helpers are not visible). Capability flags per adapter (ag
 3. While the record is over `max_mb`: delete the detail folder of the oldest ended run, then (when no detail is left) the
    oldest ended run file. A running run is never pruned.
 4. Counts are kept until "Delete all records". "Delete detail for this ticket" (`orch record delete-detail <ticket>`, a
-   person only) deletes the detail folders of that ticket's runs and sets nothing else; events then show "details not available".
+   person only: `record.delete_detail` proof, invariant H1) deletes the detail folders of that ticket's runs and sets nothing else; events then show "details not available".
 Vectors `retention` fix the order.
 
 ## Reading: `orch record tail | query | counts | delete-detail`
@@ -109,7 +109,7 @@ Vectors `retention` fix the order.
   → a page `{"items": [event…], "next": "<cursor>" | null}` (cli-answer.schema.json `page`), newest first, limit 1–500
   (default 100). `--detail <id> --run R` → one detail file.
 - `orch record counts --json` → counts.md. `orch record delete-detail <ticket> --json` → `{"deleted": n}` (person only).
-- Refused (exit 2, `{"error", "code"}`) for an agent asking `delete-detail`, for a ticket that does not exist, and when the
+- Refused (exit 2, `{"error", "code"}`) for `delete-detail` without a valid proof (human-proof.md), for a ticket that does not exist, and when the
   record folder is unsafe (symlink).
 
 ## Mapping from a JSON event stream (one-shot collectors)

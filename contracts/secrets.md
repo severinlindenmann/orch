@@ -79,7 +79,8 @@ run = ["pass-cli"]
 A profile maps variables to key names (`env`: the value in the variable; `files`: a temp file path in the variable), may set
 plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false).
 Variables that change how programs load are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*, ORCH_*, …). Profiles are
-made by a person (dashboard, or `orch secret profile`); an agent may not change them.
+made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
+only with a matching settings record (human-proof.md, Widening settings), so editing the file alone does not enable `get`.
 
 ## Commands
 
@@ -93,7 +94,8 @@ All take `--json` and follow the CLI contract (cli-answer.schema.json). The chil
 | `orch secret list [--json]` | Names, types, sources, profiles, state, last use: `$defs/list_answer`. Never a value. |
 | `orch secret get <profile> <key>` | Prints the value on stdout, for scripts. Refused unless the profile has `allow_get = true`, the key is in that profile, and stdout is **not** a terminal (a live session's screen would show it). |
 
-Person-only (refused for agents; also in the dashboard): `orch secret add <name> --type T [--file F]` (value from stdin, never
+Person-only, proven by the human channel (invariant H1, human-proof.md: a proof on stdin with `--proof-stdin`, minted by
+the local page; done from the dashboard): `orch secret add <name> --type T [--file F]` (value from stdin, never
 an argument), `orch secret remove <name>`, `orch secret profile <name> …`. These are additions to the five agent commands.
 
 - **Hiding the child's output.** stdout and stderr of the child go through pipes and the streaming hider (below) before they

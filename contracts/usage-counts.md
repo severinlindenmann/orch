@@ -11,7 +11,9 @@ relay-api.md (Usage counts and policy).
 
 ## Workspace side
 
-- Settings: `[insights] share_counts = true`, `[insights] share_names = false` (`.orch/config.toml`). On `orch relay connect`
+- Settings: `[insights] share_counts = true`, `[insights] share_names = false` (`.orch/config.toml`). Turning sharing **on**
+  (share_names, or share_counts again) needs an `insights.settings` proof and counts only with the settings record
+  (invariant H1, human-proof.md); turning it off works from the file. On `orch relay connect`
   a one-time notice says: "Daily counts go to your admin: how often skills, connections and keys are used. No text, no chats.
   This workspace's own names stay hidden. Turn it off in Insights > Settings." Insights shows a chip "Sharing counts with
   your admin" while it is on.
