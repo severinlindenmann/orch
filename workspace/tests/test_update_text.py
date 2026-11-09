@@ -501,9 +501,9 @@ def test_forged_entry_with_a_live_unrelated_pid_is_neither_signalled_nor_started
     f.forged = {(str(f.ws[0]), "dashboard"), (str(f.ws[0]), "focus")}  # all of Pilatus is forged
     lines = addons._restart_updated()
     assert not [c for c in f.calls if c[1] == "Pilatus"]  # no stop, no start for that workspace
-    assert "dashboard (Pilatus) not restarted (can't verify); run orch start in " + str(f.ws[0]) in "\n".join(
-        lines
-    )
+    assert "dashboard (Pilatus) not restarted (can't verify); run orch stop, then orch start, in " + str(
+        f.ws[0]
+    ) in "\n".join(lines)
     assert "Restarted: dashboard (Rigi), focus (Rigi)" in lines  # the verified ones still restart
 
 
@@ -527,9 +527,26 @@ def test_unregistered_workspace_is_listed_but_never_touched(proj, tmp_path, monk
     f.registered = [r for r in f.registered if r["workspace"] == str(f.ws[0])]  # Rigi is not registered
     lines = addons._restart_updated()
     assert not [c for c in f.calls if c[1] == "Rigi"]
-    assert f"dashboard (Rigi) not restarted; run orch start in {f.ws[1]}" in lines
+    assert f"dashboard (Rigi) not restarted; run orch stop, then orch start, in {f.ws[1]}" in lines
     assert "Restarted: dashboard (Pilatus), focus (Pilatus)" in lines
     # the workspace `orch update` runs in counts as registered
     f.calls.clear()
     assert addons._restart_updated(f.ws[1])[0].startswith("Restarted: dashboard (Pilatus)")
     assert ("stop", "Rigi", {"dashboard", "focus"}) in f.calls
+
+
+def test_malformed_running_entries_are_reported_not_fatal(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    services.running_path().parent.mkdir(parents=True, exist_ok=True)
+    services.running_path().write_text(json.dumps([{"workspace": 3}, "x", {"addon": "dashboard"}]))
+    assert addons._malformed_running_entries() == 3
+    lines = addons._restart_updated()  # real services.running() reads the file: nothing usable, no KeyError
+    assert f.calls == [] or lines  # (Fleet replaces running(); the count still shows)
+    assert "3 unreadable entries in the list of running services ignored" in lines
+
+
+def test_json_update_reports_skipped_entries(proj, run, source, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(addons, "_restart_updated", lambda root=None: ["x (w) not restarted; run orch stop"])
+    code, out, err = run("update", "--json")
+    assert code == 0, err
+    assert json.loads(out)["notes"][-1] == "x (w) not restarted; run orch stop"

@@ -1580,7 +1580,9 @@ def _update_lines(before: dict, found: dict, sha: str | None) -> tuple[list[str]
 
 def _registered_workspaces(root: Path | None) -> set[Path]:
     """The workspaces the person set up on this machine: the one `orch update` runs in, and every workspace
-    with a consent record (written when the person turned an add-on on there). Resolved paths."""
+    with a consent record (written when the person turned an add-on on there). Resolved paths. A consent
+    record outlives an add-on turned off, so that folder stays registered: harmless, only live pids that the
+    add-on itself verified are ever touched."""
     out: set[Path] = set()
     if root is not None:
         out.add(root.resolve())
@@ -1589,6 +1591,30 @@ def _registered_workspaces(root: Path | None) -> set[Path]:
         if isinstance(w, str):
             out.add(Path(w).resolve())
     return out
+
+
+def _malformed_running_entries() -> int:
+    """Entries of running.json that are not usable (not an object, or workspace/addon/pid missing/wrong)."""
+    from orch import services
+
+    try:
+        data = json.loads(services.running_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(data, list):
+        return 1
+    return sum(
+        not (
+            isinstance(e, dict)
+            and isinstance(e.get("workspace"), str)
+            and isinstance(e.get("addon"), str)
+            and isinstance(e.get("pid"), int)
+        )
+        for e in data
+    )
+
+
+RESTART_BY_HAND = "run orch stop, then orch start, in"  # `orch start` alone leaves a running add-on as it is
 
 
 def _restart_updated(root: Path | None = None) -> list[str]:
@@ -1600,6 +1626,11 @@ def _restart_updated(root: Path | None = None) -> list[str]:
     registered = _registered_workspaces(root)
     by_ws: dict[str, dict[str, int]] = {}
     skipped: list[str] = []
+    bad = _malformed_running_entries()
+    if bad:
+        skipped.append(
+            f"{bad} unreadable entr{'y' if bad == 1 else 'ies'} in the list of running services ignored"
+        )
     for e in services.running():
         if not services.pid_alive(e.get("pid")):
             continue
@@ -1608,7 +1639,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
         else:
             skipped.append(
                 f"{e['addon']} ({Path(e['workspace']).name}) not restarted; "
-                f"run orch start in {e['workspace']}"
+                f"{RESTART_BY_HAND} {e['workspace']}"
             )
     if not by_ws:
         return skipped
@@ -1728,7 +1759,7 @@ def _restart_locked(services, root: Path, olds: dict[str, int]) -> tuple[list[st
     for n in sorted(olds):
         why = _unverified(services, root, n, olds[n])
         if why:
-            lines.append(f"{label(n)} not restarted ({why}); run orch start in {root}")
+            lines.append(f"{label(n)} not restarted ({why}); {RESTART_BY_HAND} {root}")
         else:
             names.add(n)
     if not names:
@@ -1775,6 +1806,7 @@ def update(
     json_output: bool = False,
     report: list[str] | None = None,
     nonce: str | None = None,
+    notes: list[str] | None = None,
 ) -> list[str]:
     """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks.
     after_install: the install script just put a bare orch in place; put the registered add-ons back."""
@@ -1856,6 +1888,8 @@ def update(
             _say("\n".join(restart_lines))
         if report is not None:
             report.extend(lines)
+        if notes is not None:
+            notes.extend(restart_lines)  # for --json: restarted, skipped and failed services
         reg = registry()
         for entry in reg:
             if entry["name"] in found:
