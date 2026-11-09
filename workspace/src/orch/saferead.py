@@ -18,6 +18,7 @@ import os
 import stat
 from pathlib import Path
 
+from orch import winacl
 from orch.errors import Refused
 
 _FLAGS = (
@@ -236,8 +237,10 @@ def read_private(root: Path, rel: str, limit: int) -> bytes | None:
     `limit`. None for a missing file, a link, a hard-linked or special file (FIFO, device, folder), a file
     swapped while we look, a file bigger than `limit` or any read error: the caller takes its fail-closed
     path. Opened like everything here (`_walk`, `_open_checked`): nothing outside root, never blocks.
-    `root` must be a real path."""
+    `root` must be a real path. Windows has its own branch (`_read_private_windows`)."""
     parts = tuple(p for p in rel.split("/") if p)
+    if winacl._windows():
+        return _read_private_windows(Path(root), parts, limit)
     try:
         name, kw, dfd = _anchor(Path(root), parts)
     except OSError:
@@ -260,6 +263,45 @@ def read_private(root: Path, rel: str, limit: int) -> bytes | None:
                 break
             out += data
         return out if len(out) == st.st_size else None  # it grew or shrank under us: not trusted
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _read_private_windows(root: Path, parts: tuple[str, ...], limit: int) -> bytes | None:
+    """read_private on Windows, where there is no dir_fd, no O_NOFOLLOW and os.open reads in text mode.
+    Every part from `root` down is checked to be no link, junction or other reparse point (winacl). The file
+    is opened in BINARY mode (text mode would turn CRLF into LF and stop at Ctrl-Z, so the size check would
+    fail for a file written with CRLF). The handle must be a regular file with ONE name and the same volume
+    and file index as the path's own lstat (a swap in between, or a link that was followed, is refused). The
+    read is bounded by `limit` and must match the size. None for anything else (fail closed)."""
+    if not parts or any(p in (".", "..") or "\\" in p or ":" in p for p in parts):
+        return None
+    full = Path(root).joinpath(*parts)
+    try:
+        for c in (Path(root).joinpath(*parts[:i]) for i in range(len(parts) + 1)):
+            if winacl._attrs(c) & winacl.REPARSE:  # the root itself too
+                return None
+        named = os.lstat(full)
+        if not stat.S_ISREG(named.st_mode):
+            return None
+        fd = os.open(full, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0))
+    except (OSError, Refused):
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_size > limit:
+            return None
+        if (st.st_dev, st.st_ino) != (named.st_dev, named.st_ino):
+            return None
+        out = b""
+        while len(out) <= st.st_size:
+            data = os.read(fd, min(CHUNK, st.st_size - len(out) + 1))
+            if not data:
+                break
+            out += data
+        return out if len(out) == st.st_size else None
     except OSError:
         return None
     finally:
