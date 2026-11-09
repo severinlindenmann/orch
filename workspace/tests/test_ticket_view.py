@@ -652,3 +652,51 @@ def test_phone_paired_later_gets_light_updates_for_dashboard_tickets(proj, run, 
     _bump(proj, tid, status="waiting", started=True)
     got = phone_view.sync_light(proj, now=time.time() + 10)
     assert sorted(got) == sorted([(PHONE, tid), (new, tid)])
+
+
+def test_entering_review_sends_exactly_one_result_with_view(proj, run, new_ticket, conn):
+    """fb28/0909: one result per review round, however often sync runs; a new round sends one again."""
+    tid = new_ticket("Once only")
+    run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
+    run("ticket", "summary", tid, "Done well.")
+    st = phone_view.load_state(proj)["tickets"][tid]
+    _review(proj, tid)
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=st["at"] + 100) == [tid]
+    results = [m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]
+    assert len(results) == 1 and "ticket_view" in results[0]["body"]
+    # a stale remembered status (as remember() could write it) and repeated syncs send nothing more
+    phone_view.update_state(proj, lambda s: s["tickets"][tid].update(status="open", sig=None, at=0))
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=st["at"] + 1000) in ([], [tid])
+    assert not [m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]
+    assert phone_view.sync(proj, now=st["at"] + 2000) in ([], [tid])
+    assert not [m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]
+    # leave Review, then enter again: a new round, one more result
+    tickets.set_status(proj, tid, "open", "human:t")
+    phone_view.sync(proj, now=st["at"] + 3000)
+    _review(proj, tid)
+    n = len(conn.sent)
+    phone_view.sync(proj, now=st["at"] + 4000)
+    assert len([m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]) == 1
+
+
+def test_a_failed_result_send_is_retried_once(proj, run, new_ticket, conn, monkeypatch):
+    from orch import relay
+    from orch.errors import Refused
+
+    tid = new_ticket("Retry me")
+    run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
+    st = phone_view.load_state(proj)["tickets"][tid]
+    _review(proj, tid)
+    real = relay.send_text
+
+    def boom(*a, **k):
+        raise Refused("down")
+
+    monkeypatch.setattr(relay, "send_text", boom)
+    assert phone_view.sync(proj, now=st["at"] + 100) == []
+    monkeypatch.setattr(relay, "send_text", real)
+    n = len(conn.sent)
+    assert phone_view.sync(proj, now=st["at"] + 200) == [tid]
+    assert len([m for m in conn.sent[n:] if m["body"].get("update", {}).get("kind") == "result"]) == 1

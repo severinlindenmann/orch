@@ -926,6 +926,18 @@ def _just_finished(prev, ticket: dict) -> bool:
     return prev is not None and prev not in FINISHED and ticket.get("status") in FINISHED
 
 
+def _claim_result(state: dict, tid: str) -> bool:
+    """The ONE place that decides a result goes out: check and set the ticket's "result sent" record in the
+    state (called under the state lock). False when this finish already sent (or is sending) its result:
+    parallel syncs, retries and a stale remembered status can never send it twice. The record is dropped when
+    the ticket is seen outside Review/Done (a new round) or when the send failed (undo)."""
+    results = state.setdefault("results", {})
+    if tid in results:
+        return False
+    results[tid] = {"at": time.time()}
+    return True
+
+
 def sync(root: Path, now: float | None = None) -> list[str]:
     """Snapshots for followed tickets whose tasks, status or running agent changed, at most one per ticket
     every DEBOUNCE seconds (a change in between waits for the next pull). Quiet (kind note, never pushed),
@@ -952,16 +964,19 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             sig = _tasks_sig(t, root)
             if sig == rec.get("sig") or now - rec.get("at", 0) < DEBOUNCE:
                 continue
-            due.append((tid, rec["to"], t, _just_finished(rec.get("status"), t), rec.get("status"), sig))
+            fin = _just_finished(rec.get("status"), t) and _claim_result(state, tid)
+            due.append((tid, rec["to"], t, fin, rec.get("status"), sig))
             rec.update(sig=sig, at=now, status=t.get("status"))
         nonce = f"{os.getpid()}-{time.monotonic_ns()}"  # which pass claimed it (the undo checks it)
         for t in all_:
             tid, prev = t["id"], seen.get(t["id"])
             seen[tid] = t.get("status")
+            if t.get("status") not in FINISHED:
+                state.get("results", {}).pop(tid, None)  # left Review/Done: the next finish is a new round
             if tid in state["tickets"] or not _just_finished(prev, t):
                 continue
             with contextlib.suppress(Refused, OSError, ValueError):
-                if on or mobile_mode.from_phone(root, tid):
+                if (on or mobile_mode.from_phone(root, tid)) and _claim_result(state, tid):
                     due.append((tid, "phones", t, True, prev, None))
                     state.setdefault("claims", {})[tid] = nonce
         claims[0] = nonce
@@ -980,7 +995,9 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             sent.append(tid)
         except Refused:  # not sent: undo the claim (also the status, so a result is pushed again next pull)
 
-            def undo(st, tid=tid, before=before, claimed=claimed):
+            def undo(st, tid=tid, before=before, claimed=claimed, finished=finished):
+                if finished:
+                    st.get("results", {}).pop(tid, None)  # the result did not go out: allow the retry
                 # compare and set: only our own claim is undone, never a newer one another pull made meanwhile
                 rec = st["tickets"].get(tid)
                 if claimed is not None:

@@ -108,7 +108,7 @@ test('the review buttons show whenever the status is Review, an open question fi
   assert.ok(nodes(review).some(n => n.children.some(c => typeof c === 'string' && c.startsWith('Completed '))));
 
 });
-test('Copy ticket and Repeat show in the ticket menu only when the repeats add-on is on', () => {
+test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats add-on is on', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
   const ctx = {window:{DashHelpers:helpers, orch:{}}, document:{addEventListener(){}}, addEventListener(){}, h, locks:new Set(),
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => String(v || '').replace(/^(human|agent):/, ''),
@@ -124,7 +124,7 @@ test('Copy ticket and Repeat show in the ticket menu only when the repeats add-o
   assert.doesNotMatch(JSON.stringify(ctx.detail(t)), /Copy ticket|Repeat…/);
   ctx.repeatsAddon = () => 'automation';
   const on = JSON.stringify(ctx.detail(t));
-  assert.match(on, /Copy ticket/);
+  assert.doesNotMatch(on, /Copy ticket/);
   assert.match(on, /Repeat…/);
 });
 

@@ -382,12 +382,3 @@ function bindAddonControls(host) {
   });
 }
 
-// Copy a ticket in one click and open the copy; the copy is the ticket that was not there before.
-async function copyTicket(t) {
-  const addon = repeatsAddon(), known = new Set(tickets().map(x => x.id));
-  if (!addon || snapshot) return;
-  const result = await act('addon.act', {addon, verb:'copy', target:t.id});
-  const made = result.ok ? tickets().find(x => !known.has(x.id)) : null;
-  window.orch.toast(result.ok ? 'Ticket copied.' : changeError(result), result.ok ? 'ok' : 'error');
-  if (made) location.hash = href(made.id);
-}
