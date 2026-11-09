@@ -8,6 +8,7 @@ file hash. Findings never contain the matched text.
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 
 # name -> pattern. Run on the raw bytes (also with NUL bytes removed, which exposes UTF-16 text).
@@ -57,11 +58,40 @@ def _is_text(data):
     return False
 
 
+_IGNORABLE = {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x3164, 0xFFA0}
+_IGNORABLE_RANGES = ((0x180B, 0x180F), (0xFE00, 0xFE0F), (0xE0100, 0xE01EF), (0xFFF0, 0xFFF8))
+
+
+def _ignorable(c):
+    o = ord(c)
+    return (unicodedata.category(c) == "Cf" or o in _IGNORABLE
+            or any(a <= o <= b for a, b in _IGNORABLE_RANGES))
+
+
+def norm_segment(seg):
+    """The one form every path comparison uses: NFKC, default-ignorable code points (zero-width etc.) removed,
+    casefolded. macOS/Windows are case-insensitive and Unicode-normalizing, so `Secrets`, `se\u200bcrets` and
+    an NFD spelling all name the same folder there."""
+    seg = "".join(c for c in unicodedata.normalize("NFKC", seg) if not _ignorable(c))
+    return unicodedata.normalize("NFKC", seg.casefold())
+
+
+def norm_path(path):
+    """Normalized segments (list), or None when the path is unsafe: absolute, backslash, drive letter, empty,
+    '.' or '..' segment (also after normalization), or a control character."""
+    if (not path or path.startswith(("/", "\\")) or "\\" in path or re.match(r"^[A-Za-z]:", path)
+            or any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in path)):
+        return None
+    parts = [norm_segment(p) for p in path.split("/")]
+    if any(p in ("", ".", "..") for p in parts) or any(p in ("", ".", "..") for p in path.split("/")):
+        return None
+    return parts
+
+
 def scan_path(path):
     """Path rules only. Findings for a path that must never be synced."""
-    parts = path.replace("\\", "/").split("/")
-    if (path.startswith(("/", "\\")) or "\\" in path or ".." in parts or any(ord(c) < 32 for c in path)
-            or re.match(r"^[A-Za-z]:", path)):
+    parts = norm_path(path)
+    if parts is None:
         return [Finding(path, "path", "unsafe-path")]
     out = []
     if parts[0] in NEVER_DIRS:
@@ -76,7 +106,8 @@ def scan_blob(path, data):
     out = scan_path(path)
     haystacks = [data] + ([data.replace(b"\x00", b"")] if b"\x00" in data else [])
     pats = dict(PATTERNS)
-    if _TICKET_RE.match(path):
+    parts = norm_path(path)
+    if parts is not None and _TICKET_RE.match("/".join(parts)):
         pats.update(TICKET_PATTERNS)
     for name in sorted(pats):
         if any(re.search(pats[name], h) for h in haystacks):
