@@ -478,8 +478,13 @@ class Handler(BaseHTTPRequestHandler):
                     handoff.dismiss(self.root, hid)
                     return self._send(200, b"{}", "application/json")
                 code, text = handoff.confirm(
-                    self.root, self.orch_bin, mint, hid, actions.human_env(self.root, self.orch_bin)
-                )
+                    self.root,
+                    self.orch_bin,
+                    mint,
+                    hid,
+                    actions.human_env(self.root, self.orch_bin),
+                    session=self.session,
+                )  # 202 = started in the background (an update): the answer is sent below as it is
                 if code != 200:
                     return self._send(code, text.encode(), "text/plain; charset=utf-8")
                 return self._send(

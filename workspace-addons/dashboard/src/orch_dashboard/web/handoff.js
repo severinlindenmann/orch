@@ -23,7 +23,7 @@
       var row = el("div"); row.style.cssText = "margin-top:8px;display:flex;gap:8px";
       var ok = el("button", "Continue"), no = el("button", "Not now");
       ok.type = no.type = "button";
-      ok.onclick = function () { ok.disabled = true; post("handoff.confirm", i.id).then(function (r) { if (r.ok) { poll(); } else { return r.text().then(function (t) { ok.disabled = false; alert(t); }); } }); };
+      ok.onclick = function () { ok.disabled = true; post("handoff.confirm", i.id).then(function (r) { if (r.ok) { if (r.status === 202) { r.text().then(function (t) { var b = el("div", t, "orch-notice"); b.setAttribute("role", "status"); b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px"; document.body.appendChild(b); setTimeout(function () { b.remove(); }, 15000); }); } poll(); } else { return r.text().then(function (t) { ok.disabled = false; alert(t); }); } }); };
       no.onclick = function () { post("handoff.dismiss", i.id).then(poll); };
       row.appendChild(ok); row.appendChild(no); c.appendChild(row); box.appendChild(c);
     });

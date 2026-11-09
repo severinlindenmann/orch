@@ -63,7 +63,7 @@ class PageSession:
         if server not in SERVERS:
             raise ValueError("not a page server")
         self.root, self.server = root, server
-        self.cookie = secrets.token_urlsafe(32)  # new on every start
+        self.cookie = secrets.token_urlsafe(32)  # new on every start (but see the resume below)
         self.key: bytes | None = None
         self.spent: set[str] = set()  # sha256 of launch tokens already used in this server run
         self.revoked = False
@@ -74,6 +74,8 @@ class PageSession:
             self.key = humanproof.human_key(root)
         except (Refused, OSError):
             self.key = None
+        if self.key is not None:  # a restart the person asked for (update) keeps the open tab's session
+            self.cookie = humanproof.take_resume_cookie(root, server) or self.cookie
 
     # -- the launch token (one time, 120 s) ----------------------------------------------------------
     def launch(self, token) -> str | None:
@@ -149,3 +151,29 @@ def run_with_proof(
         input=proof + "\n",
         env=child_env(env, orch_bin),
     )
+
+
+def start_detached(argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env: dict) -> int:
+    """Run the core with `--proof-stdin` in its OWN session/process group with no timeout (an update restarts
+    this very server and must not be killed with it). The proof goes to its stdin; returns its pid at once."""
+    i = argv.index("--") if "--" in argv else len(argv)
+    argv = [*argv[:i], "--proof-stdin", *argv[i:]]
+    kw: dict = {"start_new_session": True}
+    if sys.platform == "win32":
+        kw = {"creationflags": 0x00000008 | 0x00000200}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    p = subprocess.Popen(  # noqa: S603
+        [*argv0(orch_bin), *argv],
+        cwd=cwd,
+        env=child_env(env, orch_bin),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        **kw,
+    )
+    try:
+        p.stdin.write(proof + "\n")
+        p.stdin.close()
+    except OSError:
+        pass
+    return p.pid

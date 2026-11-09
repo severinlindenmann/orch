@@ -1195,3 +1195,43 @@ def launch_url(root: Path, server: str, url: str) -> str:
     """`url` with a fresh launch token in the fragment, for the code that opens the browser for a person."""
     token = write_launch_token(root, server)
     return f"{url}#launch={token}" if token else url
+
+
+RESUME_LIFE = (
+    900  # seconds a restarting page server may adopt the session cookie of the page that asked for an update
+)
+
+
+def write_resume_cookie(root: Path, server: str, cookie: str) -> bool:
+    """Called by a page server just before it lets an update (which restarts it) run: the restarted server
+    adopts this cookie once, so the person's open tab keeps its session (no extra click). Narrow on purpose:
+    one server, one use, 15 minutes, written only after a person's click."""
+    if server not in ("focus", "dashboard") or not isinstance(cookie, str) or not 20 <= len(cookie) <= 80:
+        return False
+    try:
+        _write_private(
+            key_dir(root) / f"resume-{server}.cookie", f"{cookie}\n{int(time.time()) + RESUME_LIFE}\n"
+        )
+        return True
+    except (Refused, OSError):
+        return False
+
+
+def take_resume_cookie(root: Path, server: str) -> str | None:
+    """The cookie a restarted server may adopt, once; the file is removed whatever it holds."""
+    if server not in ("focus", "dashboard"):
+        return None
+    try:
+        d = key_dir(root, create=False)
+        f = d / f"resume-{server}.cookie"
+        with _key_lock(d):
+            try:
+                lines = _read_guarded(f).decode("utf-8").split()
+            finally:
+                with contextlib.suppress(OSError):
+                    f.unlink()
+    except (Refused, OSError, ValueError):
+        return None
+    if len(lines) == 2 and lines[1].isdigit() and int(lines[1]) > time.time() and 20 <= len(lines[0]) <= 80:
+        return lines[0]
+    return None

@@ -233,3 +233,41 @@ def test_a_sandboxed_addon_page_cannot_use_the_session(live):
             {"Cookie": ck, "Origin": "null", "Sec-Fetch-Site": "cross-site"},
         )
         assert st == 403
+
+
+def test_update_click_runs_detached_answers_at_once_and_the_restart_keeps_the_session(live, monkeypatch):
+    root, port = live
+    hp.request_handoff(root, "update", "orch", "Update orch", "", argv=["update"])
+    hid = hp.handoffs(root)[0]["id"]
+    ck = session(root, port)
+    started = {}
+    from orch_dashboard import handoff
+
+    def fake_start(argv, proof, **kw):  # stands in for the detached child: records, does not wait
+        started.update(argv=argv, proof=proof)
+        return 4242
+
+    monkeypatch.setattr(handoff, "start_detached", fake_start)
+    monkeypatch.setattr(
+        handoff, "run_with_proof", lambda *a, **k: pytest.fail("an update must not run with a timeout")
+    )
+    st, _, body = post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})
+    assert st == 202 and b"Update started" in body and started["proof"].startswith("hp1.")
+    # the update restarts the server: a NEW server for the same workspace adopts the page's session once
+    s2 = pageproof.PageSession(root, "dashboard")
+    assert s2.can_mint({"Host": "127.0.0.1:1", "Cookie": ck}, 1)
+    s3 = pageproof.PageSession(root, "dashboard")  # a second restart: the marker is spent
+    assert not s3.can_mint({"Host": "127.0.0.1:1", "Cookie": ck}, 1)
+
+
+def test_resume_cookie_is_one_use_expires_and_only_after_a_click(live, monkeypatch):
+    import time
+
+    root, _ = live
+    assert hp.write_resume_cookie(root, "dashboard", "c" * 40)
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + hp.RESUME_LIFE + 5)
+    assert hp.take_resume_cookie(root, "dashboard") is None  # expired
+    monkeypatch.setattr(time, "time", real)
+    assert hp.take_resume_cookie(root, "dashboard") is None  # and the file is gone
+    assert not hp.write_resume_cookie(root, "mine", "c" * 40)  # a local add-on gets nothing
