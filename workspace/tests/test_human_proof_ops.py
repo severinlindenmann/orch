@@ -541,3 +541,91 @@ def test_browser_opens_only_for_a_newly_queued_item_and_at_most_every_30_s(ws, r
     tid2, q2 = _ask(ws, run)
     run("answer", tid2, q2, "B", "--by", "human:pat", "--json")  # new, but within 30 s: no browser
     assert len(opened) == 1 and "#launch=" in opened[0]
+
+
+def test_relay_allow_works_via_the_hand_off_and_the_title_is_in_the_label(ws, run, monkeypatch):
+    from conftest import turn_on
+
+    from orch import relay
+
+    turn_on(ws, "relay")
+    monkeypatch.setattr(
+        relay,
+        "load_message",
+        lambda root, mid: {"from": "ws_peer", "type": "delegate", "body": {"title": "Fix it"}},
+    )
+    given = []
+    monkeypatch.setattr(
+        relay,
+        "give_allow",
+        lambda root, mid, mode: given.append((mid, mode)) or {"body": {"mode": mode}, "to": "ws_peer"},
+    )
+    monkeypatch.setattr(relay, "name_of", lambda root, w: "Peer")
+    code, out, err = run("relay", "allow", "m_deleg00000000010", "--once", "--by", "human:pat", "--json")
+    assert code == 2 and given == []
+    card = hp.handoffs(ws)[0]  # it IS queued now
+    assert card["op"] == "relay.allow" and "Fix it" in card["label"] and "ws_peer" in card["label"]
+    item = hp.handoff_take(ws, card["id"])
+    assert item["argv"][:2] == ["relay", "allow"]
+    proof = hp.mint(hp.human_key(ws), hp.new_payload(item["op"], item["target"], "human:pat"))
+    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
+    code, out, err = run(*item["argv"], "--proof-stdin")
+    assert code == 0, out + err
+    assert given == [("m_deleg00000000010", "once")]
+
+
+def test_an_abbreviated_token_option_does_not_slip_past_the_split(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    with pytest.raises(SystemExit):  # `--tok` is not an option any more: usage error, nothing is queued
+        run(
+            "relay",
+            "connect",
+            "https://r.example",
+            "--workspace",
+            "w",
+            "--tok",
+            "orn_ABBREV",
+            "--by",
+            "human:pat",
+        )
+    assert hp.handoffs(ws) == []
+    f = hp.key_dir(ws) / "handoffs.json"
+    assert not f.exists() or "orn_ABBREV" not in f.read_text()
+
+
+def test_a_second_identical_connect_keeps_the_first_token_and_drops_the_new_one(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    base = ("relay", "connect", "https://r.example", "--workspace", "w", "--by", "human:pat", "--json")
+    run(*base, "--token", "orn_FIRST")
+    run(*base, "--token", "orn_SECOND")
+    items = hp.handoffs(ws)
+    assert len(items) == 1
+    assert "orn_FIRST" in hp.handoff_take(ws, items[0]["id"])["argv"]
+
+
+def test_expired_secret_files_are_removed_on_read(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    run(
+        "relay",
+        "connect",
+        "https://r.example",
+        "--workspace",
+        "w",
+        "--token",
+        "orn_OLD",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    d = hp.key_dir(ws)
+    items = json.loads((d / "handoffs.json").read_text())
+    items[0]["exp"] = 1  # long expired
+    hp._write_private(d / "handoffs.json", json.dumps(items))
+    assert hp.handoffs(ws) == []
+    assert not list(d.glob("handoff-*.secret"))

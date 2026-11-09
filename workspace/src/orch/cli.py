@@ -302,7 +302,12 @@ _EXAMPLES = {
 
 
 class _Parser(argparse.ArgumentParser):
-    """Plain-words usage errors instead of argparse's own text."""
+    """Plain-words usage errors instead of argparse's own text. No abbreviated options (`--tok` for
+    `--token`): a hand-off must see every secret option by its full name (H1)."""
+
+    def __init__(self, *a, **kw):
+        kw.setdefault("allow_abbrev", False)
+        super().__init__(*a, **kw)
 
     def error(self, message):
         import re

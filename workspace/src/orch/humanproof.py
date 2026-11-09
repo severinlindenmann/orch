@@ -948,9 +948,8 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
             same = [
                 i for i in items if i.get("op") == op and i.get("target") == target and i.get("argv") == argv
             ]
-            if same and token is None:
-                return "dup"  # already waiting: no new item, no new browser
-            items = [i for i in items if i not in same]  # a new pairing replaces the same request (new token)
+            if same:
+                return "dup"  # already waiting: the FIRST request stays (its token too); no new browser
             if sum(1 for i in items if i.get("op") == op) >= HANDOFF_PER_OP:
                 return False
             hid = _b64u(secrets.token_bytes(9))
@@ -983,8 +982,15 @@ def handoffs(root: Path) -> list[dict]:
     try:
         d = key_dir(root, create=False)
         now = int(time.time())
-        items = _read_json(root, d / "handoffs.json", [])
-        return [i for i in items if isinstance(i, dict) and i.get("exp", 0) > now]
+        with _key_lock(d):  # a secret is written under this lock just before its item
+            items = _read_json(root, d / "handoffs.json", [])
+            live = [i for i in items if isinstance(i, dict) and i.get("exp", 0) > now]
+            ids = {i.get("id") for i in live}
+            for f in d.glob("handoff-*.secret"):  # a secret whose request expired or is gone
+                if f.name[8:-7] not in ids:
+                    with contextlib.suppress(OSError):
+                        f.unlink()
+        return live
     except (Refused, OSError, ValueError):
         return []
 

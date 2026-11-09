@@ -598,8 +598,7 @@ def run_relay(args, root: Path, out) -> None:
             args,
             "relay.allow",
             f"{args.id}:{mode}",
-            label=f"Allow {msg.get('from')} ({mode})",
-            value=str(task),
+            label=f"Allow {msg.get('from')} ({mode}): {task}",
         ).startswith("human:"):
             raise Refused(humanproof.AGENT_REFUSED)
         m = relay.give_allow(root, args.id, mode)
