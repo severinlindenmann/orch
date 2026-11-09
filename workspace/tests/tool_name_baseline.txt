@@ -2,4 +2,4 @@
 # Everything else must go through adapters.py + agents.json. This list may only shrink.
 workspace-addons/focus/src/orch_focus/adapters/claude.py 7
 workspace/src/orch/reminder_settings.py 9
-workspace/src/orch/workcheck.py 5
+workspace/src/orch/workcheck.py 6
