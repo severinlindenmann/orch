@@ -24,6 +24,7 @@ HUMAN_ONLY = {
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
     "init",
     "share",
+    "private",  # a person's approvals and Move to private (agents are refused)
     "update",
     "start",
     "stop",
