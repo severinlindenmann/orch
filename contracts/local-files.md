@@ -110,12 +110,18 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   An agent without that data (generic, Codex) ignores the setting. Applies to oneshot and live starts. `orch init` prints the mode.
 - Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
-- **A committed `config.toml` never supplies a command** (9 Nov, git step 1): when git tracks `.orch/config.toml` (or cannot say),
-  `[agents.*]` commands are ignored and `[workspace] agent` may only name a built-in agent; orch falls back to the person's own
-  default and says so in one line (`orch status`, `orch private`, the dashboard Settings, the run notes).
+- **Invariant (9 Nov, git step 1): a settings-supplied agent command (`[agents.*]` with `command` or `interactive`) runs only if
+  this person approved exactly that entry on this machine.** Approvals live in the orch home (`agent-approvals.json`: a hash of
+  workspace path, name, adapter, command, interactive, prompt), never in the workspace, and do not depend on git, links or where the
+  file came from. Anything else is not run (fail closed, also on any read error); a changed entry asks again. A built-in agent
+  needs no approval; `[workspace] agent` naming an unapproved custom agent falls back to the person's default.
+  `orch private` lists waiting entries in full with a key; `orch private allow <name> --key <key>` (a person only) approves that ONE
+  entry and only if it still matches the key. The dashboard shows every field in full before its Allow click; entries over 500
+  characters cannot be shown, so they cannot be allowed. `orch config agent add` by a person approves its own entry; an agent's does not.
 - Already-tracked personal files: `orch private` lists them; `orch private move` (a person only) runs `git rm --cached` on them,
-  keeps the files and commits nothing (older commits keep their copies). `orch status` shows the same lines.
-- A command from a folder's `.orch/config.toml` that git does not track is used **without confirmation**. Its first use on a machine prints one
+  keeps the files and commits nothing (older commits keep their copies). `orch status` shows the same lines. This is information
+  only: trust does not depend on it.
+- (Replaced by the invariant above: no command is used without this person's approval.) Its first use on a machine prints one
   notice line: `Using agent command from this folder's settings: <command>` (remembered per machine in the user's orch folder).
   This is a known trade-off (owner decision Q5, easy over secure): a cloned folder can name the command orch runs; the notice
   line is the only guard.
