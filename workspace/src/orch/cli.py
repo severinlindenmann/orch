@@ -33,39 +33,55 @@ from orch import (
 from orch import init as init_mod
 from orch.errors import Refused
 
+_HINT = "Unset ORCH_ROOT, or point it at a folder with .orch in it."
+_noted = False
+
 
 def _env_root() -> Path | None:
-    """ORCH_ROOT, when set: the workspace of whoever started this process (an agent in a copy of the
-    folder must write to the real tickets). Strict: absolute, an existing folder with .orch/ in it; anything
-    else is refused, never a silent fall back to walking up (that could write a second, stale store)."""
+    """ORCH_ROOT, when set and not empty (an empty value counts as unset): the workspace of whoever started
+    this process (an agent in a copy of the folder must write to the real tickets). Strict: absolute, an
+    existing folder with .orch/ in it, symlinks resolved; anything else is refused, never a silent fall back
+    to walking up (that could write a second, stale store)."""
     raw = os.environ.get("ORCH_ROOT")
     if not raw:
         return None
     p = Path(raw)
     if not p.is_absolute():
-        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. Nothing was changed.")
+        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. {_HINT} Nothing was changed.")
     try:
         p = p.resolve(strict=True)
     except (OSError, RuntimeError):
         raise Refused(
-            f"ORCH_ROOT points to a folder that does not exist: {raw}. Nothing was changed."
+            f"ORCH_ROOT points to a folder that cannot be opened: {raw}. {_HINT} Nothing was changed."
         ) from None
     if not p.is_dir() or not (p / ".orch").is_dir():
-        raise Refused(f"ORCH_ROOT points to a folder without orch in it: {raw}. Nothing was changed.")
+        raise Refused(f"ORCH_ROOT points to a folder without orch in it: {raw}. {_HINT} Nothing was changed.")
     return p
 
 
-def _find_root() -> Path:
-    """The workspace root: ORCH_ROOT when set, else the nearest folder upwards with .orch/ or .agents/,
-    else the current folder."""
-    env = _env_root()
-    if env is not None:
-        return env
-    cwd = Path.cwd()
+def _walk_up() -> Path:
+    cwd = Path.cwd().resolve()
     for p in (cwd, *cwd.parents):
         if (p / ".orch").is_dir() or (p / ".agents").is_dir():
             return p
     return cwd
+
+
+def _find_root() -> Path:
+    """The workspace root, always resolved (parent and child must agree on the string): ORCH_ROOT when set,
+    else the nearest folder upwards with .orch/ or .agents/, else the current folder."""
+    global _noted
+    env = _env_root()
+    if env is None:
+        return _walk_up()
+    if not _noted:  # a stale export in a shell sends every command to that workspace: say so once
+        _noted = True
+        here = _walk_up()
+        if here != env and not any(
+            (h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()
+        ):
+            print(f"Note: ORCH_ROOT sends this to {env}, not to {here}.", file=sys.stderr)
+    return env
 
 
 def _out(args, data, text: str) -> None:
@@ -545,13 +561,11 @@ def _init_guard(cwd: Path) -> None:
     env = _env_root()
     if env is not None and env != here:
         raise Refused(
-            "This folder is a copy of another orch workspace. Run orch init in the original folder."
+            f"ORCH_ROOT is set to {env}. Run orch init there, "
+            "or unset ORCH_ROOT to start a new workspace here."
         )
-    # no addons.home() here: it falls back (and traces) when the folder we stand in is under ORCH_HOME
-    homes = [Path(os.environ["ORCH_HOME"])] if os.environ.get("ORCH_HOME") else []
-    for h in (*homes, addons.real_home() / ".orch-tool"):
-        if (h.resolve() / "worktrees") in (here, *here.parents):
-            raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
+    if any((h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()):
+        raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 
 def run(args: argparse.Namespace) -> None:

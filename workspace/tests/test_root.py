@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from orch import cli, config, runs, runs_live, tickets
+from orch import cli, config, runs, runs_live
 
 
 def _store(p):
@@ -16,10 +16,6 @@ def _store(p):
     p.mkdir(parents=True, exist_ok=True)
     (p / ".orch").mkdir(exist_ok=True)
     return p
-
-
-def _titles(root):
-    return sorted(t["title"] for t in tickets.list_all(root)) if hasattr(tickets, "list_all") else None
 
 
 def _files(root):
@@ -89,7 +85,7 @@ def test_init_refuses_in_a_copy_when_orch_root_names_another_folder(proj, run, m
     monkeypatch.setenv("ORCH_ROOT", str(outer))
     before = _files(proj)
     code, _, err = run("init", "--yes")
-    assert code == 2 and "copy of another orch workspace" in err
+    assert code == 2 and "ORCH_ROOT is set to" in err
     assert _files(proj) == before
 
 
@@ -118,7 +114,6 @@ def test_agent_environment_names_the_workspace(proj, monkeypatch):
     monkeypatch.setenv("ORCH_VIA", "page")
     env = runs._agent_environ(proj)
     assert env["ORCH_ROOT"] == str(proj) and "ORCH_VIA" not in env
-    assert "ORCH_ROOT" in runs._agent_environ()  # no root given: left as inherited
 
 
 def test_tmux_start_passes_orch_root_to_the_session_and_the_agent(proj, run, monkeypatch):
@@ -150,27 +145,115 @@ def test_tmux_start_passes_orch_root_to_the_session_and_the_agent(proj, run, mon
 
 
 @pytest.mark.skipif(os.name == "nt", reason="detached wrapper uses shell stubs")
-def test_a_real_run_gets_orch_root_in_the_agent_environment(proj, run, monkeypatch, subprocess_home):
+def test_runs_start_overwrites_a_stale_orch_root_in_the_agent_environment(
+    proj, run, monkeypatch, subprocess_home
+):
+    other = _store(proj.parent / f"{proj.name}-other")  # a VALID store: the stale value must not survive
     out = proj.parent / f"{proj.name}-root.txt"
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
     stub = proj.parent / f"{proj.name}-stub.py"
     stub.write_text(
         "import os,sys\nopen(sys.argv[1],'w').write(os.environ.get('ORCH_ROOT',''))\n", encoding="utf-8"
     )
-    config.add_agent(
-        proj,
-        "fake",
-        f"{shlex.quote(sys.executable)} {shlex.quote(str(stub))} {shlex.quote(str(out))} {{prompt}}",
-    )
+    py, q = shlex.quote(sys.executable), shlex.quote
+    config.add_agent(proj, "fake", f"{py} {q(str(stub))} {q(str(out))} {{prompt}}")
     config.set_key(proj, "workspace", "agent", "fake")
     tid = json.loads(run("ticket", "new", "T", "--json", "--by", "human:t")[1])["id"]
-    monkeypatch.setenv("ORCH_ROOT", "/stale/other")  # the starter's own value is replaced, never passed on
-    monkeypatch.chdir(proj)
-    # the stale value would be refused by the CLI itself: start through the library, as the dashboard does
-    monkeypatch.delenv("ORCH_ROOT")
-    code, _, err = run("run", "start", tid, "--by", "agent:focus", "--json")
-    assert code == 0, err
+    monkeypatch.setenv("ORCH_ROOT", str(other))
+    runs.start(proj, tid, "agent:focus", mode="oneshot")  # the library, as the dashboard calls it
     end = time.monotonic() + 25
     while time.monotonic() < end and (runs.read(proj, tid) is not None or not out.exists()):
         time.sleep(0.05)
-    assert out.read_text(encoding="utf-8") == str(proj)
+    assert out.read_text(encoding="utf-8") == str(proj.resolve())
+
+
+def test_a_symlinked_workspace_gives_one_root_string(proj, monkeypatch):
+    real = _store(proj / "real")
+    link = proj / "link"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("no symlinks here")
+    monkeypatch.chdir(link)  # walk-up from the link
+    monkeypatch.delenv("ORCH_ROOT", raising=False)
+    parent = cli._find_root()
+    monkeypatch.setenv("ORCH_ROOT", str(runs._agent_environ(parent)["ORCH_ROOT"]))
+    assert cli._find_root() == parent == real.resolve()  # the child agrees with the parent
+
+
+def test_empty_orch_root_counts_as_unset(proj, monkeypatch):
+    store = _store(proj / "s")
+    monkeypatch.chdir(store)
+    monkeypatch.setenv("ORCH_ROOT", "")
+    assert cli._find_root() == store.resolve()
+
+
+def test_orch_root_with_dotdot_is_normalised(proj, monkeypatch):
+    store = _store(proj / "s")
+    (proj / "x").mkdir()
+    monkeypatch.setenv("ORCH_ROOT", str(proj / "x" / ".." / "s"))
+    assert cli._find_root() == store.resolve()
+
+
+def test_help_with_an_invalid_orch_root_is_refused_with_the_fix(proj, run, monkeypatch):
+    monkeypatch.setenv("ORCH_ROOT", str(proj / "nope"))
+    code, _, err = run("--help")
+    assert code == 2 and "Unset ORCH_ROOT" in err
+
+
+def test_init_in_a_subfolder_of_orch_root_is_refused_with_a_plain_message(proj, run, monkeypatch):
+    outer = _store(proj / "main")
+    sub = outer / "sub"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+    monkeypatch.setenv("ORCH_ROOT", str(outer))
+    code, _, err = run("init", "--yes")
+    assert code == 2 and "ORCH_ROOT is set to" in err and "unset ORCH_ROOT" in err
+    assert not (sub / ".orch").exists()
+
+
+def test_init_guard_with_orch_home_unset_uses_the_default_home(proj, run, monkeypatch):
+    from orch import addons
+
+    monkeypatch.delenv("ORCH_HOME", raising=False)
+    monkeypatch.delenv("ORCH_ROOT", raising=False)
+    copy = addons.real_home() / ".orch-tool" / "worktrees" / "ws1" / "T-1"
+    copy.mkdir(parents=True)
+    monkeypatch.chdir(copy)
+    code, _, err = run("init", "--yes")
+    assert code == 2 and "copy that orch made" in err
+    assert not (copy / ".orch").exists()
+
+
+def test_init_guard_sees_a_symlinked_cwd_that_resolves_into_worktrees(proj, run, monkeypatch):
+    from orch import addons
+
+    copy = addons.home_candidates()[0] / "worktrees" / "ws1" / "T-1"
+    copy.mkdir(parents=True)
+    link = proj / "link"
+    try:
+        link.symlink_to(copy, target_is_directory=True)
+    except OSError:
+        pytest.skip("no symlinks here")
+    monkeypatch.chdir(link)
+    monkeypatch.delenv("ORCH_ROOT", raising=False)
+    code, _, err = run("init", "--yes")
+    assert code == 2 and "copy that orch made" in err
+
+
+def test_a_note_names_a_stale_orch_root_but_not_inside_a_copy(proj, run, monkeypatch):
+    from orch import addons
+
+    outer = _store(proj / "main")
+    elsewhere = _store(proj / "else")
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("ORCH_ROOT", str(outer))
+    monkeypatch.setattr(cli, "_noted", False)
+    _, _, err = run("ticket", "new", "A", "--by", "human:t")
+    assert "Note: ORCH_ROOT sends this to" in err
+    copy = addons.home_candidates()[0] / "worktrees" / "ws1" / "T-1"
+    copy.mkdir(parents=True)
+    monkeypatch.chdir(copy)
+    monkeypatch.setattr(cli, "_noted", False)
+    _, _, err = run("ticket", "new", "B", "--by", "human:t")
+    assert "Note:" not in err

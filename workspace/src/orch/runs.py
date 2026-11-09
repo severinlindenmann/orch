@@ -995,14 +995,11 @@ def start(
 # ---------------------------------------------------------------- the wrapper (runs detached)
 
 
-def _agent_environ(root: Path | None = None) -> dict:
+def _agent_environ(root: Path) -> dict:
     """The agent's environment: ours without ORCH_VIA. A page that started the run is not where the agent's
-    own changes come from. With root: ORCH_ROOT names the workspace, so an agent working in a copy of the
-    folder still writes to the real tickets."""
-    env = {k: v for k, v in os.environ.items() if k != "ORCH_VIA"}
-    if root is not None:
-        env["ORCH_ROOT"] = str(root)
-    return env
+    own changes come from. ORCH_ROOT (always overwritten) names the workspace, so an agent working in a
+    copy of the folder still writes to the real tickets."""
+    return {**{k: v for k, v in os.environ.items() if k != "ORCH_VIA"}, "ORCH_ROOT": str(root)}
 
 
 def open_log(path: Path):
