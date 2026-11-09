@@ -1,0 +1,100 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_w0nt1d",
+  "title": "Q3 invoice export",
+  "status": "active",
+  "created_at": "2026-11-04T09:12:00Z",
+  "updated_at": "2026-11-04T10:40:00Z",
+  "checklist": [
+    {
+      "id": "c1",
+      "text": "Export the invoices",
+      "done": true,
+      "evidence": [
+        {
+          "type": "note",
+          "ref": "exported 42 rows"
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "text": "Email the finance team",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Finance pulls it themselves",
+      "by": "human:severin",
+      "at": "2026-11-09T10:00:00Z",
+      "state": "doing"
+    },
+    {
+      "id": "c3",
+      "text": "Archive the old sheet",
+      "done": false,
+      "evidence": [],
+      "wont_do": true
+    }
+  ],
+  "refs": [
+    {
+      "url": "https://jira.example.com/browse/ING-42",
+      "title": "ING-42",
+      "kind": "jira",
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:tester"
+    },
+    {
+      "url": "https://teams.microsoft.com/l/message/abc",
+      "kind": "teams",
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:tester"
+    },
+    {
+      "url": "https://github.com/acme/ingest/pull/17",
+      "title": "PR 17",
+      "kind": "github",
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:tester"
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "Keep X as an input alias for one release?",
+      "options": [
+        "Keep for one release",
+        "Remove now"
+      ],
+      "recommended": "Keep for one release",
+      "answer": null,
+      "answered_by": null,
+      "via": null
+    }
+  ],
+  "history": [
+    {
+      "at": "2026-11-04T09:12:00Z",
+      "by": "human:severin",
+      "text": "Created"
+    },
+    {
+      "at": "2026-11-04T10:05:00Z",
+      "by": "agent:claude-code",
+      "text": "Plan changed: accept legacy name X on input"
+    },
+    {
+      "at": "2026-11-04T10:40:00Z",
+      "by": "agent:claude-code",
+      "text": "Asked q1, waiting"
+    }
+  ],
+  "ext": {
+    "dashboard": {
+      "pinned": true
+    },
+    "reports": {
+      "category": "data-quality"
+    }
+  }
+}

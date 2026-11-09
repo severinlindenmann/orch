@@ -1,0 +1,25 @@
+{
+ "v": 1,
+ "seq": 1,
+ "run": "r_8k2m01",
+ "session": "3f2a9c1e-77aa-4b2e-9d10-1c2b3a4d5e6f",
+ "agent": "main",
+ "parent": null,
+ "at": "2026-11-16T09:12:05Z",
+ "ticket": "t_inv7c2",
+ "harness": "claude",
+ "coverage": "full",
+ "id": "toolu_01ABcd",
+ "via": "hook",
+ "kind": "step",
+ "text": "Read",
+ "used": {
+  "kind": "tool",
+  "name": "Read",
+  "action": null,
+  "source": "builtin",
+  "version": null
+ },
+ "outcome": null,
+ "detail": "detail/../../secrets/relay.json"
+}

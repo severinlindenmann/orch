@@ -48,6 +48,16 @@
     "note": { "type": "string", "maxLength": 2000, "description": "Optional. Free note from people, shown on the ticket. Plain text." },
     "done_when": { "type": "string", "maxLength": 2000, "description": "Optional. What people want to be true when the ticket is done. Plain text." },
     "summary": { "type": "string", "maxLength": 200, "description": "Optional. Where things stand, one or two plain sentences, kept current by whoever works on it. Used to start a fresh agent session." },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "changed": { "type": "string", "maxLength": 300, "description": "What changed, one or two plain sentences." },
+        "why": { "type": "string", "maxLength": 300, "description": "Why it was done." },
+        "not_included": { "type": "string", "maxLength": 300, "description": "What was left out." }
+      },
+      "description": "Optional. What changed and why, written when the work is done (orch ticket outcome). Shown on the ticket and on the Notes page. Readers ignore it when absent."
+    },
     "description": { "type": "string", "maxLength": 2000, "description": "Optional. What the ticket is about, written by an agent from the person's text (orch ticket title --description). Never the person's words: shown and sent to agents as the agent's description, with description_by." },
     "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
@@ -67,11 +77,15 @@
       "required": ["type", "ref"],
       "properties": {
         "type": { "enum": ["pr", "commit", "file", "url", "command", "note"] },
-        "ref": { "type": "string", "minLength": 1, "description": "PR URL, commit hash, file path (a copied file lives in the gitignored .orch/tickets/<id>/evidence/), URL, the command line, or the note text" },
+        "ref": { "type": "string", "minLength": 1, "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*$", "description": "PR URL, commit hash, file path (a copied file lives in the gitignored .orch/tickets/<id>/evidence/), URL, the command line, or the note text" },
         "text": { "type": "string", "description": "Optional short result, e.g. '42 passed'" },
         "title": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional short name shown instead of ref." },
         "summary": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. One plain line: what came out of the step. Shown on the task row." },
         "role": { "enum": ["result", "check", "support"], "description": "Optional. result = what was asked for; check = proof it works; support = anything else." },
+        "exit": { "type": "integer", "minimum": -255, "maximum": 255, "description": "Optional, command evidence recorded with `orch check record`: the exit code. Data only: orch never runs the command." },
+        "ran_at": { "$ref": "#/$defs/time", "description": "Optional, recorded command: when it ran." },
+        "files_sig": { "type": "string", "pattern": "^[0-9a-f]{16,128}$", "description": "Optional, recorded command: fingerprint of the work folder at that time (git folders only). A different fingerprint now = 'changes haven't been checked yet'." },
+        "output_tail": { "type": "string", "maxLength": 2048, "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*$", "description": "Optional, recorded command: the last 2 kB of its output, control characters removed. Text only." },
         "at": { "$ref": "#/$defs/time" },
         "by": { "$ref": "#/$defs/who" }
       }
@@ -88,11 +102,12 @@
         "wont_do": { "const": true, "description": "Optional. true = a person decided this step will not be done (\"Won't do\"). It counts as resolved for finishing the ticket, needs no evidence and is never done=true. Set and cleared only by a person; an agent can only ask (a question). Absent = a normal step." },
         "reason": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional, only with wont_do: one plain line, why. Cleared with wont_do." },
         "by": { "$ref": "#/$defs/who" },
-        "at": { "$ref": "#/$defs/time" }
+        "at": { "$ref": "#/$defs/time" },
+        "covers": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Optional. The part of the ticket's done_when this task covers, quoted in plain words. Used for the 'Done when' coverage line; absent = the task is not linked to a part." }
       },
       "allOf": [
         { "if": { "properties": { "done": { "const": true } } }, "then": { "properties": { "evidence": { "minItems": 1 } } } },
-        { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } } } },
+        { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } }, "not": { "required": ["state"] } } },
         { "if": { "required": ["reason"] }, "then": { "required": ["wont_do"] } }
       ],
       "description": "Evidence-based: done=true needs at least one evidence entry. wont_do=true (a person's decision) is resolved without evidence and excludes done=true."

@@ -7,6 +7,7 @@ Shared vectors: contracts/vectors/ticket-merge-v1.json.
 import json
 import re
 from copy import deepcopy
+from datetime import datetime
 
 FINAL = ("done", "dropped")
 LOSER_FIELDS = ("title", "note", "summary", "owner", "due", "key", "text")  # a replaced value goes to history
@@ -158,16 +159,89 @@ def _order(items, base_ids, key=None):
     return [items[i] for i in first + rest]
 
 
+RUNS_PER_REF = 5  # the rule below is the core's tickets.trim_runs (parity-tested), so replicas converge
+RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes the runs
+_RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+def _ran_at_ok(v) -> bool:
+    if not isinstance(v, str) or not _RAN_AT.fullmatch(v):
+        return False
+    try:
+        datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
+
+
+def _is_run(e) -> bool:
+    return isinstance(e, dict) and e.get("type") == "command" and _ran_at_ok(e.get("ran_at"))
+
+
+def trim_runs(evidence: list) -> list:
+    """Same as orch.tickets.trim_runs: newest 5 runs per command text and at most 45 runs per check (oldest
+    runs first); notes and other proof are never dropped; run order (ran_at, canonical JSON)."""
+    key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))
+    by_ref = {}
+    for i, e in enumerate(evidence):
+        if _is_run(e):
+            by_ref.setdefault(str(e.get("ref")), []).append(i)
+    drop = set()
+    for idx in by_ref.values():
+        idx.sort(key=key)
+        drop.update(idx[:-RUNS_PER_REF])
+    live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
+    drop.update(live[:-RUNS_PER_CHECK])  # over the cap only the oldest runs go; other proof is never touched
+    return [e for i, e in enumerate(evidence) if i not in drop]
+
+
 def _evidence(*lists):
     seen = {}
     for e in (e for lst in lists for e in lst):
-        k = (e.get("type"), e.get("ref"))
+        if not isinstance(e, dict):
+            continue
+        ran = e.get("ran_at")
+        # a recorded run is one entry per run (two replicas in the same second still collapse to one); the key is
+        # always hashable, whatever hostile JSON put in these fields
+        k = (str(e.get("type")), str(e.get("ref")), ran if isinstance(ran, str) else "")
         if k not in seen or _canon(e) > _canon(seen[k]):
             seen[k] = e
-    return sorted(seen.values(), key=lambda e: (e.get("at", ""), _canon(e)))
+    return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
+
+
+def _person_wont(x):
+    return x.get("wont_do") is True and str(x.get("by", "")).startswith("human:")
+
+
+def _drop_wont(x):
+    return {k: v for k, v in x.items() if k not in ("wont_do", "reason")}
 
 
 def _check_item(ctx, x0, xa, xb):
+    # Won't do is a person's decision: a side without a human `by` cannot bring it in (the rule of
+    # orch.tickets.check_wont_do), and done vs won't do is one side's item wholesale, never a field mix.
+    x0, xa, xb = ({**x} if not x.get("wont_do") or _person_wont(x) else _drop_wont(x) for x in (x0, xa, xb))
+    if (xa.get("wont_do") and xb.get("done")) or (xb.get("wont_do") and xa.get("done")):
+        return _normalize_check(dict(xa if ctx.a_newer else xb))
+    return _normalize_check(_check_merged(ctx, x0, xa, xb))
+
+
+def _normalize_check(x):
+    """The one rule for every merged step (one-sided, edited, picked or merged): Won't do stays only with a
+    human `by`, then the step is not done and not doing; done needs proof."""
+    if x.get("wont_do") and not _person_wont(x):
+        x = _drop_wont(x)
+    if "reason" in x and not x.get("wont_do"):
+        x = {k: v for k, v in x.items() if k != "reason"}
+    if x.get("wont_do"):
+        x = {k: v for k, v in x.items() if k != "state"}
+        x["done"] = False
+    elif x.get("done") and not x.get("evidence"):
+        x = {**x, "done": False}
+    return x
+
+
+def _check_merged(ctx, x0, xa, xb):
     out = _obj(ctx, x0, xa, xb, skip=("evidence",), top=True, label=f"{xa.get('id')} ")
     out["evidence"] = _evidence(x0.get("evidence", []), xa.get("evidence", []), xb.get("evidence", []))
     if out.get("done") and not out["evidence"]:
@@ -228,6 +302,7 @@ def _merge(base, a, b, now):
 
     cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
                 lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
+    cl = {k: _normalize_check(v) for k, v in cl.items()}
     out["checklist"] = _order(cl, ids(base.get("checklist", [])))
     if out["status"] == "done" and any(not (c.get("done") or c.get("wont_do")) for c in out["checklist"]):
         out["status"] = "active"

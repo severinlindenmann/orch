@@ -922,5 +922,9 @@ def test_view_carries_wont_do_and_counts_it(proj, run, new_ticket):
         {"text": "Email finance", "done": False, "wont_do": True, "reason": "Not needed"},
         {"text": "Archive", "done": False},
     ]
-    assert (view["done"], view["total"]) == (2, 3)
+    assert (view["done"], view["wont_do"], view["total"]) == (
+        1,
+        1,
+        3,
+    )  # never "2 of 3 done" for a declined step
     assert_valid(view)

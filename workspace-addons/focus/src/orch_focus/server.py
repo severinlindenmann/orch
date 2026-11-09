@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, adapterdata, chat, proofs, runfiles
+from . import actions, adapterdata, chat, proofs, runfiles, selfupdate
 from .board import Board, TicketWatcher
 from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
@@ -529,6 +529,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        if (path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path)) and selfupdate.answer(self):
+            return
         if (
             path == "/ready" and self.nonce
         ):  # challenge-response for start/stop; the nonce itself is never sent

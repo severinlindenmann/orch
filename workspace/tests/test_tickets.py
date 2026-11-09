@@ -404,3 +404,71 @@ def test_started_guard_writes_once_without_history(proj, new_ticket):
     assert first["history"] == before["history"]
     tickets.mark_working(proj, tid, "agent:test", "Test")
     assert tickets.load(proj, tid) == first
+
+
+def _t(items, done_when=None):
+    t = {"checklist": items}
+    if done_when:
+        t["done_when"] = done_when
+    return t
+
+
+def _c(cid, done=True, types=("command",), **kw):
+    return {"id": cid, "text": cid, "done": done, "evidence": [{"type": x, "ref": "r"} for x in types], **kw}
+
+
+def test_proof_state_counts_line():
+    ps = tickets.proof_state(_t([_c("c1"), _c("c2"), _c("c3", types=("note",))]))
+    assert ps["per_item"] == {"c1": "passed", "c2": "passed", "c3": "note"}
+    assert ps["line"] == "2 checks passed · 1 note" and ps["uncovered"] == []
+
+
+def test_proof_state_missing_and_empty():
+    ps = tickets.proof_state(_t([_c("c1", done=False, types=())]))
+    assert ps["per_item"] == {"c1": "missing"} and ps["line"] == "No checks recorded"
+    assert tickets.proof_state(_t([]))["line"] == "No checks recorded"
+
+
+def test_proof_state_failed_only_when_exit_recorded():
+    ok = _c("c1")
+    assert tickets.proof_state(_t([ok]))["per_item"]["c1"] == "passed"  # no exit = unknown, not failed
+    bad = _c("c1")
+    bad["evidence"][0]["exit"] = 1
+    ps = tickets.proof_state(_t([bad, _c("c2")]))
+    assert ps["per_item"]["c1"] == "failed" and ps["line"] == "1 check failed"
+    zero = _c("c1")
+    zero["evidence"][0]["exit"] = 0
+    assert tickets.proof_state(_t([zero]))["per_item"]["c1"] == "passed"
+
+
+def test_proof_state_real_coverage_count_and_level():
+    dw = "A CSV download button on the invoice list; and it works on the phone"
+    ps = tickets.proof_state(
+        _t([_c("c1", covers='"A CSV download button on the invoice list"')], done_when=dw)
+    )
+    assert ps["uncovered"] == ["and it works on the phone"]
+    assert ps["line"] == '1 part of "Done when" has no task' and ps["level"] == "warn"
+    ps = tickets.proof_state(_t([_c("c1", covers="Alpha"), _c("c2")], done_when="Alpha; Beta; Gamma"))
+    assert ps["uncovered"] == ["Beta", "Gamma"]
+    ps = tickets.proof_state(_t([_c("c1")], done_when="One.\nTwo; Three"))
+    assert ps["line"] == '3 parts of "Done when" have no task'
+    ps = tickets.proof_state(
+        _t(
+            [_c("c1", covers="one"), _c("c2", covers="two"), _c("c3", covers="three")],
+            done_when="One.\nTwo; Three",
+        )
+    )
+    assert ps["uncovered"] == [] and ps["line"] == "3 checks passed" and ps["level"] == "ok"
+    assert tickets.proof_state(_t([_c("c1")]))["uncovered"] == []  # no done_when, nothing to cover
+
+
+def test_proof_state_levels():
+    assert tickets.proof_state(_t([]))["level"] == "note"
+    assert tickets.proof_state(_t([_c("c1", types=("note",))]))["level"] == "note"
+    bad = _c("c1")
+    bad["evidence"][0]["exit"] = 2
+    assert tickets.proof_state(_t([bad]))["level"] == "fail"
+    assert tickets.proof_state(_t([_c("c1", done=False, types=())]))["per_item"]["c1"] == "missing"
+    stale = _c("c1")
+    stale["evidence"][0]["stale"] = True  # a stored flag is never trusted
+    assert tickets.proof_state(_t([stale]))["per_item"]["c1"] == "passed"

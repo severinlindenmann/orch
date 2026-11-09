@@ -240,3 +240,32 @@ def test_agents_test_not_installed_and_unknown(proj, run, capsys, fake_path):
     assert capsys.readouterr().out.strip() == "Codex is not installed."
     code, _, err = run("agents", "test", "nobody")
     assert code == 2 and "No agent called" in err
+
+
+RESERVED = [
+    ("focus", "live_session", True, False),
+    ("focus", "session_typing", False, True),
+    ("record", "keep_days", 90, 12),
+    ("record", "max_mb", 2048, 512),
+    ("insights", "share_counts", True, False),
+    ("insights", "share_names", False, True),
+]
+
+
+@pytest.mark.parametrize("section,key,default,valid", RESERVED)
+def test_reserved_config(proj, section, key, default, valid):
+    getter = getattr(config, f"{section}_{key}")
+    assert getter(None) == default
+    assert getter(proj) == default
+    config.set_key(proj, section, key, valid)
+    assert getter(proj) == valid
+    wrong = ['"wrong"', "[]", "{}", "1.5", "1" if isinstance(default, bool) else "true"]
+    if not isinstance(default, bool):
+        wrong += ["0", "-1"]
+    for value in wrong:
+        config.path(proj).write_text(f"[{section}]\n{key} = {value}\n")
+        assert getter(proj) == default
+    config.path(proj).write_text("invalid toml [")
+    assert getter(proj) == default
+    config.path(proj).write_text(f"{section} = 4\n")
+    assert getter(proj) == default

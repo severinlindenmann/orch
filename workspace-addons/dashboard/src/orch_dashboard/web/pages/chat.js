@@ -400,6 +400,8 @@ async function chatDmLoad(force = false) {
   chatDm.loading = true;
   const ws = chatUi.open;
   try {
+    const synced = await window.orchAct('chat.sync_ws', {});
+    if (!synced?.ok) throw new Error('Sync');
     const response = await fetch('/api/chat/contacts');
     if (!response.ok) throw new Error('Contacts');
     const contacts = await response.json();
@@ -407,8 +409,6 @@ async function chatDmLoad(force = false) {
     chatDm.contacts = chatObjects(contacts).filter(c => chatDmId(c.ws));
     chatDm.loaded = true;
     if (chatDmId(ws) && chatDmContact(ws)) {
-      const synced = await window.orchAct('chat.sync_ws', {workspace:ws});
-      if (!synced?.ok) throw new Error('Sync');
       const response = await fetch('/api/chat/thread/' + ws);
       if (!response.ok) throw new Error('Thread');
       const thread = await response.json();
@@ -441,7 +441,8 @@ const chatListWithoutDm = chatList;
 chatList = function () {
   const list = chatListWithoutDm();
   if (!snapshot) list.prepend(chatButton('New chat', 'contacts', {'data-key':'new-chat'}));
-  const rows = chatDm.contacts.filter(c => chatDmMessages(c.ws).length || chatUi.open === c.ws);
+  const rows = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
+    .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
   if (rows.length) {
     list.append(h('h2', {}, 'Workspaces'));
     rows.filter(c => c.name.toLowerCase().includes(chatUi.search.toLowerCase())).forEach(c => {
@@ -499,6 +500,7 @@ function chatDmThread() {
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
         chatText('div', 'chat-bubble chat-message-text', m.text),
+        m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,
         m.by === 'you' ? h('small', {className:'chat-delivery'},
           m.state === 'failed' ? fragment('Not sent · ', chatButton('Try again', 'retry-send', {'data-id':m.id})) :
           m.state === 'delivered' ? 'Delivered to ' + clean(title) : 'Sending…') : null))),
@@ -540,28 +542,45 @@ chatSend = async function () {
   const text = (chatUi.drafts[chatUi.open] || '').trim();
   if (text) return chatDmSend(text);
 };
+function chatDmClientId() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let id = 'm_';
+  while (id.length < 18) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(24))) {
+      if (byte < 252 && id.length < 18) id += alphabet[byte % 36];
+    }
+  }
+  return id;
+}
 async function chatDmSend(text, retryId) {
   const ws = chatUi.open;
   if (snapshot || !chatDmContact(ws)?.can?.chat || chatUi.sending.has(ws) || !text || text.length > 2000) return;
   const pending = chatDm.pending.get(ws) || [];
-  const entry = {id:'local-' + Date.now(), by:'you', text, state:'sending'};
-  pending.push(entry); chatDm.pending.set(ws, pending);
-  if (retryId) {
-    chatDm.pending.set(ws, pending.filter(m => m.id !== retryId));
+  const stored = chatObjects(chatDm.threads.get(ws)?.messages).find(m => m.id === retryId);
+  const previous = !stored && pending.find(m => m.id === retryId);
+  const entry = previous || {id:chatDmClientId(), by:'you', text, state:'sending', ...(stored ? {retry:retryId} : {})};
+  entry.state = 'sending';
+  if (!previous) pending.push(entry);
+  chatDm.pending.set(ws, pending);
+  if (stored) {
     const saved = chatDm.threads.get(ws);
-    if (saved) saved.messages = saved.messages.filter(m => m.id !== retryId);
-  } else {
+    saved.messages = saved.messages.filter(m => m.id !== retryId);
+  }
+  if (!retryId) {
     chatUi.drafts[ws] = '';
     const field = document.querySelector('.chat-page .chat-draft');
     if (field) { field.value = ''; field.style.height = ''; }
   }
   chatUi.sending.add(ws); render();
+  let accepted = false;
   try {
-    const result = await window.orchAct('chat.send_ws', {workspace:ws, text, ...(/^m_[a-z0-9]{16}$/.test(retryId || '') ? {retry:retryId} : {})});
+    const result = await window.orchAct('chat.send_ws', {workspace:ws, text, client_id:entry.id, ...(entry.retry ? {retry:entry.retry} : {})});
     const saved = result?.state?.chat_dm_result;
-    if (result?.ok && saved?.id) Object.assign(entry, saved);
-    else entry.state = 'failed';
-  } catch { entry.state = 'failed'; }
-  finally { chatUi.sending.delete(ws); render(); }
-  await chatDmLoad();
+    if (result?.ok && saved?.id) { Object.assign(entry, saved); accepted = true; }
+  } catch { /* Reconcile a possibly stored send before reporting failure. */ }
+  finally {
+    await chatDmLoad(true);
+    if (!accepted) entry.state = 'failed';
+    chatUi.sending.delete(ws); render();
+  }
 }

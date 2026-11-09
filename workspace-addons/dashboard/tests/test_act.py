@@ -968,3 +968,13 @@ def test_check_wont_do_argv():
 def test_check_wont_do_refuses_bad_args(extra):
     with pytest.raises(actions.BadRequest):
         actions.build_argv("check.wont_do", {"ticket": "t_abcdef", "check": "c1", **extra})
+
+
+def test_check_reopen_argv_and_refusals():
+    common = ["--by", actions.actor(), "--json"]
+    assert actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2"}) == [
+        "check", "reopen", "t_abcdef", "c2", *common
+    ]
+    for bad in ({"check": "bad"}, {"unexpected": 1}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("check.reopen", {"ticket": "t_abcdef", "check": "c2", **bad})

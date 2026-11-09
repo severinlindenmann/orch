@@ -16,9 +16,14 @@ from orch import (
     cli_chat,
     cli_clients,
     cli_config,
+    cli_conn,
+    cli_job,
     cli_look,
     cli_needs,
+    cli_record,
     cli_run,
+    cli_screen,
+    cli_secret,
     cli_status,
     fields,
     mobile_mode,
@@ -33,14 +38,55 @@ from orch import (
 from orch import init as init_mod
 from orch.errors import Refused
 
+_HINT = "Unset ORCH_ROOT, or point it at a folder with .orch in it."
+_noted = False
 
-def _find_root() -> Path:
-    """The workspace root: nearest folder upwards with .orch/ or .agents/, else the current folder."""
-    cwd = Path.cwd()
+
+def _env_root() -> Path | None:
+    """ORCH_ROOT, when set and not empty (an empty value counts as unset): the workspace of whoever started
+    this process (an agent in a copy of the folder must write to the real tickets). Strict: absolute, an
+    existing folder with .orch/ in it, symlinks resolved; anything else is refused, never a silent fall back
+    to walking up (that could write a second, stale store)."""
+    raw = os.environ.get("ORCH_ROOT")
+    if not raw:
+        return None
+    p = Path(raw)
+    if not p.is_absolute():
+        raise Refused(f"ORCH_ROOT must be a full folder path, not '{raw}'. {_HINT} Nothing was changed.")
+    try:
+        p = p.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise Refused(
+            f"ORCH_ROOT points to a folder that cannot be opened: {raw}. {_HINT} Nothing was changed."
+        ) from None
+    if not p.is_dir() or not (p / ".orch").is_dir():
+        raise Refused(f"ORCH_ROOT points to a folder without orch in it: {raw}. {_HINT} Nothing was changed.")
+    return p
+
+
+def _walk_up() -> Path:
+    cwd = Path.cwd().resolve()
     for p in (cwd, *cwd.parents):
         if (p / ".orch").is_dir() or (p / ".agents").is_dir():
             return p
     return cwd
+
+
+def _find_root() -> Path:
+    """The workspace root, always resolved (parent and child must agree on the string): ORCH_ROOT when set,
+    else the nearest folder upwards with .orch/ or .agents/, else the current folder."""
+    global _noted
+    env = _env_root()
+    if env is None:
+        return _walk_up()
+    if not _noted:  # a stale export in a shell sends every command to that workspace: say so once
+        _noted = True
+        here = _walk_up()
+        if here != env and not any(
+            (h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()
+        ):
+            print(f"Note: ORCH_ROOT sends this to {env}, not to {here}.", file=sys.stderr)
+    return env
 
 
 def _out(args, data, text: str) -> None:
@@ -52,8 +98,7 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
-    d, n = tickets.checks_done(t)
-    return f"{d} of {n} done" if n else ""
+    return tickets.progress_text(t)
 
 
 def _line(t: dict) -> str:
@@ -107,7 +152,8 @@ def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> lis
     mark = "✓" if c["done"] else ("–" if wont else ("◐" if c.get("state") == "doing" else "○"))
     line = f"  {mark} {c['id']} {c['text']}"
     if wont:
-        line += "   Won't do" + (f": {c['reason']}" if c.get("reason") else "")
+        why = "".join(ch for ch in str(c.get("reason") or "") if ch.isprintable())
+        line += "   Won't do" + (f": {why}" if why else "")
     if q and not c["done"] and not wont:
         line += f"   waiting for your answer ({q['id']})"
     if c.get("state") == "doing" and not c["done"] and not wont and root is not None:
@@ -143,7 +189,12 @@ def _show(t: dict, root: Path | None = None) -> str:
         f"Status: {tickets.STATUS_WORDS[t['status']]}" + (f" - {_progress(t)}" if _progress(t) else "")
     )
     if n and d == n:
-        out.append(f"✓ All done · {n} of {n}")
+        out.append(
+            f"✓ All done · {_progress(t)}"
+            if tickets.checks_split(t)[1] == 0
+            else f"✓ All resolved · {_progress(t)}"
+        )
+    out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
         out.append("  ".join(extra))
@@ -151,6 +202,10 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append(f"Note: {t['note']}")
     if t.get("done_when"):
         out.append(f"Done when: {t['done_when']}")
+    if t.get("status") == "done" and t.get("outcome"):
+        for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
+            if t["outcome"].get(k):
+                out.append(f"{label}: {t['outcome'][k]}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(f"Step of: {p['title']} ({p['id']})" if p else f"Step of: {t['parent']} (parent missing)")
@@ -350,6 +405,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("summary", parents=[common], help="where things stand, one or two sentences")
     x.add_argument("id")
     x.add_argument("text")
+    x = t.add_parser("outcome", parents=[common], help="what changed and why, for the Notes page")
+    x.add_argument("id")
+    x.add_argument("--changed", help="what changed, one or two sentences (empty clears)")
+    x.add_argument("--why", help="why it was done (empty clears)")
+    x.add_argument("--not-included", dest="not_included", help="what was left out (empty clears)")
     x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
     x.add_argument("id")
     x = t.add_parser(
@@ -393,10 +453,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = c.add_parser("add", parents=[common])
     x.add_argument("id")
     x.add_argument("text")
-    x = c.add_parser("edit", parents=[common], help="rename a task")
+    x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
+    x = c.add_parser("edit", parents=[common], help="rename a task or link it to a part of Done when")
     x.add_argument("id")
     x.add_argument("check")
-    x.add_argument("text")
+    x.add_argument("text", nargs="?")
+    x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x.add_argument("--was", metavar="TEXT", help="refused when the task text is no longer this")
     x = c.add_parser("move", parents=[common], help="put a task after another")
@@ -416,6 +478,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("check")
     x.add_argument("--reason", metavar="TEXT", help="one line, why (optional)")
+    x = c.add_parser("record", parents=[common], help="record that a command ran (orch does not run it)")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--cmd", required=True, metavar="TEXT", dest="ran", help="what ran, as text")
+    x.add_argument("--exit", type=int, metavar="N", dest="exit_code", help="its exit code")
+    x.add_argument("--output", metavar="FILE", help="a plain log file in this workspace with its output")
     x = c.add_parser("done", parents=[common])
     x.add_argument("id")
     x.add_argument("check")
@@ -478,6 +546,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_clients.add_parsers(sub, common)
     cli_run.add_parsers(sub, common)
     cli_needs.add_parsers(sub, common)
+    cli_conn.add_parsers(sub, common)
+    cli_job.add_parsers(sub, common)
+    cli_record.add_parsers(sub, common)
+    cli_secret.add_parsers(sub, common)
+    cli_screen.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
@@ -492,7 +565,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
     top = p._subparsers._group_actions[0]
     top._choices_actions[:] = [
-        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
+        a
+        for a in top._choices_actions
+        if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS and a.help != argparse.SUPPRESS
     ]
     return p
 
@@ -521,6 +596,19 @@ def _child_warning(root: Path, t: dict) -> list[str]:
     return [f"{len(kids)} sub-tickets are still open: " + ", ".join(k["id"] for k in kids)]
 
 
+def _init_guard(cwd: Path) -> None:
+    """`orch init` works on the current folder, so it refuses where that folder is a copy of a workspace."""
+    here = cwd.resolve()
+    env = _env_root()
+    if env is not None and env != here:
+        raise Refused(
+            f"ORCH_ROOT is set to {env}. Run orch init there, "
+            "or unset ORCH_ROOT to start a new workspace here."
+        )
+    if any((h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()):
+        raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
+
+
 def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
@@ -531,6 +619,7 @@ def run(args: argparse.Namespace) -> None:
 
     if cmd == "init":
         root = Path.cwd()
+        _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
         lines = init_mod.init(root, args.code)
@@ -550,7 +639,7 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
     elif cmd == "update":
-        report = []
+        report, notes = [], []
         done = addons.update(
             root,
             args.project_only,
@@ -558,14 +647,23 @@ def run(args: argparse.Namespace) -> None:
             json_output=args.json,
             report=report,
             nonce=args.update_nonce,
+            notes=notes,
         )
         if args.after_install:
             pass
         elif args.project_only and (args.json or not report):
-            _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
+            data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
+            _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
     elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
+        pass
+    elif (
+        cli_conn.dispatch(args, root)
+        or cli_job.dispatch(args, root)
+        or cli_record.dispatch(args, root)
+        or cli_secret.dispatch(args, root)
+    ):
         pass
     elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
         pass
@@ -642,6 +740,11 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "summary":
         t = tickets.set_summary(root, args.id, args.text, by())
         _out(args, t, "Summary saved.")
+    elif cmd == "ticket" and sub == "outcome":
+        t = tickets.set_outcome(
+            root, args.id, by(), changed=args.changed, why=args.why, not_included=args.not_included
+        )
+        _out(args, t, "Outcome saved.")
     elif cmd == "ticket" and sub == "artifacts":
         rows = tickets.artifacts_list(root, args.id)
         _out(
@@ -687,15 +790,20 @@ def run(args: argparse.Namespace) -> None:
             + (f" until {t['waiting_on']['until']}" if args.until else f" on {args.on}"),
         )
     elif cmd == "check" and sub == "add":
-        t, c = tickets.check_add(root, args.id, args.text, by())
+        t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
     elif cmd == "check" and sub == "wont-do":
         t, c = tickets.check_wont_do(root, args.id, args.check, by(), args.reason)
         _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
+    elif cmd == "check" and sub == "record":
+        t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
+        _out(args, c, f"Recorded for {c['id']}: {c['evidence'][-1]['ref']}")
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":
-            t, c = tickets.check_edit(root, args.id, args.check, args.text, who, args.if_revision, args.was)
+            t, c = tickets.check_edit(
+                root, args.id, args.check, args.text, who, args.if_revision, args.was, args.covers
+            )
             msg = f"{c['id']} renamed."
         elif sub == "move":
             t, c = tickets.check_move(root, args.id, args.check, args.after, who)
@@ -892,7 +1000,6 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
-    root = _find_root()
     want_json = "--json" in argv
 
     def refuse(e: Refused) -> int:
@@ -903,6 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
         parser = build_parser(show_all, lines)
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):

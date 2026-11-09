@@ -1,0 +1,26 @@
+[
+ {
+  "v": 1,
+  "seq": 1,
+  "type": "hello",
+  "ticket": "t_inv7c2",
+  "run": "r_8k2m01",
+  "cols": 120,
+  "rows": 40,
+  "at": "2026-11-16T09:20:00Z",
+  "typing_switch": false,
+  "takeover": null
+ },
+ {
+  "v": 1,
+  "seq": 2,
+  "type": "end",
+  "reason": "run-ended"
+ },
+ {
+  "v": 1,
+  "seq": 3,
+  "type": "output",
+  "data": "x"
+ }
+]
