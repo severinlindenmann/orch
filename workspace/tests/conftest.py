@@ -16,7 +16,9 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 def _snapshot_real_tool_home():
     """{path: (size, sha256, mtime_ns)} of the real ~/.orch-tool (read only), without the fallback trace; and
     the trace lines. A path that can not be read maps to None."""
-    base = _REAL_HOME_FN() / ".orch-tool"
+    # ORCH_TEST_GUARD_HOME: only tests/test_session_guard.py points the guard at a fake account home
+    guard = os.environ.get("ORCH_TEST_GUARD_HOME")
+    base = (Path(guard) if guard else _REAL_HOME_FN()) / ".orch-tool"
     files, trace = {}, []
     if base.exists():
         for p in (base, *base.rglob("*")):
