@@ -1787,9 +1787,9 @@ def _restart_locked(
     over, env_notes = launchenv.overrides(home())
     used = launchenv.apply(dict(os.environ), over)
     envs = {n: over for n in names}
+    for note in env_notes:  # once for the workspace, not per service
+        lines.append(f"{root.name}: {note}")
     for n in sorted(names):
-        for note in env_notes:
-            lines.append(f"{label(n)}: {note}")
         diff = launchenv.differs((recorded or {}).get(n), used)
         if diff:
             lines.append(

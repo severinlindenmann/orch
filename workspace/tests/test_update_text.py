@@ -643,7 +643,6 @@ def test_code_loading_variables_are_never_taken_from_a_record(name):
 
     assert launchenv.denied(name)
     assert launchenv.clean({name: "x", "HOME": "/h"}) == {"HOME": "/h"}
-    assert launchenv.apply({"A": "1"}, {name: "x", "HOME": "/h"}) == {"A": "1", "HOME": "/h"}
 
 
 def test_call_adds_the_overrides_to_the_callers_environment(proj, monkeypatch):
@@ -679,3 +678,27 @@ def test_start_records_home_and_path_for_information_only(proj, monkeypatch):
     monkeypatch.setenv("HOME", "/second/home")  # `orch start` again: the same pid keeps its first record
     services.start(proj)
     assert services.running()[0]["env"]["HOME"] == "/first/home"
+
+
+def test_pwd_failure_note_is_said_once_per_workspace(proj, tmp_path, monkeypatch):  # noqa: F811
+    from orch import launchenv
+
+    Fleet(tmp_path, monkeypatch)
+    monkeypatch.setattr(launchenv, "user_home", lambda: None)
+    lines = addons._restart_updated()
+    notes = [x for x in lines if "could not read this user's home folder" in x]
+    assert sorted(x.split(":")[0] for x in notes) == ["Pilatus", "Rigi"]  # two workspaces, one line each
+
+
+def test_a_running_services_old_record_is_cleaned_when_carried_forward(proj, monkeypatch):
+    (proj / ".orch").mkdir(exist_ok=True)
+    monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
+    monkeypatch.setattr(services, "workspace_rows", lambda root: [])
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(services, "_call", lambda *a, **k: {"running": True, "pid": 4242})
+    services.start(proj)
+    entries = json.loads(services.running_path().read_text())
+    entries[0]["env"] = {"HOME": "/h", "LD_PRELOAD": "/evil.so", "PATH": "x" * 5000, "OTHER": "y"}
+    services.running_path().write_text(json.dumps(entries))
+    services.start(proj)  # the same pid is still running: its record stays, cleaned and size-limited
+    assert services.running()[0]["env"] == {"HOME": "/h"}

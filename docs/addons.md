@@ -86,3 +86,14 @@ four buttons. A button asks the add-on to do one named thing for a ticket (`orch
 dashboard never runs add-on code and shows add-on text as plain text only.
 
 An add-on is code that runs on this computer with your rights. Add only what you trust.
+
+## Restart after `orch update`
+
+`orch update` restarts the background services that were running (dashboard, Focus, automation) so they run the
+new code. A restarted service gets the environment of the terminal that ran the update, with two exceptions: `HOME`
+is the current user's home from the password database, and `ORCH_HOME` is the orch folder in use. Nothing the
+service recorded when it started is replayed. If you run the update under a different home on purpose (for
+example `sudo -E`, or in a container where the password database has no entry for your user), the service
+gets your terminal's `HOME` instead and the update says so; if a service then misbehaves, run `orch stop` and
+`orch start` in the shell you want it to use.
+

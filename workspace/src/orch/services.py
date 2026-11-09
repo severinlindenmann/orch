@@ -255,7 +255,7 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
         if row["running"] and isinstance(row.get("pid"), int):
             old = next((e for e in before if e["workspace"] == str(root) and e["addon"] == name), None)
             if old and old.get("pid") == row["pid"] and old.get("env") and name not in envs:
-                launch = old["env"]  # it was already running: what it started with stays on record
+                launch = launchenv.clean(old["env"])  # already running: its record stays (size-limited)
             else:
                 launch = launchenv.capture(launchenv.apply(dict(os.environ), envs.get(name, {})))
             entries.append(

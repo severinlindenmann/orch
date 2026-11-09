@@ -9,8 +9,9 @@ service with the CALLER's environment plus exactly three overrides that come fro
   ORCH_HOME the orch folder in use now
   ORCH_ROOT the verified workspace folder (set by services._call)
 
-The record (HOME and PATH at start) is kept only as information: when it differs from what the restart uses,
-one line says so. Names that change what code a process loads are never taken from a record at all."""
+The record holds only HOME and PATH as they were at start, and only as information: when it differs from what
+the restart uses, one line says so. Anything else in that file is ignored, and names that change what code a
+process loads (LD_*, PYTHON*, ...) are refused outright."""
 
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ def denied(name: str) -> bool:
     return bool(DENY.match(name))
 
 
-def capture(env: dict[str, str] | None = None, root: Path | None = None) -> dict[str, str]:  # noqa: ARG001
+def capture(env: dict[str, str] | None = None) -> dict[str, str]:
     """The informational record of a start: HOME and PATH as the service got them."""
     src = os.environ if env is None else env
     return {
@@ -76,7 +77,7 @@ def overrides(orch_home: Path) -> tuple[dict[str, str], list[str]]:
 
 def apply(base: dict[str, str], over: dict[str, str]) -> dict[str, str]:
     """The caller's environment with the overrides on top (nothing else changes)."""
-    return {**base, **{k: v for k, v in over.items() if not denied(k)}}
+    return {**base, **over}
 
 
 def differs(recorded: object, used: dict[str, str]) -> list[str]:
