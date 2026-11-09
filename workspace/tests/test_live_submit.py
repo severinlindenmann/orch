@@ -903,3 +903,13 @@ def test_the_real_tmux_accepts_the_one_call_read_and_the_client_target(proj, run
     assert runs_live._hold_reason(proj, tid, None) is None  # an empty box, no dialog, not scrolled
     assert runs_live.tmux(proj, "list-clients", "-t", runs_live.target(tid)).returncode == 0
     assert runs_live._client_idle(proj, tid) == 0.0  # nobody attached: unknown, never cancels
+
+
+def test_a_tool_without_a_prompt_box_is_judged_by_the_cursor_line(proj, run, monkeypatch):
+    """A plain command-line agent (the generic adapter) draws no box: its output above the prompt is not
+    unsent text; text on the cursor's own line is."""
+    tid, rn, sent, screen = _held(proj, run, monkeypatch)
+    screen["pane"] = None
+    pane = "\n".join(["old output", "more output", "", ""])
+    assert runs_live._box_text(pane, 2, 0) == ""
+    assert runs_live._box_text(pane.replace("\n\n", "\ntyped half a line\n", 1), 2, 15) == "typed half a line"

@@ -330,6 +330,10 @@ def _is_hint(raw_row: str) -> bool | None:
 def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str:
     """What is in the prompt box ("" only when it is PROVEN empty, see the invariant above)."""
     lines = pane.split("\n")
+    if sum(1 for ln in lines if _BORDER.match(ln)) < 2:
+        # a tool that draws no prompt box (a plain command-line agent): its prompt is the cursor's own line
+        cur = lines[cy] if 0 <= cy < len(lines) else ""  # no such row on the screen: nothing typed there
+        return "" if not _PROMPT_GLYPH.sub("", cur, count=1).strip() else cur.strip()
     a, b = _box_rows(lines, cy)
     rows = [_PROMPT_GLYPH.sub("", ln, count=1).strip() for ln in lines[a:b]]
     text = " ".join(r for r in rows if r)
