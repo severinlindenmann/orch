@@ -334,3 +334,19 @@ def test_relay_immediate_post_ack(dm, monkeypatch):
     queued = relay._message(root, WS, "text", {"text": "later"})
     assert queued["sent"] is False
     assert queued["id"] not in relay.posted_ids(root)
+
+
+def test_record_posted_never_raises_and_ignores_links(tmp_path, monkeypatch):
+    from orch import relay
+
+    root = tmp_path / "w"
+    (root / ".orch").mkdir(parents=True)
+    monkeypatch.setattr(relay.net, "write_json", lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
+    relay._record_posted(root, "m_abcdefghijklmnop")  # must not raise
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    link = tmp_path / "l"
+    (link).mkdir()
+    (link / ".orch").symlink_to(real)
+    assert relay._posted_path(link) is None
+    assert relay.posted_ids(link) == []

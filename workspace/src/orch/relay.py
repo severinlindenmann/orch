@@ -467,17 +467,28 @@ def _message(
     return {**msg, "sent": True}
 
 
+def _posted_path(root: Path) -> Path | None:
+    """relay-posted.json, or None when .orch or the file is a link (never follow one)."""
+    p = root / ".orch" / "relay-posted.json"
+    return None if (root / ".orch").is_symlink() or p.is_symlink() else p
+
+
 def posted_ids(root: Path) -> list[str]:
-    data = net.read_json(root / ".orch" / "relay-posted.json", [])
+    p = _posted_path(root)
+    data = net.read_json(p, []) if p else []
     return [x for x in data if isinstance(x, str)] if isinstance(data, list) else []
 
 
 def _record_posted(root: Path, mid: str) -> None:
-    """Only called after the relay accepted a post, never when merely queued."""
-    with tickets._locked(root, "relay-posted"):
-        ids = posted_ids(root)
-        ids = [x for x in ids if x != mid]
-        net.write_json(root / ".orch" / "relay-posted.json", (ids + [mid])[-5000:], True)
+    """Only called after the relay accepted a post, never when merely queued. Bookkeeping: a failure here must
+    never turn a delivered message into a failed one or stop the outbox flush."""
+    with contextlib.suppress(Exception):
+        p = _posted_path(root)
+        if p is None:
+            return
+        with tickets._locked(root, "relay-posted"):
+            ids = [x for x in posted_ids(root) if x != mid]
+            net.write_json(p, (ids + [mid])[-5000:], True)
 
 
 def _problem_path(root: Path) -> Path:

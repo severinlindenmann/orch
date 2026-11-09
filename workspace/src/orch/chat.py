@@ -910,7 +910,7 @@ def dm_sync(root: Path, ws: str, by: str | None = None) -> dict:
             data["messages"].append(
                 {
                     "id": mid,
-                    "at": str(msg.get("created_at") or ""),
+                    "at": str(msg.get("created_at") or "")[:40],
                     "by": ws,
                     "text": relay.clean_untrusted(body["text"], 2000),
                     "state": "delivered",
