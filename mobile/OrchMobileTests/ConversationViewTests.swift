@@ -94,7 +94,7 @@ final class ConversationViewTests: XCTestCase {
         XCTAssertEqual(merged.count, 1)
         XCTAssertEqual(merged.first?.id, "r1")
         XCTAssertEqual(merged.first?.text, "Page is ready")
-        XCTAssertEqual(merged.first?.label, "Ready for your review")
+        XCTAssertEqual(merged.first?.label, "Result")
         XCTAssertEqual(merged.first?.attachments, [file])
         XCTAssertEqual(merged.first?.artifacts.map(\.name), ["preview.png", "notes.txt", "extra.txt"])
         let mine = ConvItem(id: "m", at: "2", side: .me, text: "Another request")
@@ -105,6 +105,27 @@ final class ConversationViewTests: XCTestCase {
             XCTAssertEqual(separate.map(\.id), ["r1", separator.id, "r2"])
             XCTAssertEqual(separate.first?.label, "Result")
         }
+    }
+
+    func testWithoutReviewHeadline() {
+        XCTAssertEqual(ConversationRules.withoutReviewHeadline("Ready for your review\nMade fish.html."), "Made fish.html.")
+        XCTAssertEqual(ConversationRules.withoutReviewHeadline("ready for your review: X\nMade fish.html."), "Made fish.html.")
+        XCTAssertEqual(ConversationRules.withoutReviewHeadline("Made fish.html.\nReady for your review: Fish"), "Made fish.html.\nReady for your review: Fish")
+        XCTAssertEqual(ConversationRules.withoutReviewHeadline("Ready for your review: Fish"), "Ready for your review: Fish")
+        XCTAssertEqual(ConversationRules.withoutReviewHeadline("Ready for your review\n"), "Ready for your review\n")
+        XCTAssertEqual(ConversationRules.withoutReviewHeadline("Ready for your review: Fish\r\n\n Made fish.html. \n"), "\n Made fish.html. \n")
+    }
+
+    func testReviewTicketResultShowsStatusOnlyInHeader() {
+        let text = "Ready for your review: Fish\nMade fish.html."
+        let message = PhoneMessage(message: TextMessage(id: "r1", from: "ws_a", to: "ph_1", type: "text", createdAt: "2026-11-09T10:00:00Z", ticket: "t_1",
+                                                       body: TextBody(text: text, update: TextUpdate(kind: "result"))), workspaceName: "A")
+        let ticket = Ticket(id: "ws_a|t_1", workspace: "ws_a", workspaceName: "A", ticket: "t_1", title: "Fish", text: text,
+                            status: .review, kind: "result", at: "2026-11-09T10:00:00Z", question: nil)
+        let items = ConversationBuilder.items(.topic(workspace: "ws_a", ticket: "t_1"), ConversationInputs(messages: [message], tickets: [ticket]))
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.label, "Result")
+        XCTAssertEqual(items.first?.text, "Made fish.html.")
     }
 
     func testTicketBuilderMergesResultsAcrossHiddenWorkingUpdates() {
