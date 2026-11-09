@@ -750,7 +750,16 @@ function ticketRenameStep(child) {
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } };
   actions.append(save); d.append(input, actions); window.orch.open(d); input.focus();
 }
+// The goal and what is not included live at the end of the parent's note: "Goal: ...\nNot included: ...".
+function planGoal(note) {
+  const text = String(note || ''), at = text.search(/Not included:/i);
+  const notIn = at < 0 ? '' : text.slice(at).replace(/^Not included:\s*/i, '').trim();
+  const before = (at < 0 ? text : text.slice(0, at)).trim().split(/\n\s*\n/).pop().trim();
+  const goal = before.replace(/^Goal:\s*/i, '').trim();
+  return {goal: /^Goal:/im.test(text) || at >= 0 ? goal : '', notIn};
+}
 function ticketPlan(t, q, children) {
+  const {goal, notIn} = planGoal(t.note);
   const editing = ticketPlanEditing.has(t.id);
   const start = snapshot ? null : ticketButton('Start work', 'primary', async () => {
     const lock = 'plan-answer-' + t.id;
@@ -765,6 +774,8 @@ function ticketPlan(t, q, children) {
   return h('section', {className:'card next-step next-question ticket-plan'},
     chip("Waiting for you · work hasn't started", 'attn'),
     h('h2', {}, clean(q.text)),
+    goal ? h('p', {className:'preserve-lines'}, h('strong', {}, 'Goal: '), clean(goal)) : null,
+    notIn ? h('p', {className:'meta preserve-lines'}, h('strong', {}, 'Not included: '), clean(notIn)) : null,
     h('ol', {className:'ticket-plan-steps'}, children.filter(c => c.status !== 'dropped').sort((x, y) => (Number(String(x.key).split('-').pop()) || 0) - (Number(String(y.key).split('-').pop()) || 0)).map(child =>
       h('li', {}, h('div', {className:'stack'}, h('strong', {}, clean(child.title)),
         child.done_when ? h('p', {className:'meta preserve-lines'}, 'Done when ' + clean(child.done_when)) : null,
@@ -807,6 +818,7 @@ function detail(t) {
   const answered = array(t.questions).filter(q => q.answer != null).slice().reverse().map(q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
     h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines'}, clean(q.answer)), h('p', {className:'meta'}, ['Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · ')))));
   const fresh = !total && !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
+  const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   let next = null;
   if (t.status !== 'done') {
     // Review buttons are there whenever the status is Review, even with an open question: the question comes first.
@@ -817,7 +829,7 @@ function detail(t) {
       h('h2', {}, agent + ' finished' + (file ? ': ' + clean(window.DashHelpers.plainFileName(file.name)) : '')),
       at ? h('p', {className:'meta'}, 'Completed ' + window.DashHelpers.stamp(at, Date.now())) : null,
       ticketReviewTile(t, file), snapshot ? null : ticketChangesEditor(t)) : null;
-    if (openQuestions.length || review) next = [openQuestions.length ? (t.plan_first && String(openQuestions[0].text || '').startsWith('Plan ready') ? ticketPlan(t, openQuestions[0], children) : ticketQuestion(t, openQuestions[0], true)) : null, review];
+    if (openQuestions.length || review) next = [openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null, review];
     else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start agent', 'primary', () => act('run.start', {ticket:t.id})));
   }
   const menu = snapshot ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon', 'aria-label':'More ticket actions'}, iconEl('more')),
@@ -826,12 +838,12 @@ function detail(t) {
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id}, h('header', {className:'stack ticket-heading'},
     parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
-    h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
+    h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), planQ ? null : openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && !planQ && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
-      !fresh && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
+      !fresh && !planQ && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !planQ && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),
-      panel('overview', [t.description ? h('p', {className:'muted preserve-lines', 'data-key':'description'}, clean(t.description), ' ', h('small', {className:'meta'}, '— written by ' + ticketActor(t.description_by))) : null, t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, children.length || (!parent && !t.parent) ? ticketParts(t, children) : null, ticketFiles(t), tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
+      panel('overview', [t.description ? h('p', {className:'muted preserve-lines', 'data-key':'description'}, clean(t.description), ' ', h('small', {className:'meta'}, '— written by ' + ticketActor(t.description_by))) : null, t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, !planQ && (children.length || (!parent && !t.parent)) ? ticketParts(t, children) : null, ticketFiles(t), tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
       panel('tasks', tasksCard('tasks')),
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),

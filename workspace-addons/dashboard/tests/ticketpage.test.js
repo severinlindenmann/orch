@@ -265,6 +265,15 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
   let tree = ctx.detail(t);
   assert.match(JSON.stringify(tree), /Waiting for you · work hasn't started/);
   assert.match(JSON.stringify(tree), /Done when It works/);
+  const json = JSON.stringify(tree);
+  assert.equal((json.match(/work hasn't started/g) || []).length, 1);  // the waiting state shows once
+  assert.equal((json.match(/Needs you/g) || []).length, 0);
+  assert.equal((json.match(/"First"/g) || []).length, 1);  // each step once
+  assert.equal(nodes(tree).filter(n => n.tag === 'button' && n.children.includes('Answer')).length, 0);
+  t.note = 'Build it\n\nGoal: customers pay online\nNot included: refunds · subscriptions';
+  const withGoal = JSON.stringify(ctx.detail(t));
+  assert.match(withGoal, /Goal: /); assert.match(withGoal, /customers pay online/); assert.match(withGoal, /Not included: /); assert.match(withGoal, /refunds · subscriptions/);
+  delete t.note;
   assert.ok(find(tree, 'Start work')); assert.ok(find(tree, 'Change a step'));
   assert.equal(find(tree, 'Rename'), undefined);
   find(tree, 'Change a step').onclick();

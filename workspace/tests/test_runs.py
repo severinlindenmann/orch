@@ -445,3 +445,16 @@ def test_claim_started_survives_stop_and_second_claim(proj, new_ticket, run):
     second = runs.claim(proj, tid, "agent:test", "claude", pid=os.getpid())
     assert tickets.load(proj, tid)["started"] is True
     runs.release(proj, tid, second["run"])
+
+
+def test_plan_first_with_done_when_does_not_say_then_start(proj):
+    t = tickets.create(
+        proj, "Online payments", "human:me", fields={"done_when": "Customers can pay"}, plan_first=True
+    )
+    prompt = runs.fresh_prompt(t, [])
+    assert "then start" not in prompt and "done-when of the steps" in prompt
+    assert prompt.index("Do NOT change any project file") < prompt.index("Customers can pay")
+    assert "Goal: <goal>" in prompt and "Not included: <list>" in prompt
+    assert "Which step, and what should change?" in prompt
+    plain = tickets.create(proj, "Other", "human:me", fields={"done_when": "x"})
+    assert "then start" in runs.fresh_prompt(plain, [])

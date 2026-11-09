@@ -1,4 +1,4 @@
-/* Question card logic, no DOM. Options send immediately; typed answers wait 5 seconds (Undo); exactly one send.
+/* Question card logic, no DOM. Plain-question options (oneTap, no kind) send immediately; everything else waits 5 seconds (Undo); exactly one send.
    idle -> pending -> sending -> sent | undone | conflict | error ;  a reload with an unsent pending answer -> notsent.
    Clock, send function, storage and id source are injected so tests need no browser and no real time. */
 (function (root, factory) {
