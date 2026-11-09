@@ -342,6 +342,9 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                     "ticket_fields": tf,
                     "acts": acts,
                     "link_kinds": kinds,
+                    # orch-shipped (an installed package) vs a local folder someone added: the page of the
+                    # latter runs sandboxed, with no way to use the person's session (H1)
+                    "shipped": a.get("source") == "built-in",
                 }
             )
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))

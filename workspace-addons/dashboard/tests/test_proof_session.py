@@ -218,3 +218,18 @@ def test_dismiss_needs_a_session(live):
     ck = session(root, port)
     assert post(port, "/api/act", {"op": "handoff.dismiss", "args": {"id": hid}}, {"Cookie": ck})[0] == 200
     assert hp.handoffs(root) == []
+
+
+def test_a_sandboxed_addon_page_cannot_use_the_session(live):
+    """A page of a local add-on runs in an opaque origin: its requests carry Origin "null" and the fence refuses
+    them, even with the person's cookie in the jar."""
+    root, port = live
+    ck = session(root, port)
+    for op in ("handoff.confirm", "handoff.dismiss"):
+        st, _, _ = post(
+            port,
+            "/api/act",
+            {"op": op, "args": {"id": "x"}},
+            {"Cookie": ck, "Origin": "null", "Sec-Fetch-Site": "cross-site"},
+        )
+        assert st == 403

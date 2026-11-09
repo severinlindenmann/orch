@@ -125,6 +125,12 @@ class Handler(BaseHTTPRequestHandler):
         host = host.rsplit("]", 1)[0] + "]" if host.startswith("[") else host.split(":", 1)[0]
         return host in ("127.0.0.1", "localhost", "[::1]")
 
+    def _shipped(self, name: str) -> bool:
+        """True only for an add-on `orch addon list` says is shipped with orch; anything else, or unknown, is not."""
+        return any(
+            a["name"] == name and a.get("shipped") is True for a in load_addons(self.root, self.orch_bin)
+        )
+
     def _upstream_port(self, name: str) -> int | None:
         """The local port of a running add-on that declares a [page]: both facts come from orch's own add-on data."""
         hit = _PORTS.get((str(self.root), name))
@@ -181,7 +187,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(r.status, data, ctype, extra, csp=page_csp)
         if cross:
             return self._send(403, b"forbidden", "text/plain")
-        self._send(r.status, data, ctype, extra or None, csp=PROXY_CSP)
+        # a page that orch did not ship gets an opaque origin: it cannot call this server's /api/act or hand-off
+        # confirm with the person's cookie (the fence refuses an origin of "null"; SameSite withholds the cookie)
+        csp = PROXY_CSP if self._shipped(name) else PROXY_CSP + "; sandbox allow-scripts"
+        self._send(r.status, data, ctype, extra or None, csp=csp)
 
     def _same_origin(self) -> bool:
         origin = self.headers.get("Origin")

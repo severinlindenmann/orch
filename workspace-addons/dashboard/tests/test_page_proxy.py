@@ -53,9 +53,9 @@ import sys, json
 a = sys.argv[1:]
 if a[:2] == ["addon", "list"]:
     print(json.dumps([
-      {{"name": "viewer", "active": True, "description": "d", "dashboard": {{"label": "Viewer", "icon": "bolt"}},
+      {{"name": "viewer", "source": "local", "active": True, "description": "d", "dashboard": {{"label": "Viewer", "icon": "bolt"}},
         "page": {{"path": "/", "label": "Open"}}, "ticket_view": []}},
-      {{"name": "focus", "active": True, "description": "d", "dashboard": {{"label": "F", "icon": "bolt"}},
+      {{"name": "focus", "source": "built-in", "active": True, "description": "d", "dashboard": {{"label": "F", "icon": "bolt"}},
         "page": {{"path": "/", "label": "Open"}}, "ticket_view": []}},
       {{"name": "nopage", "active": True, "description": "d", "dashboard": {{"label": "N", "icon": "bolt"}}, "ticket_view": []}}]))
 elif a[:2] == ["status", "--json"]:
@@ -97,6 +97,30 @@ def test_get_is_forwarded_with_the_addons_own_host_and_a_prefix(stack):
     )
     csp = h["Content-Security-Policy"]
     assert "frame-ancestors 'self'" in csp and "frame-ancestors 'none'" not in csp
+    assert csp.endswith("; sandbox allow-scripts")  # "viewer" is a local folder: opaque origin (H1)
+
+
+def test_a_shipped_addon_page_keeps_its_origin_and_a_local_one_does_not(stack):
+    base, _ = stack
+    _c, _b, shipped = call(base + "/addon/focus/")
+    _c, _b, local = call(base + "/addon/viewer/")
+    assert "sandbox" not in shipped["Content-Security-Policy"]
+    assert "sandbox allow-scripts" in local["Content-Security-Policy"]
+
+
+def test_an_addon_not_listed_as_shipped_is_sandboxed_fail_closed(ws, tmp_path):
+    import orch_dashboard.server as s
+
+    h = s.Handler.__new__(s.Handler)
+    h.root, h.orch_bin = ws, str(tmp_path / "missing")
+    assert h._shipped("focus") is False  # no list, no proof it is shipped
+
+
+def test_the_dashboard_marks_which_addons_are_shipped(stack):
+    base, _ = stack
+    _code, body, _h = call(base + "/api/state")
+    by = {a["name"]: a["shipped"] for a in json.loads(body)["addons"]}
+    assert by == {"viewer": False, "focus": True, "nopage": False}
 
 
 def test_only_addons_with_a_page_that_run_are_shown(stack):
