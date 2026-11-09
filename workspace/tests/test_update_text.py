@@ -1,6 +1,7 @@
 """Update text across the install/reexec boundary, without installing or starting anything."""
 
 import json
+import os
 
 import pytest
 from test_addons import run, uv_calls  # noqa: F401
@@ -105,7 +106,7 @@ class Fleet:
         monkeypatch.setattr(services, "stop", self.stop)
         monkeypatch.setattr(services, "start", self.start)
 
-    def call(self, root, name, m, sub):
+    def call(self, root, name, m, sub, launch=None):
         assert sub == "status"  # the proof of life comes from the add-on itself
         if (str(root), name) in self.forged:
             return {"running": False}
@@ -128,7 +129,8 @@ class Fleet:
             for a in sorted(only)
         ]
 
-    def start(self, root, only=None):
+    def start(self, root, only=None, envs=None):
+        self.envs = envs
         self.calls.append(("start", root.name, set(only)))
         if self.failure == "start":
             raise RuntimeError("start failed")
@@ -228,7 +230,9 @@ def test_service_filter_preserves_other_records(proj, monkeypatch):
     monkeypatch.setattr(services, "workspace_rows", lambda root: [])
     calls, saved = [], []
     monkeypatch.setattr(services, "_save", lambda rows: saved.append(rows))
-    monkeypatch.setattr(services, "_call", lambda root, name, m, sub: calls.append((name, sub)) or {})
+    monkeypatch.setattr(
+        services, "_call", lambda root, name, m, sub, launch=None: calls.append((name, sub)) or {}
+    )
     services.stop(proj, only={"dashboard"})
     services.start(proj, only={"dashboard"})
     assert calls == [("dashboard", "stop"), ("dashboard", "start")]
@@ -389,7 +393,7 @@ def test_start_and_stop_never_interleave(proj, monkeypatch):
     monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
     monkeypatch.setattr(services, "workspace_rows", lambda root: [])
 
-    def call(root, name, m, sub):
+    def call(root, name, m, sub, launch=None):
         order.append(f"{sub}-begin")
         time.sleep(0.4)
         order.append(f"{sub}-end")
@@ -438,7 +442,7 @@ def test_restart_retries_once_and_restores_sighup(proj, tmp_path, monkeypatch): 
     first = f.start
     tries = []
 
-    def start(root, only=None):
+    def start(root, only=None, envs=None):
         tries.append(1)
         if len(tries) == 1:  # first try: not up yet
             f.calls.append(("start", root.name, set(only)))
@@ -550,3 +554,151 @@ def test_json_update_reports_skipped_entries(proj, run, source, monkeypatch):  #
     code, out, err = run("update", "--json")
     assert code == 0, err
     assert json.loads(out)["notes"][-1] == "x (w) not restarted; run orch stop"
+
+
+# ---- restart environment: the caller's plus HOME (system) and ORCH_HOME; no record replayed ------
+
+
+def _real_home():
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_dir
+
+
+def _with_env(f, rec):
+    """The Fleet's running state carries this recorded launch environment for every service."""
+    orig = f.running
+    f.running = lambda: [{**r, "env": rec} for r in orig()]
+    services.running = f.running
+
+
+def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    _with_env(f, {"HOME": _real_home(), "PATH": "/usr/bin:/bin"})
+    other = tmp_path / "test-home"
+    other.mkdir()
+    monkeypatch.setenv("HOME", str(other))  # the updater runs with a test HOME
+    lines = addons._restart_updated()
+    assert f.envs["dashboard"]["HOME"] == _real_home()  # from pwd: the agent login is found again
+    assert f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
+    assert set(f.envs["dashboard"]) == {"HOME", "ORCH_HOME"}  # nothing else is overridden
+    assert "Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)" in lines
+
+
+def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    evil = tmp_path / "evil"
+    evil.mkdir()
+    rec = {
+        "HOME": str(evil), "PATH": f"{evil}:/usr/bin", "CODEX_HOME": str(evil), "XDG_CONFIG_HOME": str(evil),
+        "CLAUDE_CONFIG_DIR": str(evil), "PYTHONPATH": str(evil), "LD_PRELOAD": str(evil / "x.so"),
+        "DYLD_INSERT_LIBRARIES": "x", "NODE_OPTIONS": "--require x", "GIT_SSH_COMMAND": "x",
+        "ORCH_REPO": "evil", "ORCH_ROOT": str(evil),
+    }  # fmt: skip
+    _with_env(f, rec)
+    monkeypatch.setenv("PATH", "/caller/path")
+    addons._restart_updated()
+    got = f.envs["dashboard"]
+    assert got["HOME"] == _real_home() and set(got) == {"HOME", "ORCH_HOME"}  # none of the record
+    merged = launchenv_apply(got)
+    assert merged["PATH"] == "/caller/path"  # the caller's own, never the recorded one
+    for k in rec:
+        if k not in ("HOME", "PATH", "ORCH_ROOT"):
+            assert merged.get(k) != rec[k]
+
+
+def launchenv_apply(over):
+    from orch import launchenv
+
+    return launchenv.apply(dict(os.environ), over)
+
+
+def test_a_different_recorded_home_or_path_is_reported_once(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    _with_env(f, {"HOME": "/some/other/home", "PATH": "/old/path"})
+    monkeypatch.setenv("PATH", "/caller/path")
+    lines = "\n".join(addons._restart_updated())
+    assert "dashboard (Pilatus) started with a different HOME/PATH; restarted with this terminal's" in lines
+    _with_env(f, {"HOME": _real_home(), "PATH": "/caller/path"})
+    assert "different" not in "\n".join(addons._restart_updated())  # same HOME and PATH: no line
+
+
+def test_without_a_system_home_the_callers_home_is_kept_and_said(proj, tmp_path, monkeypatch):  # noqa: F811
+    from orch import launchenv
+
+    f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.setattr(launchenv, "user_home", lambda: None)
+    lines = addons._restart_updated()
+    assert "HOME" not in f.envs["dashboard"] and f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
+    assert any("could not read this user's home folder; kept this terminal's HOME" in x for x in lines)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "PYTHONSTARTUP", "NODE_OPTIONS",
+     "GIT_SSH_COMMAND", "BASH_ENV", "ENV", "PERL5LIB", "RUBYOPT"],
+)  # fmt: skip
+def test_code_loading_variables_are_never_taken_from_a_record(name):
+    from orch import launchenv
+
+    assert launchenv.denied(name)
+    assert launchenv.clean({name: "x", "HOME": "/h"}) == {"HOME": "/h"}
+
+
+def test_call_adds_the_overrides_to_the_callers_environment(proj, monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw["env"])
+        return type("R", (), {"stdout": "{}", "stderr": "", "returncode": 0})()
+
+    monkeypatch.setattr(services.subprocess, "run", fake_run)
+    monkeypatch.setenv("HOME", "/caller/home")
+    monkeypatch.setenv("PATH", "/caller/path")
+    monkeypatch.setenv("CODEX_HOME", "/caller/codex")
+    over = {"HOME": "/system/home", "ORCH_HOME": "/orch/home"}
+    services._call(proj, "dashboard", {"run": "orch_dashboard"}, "start", over)
+    assert seen["HOME"] == "/system/home" and seen["ORCH_HOME"] == "/orch/home"
+    assert seen["PATH"] == "/caller/path" and seen["CODEX_HOME"] == "/caller/codex"  # the caller's, untouched
+    assert seen["ORCH_ROOT"] == str(proj.resolve())
+
+
+def test_start_records_home_and_path_for_information_only(proj, monkeypatch):
+    (proj / ".orch").mkdir(exist_ok=True)
+    monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
+    monkeypatch.setattr(services, "workspace_rows", lambda root: [])
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(services, "_call", lambda *a, **k: {"running": True, "pid": 4242})
+    monkeypatch.setenv("HOME", "/first/home")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
+    services.start(proj)
+    rec = services.running()[0]["env"]
+    assert rec == {"HOME": "/first/home", "PATH": os.environ["PATH"]}
+    assert "sk-secret" not in services.running_path().read_text()
+    monkeypatch.setenv("HOME", "/second/home")  # `orch start` again: the same pid keeps its first record
+    services.start(proj)
+    assert services.running()[0]["env"]["HOME"] == "/first/home"
+
+
+def test_pwd_failure_note_is_said_once_per_workspace(proj, tmp_path, monkeypatch):  # noqa: F811
+    from orch import launchenv
+
+    Fleet(tmp_path, monkeypatch)
+    monkeypatch.setattr(launchenv, "user_home", lambda: None)
+    lines = addons._restart_updated()
+    notes = [x for x in lines if "could not read this user's home folder" in x]
+    assert sorted(x.split(":")[0] for x in notes) == ["Pilatus", "Rigi"]  # two workspaces, one line each
+
+
+def test_a_running_services_old_record_is_cleaned_when_carried_forward(proj, monkeypatch):
+    (proj / ".orch").mkdir(exist_ok=True)
+    monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
+    monkeypatch.setattr(services, "workspace_rows", lambda root: [])
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(services, "_call", lambda *a, **k: {"running": True, "pid": 4242})
+    services.start(proj)
+    entries = json.loads(services.running_path().read_text())
+    entries[0]["env"] = {"HOME": "/h", "LD_PRELOAD": "/evil.so", "PATH": "x" * 5000, "OTHER": "y"}
+    services.running_path().write_text(json.dumps(entries))
+    services.start(proj)  # the same pid is still running: its record stays, cleaned and size-limited
+    assert services.running()[0]["env"] == {"HOME": "/h"}
