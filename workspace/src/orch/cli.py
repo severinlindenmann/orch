@@ -675,10 +675,10 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check":
         extra = {k: getattr(args, k) for k in ("title", "role") if getattr(args, k)}
         # the summary says what came out of the step: it goes on ONE proof (the file, else the first one)
-        shorthand = [
-            json.dumps({"type": k, "ref": getattr(args, k), **extra, **({"summary": args.summary} if args.summary and i == 0 and not args.file else {})})
-            for i, k in enumerate(k for k in ("command", "note", "pr", "commit", "url") if getattr(args, k))
-        ]
+        kinds = [k for k in ("command", "note", "pr", "commit", "url") if getattr(args, k)]
+        shorthand = [json.dumps({"type": k, "ref": getattr(args, k), **extra}) for k in kinds]
+        if args.summary and shorthand and not args.file:
+            shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
             attached = tickets.attach_file(root, args.id, args.file, args.title, args.role, args.summary)

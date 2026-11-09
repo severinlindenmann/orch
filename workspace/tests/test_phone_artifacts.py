@@ -485,7 +485,8 @@ def test_a_picture_that_was_not_sent_is_never_a_preview(proj, run, new_ticket, c
 
 
 def _att(kind, name, at, aid):
-    return {"kind": kind, "title": name, "name": name, "blob_id": "b_0123456789abcdef", "size": 1, "at": at, "id": aid, "rev": "r"}
+    blob = "b_0123456789abcdef"
+    return {"kind": kind, "title": name, "name": name, "blob_id": blob, "size": 1, "at": at, "id": aid, "rev": "r"}
 
 
 def test_pairing_with_a_newer_picture_has_no_duplicates():
