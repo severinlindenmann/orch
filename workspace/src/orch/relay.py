@@ -972,7 +972,7 @@ def _set_asked(root: Path, mid: str, **fields) -> dict:
 def ack_proposal(root: Path, mid: str, made: dict) -> None:
     """Closes the phone's proposal card when the DASHBOARD made the ticket first: the ordinary ack ("Got it:
     <title>", with the new ticket and its key), once, to where the question went. When a phone's own answer
-    made it, nothing is sent: the card already shows the result ("Ticket made"), no second text.
+    made it, no ack is sent: the proposal result closes the card ("Ticket made").
     Only for a proposal asked on the phones."""
 
     def claim(asked):
@@ -989,6 +989,38 @@ def ack_proposal(root: Path, mid: str, made: dict) -> None:
     except BaseException:
         _set_asked(root, mid, acked=False)
         raise
+
+
+def _proposal_result_text(result: dict) -> str:
+    if result["result"] == "refused":
+        return "Couldn't make the ticket"
+    if result.get("key"):
+        return f"Ticket made: {result['key']}"
+    return "Already decided"
+
+
+def _refusal_reason(exc: Exception) -> str:
+    if getattr(exc, "needs_person", False) or str(exc).startswith("Only a person"):
+        return "needs_person"
+    return "unavailable"
+
+
+def _send_proposal_result(root: Path, mid: str, result: dict, created_at: str) -> None:
+    try:
+        sent = _message(
+            root,
+            result["to"],
+            "text",
+            {"text": _proposal_result_text(result["body"]), "proposal_result": result["body"]},
+            None,
+            reply_to=mid,
+            mid=result["id"],
+            created_at=created_at,
+        )
+        if not sent.get("sent"):
+            log_send_failure(root, f"proposal result {result['id']} failed", "not sent")
+    except (Refused, OSError) as exc:
+        log_send_failure(root, f"proposal result {result['id']} failed", exc)
 
 
 def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
@@ -1017,28 +1049,57 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
         with contextlib.suppress(Refused, OSError):
             tickets.note_history(root, tickets.ensure_general(root, by), by, text, via)
 
-    if _asked_edit(root, lambda asked: (asked.get(mid) or {}).get("done")):
-        line(f'A second answer to the ticket proposal "{title}" was ignored')
-        return "ignored: the ticket proposal was already decided", None
+    rec = _asked_edit(root, lambda records: records.get(mid) or {})
+    answer_id = str(msg["id"])
+    recorded = rec.get("results", {}).get(answer_id)
+    if ans == "make" and recorded and recorded["phone"] == frm:
+        _send_proposal_result(root, mid, recorded["result"], recorded["created_at"])
+        return "ticket proposal: result resent", None
+
+    def result(body: dict, to: str, **outcome) -> None:
+        saved = {"id": new_id(), "to": to, "body": body}
+        created_at = tickets.now()
+        results = dict(rec.get("results", {}))
+        results[answer_id] = {"phone": frm, "result": saved, "created_at": created_at}
+        _set_asked(root, mid, result=saved, results=results, **outcome)
+        _send_proposal_result(root, mid, saved, created_at)
+
     state = chat.proposal_state(root, mid)
-    if state in ("made", "gone") or (state == "open" and ans == "not_now"):
-        _set_asked(root, mid, done=state if state != "open" else "not_now")
-        if ans == "not_now" and state == "open":
+    if rec.get("done") or state in ("made", "gone"):
+        line(
+            f'A second answer to the ticket proposal "{title}" was ignored'
+            if rec.get("done")
+            else f'A phone answer to the ticket proposal "{title}" came too late and was ignored'
+        )
+        if ans == "make":
+            # Every phone already received the made broadcast. Only its original delivery is retried.
+            if any(r["result"]["body"]["result"] == "made" for r in rec.get("results", {}).values()):
+                return "ignored: the ticket proposal was already decided", None
+            body = {"result": "decided"}
+            if state == "made":
+                # The idempotent return reads the ticket's display key; suppress any new ordinary ack.
+                _set_asked(root, mid, phone=frm)
+                with contextlib.suppress(Refused, OSError):
+                    body["key"] = chat.make_ticket(root, mid, None, by)["key"]
+            result(body, frm, done=rec.get("done") or state)
+        else:
+            _set_asked(root, mid, done=rec.get("done") or state)
+        return "ignored: the ticket proposal was already decided", None
+    if ans == "not_now":
+        if state == "open":
+            _set_asked(root, mid, done="not_now")
             line(f'Not now, from the phone: the ticket proposal "{title}"')
             return "ticket proposal: not now", None
-        line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
-        return "ignored: the ticket proposal was already decided", None
-    if ans == "not_now":  # making has started: it finishes, the answer changes nothing
         line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
         return "ignored: the ticket proposal was already decided", None
     _set_asked(root, mid, phone=frm)
     try:
         made = chat.make_ticket(root, mid, None, by)
     except Refused as e:
-        _set_asked(root, mid, done="refused")
+        result({"result": "refused", "reason": _refusal_reason(e)}, frm, done="refused")
         line("A ticket proposal answer from the phone was not used: " + str(e)[:120])
         return f"not applied: {e}", None
-    _set_asked(root, mid, done="make")
+    result({"result": "made", "key": made["key"]}, "phones", done="make")
     return f"made {made['key']} from a ticket proposal (via {via})", made["ticket"]
 
 
