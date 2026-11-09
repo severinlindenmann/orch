@@ -272,6 +272,13 @@ def _trace_fallback(real: Path, reason: str) -> None:
         pass
 
 
+def home_candidates() -> list[Path]:
+    """Every place the user's orch folder can be, resolved, without the trust rules or any fallback trace:
+    ORCH_HOME when set (as home() reads it), then ~/.orch-tool. For "is this path inside it" questions."""
+    env = os.environ.get("ORCH_HOME")
+    return [*([Path(env).resolve()] if env else []), (real_home() / ".orch-tool").resolve()]
+
+
 def home(root: Path | None = None) -> Path:
     """The user's orch folder: ORCH_HOME when trusted (see _untrusted_rule), else ~/.orch-tool.
     ORCH_HOME_STRICT (anything but empty or 0, for tests and e2e) makes every fallback an error: ORCH_HOME
