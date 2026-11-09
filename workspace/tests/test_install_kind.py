@@ -323,11 +323,70 @@ def test_snapshot_in_an_agent_chosen_home_is_skipped(tws, tmp_path, monkeypatch,
     assert addonsnap.home_of(via, snap["hash"]) is None
 
 
-def test_registry_comes_from_the_default_home_on_a_normal_install(rws, tmp_path, monkeypatch):
-    agent = tmp_path / "agenthome"
-    agent.mkdir()
-    monkeypatch.setenv("ORCH_HOME", str(agent))
-    assert addons.registry_path() == tmp_path / "acct" / ".orch-tool" / "addons.json"
+@pytest.fixture
+def throwaway(tmp_path, monkeypatch):
+    """A NORMAL install whose account home is faked and whose ORCH_HOME is a trusted throwaway folder (what an
+    e2e lane's own HOME looks like). Nothing may ever be written under the account's default orch home."""
+    acct = tmp_path / "acct"
+    acct.mkdir()
+    orch_home = acct / "lane-home"
+    orch_home.mkdir()
+    ws = acct / "work" / "ws"
+    (ws / ".orch").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(orch_home))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    return acct, orch_home, ws
+
+
+def test_all_state_lives_in_one_home(throwaway):
+    """Why the unit tests missed the registry split: every path was inside a temp tree, and nothing compared
+    them. State (registry, running.json, update snapshot) must all come from home()."""
+    from orch import services
+
+    acct, orch_home, ws = throwaway
+    assert addons.home() == orch_home
+    assert addons.registry_path() == orch_home / "addons.json"
+    assert services.running_path() == orch_home / "running.json"
+    assert not (acct / ".orch-tool").exists()
+
+
+def test_update_on_a_normal_install_with_a_trusted_orch_home_touches_only_that_home(
+    throwaway, tmp_path, monkeypatch
+):
+    acct, orch_home, ws = throwaway
+    entries = [{"name": "focus", "source": "built-in", "version": "0.1.0"}]
+    addons._save_registry(entries)
+    assert (orch_home / "addons.json").is_file() and not (acct / ".orch-tool").exists()
+    seen = {}
+
+    def fake_reinstall(reg, *, save, then, root, done):
+        seen.update(reg=reg, save=save, then=then)
+        return True
+
+    monkeypatch.setattr(addons, "_reinstall", fake_reinstall)
+    addons.update(ws)
+    assert [e["name"] for e in seen["reg"]] == ["focus"]  # the list came from ORCH_HOME
+    assert (orch_home / "update-before.json").is_file()
+    assert not (acct / ".orch-tool").exists()  # nothing under the real account home
+    # the real reinstall path too: uv runs once, the record is written, state stays in ORCH_HOME
+    monkeypatch.undo()
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(orch_home))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    env = _prefix(tmp_path, monkeypatch)
+    (env / "bin").mkdir()
+    monkeypatch.setattr(hp, "_source_tree", lambda: False)
+    ran = []
+    monkeypatch.setattr(addons, "run_uv", lambda a: ran.append(a))
+    monkeypatch.setattr(addons, "reexec", lambda a: ran.append(a))
+    addons._save_registry(entries)
+    addons.update(ws)
+    assert ran and hp.read_install_record() == "normal"
+    assert not (acct / ".orch-tool").exists()
 
 
 def test_install_uses_the_snapshot_not_the_live_folder(tws, tmp_path, monkeypatch):
