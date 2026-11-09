@@ -5,9 +5,9 @@ Level 1 (owner decision R1): an agent that reads the orch home directly is outsi
 It stops
 flags, environment, workspace files and copies, not a hostile process of the same user.
 
-Windows: POSIX rights (0700/0600) do not exist there. The folder and file are created in the user's profile
-(inherits the profile ACL: the user, SYSTEM and administrators); the explicit "user and SYSTEM only" ACL of
-secrets.md is a follow-up (slice 1.1, key store). The mode checks below are skipped on Windows.
+Windows: POSIX rights (0700/0600) do not exist there. orch.winacl does the same job: a user+SYSTEM-only ACL
+(no inheritance) is set when a folder or file is made and checked on every read, and a link, junction or other
+reparse point anywhere on the path is refused (#405).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+from orch import winacl
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
@@ -172,6 +173,7 @@ def _check_dir(p: Path) -> None:
         raise Refused(WRONG_RIGHTS)
     if POSIX and (st.st_uid != os.getuid() or st.st_mode & 0o077):
         raise Refused(WRONG_RIGHTS)
+    winacl.check_private(p)  # Windows only (no-op on POSIX)
 
 
 def _check_file(p: Path) -> None:
@@ -180,6 +182,7 @@ def _check_file(p: Path) -> None:
         raise Refused(WRONG_RIGHTS)
     if POSIX and (st.st_uid != os.getuid() or st.st_mode & 0o077):
         raise Refused(WRONG_RIGHTS)
+    winacl.check_private(p)
 
 
 def _private_dir(p: Path, stop: Path) -> None:
@@ -191,6 +194,7 @@ def _private_dir(p: Path, stop: Path) -> None:
             c.mkdir(mode=0o700)
             if POSIX:
                 c.chmod(0o700)
+            winacl.set_private(c, True)
         _check_dir(c)
 
 
@@ -199,12 +203,16 @@ def key_dir(root: Path, create: bool = True) -> Path:
     from orch import addons
 
     home = guarded_home(root)
+    winacl.no_reparse(home)  # a junction anywhere on the path to the home (Windows)
     ws = addons.workspace_id(root, create=create)
     if ws is None:
         raise Refused("This folder has no local id yet.")
     d = home / "keys" / ws
     if create:
+        fresh = not home.exists()
         home.mkdir(parents=True, exist_ok=True)
+        if fresh:
+            winacl.set_private(home, True)
         _private_dir(d, home)
     else:
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
@@ -217,6 +225,7 @@ def _write_private(path: Path, text: str) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            winacl.set_private(tmp, False)  # before any secret is written (Windows)
             f.write(text)
         os.replace(tmp, path)
     finally:
