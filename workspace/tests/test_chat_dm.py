@@ -594,3 +594,36 @@ def test_600_inbound_texts_keep_the_newest_500_and_a_second_sync_imports_nothing
     assert [m["id"] for m in again] == [m["id"] for m in first]  # nothing re-imported, nothing resurrected
     stored = json.loads(chat._dm_path(root, WS).read_text())
     assert len(stored["seen"]) >= 500 and set(m["id"] for m in first) <= set(stored["seen"])
+
+
+def test_corrupt_thread_file_fails_closed_and_other_threads_still_sync(dm, monkeypatch, capsys):
+    root, directory = dm
+    directory["workspaces"].append({"id": OTHER, "can_send": {"text": True}})
+    seen_id = "m_seenbefore0000001"
+    net.write_json(
+        chat._dm_path(root, WS),
+        {"ws": WS, "messages": [], "seen": [seen_id]},
+        True,
+    )
+    net.write_json(
+        root / ".orch/inbox" / f"{seen_id}.json",
+        {"id": seen_id, "from": WS, "type": "text", "body": {"text": "old"}},
+        True,
+    )
+    net.write_json(
+        root / ".orch/inbox" / "m_other0000000000a.json",
+        {"id": "m_other0000000000a", "from": OTHER, "type": "text", "body": {"text": "fresh"}},
+        True,
+    )
+    chat._dm_path(root, WS).write_text("{ not json", encoding="utf-8")
+    with pytest.raises(Refused):
+        chat.dm_read(root, WS)
+    chat.dm_sync_all(root)
+    assert (
+        chat._dm_path(root, WS).read_text(encoding="utf-8") == "{ not json"
+    )  # untouched, nothing re-imported
+    assert [m["text"] for m in chat.dm_read(root, OTHER)["messages"]] == ["fresh"]
+    assert "skipped" in capsys.readouterr().err
+    with pytest.raises(Refused):
+        chat.dm_send(root, WS, "hi")
+    assert [c["ws"] for c in chat.contacts(root)].count(WS) == 1  # the list still works (count 0)

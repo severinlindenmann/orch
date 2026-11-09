@@ -835,7 +835,10 @@ def _dm_summary(root: Path, ws: str) -> tuple[int, str]:
     hit = _DM_SUMMARY.get(str(path))
     if hit and hit[0] == key:
         return hit[1]
-    messages = _dm_read(root, ws)["messages"][-500:]
+    try:
+        messages = _dm_read(root, ws)["messages"][-500:]
+    except Refused:
+        return 0, ""
     value = (len(messages), str(messages[-1].get("at", ""))[:40] if messages else "")
     if len(_DM_SUMMARY) > 2000:
         _DM_SUMMARY.clear()
@@ -859,8 +862,20 @@ def _dm_path(root: Path, ws: str) -> Path:
     return path
 
 
+_DM_UNREADABLE = object()
+
+
 def _dm_read(root: Path, ws: str) -> dict:
-    data = net.read_json(_dm_path(root, ws), {})
+    path = _dm_path(root, ws)
+    data = net.read_json(path, _DM_UNREADABLE)
+    if data is _DM_UNREADABLE:
+        if (
+            path.exists()
+        ):  # fail closed: a corrupt file must not read back as an empty thread (it holds `seen`)
+            raise Refused("A saved conversation file cannot be read. It was left as it is.")
+        data = {}
+    elif not isinstance(data, dict):
+        raise Refused("A saved conversation file cannot be read. It was left as it is.")
     rows = data.get("messages") if isinstance(data, dict) and data.get("ws", ws) == ws else None
     return {
         "schema": "orch.chat-dm/1",
@@ -1005,7 +1020,14 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
     if (root / ".orch").is_symlink():
         raise Refused("Chat storage must not be a link.")
     with tickets._locked(root, "chat"):
-        data = {c["ws"]: _dm_read(root, c["ws"]) for c in peers}
+        data = {}
+        for c in peers:
+            try:
+                data[c["ws"]] = _dm_read(root, c["ws"])
+            except (
+                Refused
+            ) as e:  # one corrupt thread file never blocks the others (and is not re-imported over)
+                print(f"orch: skipped {c['ws']}: {e}", file=__import__("sys").stderr)
         ids = {
             ws: {m.get("id") for m in d["messages"] if isinstance(m.get("id"), str)} | set(d["seen"])
             for ws, d in data.items()
