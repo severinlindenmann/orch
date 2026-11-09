@@ -1,0 +1,55 @@
+{
+ "name": "line chart",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "orch",
+  "blocks": [
+   {
+    "type": "chart",
+    "kind": "line",
+    "series": [
+     {
+      "name": "Latency",
+      "points": [
+       [
+        1,
+        120
+       ],
+       [
+        2,
+        98.5
+       ],
+       [
+        3,
+        101
+       ]
+      ]
+     },
+     {
+      "name": "Errors",
+      "points": [
+       [
+        1,
+        0
+       ],
+       [
+        2,
+        2
+       ],
+       [
+        3,
+        0
+       ]
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "valid": true,
+ "shows": [
+  "Latency",
+  "Errors"
+ ],
+ "fallback": 0
+}

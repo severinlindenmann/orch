@@ -1,0 +1,16 @@
+{
+ "name": "from check",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "check",
+  "blocks": [
+   {
+    "type": "summary",
+    "text": "All checks passed"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

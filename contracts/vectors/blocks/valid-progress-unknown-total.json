@@ -1,0 +1,20 @@
+{
+ "name": "progress unknown total",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "progress",
+    "label": "Pages",
+    "done": 7,
+    "total": null
+   }
+  ]
+ },
+ "valid": true,
+ "shows": [
+  "Pages"
+ ],
+ "fallback": 0
+}

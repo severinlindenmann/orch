@@ -1,0 +1,24 @@
+{
+ "name": "empty table",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "table",
+    "columns": [
+     {
+      "key": "a",
+      "label": "A"
+     }
+    ],
+    "rows": []
+   }
+  ]
+ },
+ "valid": true,
+ "shows": [
+  "A"
+ ],
+ "fallback": 0
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/screen.schema.json",
+  "title": "orch screen stream v1 (orch.screen/1): one line of `orch run screen <ticket> --follow --json`, plus the typing input of `orch run type`",
+  "description": "See screen.md. A read-only copy of a live run's terminal, key values hidden before a line is written. Readers skip unknown types.",
+  "type": "object",
+  "required": ["v", "type", "seq"],
+  "properties": {
+    "v": { "const": 1 },
+    "type": { "enum": ["hello", "snapshot", "output", "resize", "alt", "takeover", "ping", "end", "error"] },
+    "seq": { "type": "integer", "minimum": 1, "description": "+1 per line of this stream." }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "hello" } } }, "then": { "required": ["ticket", "run", "cols", "rows", "at", "typing_switch", "takeover"], "properties": {
+      "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" },
+      "cols": { "$ref": "#/$defs/cols" }, "rows": { "$ref": "#/$defs/rows" }, "at": { "$ref": "#/$defs/time" },
+      "typing_switch": { "type": "boolean", "description": "[focus] session_typing is on and not locked by the admin. Whether THIS viewer may type is decided by the page (local only)." },
+      "takeover": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/takeover" }] }
+    } } },
+    { "if": { "properties": { "type": { "const": "snapshot" } } }, "then": { "required": ["cols", "rows", "alt", "cursor", "data"], "properties": {
+      "cols": { "$ref": "#/$defs/cols" }, "rows": { "$ref": "#/$defs/rows" }, "alt": { "type": "boolean" },
+      "cursor": { "type": "object", "required": ["x", "y", "visible"], "additionalProperties": false, "properties": { "x": { "type": "integer", "minimum": 0 }, "y": { "type": "integer", "minimum": 0 }, "visible": { "type": "boolean" } } },
+      "data": { "$ref": "#/$defs/data", "description": "The visible screen with colour escapes, wrapped lines joined, lines separated by CR LF; write it to a cleared terminal of cols x rows." }
+    } } },
+    { "if": { "properties": { "type": { "const": "output" } } }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/data" } } } },
+    { "if": { "properties": { "type": { "const": "resize" } } }, "then": { "required": ["cols", "rows"], "properties": { "cols": { "$ref": "#/$defs/cols" }, "rows": { "$ref": "#/$defs/rows" } } } },
+    { "if": { "properties": { "type": { "const": "alt" } } }, "then": { "required": ["on"], "properties": { "on": { "type": "boolean" } } } },
+    { "if": { "properties": { "type": { "const": "takeover" } } }, "then": { "required": ["state"], "properties": {
+      "state": { "enum": ["held", "released"] },
+      "by": { "$ref": "#/$defs/person" }, "since": { "$ref": "#/$defs/time" }, "expires_at": { "$ref": "#/$defs/time" },
+      "reason": { "enum": ["released", "idle", "run-ended", "switched-off", "locked-by-admin"] }
+    } } },
+    { "if": { "properties": { "type": { "const": "ping" } } }, "then": { "required": ["at"], "properties": { "at": { "$ref": "#/$defs/time" } } } },
+    { "if": { "properties": { "type": { "const": "end" } } }, "then": { "required": ["reason"], "properties": { "reason": { "enum": ["run-ended", "switched-off", "locked-by-admin", "session-gone"] } } } },
+    { "if": { "properties": { "type": { "const": "error" } } }, "then": { "required": ["error"], "properties": { "error": { "$ref": "cli-answer.schema.json#/$defs/error/properties/error" }, "code": { "$ref": "cli-answer.schema.json#/$defs/error/properties/code" } } } }
+  ],
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "cols": { "type": "integer", "minimum": 10, "maximum": 1000 },
+    "rows": { "type": "integer", "minimum": 2, "maximum": 500 },
+    "data": { "type": "string", "maxLength": 65536, "description": "Terminal text: UTF-8 characters with escape sequences, exactly as the program wrote them (tmux's octal escapes decoded), key values hidden." },
+    "person": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$" },
+    "takeover": {
+      "type": "object", "required": ["by", "from", "since", "last_input_at", "expires_at"], "additionalProperties": false,
+      "description": "The take-over lock, stored in the run record (run.schema.json takeover) and shown in hello.",
+      "properties": {
+        "by": { "$ref": "#/$defs/person" },
+        "from": { "const": "local-page" },
+        "since": { "$ref": "#/$defs/time" },
+        "last_input_at": { "$ref": "#/$defs/time" },
+        "expires_at": { "$ref": "#/$defs/time", "description": "last_input_at + 120 s." },
+        "keys": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "type_input": {
+      "description": "One stdin line of `orch run type <ticket> --by human:<user> --from local-page`: text typed literally, or one named key.",
+      "oneOf": [
+        { "type": "object", "required": ["text"], "additionalProperties": false, "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 4096 } } },
+        { "type": "object", "required": ["key"], "additionalProperties": false, "properties": { "key": { "enum": ["Enter", "Escape", "Tab", "BTab", "Backspace", "Delete", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown", "C-c", "C-d", "C-z", "C-l", "C-r", "C-u", "C-w", "C-a", "C-e"] } } }
+      ]
+    }
+  }
+}
