@@ -187,10 +187,12 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files", "title_auto"))
+    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files", "title_auto", "plan_first"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
+    if _flag(a.get("plan_first")):
+        flags.append("--plan-first")
     long_text = a.get("long_text")
     if long_text is not None:
         _text(long_text, "text", limit=MAX_LONG)

@@ -549,6 +549,7 @@ def create(
     *,
     tid: str | None = None,
     title_auto: bool = False,
+    plan_first: bool = False,
 ) -> dict:
     """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
@@ -589,6 +590,8 @@ def create(
         ticket["parent"] = parent
     if title_auto:
         ticket["title_auto"] = True
+    if plan_first:  # "Show plan first": the agent plans, asks "Plan ready", waits (set at creation only)
+        ticket["plan_first"] = True
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -950,7 +953,7 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
-PROTECTED_FIELDS = ("title_auto", "description", "description_by")  # only orch ticket title writes these
+PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # orch writes these itself
 
 
 def clean_field(key: str, value):
@@ -1080,6 +1083,20 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
             if ticket.get("note") == LONG_NOTE:
                 ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
+
+    return apply_op(root, tid, op)[0]
+
+
+def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
+    """The agent's goal and 'Not included' of a plan, in its own field (never the person's note)."""
+    goal = goal.strip()
+    ni = (not_included or "").strip()
+    if not goal or len(goal) > 500 or len(ni) > 500:
+        raise Refused("The goal needs 1 to 500 characters, 'Not included' at most 500.")
+
+    def op(ticket):
+        ticket["plan"] = {"goal": goal, **({"not_included": ni} if ni else {}), "by": by[:100]}
+        add_history(ticket, by, "Plan written")
 
     return apply_op(root, tid, op)[0]
 
