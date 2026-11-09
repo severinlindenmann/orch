@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orch import adapters, claude_settings, skills
+from orch import adapters, reminder_settings, skills
 from orch.errors import Refused
 
 
@@ -23,18 +23,18 @@ def init(root: Path, code: str | None = None) -> list[str]:
     skills.install_skill(root, "orch", src)
     skills.set_block(root, "orch", skills.read_block(src, "orch"))
     linked = skills.apply_agent_files(root)
-    # Claude only: the reminder hooks, merged into .claude/settings.local.json
-    claude = "claude" in skills.detected_agents(root)
-    warn = claude_settings.ensure(root) if claude else None
+    # the reminder hooks, merged into the agent tool's local settings (only for a tool that has them)
+    reminded = reminder_settings.applies(root)
+    warn = reminder_settings.ensure(root) if reminded else None
     lines = [
         "Skill       .agents/skills/orch/SKILL.md (local; not part of your team's files)",
     ]
     if linked:
         lines.append("Linked for: " + ", ".join(linked))
-    if claude:
+    if reminded:
         lines.append(
             warn
-            or "Reminder    .claude/settings.local.json (local; Claude is reminded of work with no ticket)"
+            or f"Reminder    {reminder_settings.REL} (local; your agent is reminded of work with no ticket)"
         )
     lines += [
         "Local only  orch files stay out of git (.git/info/exclude)",

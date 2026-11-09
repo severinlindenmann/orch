@@ -24,6 +24,13 @@ TIMEOUT = 5
 TAIL = ["work-check", "--hook", "claude"]
 
 
+def applies(root: Path) -> bool:
+    """Claude is this machine's or this folder's agent (the only built-in tool with local settings files)."""
+    from orch import skills
+
+    return "claude" in skills.detected_agents(root)
+
+
 def hook_command() -> str:
     """The shell command of the hook: absolute interpreter, -P, -m orch, each part quoted."""
     argv = procs.orch_python_argv(*TAIL)

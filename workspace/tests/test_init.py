@@ -866,7 +866,7 @@ def test_without_git_a_fresh_copy_is_ours(proj, monkeypatch, tmp_path_factory):
     assert harness._is_ours_copy(dest, proj) is False
 
 
-# ---------------------------------------------------------------- claude_settings (work-check hooks)
+# ---------------------------------------------------------------- reminder_settings (work-check hooks)
 
 
 def _local_settings(proj):
@@ -884,7 +884,7 @@ def _ours(doc, event):
     ]
 
 
-def test_claude_settings_created_with_both_hooks(proj, run):
+def test_reminder_settings_created_with_both_hooks(proj, run):
     code, out, _ = run("init")
     assert code == 0 and "Reminder" in out
     doc = _local_settings(proj)
@@ -896,7 +896,7 @@ def test_claude_settings_created_with_both_hooks(proj, run):
         assert ((proj / ".claude/settings.local.json").stat().st_mode & 0o777) == 0o600
 
 
-def test_claude_settings_merge_keeps_other_keys_and_mode(proj, run):
+def test_reminder_settings_merge_keeps_other_keys_and_mode(proj, run):
     import json
 
     (proj / ".claude").mkdir()
@@ -921,7 +921,7 @@ def test_claude_settings_merge_keeps_other_keys_and_mode(proj, run):
         assert (f.stat().st_mode & 0o777) == 0o640
 
 
-def test_claude_settings_idempotent(proj, run):
+def test_reminder_settings_idempotent(proj, run):
     run("init")
     first = (proj / ".claude/settings.local.json").read_bytes()
     run("init")
@@ -931,10 +931,10 @@ def test_claude_settings_idempotent(proj, run):
     assert len(_ours(doc, "UserPromptSubmit")) == 1
 
 
-def test_claude_settings_refreshes_an_old_path(proj, run):
+def test_reminder_settings_refreshes_an_old_path(proj, run):
     import json
 
-    from orch import claude_settings
+    from orch import reminder_settings
 
     (proj / ".claude").mkdir()
     old = {
@@ -947,13 +947,13 @@ def test_claude_settings_refreshes_an_old_path(proj, run):
     (proj / ".claude/settings.local.json").write_text(json.dumps(old), encoding="utf-8")
     run("init")
     (h,) = _ours(_local_settings(proj), "SessionStart")
-    assert h["command"] == claude_settings.hook_command()
+    assert h["command"] == reminder_settings.hook_command()
 
 
 @pytest.mark.parametrize(
     "text", ["{not json", "[1, 2]", '{"hooks": []}', '{"hooks": {"Stop": 1, "UserPromptSubmit": "x"}}']
 )
-def test_claude_settings_malformed_left_untouched_with_one_warning(proj, run, text):
+def test_reminder_settings_malformed_left_untouched_with_one_warning(proj, run, text):
     (proj / ".claude").mkdir()
     f = proj / ".claude/settings.local.json"
     f.write_text(text, encoding="utf-8")
@@ -962,14 +962,14 @@ def test_claude_settings_malformed_left_untouched_with_one_warning(proj, run, te
     assert out.count("left it as it is") == 1
 
 
-def test_claude_settings_not_written_without_claude(proj, run, monkeypatch):
+def test_reminder_settings_not_written_without_claude(proj, run, monkeypatch):
     monkeypatch.setattr(adapters, "detect", lambda: [])
     run("init")
     assert not (proj / ".claude").exists()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink")
-def test_claude_settings_link_is_not_written_through(proj, run, tmp_path_factory):
+def test_reminder_settings_link_is_not_written_through(proj, run, tmp_path_factory):
     outside = tmp_path_factory.mktemp("outside") / "s.json"
     outside.write_text("{}", encoding="utf-8")
     (proj / ".claude").mkdir()
@@ -978,7 +978,7 @@ def test_claude_settings_link_is_not_written_through(proj, run, tmp_path_factory
     assert code == 0 and outside.read_text(encoding="utf-8") == "{}" and "left it as it is" in out
 
 
-def test_claude_settings_in_git_exclude(proj, run):
+def test_reminder_settings_in_git_exclude(proj, run):
     _git_repo(proj)
     run("init")
     assert ".claude/settings.local.json" in (proj / ".git/info/exclude").read_text(encoding="utf-8")
@@ -986,13 +986,13 @@ def test_claude_settings_in_git_exclude(proj, run):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="posix quoting")
-def test_claude_settings_command_is_quoted(monkeypatch):
+def test_reminder_settings_command_is_quoted(monkeypatch):
     import shlex
 
-    from orch import claude_settings
+    from orch import reminder_settings
 
     nasty = "/tmp/a b/$(touch x);y'z/py"
     monkeypatch.setattr(sys, "executable", nasty)
-    cmd = claude_settings.hook_command()
+    cmd = reminder_settings.hook_command()
     assert shlex.split(cmd) == [nasty, "-P", "-m", "orch", "work-check", "--hook", "claude"]
     assert cmd.endswith(" -P -m orch work-check --hook claude")

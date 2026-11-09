@@ -342,7 +342,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
     x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
-    x.add_argument("--hook", choices=["claude"], help=argparse.SUPPRESS)  # a tool's hook
+    x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
