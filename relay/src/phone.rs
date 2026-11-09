@@ -1201,7 +1201,7 @@ pub async fn push_message(app: &AppState, q: &Value) {
     let to = q["to"].as_str().unwrap_or("").to_string();
     let from = q["from"].as_str().unwrap_or("").to_string();
     let is_text = q["type"] == "text";
-    if is_text && q["body"].get("proposal_result").is_some() {
+    if q["body"].get("proposal_result").is_some() {
         return;
     }
     // Work updates: only result / question / failure / stopped are pushed. ack, working and note stay quiet

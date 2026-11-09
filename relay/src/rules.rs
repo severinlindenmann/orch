@@ -90,7 +90,13 @@ fn kind_of(typ: &str) -> Option<(usize, &'static str)> {
 pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res<Value> {
     let typ = msg["type"].as_str().unwrap_or("").to_string();
     let to = msg["to"].as_str().unwrap_or("").to_string();
-    if typ == "text" {
+    // The marker is checked wherever it appears, not only on a text (the schema refuses other types too).
+    // The caller holds the one database lock from the duplicate check to the insert, so the one-result
+    // rule below cannot race another result.
+    if msg["body"].get("proposal_result").is_some() {
+        if typ != "text" {
+            return Err(invalid("Invalid proposal result."));
+        }
         check_proposal_result(c, key, sender, &msg)?;
     }
     if let Some((idx, label)) = kind_of(&typ) {
@@ -226,9 +232,14 @@ fn check_proposal_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -
     if !fields_ok
         || body["text"].as_str() != Some(canonical.as_str())
         || !body.as_object().is_some_and(|o| o.len() == 2)
-        || ["ticket", "key", "general"]
-            .iter()
-            .any(|k| msg.get(k).is_some())
+        || msg.as_object().is_none_or(|o| {
+            o.keys().any(|k| {
+                !matches!(
+                    k.as_str(),
+                    "schema" | "id" | "from" | "to" | "type" | "reply_to" | "created_at" | "body"
+                )
+            })
+        })
         || !msg["reply_to"]
             .as_str()
             .is_some_and(|id| valid_id(id, "m_", 16))
