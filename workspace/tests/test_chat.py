@@ -825,7 +825,7 @@ def test_every_new_history_line_carries_the_flag(proj):
     assert [e["chat_message"] for e in t["history"]] == [False, True]
 
 
-@pytest.mark.parametrize("sub", ["make-ticket", "say"])
+@pytest.mark.parametrize("sub", ["make-ticket", "say", "contacts", "thread", "send"])
 def test_guard_refuses_person_chat_commands(proj, monkeypatch, sub):
     from types import SimpleNamespace
 
