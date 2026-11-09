@@ -50,6 +50,16 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | POST | `/v1/transcribe` | Same as `/v1/phone/transcribe`, with workspace auth (agents transcribe audio files) | Same as `/v1/phone/transcribe` |
 | GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}` (its `phones` = the paired phones that may reach this workspace). What is missing was unassigned and gets removed locally (local-files.md) |
 
+## Usage counts and policy (draft 02; usage-counts.md, counts.schema.json)
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| PUT | `/v1/usage/days/<YYYY-MM-DD>` | `$defs/upload` (`orch.usage/1`, counts only, `day` = the path) | `200 {day, replaced}`. Idempotent per workspace + day (replaces the stored day). Future or > 400 days old → `422`; counts off for this workspace or relay-wide → `403 not_allowed`; > 256 KB → `413`. Kept 400 days |
+| GET | `/v1/policy` | – | `$defs/policy` `{usage_counts: on\|off, live_session: allowed\|locked_off}`; also in `GET /v1/refresh` as `policy` (a change raises `version` + refresh-hint) |
+| GET / PUT | `/admin/api/policy` | PUT: `{usage_counts?: bool, live_session_locked?: bool}` | `{usage_counts, live_session_locked}` (defaults true, false). Admin auth as for all admin routes |
+| PATCH | `/admin/api/workspaces/<id>` | `{usage_counts: bool}` | `200` workspace card. Off for this workspace only; effective = relay-wide AND this |
+| GET | `/admin/api/usage?workspace=&from=&to=&kind=` | – | `{items: [{workspace, day, kind, name, ref, source, uses, runs, ok, failed, refused}], next}` |
+
 ## Phone API
 
 | Method | Path | Request | Response |

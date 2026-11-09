@@ -1,0 +1,191 @@
+{
+ "schema": "orch.counts/1",
+ "generated_at": "2026-11-16T09:30:00Z",
+ "since": "2026-11-02T08:00:00Z",
+ "from": "2026-10-18",
+ "to": "2026-11-16",
+ "runs": 27,
+ "tickets": 12,
+ "coverage": {
+  "full": 23,
+  "partial": 4
+ },
+ "items": [
+  {
+   "kind": "skill",
+   "name": "invoice-export",
+   "source": "workspace",
+   "action": null,
+   "runs": {
+    "used": 5,
+    "of": 23,
+    "unseen": 4
+   },
+   "uses": 7,
+   "ok": 6,
+   "failed": 1,
+   "refused": 0,
+   "unknown": 0,
+   "seen": "yes",
+   "first_seen": "2026-11-02T08:00:00Z",
+   "last_seen": "2026-11-16T09:00:00Z",
+   "versions": [
+    {
+     "version": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "uses": 7,
+     "ok": 6,
+     "failed": 1,
+     "first_seen": "2026-11-02T08:00:00Z"
+    }
+   ],
+   "tickets": {
+    "done": 3,
+    "sent_back": 1,
+    "open": 1
+   }
+  },
+  {
+   "kind": "mcp",
+   "name": "weather",
+   "source": "workspace",
+   "action": "forecast",
+   "runs": {
+    "used": 0,
+    "of": 23,
+    "unseen": 4
+   },
+   "uses": 0,
+   "ok": 0,
+   "failed": 0,
+   "refused": 0,
+   "unknown": 0,
+   "seen": "not_seen",
+   "first_seen": null,
+   "last_seen": null,
+   "versions": [],
+   "tickets": {
+    "done": 3,
+    "sent_back": 1,
+    "open": 1
+   }
+  },
+  {
+   "kind": "key",
+   "name": "stripe-key",
+   "source": "admin",
+   "action": null,
+   "runs": {
+    "used": 3,
+    "of": 27,
+    "unseen": 0
+   },
+   "uses": 3,
+   "ok": 0,
+   "failed": 0,
+   "refused": 3,
+   "unknown": 0,
+   "seen": "yes",
+   "first_seen": "2026-11-02T08:00:00Z",
+   "last_seen": "2026-11-16T09:00:00Z",
+   "versions": [],
+   "tickets": {
+    "done": 3,
+    "sent_back": 1,
+    "open": 1
+   }
+  }
+ ],
+ "inventory": {
+  "schema": "orch.inventory/1",
+  "generated_at": "2026-11-16T09:00:00Z",
+  "skills": [
+   {
+    "name": "newsletter-writing",
+    "source": "workspace",
+    "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "shadowed": false
+   },
+   {
+    "name": "orch",
+    "source": "builtin",
+    "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "shadowed": false
+   }
+  ],
+  "connections": [
+   {
+    "name": "gdrive",
+    "label": "Google Drive",
+    "source": "harness",
+    "transport": "stdio",
+    "command": "npx",
+    "host": null,
+    "profile": null,
+    "actions": [
+     {
+      "name": "read_file",
+      "allowed": true
+     },
+     {
+      "name": "search",
+      "allowed": true
+     }
+    ],
+    "allow_all": false,
+    "state": "ok",
+    "shadowed": false,
+    "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   },
+   {
+    "name": "slack",
+    "label": "Slack",
+    "source": "admin",
+    "transport": "http",
+    "command": null,
+    "host": "mcp.slack.example",
+    "profile": null,
+    "actions": [
+     {
+      "name": "search",
+      "allowed": true
+     },
+     {
+      "name": "post_message",
+      "allowed": false
+     }
+    ],
+    "allow_all": false,
+    "state": "ok",
+    "shadowed": false,
+    "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   },
+   {
+    "name": "weather",
+    "label": "Weather",
+    "source": "workspace",
+    "transport": "stdio",
+    "command": "uvx",
+    "host": null,
+    "profile": "weather",
+    "actions": [],
+    "allow_all": false,
+    "state": "not-started",
+    "shadowed": false,
+    "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   }
+  ],
+  "keys": [
+   {
+    "name": "google-sa.json",
+    "type": "json",
+    "source": "admin"
+   }
+  ]
+ },
+ "sharing": {
+  "counts": "on",
+  "names": false,
+  "last_sent": "2026-11-15",
+  "queued": 0
+ }
+}

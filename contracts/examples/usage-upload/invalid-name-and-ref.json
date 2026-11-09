@@ -1,0 +1,19 @@
+{
+ "schema": "orch.usage/1",
+ "day": "2026-11-15",
+ "runs": 1,
+ "tickets": 1,
+ "items": [
+  {
+   "kind": "skill",
+   "name": "candidate-x-offer",
+   "ref": "h_3fa9c1d2e4b5a697",
+   "source": "workspace",
+   "uses": 1,
+   "runs": 1,
+   "ok": 1,
+   "failed": 0,
+   "refused": 0
+  }
+ ]
+}

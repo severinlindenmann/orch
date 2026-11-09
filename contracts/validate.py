@@ -833,6 +833,81 @@ def kind_screen():
         _expect(f"screen expiry {c['name']}", scr_expired(c), c["expired"])
 
 
+
+# --- counts (counts.md, usage-counts.md) -----------------------------------------------------------------------------
+import hmac
+
+CNT_FIELDS = ("kind", "name", "source", "runs", "uses", "ok", "failed", "refused", "unknown", "seen")
+NAMES_ALWAYS_SENT = ("admin", "builtin", "marketplace", "none")
+
+
+def cnt_items(case):
+    """Reference counting with denominators: runs[].sees = kinds the run's agent tool can report."""
+    runs, items = case["runs"], {}
+    for inv in case.get("inventory", []):
+        items.setdefault((inv["kind"], inv["name"], inv["source"]), {"uses": 0, "ok": 0, "failed": 0, "refused": 0, "unknown": 0, "used_runs": set()})
+    for r in runs:
+        for ev in r["events"]:
+            it = items.setdefault((ev["kind"], ev["name"], ev["source"]), {"uses": 0, "ok": 0, "failed": 0, "refused": 0, "unknown": 0, "used_runs": set()})
+            it["uses"] += 1
+            it["used_runs"].add(r["run"])
+            if ev.get("refused"):
+                it["refused"] += 1
+            elif ev["ok"] is True:
+                it["ok"] += 1
+            elif ev["ok"] is False:
+                it["failed"] += 1
+            else:
+                it["unknown"] += 1
+    out = []
+    for (kind, name, source), it in sorted(items.items()):
+        of = sum(1 for r in runs if kind in r["sees"])
+        used = len(it["used_runs"])
+        seen = "yes" if it["uses"] else ("not_seen" if of else "unknown")
+        out.append({"kind": kind, "name": name, "source": source, "runs": {"used": used, "of": max(of, used), "unseen": len(runs) - max(of, used)},
+                    "uses": it["uses"], "ok": it["ok"], "failed": it["failed"], "refused": it["refused"], "unknown": it["unknown"], "seen": seen})
+    return out
+
+
+def usage_name(kind, name, source, share_names, salt):
+    if source in NAMES_ALWAYS_SENT or share_names:
+        return {"name": name, "ref": None}
+    return {"name": None, "ref": "h_" + hmac.new(salt.encode(), f"{kind}:{name}".encode(), hashlib.sha256).hexdigest()[:16]}
+
+
+def usage_queue(c):
+    if not c["share_counts"] or c["policy"] == "off":
+        return {"send": [], "drop": sorted(c["pending"])}
+    today = datetime.strptime(c["today"], "%Y-%m-%d")
+    old = [d for d in c["pending"] if (today - datetime.strptime(d, "%Y-%m-%d")).days > 60]
+    keep = sorted(d for d in c["pending"] if d not in old and d != c["today"])
+    return {"send": keep if c["connected"] else [], "drop": sorted(old)}
+
+
+def kind_counts():
+    va, vd, vu, vp = (_w("counts", d) for d in ("answer", "day_file", "upload", "policy"))
+    _core_clean("counts")
+    _examples("counts", lambda d: _msgs(va, d))
+    _examples("counts-day", lambda d: _msgs(vd, d))
+    _examples("usage-upload", lambda d: _msgs(vu, d))
+    _examples("usage-policy", lambda d: _msgs(vp, d))
+    vec = _vec("counts-v1.json")
+    for c in vec["denominators"]:
+        _expect(f"counts denominators {c['name']}", cnt_items(c), c["items"])
+    for c in vec["names"]:
+        _expect(f"counts names {c['name']}", usage_name(c["kind"], c["item"], c["source"], c["share_names"], c["salt"]), c["sent"])
+    for c in vec["queue"]:
+        _expect(f"counts queue {c['name']}", usage_queue(c), c["expect"])
+    for c in vec["idempotent"]:
+        store = {}
+        results = []
+        for put in c["puts"]:
+            key = (put["workspace"], put["day"])
+            results.append("replaced" if key in store else "stored")
+            store[key] = put["body"]
+        _expect(f"counts idempotent {c['name']}", {"results": results, "days": len(store)}, c["expect"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
@@ -842,6 +917,7 @@ KINDS = {
     "inventory": kind_inventory,
     "addon-manifest": kind_addon_manifest,
     "screen": kind_screen,
+    "counts": kind_counts,
 }
 
 

@@ -1,0 +1,41 @@
+{
+ "schema": "orch.usage/1",
+ "day": "2026-11-15",
+ "runs": 9,
+ "tickets": 4,
+ "items": [
+  {
+   "kind": "skill",
+   "name": null,
+   "ref": "h_3fa9c1d2e4b5a697",
+   "source": "workspace",
+   "uses": 4,
+   "runs": 3,
+   "ok": 3,
+   "failed": 1,
+   "refused": 0
+  },
+  {
+   "kind": "skill",
+   "name": "acme-sql",
+   "ref": null,
+   "source": "admin",
+   "uses": 2,
+   "runs": 2,
+   "ok": 2,
+   "failed": 0,
+   "refused": 0
+  },
+  {
+   "kind": "tool",
+   "name": "Read",
+   "ref": null,
+   "source": "builtin",
+   "uses": 40,
+   "runs": 9,
+   "ok": 40,
+   "failed": 0,
+   "refused": 0
+  }
+ ]
+}
