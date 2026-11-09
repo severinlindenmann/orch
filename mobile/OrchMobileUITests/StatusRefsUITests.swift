@@ -67,7 +67,8 @@ final class StatusRefsUITests: XCTestCase {
         shot(app, "4-references")
         for _ in 0..<3 where !el(app, "info-ref-ref1").isHittable { app.swipeDown() }
         el(app, "info-ref-ref1").tap()   // opens that topic
-        XCTAssertTrue(app.descendants(matching: .any)["tasks-card"].waitForExistence(timeout: 10) || app.staticTexts["composer-note"].waitForExistence(timeout: 5))
+        // The referenced topic opened: its ticket chat status line (tasks toggle); "tasks-card" no longer exists.
+        XCTAssertTrue(app.descendants(matching: .any)["tasks-toggle"].waitForExistence(timeout: 10))
         shot(app, "5-reference-opened")
     }
 
