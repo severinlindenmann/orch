@@ -231,7 +231,7 @@ fn check_proposal_question(msg: &Value) -> Res<()> {
         && b["options"] == serde_json::json!(["make", "not_now"])
         && b.get("scope").is_none()
         && b.get("review").is_none()
-        && msg.get("ticket").map_or(true, |t| t.is_null());
+        && msg.get("ticket").is_none_or(|t| t.is_null());
     if ok {
         Ok(())
     } else {
