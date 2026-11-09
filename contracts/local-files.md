@@ -35,7 +35,8 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
                                   and pictures only, at most 2 MB each, named by orch (`orch ticket attach`), never a person's path
   secrets/                        GITIGNORED
     publish.json                  {"url": "https://publish.severin.io", "workspace": "ws_…", "token": "orp_…"}
-    relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…", "token": "orn_…"}
+    relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…"}: no token; the token lives only in the
+                                  relay record in the guarded orch home (human-proof.md, relay.connect)
     allows.json                   {"given": [{token, peer, kind, key, mode, message_id, used}], "received": [{token, peer, kind, key}]}
     credentials.json              {"<NAME>": "<value>"} from `orch relay refresh`
     mcp.json                      {"mcpServers": {"<name>": {…}}} from `orch relay refresh`

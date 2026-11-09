@@ -84,8 +84,10 @@ off, an agent editing the file back to on changes nothing either. Reference `hp_
 The relay address, workspace id, token and the paired phones come **only** from a record in the guarded orch home
 (`<orch home>/keys/<ws>/relay.json`: `{url, workspace, token, phones, connected_by, at}`), written by `orch relay connect` /
 the dashboard's Connect with a `relay.connect` proof; `phones` is updated by each refresh fetched under that record. The
-workspace's `.orch/secrets/relay.json` is no longer authority: when it exists and its `url` or `workspace` differs from the
-record, every relay call is refused ("The relay settings in this folder were changed. Connect again from the dashboard.").
+token lives **only** in that record. The workspace's `.orch/secrets/relay.json` holds `{url, workspace}` and no token, and is
+no longer authority: when its `url` or `workspace` differs from the record, every relay call is refused ("The relay settings
+in this folder were changed. Connect again from the dashboard."); a `token` found in it is never read (the core rewrites the
+file without it).
 The relay client uses no proxy from the environment (`HTTP(S)_PROXY`, `ALL_PROXY` are ignored: an empty proxy handler) and a
 fixed trust store shipped with orch or the OS default, never `SSL_CERT_FILE` / `SSL_CERT_DIR` / `REQUESTS_CA_BUNDLE`.
 Reference `relay_conn`, vectors `relay`. Admin-source classification (inventory.md) uses refreshes fetched this way only.
@@ -166,7 +168,7 @@ rows add a named case.
 | `config.agents_may_finish` | `orch config set workflow.agents_may_finish on` (cli_config.py 210) | setting (off needs no proof) | page, terminal | `settle` class |
 | `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
 | `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
-| `run.human_input` | input that counts as a person's and may start a run (runs.py 382: `human:` by or phone) | ticket | page, phone | – |
+| `run.human_input` | input that counts as a person's and may start a run (runs.py 375-397 `human_waiting`: today any `human:` by or phone line in the agent-writable `.orch/run/pending/<tid>.jsonl`) | ticket | page, phone | `pending` |
 | `addon.act` (`who: people`) | an add-on button the manifest marks for people only (addons.py 599, 1051) | `<add-on>:<verb>:<ticket>` | page | – |
 | relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network), never a workspace token | – |
 
@@ -174,6 +176,14 @@ rows add a named case.
 `propose`) as a run whose recorded agent process (pid + start time) is an ancestor of the caller, not from `ORCH_RUN`; and
 (N12) treat a missing or unreadable `human-settings.json` as every widening off, and write the tombstone at once when a
 lowering comes through the CLI or the page.
+
+**Read-back rule (pending input, synced ticket data).** A line in `.orch/run/pending/<tid>.jsonl` counts as a person's (and
+may make a background host start a run) only when it carries `mac` = HMAC-SHA256(`human.key`, canonical JSON of the line
+without `mac`), written by the core when it accepted the input with a valid proof (page) or from the relay channel (phone,
+above); the core **verifies it on every read**, not only when writing. A line without a valid `mac` is agent input, whatever
+its `by` says (reference `pending_is_human`, vectors `pending`). The same holds for `check.wont_do` arriving through a sync
+merge: it is kept as a person's only when it carries such a MAC from the sending side's core or is attributed through the
+relay-authenticated sender; otherwise it is an agent's.
 
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).

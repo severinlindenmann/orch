@@ -39,24 +39,27 @@ What Level 1 does:
     profiles.toml                         0600, $defs/profiles: names only
 ```
 
-- **Guarded orch home (decision N11, rationale below).** The key store, the hider, `human.key`, the nonce store,
+- **Guarded orch home (decision N11/N14, rationale below).** The key store, the hider, `human.key`, the nonce store,
   `human-settings.json`, `proposals.json`, the relay record and the dev record live in the *guarded home* of a workspace:
-  - a **real workspace** (its real path is not under a test prefix) uses only the account's default home,
-    `<account home>/.orch-tool`, where the account home comes from the account database (`pwd.getpwuid`; Windows: the
-    profile folder from the OS), never from `HOME` or `ORCH_HOME`;
-  - a **test workspace** (its real path is under a test prefix) uses only a home that is also under a test prefix
-    (`ORCH_HOME`, else `HOME/.orch-tool`);
-  - any other pairing (a real workspace with an env home elsewhere, a test workspace with the default home, an env home
-    outside every test prefix) → guarded operations are refused (`Refused: this workspace and this orch home don't belong
+  - a **real workspace** uses only the account's default home, `<account home>/.orch-tool`, where the account home comes
+    from the account database (`pwd.getpwuid`; Windows: the profile folder from the OS), never from `HOME` or `ORCH_HOME`;
+  - a **test workspace** uses only a test home (`ORCH_HOME`, else `HOME/.orch-tool`, that is itself a test path);
+  - any other pairing → guarded operations are refused (`Refused: this workspace and this orch home don't belong
     together.`); there is no silent fallback in either direction.
-  Test prefixes: `<account home>/.orch-test/`, plus prefixes named in the install record of a dev install (inside the orch
-  tool env, written by the dev kit's installer). Reference `home_ok`, vectors `home` (human-proof-v1).
-  **Rationale.** Tests and e2e must keep isolating with `env -i HOME=~/.orch-test/… ORCH_HOME=…` and must never read or write
-  the real `~/.orch-tool` (owner rule): they do, because their workspaces live under the test prefix too, and the check needs no
-  read of the real home. An agent working in a real workspace cannot gain person authority by setting `HOME` or `ORCH_HOME`: a
-  non-default home never holds or accepts a real workspace's proof key, key store, settings or nonces. **It does not stop**
-  an agent that edits files in the default orch home or the install record directly (out of the boundary above), or one that
-  makes its own fake workspace under `~/.orch-test/` (that only gives it power over that fake workspace).
+  **Test paths exist only on a test or dev install.** The install record inside orch's own tool environment says `normal`,
+  `dev` (the dev kit's installer) or `test` (running from the source tree, as the test suite does). On a **normal install there
+  is no test path at all**: every workspace is real and only the default home is guarded. On a dev or test install the one test
+  prefix is the literal `<account home>/.orch-test/`, and it counts only when it `lstat`s as a real directory (not a symlink)
+  owned by the user. A workspace or home is a test path when its **realpath** lies under that literal prefix, compared
+  path component by component (`~/.orch-testX/` is not under it; the prefix itself is not resolved, so a `.orch-test`
+  symlink to `~` makes nothing a test path). Reference `home_ok`, vectors `home` (human-proof-v1).
+  **Rationale.** Tests and e2e keep isolating with `env -i HOME=~/.orch-test/… ORCH_HOME=…` and never read or write the real
+  `~/.orch-tool` (owner rule): they run from the source tree or a dev install, and their workspaces and homes are real
+  directories under the prefix; the check reads nothing in the real home. On a pilot user's normal install an agent cannot
+  get a second, agent-made human key by moving a workspace under `~/.orch-test`, linking paths, or setting `HOME`/`ORCH_HOME`:
+  there is no test path, so a non-default home is simply refused. **It does not stop** editing the install record or files in
+  the default orch home directly (outside the boundary above); on a dev or test install, a workspace under the prefix is a
+  test workspace by design.
 - POSIX: folders 0700 and files 0600, checked on every read; looser rights, another owner, or a symlink anywhere on the path
   → refused (`Refused: the key folder has the wrong rights. Fix: orch doctor`). Windows: an ACL with only the user and
   SYSTEM, set at creation, checked the same way.

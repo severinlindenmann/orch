@@ -235,7 +235,8 @@ Pushes go to the phones the message is for: `phones` = every paired phone with t
 
 Admin prompt for a workspace (shown once): `orch addon add relay --yes` then `orch relay connect https://relay.severin.io --workspace ws_… --token orn_…`
 (+ the `onboarding.sh/.ps1` line for machines without orch). `connect` runs `orch init` if needed, checks `/v1/whoami`,
-writes `.orch/secrets/relay.json`, copies the `orch-relay` skill (shipped inside the CLI), adds the AGENTS.md block, then runs `orch relay refresh`.
+writes the relay record (url, workspace, token) into the guarded orch home with a `relay.connect` proof (human-proof.md;
+the token is stored nowhere else) and `.orch/secrets/relay.json` with url and workspace only, copies the `orch-relay` skill (shipped inside the CLI), adds the AGENTS.md block, then runs `orch relay refresh`.
 
 Phone onboarding link (from the admin portal, also as QR code, valid 24 h, one use):
 `orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_<22 chars>`

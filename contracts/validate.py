@@ -1105,6 +1105,16 @@ def hp_settle(c):
     return out
 
 
+def pending_is_human(c):
+    """A pending line counts as a person's only with a valid MAC (guarded human key), checked on read; by is ignored."""
+    line = dict(c["line"])
+    mac = line.pop("mac", None)
+    if not mac or line.get("kind") not in ("answer", "message", "text"):
+        return False
+    want = _b64u(hmac.new(bytes.fromhex(c["key"]), json.dumps(line, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(), hashlib.sha256).digest())
+    return hmac.compare_digest(want, mac)
+
+
 def relay_conn(c):
     """Where relay calls go: only the record in the guarded home; a differing workspace file refuses; env never used."""
     rec = c.get("record")
@@ -1113,7 +1123,7 @@ def relay_conn(c):
     f = c.get("file")
     if f is not None and (f.get("url") != rec["url"] or f.get("workspace") != rec["workspace"]):
         return "refused"
-    return {"url": rec["url"], "workspace": rec["workspace"], "proxy": None, "trust": "fixed"}
+    return {"url": rec["url"], "workspace": rec["workspace"], "token_from": "record", "proxy": None, "trust": "fixed"}
 
 
 def dev_can_mark(c):
@@ -1121,13 +1131,26 @@ def dev_can_mark(c):
     return bool(c["install_dev"] and c["creating"] and not c["has_human_key"])
 
 
+def _under(path, prefix):
+    """Component-wise: is realpath `path` inside the literal `prefix` (both absolute POSIX strings)?"""
+    pp, xp = [x for x in path.split("/") if x], [x for x in prefix.split("/") if x]
+    return len(pp) > len(xp) and pp[: len(xp)] == xp
+
+
 def home_ok(c):
-    """Guarded orch home rule: real workspace <-> default home, test workspace <-> test home; anything else refused."""
-    if c["home"] == "default":
-        return c["workspace"] == "real"
-    if c["home"] == "test":
-        return c["workspace"] == "test"
-    return False
+    """Guarded orch home rule (secrets.md). Test paths exist only on a dev/test install, under the literal
+    <account home>/.orch-test/ that lstats as a real directory owned by the user; paths are compared by realpath."""
+    prefix = c["account_home"].rstrip("/") + "/.orch-test"
+    active = c["install"] in ("dev", "test") and c["prefix_real_dir"]
+    ws_test = active and _under(c["workspace_realpath"], prefix)
+    default_home = c["account_home"].rstrip("/") + "/.orch-tool"
+    if c["home_realpath"] == default_home:
+        home = "default"
+    elif active and _under(c["home_realpath"], prefix):
+        home = "test"
+    else:
+        home = "other"
+    return (not ws_test and home == "default") or (ws_test and home == "test")
 
 
 def kind_human():
@@ -1144,6 +1167,8 @@ def kind_human():
                 used.append(json.loads(base64.urlsafe_b64decode(call["proof"].split(".")[1] + "=="))["nonce"])
             got.append(r)
         _expect(f"human concurrent {c['name']}", got, c["results"])
+    for c in vec["pending"]:
+        _expect(f"human pending {c['name']}", pending_is_human(c), c["human"])
     for c in vec["relay"]:
         _expect(f"human relay {c['name']}", relay_conn(c), c["expect"])
     for c in vec["dev_mark"]:

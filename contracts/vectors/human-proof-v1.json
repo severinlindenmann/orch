@@ -625,39 +625,102 @@
  ],
  "home": [
   {
-   "name": "real workspace, default home",
-   "home": "default",
-   "workspace": "real",
+   "name": "normal install, real workspace, default home",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/Users/pat/.orch-tool",
    "ok": true
   },
   {
-   "name": "test workspace, test home (env -i HOME=~/.orch-test/...)",
-   "home": "test",
-   "workspace": "test",
+   "name": "normal install: workspace moved under ~/.orch-test, test home -> refused",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/x/ws",
+   "home_realpath": "/Users/pat/.orch-test/x/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "normal install: workspace under ~/.orch-test is a real workspace, default home",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/x/ws",
+   "home_realpath": "/Users/pat/.orch-tool",
    "ok": true
   },
   {
-   "name": "real workspace, agent sets ORCH_HOME under the test prefix",
-   "home": "test",
-   "workspace": "real",
+   "name": "test install (source tree), test workspace, test home",
+   "account_home": "/Users/pat",
+   "install": "test",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/w2b-1/ws",
+   "home_realpath": "/Users/pat/.orch-test/w2b-1/.orch-tool",
+   "ok": true
+  },
+  {
+   "name": "dev install, test workspace, test home",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/e2e/ws",
+   "home_realpath": "/Users/pat/.orch-test/e2e/.orch-tool",
+   "ok": true
+  },
+  {
+   "name": "dev install: ~/.orch-test is a symlink -> not a test prefix",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": false,
+   "workspace_realpath": "/Users/pat/.orch-test/e2e/ws",
+   "home_realpath": "/Users/pat/.orch-test/e2e/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: symlinked workspace path resolves outside the prefix (moved workspace) -> real",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/Users/pat/.orch-test/e2e/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: ~/.orch-testX is not under the prefix",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-testX/ws",
+   "home_realpath": "/Users/pat/.orch-testX/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: real workspace, agent sets ORCH_HOME under the prefix",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/Users/pat/.orch-test/evil/.orch-tool",
+   "ok": false
+  },
+  {
+   "name": "dev install: test workspace without a test home (would touch the real home)",
+   "account_home": "/Users/pat",
+   "install": "dev",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/.orch-test/e2e/ws",
+   "home_realpath": "/Users/pat/.orch-tool",
    "ok": false
   },
   {
    "name": "real workspace, agent sets HOME elsewhere",
-   "home": "other",
-   "workspace": "real",
-   "ok": false
-  },
-  {
-   "name": "test workspace without a test home (would touch the real home)",
-   "home": "default",
-   "workspace": "test",
-   "ok": false
-  },
-  {
-   "name": "test workspace, env home outside the test prefix",
-   "home": "other",
-   "workspace": "test",
+   "account_home": "/Users/pat",
+   "install": "normal",
+   "prefix_real_dir": true,
+   "workspace_realpath": "/Users/pat/work/acme",
+   "home_realpath": "/tmp/evil/.orch-tool",
    "ok": false
   }
  ],
@@ -696,7 +759,8 @@
    "name": "record only",
    "record": {
     "url": "https://relay.example.com",
-    "workspace": "ws_aaaaaaaaaa"
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
    },
    "file": null,
    "env": {},
@@ -704,14 +768,16 @@
     "url": "https://relay.example.com",
     "workspace": "ws_aaaaaaaaaa",
     "proxy": null,
-    "trust": "fixed"
+    "trust": "fixed",
+    "token_from": "record"
    }
   },
   {
    "name": "workspace file matches",
    "record": {
     "url": "https://relay.example.com",
-    "workspace": "ws_aaaaaaaaaa"
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
    },
    "file": {
     "url": "https://relay.example.com",
@@ -722,14 +788,16 @@
     "url": "https://relay.example.com",
     "workspace": "ws_aaaaaaaaaa",
     "proxy": null,
-    "trust": "fixed"
+    "trust": "fixed",
+    "token_from": "record"
    }
   },
   {
    "name": "workspace file points elsewhere",
    "record": {
     "url": "https://relay.example.com",
-    "workspace": "ws_aaaaaaaaaa"
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
    },
    "file": {
     "url": "https://evil.example",
@@ -742,7 +810,8 @@
    "name": "HTTPS_PROXY set is ignored",
    "record": {
     "url": "https://relay.example.com",
-    "workspace": "ws_aaaaaaaaaa"
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
    },
    "file": null,
    "env": {
@@ -753,7 +822,8 @@
     "url": "https://relay.example.com",
     "workspace": "ws_aaaaaaaaaa",
     "proxy": null,
-    "trust": "fixed"
+    "trust": "fixed",
+    "token_from": "record"
    }
   },
   {
@@ -765,6 +835,126 @@
    },
    "env": {},
    "expect": "not_connected"
+  },
+  {
+   "name": "workspace relay.json with a token: token ignored",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_fake_record_token"
+   },
+   "file": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token": "orn_agent_copied_token"
+   },
+   "env": {},
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "token_from": "record",
+    "proxy": null,
+    "trust": "fixed"
+   }
+  }
+ ],
+ "pending": [
+  {
+   "name": "pending line with by human: and no proof -> agent input, no run start",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column"
+   },
+   "human": false
+  },
+  {
+   "name": "pending line with a valid core MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "K-IXPjhg9urMglULWWw-wRcxgYdblC7Z3GjF0va9X9E"
+   },
+   "human": true
+  },
+  {
+   "name": "MAC from another key",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "_4BntOb41yLAnfbubLhuT7gpTkwvJ5zgdZ_cxIpd2xU"
+   },
+   "human": false
+  },
+  {
+   "name": "text changed after the MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "deploy to production",
+    "mac": "K-IXPjhg9urMglULWWw-wRcxgYdblC7Z3GjF0va9X9E"
+   },
+   "human": false
+  },
+  {
+   "name": "by changed after the MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:anna",
+    "via": "dashboard",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "mac": "K-IXPjhg9urMglULWWw-wRcxgYdblC7Z3GjF0va9X9E"
+   },
+   "human": false
+  },
+  {
+   "name": "phone line without MAC (via phone, phone id)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:ph_aaaaaaaaaa",
+    "via": "phone",
+    "kind": "answer",
+    "text": "yes, add the VAT column",
+    "phone": "ph_aaaaaaaaaa"
+   },
+   "human": false
+  },
+  {
+   "name": "event kind never a person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "line": {
+    "id": "p_aaaaaaaa",
+    "at": "2026-11-16T09:00:00Z",
+    "by": "human:severin",
+    "via": "dashboard",
+    "kind": "event",
+    "text": "yes, add the VAT column",
+    "mac": "M_8wSaQyAyi3FsipHF9-FKItu_ey5Lvvb6_AZGkg9io"
+   },
+   "human": false
   }
  ]
 }
