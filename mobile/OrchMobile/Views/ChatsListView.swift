@@ -126,7 +126,6 @@ struct ChatsListView: View {
                 Image(systemName: "bubble.left").themeFont(32).foregroundStyle(Theme.brand)
                     .frame(width: 70, height: 70).background(Theme.surface, in: RoundedRectangle(cornerRadius: 24))
                 Text("No chats yet").themeFont(20, .semibold)
-                Text("Add your workspace to talk to its helper and keep up with your tickets.").themeFont(15).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 Button("Add a workspace") { sheet = .addWorkspace }.buttonStyle(PrimaryButtonStyle())
             }.frame(maxWidth: .infinity).padding(.vertical, 50).accessibilityIdentifier("chats-empty")
         } else {

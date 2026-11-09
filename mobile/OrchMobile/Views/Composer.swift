@@ -108,9 +108,9 @@ struct Composer: View {
             if target == nil { Text(unavailableText).themeFont(13).foregroundStyle(Theme.muted) }
             else if let note, !hasAudio, reply?.answering == nil { Text(note).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("composer-note") }
         }.padding(.horizontal, 8).padding(.vertical, 8)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.xl, style: .continuous))
-            .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 4)
-            .background(Theme.bg)
+            .frame(maxWidth: .infinity)
+            .background(Theme.surface)
+            .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 0.5) }
             .accessibilityElement(children: .contain).accessibilityIdentifier("composer")
             .foregroundStyle(Theme.text).tint(Theme.brand)
             .sensoryFeedback(.success, trigger: success).sensoryFeedback(.warning, trigger: cancellation)
@@ -258,8 +258,15 @@ struct Composer: View {
                 }
                 if reply?.answering?.id == q.id { reply = nil; restoreDraft() }
             } else {
-                try await dispatch(MessageDraft(text: text, replyTo: reply?.messageId), to: target)
+                let sent = text
+                let replyTo = reply?.messageId
                 text = ""; Self.drafts[draftKey(target)] = nil; reply = nil
+                do { try await dispatch(MessageDraft(text: sent, replyTo: replyTo), to: target) }
+                catch {
+                    // Never overwrite what was typed meanwhile.
+                    if text.isEmpty { text = sent; Self.drafts[draftKey(target)] = sent }
+                    throw error
+                }
             }
             success += 1; onSent?()
         } catch { self.error = error.localizedDescription }
