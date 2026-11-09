@@ -512,6 +512,20 @@ def _set_problem(root: Path, text: str | None) -> None:
         p.unlink(missing_ok=True)
 
 
+def log_send_failure(root: Path, what: str, why: object) -> None:
+    """One line in .orch/relay-errors.log (newest 200 kept) for a phone send that failed and was not shown to
+    anybody (the proposal question). Never fails the caller, never printed."""
+    try:
+        p = root / ".orch" / "relay-errors.log"
+        if (root / ".orch").is_symlink() or p.is_symlink():
+            return
+        line = f"{tickets.now()} {what}: {' '.join(str(why).split())[:300]}"
+        have = p.read_text(encoding="utf-8").splitlines() if p.is_file() else []
+        net.write_atomic(p, ("\n".join([*have, line][-200:]) + "\n").encode("utf-8"))
+    except OSError:
+        pass
+
+
 def outbox_list(root: Path) -> list[dict]:
     """Messages saved but not taken by the relay yet, oldest first: [{id, to, type, created_at}]."""
     out = []
@@ -762,15 +776,17 @@ def _send_proposal(
     # is only waiting offline goes out later from the outbox, the same bytes.
     try:
         return {**_message(root, to, "question", body, None, reply_to, mid), "sent": True, "problem": None}
-    except Refused:
+    except Refused as e:
         _asked_edit(root, lambda asked: asked.pop(mid, None))
+        log_send_failure(root, f"proposal question {mid} to {to} refused", e)
     try:  # the phone still hears the helper, as a plain text (no card), under the same message id
         return {
             **_message(root, to, "text", general_body, None, reply_to, mid),
             "sent": True,
             "problem": None,
         }
-    except Refused:
+    except Refused as e:
+        log_send_failure(root, f"proposal text {mid} to {to} refused", e)
         return {**local, "sent": True}
 
 
