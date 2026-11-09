@@ -74,6 +74,13 @@ def account_home() -> Path:
     test suite fakes, so tests never touch the real orch home."""
     from orch import addons
 
+    if _is_windows():  # the profile folder from the process token (winacl), never the environment
+        try:
+            from orch import winacl
+
+            return Path(winacl.profile_dir())
+        except (ImportError, AttributeError, OSError, Refused):
+            pass
     return addons.real_home()
 
 
@@ -132,10 +139,29 @@ def install_kind() -> str:
     return "test" if _source_tree() else "normal"
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _parts(path: str) -> list[str]:
+    """Path components for comparing. Windows: both separators, and case-insensitive (the file system is)."""
+    if _is_windows():
+        return [x.lower() for x in str(path).replace("\\", "/").split("/") if x]
+    return [x for x in str(path).split("/") if x]
+
+
+def _same(a: str, b: str) -> bool:
+    return _parts(a) == _parts(b)
+
+
 def _under(path: str, prefix: str) -> bool:
-    """Component-wise: is `path` inside the literal `prefix` (both absolute POSIX strings)?"""
-    pp, xp = [x for x in path.split("/") if x], [x for x in prefix.split("/") if x]
+    """Component-wise: is `path` inside `prefix` (absolute paths; the prefix itself is not inside itself)?"""
+    pp, xp = _parts(path), _parts(prefix)
     return len(pp) > len(xp) and pp[: len(xp)] == xp
+
+
+def _join(account, name: str) -> str:
+    return str(account).rstrip("/\\") + "/" + name
 
 
 def home_ok(
@@ -143,12 +169,11 @@ def home_ok(
 ) -> bool:
     """Reference `home_ok` (secrets.md, vectors `home`): a real workspace pairs only with the default home, a
     test workspace (dev/test install, realpath under the literal <account home>/.orch-test) only with a
-    test home."""
-    prefix = account.rstrip("/") + "/.orch-test"
+    test home. On Windows the account home is the profile folder and components compare case-insensitively."""
+    prefix = _join(account, ".orch-test")
     active = install in ("dev", "test") and prefix_real_dir
     ws_test = active and _under(workspace_realpath, prefix)
-    default_home = account.rstrip("/") + "/.orch-tool"
-    if home_realpath == default_home:
+    if _same(home_realpath, _join(account, ".orch-tool")):
         home = "default"
     elif active and _under(home_realpath, prefix):
         home = "test"
@@ -157,13 +182,24 @@ def home_ok(
     return (not ws_test and home == "default") or (ws_test and home == "test")
 
 
+REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: a junction or symlink
+
+
+def _lstat(p: Path):
+    return p.lstat()
+
+
 def _prefix_is_real_dir(account: Path) -> bool:
-    p = account / ".orch-test"
+    """<account home>/.orch-test lstat's as a real folder (no link, no reparse point) owned by the user."""
     try:
-        st = p.lstat()
+        st = _lstat(Path(account) / ".orch-test")
     except OSError:
         return False
-    return stat.S_ISDIR(st.st_mode) and (not POSIX or st.st_uid == os.getuid())
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    if _is_windows():
+        return not getattr(st, "st_file_attributes", 0) & REPARSE
+    return st.st_uid == os.getuid()
 
 
 def guarded_home(root: Path) -> Path:
@@ -175,7 +211,7 @@ def guarded_home(root: Path) -> Path:
     install = install_kind()
     real_dir = _prefix_is_real_dir(account)
     ws_real = os.path.realpath(root)
-    ws_test = install in ("dev", "test") and real_dir and _under(ws_real, acct.rstrip("/") + "/.orch-test")
+    ws_test = install in ("dev", "test") and real_dir and _under(ws_real, _join(acct, ".orch-test"))
     if ws_test:
         env = os.environ.get("ORCH_HOME")
         cand = Path(env) if env else Path(os.environ.get("HOME", "")) / ".orch-tool"
@@ -186,10 +222,10 @@ def guarded_home(root: Path) -> Path:
             # test suite (subprocess tests) reach here with the real pwd home, so this must refuse, not fake.
             raise Refused(NOT_TOGETHER)
         cand = account / ".orch-tool"
-        home_real = acct.rstrip("/") + "/.orch-tool"
+        home_real = _join(acct, ".orch-tool")
         env = os.environ.get("ORCH_HOME")
         # a real workspace pairs only with the default home: another home refuses, never a fallback
-        if env and os.path.realpath(env) != home_real:
+        if env and not _same(os.path.realpath(env), home_real):
             raise Refused(NOT_TOGETHER)
         if cand.is_symlink():
             raise Refused(NOT_TOGETHER)  # the default folder is a link: never followed
@@ -651,12 +687,13 @@ LAUNCH_SERVERS = ("focus", "dashboard")
 
 
 def is_test_workspace(root: Path) -> bool:
-    """A test install AND a workspace whose realpath is under the literal <account home>/.orch-test."""
+    """A test install AND a workspace whose realpath is under the literal <account home>/.orch-test (Windows:
+    <profile folder>\\.orch-test, case-insensitive)."""
     account = account_home()
     return (
         install_kind() == "test"
         and _prefix_is_real_dir(account)
-        and _under(os.path.realpath(root), str(account).rstrip("/") + "/.orch-test")
+        and _under(os.path.realpath(root), _join(account, ".orch-test"))
     )
 
 

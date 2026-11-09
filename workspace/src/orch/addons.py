@@ -99,20 +99,6 @@ def _install_origin() -> dict:
     return {}
 
 
-_ENV_SOURCE_PROVEN = False
-
-
-@contextlib.contextmanager
-def trusted_env_source():
-    """Inside the person-gated `orch update` (its proof verified): ORCH_REPO / ORCH_REF count there too."""
-    global _ENV_SOURCE_PROVEN
-    prev, _ENV_SOURCE_PROVEN = _ENV_SOURCE_PROVEN, True
-    try:
-        yield
-    finally:
-        _ENV_SOURCE_PROVEN = prev
-
-
 _LOCAL_ADD_PROVEN: str | None = None  # the content hash a person allowed (op addon.add_local), while inside
 
 
@@ -158,10 +144,11 @@ def _local_add_ok() -> bool:
 
 def _env_source_ok() -> bool:
     """ORCH_REPO / ORCH_REF choose where code is installed from: an agent could aim them at its own code. They
-    count only on a dev or test install, or inside the person-gated `orch update`."""
+    count only on a dev or test install, never on a normal one (a person's update uses the source shown on
+    its card)."""
     from orch import humanproof
 
-    return _ENV_SOURCE_PROVEN or humanproof.install_kind() in ("dev", "test")
+    return humanproof.install_kind() in ("dev", "test")
 
 
 def _src_env(name: str) -> str | None:
