@@ -1,5 +1,8 @@
 """Workspace DMs: permissions, durable sends, inbox isolation, and helper default deny."""
 
+import json
+import os
+
 import pytest
 
 from orch import chat, cli, net, relay, tickets
@@ -145,7 +148,7 @@ def test_inbox_clean_idempotent_sorted_and_isolated(dm, all_contacts):
     if all_contacts:
         chat.dm_sync_all(root)
     msgs = chat.dm_sync(root, WS)["messages"]
-    assert [m["text"] for m in msgs] == ["earlier", relay.clean_untrusted(text, 2000)]
+    assert [m["text"] for m in msgs] == [relay.clean_untrusted(text, 2000), "earlier"]  # arrival order
     assert chat.dm_thread(root, WS)["messages"] == msgs
     with pytest.raises(Refused):
         chat.dm_thread(root, "../" + OTHER)
@@ -569,3 +572,25 @@ def test_a_peer_clock_never_orders_or_evicts(dm):
 def test_thread_and_sync_are_not_helper_commands():
     for pair in (("chat", "thread"), ("chat", "sync"), ("chat", "contacts"), ("chat", "send")):
         assert pair not in chat.HELPER_COMMANDS
+
+
+def test_600_inbound_texts_keep_the_newest_500_and_a_second_sync_imports_nothing(dm):
+    root, _ = dm
+    for n in range(600):
+        mid = f"m_flood{n:011d}"
+        net.write_json(
+            root / ".orch/inbox" / f"{mid}.json",
+            {"id": mid, "from": WS, "type": "text", "body": {"text": f"t{n}"}},
+            True,
+        )
+        os.utime(root / ".orch/inbox" / f"{mid}.json", (1_700_000_000 + n, 1_700_000_000 + n))
+    chat.dm_sync(root, WS)
+    first = chat.dm_read(root, WS)["messages"]
+    assert len(first) == 500
+    assert [m["text"] for m in first][-1] == "t599"  # the newest inbox files, appended in import order
+    chat.dm_sync(root, WS)
+    chat.dm_sync_all(root)
+    again = chat.dm_read(root, WS)["messages"]
+    assert [m["id"] for m in again] == [m["id"] for m in first]  # nothing re-imported, nothing resurrected
+    stored = json.loads(chat._dm_path(root, WS).read_text())
+    assert len(stored["seen"]) >= 500 and set(m["id"] for m in first) <= set(stored["seen"])

@@ -866,11 +866,19 @@ def _dm_read(root: Path, ws: str) -> dict:
         "schema": "orch.chat-dm/1",
         "ws": ws,
         "messages": [m for m in rows if isinstance(m, dict)] if isinstance(rows, list) else [],
+        # every inbox id ever imported: the 500-message cap never forgets it, so a cut message cannot come back
+        "seen": [
+            x for x in (data.get("seen") if isinstance(data, dict) else None) or [] if isinstance(x, str)
+        ][-DM_SEEN:],
     }
+
+
+DM_SEEN = 5000
 
 
 def _dm_write(root: Path, ws: str, data: dict) -> None:
     data["messages"] = data["messages"][-500:]
+    data["seen"] = [x for x in data.get("seen") or [] if isinstance(x, str)][-DM_SEEN:]
     net.write_json(_dm_path(root, ws), data, True)
 
 
@@ -999,11 +1007,11 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
     with tickets._locked(root, "chat"):
         data = {c["ws"]: _dm_read(root, c["ws"]) for c in peers}
         ids = {
-            ws: {m.get("id") for m in d["messages"] if isinstance(m.get("id"), str)} for ws, d in data.items()
+            ws: {m.get("id") for m in d["messages"] if isinstance(m.get("id"), str)} | set(d["seen"])
+            for ws, d in data.items()
         }
-        original = {ws: [dict(m) for m in d["messages"]] for ws, d in data.items()}
         changed = set()
-        for msg in _dm_inbox(root):
+        for msg in reversed(list(_dm_inbox(root))):  # oldest first: append order = arrival order
             if (
                 not isinstance(msg, dict)
                 or not isinstance(msg.get("from"), str)
@@ -1033,6 +1041,7 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
                 }
             )
             ids[ws].add(mid)
+            data[ws]["seen"].append(mid)
             changed.add(ws)
         sent_ids = relay.posted_ids(root)
         for ws, thread in data.items():
@@ -1049,6 +1058,4 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
                     m["state"] = "delivered"
                     changed.add(ws)
         for ws in changed:
-            data[ws]["messages"] = data[ws]["messages"][-500:]
-            if data[ws]["messages"] != original[ws]:
-                _dm_write(root, ws, data[ws])
+            _dm_write(root, ws, data[ws])
