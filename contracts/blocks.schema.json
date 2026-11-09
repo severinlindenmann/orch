@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/blocks.schema.json",
+  "title": "orch blocks v1 (orch.blocks/1): results drawn the same on the web and the phone",
+  "description": "See blocks.md. A document of up to 50 blocks, at most 64 KB as compact UTF-8 JSON (checked by producers and validate.py). Every string is plain text: renderers set it as text, never as markup. A block with an unknown type is valid and is drawn as \"can't show this here\".",
+  "type": "object",
+  "required": ["schema", "from", "blocks"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "orch.blocks/1" },
+    "from": { "enum": ["job", "agent", "orch"], "description": "job = reported by a job (shown as 'reported by the job', never as a passed check); agent = the agent's proof; orch = computed by orch itself." },
+    "title": { "$ref": "#/$defs/line" },
+    "blocks": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/block" } }
+  },
+  "$defs": {
+    "line": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+    "short": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+    "multiline": { "type": "string", "maxLength": 2000, "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f]*$" },
+    "tone": { "enum": ["neutral", "good", "warn", "bad"] },
+    "path": { "type": "string", "maxLength": 300, "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|/)\\.\\.(/|$))(?!.*\\\\)[^\\u0000-\\u001f\\u007f]+$", "description": "Relative to the workspace root, inside it: no leading /, no .., no backslash, no drive letter. Renderers also refuse symlinks that leave the workspace." },
+    "https": { "type": "string", "maxLength": 2000, "pattern": "^https://[^\\s<>\"'`]+$" },
+    "cell": { "oneOf": [{ "type": "null" }, { "type": "number" }, { "type": "string", "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }] },
+    "block": {
+      "type": "object", "required": ["type"],
+      "properties": { "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" } },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "summary" } } }, "then": { "$ref": "#/$defs/summary" } },
+        { "if": { "properties": { "type": { "const": "steps" } } }, "then": { "$ref": "#/$defs/steps" } },
+        { "if": { "properties": { "type": { "const": "progress" } } }, "then": { "$ref": "#/$defs/progress" } },
+        { "if": { "properties": { "type": { "const": "stat" } } }, "then": { "$ref": "#/$defs/stat" } },
+        { "if": { "properties": { "type": { "const": "kv" } } }, "then": { "$ref": "#/$defs/kv" } },
+        { "if": { "properties": { "type": { "const": "table" } } }, "then": { "$ref": "#/$defs/table" } },
+        { "if": { "properties": { "type": { "const": "file" } } }, "then": { "$ref": "#/$defs/file" } },
+        { "if": { "properties": { "type": { "const": "link" } } }, "then": { "$ref": "#/$defs/link" } },
+        { "if": { "properties": { "type": { "const": "log" } } }, "then": { "$ref": "#/$defs/log" } },
+        { "if": { "properties": { "type": { "const": "chart" } } }, "then": { "$ref": "#/$defs/chart" } }
+      ]
+    },
+    "summary": {
+      "type": "object", "required": ["type", "text"], "additionalProperties": false,
+      "properties": { "type": { "const": "summary" }, "text": { "$ref": "#/$defs/multiline", "minLength": 1 }, "tone": { "$ref": "#/$defs/tone" } }
+    },
+    "steps": {
+      "type": "object", "required": ["type", "items"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "steps" },
+        "items": { "type": "array", "minItems": 1, "maxItems": 100, "items": {
+          "type": "object", "required": ["label", "state"], "additionalProperties": false,
+          "properties": { "label": { "$ref": "#/$defs/line" }, "state": { "enum": ["waiting", "running", "done", "failed", "skipped"] }, "note": { "$ref": "#/$defs/line" } }
+        } }
+      }
+    },
+    "progress": {
+      "type": "object", "required": ["type", "label", "done", "total"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "progress" }, "label": { "$ref": "#/$defs/line" },
+        "done": { "type": "number", "minimum": 0 },
+        "total": { "oneOf": [{ "type": "null" }, { "type": "number", "exclusiveMinimum": 0 }], "description": "null = unknown total (a spinner and the count)." },
+        "unit": { "$ref": "#/$defs/short" }
+      }
+    },
+    "stat": {
+      "type": "object", "required": ["type", "label", "value"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "stat" }, "label": { "$ref": "#/$defs/line" },
+        "value": { "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/short" }] },
+        "unit": { "$ref": "#/$defs/short" }, "tone": { "$ref": "#/$defs/tone" },
+        "delta": { "$ref": "#/$defs/short", "description": "Plain words, e.g. '+12 since last week'." }
+      }
+    },
+    "kv": {
+      "type": "object", "required": ["type", "items"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "kv" },
+        "items": { "type": "array", "minItems": 1, "maxItems": 50, "items": {
+          "type": "object", "required": ["key", "value"], "additionalProperties": false,
+          "properties": { "key": { "$ref": "#/$defs/line" }, "value": { "$ref": "#/$defs/cell" } }
+        } }
+      }
+    },
+    "table": {
+      "type": "object", "required": ["type", "columns", "rows"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "table" }, "title": { "$ref": "#/$defs/line" },
+        "columns": { "type": "array", "minItems": 1, "maxItems": 12, "items": {
+          "type": "object", "required": ["key", "label"], "additionalProperties": false,
+          "properties": { "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" }, "label": { "$ref": "#/$defs/short" }, "kind": { "enum": ["text", "number", "duration", "date", "tone"], "default": "text" } }
+        } },
+        "rows": { "type": "array", "maxItems": 200, "items": { "type": "object", "maxProperties": 12, "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,31}$" }, "additionalProperties": { "$ref": "#/$defs/cell" } } },
+        "total_rows": { "type": "integer", "minimum": 0, "description": "When rows were cut: how many there are in all ('first 200 of 1 234')." }
+      }
+    },
+    "file": {
+      "type": "object", "required": ["type", "path"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "file" }, "path": { "$ref": "#/$defs/path" }, "label": { "$ref": "#/$defs/line" },
+        "size": { "type": "integer", "minimum": 0 },
+        "preview": { "const": "image", "description": "Draw a picture preview: only png, jpeg, gif or webp up to 2 MB and 4096 px a side; anything else shows as a file row." }
+      }
+    },
+    "link": {
+      "type": "object", "required": ["type", "url", "label"], "additionalProperties": false,
+      "properties": { "type": { "const": "link" }, "url": { "$ref": "#/$defs/https" }, "label": { "$ref": "#/$defs/line" } }
+    },
+    "log": {
+      "type": "object", "required": ["type", "lines"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "log" }, "title": { "$ref": "#/$defs/line" },
+        "lines": { "type": "array", "maxItems": 200, "items": { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u0008\\u000a-\\u001f\\u007f]*$" } },
+        "cut": { "type": "integer", "minimum": 0, "description": "Lines left out before these ('… 1 200 earlier lines')." }
+      }
+    },
+    "chart": {
+      "type": "object", "required": ["type", "kind", "series"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "chart" }, "kind": { "enum": ["line", "bar"] }, "title": { "$ref": "#/$defs/line" },
+        "x_label": { "$ref": "#/$defs/short" }, "y_label": { "$ref": "#/$defs/short" },
+        "series": { "type": "array", "minItems": 1, "maxItems": 4, "items": {
+          "type": "object", "required": ["name", "points"], "additionalProperties": false,
+          "properties": {
+            "name": { "$ref": "#/$defs/short" },
+            "points": { "type": "array", "maxItems": 200, "items": { "type": "array", "prefixItems": [{ "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/short" }] }, { "type": ["number", "null"] }], "minItems": 2, "maxItems": 2 } }
+          }
+        } }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+ "name": "file absolute",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "file",
+    "path": "/etc/passwd"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

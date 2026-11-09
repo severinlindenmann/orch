@@ -467,10 +467,65 @@ def kind_secrets():
         _expect(f"secrets too_short {c['value']!r}", ok, c["stored"])
 
 
+
+# --- blocks (blocks.md) ----------------------------------------------------------------------------------------------
+BLOCK_TYPES = ["summary", "steps", "progress", "stat", "kv", "table", "file", "link", "log", "chart"]
+
+
+def _strings(o):
+    if isinstance(o, str):
+        yield o
+    elif isinstance(o, dict):
+        for k, x in o.items():
+            yield from _strings(k)
+            yield from _strings(x)
+    elif isinstance(o, list):
+        for x in o:
+            yield from _strings(x)
+
+
+def blocks_errors(v, doc):
+    errs = _msgs(v, doc)
+    if not errs and len(json.dumps(doc, separators=(",", ":"), ensure_ascii=False).encode()) > 65536:
+        errs.append("document over 64 KB")
+    return errs
+
+
+def kind_blocks():
+    v = _w("blocks")
+    _core_clean("blocks")
+    files = sorted((HERE / "vectors" / "blocks").glob("*.json"))
+    seen = set()
+    for f in files:
+        case = json.loads(f.read_text())
+        label = f"vectors/blocks/{f.name}"
+        want = f.name.startswith("valid-")
+        if case.get("valid") is not want:
+            fails.append(f"{label}: valid must be {want} for a {'valid' if want else 'invalid'}-* file")
+        errs = blocks_errors(v, case["doc"])
+        if bool(errs) == want:
+            fails.append(f"{label}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
+        if want:
+            texts = set(_strings(case["doc"]))
+            for s in case["shows"]:
+                if not any(s in t for t in texts):
+                    fails.append(f"{label}: shows {s!r} is not in the document")
+            unknown = sum(1 for b in case["doc"]["blocks"] if b.get("type") not in BLOCK_TYPES)
+            _expect(f"{label} fallback", unknown, case["fallback"])
+            seen.update(b.get("type") for b in case["doc"]["blocks"])
+    missing = [t for t in BLOCK_TYPES if t not in seen]
+    if missing:
+        fails.append(f"vectors/blocks: no valid fixture uses {missing}")
+    for prefix in ("valid-", "invalid-"):
+        if not any(f.name.startswith(prefix) for f in files):
+            fails.append(f"vectors/blocks: needs at least one {prefix}* fixture")
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
     "secrets": kind_secrets,
+    "blocks": kind_blocks,
 }
 
 
