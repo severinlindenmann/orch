@@ -233,6 +233,12 @@ class Handler(BaseHTTPRequestHandler):
             ok = self.session is not None and self.session.authed(self.headers)
             items = handoff.notices(self.root) if ok else []
             return self._send(200, json.dumps(items).encode(), "application/json")
+        if path == "/api/update-status":  # only a page with a session (a finished result is read once)
+            from . import handoff
+
+            ok = self.session is not None and self.session.authed(self.headers)
+            st = handoff.update_status(self.root) if ok else None
+            return self._send(200, json.dumps(st or {}).encode(), "application/json")
         if path == "/api/handoffs":  # pending requests from a terminal; same-origin only (checked above)
             from . import handoff
 
@@ -478,8 +484,13 @@ class Handler(BaseHTTPRequestHandler):
                     handoff.dismiss(self.root, hid)
                     return self._send(200, b"{}", "application/json")
                 code, text = handoff.confirm(
-                    self.root, self.orch_bin, mint, hid, actions.human_env(self.root, self.orch_bin)
-                )
+                    self.root,
+                    self.orch_bin,
+                    mint,
+                    hid,
+                    actions.human_env(self.root, self.orch_bin),
+                    session=self.session,
+                )  # 202 = started in the background (an update): the answer is sent below as it is
                 if code != 200:
                     return self._send(code, text.encode(), "text/plain; charset=utf-8")
                 return self._send(

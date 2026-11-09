@@ -233,3 +233,90 @@ def test_a_sandboxed_addon_page_cannot_use_the_session(live):
             {"Cookie": ck, "Origin": "null", "Sec-Fetch-Site": "cross-site"},
         )
         assert st == 403
+
+
+def test_update_click_runs_detached_answers_at_once_and_the_restart_keeps_the_session(live, monkeypatch):
+    root, port = live
+    hp.request_handoff(root, "update", "orch", "Update orch", "", argv=["update"])
+    hid = hp.handoffs(root)[0]["id"]
+    ck = session(root, port)
+    started = {}
+    from orch_dashboard import handoff
+
+    def fake_start(argv, proof, **kw):  # stands in for the detached child: records, does not wait
+        started.update(argv=argv, proof=proof)
+        return 4242
+
+    monkeypatch.setattr(handoff, "start_detached", fake_start)
+    monkeypatch.setattr(
+        handoff, "run_with_proof", lambda *a, **k: pytest.fail("an update must not run with a timeout")
+    )
+    st, _, body = post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})
+    assert st == 202 and b"Update started" in body and started["proof"].startswith("hp1.")
+    # the update restarts the server: a NEW server for the same workspace adopts the page's session once
+    s2 = pageproof.PageSession(root, "dashboard")
+    assert s2.can_mint({"Host": "127.0.0.1:1", "Cookie": ck}, 1)
+    s3 = pageproof.PageSession(root, "dashboard")  # a second restart: the marker is spent
+    assert not s3.can_mint({"Host": "127.0.0.1:1", "Cookie": ck}, 1)
+
+
+def test_resume_cookie_is_one_use_expires_and_only_after_a_click(live, monkeypatch):
+    import time
+
+    root, _ = live
+    assert hp.write_resume_cookie(root, "dashboard", "c" * 40)
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + hp.RESUME_LIFE + 5)
+    assert hp.take_resume_cookie(root, "dashboard") is None  # expired
+    monkeypatch.setattr(time, "time", real)
+    assert hp.take_resume_cookie(root, "dashboard") is None  # and the file is gone
+    assert not hp.write_resume_cookie(root, "mine", "c" * 40)  # a local add-on gets nothing
+
+
+def test_print_launch_url_gives_the_page_a_session_once_and_reuse_revokes(live):
+    """`orch start --print-launch-url` (test install, test folder) uses the ONE launch-token writer: the link it
+    prints opens the page once; a second use of it revokes the session it made."""
+    root, port = live
+    url = hp.printable_launch_url(root, "dashboard", f"http://127.0.0.1:{port}")
+    token = url.split("#launch=")[1]
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})  # the page loads (read-only, no cookie)
+    assert c.getresponse().status == 200
+    st, ck, _ = post(port, "/session", {"token": token})
+    assert st == 204 and ck.startswith("orch_page=")
+    assert hp.LAUNCH_LIFE == 30 and not list(hp.key_dir(root).glob("launch-dashboard.token"))  # spent
+    st, _, body = post(port, "/session", {"token": token})
+    assert st == 403 and b"Someone else tried to use this sign-in link" in body
+    st, _, _ = post(
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"Cookie": ck.split(";")[0]},
+    )
+    assert st == 403  # the first session is revoked
+
+
+def test_the_printable_link_is_refused_outside_a_test_folder(live, monkeypatch):
+    root, port = live
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    with pytest.raises(hp.Refused):
+        hp.printable_launch_url(root, "dashboard", f"http://127.0.0.1:{port}")
+
+
+def test_update_result_is_shown_to_a_session_once(live):
+    root, port = live
+    hp.write_update_status(root, "failed", "The server said no.")
+
+    def get(cookie=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request(
+            "GET",
+            "/api/update-status",
+            headers={"Host": f"127.0.0.1:{port}", **({"Cookie": cookie} if cookie else {})},
+        )
+        return json.loads(c.getresponse().read())
+
+    assert get() == {}  # no session: nothing, and nothing consumed
+    ck = session(root, port)
+    assert get(ck) == {"state": "failed", "reason": "The server said no."}
+    assert get(ck) == {}  # once

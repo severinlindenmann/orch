@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
+import os
 import re
 import secrets
 import subprocess
@@ -63,7 +65,7 @@ class PageSession:
         if server not in SERVERS:
             raise ValueError("not a page server")
         self.root, self.server = root, server
-        self.cookie = secrets.token_urlsafe(32)  # new on every start
+        self.cookie = secrets.token_urlsafe(32)  # new on every start (but see the resume below)
         self.key: bytes | None = None
         self.spent: set[str] = set()  # sha256 of launch tokens already used in this server run
         self.revoked = False
@@ -74,6 +76,8 @@ class PageSession:
             self.key = humanproof.human_key(root)
         except (Refused, OSError):
             self.key = None
+        if self.key is not None:  # a restart the person asked for (update) keeps the open tab's session
+            self.cookie = humanproof.take_resume_cookie(root, server) or self.cookie
 
     # -- the launch token (one time, 120 s) ----------------------------------------------------------
     def launch(self, token) -> str | None:
@@ -149,3 +153,80 @@ def run_with_proof(
         input=proof + "\n",
         env=child_env(env, orch_bin),
     )
+
+
+def start_detached(argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env: dict) -> int:
+    """Run the core with `--proof-stdin` through a small detached RUNNER (own session, survives a restart of
+    this server): it keeps the output in a log in the guarded home, stops a hung run after 30 minutes and
+    records running / finished / failed for the page. The proof goes to its stdin; returns its pid at once."""
+    i = argv.index("--") if "--" in argv else len(argv)
+    full = [*argv0(orch_bin), *argv[:i], "--proof-stdin", *argv[i:]]
+    kw: dict = {"start_new_session": True}
+    if sys.platform == "win32":
+        kw = {"creationflags": 0x00000008 | 0x00000200}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    p = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-I", "-P", "-m", "orch.pageproof", json.dumps(full)],
+        cwd=cwd,
+        env=child_env(env, orch_bin),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        **kw,
+    )
+    try:
+        p.stdin.write(proof + "\n")
+        p.stdin.close()
+    except OSError:
+        pass
+    return p.pid
+
+
+def _short_reason(text: str) -> str:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    last = lines[-1] if lines else "it did not finish"
+    return re.sub(r"^Refused:\s*", "", last)[:120]
+
+
+def _runner(cmd: list[str]) -> int:
+    """The detached runner: `python -I -P -m orch.pageproof '<json command>'`, the proof on its own stdin."""
+    root = Path.cwd()
+    proof = sys.stdin.readline()
+    humanproof.write_update_status(root, "running")
+    try:
+        log = humanproof.key_dir(root) / "update.log"
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    except (Refused, OSError):
+        humanproof.write_update_status(root, "failed", "the update could not write its log")
+        return 1
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        try:
+            p = subprocess.Popen(  # noqa: S603
+                cmd, cwd=root, stdin=subprocess.PIPE, stdout=out, stderr=subprocess.STDOUT, text=True
+            )
+            p.stdin.write(proof)
+            p.stdin.close()
+            code = p.wait(timeout=humanproof.UPDATE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            humanproof.write_update_status(root, "failed", "it took too long and was stopped")
+            return 1
+        except OSError:
+            humanproof.write_update_status(root, "failed", "the update could not be started")
+            return 1
+    if code == 0:
+        humanproof.write_update_status(root, "finished")
+        return 0
+    try:
+        tail = log.read_text(errors="replace")  # lint-allow: our own log (plain text)
+    except OSError:
+        tail = ""
+    humanproof.write_update_status(root, "failed", _short_reason(tail))
+    return code
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(_runner(json.loads(sys.argv[1])))
+    except (ValueError, IndexError):
+        sys.exit(2)

@@ -9,10 +9,11 @@ from pathlib import Path
 
 try:
     from orch import humanproof
-    from orch.pageproof import run_with_proof
+    from orch.pageproof import run_with_proof, start_detached
 except ImportError:  # standalone use without orch: no hand-offs
     humanproof = None
     run_with_proof = None
+    start_detached = None
 
 SHOW = ("id", "op", "target", "label", "value", "at")
 
@@ -34,13 +35,28 @@ def notices(root: Path) -> list[dict]:
     ][:5]
 
 
-def confirm(root: Path, orch_bin, mint, hid, env, run_proof=None) -> tuple[int, str]:
+def confirm(
+    root: Path, orch_bin, mint, hid, env, run_proof=None, session=None, start=None
+) -> tuple[int, str]:
     """The person clicked Continue. mint(op, target) exists only for a request with a page session."""
     if humanproof is None or mint is None:
         return 403, "Open the dashboard from this computer to do this."
     item = humanproof.handoff_take(root, hid) if isinstance(hid, str) else None
     if item is None:
         return 404, "That request is gone. Ask again from the terminal."
+    if item["op"] == "update":
+        # an update restarts this server: run it detached with no timeout, answer the click at once, and let the
+        # restarted server adopt this page's session so the open tab keeps working
+        if session is not None:
+            humanproof.write_resume_cookie(root, session.server, session.cookie)
+        try:
+            pid = (start or start_detached)(
+                item["argv"], mint(item["op"], item["target"]), orch_bin=orch_bin, cwd=root, env=env
+            )
+        except OSError:
+            return 503, "The update could not be started. Please try again from the terminal."
+        _record_update(root, pid)
+        return 202, "Update started. This page reconnects when it is done."
     run = run_proof or run_with_proof
     try:
         r = run(
@@ -52,6 +68,21 @@ def confirm(root: Path, orch_bin, mint, hid, env, run_proof=None) -> tuple[int, 
         return 200, ""
     msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
     return 422, msg[:300]
+
+
+def _record_update(root: Path, pid: int) -> None:
+    """The detached update's pid, kept in the add-on's run folder (display and cleanup only)."""
+    try:
+        from . import runfiles
+
+        runfiles.write_json(runfiles.run_dir(root, "dashboard") / "update.json", {"pid": pid})
+    except (OSError, RuntimeError, ImportError):
+        pass
+
+
+def update_status(root: Path) -> dict | None:
+    """The detached update's state for the page: running, or finished / failed (read once)."""
+    return humanproof.take_update_status(root) if humanproof is not None else None
 
 
 def dismiss(root: Path, hid) -> None:

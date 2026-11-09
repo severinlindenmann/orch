@@ -397,13 +397,38 @@ def _pending_proof(root: Path, tid: str):
         return None
 
 
-def _mac_line(root: Path, tid: str, item: dict) -> None:
-    """Add the pending1 MAC (humanproof.pending_mac): the core accepted this input from a verified person."""
+class Unsigned(Refused):
+    """A person's input could not be signed (no usable key folder): nothing was saved."""
+
+
+UNSIGNED = (
+    "Not saved: orch can't check who you are on this computer right now (its protected folder can't be "
+    "used), so your message would never reach the agent. Close orch and start it again; if it keeps "
+    "happening, the protected folder has wrong rights: orch resets its protection on the next start."
+)
+
+
+def require_signing(root: Path) -> None:
+    """Refuse VISIBLY, before anything is saved, when a person's input could not be signed (no usable key
+    folder): otherwise it would be stored without a MAC and silently never start a run."""
     from orch import humanproof
 
+    if humanproof.ENFORCE_PENDING_MAC and _pending_proof(root, "") is None:
+        raise Unsigned(UNSIGNED)
+
+
+def _mac_line(root: Path, tid: str, item: dict) -> None:
+    """Add the pending1 MAC (humanproof.pending_mac): the core accepted this input from a verified person.
+    No usable key folder = refuse in plain words (never a line without a MAC that silently starts nothing)."""
+    from orch import humanproof
+
+    if item.get("kind") not in humanproof.PENDING_MAC_KINDS:
+        return
     proof = _pending_proof(root, tid)
-    if proof and item.get("kind") in humanproof.PENDING_MAC_KINDS:
+    if proof:
         item["mac"] = humanproof.pending_mac(proof[0], proof[1], tid, item)
+    elif humanproof.ENFORCE_PENDING_MAC:
+        raise Unsigned(UNSIGNED)
 
 
 def _mac_valid(root: Path, tid: str, item: dict, key_ws) -> bool:

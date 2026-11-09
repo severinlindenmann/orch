@@ -6,7 +6,8 @@ import argparse
 import json
 from pathlib import Path
 
-from orch import addons
+from orch import addons, humanproof
+from orch.errors import Refused
 
 
 def _out(args, data, text: str) -> None:
@@ -40,7 +41,33 @@ def dispatch(args, root: Path) -> bool:
             or "No add-ons are installed. Turn one on with: orch addon add <name>",
         )
     elif sub == "add":
-        addons.add(root, args.name, args.yes, args.project_only)
+        if addons._is_path(args.name) and not addons._local_add_ok():
+            # code from a folder runs inside orch itself: only a person's click (proof) may allow it (H1)
+            # Snapshot the folder NOW (request time): the card shows the path and a short content hash, the
+            # proof's target is the full hash. The proven add installs from the snapshot with that hash and is
+            # refused when the folder changed since (a content swap before the click).
+            info = addons.prepare_local_add(root, Path(args.name))
+            # the queued command carries the ABSOLUTE path the card shows (it runs later with cwd = the
+            # workspace root, where a relative `./x` would mean another folder)
+            queued = [
+                info["path"] if w == args.name else w
+                for w in humanproof._clean_argv(humanproof.CURRENT_ARGV) or []
+            ]
+            who = humanproof.person_by(
+                root,
+                args,
+                "addon.add_local",
+                info["hash"],
+                argv=queued,
+                label=f"Add the add-on from {info['path']} (version {info['short']}) "
+                "\u2014 it runs inside orch",
+            )
+            if not who.startswith("human:"):
+                raise Refused(humanproof.AGENT_REFUSED)
+            with addons.trusted_local_add(info["hash"]):
+                addons.add(root, args.name, args.yes, args.project_only)
+        else:
+            addons.add(root, args.name, args.yes, args.project_only)
         if args.project_only:
             _out(args, {"ok": True}, f"{args.name} is turned on in this workspace.")
     elif sub == "remove":

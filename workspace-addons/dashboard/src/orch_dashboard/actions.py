@@ -118,6 +118,8 @@ PROOF_OPS = {
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
     "chat.say": ("chat.send", lambda a: "general"),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
+    "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
+    "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
 }
 
 

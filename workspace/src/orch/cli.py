@@ -31,6 +31,7 @@ from orch import (
     net,
     refs,
     relay,
+    runs,
     runs_live,
     services,
     term,
@@ -288,7 +289,7 @@ def _visible(root: Path, t: dict) -> dict:
 
 
 _PLACEHOLDERS = {"run", "agents", "config", "share", "chat"}  # hidden until built
-ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext"}
+ADVANCED_TOP = {"update", "wait", "log", "answer", "ref", "ext", "dev-proof", "dev-mark"}
 ADVANCED_SUB = {"relay": {"allow"}}
 
 
@@ -359,6 +360,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
+
+    d = sub.add_parser(
+        "dev-proof", parents=[common], help=argparse.SUPPRESS
+    )  # e2e test human (dev workspaces)
+    d.add_argument("op")
+    d.add_argument("target")
+    sub.add_parser("dev-mark", parents=[common], help=argparse.SUPPRESS)  # e2e: mark a demo workspace dev
 
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
@@ -652,10 +660,25 @@ def run(args: argparse.Namespace) -> None:
                 else ""
             ),
         )
+    elif cmd == "dev-mark":
+        humanproof.dev_mark_cli(root, getattr(args, "by", None))
+        _out(args, {"ok": True}, "Marked as a dev workspace.")
+    elif cmd == "dev-proof":
+        # The e2e test human (humanproof.dev_proof_cli: test install, ~/.orch-test, allowlisted ops, no agent
+        # context). Printed on stdout, to be piped into `<command> --proof-stdin`.
+        print(humanproof.dev_proof_cli(root, args.op, args.target, getattr(args, "by", None)))
     elif cmd == "update":
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
+            # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official
+            # channel or the one the install came from). It is part of what the person approves AND of the
+            # proof's target, so a proof for one source never installs another (no aiming a click at a fork).
+            repo, ref = addons.repo(), addons.ref()
             if not humanproof.person_by(
-                root, args, "update", "orch", label="Update orch to the latest version"
+                root,
+                args,
+                "update",
+                humanproof.update_target(repo, ref),
+                label=f"Update orch from {repo}@{ref}",
             ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
         report, notes = [], []
@@ -911,6 +934,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
             raise Refused("This question was sent to the phones. Only a human answers it.")
+        if who.startswith("human:"):
+            runs.require_signing(root)  # a person's answer that could not be signed is refused, not half done
         t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
         with contextlib.suppress(
             Refused

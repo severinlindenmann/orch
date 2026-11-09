@@ -6,7 +6,7 @@
   function post(op, id) {
     return fetch("/api/act", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({op: op, args: {id: id}})});
   }
-  var WORDS = {"ticket.answer": "Send an answer", "run.human_input": "Send a message to the agent", "ticket.verdict": "Decide on a ticket", "relay.allow": "Allow another workspace", "update": "Update orch", "relay.connect": "Connect to a relay", "chat.send": "Write in Chat"};
+  var WORDS = {"ticket.answer": "Send an answer", "run.human_input": "Send a message to the agent", "ticket.verdict": "Decide on a ticket", "relay.allow": "Allow another workspace", "update": "Update orch", "relay.connect": "Connect to a relay", "chat.send": "Write in Chat", "chat.make_ticket": "Make a ticket"};
   function render(items) {
     var key = JSON.stringify(items);
     if (key === seen) return;
@@ -23,7 +23,7 @@
       var row = el("div"); row.style.cssText = "margin-top:8px;display:flex;gap:8px";
       var ok = el("button", "Continue"), no = el("button", "Not now");
       ok.type = no.type = "button";
-      ok.onclick = function () { ok.disabled = true; post("handoff.confirm", i.id).then(function (r) { if (r.ok) { poll(); } else { return r.text().then(function (t) { ok.disabled = false; alert(t); }); } }); };
+      ok.onclick = function () { ok.disabled = true; post("handoff.confirm", i.id).then(function (r) { if (r.ok) { if (r.status === 202) { r.text().then(function (t) { var b = el("div", t, "orch-notice"); b.setAttribute("role", "status"); b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px"; document.body.appendChild(b); setTimeout(function () { b.remove(); }, 15000); }); } poll(); } else { return r.text().then(function (t) { ok.disabled = false; alert(t); }); } }); };
       no.onclick = function () { post("handoff.dismiss", i.id).then(poll); };
       row.appendChild(ok); row.appendChild(no); c.appendChild(row); box.appendChild(c);
     });
@@ -42,5 +42,20 @@
       });
     }).catch(function () {});
   }
-  notices(); poll(); setInterval(poll, 4000);
+  var shown = "";
+  function banner(text) {
+    var b = el("div", text, "orch-notice"); b.setAttribute("role", "status");
+    b.style.cssText = "position:fixed;left:16px;right:16px;top:16px;max-width:560px;margin:0 auto;z-index:60;background:#fff8e1;color:#111;border:1px solid #e0c36a;border-radius:10px;padding:12px";
+    var x = el("button", "Got it"); x.type = "button"; x.style.cssText = "margin-left:12px"; x.onclick = function () { b.remove(); };
+    b.appendChild(x); document.body.appendChild(b);
+  }
+  // the detached update: "Update finished" / "Update failed: <reason>" (also after the page reconnects)
+  function updateStatus() {
+    fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : {}; }).then(function (s) {
+      if (!s || !s.state || s.state === "running") return;
+      var t = s.state === "finished" ? "Update finished." : "Update failed: " + (s.reason || "it did not finish") + ".";
+      if (t !== shown) { shown = t; banner(t); }
+    }).catch(function () {});
+  }
+  notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
 })();

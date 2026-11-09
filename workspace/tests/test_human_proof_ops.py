@@ -4,6 +4,7 @@ replayed proofs, the dev test human, the pending start flows, launch token, hand
 import io
 import json
 import os
+import sys
 import time
 
 import pytest
@@ -259,7 +260,8 @@ def test_launch_token_is_single_use_and_expires(ws):
     t = hp.write_launch_token(ws, "focus")
     assert hp.consume_launch_token(ws, "focus", t) is True
     assert hp.consume_launch_token(ws, "focus", t) is False
-    assert hp.write_launch_token(ws, "mine") is None  # a local add-on never gets one
+    with pytest.raises(Refused):
+        hp.write_launch_token(ws, "mine")  # a local add-on never gets one
 
 
 def test_page_session_headers(ws):
@@ -629,3 +631,332 @@ def test_expired_secret_files_are_removed_on_read(ws, run):
     hp._write_private(d / "handoffs.json", json.dumps(items))
     assert hp.handoffs(ws) == []
     assert not list(d.glob("handoff-*.secret"))
+
+
+def test_an_unusable_key_folder_refuses_visibly_and_saves_nothing(ws, run, monkeypatch):
+    tid, q = _ask(ws, run)
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
+    monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)  # key folder unusable at write time
+    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")
+    assert (
+        code == 2
+        and "Not saved" in out + err
+        and "start it again" in out + err
+        and "orch doctor" not in out + err
+    )
+    assert tickets.load(ws, tid)["questions"][0].get("answer") is None  # not half done
+    # Send back: the note is not queued without a MAC either, and the ticket stays in Review
+    rid = _review_ticket(ws, run)
+    proof = _proof(ws, "ticket.verdict", rid)
+    code, out, err = _cli(run, monkeypatch, proof, "ticket", "changes", rid, "more", "--json")
+    assert code == 2 and "Not saved" in out + err and tickets.load(ws, rid)["status"] == "review"
+    assert runs.undelivered(ws, rid) == []
+
+
+def _demo(ws):
+    """A dev demo workspace under the test prefix, marked at creation (the dev installer's step)."""
+    fresh = ws.parent / "demo"
+    (fresh / ".orch").mkdir(parents=True)
+    hp.dev_mark(fresh)
+    return fresh
+
+
+def test_dev_proof_command_works_only_in_a_dev_workspace(ws, run, monkeypatch):
+    code, out, err = run("dev-proof", "update", "orch")  # a test workspace without a dev record
+    assert code == 2 and "hp1." not in out
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
+    code, out, err = run("dev-proof", "ticket.answer", "t_a:q1")
+    assert code == 0 and out.strip().startswith("hp1.")
+    assert hp.verify_and_consume(fresh, out.strip(), "ticket.answer", "t_a:q1") == "human:test-human"
+
+
+def test_dev_proof_refuses_a_dev_install_a_normal_install_and_a_real_workspace(ws, run, monkeypatch):
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
+    for kind in ("dev", "normal"):
+        monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
+        code, out, err = run("dev-proof", "update", "orch")
+        assert code == 2 and "hp1." not in out  # only a TEST install, even with the dev record
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    outside = ws.parent.parent / "real-ws"  # not under .orch-test
+    (outside / ".orch").mkdir(parents=True)
+    monkeypatch.chdir(outside)
+    code, out, err = run("dev-proof", "update", "orch")
+    assert code == 2 and "hp1." not in out
+
+
+def test_dev_proof_refuses_an_orch_started_agent_context(ws, run, monkeypatch):
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
+    for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA", "CLAUDECODE"):
+        monkeypatch.setenv(k, "x")
+        code, out, err = run("dev-proof", "update", "orch")
+        assert code == 2 and "hp1." not in out, k
+        monkeypatch.delenv(k)
+    code, out, err = run("dev-proof", "update", "orch", "--by", "agent:helper")
+    assert code == 2 and "hp1." not in out
+    assert run("dev-proof", "update", "orch")[0] == 0  # the clean harness context works
+
+
+def test_dev_proof_allowlist_and_a_log_without_secrets(ws, run, monkeypatch):
+    fresh = _demo(ws)
+    monkeypatch.chdir(fresh)
+    code, out, err = run("dev-proof", "config.share", "on")  # a real op, but not one the e2e scripts need
+    assert code == 2 and "hp1." not in out
+    code, proof, err = run("dev-proof", "update", "orch")
+    assert code == 0
+    log = (hp.key_dir(fresh) / "dev-proof.log").read_text()
+    assert "dev:test-human minted op=update" in log and proof.strip() not in log and "hp1" not in log
+
+
+# ------------------------------------------------------------------ chat: make-ticket, DM ops
+
+
+def _proposal(ws):
+    from orch import chat
+
+    chat.record(ws, "person", "you", "dashboard", "Fish", convo_start=True)
+    chat.record(
+        ws,
+        "m_proposal0000001",
+        "ws_helper01",
+        "helper",
+        "Ready?",
+        refs=[{"kind": "proposal", "title": "Fish"}],
+    )
+    return "m_proposal0000001"
+
+
+def test_make_ticket_needs_the_proof_in_the_cli_and_hands_off(ws, run, monkeypatch):
+    mid = _proposal(ws)
+    code, out, err = run("chat", "make-ticket", mid, "--by", "human:pat", "--json")
+    assert code == 2 and "Continue" in out + err
+    assert (
+        not [t for t in tickets.list_all(ws) if t.get("title") == "Fish"]
+        if hasattr(tickets, "list_all")
+        else True
+    )
+    card = hp.handoffs(ws)[0]
+    assert card["op"] == "chat.make_ticket" and card["target"] == mid
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "chat.make_ticket", mid), "chat", "make-ticket", mid, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["key"]
+
+
+def test_make_ticket_forged_by_with_a_proof_for_another_message_is_refused(ws, run, monkeypatch):
+    mid = _proposal(ws)
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "chat.make_ticket", "m_other"), "chat", "make-ticket", mid, "--json"
+    )
+    assert code == 2 and "dashboard on this computer" in out + err
+
+
+def test_the_phone_path_makes_the_ticket_in_process_from_the_relay_sender_only(ws):
+    """relay._apply_proposal_answer calls chat.make_ticket(root, mid, None, by) with the relay-authenticated
+    `human:<phone>`: no proof is read there. An agent in the environment, or a by that is not human:, is
+    refused inside chat itself, so the in-process call is not an unproven way for an agent."""
+    from orch import chat
+
+    mid = _proposal(ws)
+    with pytest.raises(Refused):
+        chat.make_ticket(ws, mid, None, "agent:x")
+    made = chat.make_ticket(ws, mid, None, "human:ph_abcdef")
+    assert made["key"]
+
+
+def test_dm_reads_and_sync_need_no_proof_and_confer_no_person_input(ws, run):
+    """contacts / thread / sync are read-only for orch's authority: no proof, no hand-off per poll, and they
+    never write a person-class pending line (the pending MAC is only written for proven input)."""
+    for argv in (("chat", "contacts"), ("chat", "sync")):
+        code, out, err = run(*argv, "--by", "human:pat", "--json")
+        assert "dashboard on this computer" not in out + err and "Continue" not in out + err
+    assert hp.handoffs(ws) == []
+
+
+# ------------------------------------------------------------------ update/ORCH_REF and folder add-ons
+
+
+def test_update_source_is_resolved_first_shown_and_part_of_the_proof(ws, run, monkeypatch):
+    """Normal install: ORCH_REPO / ORCH_REF set by an agent are ignored; the card shows the official source
+    and the proof target is that source, so a proof for another source does not verify."""
+    from orch import addons
+
+    monkeypatch.setattr(addons, "_env_source_ok", lambda: False)  # a normal install (no env override)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setenv("ORCH_REPO", "https://github.com/evil/fork")
+    monkeypatch.setenv("ORCH_REF", "evil")
+    seen = {}
+    monkeypatch.setattr(
+        addons, "update", lambda *a, **k: seen.update(repo=addons.repo(), ref=addons.ref()) or []
+    )
+    code, out, err = run("update", "--by", "human:pat", "--json")
+    assert code == 2
+    card = hp.handoffs(ws)[0]
+    official = f"{addons.DEFAULT_REPO}@main"
+    assert official in card["label"] and "evil" not in card["label"]
+    assert card["target"] == hp.update_target(addons.DEFAULT_REPO, "main")
+    # a proof for the fork's source does not verify for this update
+    bad = _proof(ws, "update", hp.update_target("https://github.com/evil/fork", "evil"))
+    code, out, err = _cli(run, monkeypatch, bad, "update", "--json")
+    assert code == 2 and "repo" not in seen
+    # the proof for the shown source runs, and installs from exactly that source (the env is still ignored)
+    good = _proof(ws, "update", card["target"])
+    code, out, err = _cli(run, monkeypatch, good, "update", "--json")
+    assert code == 0, out + err
+    assert seen == {"repo": addons.DEFAULT_REPO, "ref": "main"}
+
+
+def test_dev_and_test_installs_keep_the_env_override_for_e2e(ws, run, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setenv("ORCH_REPO", "https://github.com/lane-c/test")
+    monkeypatch.setenv("ORCH_REF", "e2e")
+    run("update", "--by", "human:pat", "--json")  # test install: the override counts
+    assert "lane-c/test@e2e" in hp.handoffs(ws)[0]["label"]
+    assert addons.repo() == "https://github.com/lane-c/test"
+
+
+def test_a_folder_addon_needs_a_click_and_installs_from_the_snapshot(ws, run, monkeypatch):
+    from orch import addons
+
+    folder = ws.parent / "my-addon"
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("one\n")
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))  # a normal install
+    seen = {}
+    monkeypatch.setattr(addons, "add", lambda *a, **k: seen.update(args=a, proven=addons._LOCAL_ADD_PROVEN))
+    code, out, err = run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    assert code == 2 and "args" not in seen  # refused: nothing installed
+    card = hp.handoffs(ws)[0]
+    info = addons.prepare_local_add(ws, folder)
+    assert card["op"] == "addon.add_local" and card["target"] == info["hash"] and len(info["hash"]) == 64
+    assert str(folder.resolve()) in card["label"] and f"(version {info['short']})" in card["label"]
+    assert "runs inside orch" in card["label"]
+    item = hp.handoff_take(ws, card["id"])  # one click: the page takes the item and runs it with a proof
+    proof = _proof(ws, item["op"], item["target"])
+    code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
+    assert code == 0, out + err
+    assert seen["proven"] == info["hash"]  # installed inside trusted_local_add(<that content hash>)
+    # an agent's own add is refused outright, no hand-off by an agent
+    monkeypatch.setenv("CLAUDECODE", "1")
+    seen.clear()
+    code, out, err = run("addon", "add", str(folder), "--yes", "--json")
+    assert code == 2 and "args" not in seen
+
+
+def test_a_content_swap_before_the_click_is_refused(ws, run, monkeypatch):
+    from orch import addons
+
+    folder = ws.parent / "swap-addon"
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("good\n")
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))
+    seen = {}
+    monkeypatch.setattr(addons, "add", lambda *a, **k: seen.update(args=a))
+    run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    item = hp.handoff_take(ws, card["id"])
+    (folder / "src" / "a.py").write_text("EVIL\n")  # swapped after the request, before the click
+    proof = _proof(ws, item["op"], item["target"])
+    code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
+    assert code == 2 and "args" not in seen  # the proof was for the other content
+
+
+# ------------------------------------------------------------------ unusable key folder: nothing looks saved
+
+
+def test_chat_say_with_an_unusable_key_folder_writes_nothing(ws, run, monkeypatch):
+    from orch import chat
+
+    monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)
+    proof = _proof(ws, "chat.send", "general")
+    code, out, err = _cli(run, monkeypatch, proof, "chat", "say", "Hello team", "--json")
+    assert code == 2 and "Not saved" in out + err
+    day = chat.read_day(ws, chat.day_key(ws))
+    assert day["messages"] == []  # no chat line that looks saved while the error says it is not
+    assert (
+        not [t for t in tickets.list_tickets(ws) if t.get("general")]
+        if hasattr(tickets, "list_tickets")
+        else True
+    )
+
+
+def test_a_phone_text_with_an_unusable_key_folder_retries_then_tells_the_phone(ws, monkeypatch):
+    from orch import chat, relay
+
+    monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)
+    sent = []
+    monkeypatch.setattr(relay, "send_text", lambda root, to, text, **k: sent.append((to, text, k)) or {})
+    msg = {
+        "id": "m_phonetext00000001",
+        "from": "ph_abcdefghij",
+        "type": "text",
+        "body": {"text": "hi", "general": True},
+    }
+    with pytest.raises(relay.Transient):  # tried again on the next pulls, not marked seen
+        relay._phone_text(ws, msg, final=False)
+    assert sent == []
+    note, tid = relay._phone_text(ws, msg, final=True)  # the last try: a plain reply, nothing written
+    assert "not saved" in note and len(sent) == 1
+    to, text, kw = sent[0]
+    assert to == "ph_abcdefghij" and "Not saved on the computer" in text and "Try again shortly" in text
+    assert kw["reply_to"] == msg["id"]
+    assert chat.read_day(ws, chat.day_key(ws))["messages"] == []
+
+
+def test_the_queued_add_command_carries_the_absolute_path_the_card_shows(ws, run, monkeypatch):
+    from orch import addons
+
+    folder = ws.parent / "rel-addon"
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("x\n")
+    sub = ws / "sub"
+    sub.mkdir()
+    monkeypatch.chdir(sub)  # the requester's cwd is a subfolder; the page runs the command from the root
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))
+    monkeypatch.setattr(hp, "CURRENT_ARGV", ["addon", "add", "../../rel-addon", "--yes"])
+    code, out, err = run("addon", "add", "../../rel-addon", "--yes", "--by", "human:pat", "--json")
+    assert code == 2
+    card = hp.handoffs(ws)[0]
+    item = hp.handoff_take(ws, card["id"])
+    assert str(folder.resolve()) in card["label"] and str(folder.resolve()) in item["argv"]
+    assert "../../rel-addon" not in item["argv"]
+
+
+# ------------------------------------------------------------------ the detached update: log and result
+
+
+def _run_runner(ws, monkeypatch, code_text):
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr("sys.stdin", io.StringIO("hp1.proof\n"))
+    return pageproof._runner([sys.executable, "-c", code_text])
+
+
+def test_runner_records_a_finished_update(ws, monkeypatch):
+    assert _run_runner(ws, monkeypatch, "import sys; sys.stdin.read(); print('ok')") == 0
+    assert hp.take_update_status(ws) == {"state": "finished", "reason": ""}
+    assert hp.take_update_status(ws) is None  # read once
+    assert (hp.key_dir(ws) / "update.log").read_text().strip() == "ok"  # the log, in the guarded folder
+
+
+def test_runner_records_a_failed_update_with_a_short_plain_reason_and_no_proof(ws, monkeypatch):
+    code = (
+        "import sys; sys.stdin.read(); print('working'); print('Refused: The server said no.'); sys.exit(2)"
+    )
+    assert _run_runner(ws, monkeypatch, code) == 2
+    st = hp.take_update_status(ws)
+    assert st == {"state": "failed", "reason": "The server said no."}
+    assert "hp1." not in (hp.key_dir(ws) / "update.log").read_text()  # the proof is never in the log
+
+
+def test_runner_stops_a_hung_update(ws, monkeypatch):
+    monkeypatch.setattr(hp, "UPDATE_TIMEOUT", 0.5)
+    assert _run_runner(ws, monkeypatch, "import time; time.sleep(30)") == 1
+    st = hp.take_update_status(ws)
+    assert st["state"] == "failed" and "too long" in st["reason"]

@@ -52,8 +52,9 @@ def test_test_workspace_uses_test_home(tws):
 def test_normal_install_real_workspace_with_env_home_is_refused(tws, monkeypatch):
     monkeypatch.setattr(hp, "install_kind", lambda: "normal")
     acct = tws.parent.parent
-    with pytest.raises(Refused, match="don't belong together"):
+    with pytest.raises(hp.HomeRefused, match="different orch folder than your account's") as e:
         hp.guarded_home(tws)  # real workspace + env-chosen home
+    assert e.value.code == hp.NOT_TOGETHER
     with pytest.raises(Refused):
         hp.human_key(tws)
     assert not (acct / ".orch-tool").exists()  # nothing created in the account home
@@ -73,7 +74,7 @@ def test_real_workspace_with_agent_chosen_home_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "real_home", lambda: acct)
     monkeypatch.setattr(hp, "install_kind", lambda: "dev")
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "evil"))
-    with pytest.raises(Refused, match="don't belong together"):
+    with pytest.raises(hp.HomeRefused, match="different orch folder than your account's"):
         hp.guarded_home(ws)
     assert not (acct / ".orch-tool").exists() and not (acct / ".orch-test" / "evil").exists()
     monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-tool"))
@@ -459,9 +460,33 @@ def test_symlinked_and_oversized_and_hardlinked_files_are_loose(tws):
 
 
 def test_install_record_read_through_saferead(tmp_path, monkeypatch):
-    (tmp_path / "orch-install.json").write_text('{"kind": "dev"}')
+    (tmp_path / "orch-install.json").write_text(hp.install_record_text("dev", tmp_path))
     monkeypatch.setattr(hp.sys, "prefix", str(tmp_path))
     assert hp.install_kind() == "dev"
     (tmp_path / "orch-install.json").unlink()
     os.mkfifo(tmp_path / "orch-install.json")
     assert hp.install_kind() in ("test", "normal")  # a FIFO is no record, and does not hang
+
+
+def test_plain_refusal_texts(tmp_path, monkeypatch):
+    acct = tmp_path / "acct"
+    (acct / ".orch-test" / "home").mkdir(parents=True)
+    real = tmp_path / "work"
+    real.mkdir()
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setattr(hp, "install_kind", lambda: "dev")
+    monkeypatch.delenv("ORCH_HOME", raising=False)
+    (acct / "elsewhere").mkdir()
+    (acct / ".orch-tool").symlink_to(acct / "elsewhere")  # the default folder is a link
+    with pytest.raises(hp.HomeRefused, match="is a link to somewhere else") as e:
+        hp.guarded_home(real)
+    assert str(acct / ".orch-tool") in str(e.value) and "belong together" not in str(e.value)
+    (acct / ".orch-tool").unlink()
+    ws = acct / ".orch-test" / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-tool"))  # a test workspace with the default home
+    with pytest.raises(hp.HomeRefused, match="test workspace; start it with its own test orch folder"):
+        hp.guarded_home(ws)
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    with pytest.raises(hp.HomeRefused, match="only works in test folders"):
+        hp.guarded_home(real)
