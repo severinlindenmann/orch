@@ -465,12 +465,14 @@ def run_relay(args, root: Path, out) -> None:
         return run_group(args, root, out)
     if sub == "connect":
         # connecting (or changing the relay address) is a person's action (H1): proof for this relay host
+        address = humanproof.server_address(args.url)  # refuses a URL with a name or password in it
         if not humanproof.person_by(
             root,
             args,
             "relay.connect",
-            _host(args.url),
-            parts={"host": humanproof.part(_host(args.url))},
+            address,
+            parts={"host": address},
+            exact=address,
         ).startswith("human:"):
             raise Refused(humanproof.AGENT_REFUSED)
         who, line = relay.connect(root, args.url, args.workspace, args.token)

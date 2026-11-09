@@ -1038,6 +1038,33 @@ def part(text) -> str:
     return t[:PART_MAX] + "\u2026" if len(t) > PART_MAX else t
 
 
+def tail(text, n: int = 60) -> str:
+    """A long path for the sentence: its END ("\u2026/real/folder"), never its head. The full value is
+    always in the card's exact block."""
+    t = " ".join(str(text if text is not None else "").split())
+    return t if len(t) <= n else "\u2026" + t[-n:]
+
+
+NO_USERINFO = "This address contains a name or password. Use just the server address."
+
+
+def server_address(url: str) -> str:
+    """hostname[:port] of a server URL, built from urlsplit; a URL with userinfo (user@ / user:pass@) is
+    refused, so what the card shows is what is connected to."""
+    from urllib.parse import urlsplit
+
+    try:
+        u = urlsplit(url.strip())
+        host, port = u.hostname, u.port
+    except ValueError:
+        raise Refused("That is not a server address.") from None
+    if u.username is not None or u.password is not None or "@" in u.netloc:
+        raise Refused(NO_USERINFO)
+    if not host:
+        raise Refused("That is not a server address.")
+    return f"{host}:{port}" if port else host
+
+
 def ticket_name(root: Path, tid: str) -> str:
     """The ticket's title (never its id), as one safe fragment."""
     from orch import tickets
@@ -1097,7 +1124,7 @@ def _join_token(argv: list[str], token: str) -> list[str]:
 
 
 def request_handoff(
-    root: Path, op: str, target: str, label: str = "", value: str = "", argv=None, parts=None
+    root: Path, op: str, target: str, label: str = "", value: str = "", argv=None, parts=None, exact=None
 ) -> bool:
     """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
     by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
@@ -1110,6 +1137,9 @@ def request_handoff(
         return False  # never queue what the page could not run
     if len(value) > VALUE_MAX or (value and value not in argv):
         return False
+    exact = str(exact)[:2000] if exact else ""
+    if exact and op in ("relay.connect", "addon.add_local") and exact not in " ".join(argv):
+        return False  # the shown full target must be part of the command that runs
     try:
         d = key_dir(root)
         path = d / "handoffs.json"
@@ -1137,6 +1167,7 @@ def request_handoff(
                     "op": op,
                     "target": target,
                     "label": label[:400],
+                    "exact": exact,
                     "parts": {k: v for k, v in (parts or {}).items() if isinstance(k, str)},
                     "value": value,
                     "argv": argv,
@@ -1196,6 +1227,9 @@ def handoff_take(root: Path, hid: str) -> dict | None:
         return None
     if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
         return None
+    if hit.get("exact") and hit.get("op") in ("relay.connect", "addon.add_local"):
+        if hit["exact"] not in " ".join(argv):  # the full target shown must be what runs
+            return None
     return hit
 
 
@@ -1264,6 +1298,7 @@ def person_by(
     argv=None,
     no_handoff=None,
     parts=None,
+    exact=None,
 ) -> str:
     """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
     comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
@@ -1283,7 +1318,7 @@ def person_by(
     if no_handoff:
         raise Refused(no_handoff)  # this command cannot be approved on the page as typed
     clean = _clean_argv(CURRENT_ARGV) if argv is None else argv
-    queued = request_handoff(root, op, target, label, value, clean, parts)
+    queued = request_handoff(root, op, target, label, value, clean, parts, exact)
     if not queued:
         raise Refused(HANDOFF)
     raise Refused(_dashboard_note(root, open_ok=queued is True))

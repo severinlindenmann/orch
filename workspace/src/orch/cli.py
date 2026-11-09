@@ -678,7 +678,8 @@ def run(args: argparse.Namespace) -> None:
                 args,
                 "update",
                 humanproof.update_target(repo, ref),
-                parts={"source": humanproof.part(f"{repo}@{ref}")},
+                parts={"source": f"{repo}@{ref}"},
+                exact=f"{repo}@{ref}",
             ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
         report, notes = [], []
