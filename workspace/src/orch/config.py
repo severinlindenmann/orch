@@ -215,6 +215,51 @@ def live_idle_minutes(root: Path | None) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else DEFAULT_LIVE_IDLE_MINUTES
 
 
+DEFAULT_FOCUS_LIVE_SESSION = True
+DEFAULT_FOCUS_SESSION_TYPING = False
+DEFAULT_RECORD_KEEP_DAYS = 90
+DEFAULT_RECORD_MAX_MB = 2048
+DEFAULT_INSIGHTS_SHARE_COUNTS = True
+DEFAULT_INSIGHTS_SHARE_NAMES = False
+
+
+def _reserved(root: Path | None, section: str, key: str, default: bool | int) -> bool | int:
+    if root is None:
+        return default
+    try:
+        table = read(root).get(section)
+    except Refused:
+        return default
+    value = table.get(key) if isinstance(table, dict) else None
+    if type(value) is not type(default):
+        return default
+    return value if isinstance(value, bool) or value > 0 else default
+
+
+def focus_live_session(root: Path | None) -> bool:
+    return _reserved(root, "focus", "live_session", DEFAULT_FOCUS_LIVE_SESSION)
+
+
+def focus_session_typing(root: Path | None) -> bool:
+    return _reserved(root, "focus", "session_typing", DEFAULT_FOCUS_SESSION_TYPING)
+
+
+def record_keep_days(root: Path | None) -> int:
+    return _reserved(root, "record", "keep_days", DEFAULT_RECORD_KEEP_DAYS)
+
+
+def record_max_mb(root: Path | None) -> int:
+    return _reserved(root, "record", "max_mb", DEFAULT_RECORD_MAX_MB)
+
+
+def insights_share_counts(root: Path | None) -> bool:
+    return _reserved(root, "insights", "share_counts", DEFAULT_INSIGHTS_SHARE_COUNTS)
+
+
+def insights_share_names(root: Path | None) -> bool:
+    return _reserved(root, "insights", "share_names", DEFAULT_INSIGHTS_SHARE_NAMES)
+
+
 def agents_may_finish(root: Path | None) -> bool:
     return root is not None and (read(root).get("workflow") or {}).get("agents_may_finish") is True
 

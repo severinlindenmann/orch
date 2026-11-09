@@ -1,0 +1,17 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_o7c0me",
+  "title": "Invoice CSV export",
+  "status": "done",
+  "created_at": "2026-11-05T08:10:00Z",
+  "updated_at": "2026-11-05T12:00:00Z",
+  "outcome": {
+    "changed": "Invoices can now be exported as a CSV from the Invoices page.",
+    "why": "Finance needs the file for the month-end close.",
+    "not_included": "PDF export."
+  },
+  "checklist": [],
+  "questions": [],
+  "history": [],
+  "refs": []
+}

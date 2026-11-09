@@ -30,7 +30,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, procs, runs, tickets
+from orch import adapters, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 MAX_LIVE = 4
@@ -510,6 +510,8 @@ def deliver(root: Path, tid: str, stop=None) -> int:
             )
         if (stop is not None and stop.is_set()) or (runs.read(root, tid) or {}).get("stop_requested"):
             return 0
+        if not runhooks.gate(root=root, tid=tid, run=rec["run"]):
+            return 0
         if not _type_line(root, tid, line, QUICK):
             return 0
         rec = runs.read(root, tid) or rec
@@ -856,7 +858,8 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         rec["renewed_at"] = tickets.now()
         rec.pop("maybe_stale_since", None)
         runs._write(root, rec)
-        return True
+    runhooks.fire("run_state", root=root, tid=tid, run=run, state=state)  # after the lock is released
+    return True
 
 
 def find_run(root: Path, run: str | None, tid: str | None) -> dict | None:
@@ -910,14 +913,20 @@ def event(
     elif kind == "attention" and idle_notice(rec["agent"], root, payload):
         # "still waiting for your input": input may go in only if the run is idle already (after Stop); in any
         # other state (a dialog may be open) nothing changes, and the next Stop sets idle.
-        return deliver(root, tid)
+        result = deliver(root, tid)
+        runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
+        return result
     elif kind == "working":  # a prompt went in (also one a person typed in the live session): never paste now
         up("working")
+        runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
     else:  # a permission prompt or any other notice: a person answers it; nothing is pasted
         _set_state(root, tid, run, "attention")
+        runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
-    return deliver(root, tid)
+    result = deliver(root, tid)
+    runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
+    return result
 
 
 def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:

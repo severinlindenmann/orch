@@ -1,0 +1,539 @@
+{
+ "v": 1,
+ "about": "inventory.md reference cases (inv_skill_version, inv_conn_version, inv_winners in validate.py).",
+ "skill_version": [
+  {
+   "name": "two files",
+   "files": {
+    "SKILL.md": "---\nname: invoice-export\n---\nExport invoices.\n",
+    "run.sh": "#!/bin/sh\nexec orch secret exec x\n"
+   },
+   "version": "sha256:ba0f192dcea6375cd854d10d779a55d2c96a0ec8fde57d735cc656acda7b87a0"
+  },
+  {
+   "name": "dot files ignored",
+   "files": {
+    "SKILL.md": "---\nname: invoice-export\n---\nExport invoices.\n",
+    "run.sh": "#!/bin/sh\nexec orch secret exec x\n",
+    ".orch-shared": "1",
+    ".DS_Store": "x"
+   },
+   "version": "sha256:ba0f192dcea6375cd854d10d779a55d2c96a0ec8fde57d735cc656acda7b87a0"
+  },
+  {
+   "name": "one changed line changes it",
+   "files": {
+    "SKILL.md": "---\nname: invoice-export\n---\nExport invoices.\nSay the date format.\n",
+    "run.sh": "#!/bin/sh\nexec orch secret exec x\n"
+   },
+   "version": "sha256:4e5fc767bf068edbdeccd8f61e7587b70d38efe49489e55e721b21f3d6632ef2"
+  },
+  {
+   "name": "path order is byte order",
+   "files": {
+    "b/x.md": "1",
+    "a.md": "2",
+    "B.md": "3"
+   },
+   "version": "sha256:77647d0f9e45f44ba5e25627227b2d252f4417716795dbf6bcb1c421da583e77"
+  }
+ ],
+ "conn_version": [
+  {
+   "name": "stdio",
+   "server": {
+    "command": [
+     "npx",
+     "-y",
+     "gdrive-mcp"
+    ],
+    "profile": "google"
+   },
+   "version": "sha256:573cc9ab9c9b5d34f0740767bc8e6f7c6bd67adc61ec865b99038b388fdf82fc"
+  },
+  {
+   "name": "env and headers never hashed",
+   "server": {
+    "command": [
+     "npx",
+     "-y",
+     "gdrive-mcp"
+    ],
+    "profile": "google",
+    "env": {
+     "TOKEN": "fake-token-Q7xP2mK9vL4"
+    },
+    "headers": {
+     "Authorization": "x"
+    }
+   },
+   "version": "sha256:573cc9ab9c9b5d34f0740767bc8e6f7c6bd67adc61ec865b99038b388fdf82fc"
+  },
+  {
+   "name": "key order does not matter",
+   "server": {
+    "profile": "google",
+    "command": [
+     "npx",
+     "-y",
+     "gdrive-mcp"
+    ]
+   },
+   "version": "sha256:573cc9ab9c9b5d34f0740767bc8e6f7c6bd67adc61ec865b99038b388fdf82fc"
+  }
+ ],
+ "precedence": [
+  {
+   "name": "skill workspace wins",
+   "kind": "skill",
+   "entries": [
+    {
+     "name": "invoice-export",
+     "source": "admin"
+    },
+    {
+     "name": "invoice-export",
+     "source": "workspace"
+    },
+    {
+     "name": "orch",
+     "source": "builtin"
+    }
+   ],
+   "winners": {
+    "invoice-export": "workspace",
+    "orch": "builtin"
+   }
+  },
+  {
+   "name": "connection admin over harness",
+   "kind": "connection",
+   "entries": [
+    {
+     "name": "slack",
+     "source": "harness"
+    },
+    {
+     "name": "slack",
+     "source": "admin"
+    }
+   ],
+   "winners": {
+    "slack": "admin"
+   }
+  },
+  {
+   "name": "key workspace over admin",
+   "kind": "key",
+   "entries": [
+    {
+     "name": "stripe-key",
+     "source": "admin"
+    },
+    {
+     "name": "stripe-key",
+     "source": "workspace"
+    }
+   ],
+   "winners": {
+    "stripe-key": "workspace"
+   }
+  }
+ ],
+ "allowed": [
+  {
+   "name": "no entry: nothing allowed",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": null,
+   "grant": null,
+   "allowed": []
+  },
+  {
+   "name": "entry written by an agent, no grant",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": "*",
+   "grant": null,
+   "allowed": []
+  },
+  {
+   "name": "entry and grant agree",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": [
+    "search"
+   ],
+   "grant": [
+    "search"
+   ],
+   "allowed": [
+    "search"
+   ]
+  },
+  {
+   "name": "file widens beyond the grant",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": "*",
+   "grant": [
+    "search"
+   ],
+   "allowed": [
+    "search"
+   ]
+  },
+  {
+   "name": "all allowed by a person",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": "*",
+   "grant": "*",
+   "allowed": [
+    "post_message",
+    "read_file",
+    "search"
+   ]
+  },
+  {
+   "name": "unknown action name is not allowed",
+   "actions": [
+    "search",
+    "post_message",
+    "read_file"
+   ],
+   "file": [
+    "delete_all"
+   ],
+   "grant": [
+    "delete_all"
+   ],
+   "allowed": []
+  }
+ ],
+ "classify": [
+  {
+   "name_case": "admin skill matching the refresh",
+   "name": "acme-sql",
+   "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "source": "admin"
+  },
+  {
+   "name_case": "spoofed .orch-shared marker, not in the refresh",
+   "name": "candidate-x-offer",
+   "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "has_marker": true,
+   "source": "workspace"
+  },
+  {
+   "name_case": "admin name with another version",
+   "name": "acme-sql",
+   "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "source": "workspace"
+  },
+  {
+   "name_case": "orch-shipped skill",
+   "name": "orch",
+   "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "source": "builtin"
+  },
+  {
+   "name_case": "orch-x folder not shipped",
+   "name": "orch-x",
+   "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "source": "workspace"
+  },
+  {
+   "name_case": "orch-relay changed locally",
+   "name": "orch-relay",
+   "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "source": "workspace"
+  },
+  {
+   "name_case": "official marketplace add-on",
+   "name": "github",
+   "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "source": "marketplace"
+  },
+  {
+   "name_case": "private add-on",
+   "name": "my-private-addon",
+   "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "source": "workspace"
+  },
+  {
+   "name_case": "agent tool's own connection",
+   "name": "my-notes",
+   "version": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refresh_items": [
+    [
+     "acme-sql",
+     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   ],
+   "shipped": {
+    "orch": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "orch-relay": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "marketplace_index": {
+    "github": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "from_harness_settings": true,
+   "source": "harness"
+  }
+ ],
+ "allow_settle": [
+  {
+   "name": "grant [a,b], file narrowed to [a], then edited back to [a,b]",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "proof",
+     "value": [
+      "a",
+      "b"
+     ]
+    },
+    {
+     "by": "file",
+     "value": [
+      "a"
+     ]
+    },
+    {
+     "by": "file",
+     "value": [
+      "a",
+      "b"
+     ]
+    }
+   ],
+   "effective": [
+    [
+     "a",
+     "b"
+    ],
+    [
+     "a"
+    ],
+    [
+     "a"
+    ]
+   ]
+  },
+  {
+   "name": "grant all, file narrowed to [b], then '*' again",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "proof",
+     "value": "*"
+    },
+    {
+     "by": "file",
+     "value": [
+      "b"
+     ]
+    },
+    {
+     "by": "file",
+     "value": "*"
+    }
+   ],
+   "effective": [
+    [
+     "a",
+     "b",
+     "c"
+    ],
+    [
+     "b"
+    ],
+    [
+     "b"
+    ]
+   ]
+  },
+  {
+   "name": "file only, no grant",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "file",
+     "value": "*"
+    }
+   ],
+   "effective": [
+    []
+   ]
+  },
+  {
+   "name": "narrow then a new proof widens",
+   "actions": [
+    "a",
+    "b",
+    "c"
+   ],
+   "events": [
+    {
+     "by": "proof",
+     "value": [
+      "a"
+     ]
+    },
+    {
+     "by": "file",
+     "value": []
+    },
+    {
+     "by": "proof",
+     "value": [
+      "a",
+      "c"
+     ]
+    }
+   ],
+   "effective": [
+    [
+     "a"
+    ],
+    [],
+    [
+     "a",
+     "c"
+    ]
+   ]
+  }
+ ]
+}

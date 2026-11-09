@@ -1,6 +1,6 @@
-"""Agent tool adapters: the only code (with agents.json) that knows tool names and how a tool is run.
+"""Agent tool adapters: the only code (with agents/) that knows tool names and how a tool is run.
 
-agents.json holds the built-in adapters (contracts/agent-adapter.schema.json). A user entry in
+agents/ holds the built-in adapters (contracts/agent-adapter.schema.json). A user entry in
 .orch/config.toml ([agents.<name>] with adapter, command, interactive) picks one of them; the generic
 adapter turns any command line into an agent. Callers ask for argv and capabilities, never for a name.
 """
@@ -19,7 +19,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from orch import config
+from orch import agentsdata, config
 from orch.errors import Refused
 
 SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$")
@@ -51,10 +51,10 @@ def argv_errors(doc: Mapping) -> list[str]:
 
 @functools.cache
 def _registry() -> dict:
-    doc = json.loads(Path(__file__).with_name("agents.json").read_text(encoding="utf-8"))
+    doc = agentsdata.load()
     errs = argv_errors(doc)
     if errs:
-        raise RuntimeError("agents.json: " + "; ".join(errs))
+        raise RuntimeError("agents/: " + "; ".join(errs))
     return doc["adapters"]
 
 

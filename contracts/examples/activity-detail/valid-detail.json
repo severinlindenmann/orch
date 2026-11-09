@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "id": "toolu_01ABcd",
+ "run": "r_8k2m01",
+ "input": {
+  "file_path": "reports/report-2025-11.pdf"
+ },
+ "output": "Revenue 12 400 CHF. Token [hidden: stripe-key]",
+ "truncated": false,
+ "hidden": 1
+}
