@@ -122,6 +122,19 @@ def test_say_without_a_relay_stays_local(proj, run):
     assert chat.read_day(proj, chat.day_key(proj))["messages"][-1]["text"] == "Hallo"
 
 
+def test_say_works_in_a_git_folder(proj, run):
+    """fb31: in a git project the Chat file under .orch/chat was refused ("git would not leave ... alone"), so
+    "Message Pilatus" always said "Could not send your message", with or without relay and publish."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    code, out, err = run("chat", "say", "--by", "human:marco", "--json", "--", "Hallo")
+    assert code == 0, (out, err)
+    assert chat.read_day(proj, chat.day_key(proj))["messages"][-1]["text"] == "Hallo"
+    ignored = subprocess.run(["git", "check-ignore", "-q", ".orch/chat/x.json"], cwd=proj)
+    assert ignored.returncode == 0  # the Chat texts are private, never committed
+
+
 def test_an_agent_cannot_write_as_the_person(proj, run, monkeypatch):
     monkeypatch.setenv("CLAUDECODE", "1")
     assert run("chat", "say", "I am the person")[0] == 2

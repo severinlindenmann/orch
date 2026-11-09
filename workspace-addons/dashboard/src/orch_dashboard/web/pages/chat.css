@@ -134,3 +134,7 @@
 @media(prefers-reduced-motion:reduce){
   .chat-page *,.chat-page *:before,.chat-page *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
+/* Send: empty grey, ready green with icon, sending spinner (text contrast 4.5:1 in every state) */
+.chat-page .chat-compose>.chat-primary:disabled{opacity:1;background:var(--surface-3);border-color:var(--border-strong);color:var(--text-muted);cursor:default}
+.chat-page .chat-compose>.chat-primary[data-state=sending]{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.chat-page .chat-compose>.chat-primary .spinner{border-color:rgb(6 35 28 / .35);border-top-color:var(--on-brand)}

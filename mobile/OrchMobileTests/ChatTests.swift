@@ -131,11 +131,12 @@ final class ChatTests: XCTestCase {
     }
 
     func testComposerWording() {
-        XCTAssertEqual(ChatBuilder.composerNote(running: true), "Goes in after this step")
-        XCTAssertEqual(ChatBuilder.composerNote(running: false), "Goes in after this step", "open topic, run state not running: still this step")
-        XCTAssertEqual(ChatBuilder.composerNote(running: nil), "Goes in after this step", "unknown run state, as in the mockup")
-        XCTAssertEqual(ChatBuilder.composerNote(running: nil, finished: true), "Saved for the next run")
-        XCTAssertEqual(ChatBuilder.composerNote(running: false, finished: true), "Saved for the next run")
+        XCTAssertEqual(ChatBuilder.composerNote(workspaceName: "Dev Team", running: true), "Dev Team reads this after its current step")
+        XCTAssertNil(ChatBuilder.composerNote(workspaceName: "Dev Team", running: false))
+        XCTAssertNil(ChatBuilder.composerNote(workspaceName: "Dev Team", running: nil))
+        XCTAssertNil(ChatBuilder.composerNote(workspaceName: "Dev Team", running: true, review: true))
+        XCTAssertNil(ChatBuilder.composerNote(workspaceName: "Dev Team", running: true, finished: true))
+        XCTAssertNil(ChatBuilder.composerNote(workspaceName: "Dev Team", running: false, finished: true))
     }
 
     func testUndoCancelsTheSendAndLaterSends() async throws {
