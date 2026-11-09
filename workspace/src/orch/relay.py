@@ -522,9 +522,9 @@ def log_send_failure(root: Path, what: str, why: object) -> None:
             return
         p.parent.mkdir(parents=True, exist_ok=True)
         line = f"{tickets.now()} {what}: {' '.join(str(why).split())[:300]}"
-        have = p.read_text(encoding="utf-8").splitlines() if p.is_file() else []
+        have = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.is_file() else []
         net.write_atomic(p, ("\n".join([*have, line][-200:]) + "\n").encode("utf-8"), True)
-    except (OSError, Refused):
+    except (OSError, ValueError, Refused):
         pass
 
 
@@ -778,17 +778,20 @@ def _send_proposal(
     # is only waiting offline goes out later from the outbox, the same bytes.
     try:
         return {**_message(root, to, "question", body, None, reply_to, mid), "sent": True, "problem": None}
-    except Refused as e:
+    except (
+        Refused,
+        OSError,
+    ) as e:  # a refusal, or the outbox could not be written: no card the phone never had
         _asked_edit(root, lambda asked: asked.pop(mid, None))
-        log_send_failure(root, f"proposal question {mid} to {to} refused", e)
+        log_send_failure(root, f"proposal question {mid} to {to} failed", e)
     try:  # the phone still hears the helper, as a plain text (no card), under the same message id
         return {
             **_message(root, to, "text", general_body, None, reply_to, mid),
             "sent": True,
             "problem": None,
         }
-    except Refused as e:
-        log_send_failure(root, f"proposal text {mid} to {to} refused", e)
+    except (Refused, OSError) as e:
+        log_send_failure(root, f"proposal text {mid} to {to} failed", e)
         return {**local, "sent": True}
 
 

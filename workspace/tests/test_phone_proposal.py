@@ -278,7 +278,7 @@ def test_relay_refusal_keeps_the_dashboard_card(proj, run, conn):
     assert not proposals(conn)
     assert any(m["type"] == "text" and m["id"] == sent["id"] for m in conn.sent), "the phone still hears it"
     log = (proj / ".orch/run/relay-errors.log").read_text()
-    assert f"proposal question {sent['id']} to phones refused" in log and "nothing like this" in log
+    assert f"proposal question {sent['id']} to phones failed" in log and "nothing like this" in log
     assert log.count("\n") == 1, "the text fallback went out: one line only"
     check_local_first(proj, conn, sent)
 
@@ -361,4 +361,26 @@ def test_the_helper_prompt_never_talks_about_failed_sends(proj):
     ticket = {"id": tickets.ensure_general(proj, "human:t")}
     prompt = chat.helper_prompt(proj, ticket, [], "")
     assert "Never mention failures, refusals, retries or how anything was sent" in prompt
-    assert "offer it again" in prompt
+    assert "do not propose it again on your own" in prompt
+
+
+def test_an_outbox_write_failure_leaves_no_card_the_phone_never_had(proj, conn, monkeypatch):
+    def boom(root, mid, raw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(relay, "_write_outbox", boom)
+    chat.record(proj, "m_you0000000000001", "you", "phone", "please rename field X", phone=PHONE)
+    sent = relay.send_text(
+        proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
+    )
+    assert sent["sent"] is True and not proposals(conn)
+    assert relay._asked_edit(proj, lambda a: sent["id"] in a) is False
+    assert "failed" in (proj / ".orch/run/relay-errors.log").read_text()
+
+
+def test_a_corrupt_failure_log_never_fails_the_caller(proj, conn):
+    log = proj / ".orch/run/relay-errors.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_bytes(b"\xff\xfe broken\n")
+    relay.log_send_failure(proj, "x", "y")
+    assert log.read_text(errors="replace").endswith("x: y\n")
