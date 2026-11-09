@@ -1,0 +1,50 @@
+{
+ "schema": "orch.inventory/1",
+ "generated_at": "2026-11-16T09:00:00Z",
+ "skills": [
+  {
+   "name": "newsletter-writing",
+   "source": "workspace",
+   "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "shadowed": false
+  },
+  {
+   "name": "orch",
+   "source": "builtin",
+   "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "shadowed": false
+  }
+ ],
+ "connections": [
+  {
+   "name": "gdrive",
+   "label": "Google Drive",
+   "source": "harness",
+   "transport": "stdio",
+   "command": "npx -y gdrive-mcp --token abc",
+   "host": null,
+   "profile": null,
+   "actions": [
+    {
+     "name": "read_file",
+     "allowed": true
+    },
+    {
+     "name": "search",
+     "allowed": true
+    }
+   ],
+   "allow_all": false,
+   "state": "ok",
+   "shadowed": false,
+   "version": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+ ],
+ "keys": [
+  {
+   "name": "google-sa.json",
+   "type": "json",
+   "source": "admin"
+  }
+ ]
+}

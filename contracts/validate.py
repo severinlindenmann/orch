@@ -661,12 +661,56 @@ def kind_jobs():
         _expect(f"jobs progress_pattern {c['line']!r}", job_progress_from_line(c["line"]), c["progress"])
 
 
+
+# --- inventory (inventory.md) ----------------------------------------------------------------------------------------
+INV_ORDER = {"skill": ["workspace", "admin", "marketplace", "builtin", "harness"],
+             "connection": ["workspace", "admin", "harness"], "key": ["workspace", "admin"]}
+
+
+def inv_skill_version(files):
+    """files: {relative posix path: text}; dot-names are skipped."""
+    h = hashlib.sha256()
+    for path in sorted((p for p in files if not any(part.startswith(".") for part in p.split("/"))), key=lambda p: p.encode()):
+        h.update(path.encode() + b"\0" + hashlib.sha256(files[path].encode()).hexdigest().encode() + b"\n")
+    return "sha256:" + h.hexdigest()
+
+
+def inv_conn_version(server):
+    clean = {k: v for k, v in server.items() if k not in ("env", "headers")}
+    return "sha256:" + hashlib.sha256(json.dumps(clean, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def inv_winners(kind, entries):
+    order = INV_ORDER[kind]
+    best = {}
+    for e in entries:
+        if e["name"] not in best or order.index(e["source"]) < order.index(best[e["name"]]):
+            best[e["name"]] = e["source"]
+    return dict(sorted(best.items()))
+
+
+def kind_inventory():
+    vi, vm, vp = _w("inventory", "inventory"), _w("inventory", "mcp_file"), _w("inventory", "conn_page")
+    _core_clean("inventory")
+    _examples("inventory", lambda d: _msgs(vi, d))
+    _examples("mcp-file", lambda d: _msgs(vm, d))
+    _examples("conn-page", lambda d: _msgs(vp, d))
+    vec = _vec("inventory-v1.json")
+    for c in vec["skill_version"]:
+        _expect(f"inventory skill_version {c['name']}", inv_skill_version(c["files"]), c["version"])
+    for c in vec["conn_version"]:
+        _expect(f"inventory conn_version {c['name']}", inv_conn_version(c["server"]), c["version"])
+    for c in vec["precedence"]:
+        _expect(f"inventory precedence {c['name']}", inv_winners(c["kind"], c["entries"]), c["winners"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
     "secrets": kind_secrets,
     "jobs": kind_jobs,
     "blocks": kind_blocks,
+    "inventory": kind_inventory,
 }
 
 
