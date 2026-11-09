@@ -250,6 +250,8 @@
     },
     "question": {
       "type": "object", "required": ["question_id", "text", "options"],
+      "if": { "required": ["review"] },
+      "then": { "properties": { "question_id": { "pattern": "^review-" }, "options": { "const": ["accept", "changes"] } }, "not": { "required": ["scope"] } },
       "properties": {
         "question_id": { "type": "string", "pattern": "^(q[0-9]{1,4}|review-[0-9]{1,4})$", "description": "q<n> = a question of the ticket; review-<n> = the review question of round n (review: true)." },
         "review": { "const": true, "description": "Optional marker: the review question \"Is this done?\" of a ticket in Review (options accept, changes). The phone shows it only as that ticket chat's review bar, never as a question card." },

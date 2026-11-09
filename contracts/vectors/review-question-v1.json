@@ -1,19 +1,21 @@
 {
-  "about": "Review question (relay-api.md 'Review question'). question: the message the workspace sends to phones when a ticket enters Review (validates against message.schema.json). cases: a phone answer to it and what the workspace must do; state = the ticket's status and the current review round when the answer arrives.",
+  "about": "Review question (relay-api.md 'Review question'). question: the message the workspace sends to phones when a ticket enters Review (validates against message.schema.json). phone: ph_iphone0001 is paired and named \"iPhone\" (attribution = human:<that name>). cases: a phone answer to it and what the workspace must do; state = the ticket's status and the current review round when the answer arrives.",
   "question": {
     "schema": "orch.msg/1", "id": "m_rv00000000000001", "from": "ws_pilatus001", "to": "phones", "type": "question",
     "created_at": "2026-11-09T10:40:00Z", "ticket": "t_m2p8xz",
     "body": { "question_id": "review-2", "title": "Rename field X to source_id", "text": "Is this done?", "options": ["accept", "changes"], "recommended": null, "review": true }
   },
   "cases": [
-    { "name": "accept-in-review", "state": {"status": "review", "round": 2}, "answer": "accept", "from": "ph_iphone0001", "do": "accept", "by": "human:ph_iphone0001" },
-    { "name": "accept-case-and-space", "state": {"status": "review", "round": 2}, "answer": " Accept ", "from": "ph_iphone0001", "do": "accept", "by": "human:ph_iphone0001" },
+    { "name": "accept-in-review", "state": {"status": "review", "round": 2}, "answer": "accept", "from": "ph_iphone0001", "do": "accept", "by": "human:iPhone" },
+    { "name": "accept-case-and-space", "state": {"status": "review", "round": 2}, "answer": " Accept ", "from": "ph_iphone0001", "do": "accept", "by": "human:iPhone" },
     { "name": "changes-with-note", "state": {"status": "review", "round": 2}, "answer": "Please also rename Y", "from": "ph_iphone0001", "do": "changes", "note": "Please also rename Y" },
     { "name": "accept-after-left-review", "state": {"status": "ready", "round": 2}, "answer": "accept", "from": "ph_iphone0001", "do": "nothing" },
     { "name": "accept-stale-round", "state": {"status": "review", "round": 3}, "answer": "accept", "from": "ph_iphone0001", "do": "nothing" },
     { "name": "accept-twice", "state": {"status": "done", "round": 2}, "answer": "accept", "from": "ph_iphone0001", "do": "nothing" },
     { "name": "accept-from-subscriber", "state": {"status": "review", "round": 2}, "answer": "accept", "from": "sub_abc12345", "do": "nothing" },
     { "name": "accept-from-other-workspace", "state": {"status": "review", "round": 2}, "answer": "accept", "from": "ws_other00001", "do": "nothing" },
+    { "name": "bare-changes", "state": {"status": "review", "round": 2}, "answer": "changes", "from": "ph_iphone0001", "do": "nothing" },
+    { "name": "unpaired-phone", "state": {"status": "review", "round": 2}, "answer": "accept", "from": "ph_stranger01", "do": "nothing" },
     { "name": "empty-answer", "state": {"status": "review", "round": 2}, "answer": "  ", "from": "ph_iphone0001", "do": "nothing" }
   ]
 }

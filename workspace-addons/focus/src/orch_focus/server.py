@@ -69,11 +69,13 @@ class Tracker:
     def __init__(self, root: Path, orch_bin: str | None):
         self.root, self.orch_bin = root, orch_bin
         self.lock = threading.Lock()
+        self.plock = threading.Lock()  # started + pins: handler threads change them together
         self.seen_sig = ""
         self.tickets: dict[str, dict] = {}
         self.status_cache: dict[str, tuple[float, dict]] = {}
         # ticket -> run id, for the runs Focus started (kept in .orch/run/focus/ so a crash is recoverable)
         self.started: dict[str, str] = self._load_started()
+        self.pins: dict[str, dict] = {t: p for t, p in self._load_pins().items() if self.started.get(t) == p["run"]}  # ticket -> {run, pid, start}: who a stop may signal
         self.perms = Permissions(root, orch_bin)
         self.last_agent: dict[str, tuple[str, str]] = {}  # ticket -> (agent, mode) of its latest run
         self.ticket_cache: dict[str, tuple[float, dict | None]] = {}
@@ -155,8 +157,126 @@ class Tracker:
         self.ticket_cache.pop(tid, None)
 
     def forget_started(self, tid: str) -> None:
-        if self.started.pop(tid, None) is not None:
-            self._save_started()
+        with self.plock:
+            if self.started.pop(tid, None) is not None:
+                self._save_started()
+            if self.pins.pop(tid, None) is not None:
+                self._save_pins()
+
+    # ---- processes Focus started: listed, and stopped only after they are proven to be the ones Focus started ----
+    def _pins_file(self) -> Path:
+        return runfiles.run_dir(self.root, "focus") / "pins.json"
+
+    def _load_pins(self) -> dict[str, dict]:
+        try:
+            d = runfiles.read_json(self._pins_file()) or {}
+        except RuntimeError:
+            return {}
+        return {
+            t: p for t, p in d.items()
+            if TID_RE.fullmatch(str(t)) and isinstance(p, dict) and isinstance(p.get("run"), str)
+            and RUN_ID.fullmatch(p["run"]) and runfiles.valid_pid(p.get("pid")) and isinstance(p.get("start"), str)
+        }  # fmt: skip
+
+    def _save_pins(self) -> None:
+        try:
+            runfiles.write_json(self._pins_file(), self.pins)
+        except (RuntimeError, OSError):
+            pass
+
+    @staticmethod
+    def _claim_pid(claim: dict) -> int | None:
+        for k in ("pid", "agent_pid"):
+            if runfiles.valid_pid(claim.get(k)):
+                return claim[k]
+        return None
+
+    def pin_started(self, tid: str, run: str) -> bool:
+        """Right after Focus started a run: record {run, pid, start} of its process. Only a run with this pin
+        is ever listed or stopped (nothing is pinned later, on first sight, from a claim someone else could write)."""
+        for _ in range(60):  # a live session writes its pid a moment after the start (up to 30 s)
+            self.status_cache.pop(tid, None)
+            claim = self.run_status(tid).get("claim") or {}
+            pid = self._claim_pid(claim)
+            if claim.get("run") == run and pid is not None:
+                start = runfiles.proc_start(pid)
+                if start is None:
+                    return False
+                with self.plock:
+                    self.pins[tid] = {"run": run, "pid": pid, "start": start}
+                    self._save_pins()
+                return True
+            time.sleep(0.5)
+        import sys
+
+        print(f"focus: no process id for run {run} on {tid} after 30 s; it stays out of Running now", file=sys.stderr)
+        return False
+
+    def _ours(self, tid: str, run: str, claim: dict, running: bool) -> bool:
+        """True only for a run Focus itself started (run id recorded by Focus, claim still that run, started by
+        Focus) that is alive and whose process is the one pinned when Focus started it: same pid and same start
+        time (a reused pid has another start time). No pin, or a claim that lost its pid: not ours."""
+        if not (running and self.started.get(tid) == run and claim.get("run") == run and claim.get("by") == "focus"):
+            return False
+        with self.plock:
+            pin = dict(self.pins.get(tid) or {})
+        pid = self._claim_pid(claim)
+        if pin.get("run") != run or pid is None or pid != pin.get("pid") or not runfiles.alive(pid):
+            return False
+        return runfiles.proc_start(pid) == pin.get("start")
+
+    def procs(self) -> list[dict]:
+        """One row per run Focus started that is still running (a plain view, no secrets)."""
+        rows = []
+        started = dict(self.started)
+        agents = self.agents()
+        for tid, run in sorted(started.items()):
+            status = self.run_status(tid)
+            claim = status.get("claim") or {}
+            if not self._ours(tid, run, claim, bool(status.get("running"))):
+                continue
+            ticket = self.ticket(tid) or {}
+            live = claim.get("live") or {}
+            needs = any(q.get("answer") is None for q in ticket.get("questions") or [])
+            state = "needs" if needs or live.get("state") == "attention" else "paused" if live.get("state") == "idle" else "working"
+            rows.append({
+                "ticket": tid, "key": ticket.get("key"), "title": str(ticket.get("title") or "")[:200],
+                "run": run, "label": agent_label(claim, agents), "state": state,
+                "started_at": claim.get("started_at"), "pid": self._claim_pid(claim),
+            })  # fmt: skip
+        return rows
+
+    def stop_proc(self, tid: str, run: str) -> tuple[bool, str]:
+        """Stop one run Focus started, through core `orch run stop` (never a signal from here)."""
+        if not (TID_RE.fullmatch(tid) and RUN_ID.fullmatch(run)):
+            return False, "That is not a process Focus started."
+        self.status_cache.pop(tid, None)
+        status = self.run_status(tid)
+        if not self._ours(tid, run, status.get("claim") or {}, bool(status.get("running"))):
+            return False, "Focus did not start that one, or it already ended."
+        try:
+            code, _, err = actions.orch(self.root, self.orch_bin, ["run", "stop", tid, "--by", "focus"], timeout=20)
+        except actions.Unavailable as e:
+            return False, str(e)
+        if code != 0:
+            return False, (err.strip().splitlines() or ["That did not stop."])[0][:300]
+        self.forget_started(tid)
+        self.status_cache.pop(tid, None)
+        self.ticket_cache.pop(tid, None)
+        return True, ""
+
+    def stop_all(self) -> tuple[int, int]:
+        """Stop every run Focus started. Returns (stopped, failed)."""
+        ok = bad = 0
+        end = time.monotonic() + 40  # one request never holds a handler for minutes
+        self.status_cache.clear()  # what is running is read fresh, not from the 1 s cache
+        for row in self.procs():
+            if time.monotonic() > end:
+                bad += 1
+                continue
+            done, _ = self.stop_proc(row["ticket"], row["run"])
+            ok, bad = ok + done, bad + (not done)
+        return ok, bad
 
     def ticket(self, tid: str) -> dict | None:
         """The ticket, as `orch ticket show --json` says it (core owns the file; one answer a second)."""
@@ -358,6 +478,7 @@ class Tracker:
                         "key": t.get("key"),
                         "title": str(t.get("title", ""))[:200],
                         "status": t["status"],
+                        "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at")) if t["status"] == "done" else None,
                         "started": bool(t.get("started") or (t.get("ticket_view") or {}).get("started")),
                     }
                 )
@@ -417,6 +538,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if path == "/api/tickets":
             return self._json(200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()})
+        if path == "/api/procs":
+            return self._json(200, {"procs": self.tracker.procs()})
         if path == "/api/mobile":
             return self._json(200, self.tracker.mobile())
         if path == "/api/events":
@@ -490,6 +613,24 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             revisions.leave()
 
+    def _proc_op(self, op, args):
+        """Stop one run (or all) that Focus started; the tracker checks each one again right before it stops it."""
+        bad = lambda: self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if not isinstance(args, dict):
+            return bad()
+        if op == "proc.stop_all":
+            if args:
+                return bad()
+            ok, failed = self.tracker.stop_all()
+        else:
+            if set(args) != {"ticket", "run"} or not all(isinstance(v, str) for v in args.values()):
+                return bad()
+            done, why = self.tracker.stop_proc(args["ticket"], args["run"])
+            if not done:
+                return self._send(409, why.encode(), "text/plain; charset=utf-8")
+            ok, failed = 1, 0
+        self._json(200, {"stopped": ok, "failed": failed, "procs": self.tracker.procs()})
+
     def _refuse(self):
         self._send(405, b"not allowed", "text/plain")
 
@@ -515,6 +656,8 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
         args = body.get("args", {})
+        if body.get("op") in ("proc.stop", "proc.stop_all"):
+            return self._proc_op(body["op"], args)
         try:
             code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args)
         except actions.BadRequest as e:
@@ -526,6 +669,8 @@ class Handler(BaseHTTPRequestHandler):
         self.tracker.ticket_cache.clear()  # the view sent back must show what this action just did
         if code == 200 and body.get("op") == "run.start":
             self.tracker.note_started(args["ticket"], (extra or {}).get("run"))
+            if isinstance((extra or {}).get("run"), str) and RUN_ID.fullmatch(extra["run"]):
+                threading.Thread(target=self.tracker.pin_started, args=(args["ticket"], extra["run"]), daemon=True).start()
             self.tracker.mark_page(args["ticket"])
         elif code == 200 and body.get("op") == "run.stop":
             self.tracker.forget_started(args["ticket"])

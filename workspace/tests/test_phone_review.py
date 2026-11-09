@@ -9,7 +9,7 @@ import pytest
 from fakes import WS
 from test_relay_client import msg
 
-from orch import phone_view, relay, runs, tickets
+from orch import phone_view, runs, tickets
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
@@ -17,7 +17,9 @@ PHONE = "ph_iphone0001"
 
 @pytest.fixture
 def conn(proj, run, rel):
-    rel.snapshot["workspaces"]["phones"] = [{"id": PHONE, "name": "iPhone", "online": True, "last_seen": None}]
+    rel.snapshot["workspaces"]["phones"] = [
+        {"id": PHONE, "name": "iPhone", "online": True, "last_seen": None}
+    ]
     assert run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)[0] == 0
     return rel
 
@@ -216,7 +218,11 @@ def test_vector_cases(proj, run, new_ticket, conn):
             msg(
                 mid,
                 "answer",
-                {"question_id": q["body"]["question_id"], "answer": case["answer"], "answered_by": "human:iPhone"},
+                {
+                    "question_id": q["body"]["question_id"],
+                    "answer": case["answer"],
+                    "answered_by": "human:iPhone",
+                },
                 frm=case["from"],
                 ticket=tid,
                 reply_to=q["id"],
@@ -229,3 +235,74 @@ def test_vector_cases(proj, run, new_ticket, conn):
             assert t["status"] == want, case["name"]
         else:
             assert t["status"] == case["state"]["status"], case["name"]
+
+
+def test_leaving_and_reentering_review_between_syncs_makes_the_old_round_stale(proj, run, new_ticket, conn):
+    """Opus M1: no sync_reviews between the two status changes; the old accept must not apply."""
+    tid = new_ticket()
+    to_review(proj, tid)
+    phone_view.sync_reviews(proj)
+    (q1,) = review_questions(conn)
+    tickets.set_status(proj, tid, "ready", "human:dash")
+    to_review(proj, tid)  # an agent/run brings it back; still no sync
+    answer(conn, q1, "accept")
+    run("relay", "inbox")
+    assert status(run, tid)["status"] == "review"
+    phone_view.sync_reviews(proj)  # (the inbox call already did) a new round asks again
+    assert review_questions(conn)[-1]["body"]["question_id"] == "review-2"
+
+
+def test_a_round_is_bound_to_its_own_message(proj, run, new_ticket, conn):
+    tid = new_ticket()
+    to_review(proj, tid)
+    phone_view.sync_reviews(proj)
+    (q,) = review_questions(conn)
+    conn.inbox.append(
+        msg(
+            "m_ans0000000000099",
+            "answer",
+            {"question_id": "review-1", "answer": "accept", "answered_by": "human:x"},
+            frm=PHONE,
+            ticket=tid,
+            reply_to="m_other00000000001",
+        )
+    )
+    run("relay", "inbox")
+    assert status(run, tid)["status"] == "review"
+
+
+def test_an_unpaired_phone_and_group_messages_are_refused(proj, run, new_ticket, conn):
+    tid = new_ticket()
+    to_review(proj, tid)
+    phone_view.sync_reviews(proj)
+    (q,) = review_questions(conn)
+    answer(conn, q, "accept", frm="ph_stranger01")
+    answer(conn, q, "accept", n=2)
+    conn.inbox[-1]["body"]["group"] = {"id": "grp_x"}
+    run("relay", "inbox")
+    assert status(run, tid)["status"] == "review"
+
+
+def test_attribution_comes_from_the_paired_phone_not_the_body(proj, run, new_ticket, conn):
+    tid = new_ticket()
+    to_review(proj, tid)
+    phone_view.sync_reviews(proj)
+    (q,) = review_questions(conn)
+    answer(conn, q, "accept", by="human:Alice The Boss")
+    run("relay", "inbox")
+    t = status(run, tid)
+    assert t["status"] == "done" and t["history"][-1]["by"] == "human:iPhone"
+
+
+def test_a_bare_changes_answer_is_a_history_line_only(proj, run, new_ticket, conn):
+    tid = new_ticket()
+    to_review(proj, tid)
+    phone_view.sync_reviews(proj)
+    (q,) = review_questions(conn)
+    answer(conn, q, "changes")
+    run("relay", "inbox")
+    t = status(run, tid)
+    assert t["status"] == "review" and "without a note" in t["history"][-1]["text"]
+    answer(conn, q, "Rename Y", n=2)  # the round is still open for a real note
+    run("relay", "inbox")
+    assert status(run, tid)["status"] == "ready"
