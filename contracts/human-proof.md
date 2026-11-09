@@ -118,11 +118,17 @@ are signed with a separate **dev key** (`<guarded orch home>/keys/<ws>/dev-human
 
 ## A person in their own terminal
 
-A human-only command run without a proof is refused with a **hand-off to the dashboard**: the CLI opens the local page at
-that action (with a fresh launch token, step 3) and prints "Opened the dashboard: click <button> to finish." The person
-clicks; no typed confirm words (owner rule). A confirmation on `/dev/tty` is not used: a live agent runs in its own tmux pane
-with a terminal too, so a tty proves nothing. What Level 1 promises: an agent cannot finish a human-only action with flags,
-environment, a tty or a forged file; it can open the page but needs the launch token, which lives in the key folder.
+A human-only command run without a proof is refused with a **hand-off to the dashboard**: the core adds a pending item for
+that action to the local page and, on a desktop, opens the browser at it with a fresh launch token (step 3). The CLI prints
+only "Opened the dashboard: click <button> to finish." **The launch token is never printed, returned or written where the
+calling process can read it** (not stdout, not stderr, not the workspace). On a headless host (VPS) no browser is opened: the
+item waits on the page the person already has open (through their own tunnel); the CLI says so.
+The hand-off page says **"Requested by a command"**, shows the full action, target and value (the relay host, the hash being
+allowed, the key profile, the update version), never puts focus on the confirm button, and hand-offs are rate-limited per op
+(at most 3 pending per op, a new one replaces the oldest). No typed confirm words (owner rule). A confirmation on `/dev/tty`
+is not used: a live agent runs in its own tmux pane with a terminal too, so a tty proves nothing.
+What Level 1 promises: an agent cannot finish a human-only action with flags, environment, a tty or a forged workspace file;
+it can ask for a hand-off, which the person sees as a request from a command and has to click.
 
 ## Human-only actions (every op that trusts person detection or env today)
 
@@ -163,6 +169,11 @@ rows add a named case.
 | `run.human_input` | input that counts as a person's and may start a run (runs.py 382: `human:` by or phone) | ticket | page, phone | – |
 | `addon.act` (`who: people`) | an add-on button the manifest marks for people only (addons.py 599, 1051) | `<add-on>:<verb>:<ticket>` | page | – |
 | relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network), never a workspace token | – |
+
+*Implementing slice 1.0a must* (N8) find "the caller's own run" (for `run.stop` of its own run and for the check-up's
+`propose`) as a run whose recorded agent process (pid + start time) is an ancestor of the caller, not from `ORCH_RUN`; and
+(N12) treat a missing or unreadable `human-settings.json` as every widening off, and write the tombstone at once when a
+lowering comes through the CLI or the page.
 
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).

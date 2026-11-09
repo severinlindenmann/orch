@@ -17,7 +17,8 @@ version checks, what a check-up run may call). T0: `… contracts/validate.py pr
   `orch check … <own ticket>`. **Every other shell command is denied**, so `env -u ORCH_RUN orch …`, `cat`, `curl` and
   scripts do not run; the agent tool's web, fetch and connection tools are off. The draft goes to `orch record propose` on
   stdin. Reference `checkup_allowed`, vectors `checkup_commands`.
-- **Layer 2, the core:** `orch record propose` is refused unless the caller's run record says `profile: "checkup"`; `orch
+- **Layer 2, the core:** `orch record propose` is refused unless the caller's run record says `profile: "checkup"` (*slice
+  3.2 must* find the caller's run by process ancestry, not `ORCH_RUN`: human-proof.md, N8); `orch
   secret` refuses inside such a run; no connections are passed to the agent.
 - Check-up is offered only for adapters whose capability flags say they support an exact command allowlist; otherwise
   "Analyse with an agent" is not shown.
@@ -69,7 +70,8 @@ any open state --skill changed meanwhile--> stale
   to admin", `checkup.send_to_admin` proof). Applies the files in one step (new files + rename), writes `decided`,
   `applied`, and the skill's new version starts a new line in Insights ("since the change").
 - `rollback` (`checkup.rollback` proof): only from `accepted` and only when the current version equals
-  `applied.version_after` (else refused `conflict`: someone changed it since); restores the kept files. *Implementing slice 3.4 must* write files with O_NOFOLLOW and check that every
+  `applied.version_after` (else refused `conflict`: someone changed it since); restores the kept files. *Implementing slice 3.4 must* verify the restored content against `version_before` recorded in the guarded orch home
+  (N10: the `before/` copy is workspace-writable), and write files with O_NOFOLLOW and check that every
   realpath stays inside the skill folder (no symlink out).
 - Tests on past tickets run isolated (a copy of the workspace without keys and connections, outside services faked); a
   failed or errored test blocks Accept (the person sees the cases).

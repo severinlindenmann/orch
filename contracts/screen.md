@@ -48,7 +48,8 @@ at a character boundary).
 string up to its terminator (BEL, `ESC \` or U+009C), with a state machine that survives chunk boundaries. Nothing on the
 screen needs them, and they carry clipboard writes (OSC 52), links (OSC 8, incl. `javascript:` / `file:`), titles (OSC 0/2),
 notifications (OSC 9/777), file transfers (OSC 1337) and colour or device queries whose answers would come back as input.
-Reference `ScrStrip`, vectors `control_mode` (OSC 52/8/0/9/777/1337/11, DCS, split across lines, C1 forms).
+*Implementing slice 4.1 must* cap one such string at 64 KiB and then return to normal output (N13: an unterminated OSC must
+not hide the rest of the session; safe, because the terminal never saw its start). Reference `ScrStrip`, vectors `control_mode` (OSC 52/8/0/9/777/1337/11, DCS, split across lines, C1 forms).
 
 **Hiding.** Every `data` then passes through the streaming hider of secrets.md before the line is written: one hider per
 stream, fed in order, so a value split over two `%output` lines is still hidden (vectors `control_mode` "value split"). The
