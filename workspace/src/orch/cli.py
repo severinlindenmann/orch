@@ -194,6 +194,10 @@ def _show(t: dict, root: Path | None = None) -> str:
         out.append(f"Note: {t['note']}")
     if t.get("done_when"):
         out.append(f"Done when: {t['done_when']}")
+    if t.get("status") == "done" and t.get("outcome"):
+        for k, label in (("changed", "Changed"), ("why", "Why"), ("not_included", "Not included")):
+            if t["outcome"].get(k):
+                out.append(f"{label}: {t['outcome'][k]}")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(f"Step of: {p['title']} ({p['id']})" if p else f"Step of: {t['parent']} (parent missing)")
@@ -393,6 +397,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("summary", parents=[common], help="where things stand, one or two sentences")
     x.add_argument("id")
     x.add_argument("text")
+    x = t.add_parser("outcome", parents=[common], help="what changed and why, for the Notes page")
+    x.add_argument("id")
+    x.add_argument("--changed", help="what changed, one or two sentences (empty clears)")
+    x.add_argument("--why", help="why it was done (empty clears)")
+    x.add_argument("--not-included", dest="not_included", help="what was left out (empty clears)")
     x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
     x.add_argument("id")
     x = t.add_parser(
@@ -610,7 +619,7 @@ def run(args: argparse.Namespace) -> None:
             ),
         )
     elif cmd == "update":
-        report = []
+        report, notes = [], []
         done = addons.update(
             root,
             args.project_only,
@@ -618,11 +627,13 @@ def run(args: argparse.Namespace) -> None:
             json_output=args.json,
             report=report,
             nonce=args.update_nonce,
+            notes=notes,
         )
         if args.after_install:
             pass
         elif args.project_only and (args.json or not report):
-            _out(args, {"ok": True, "refreshed": done}, "Refreshed: " + ", ".join(done or ["nothing"]))
+            data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
+            _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
     elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
@@ -709,6 +720,11 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "summary":
         t = tickets.set_summary(root, args.id, args.text, by())
         _out(args, t, "Summary saved.")
+    elif cmd == "ticket" and sub == "outcome":
+        t = tickets.set_outcome(
+            root, args.id, by(), changed=args.changed, why=args.why, not_included=args.not_included
+        )
+        _out(args, t, "Outcome saved.")
     elif cmd == "ticket" and sub == "artifacts":
         rows = tickets.artifacts_list(root, args.id)
         _out(
