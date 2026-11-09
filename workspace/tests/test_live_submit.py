@@ -1016,8 +1016,8 @@ def test_input_held_for_unsent_text_is_given_up_after_three_minutes(proj, run, m
     assert back["live_retry"] is True
 
 
-def test_run_status_json_says_why_a_live_run_waits_and_drops_it_when_it_clears(proj, run, monkeypatch, capsys):
-    """fb18 (hold-why): `orch run status --json` carries `hold` = the core's words; gone once the hold clears."""
+def test_run_status_json_says_why_a_run_waits(proj, run, monkeypatch, capsys):
+    """fb18: `orch run status --json` carries `hold`, the core's words; gone once the hold clears."""
     import json
 
     from orch import cli

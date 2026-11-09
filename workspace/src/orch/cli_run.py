@@ -185,7 +185,7 @@ def _status(args, root: Path) -> None:
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
     if st == "alive" and rec.get("mode") == "live" and runs_live.hold_text(rec):
-        data["hold"] = runs_live.hold_text(rec)  # why orch waits to type into the window; gone when the hold clears
+        data["hold"] = runs_live.hold_text(rec)  # why orch waits; gone when the hold clears
     if st == "dead":
         text = (
             f"The earlier run on {_name(root, tid)} ended without finishing. "
