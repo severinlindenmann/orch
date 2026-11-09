@@ -1708,8 +1708,8 @@ def artifacts_dir(root: Path, tid: str) -> Path:
     return d
 
 
-# What a person may attach to a ticket from the dashboard or the phone: plain text and pictures. Never a page or a
-# program that runs: html and scripts are not accepted.
+# What a person may attach to a ticket from the dashboard or the phone: plain text and pictures.
+# Never a page or a program that runs: html and scripts are not accepted.
 ATTACH_TEXT = frozenset({"txt", "md", "csv", "tsv", "json", "log", "xml", "yml", "yaml", "toml", "ini"})
 ATTACH_IMAGES = {
     "png": (b"\x89PNG\r\n\x1a\n",),
@@ -1738,8 +1738,8 @@ def attach_name(hint) -> str:
 
 def attach(root: Path, tid: str, hint, data: bytes, by: str) -> dict:
     """Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
-    ' (2)', ' (3)' ...; created with O_EXCL and no link followed). Text must be UTF-8 without NUL bytes, a picture
-    must start with its type's signature. One history line says what was attached."""
+    ' (2)', ' (3)' ...; created with O_EXCL and no link followed). Text must be UTF-8 without NUL bytes, a
+    picture must start with its type's signature. One history line says what was attached."""
     name = attach_name(hint)
     ext = name.rsplit(".", 1)[-1]
     if not isinstance(data, bytes) or not data:

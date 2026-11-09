@@ -824,7 +824,7 @@ def test_big_body_is_allowed_only_for_a_new_ticket(act_server, act_orch):
     c = acts(act_orch)[-1]
     assert c[:2] == ["ticket", "new"] and not any(a.startswith("--note=") and len(a) > 2100 for a in c)
     assert any(a.startswith("--note=The full text is attached as note.md") for a in c)
-    s, text, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}, "pad": big})
+    s, _, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}, "pad": big})
     assert s == 400
     s, _, _ = _post_raw(act_server, {"op": "log", "args": {"ticket": "t_abcdef", "text": big[:30000]}})
     assert s == 400  # over 16 KB for an ordinary action
@@ -845,13 +845,13 @@ def test_long_text_over_the_limit_and_short_text_cap_unchanged(act_server):
 
 def test_paste_long_text_keeps_the_note_short():
     text = "First line\n" + "word " * 800
-    words, flags, tail = actions.OPS["ticket.paste"]({"text": text})
+    _, flags, tail = actions.OPS["ticket.paste"]({"text": text})
     assert tail == ["First line"]
     assert flags == ["--note=" + actions.LONG_NOTE]
     assert [n for n, _ in actions.attachments("ticket.paste", {"text": text})] == ["note.md"]
     # a short paste is unchanged: no file, the text is the note
     short = "Short title\nand some more"
-    words, flags, tail = actions.OPS["ticket.paste"]({"text": short})
+    _, flags, _ = actions.OPS["ticket.paste"]({"text": short})
     assert flags == ["--note=" + short] and actions.attachments("ticket.paste", {"text": short}) == []
 
 

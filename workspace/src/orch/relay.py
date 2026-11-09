@@ -1173,7 +1173,9 @@ def _long_phone_text(root: Path, tid: str, mid: str, who: str, raw: str) -> str:
     key = f"{mid}:note"
     done = st.setdefault("saved", {}).get(key)
     if not (done and (root / done).is_file()):
-        done = tickets.attach(root, tid, tickets.PASTED_NAME, raw.encode("utf-8"), _line(who, 100) or "phone")["path"]
+        done = tickets.attach(
+            root, tid, tickets.PASTED_NAME, raw.encode("utf-8"), _line(who, 100) or "phone"
+        )["path"]
         st["saved"][key] = done
         st["saved"] = dict(list(st["saved"].items())[-V3_STATE_KEEP:])
         _v3_save(root, st)

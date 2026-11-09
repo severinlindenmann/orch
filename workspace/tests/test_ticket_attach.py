@@ -1,4 +1,4 @@
-"""Files kept with a ticket (orch ticket attach): the name is the server's, the type and content are checked."""
+"""Files kept with a ticket (orch ticket attach): the server picks the name, type and content are checked."""
 
 import json
 import os

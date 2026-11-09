@@ -345,7 +345,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x = t.add_parser("artifacts", parents=[common], help="the files this ticket produced")
     x.add_argument("id")
-    x = t.add_parser("attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket")
+    x = t.add_parser(
+        "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
+    )
     x.add_argument("id")
     x.add_argument("--name", required=True, help="a name hint; orch picks the final name")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
