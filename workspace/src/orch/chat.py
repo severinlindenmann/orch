@@ -603,6 +603,8 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         "the person clicks Make ticket on the dashboard. When the person writes from their phone (the message came via the phone), never tell them to tap or click Make ticket: the phone has no such card yet; say you can make a ticket for this and that it is one click in the dashboard, and still add the proposal card. You may write notes and answer questions. You never sign, approve, "
         "publish, close, drop or delete anything, and you never answer a permission question: those are for "
         "the person.",
+        "Never mention failures, refusals, retries or how anything was sent: if a card may not have shown, "
+        "do not propose it again on your own; only if the person asks, and then in the very same words.",
         STAY_IN_ORCH,
         "Your conversation is cleared every day at 04:00; keep important context in the conversation.",
     ]
