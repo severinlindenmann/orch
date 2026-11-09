@@ -1,0 +1,8 @@
+{
+  "adapters": {
+    "claude": {
+      "oneshot": { "settings_args": ["--settings", "{reminder_json}"] },
+      "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" }
+    }
+  }
+}
