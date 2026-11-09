@@ -311,7 +311,7 @@ def private_lines(root: Path) -> list[str]:
                 f"Allow on this machine: orch private allow {p['name']} --key {p['key']}"
             )
         else:
-            out.append(f"This workspace names an agent '{p['name']}' with a command too long to show; it is not run.")
+            out.append("This workspace asks to run a command orch can't show safely. Not allowed; it is not run.")
     return out
 
 

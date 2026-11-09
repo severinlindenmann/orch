@@ -102,6 +102,17 @@ def _raw_entries(root: Path) -> dict[str, dict]:
 SHOW_MAX = 500  # an entry with a longer field cannot be shown in full, so it cannot be approved
 
 
+def _safe_text(v: str) -> bool:
+    """Plain printable text only: no control (C0/C1, ESC), format (bidi, zero-width), line/paragraph separator,
+    private-use or unassigned character, and no space but the plain one. What is shown is exactly what is hashed."""
+    import unicodedata
+
+    return len(v) <= SHOW_MAX and all(
+        c == " " or (unicodedata.category(c) not in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"))
+        for c in v
+    )
+
+
 def pending_agents(root: Path) -> list[dict]:
     """Entries of this workspace's settings that name a command nobody approved here. Every field the approval
     covers is returned in full, plus `key` (the hash the approval is bound to) and `showable`."""
@@ -115,7 +126,7 @@ def pending_agents(root: Path) -> list[dict]:
                 "name": n,
                 **fields,
                 "key": _entry_key(root, n, e),
-                "showable": all(len(v) <= SHOW_MAX for v in fields.values() if isinstance(v, str)),
+                "showable": all(_safe_text(v) for v in fields.values() if isinstance(v, str)) and _safe_text(n),
             }
         )
     return out
@@ -129,8 +140,8 @@ def allow_agent(root: Path, name: str, key: str) -> str:
         raise Refused("That agent is not in this workspace's settings (any more). Please look again.")
     if not isinstance(key, str) or _entry_key(root, name, e) != key:
         raise Refused("That command changed since you looked. Please look again.")
-    if any(len(v) > SHOW_MAX for v in e.values() if isinstance(v, str)):
-        raise Refused("That command is too long to show in full, so it cannot be allowed here.")
+    if not (_safe_text(name) and all(_safe_text(v) for v in e.values() if isinstance(v, str))):
+        raise Refused("That command cannot be shown safely (too long or odd characters), so it cannot be allowed.")
     approve_agent(root, name, e)
     return name
 
@@ -140,6 +151,8 @@ def untrusted_note(root: Path) -> str | None:
     p = pending_agents(root)
     if not p:
         return None
+    if not p[0]["showable"]:
+        return "This workspace asks to run a command orch can't show safely. It is not run."
     c = p[0]["command"] or p[0]["interactive"] or ""
     return f"This workspace asks to run `{c[:200]}`. Allow it on this machine first: orch private"
 

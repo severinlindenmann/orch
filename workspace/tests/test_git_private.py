@@ -294,3 +294,27 @@ def test_an_entry_too_long_to_show_cannot_be_allowed(proj):
     with pytest.raises(Refused):
         config.allow_agent(proj, "mine", p["key"])
     assert config.agent_entries(proj) == {}
+
+
+@pytest.mark.parametrize("bad", ["\x1b[2K", "‮", "​", "\x85", " ", "﻿", "\t", " ", "\x07"])
+@pytest.mark.parametrize("field", ["command", "interactive", "prompt"])
+def test_unsafe_characters_make_an_entry_not_approvable(proj, run, field, bad):
+    import json as _json
+
+    cmd = _json.dumps("touch X" + bad + " {prompt}")
+    extra = {"command": "", "interactive": f"interactive = {cmd}\n", "prompt": f'prompt = {cmd}\n'}[field]
+    base = '[agents.mine]\nadapter = "generic"\n' + (f"command = {cmd}\n" if field == "command" else 'command = "ok {prompt}"\n')
+    write_config(proj, base + (extra if field != "command" else ""))
+    p = config.pending_agents(proj)
+    assert len(p) == 1 and p[0]["showable"] is False
+    with pytest.raises(Refused):
+        config.allow_agent(proj, "mine", p[0]["key"])
+    code, out, err = run("private", "allow", "mine", "--key", p[0]["key"])
+    assert code != 0 and config.agent_entries(proj) == {}
+    assert bad not in run("private")[1] and "can't show safely" in run("private")[1]
+
+
+def test_the_run_note_never_prints_unsafe_text(proj):
+    write_config(proj, '[agents.mine]\nadapter = "generic"\ncommand = "x\\u001b[2K {prompt}"\n')
+    note = adapters.command_notice("claude", "oneshot", proj)
+    assert "\x1b" not in note and "can't show safely" in note
