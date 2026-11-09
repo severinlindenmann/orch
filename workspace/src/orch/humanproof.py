@@ -288,12 +288,75 @@ def key_dir(root: Path, create: bool = True) -> Path:
         if fresh:
             winacl.set_private(home, True)
         _check_dir(home)
-        _private_dir(d, home)
+        _private_dir(d.parent, home)
+        try:
+            d.mkdir(mode=0o700)
+            if POSIX:
+                d.chmod(0o700)
+            fresh = True
+        except FileExistsError:
+            fresh = False
+        _check_dir(d)
+        if fresh or not any(d.iterdir()):  # the binding is made only while the folder is new or empty
+            _bind_new(root, d)
     else:
         _check_dir(home)
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
+    _check_binding(root, d)
     return d
+
+
+BINDING_MISMATCH = (
+    "Refused: this folder's key id belongs to another folder (it was copied or moved). "
+    "Its keys stay where they are."
+)
+
+
+def _bind_new(root: Path, d: Path) -> None:
+    """Record the workspace's real path as binding.json in the new key folder: written to a temp file and
+    linked into place, so it appears whole and only if none exists (the first writer wins)."""
+    f = d / "binding.json"
+    tmp = d / f".binding.{secrets.token_hex(4)}.tmp"
+    try:
+        _write_private(
+            tmp, json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(root)}) + "\n"
+        )
+        with contextlib.suppress(FileExistsError):
+            os.link(tmp, f)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
+def _check_binding(root: Path, d: Path) -> None:
+    """The workspace's local id (workspace-writable, so not trusted alone) must be bound to this workspace's
+    real path in the guarded home (binding.json, 0600): a mismatch is refused (N17). A key folder WITHOUT a
+    binding is refused too: orch never binds a folder that already exists (no trust on first use); a person
+    reconnects the workspace instead. The stored folder is compared by identity (samefile), so a case change
+    on macOS is the same folder, while a copy (another folder, same id) or a move is refused."""
+    f = d / "binding.json"
+    here = os.path.realpath(root)
+    try:
+        stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
+    except FileNotFoundError:
+        raise Refused(BINDING_MISMATCH) from None
+    except (LooseFile, winacl.Unknown):
+        # a loose or unreadable binding refuses: a reset cannot repair it (the folder is not re-bound),
+        # so there is no reset and nothing is written; the person reconnects the workspace
+        raise Refused(BINDING_MISMATCH) from None
+    except (ValueError, AttributeError):
+        raise Refused("A record in the orch folder is unreadable.") from None
+    if not isinstance(stored, str):
+        raise Refused("A record in the orch folder is unreadable.")
+    if stored == here:
+        return
+    try:
+        same = os.path.samefile(stored, here)
+    except OSError:
+        same = False
+    if not same:
+        raise Refused(BINDING_MISMATCH)
 
 
 def _write_private(path: Path, text: str) -> None:

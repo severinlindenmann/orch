@@ -382,7 +382,7 @@ def _read_fails_once(monkeypatch):
     real, n = hp.saferead.read_private, []
 
     def once(*a):
-        if not n:
+        if not n and str(a[1]).endswith("human.key"):  # the human key only, not the binding
             n.append(1)
             return None  # a transient read error, once
         return real(*a)
@@ -404,6 +404,22 @@ def test_read_none_with_a_real_finding_still_resets(win, tws, monkeypatch):
     os.link(d / "human.key", d / "second-name")  # a second name: a finding, not a transient error
     assert hp.human_key(tws) != key  # read_private is None for it: reset_protection rotates the key
     assert [n["text"] for n in hp.take_notices(tws)] == [hp.RESET_NOTICE]
+
+
+def test_a_loose_or_unreadable_binding_refuses_without_a_reset(tws, monkeypatch):
+    hp.human_key(tws)
+    d = hp.key_dir(tws, create=False)
+    before = sorted(p.name for p in d.iterdir())
+    with monkeypatch.context() as m:
+        m.setattr(hp.saferead, "read_private", lambda *a: None)  # unreadable
+        with pytest.raises(Refused, match="copied or moved"):
+            hp.human_key(tws, create=False)
+    assert sorted(p.name for p in d.iterdir()) == before  # nothing written, nothing reset
+    assert hp.take_notices(tws) == []
+    os.chmod(d / "binding.json", 0o644)  # a loose binding file
+    with pytest.raises(Refused, match="copied or moved"):
+        hp.human_key(tws, create=False)
+    assert sorted(p.name for p in d.iterdir()) == before and hp.take_notices(tws) == []
 
 
 def test_posix_read_none_is_still_a_loose_file(tws, monkeypatch):
