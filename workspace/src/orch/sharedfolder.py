@@ -23,16 +23,12 @@ def _folder(root: Path, rec: dict) -> Path:
         return root.resolve()
 
 
-def others_in_folder(root: Path, ticket_id: str) -> list[dict]:
-    """Other alive runs (any ticket) in this ticket's run folder: [{ticket, title, agent}], by ticket id.
-    Empty when this ticket has no alive run of its own."""
-    me = runs.read(root, ticket_id)
-    if not me or runs.state(me) != "alive":
-        return []
-    where = _folder(root, me)
+def alive_in(root: Path, where: Path, exclude_ticket: str | None = None) -> list[dict]:
+    """Alive runs (any ticket but `exclude_ticket`) whose start folder is `where`."""
+    where = where.resolve()
     out = []
     for f in sorted((runs.run_dir(root) / "tickets").glob("*.json")):
-        if f.stem == ticket_id:
+        if f.stem == exclude_ticket:
             continue
         rec = runs.read(root, f.stem)
         if not rec or runs.state(rec) != "alive" or _folder(root, rec) != where:
@@ -42,6 +38,15 @@ def others_in_folder(root: Path, ticket_id: str) -> list[dict]:
             title = tickets.load(root, f.stem).get("title") or f.stem
         out.append({"ticket": f.stem, "title": title, "agent": rec.get("agent") or "an agent"})
     return out
+
+
+def others_in_folder(root: Path, ticket_id: str) -> list[dict]:
+    """Other alive runs (any ticket) in this ticket's run folder: [{ticket, title, agent}], by ticket id.
+    Empty when this ticket has no alive run of its own."""
+    me = runs.read(root, ticket_id)
+    if not me or runs.state(me) != "alive":
+        return []
+    return alive_in(root, _folder(root, me), ticket_id)
 
 
 def line(others: list[dict]) -> str | None:

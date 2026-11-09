@@ -22,6 +22,9 @@ KEYS = (
     "workspace.permissions",
     "workspace.live_idle_minutes",
     "workflow.agents_may_finish",
+    "workflow.copies",
+    "workflow.copies_max",
+    "workflow.copy_setup",
 )
 TEST_PROMPT = "Reply with the word ok"
 TEST_TIMEOUT = 60  # seconds
@@ -189,6 +192,9 @@ def _config(args, root: Path) -> None:
             "workspace.permissions": config.permissions(root),
             "workspace.live_idle_minutes": config.live_idle_minutes(root),
             "workflow.agents_may_finish": config.agents_may_finish(root),
+            "workflow.copies": config.copies_mode(root),
+            "workflow.copies_max": config.copies_max(root),
+            "workflow.copy_setup": config.copy_setup(root),
         }
         if args.key:
             _out(
@@ -212,6 +218,19 @@ def _config(args, root: Path) -> None:
             )
         value = config.set_agents_may_finish(root, args.value == "on")
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
+    elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
+        if _actor(args).startswith("agent:"):  # copy_setup is a command orch runs: only a person chooses it
+            raise Refused(f"Only a person can change this. Ask them to run: orch config set {args.key} ...")
+        if args.key == "workflow.copies":
+            v = config.set_copies_mode(root, args.value)
+            text = f"Saved: separate copies = {v}."
+        elif args.key == "workflow.copies_max":
+            v = config.set_copies_max(root, args.value)
+            text = f"Saved: at most {v} separate copies at once."
+        else:
+            v = config.set_copy_setup(root, args.value)
+            text = f"Saved: a new copy is prepared with: {v}." if v else "Saved: nothing runs in a new copy."
+        _out(args, {args.key: v}, text)
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)
         _out(

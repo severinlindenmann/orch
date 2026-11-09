@@ -627,7 +627,7 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
 # ------------------------------------------------------------------ local instruction file
 
 
-def write_local_file(root: Path, fn: str, line: str | None) -> bool:
+def write_local_file(root: Path, fn: str, line: str | None, harness_root: Path | None = None) -> bool:
     """The local-only instruction file: our marked block imports AGENTS.md (when the team has no shared sibling file of
     the same name without ".local" and an AGENTS.md) and the orch block. Other text in the file is kept. Returns False when skipped."""
     path = root / fn
@@ -643,8 +643,10 @@ def write_local_file(root: Path, fn: str, line: str | None) -> bool:
     )  # the team's own file: the tool reads it already
     if line and (root / "AGENTS.md").is_file() and not team_file:
         lines.append(line)
-    if combined(root):
-        lines.append(f"@{(HARNESS / 'AGENTS.orch.md').as_posix()}")
+    if combined(harness_root or root):
+        # a separate copy has no .orch/harness of its own: it imports the workspace's, by full path
+        imp = (harness_root / HARNESS / "AGENTS.orch.md") if harness_root else (HARNESS / "AGENTS.orch.md")
+        lines.append(f"@{imp.as_posix()}")
     if not lines and LOCAL_MARK[0] not in text:
         return path.exists()  # nothing to say yet: do not make the file
     block = "\n".join([LOCAL_MARK[0], *lines, LOCAL_MARK[1]]) + "\n"

@@ -169,7 +169,7 @@ _terminating = False  # the SIGTERM handler is running: it interrupted whatever 
 
 
 @contextlib.contextmanager
-def locked(root: Path, tid: str):
+def locked(root: Path, tid: str, wait: float = 10.0):
     """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +179,7 @@ def locked(root: Path, tid: str):
         # out and leave the claim behind.
         yield
         return
-    end = time.monotonic() + 10
+    end = time.monotonic() + wait
     while True:
         try:
             _create_lock(lock)
@@ -563,8 +563,11 @@ def claim(
     take_over: bool = False,
     reason: str | None = None,
     busy_text: str | None = None,
+    folder: Path | None = None,
 ) -> dict:
-    """Take the claim on a ticket, or raise Busy. A busy ticket queues `busy_text` as input (same lock)."""
+    """Take the claim on a ticket, or raise Busy. A busy ticket queues `busy_text` as input (same lock).
+    folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
+    record."""
     ticket = tickets.load(root, tid)
     with locked(root, tid):
         cur = read(root, tid)
@@ -586,6 +589,8 @@ def claim(
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
         _drop_start_prompts_locked(root, tid)
         rec = _new_record(tid, by, agent, mode, ticket, reason, root)
+        if folder is not None and Path(folder).resolve() != Path(root).resolve():
+            rec["folder"] = str(Path(folder).resolve())
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
@@ -598,6 +603,23 @@ def claim(
     tickets.mark_working(root, tid, by, label)
     notify_working(root)
     return rec
+
+
+def claim_routed(root: Path, tid: str, by: str, agent: str, mode: str, **kw) -> tuple[dict, list[str]]:
+    """claim() after deciding where the agent works (worktrees.route): (record, notes for the person). The
+    decision, the copy and the claim happen under ONE workspace lock (worktrees.start_lock), so two
+    starts at the
+    same moment cannot both find the folder free. A copy that cannot be made is never an error: the run
+    works in
+    the workspace folder (and shows the "also changing this folder" line)."""
+    from orch import worktrees
+
+    with worktrees.start_lock(root):
+        try:
+            folder, notes = worktrees.route(root, tid)
+        except Exception:  # noqa: BLE001 - copies are an extra; a start never fails because of them
+            folder, notes = root, []
+        return claim(root, tid, by, agent, mode, folder=folder, **kw), notes
 
 
 def set_process(root: Path, tid: str, run: str, pid: int, **fields) -> bool:
@@ -824,7 +846,10 @@ def plan(
     a = adapters.load(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
-    if sid and adapters.transcript_exists(name, sid, root) is False:
+    if (
+        sid
+        and adapters.transcript_exists(name, sid, root, folder=workdir_for(root, read(root, tid))) is False
+    ):
         sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
     v = {
@@ -932,7 +957,7 @@ def start(
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
         )
-        r["notes"] = notes + ([notice] if notice else [])
+        r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
     notice = adapters.command_notice(name, mode, root)
     if notice:
@@ -941,7 +966,7 @@ def start(
     if allow and not a["capabilities"]["permission_retry"]:
         notes.append(f"{a['label']} cannot be told which tools to allow; --allow was ignored.")
         allow = []
-    rec = claim(
+    rec, copy_notes = claim_routed(
         root,
         tid,
         by,
@@ -950,6 +975,7 @@ def start(
         take_over=take_over,
         busy_text=text or f"{by} asked for more work on this ticket.",
     )
+    notes += copy_notes
     try:
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
@@ -996,6 +1022,15 @@ def start(
 
 
 # ---------------------------------------------------------------- the wrapper (runs detached)
+
+
+def workdir_for(root: Path, rec: dict | None) -> Path:
+    """The folder this run's agent works in: the record's `folder` when it is a separate copy of this
+    workspace
+    (worktrees.workdir_for checks that), else the workspace folder."""
+    from orch import worktrees
+
+    return worktrees.workdir_for(root, rec)
 
 
 def _agent_environ(root: Path) -> dict:
@@ -1145,6 +1180,7 @@ def wrap(
         return 1
     set_process(root, tid, run, os.getpid())
     env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    work = workdir_for(root, rec)  # a separate copy of the folder, or the workspace itself
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
     current: dict = {}
@@ -1164,7 +1200,7 @@ def wrap(
         flags: dict = {}
         rc, out = _run_turn(
             argv,
-            root,
+            work,
             stdin,
             log,
             env,
@@ -1180,20 +1216,20 @@ def wrap(
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags.clear()
-            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             flags.clear()
-            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
         if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
             again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
             if undeliver(root, tid, again):
                 with contextlib.suppress(Exception):
                     tickets.log(root, tid, HANG_AGAIN, "orch")
         sid = new_session or adapters.parse_session(name, out, root)
-        unsaved = flags.get("hung") or adapters.transcript_exists(name, sid or "", root) is False
+        unsaved = flags.get("hung") or adapters.transcript_exists(name, sid or "", root, folder=work) is False
         if sid and new_session and unsaved:
             sid = None  # orch chose the id, but the tool never saved that conversation: never resume it
         if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
@@ -1242,7 +1278,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
 
         signal.signal(signal.SIGINT, signal.SIG_IGN)  # Escape/^C belong to the agent, not to this wrapper
     try:
-        proc = subprocess.Popen(argv, cwd=root, env=env)
+        proc = subprocess.Popen(argv, cwd=workdir_for(root, rec), env=env)
     except OSError as e:
         print(f"orch could not start the agent: {e}", file=sys.stderr)
         with contextlib.suppress(Exception):

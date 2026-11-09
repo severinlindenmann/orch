@@ -177,11 +177,14 @@ def start_live(
         )
     if not mine and session_exists(root, tid):
         tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone
-    rec = runs.claim(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)
+    rec, copy_notes = runs.claim_routed(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)
     run = rec["run"]
+    work = runs.workdir_for(root, rec)  # a separate copy of the folder, or the workspace itself
     # never blocks a start: a screen the tool still shows is explained by check_starting
     with contextlib.suppress(Exception):
         adapters.trust_folder(name, root)
+        if work != root:
+            adapters.trust_folder(name, work)
     hooks_path = runs.run_dir(root) / f"hooks-{run}.json"
     try:
         hooks = adapters.hooks_doc(name, run, root)
@@ -202,7 +205,7 @@ def start_live(
         cmd += ["--env-file", str(env_file), "--"] + p["argv"]
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
-            "-s", tid, "-c", str(root), "-e", f"ORCH_ROOT={root}", "--", *cmd,
+            "-s", tid, "-c", str(work), "-e", f"ORCH_ROOT={root}", "--", *cmd,
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -223,6 +226,7 @@ def start_live(
         "tmux": {"socket": socket_name(root), "session": tid},
         "run": run,
         "log": None,
+        "notes": copy_notes,
     }
 
 
@@ -1143,7 +1147,7 @@ def check_starting(
     if scr and scr.get("answer"):
         if answered is None or scr["what"] in answered:
             scr = None  # the wrapper answers it (or already did: the tool is still redrawing)
-        elif not scr.get("folder") or _names_own_folder(root, pane.stdout):
+        elif not scr.get("folder") or _names_own_folder(root, pane.stdout, runs.workdir_for(root, rec)):
             for i, k in enumerate(scr["answer"]):
                 if i:
                     time.sleep(PASTE_DELAY)
@@ -1176,12 +1180,13 @@ def check_starting(
     return note
 
 
-def _names_own_folder(root: Path, text: str) -> bool:
+def _names_own_folder(root: Path, text: str, work: Path | None = None) -> bool:
     if not adapters.orch_folder(root):
         return False
+    work = work or root
     lines = [ln.strip() for ln in text.splitlines()]
     joined = lines + [a + b for a, b in zip(lines, lines[1:], strict=False)]  # a long path may wrap
-    return bool({str(root), str(root.resolve())} & set(joined))  # the whole line, not a part of a path
+    return bool({str(work), str(work.resolve())} & set(joined))  # the whole line, not a part of a path
 
 
 def watch_start(root: Path, tid: str, run: str, name: str, proc: subprocess.Popen) -> list[str]:

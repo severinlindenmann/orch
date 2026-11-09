@@ -52,6 +52,26 @@
     "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
+    "work": {
+      "type": "object",
+      "description": "Optional. Where the ticket's agent works when it has a separate copy of the project folder (a git worktree made by orch, on branch orch/<ticket>). Kept for the life of the ticket. Paths are of the machine that made them: another machine ignores entries that are not its own copies. A single-repo workspace has one entry; further entries are more repositories of the same ticket.",
+      "properties": {
+        "folders": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["path", "branch"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 1000, "description": "Full path of the copy (the worktree's top folder)." },
+              "branch": { "type": "string", "minLength": 1, "maxLength": 200, "description": "The branch the copy works on, orch/<ticket>." },
+              "base": { "type": "string", "pattern": "^[0-9a-f]{40,64}$", "description": "The commit the copy was made from." },
+              "sub": { "type": "string", "maxLength": 1000, "description": "The workspace folder below the git top folder ('' or absent when the workspace is the top). The agent starts in path/sub." }
+            }
+          }
+        }
+      }
+    },
     "sessions": {
       "type": "array",
       "maxItems": 32,

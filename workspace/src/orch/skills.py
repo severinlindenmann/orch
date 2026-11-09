@@ -172,6 +172,35 @@ def apply_agent_files(root: Path) -> list[str]:
     return done
 
 
+def apply_copy_files(root: Path, work: Path) -> None:
+    """apply_agent_files for a separate copy of the project (git worktree) at `work`: the same skill links and
+    local instruction files, but the links point at the WORKSPACE's harness (the copy has no .orch/harness) and
+    the instruction file imports it by full path. The excludes live in the shared .git/info/exclude of the
+    repository, already written for the workspace. One refused link does not stop the others."""
+    from orch import adapters
+
+    sk = harness.harness_dir(root) / "skills"
+    refused = None
+    for where in _skill_places(root):
+        for n in _harness_skill_names(root):
+            harness.check_harness(root, sk / n)
+            try:
+                harness.link_skill(work, where, n, sk / n)
+            except Refused as e:
+                refused = refused or e
+    for sh in _shared_skills(root):
+        for where in _skill_places(root)[1:]:
+            try:
+                harness.link_skill(work, where, sh.name, sh)
+            except Refused as e:
+                refused = refused or e
+    for n in detected_agents(root):
+        for fn, line in ((adapters.load(n).get("files") or {}).get("instructions_link") or {}).items():
+            harness.write_local_file(work, fn, line, harness_root=root)
+    if refused:
+        raise refused
+
+
 def _shared_skills(root: Path) -> list[Path]:
     base = root / ".agents" / "skills"
     if not base.is_dir() or harness.is_link(base):
