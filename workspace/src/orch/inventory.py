@@ -230,7 +230,7 @@ def _profile_state(root: Path, orch_home: Path, profile: str | None) -> str:
 
 def connections(root: Path, *, orch_home: Path | None = None, account_home: Path | None = None):
     """(items, also_from). items = schema `connection` objects of every source, sorted by name then source;
-    the winner of a name has shadowed false, the others true. also_from = {name: [other sources]} (collisions)."""
+    the winner of a name has shadowed false, the others true. also_from = {name: [other sources]}."""
     root = Path(root)
     home = addons.home(root) if orch_home is None else orch_home
     admin = admin_servers(root, home)
