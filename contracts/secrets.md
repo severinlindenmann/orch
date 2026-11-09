@@ -108,9 +108,25 @@ an argument), `orch secret remove <name>`, `orch secret profile <name> …`. The
 ## Hiding (exact values)
 
 The hider knows every value of this workspace's key store (both sources) and runs on every string any writer writes.
-- **Needles** per key: the value; its JSON-string escaping (`json.dumps(v)[1:-1]`), URL encoding (`quote(v, safe="")`) and
-  standard base64, when they differ; for `json` keys every string leaf ≥ 8 characters (with the same encodings) and the
-  compact JSON; for multi-line values each line ≥ 16 characters.
+**A safety net, not a guarantee.** Value hiding is best effort. The guarantee of Level 1 comes from keys going straight
+to the command, never through the agent; hiding only catches what slips through (a CLI that echoes its token, an error that
+prints a header).
+
+- **Forms** (every one is required; applied once, the only nested form is url-quoted base64), for the value as UTF-8:
+  1. the value itself;
+  2. JSON-string escaped (`json.dumps(v)[1:-1]`);
+  3. URL-quoted (`quote(v, safe="")`);
+  4. hex, lower case and upper case;
+  5. base64 and base64url at all three byte alignments: encode the value with 0, 1 and 2 bytes before it, drop the
+     padding, and keep only the characters whose 6 bits lie wholly inside the value (characters at both ends that depend
+     on neighbouring bytes are trimmed). So the value is found at any offset inside a longer encoded string, e.g. HTTP
+     Basic `base64("user:token")`; the 1-2 trimmed characters at each end stay visible (at most 12 bits);
+  6. URL-quoted forms of the base64 forms of 5.
+  For `json` keys: the compact JSON plus every string leaf with all forms. For multi-line values: also each line of at
+  least 16 characters. Reference: `sec_forms` / `sec_b64_forms` in validate.py, vectors `hide`.
+- **Minimum length.** A value or form shorter than 8 characters is never hidden by exact value: hiding a short string
+  would garble normal text (every "12345" in a log) and protects nothing, because a short secret is guessable anyway. The
+  store refuses such values (Key types, above; vectors `min_len`, `too_short`).
 - **Replacement**: `[hidden: <key name>]`. Longest match first, scanning left to right; matches never overlap.
 - **Streams**: the hider keeps back the last `L-1` characters (L = longest needle) until more text comes or the stream
   ends, so a value split across chunks (pipe reads, `%output` lines, log lines) is still hidden. The streamed result equals
@@ -118,7 +134,7 @@ The hider knows every value of this workspace's key store (both sources) and run
 - **Error paths**: exception messages, tracebacks (exit 1), stderr of failed children, refusals and HTTP error bodies go
   through the same hider before they are printed, logged or recorded. A writer that cannot get a hider refuses
   (activity.md, Fail closed).
-- Known limits (Level 1): a value transformed by the program (hex, reversed, split by colour codes or line wrapping on a
+- Known limits (Level 1): a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
   terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences.
 
 ## Wrapper examples (a skill ships them; `orch-wrapper-maker` teaches agents to write them)

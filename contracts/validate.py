@@ -344,16 +344,36 @@ def kind_activity():
 
 
 # --- secrets (secrets.md) --------------------------------------------------------------------------------------------
-def sec_needles(keys):
-    """[(needle, name)] for a list of {name, type, value} (value of a json key = the object)."""
+SEC_MIN_LEN = 8  # values (and derived forms) shorter than this are never hidden by exact value (secrets.md, Hiding)
+
+
+def sec_b64_forms(v):
+    """base64 and base64url of the value at the 3 byte alignments (0, 1, 2 bytes before it), without padding and with
+    the boundary characters that depend on neighbouring bytes trimmed: matches the value anywhere inside a longer
+    encoded string (e.g. Basic base64("user:token"))."""
+    b, out = v.encode(), []
+    for k in range(3):
+        enc = base64.b64encode(b"\0" * k + b).decode().rstrip("=")
+        first, last = -(-8 * k // 6), (8 * (k + len(b))) // 6  # chars fully inside the value's bits
+        part = enc[first:last]
+        out += [part, part.translate(str.maketrans("+/", "-_"))]
+    return out
+
+
+def sec_forms(v):
+    """Every required form of one value (applied once; the only nested form is url-quoted base64)."""
     from urllib.parse import quote
 
-    out = []
+    hx = v.encode().hex()
+    b64 = sec_b64_forms(v)
+    cands = [v, json.dumps(v, ensure_ascii=False)[1:-1], quote(v, safe=""), hx, hx.upper()] + b64
+    cands += [quote(f, safe="") for f in b64]
+    return [c for c in dict.fromkeys(cands) if len(c) >= SEC_MIN_LEN]
 
-    def forms(v, name):
-        cands = [v, json.dumps(v, ensure_ascii=False)[1:-1], quote(v, safe=""), base64.b64encode(v.encode()).decode()]
-        for c in dict.fromkeys(cands):
-            out.append((c, name))
+
+def sec_needles(keys):
+    """[(needle, name)] for a list of {name, type, value} (value of a json key = the object), longest first."""
+    out = []
 
     def leaves(o):
         if isinstance(o, str):
@@ -365,21 +385,23 @@ def sec_needles(keys):
             for x in o:
                 yield from leaves(x)
 
+    def add(v, name):
+        if len(v) < SEC_MIN_LEN:
+            return
+        out.extend((f, name) for f in sec_forms(v))
+        if "\n" in v:
+            out.extend((ln, name) for ln in v.splitlines() if len(ln) >= 16)
+
     for k in keys:
         v, name = k["value"], k["name"]
         if k["type"] == "json":
             out.append((json.dumps(v, separators=(",", ":"), ensure_ascii=False), name))
             for leaf in leaves(v):
-                if len(leaf) >= 8:
-                    forms(leaf, name)
-                    if "\n" in leaf:
-                        out.extend((ln, name) for ln in leaf.splitlines() if len(ln) >= 16)
+                add(leaf, name)
         else:
-            forms(v, name)
-            if "\n" in v:
-                out.extend((ln, name) for ln in v.splitlines() if len(ln) >= 16)
+            add(v, name)
     seen, uniq = set(), []
-    for n, name in sorted(out, key=lambda x: -len(x[0])):
+    for n, name in sorted(out, key=lambda x: (-len(x[0]), x[0])):
         if n and n not in seen:
             seen.add(n)
             uniq.append((n, name))
@@ -455,9 +477,11 @@ def kind_secrets():
         _expect(f"secrets hide {c['name']} (whole)", whole, c["expect"])
         streamed = sec_hide_stream(c["chunks"], needles)
         _expect(f"secrets hide {c['name']} (streamed)", "".join(streamed), c["expect"])
-        for k in c["keys"]:
-            if k["type"] != "json" and k["value"] in c["expect"]:
-                fails.append(f"secrets hide {c['name']}: a value survives in expect")
+        for n, _ in needles:
+            if n in c["expect"]:
+                fails.append(f"secrets hide {c['name']}: a hidden form survives in expect: {n[:12]}...")
+    for c in vec["min_len"]:
+        _expect(f"secrets min_len {c['value']!r}", bool(sec_needles([{"name": "k", "type": "token", "value": c["value"]}])), c["hidden"])
     for c in vec["get"]:
         _expect(f"secrets get {c['name']}", sec_get(c), c["result"])
     for c in vec["resolve"]:
