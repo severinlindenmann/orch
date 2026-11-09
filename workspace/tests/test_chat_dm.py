@@ -627,3 +627,76 @@ def test_corrupt_thread_file_fails_closed_and_other_threads_still_sync(dm, monke
     with pytest.raises(Refused):
         chat.dm_send(root, WS, "hi")
     assert [c["ws"] for c in chat.contacts(root)].count(WS) == 1  # the list still works (count 0)
+
+
+def _pull_with(monkeypatch, root, messages):
+    calls = []
+
+    def api(r, method, path, body=None, timeout=60):
+        calls.append((method, path))
+        return 200, ({"items": messages} if method == "GET" else {})
+
+    monkeypatch.setattr(relay, "_api", api)
+    return relay._pull(root, 0)
+
+
+def test_the_normal_pull_puts_a_workspace_text_into_its_thread_with_the_senders_time(tmp_path, monkeypatch):
+    b = tmp_path
+    monkeypatch.setattr(
+        relay,
+        "_read_dir",
+        lambda root: {"workspaces": [{"id": OTHER, "name": "Pilatus", "can_send": {"text": True}}]},
+    )
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    sent = chat.tickets.now()  # a plausible sender time: now
+    msg = {
+        "id": MID,
+        "from": OTHER,
+        "to": WS,
+        "type": "text",
+        "body": {"text": "[R] hello"},
+        "created_at": sent,
+        "schema": "orch.msg/1",
+    }
+    _pull_with(monkeypatch, b, [msg])
+    # nobody opened Chat, nobody synced: the read-only thread already has it, once
+    thread = chat.dm_read(b, OTHER)["messages"]
+    assert [m["text"] for m in thread] == ["[R] hello"] and thread[0]["by"] == OTHER
+    assert thread[0]["shown_at"] == sent and thread[0]["peer_at"] == sent
+    _pull_with(monkeypatch, b, [])  # the next pull imports nothing again
+    assert len(chat.dm_read(b, OTHER)["messages"]) == 1
+
+
+def test_display_time_is_the_senders_only_when_sane(tmp_path):
+    arrival = "2026-11-09T12:00:00Z"
+    assert chat._shown_at("2026-11-09T11:59:00Z", arrival, []) == "2026-11-09T11:59:00Z"
+    assert chat._shown_at("2026-11-09T12:04:00Z", arrival, []) == "2026-11-09T12:04:00Z"  # within 5 min ahead
+    assert chat._shown_at("2026-11-09T12:06:00Z", arrival, []) == arrival  # too far in the future
+    assert chat._shown_at("2999-01-01T00:00:00Z", arrival, []) == arrival
+    earlier = [{"at": "2026-11-09T11:30:00Z", "shown_at": "2026-11-09T11:58:00Z"}]
+    assert chat._shown_at("2026-11-09T11:40:00Z", arrival, earlier) == arrival  # before the previous message
+    assert chat._shown_at("nonsense", arrival, []) == arrival
+    assert chat._shown_at(None, arrival, []) == arrival
+
+
+def test_an_agent_session_pull_never_imports(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        relay,
+        "_read_dir",
+        lambda root: {"workspaces": [{"id": OTHER, "name": "P", "can_send": {"text": True}}]},
+    )
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
+    msg = {
+        "id": MID,
+        "from": OTHER,
+        "to": WS,
+        "type": "text",
+        "body": {"text": "hi"},
+        "created_at": chat.tickets.now(),
+    }
+    _pull_with(monkeypatch, tmp_path, [msg])
+    assert not chat._dm_path(tmp_path, OTHER).exists()
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    _pull_with(monkeypatch, tmp_path, [])  # the workspace's own next pull picks the saved file up
+    monkeypatch.setattr(tickets, "current_actor", lambda by=None: by or "human:me")
+    assert [m["text"] for m in chat.dm_read(tmp_path, OTHER)["messages"]] == ["hi"]

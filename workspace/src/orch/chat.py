@@ -819,9 +819,13 @@ def can_of(flags) -> dict:
 
 
 def contacts(root: Path) -> list[dict]:
+    _dm_person()
+    return _contacts_list(root)
+
+
+def _contacts_list(root: Path) -> list[dict]:
     from orch.chat_groups import _valid_look
 
-    _dm_person()
     directory = relay._read_dir(root)
     rows = directory.get("workspaces") if isinstance(directory, dict) else None
     out = {}
@@ -916,6 +920,28 @@ def _dm_read(root: Path, ws: str) -> dict:
 
 
 DM_SEEN = 5000
+
+
+def _shown_at(peer_at, arrival: str, earlier: list) -> str:
+    """The time to DISPLAY for an inbound text: the sender's own time when it is sane (a valid instant, not more than
+    5 minutes after the arrival, not before the previous message of this thread), else the arrival time.
+    Display only: order and the 500 cap stay by arrival."""
+    try:
+        at = dt.datetime.fromisoformat(str(peer_at).replace("Z", "+00:00"))
+        at = at.replace(tzinfo=dt.UTC) if at.tzinfo is None else at.astimezone(dt.UTC)
+        arrived = dt.datetime.fromisoformat(str(arrival).replace("Z", "+00:00"))
+        arrived = arrived.replace(tzinfo=dt.UTC) if arrived.tzinfo is None else arrived.astimezone(dt.UTC)
+        if at > arrived + dt.timedelta(minutes=5):
+            return arrival
+        for m in reversed(earlier):
+            prev = dt.datetime.fromisoformat(str(m.get("shown_at") or m.get("at")).replace("Z", "+00:00"))
+            prev = prev.replace(tzinfo=dt.UTC) if prev.tzinfo is None else prev.astimezone(dt.UTC)
+            if at < prev:
+                return arrival
+            break
+        return at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError, OverflowError):
+        return arrival
 
 
 def _dm_write(root: Path, ws: str, data: dict) -> None:
@@ -1082,8 +1108,11 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
             data[ws]["messages"].append(
                 {
                     "id": mid,
-                    "at": tickets.now(),  # import time: a peer's clock never orders or evicts anything
+                    "at": (
+                        now := tickets.now()
+                    ),  # import time: a peer's clock never orders or evicts anything
                     "peer_at": str(msg.get("created_at") or "")[:40],
+                    "shown_at": _shown_at(msg.get("created_at"), now, data[ws]["messages"]),
                     "by": ws,
                     "text": relay.clean_untrusted(body["text"], 2000),
                     "state": "delivered",
@@ -1108,3 +1137,15 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
                     changed.add(ws)
         for ws in changed:
             _dm_write(root, ws, data[ws])
+
+
+def dm_import_on_pull(root: Path) -> None:
+    """Called by the workspace's own relay pull (never in an agent session): inbound workspace texts reach their thread
+    within one pull cycle, whether or not anyone opens Chat. Same bounded import as `orch chat sync` (seen ids, caps,
+    link and id checks); a failure here never disturbs the pull."""
+    if tickets.agent_tool():
+        return
+    with contextlib.suppress(Exception):
+        peers = _contacts_list(root)
+        if peers:
+            _dm_sync_contacts(root, peers)
