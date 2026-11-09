@@ -82,6 +82,7 @@ class Board:
         self.open_calls: dict[str, dict] = {}  # tool/helper id -> start event
         self.helpers: dict[str, dict] = {}
         self.usage: dict | None = None
+        self.context: dict | None = None  # how much of the saved conversation was reused: {reused: 0..100, at}
         self.denials: list[dict] = []
         self.last_step = ""
 
@@ -96,6 +97,9 @@ class Board:
         k, d = e.get("kind"), e.get("data") or {}
         if k == "run.state":
             self.state = d.get("state", self.state)
+            r = d.get("reused")
+            if isinstance(r, int) and not isinstance(r, bool) and 0 <= r <= 100:
+                self.context = {"reused": r, "at": e["at"]}
             if self.state in ("idle", "done", "failed"):
                 self.open_calls.clear()
                 for h in self.helpers.values():
@@ -165,6 +169,7 @@ class Board:
             "helpers": [h for h in self.helpers.values() if h["open"]],
             "jobs": jobs,
             "usage": usage,
+            "context": self.context,
             "denials": list(self.denials),
             "step": self.last_step if self.open_calls else "",
         }  # fmt: skip
