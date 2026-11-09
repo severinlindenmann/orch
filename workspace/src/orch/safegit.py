@@ -44,7 +44,7 @@ from orch import addons
 
 # Modules that still start git themselves. MUST SHRINK TO ZERO: each moves onto safegit. filesig.py (B8) and
 # B9's work-check join this list until they migrate.
-LEGACY = ("addons.py", "harness.py")
+LEGACY = ("addons.py", "harness.py", "filesig.py")
 
 IDENTITY = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits orch makes (bring-back)
 EMPTY_TREE = {  # by `rev-parse --show-object-format`
