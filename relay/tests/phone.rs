@@ -966,6 +966,78 @@ async fn phone_updates_scan_is_capped_per_request() {
 }
 
 #[tokio::test]
+async fn phone_can_is_scoped_to_pairing_and_returned_by_patch() {
+    let t = start().await;
+    let (ws1, ws2) = (t.add_ws("One").await, t.add_ws("Two").await);
+    let a = t.pair_phone(&[&ws1]).await;
+    let b = t.pair_phone(&[&ws2]).await;
+    let can = json!({"chat": true, "files": true, "tasks": true});
+    let denied = json!({"chat": false, "files": false, "tasks": false});
+    for (phone, own, other) in [(&a, &ws1, &ws2), (&b, &ws2, &ws1)] {
+        let (status, listing) = t.phone(phone, "GET", "/v1/phone/workspaces", None).await;
+        assert_eq!(status, 200);
+        assert_eq!(listing["items"].as_array().unwrap().len(), 1);
+        assert_eq!(listing["items"][0]["id"], own.id);
+        assert_eq!(listing["items"][0]["can"], can);
+        let (status, item) = t
+            .phone(
+                phone,
+                "PATCH",
+                &format!("/v1/phone/workspaces/{}", own.id),
+                Some(json!({"muted_until": "forever"})),
+            )
+            .await;
+        assert_eq!(status, 200);
+        assert_eq!(item["can"], can);
+        for (target, expected) in [(own, 201), (other, 403)] {
+            let (status, body) = t
+                .phone(
+                    phone,
+                    "POST",
+                    "/v1/phone/send",
+                    Some(json!({"to": target.id, "text": "hello"})),
+                )
+                .await;
+            assert_eq!(status, expected, "{body}");
+        }
+        let c = t.app.db.lock().unwrap();
+        assert_eq!(
+            orch_relay::store::phone_can(&c, &phone.0, &other.id),
+            denied
+        );
+        assert_eq!(
+            orch_relay::store::phone_can(&c, &phone.0, "ws_missing001"),
+            denied
+        );
+    }
+    // A stale pairing entry still cannot grant access to a workspace that no longer exists.
+    let c = t.app.db.lock().unwrap();
+    c.execute("DELETE FROM workspaces WHERE id=?1", [&ws1.id])
+        .unwrap();
+    assert_eq!(orch_relay::store::phone_can(&c, &a.0, &ws1.id), denied);
+    assert_eq!(orch_relay::store::phone_can(&c, &b.0, &ws2.id), can);
+}
+
+#[tokio::test]
+async fn phone_send_is_refused_after_the_workspace_is_deleted() {
+    let t = start().await;
+    let ws1 = t.add_ws("One").await;
+    let a = t.pair_phone(&[&ws1]).await;
+    let send = json!({"to": ws1.id, "text": "hello"});
+    let (status, body) = t
+        .phone(&a, "POST", "/v1/phone/send", Some(send.clone()))
+        .await;
+    assert_eq!(status, 201, "{body}");
+    {
+        let c = t.app.db.lock().unwrap();
+        c.execute("DELETE FROM workspaces WHERE id=?1", [&ws1.id])
+            .unwrap();
+    }
+    let (status, body) = t.phone(&a, "POST", "/v1/phone/send", Some(send)).await;
+    assert_eq!(status, 403, "{body}");
+}
+
+#[tokio::test]
 async fn review_question_is_stored_listed_and_answerable_but_not_pushed() {
     let t = start().await;
     let a = t.add_ws("A").await;

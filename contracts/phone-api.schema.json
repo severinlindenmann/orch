@@ -133,6 +133,14 @@
         "tags": { "type": "array", "items": { "type": "string" } },
         "online": { "type": "boolean" },
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "can": {
+          "type": "object", "required": ["chat", "files", "tasks"], "additionalProperties": false,
+          "properties": {
+            "chat": { "type": "boolean" },
+            "files": { "type": "boolean" },
+            "tasks": { "type": "boolean" }
+          }
+        },
         "open_questions": { "type": "integer", "minimum": 0 },
         "muted_until": { "$ref": "#/$defs/muted_until" },
         "icon": { "type": ["string", "null"], "description": "look.md: an id; unknown ids fall back to the letter (read shape, not the allowlist)" },
