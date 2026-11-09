@@ -156,7 +156,7 @@ def test_sentinel_empty_driver_values_really_prevent_execution(tmp_path):
     )
     assert not list(tmp_path.glob("MARK*"))
     args = safegit.driver_args(r)
-    assert "filter.a.smudge=" in args and "filter.b.process=" in args and "merge.m.driver=" in args
+    assert "filter.a.smudge=" in args and "filter.b.process=" in args and "merge.m.driver=false" in args
 
 
 def test_it_fails_closed_when_the_drivers_cannot_be_listed(hostile, tmp_path, monkeypatch):
@@ -192,7 +192,7 @@ def test_diff_like_calls_get_no_ext_diff_and_the_future_defaults(tmp_path, monke
 
 
 def test_the_cache_is_per_set_of_avoided_folders(tmp_path, monkeypatch):
-    real = Path(safegit.subprocess.run(["which", "git"], capture_output=True, text=True).stdout.strip())
+    real = Path(safegit.git_exe(tmp_path, tmp_path))
     monkeypatch.setenv("PATH", str(real.parent))
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir()
@@ -212,13 +212,13 @@ def test_a_git_in_the_repo_or_in_a_path_entry_inside_it_is_never_used(tmp_path, 
     marker = tmp_path / "FAKE-GIT-RAN"
     sh(proj / "git", f"touch {marker}")
     sh(proj / "bin" / "git", f"touch {marker}")
-    real = Path(safegit.subprocess.run(["which", "git"], capture_output=True, text=True).stdout.strip())
+    real = Path(safegit.git_exe(tmp_path, tmp_path))
     monkeypatch.setenv(
         "PATH", os.pathsep.join(["", ".", "relative/bin", str(proj / "bin"), str(real.parent)])
     )
     monkeypatch.chdir(proj)
     assert safegit.git_exe(proj) == str(real)
-    rc, out, _ = safegit.run(["--version"], proj)
+    rc, out, _ = safegit.run(["--version"], proj, filters=False)
     assert rc == 0 and out.startswith("git version") and not marker.exists()
     # only a fake one on the PATH: refused, nothing runs
     monkeypatch.setattr(safegit, "_exes", {})
@@ -317,3 +317,96 @@ def test_nothing_that_prepares_a_copy_runs_git_with_a_copy_as_cwd():
     a = text.index("def apply_copy_files")
     body = text[a : text.index("\ndef ", a + 10)]
     assert "_git" not in body and "protect_local" not in body and "exclude_set" not in body
+
+
+# ---------------------------------------------------------------- round 4
+
+
+def test_subcommand_is_found_past_global_options(tmp_path, monkeypatch):
+    assert safegit.subcommand_index(["-C", "x", "--literal-pathspecs", "-c", "a=b", "diff"]) == 5
+    assert safegit.subcommand_index(["status"]) == 0
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    for cmd in ("diff", "log", "show", "format-patch", "blame"):
+        safegit.run(["-C", ".", "--literal-pathspecs", cmd, "x"], tmp_path, filters=False)
+        i = seen[-1].index(cmd)
+        assert seen[-1][i + 1 : i + 3] == ["--no-ext-diff", "--no-textconv"], cmd
+    safegit.run(["grep", "x"], tmp_path, filters=False)
+    assert "--no-textconv" in seen[-1]
+
+
+def test_sha256_repo_gets_its_own_empty_tree(tmp_path):
+    r = tmp_path / "s"
+    p = subprocess.run(["git", "init", "-q", "--object-format=sha256", str(r)], capture_output=True)
+    if p.returncode != 0:
+        pytest.skip("this git cannot make sha256 repositories")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+    assert safegit.empty_tree(r) == safegit.EMPTY_TREE["sha256"]
+    assert plain_git(r, "hash-object", "-t", "tree", "/dev/null") == safegit.EMPTY_TREE["sha256"]
+    wt = tmp_path / "wt"
+    assert (
+        safegit.run(["worktree", "add", "--no-checkout", "-b", "q", str(wt), "HEAD"], r, filters=False)[0]
+        == 0
+    )
+    assert safegit.run(["read-tree", "HEAD"], wt, filters=False)[0] == 0
+    assert safegit.run(["checkout-index", "-a", "-f", "-u"], wt)[0] == 0
+    assert (wt / "a.txt").read_text() == "x\n"
+
+
+def test_a_merge_driver_never_runs_and_the_merge_conflicts(tmp_path):
+    r = tmp_path / "m"
+    r.mkdir()
+    plain_git(r, "init", "-q", "-b", "main")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / ".gitattributes").write_text("*.dat merge=evil\n")
+    (r / "f.dat").write_text("base\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "base")
+    plain_git(r, "checkout", "-qb", "side")
+    (r / "f.dat").write_text("theirs\n")
+    plain_git(r, "commit", "-qam", "side")
+    plain_git(r, "checkout", "-q", "main")
+    (r / "f.dat").write_text("ours\n")
+    plain_git(r, "commit", "-qam", "main")
+    mark = tmp_path / "MERGE-RAN"
+    plain_git(r, "config", "merge.evil.driver", f"touch {mark}; cp %A %A.x; exit 0")
+    rc, _, _ = safegit.run(["merge", "--no-edit", "side"], r)
+    assert not mark.exists()
+    assert rc != 0  # a conflict, not a silent success that dropped "theirs"
+    assert (r / "f.dat").read_text() != "ours\n" or rc != 0
+
+
+def test_a_copy_holds_the_committed_bytes_whatever_the_eol_attributes(tmp_path):
+    r = tmp_path / "e"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    plain_git(r, "config", "core.autocrlf", "false")
+    (r / ".gitattributes").write_text("* text=auto eol=crlf\n*.sh text eol=lf\n")
+    (r / "a.txt").write_bytes(b"one\r\ntwo\r\n")
+    (r / "b.sh").write_bytes(b"echo\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+
+    def blob(n):
+        return subprocess.run(["git", "cat-file", "blob", f"HEAD:{n}"], cwd=r, capture_output=True).stdout
+
+    wt = tmp_path / "wt"
+    assert (
+        safegit.run(["worktree", "add", "--no-checkout", "-b", "q", str(wt), "HEAD"], r, filters=False)[0]
+        == 0
+    )
+    assert safegit.run(["read-tree", "HEAD"], wt, filters=False)[0] == 0
+    assert safegit.run(["checkout-index", "-a", "-f", "-u"], wt)[0] == 0
+    if safegit.version(r) >= (2, 40):  # no attribute applies: the committed bytes, exactly
+        assert (wt / "a.txt").read_bytes() == blob("a.txt") and (wt / "b.sh").read_bytes() == blob("b.sh")
+    else:  # older git applies eol attributes (filters are still off): content is the converted form
+        assert (wt / "a.txt").read_bytes().replace(b"\r\n", b"\n") == blob("a.txt").replace(b"\r\n", b"\n")

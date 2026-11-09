@@ -16,7 +16,10 @@ sandbox and permission mode. So every call here:
 * neutralizes every filter driver (clean/smudge/process) and merge driver the repository's configuration
   defines (git has no wildcard: they are enumerated with `git config --includes --get-regexp`, which runs
   nothing), and where git is new enough (2.40) reads no attributes from the branch at all
-  (`--attr-source=<empty tree>`). FAIL CLOSED: if the enumeration fails or times out, the operation is refused
+  (`--attr-source=<empty tree of the repo's hash algorithm>`). That option also means no `text`/`eol`/
+  `working-tree-encoding` attribute applies on git >= 2.40: a copy holds the committed bytes (tests check a
+  CRLF `text=auto` repo); older git reads the attributes (filters stay neutralized).
+  FAIL CLOSED: if the enumeration fails or times out, the operation is refused
   (rc 125), never run with the repository's own drivers. `filters=False` is only for calls that touch no file
   content (rev-parse, config, worktree list);
 * adds `--no-optional-locks` to read-only calls, takes an argv list and a timeout, never a shell;
@@ -43,14 +46,18 @@ from orch import addons
 LEGACY = ("addons.py", "harness.py")
 
 IDENTITY = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits orch makes (bring-back)
-EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+EMPTY_TREE = {  # by `rev-parse --show-object-format`
+    "sha1": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "sha256": "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
+}
 TIMEOUT = 60
 REFUSED = 125  # rc: orch would not run this git call (could not check the repository's drivers)
 _DRIVER = re.compile(r"^(filter\.(.+)\.(smudge|clean|process)|merge\.(.+)\.driver)$")
-_DIFFLIKE = {"diff", "log", "show"}
+_DIFFLIKE = {"diff", "log", "show", "format-patch", "blame", "grep"}
+_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--attr-source"}
 
 _exes: dict[frozenset, str | None] = {}
-_version: tuple[int, int] | None = None
+_versions: dict[str, tuple[int, int]] = {}
 _lock = threading.Lock()
 
 
@@ -87,7 +94,7 @@ def git_exe(cwd: Path, root: Path | None = None) -> str | None:
     looks in the current folder, so a committed git.exe would run). Only absolute PATH entries count, only
     `git.exe` on Windows (never .cmd/.bat: they go through cmd.exe), and never one inside the folder we work
     in, the workspace root, or any orch worktrees folder. Cached per set of those folders."""
-    avoid = _avoid(cwd, root)
+    avoid = _avoid(cwd, root) | {"PATH=" + os.environ.get("PATH", "")}
     with _lock:
         if avoid in _exes:
             return _exes[avoid]
@@ -97,7 +104,11 @@ def git_exe(cwd: Path, root: Path | None = None) -> str | None:
             if not d or d == "." or not os.path.isabs(d):
                 continue
             p = os.path.join(d, name)
-            if os.path.isfile(p) and os.access(p, os.X_OK) and not any(_inside(p, a) for a in avoid):
+            if (
+                os.path.isfile(p)
+                and os.access(p, os.X_OK)
+                and not any(_inside(p, a) for a in avoid if not a.startswith("PATH="))
+            ):
                 found = p
                 break
         _exes[avoid] = found
@@ -158,17 +169,32 @@ def _raw(argv: list[str], cwd: Path, timeout: float, data: bytes | None = None, 
 
 
 def version(cwd: Path, root: Path | None = None) -> tuple[int, int]:
-    global _version
-    if _version is None:
+    exe = git_exe(cwd, root) or ""
+    if exe not in _versions:
         rc, out, _ = _raw(["git", "--version"], cwd, 10, None, root)
         m = re.search(r"(\d+)\.(\d+)", out)
-        _version = (int(m[1]), int(m[2])) if rc == 0 and m else (0, 0)
-    return _version
+        _versions[exe] = (int(m[1]), int(m[2])) if rc == 0 and m else (0, 0)
+    return _versions[exe]
+
+
+def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
+    """The empty tree of this repository's hash algorithm; None when that can't be found out."""
+    rc, out, _ = _raw(["git", *base_args(True), "rev-parse", "--show-object-format"], cwd, 10, None, root)
+    return EMPTY_TREE.get(out.strip()) if rc == 0 else None
+
+
+def subcommand_index(args: list[str]) -> int:
+    """Index of the git subcommand in `args`, past leading global options (-C x, -c k=v, --literal-pathspecs,
+    --opt=value ...); len(args) when there is none."""
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in _GLOBAL_WITH_VALUE else 1
+    return i
 
 
 def driver_args(cwd: Path, timeout: float = TIMEOUT, root: Path | None = None) -> list[str] | None:
-    """`-c filter.<d>.smudge= ...` and `-c merge.<d>.driver=` for every driver this repository's configuration
-    defines; None when that could not be found out (the caller refuses)."""
+    """`-c filter.<d>.smudge= ...` and `-c merge.<d>.driver=false` for every driver the repository's
+    configuration defines; None when that could not be found out (the caller refuses)."""
     rc, out, _ = _raw(
         ["git", *base_args(True), "config", "--includes", "--null", "--get-regexp",
          r"^(filter\..*\.(smudge|clean|process)|merge\..*\.driver)$"],
@@ -189,7 +215,10 @@ def driver_args(cwd: Path, timeout: float = TIMEOUT, root: Path | None = None) -
             args += ["-c", f"filter.{m[2]}.smudge=", "-c", f"filter.{m[2]}.clean=", "-c",
                      f"filter.{m[2]}.process=", "-c", f"filter.{m[2]}.required=false"]  # fmt: skip
         else:
-            args += ["-c", f"merge.{m[4]}.driver="]
+            args += [
+                "-c",
+                f"merge.{m[4]}.driver=false",
+            ]  # `false` fails: a merge conflicts, never silently drops
     return args
 
 
@@ -215,9 +244,17 @@ def run(
             return REFUSED, "", "orch could not check this repository's filters, so it did not run git here"
         extra = found
         if version(cwd, root) >= (2, 40):
-            top = [f"--attr-source={EMPTY_TREE}"]  # the branch's .gitattributes is not read at all
+            tree = empty_tree(cwd, root)
+            if tree is None:
+                return (
+                    REFUSED,
+                    "",
+                    "orch could not tell this repository's hash algorithm, so it did not run git",
+                )
+            top = [f"--attr-source={tree}"]  # the branch's .gitattributes is not read at all
     sub = list(args)
-    if sub and sub[0] in _DIFFLIKE:
-        sub[1:1] = ["--no-ext-diff", "--no-textconv"]
+    k = subcommand_index(sub)
+    if k < len(sub) and sub[k] in _DIFFLIKE:
+        sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"] if sub[k] != "grep" else ["--no-textconv"]
     rc, out, err = _raw(["git", *top, *base_args(read_only), *extra, *sub], cwd, timeout, data, root)
     return rc, out.strip() if strip else out, err

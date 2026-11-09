@@ -276,6 +276,7 @@ def _repo(root: Path) -> tuple[Path, str, str] | None:
 
 def _drop_partial(top: Path, dest: Path, branch: str, made_branch: bool) -> None:
     """A copy that did not get finished: take back exactly what this call made (this path, this branch)."""
+    # filters stay ON here: `remove` looks at file content (is it dirty?) and must not run a driver either
     _git(["worktree", "remove", "--force", str(dest)], top)
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)  # dest is the path_for() path we just made, nothing else
@@ -390,6 +391,7 @@ def create(root: Path, ticket: str) -> dict | None:
     (no git,
     git missing, no commit, a folder in the way). The caller then works in the project folder and shows the
     "also changing this folder" line."""
+    _ctx.root = root
     with start_lock(root):
         ent = (registry(root).get(ticket) or {"paths": []})["paths"]
         if ent and _mine(root, ticket, ent[0]):
@@ -521,6 +523,7 @@ def route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
     `workflow.copies_max` copies exist. Anything else: the project folder.
     Under the lock only the quick part happens (decide, git worktree, register). `after` are the slow steps
     (harness files, the setup command, the ticket's record): call them once the lock is released."""
+    _ctx.root = root  # every safegit call of this thread avoids the workspace root when it looks for git
     rec = _alive_here(root, ticket)
     if rec:  # a run is on (or about to take over) this ticket: it stays where it is
         return workdir_for(root, rec), [], []
