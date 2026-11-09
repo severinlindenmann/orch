@@ -2,14 +2,20 @@
 CLI or its login is missing. Prompts are tiny on purpose. Judged by end state (ticket sessions, claim files), not prose."""
 from __future__ import annotations
 
+import concurrent.futures
+import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
 
-from agentlib import codex_home, run_agent
+from agentlib import adh_table, codex_home, run_agent, save_transcript, tokens_from
 from lib import Skip, check, http, scenario
 
 # the core v2 scenarios have the same module name (e2e/scenarios_v2.py): load that file under another name
@@ -221,3 +227,199 @@ def r8(e):
 def r9(e):
     """Dashboard Start without tmux (one step at a time), real Claude: tasks and a summary appear, the log streams."""
     return _dashboard_start(e, "V2-R9", tmux=False)
+
+
+# ---- AG-ADH: do agents use orch on their own? (adherence benchmark, opt-in, slow and costly) ---------------------
+# 10 prompts x agents x start modes x repeats. Not part of `agents`/`all`: only by id (`e2e/run.sh AG-ADH`).
+# Config (env, passed through agents/run.sh): ADH_REPEATS (3), ADH_AGENTS (claude,codex), ADH_MODES (orch,hand),
+# ADH_PROMPTS (ids, default all), ADH_QUICK=1 (1 repeat, prompts typo+q-normalise), ADH_PARALLEL (1), ADH_TIMEOUT (420 s).
+def tickets(ws: Path) -> list[dict]:
+    return [json.loads(p.read_text()) for p in sorted((ws / ".orch/tickets").glob("t_*.json"))]
+
+
+ADH_FILES = {
+    "ingestion/__init__.py": "",
+    "ingestion/job.py": '''"""Nightly ingestion job: reads customer rows and normalises them."""
+FIELDS = ["cust_id", "name", "amount"]
+
+
+def normalise(row):
+    return {"cust_id": row["cust_id"].strip(), "name": row["name"].title(), "amount": float(row["amount"])}
+
+
+def run(rows):
+    return [normalise(r) for r in rows]
+''',
+    "ingestion/report.py": '''from ingestion.job import run
+
+
+def totals(rows):
+    out = {}
+    for r in run(rows):
+        out[r["cust_id"]] = out.get(r["cust_id"], 0) + r["amount"]
+    return out
+''',
+    "ingestion/stats.py": '''def average(values):
+    """Mean of a list of numbers (0 for an empty list)."""
+    if not values:
+        return 0
+    return sum(values) / (len(values) + 1)
+''',
+    "tests/__init__.py": "",
+    "tests/test_job.py": '''import unittest
+
+from ingestion.job import run
+from ingestion.report import totals
+
+ROWS = [{"cust_id": " c1 ", "name": "ann lee", "amount": "2.5"}, {"cust_id": "c1", "name": "ann lee", "amount": "1"}]
+
+
+class JobTest(unittest.TestCase):
+    def test_run_keeps_the_customer_id(self):
+        self.assertEqual(run(ROWS)[0]["cust_id"], "c1")
+
+    def test_totals_per_customer(self):
+        self.assertEqual(totals(ROWS), {"c1": 3.5})
+
+
+if __name__ == "__main__":
+    unittest.main()
+''',
+    "README.md": "# Ingestion\n\nThe nightly job normalises customer rows (field `cust_id`). It recieves rows as dicts and returns clean ones.\n",
+}
+ADH_PROMPTS = [  # (id, kind, text)
+    ("rename", "work", "In the ingestion job of this project, rename the field `cust_id` to `customer_id` everywhere (code and tests) and make sure the tests still pass."),
+    ("typo", "work", "There is a spelling mistake in README.md. Please fix it."),
+    ("add-test", "work", "Add a unit test to tests/test_job.py that checks `normalise` turns the name \"ann lee\" into \"Ann Lee\"."),
+    ("multi-file", "work", "Add an optional `currency` column: `normalise` should return a `currency` key (default \"EUR\" when the row has none), and the README should mention it. Update the tests."),
+    ("refactor", "work", "In ingestion/job.py, move the amount parsing out of `normalise` into a small helper `parse_amount(value)`. Behaviour must not change."),
+    ("docs", "work", "Add a short 'Running the tests' section to README.md that says to run `python3 -m unittest`."),
+    ("bug", "work", "`average([2, 4])` in ingestion/stats.py returns 2.0 but should be 3.0. Please fix the bug."),
+    ("q-normalise", "question", "What does `normalise` do with the `name` field? Just answer, do not change anything."),
+    ("q-imports", "question", "Which files in this project import from `ingestion.job`? Just answer, do not change anything."),
+    ("q-totals", "question", "Explain what `totals` returns when two rows have the same customer id. Just answer, do not change anything."),
+]
+ADH_SKIP_DIRS = {".git", ".orch", ".agents", ".claude", "__pycache__", ".pytest_cache"}
+ADH_SKIP_FILES = {"AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", ".gitignore"}
+
+
+def _adh_snapshot(root: Path) -> dict[str, tuple[str, float]]:
+    out = {}
+    for p in root.rglob("*"):
+        rel = p.relative_to(root)
+        if p.is_file() and not (set(rel.parts) & ADH_SKIP_DIRS) and rel.name not in ADH_SKIP_FILES:
+            out[str(rel)] = (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_mtime)
+    return out
+
+
+def _epoch(ts: str) -> float:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+
+
+def adh_measure(w, base: dict, pre: set[str]) -> dict:
+    """Facts of one finished run: tickets beyond the pre-made one(s), task-before-first-change, proof on done tasks."""
+    now = _adh_snapshot(w.root)
+    changed = [k for k, (h, _) in now.items() if base.get(k, (None,))[0] != h]
+    first_change = min((now[k][1] for k in changed), default=None)
+    tks = tickets(w.root)
+    new = [t for t in tks if t["id"] not in pre]
+    mine = tks if pre else new  # orch-started: the started ticket counts too
+    adds = [_epoch(h["at"]) for t in mine for h in t["history"] if h["by"].startswith("agent:") and re.fullmatch(r"Added check c\d+", h["text"])]
+    checks = [c for t in mine for c in t["checklist"]]
+    done = [c for c in checks if c.get("done")]
+    return {
+        "ticket": bool(new), "extra_tickets": len(new), "files_changed": len(changed),
+        "checks": len(checks), "done": len(done),
+        # history `at` has 1 s resolution (truncated): a task added in the same second as the change counts as first
+        "task_first": bool(adds) and first_change is not None and min(adds) <= first_change,
+        "proof": bool(done) and all(c.get("evidence") for c in done),
+    }
+
+
+def _adh_run(e, agent: str, mode: str, pid: str, kind: str, text: str, rep: int, timeout: int) -> dict:
+    name = f"ADH-{agent}-{mode}-{pid}-{rep}"
+    rec = {"agent": agent, "mode": mode, "prompt": pid, "kind": kind, "rep": rep}
+    t0 = time.time()
+    try:
+        w = real_w(e, name, agent)
+        if agent == "codex":  # orch starts `codex exec` with no flags: without a config the sandbox is read-only (a person's ~/.codex sets it)
+            (Path(codex_home(e)) / "config.toml").write_text('sandbox_mode = "workspace-write"\n')
+        for rel, txt in ADH_FILES.items():
+            (w.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (w.root / rel).write_text(txt)
+        w.sh(["git", "add", "-A"], check_rc=True)
+        w.sh(["git", "-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-qm", "fixture"], check_rc=True)
+        base = _adh_snapshot(w.root)
+        pre: set[str] = set()
+        if mode == "orch":
+            tid = w.ticket(text[:200])
+            pre = {tid}
+            w.o("ticket", "summary", tid, text)
+            r = w.j("run", "start", tid)
+            w.wait_done(tid, timeout)
+            log = (w.root / r["log"]).read_text(errors="replace") if r.get("log") else ""
+            save_transcript(e, name, f"# orch run start {tid} ({agent})\n# prompt: {text}\n\n{log}")
+            rec["tokens"], rec["timed_out"] = tokens_from(log), False
+        else:
+            run = run_agent(e, name, agent, w.root, text, timeout=timeout, env_over=w.env)
+            rec["tokens"], rec["timed_out"] = run.tokens, run.timed_out
+        rec.update(adh_measure(w, base, pre))
+    except Skip:
+        raise
+    except Exception as x:  # noqa: BLE001  one bad run must not end the benchmark
+        rec["error"] = f"{type(x).__name__}: {' '.join(str(x).split())[:200]}"
+    rec["secs"] = round(time.time() - t0)
+    return rec
+
+
+@scenario("AG-ADH", slow=True)
+def ag_adh(e):
+    """AG-ADH (opt-in, costly): adherence benchmark - do claude/codex make a ticket + tasks + proof on their own?"""
+    quick = os.environ.get("ADH_QUICK") == "1"
+    reps = int(os.environ.get("ADH_REPEATS") or (1 if quick else 3))
+    agents = [a for a in (os.environ.get("ADH_AGENTS") or "claude,codex").split(",") if a]
+    modes = [m for m in (os.environ.get("ADH_MODES") or "orch,hand").split(",") if m]
+    want = [p for p in (os.environ.get("ADH_PROMPTS") or ("typo,q-normalise" if quick else "")).split(",") if p]
+    prompts = [p for p in ADH_PROMPTS if not want or p[0] in want]
+    check(prompts and all(a in ("claude", "codex") for a in agents) and all(m in ("orch", "hand") for m in modes),
+          f"bad ADH config: agents {agents} modes {modes} prompts {want}")
+    timeout, par = int(os.environ.get("ADH_TIMEOUT") or 420), int(os.environ.get("ADH_PARALLEL") or 1)
+    jobs = [(a, m, p, r) for r in range(1, reps + 1) for a in agents for m in modes for p in prompts]
+    # rough per-run figures from AG-W2/W7 and V2-R3/R4 runs (cache reads included); real totals are printed at the end
+    est_s = sum(150 if p[1] == "work" else 60 for _, _, p, _ in jobs)
+    est_tok = sum(250_000 if p[1] == "work" else 80_000 for _, _, p, _ in jobs)
+    print(f"AG-ADH budget estimate: {len(jobs)} runs ({reps} repeat(s) x {len(agents)} agent(s) x {len(modes)} start mode(s) x "
+          f"{len(prompts)} prompt(s)); about {est_s // 60} min sequential ({est_s // 60 // max(par, 1)} min at parallel {par}), "
+          f"about {est_tok / 1e6:.1f}M tokens (rough, cache reads included)", flush=True)
+    out = Path(os.environ.get("E2E_OUT_DIR") or e.tmp)
+    records: list[dict] = []
+    skipped: set[str] = set()
+    t0, lock = time.time(), threading.Lock()
+
+    def one(job):
+        a, m, p, r = job
+        try:
+            rec = _adh_run(e, a, m, p[0], p[1], p[2], r, timeout)
+        except Skip as s:
+            skipped.add(f"{a}: {s}")
+            return
+        with lock:
+            records.append(rec)
+            (out / "adh.json").write_text(json.dumps({"config": {"repeats": reps, "agents": agents, "modes": modes, "prompts": [p[0] for p in prompts]},
+                                                      "records": records}, indent=1))
+            print(f"[{len(records)}/{len(jobs)}] {a:6} {m:4} {p[0]:12} rep{r} {rec['secs']:>4}s "
+                  + (f"ERROR {rec['error']}" if rec.get("error") else
+                     f"ticket={rec['ticket']} tasks={rec['checks']} first={rec['task_first']} proof={rec['proof']} files={rec['files_changed']}"), flush=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max(par, 1)) as ex:
+        list(ex.map(one, jobs))
+    check(records, f"every run was skipped: {sorted(skipped)}")
+    total_s, toks = time.time() - t0, sum(r.get("tokens") or 0 for r in records)
+    table = adh_table(records)
+    summary = (f"\nAG-ADH adherence (work: ticket / task before first file change / proof on done tasks; question: false tickets)\n{table}\n"
+               f"totals: {len(records)} runs, {total_s / 60:.0f} min wall, {toks:,} tokens, {sum(1 for r in records if r.get('error'))} errors"
+               + (f"; skipped: {sorted(skipped)}" if skipped else ""))
+    print(summary, flush=True)
+    (out / "adh.md").write_text(summary + "\n")
+    errs = sum(1 for r in records if r.get("error"))
+    return f"{len(records)} runs, {errs} errors, {toks:,} tokens, {total_s / 60:.0f} min; table in {out / 'adh.md'}"

@@ -236,7 +236,7 @@ def test_history_says_where_a_change_came_from(proj, run, monkeypatch):
     t = tickets.create(proj, "Odd", "human:t")
     assert t["history"][0]["via"] == "cli"
     monkeypatch.setenv("ORCH_VIA", "dashboard")
-    assert "ORCH_VIA" not in runs._agent_environ()  # an agent started from the page writes as itself
+    assert "ORCH_VIA" not in runs._agent_environ(proj)  # an agent started from the page writes as itself
 
 
 @pytest.mark.parametrize(
@@ -366,3 +366,32 @@ def test_ask_refuses_curly_apostrophe_and_natural_language_machine_key(proj, run
     assert run("ask", new_ticket(), "What\u2019s your password?")[0] == 2
     base = ["ask", new_ticket(), "Retry?", "--kind", "scheduler:failure", "--action"]
     assert run(*base, '{"key": "paste your API key"}')[0] == 2
+
+
+def test_outcome_set_merge_and_clear(proj, run, new_ticket):
+    tid = new_ticket()
+    code = run("ticket", "outcome", tid, "--changed", "Added CSV export.", "--why", "Finance needs it")[0]
+    assert code == 0
+    assert read(proj, tid)["outcome"] == {"changed": "Added CSV export.", "why": "Finance needs it"}
+    assert run("ticket", "outcome", tid, "--not-included", "PDF")[0] == 0
+    assert read(proj, tid)["outcome"]["changed"] == "Added CSV export."
+    assert read(proj, tid)["outcome"]["not_included"] == "PDF"
+    assert run("ticket", "outcome", tid, "--changed", "", "--why", "", "--not-included", "")[0] == 0
+    assert "outcome" not in read(proj, tid)
+
+
+def test_outcome_refuses_long_and_empty(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("ticket", "outcome", tid, "--why", "x" * 301)[0] != 0
+    assert run("ticket", "outcome", tid)[0] != 0
+    assert "outcome" not in read(proj, tid)
+
+
+def test_outcome_shown_by_show_on_done_only(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("ticket", "outcome", tid, "--changed", "Added CSV export.")[0] == 0
+    assert "Changed: Added CSV export." not in run("ticket", "show", tid)[1]
+    t = read(proj, tid)
+    t["status"] = "done"
+    (proj / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(t), encoding="utf-8")
+    assert "Changed: Added CSV export." in run("ticket", "show", tid)[1]

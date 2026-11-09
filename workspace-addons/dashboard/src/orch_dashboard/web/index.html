@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="pages/newticket.css">
 <link rel="stylesheet" href="pages/settings.css">
 <link rel="stylesheet" href="pages/chat.css">
+<link rel="stylesheet" href="pages/notes.css">
 <link rel="stylesheet" href="look-colors.css">
 <link rel="stylesheet" href="look.css">
 </head>
@@ -34,7 +35,7 @@
 </aside>
 <div>
 <div id="mm-bar" class="mm-bar" hidden></div>
-<header class="topbar"><span id="crumb">Home</span><button type="button" class="mm-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><i class="mm-sw"></i>Mobile mode</button><button type="button" class="btn outline sm" id="open-agent" data-action="open-agent" hidden>Open agent</button><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button></header>
+<header class="topbar"><span id="crumb">Home</span><button type="button" class="mm-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><i class="mm-sw"></i>Mobile mode</button><span class="topbar-actions"><button type="button" class="btn outline sm" id="open-agent" data-action="open-agent" hidden>Open agent</button><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button></span></header>
 <div id="connection" class="banner attn" role="status" hidden></div>
 <main id="content" class="page" aria-label="Dashboard"><div class="loading-home" role="status" aria-busy="true" aria-label="Loading"><div class="skeleton lh-title"></div><div class="skeleton lh-card"></div><div class="skeleton lh-card"></div></div></main>
 </div>
@@ -56,6 +57,7 @@
 <script src="pages/newticket.js"></script>
 <script src="pages/settings.js"></script>
 <script src="pages/chat.js"></script>
+<script src="pages/notes.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

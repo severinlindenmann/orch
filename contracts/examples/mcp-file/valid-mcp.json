@@ -1,0 +1,27 @@
+{
+ "schema": "orch.mcp/1",
+ "servers": {
+  "weather": {
+   "command": [
+    "uvx",
+    "weather-mcp"
+   ],
+   "profile": "weather",
+   "label": "Weather"
+  },
+  "crm": {
+   "url": "https://mcp.crm.example/sse",
+   "profile": "crm"
+  }
+ },
+ "allow": {
+  "weather": "*",
+  "slack": [
+   "search"
+  ],
+  "gdrive": [
+   "read_file",
+   "search"
+  ]
+ }
+}

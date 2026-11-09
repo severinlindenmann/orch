@@ -221,3 +221,117 @@ def test_summary_is_printable_one_line_and_on_one_proof(proj, run, tid):
     assert run("check", "done", tid, "c1", "--note", "n", "--pr", "PR #1", "--summary", "Done.")[0] == 0
     evs = read(proj, tid)["checklist"][0]["evidence"]
     assert [e.get("summary") for e in evs] == ["Done.", None]
+
+
+def test_record_stores_cmd_exit_and_output_tail(proj, run, validate, tid):
+    log = proj / "out.txt"
+    log.write_text("x" * 5000 + "\x1b[31mred\x00\x07 ok\n", encoding="utf-8")
+    code, out, err = run(
+        "check", "record", tid, "c1", "--cmd", "uv run pytest -q", "--exit", "1", "--output", "out.txt"
+    )
+    assert code == 0 and "Recorded for c1" in out, err
+    t = read(proj, tid)
+    ev = t["checklist"][0]["evidence"][0]
+    assert ev["type"] == "command" and ev["ref"] == "uv run pytest -q" and ev["exit"] == 1
+    assert ev["ran_at"].endswith("Z") and "files_sig" not in ev  # not a git folder
+    assert len(ev["output_tail"]) <= 2048 and ev["output_tail"].endswith("red ok\n")
+    assert "\x1b" not in ev["output_tail"] and "\x00" not in ev["output_tail"]
+    assert t["checklist"][0]["done"] is False  # recording is not finishing
+    validate(t)
+
+
+def test_record_refusals(proj, run, tid, tmp_path):
+    def refused(*output):
+        return run("check", "record", tid, "c1", "--cmd", "x", *output)[0] == 2
+
+    assert run("check", "record", tid, "c9", "--cmd", "x")[0] == 2
+    assert run("check", "record", tid, "c1", "--cmd", "  ")[0] == 2
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--exit", "99999")[0] == 2
+    outside = tmp_path.parent / "elsewhere.txt"
+    outside.write_text("secret", encoding="utf-8")
+    assert refused("--output", str(outside))
+    assert refused("--output", "-")  # standard input is gone: it is not a file inside the workspace
+    for rel in (
+        ".orch/run/k.txt",
+        ".env",
+        ".aws/log.txt",
+        "sub/.git/config",
+        "my-api-key.txt",
+        "tok.pem",
+        "a_secret.log",
+    ):
+        f = proj / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("k", encoding="utf-8")
+        assert refused("--output", rel), rel
+    (proj / "link.txt").symlink_to(outside)
+    assert refused("--output", "link.txt")
+    (proj / "ok.txt").write_text("fine", encoding="utf-8")
+    (proj / "hard.txt").hardlink_to(proj / "ok.txt")
+    assert refused("--output", "hard.txt")  # two names: refused
+    os.mkfifo(proj / "pipe.txt")
+    assert refused("--output", "pipe.txt")  # a FIFO never blocks us
+    (proj / "dir.txt").mkdir()
+    assert refused("--output", "dir.txt")
+    assert read(proj, tid)["checklist"][0]["evidence"] == []
+    (proj / "good.log").write_text("fine", encoding="utf-8")
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "good.log")[0] == 0
+
+
+def test_evidence_record_fields_are_typed():
+    ok = {"type": "command", "ref": "x", "exit": 0, "ran_at": "2026-11-09T10:00:00Z", "files_sig": "ab" * 32}
+    assert tickets.parse_evidence(json.dumps(ok))["exit"] == 0
+    for bad in (
+        {"exit": "0"},
+        {"exit": True},
+        {"exit": 1.5},
+        {"ran_at": "yesterday"},
+        {"files_sig": "XYZ"},
+        {"files_sig": "a" * 200},
+        {"output_tail": 5},
+        {"output_tail": "x" * 2049},
+        {"ran_at": "2026-99-99T99:00:00Z"},
+        {"ran_at": "2026-11-09T10:00:00+00:00"},
+        {"ran_at": "2026-11-09T10:00:00Z\n"},
+        {"output_tail": "a\x1b[31mb"},
+        {"output_tail": "a\x00b"},
+        {"output_tail": "a\x85b"},
+        {"output_tail": "a\u202eb"},
+        {"ref": "pytest \u2066 x"},
+        {"ref": "bell\x07"},
+    ):
+        with pytest.raises(tickets.Refused):
+            tickets.parse_evidence(json.dumps({"type": "command", "ref": "x", **bad}))
+
+
+def test_record_keeps_the_newest_five_runs_per_command(proj, run, tid):
+    for n in range(8):
+        tickets_run = run("check", "record", tid, "c1", "--cmd", "pytest -q", "--exit", str(n % 2))
+        assert tickets_run[0] == 0
+    run("check", "record", tid, "c1", "--cmd", "ruff check")
+    evs = read(proj, tid)["checklist"][0]["evidence"]
+    assert len([e for e in evs if e["ref"] == "pytest -q"]) == 5 and len(evs) == 6
+    assert [e for e in evs if e["ref"] == "pytest -q"][-1]["exit"] == 1  # the newest stays
+
+
+def test_trim_runs_leaves_other_proof_alone():
+    note = {"type": "note", "ref": "n"}
+    runs = [{"type": "command", "ref": "x", "ran_at": f"2026-11-09T10:00:0{i}Z"} for i in range(7)]
+    out = tickets.trim_runs([note, *runs, {"type": "command", "ref": "no ran_at"}])
+    assert note in out and len(out) == 1 + 5 + 1 and runs[0] not in out and runs[-1] in out
+
+
+def test_record_cleans_c1_and_direction_characters_from_output(proj, run, tid):
+    (proj / "o.log").write_text("ok\x85 line\u202e rtl\u2066 iso\x1b[0m end\n", encoding="utf-8")
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "o.log")[0] == 0
+    tail = read(proj, tid)["checklist"][0]["evidence"][0]["output_tail"]
+    assert tail == "ok line rtl iso[0m end\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need POSIX")
+def test_record_refuses_a_path_through_a_linked_folder(proj, run, tid, tmp_path):
+    outside = tmp_path.parent / (tmp_path.name + "_out")
+    outside.mkdir()
+    (outside / "log.txt").write_text("secret", encoding="utf-8")
+    (proj / "lnk").symlink_to(outside)
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "lnk/log.txt")[0] == 2

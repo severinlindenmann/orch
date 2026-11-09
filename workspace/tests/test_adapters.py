@@ -11,7 +11,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import adapters, config
+from orch import adapters, agentsdata, config
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,7 +25,7 @@ def _agent(root, name, **kw):
 
 def test_agents_json_is_the_contract_example_and_valid():
     schema = json.loads((CONTRACTS / "agent-adapter.schema.json").read_text(encoding="utf-8"))
-    doc = json.loads((Path(adapters.__file__).with_name("agents.json")).read_text(encoding="utf-8"))
+    doc = agentsdata.load()
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(doc)
     assert doc == json.loads((CONTRACTS / "examples/agent-adapter/valid-builtin.json").read_text("utf-8"))
     assert adapters.argv_errors(doc) == []
@@ -44,10 +44,11 @@ def test_argv_rule_checker_finds_bad_templates():
 
 RUN_CMDS = (
     "check", "ask", "log", "ref", "needs", "wait", "ticket show", "ticket list", "ticket tree", "ticket new",
-    "ticket summary", "ticket status", "ticket artifacts", "ticket artifacts-dir", "ticket wait",
-    "ticket set", "run done", "run input", "run status",
+    "ticket summary", "ticket outcome", "ticket status", "ticket artifacts", "ticket artifacts-dir",
+    "ticket wait", "ticket set", "run done", "run input", "run status",
 )  # fmt: skip
 # the agent may run the orch commands a run needs (tasks, questions, summary), nothing else
+# (ticket outcome writes only three short ticket texts: no exec, no config, no add-on or run control)
 ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
 # ask and auto mode also deny the approval commands and the approval store (defense in depth, git step 1)
 DENY = adapters.permission_args("claude", None, "ask")
@@ -330,8 +331,8 @@ def test_detect_finds_binaries_and_versions(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- the tool-name rule
 
 NAME = re.compile(r"claude|codex", re.I)
-SKIP_DIRS = {"tests", ".venv", "node_modules", "__pycache__", ".pytest_cache", "templates"}
-SKIP_FILES = {"adapters.py", "agents.json", "uv.lock"}
+SKIP_DIRS = {"agents", "tests", ".venv", "node_modules", "__pycache__", ".pytest_cache", "templates"}
+SKIP_FILES = {"adapters.py", "uv.lock"}
 
 
 def _hits() -> dict[str, int]:

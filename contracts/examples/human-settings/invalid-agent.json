@@ -1,0 +1,12 @@
+{
+ "schema": "orch.human-settings/1",
+ "workspaces": {
+  "0123456789abcdef0123456789abcdef": {
+   "focus.session_typing": {
+    "value": true,
+    "by": "agent:main",
+    "at": "2026-11-16T09:00:00Z"
+   }
+  }
+ }
+}

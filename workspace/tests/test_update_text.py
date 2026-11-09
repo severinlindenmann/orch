@@ -1,6 +1,7 @@
 """Update text across the install/reexec boundary, without installing or starting anything."""
 
 import json
+import os
 
 import pytest
 from test_addons import run, uv_calls  # noqa: F401
@@ -59,77 +60,144 @@ def test_release_title(proj, run, source):  # noqa: F811
     assert out.count("Fixes the sign button") == 1
 
 
-def test_unchanged_does_not_restart(proj, run, source, monkeypatch):  # noqa: F811
+def test_unchanged_with_nothing_running_prints_only_up_to_date(proj, run, source, monkeypatch):  # noqa: F811
     source["next"] = {}
-    monkeypatch.setattr(services, "running", lambda: pytest.fail("must not inspect/restart services"))
+    monkeypatch.setattr(services, "running", lambda: [])
     code, out, err = run("update")
     assert code == 0, err
     assert out == "orch is up to date.\n"
 
 
-@pytest.mark.parametrize("failure", [None, "row", "stop", "stoprow", "start"])
-def test_restart_only_running_here(proj, run, source, monkeypatch, failure):  # noqa: F811
-    (proj / ".orch").mkdir(exist_ok=True)
-    monkeypatch.setattr(services, "pid_alive", lambda pid: pid != 999)
+def test_unchanged_versions_still_restart_what_runs(proj, run, source, monkeypatch):  # noqa: F811
+    """A develop install keeps the version number but replaces the code: running services restart anyway."""
+    source["next"] = {}
+    called = []
     monkeypatch.setattr(
-        services,
-        "running",
-        lambda: [
-            {"workspace": str(proj.resolve()), "addon": "dashboard", "pid": 1},
-            {"workspace": str(proj.resolve()), "addon": "focus", "pid": 2},
-            {"workspace": str(proj.resolve()), "addon": "dead", "pid": 999},
-            {"workspace": str(proj / "elsewhere"), "addon": "automation", "pid": 3},
-        ],
+        addons, "_restart_updated", lambda root=None: called.append(1) or ["Restarted: dashboard (x)"]
     )
-    calls = []
-
-    def stop(root, only=None):
-        calls.append(("stop", root, only))
-        if failure == "stop":
-            raise RuntimeError("stop failed")
-        return [
-            {"addon": "dashboard", "stopped": True},
-            {
-                "addon": "focus",
-                "stopped": failure != "stoprow",
-                **({"error": "busy"} if failure == "stoprow" else {}),
-            },
-        ]
-
-    def start(root, only=None):
-        calls.append(("start", root, only))
-        if failure == "start":
-            raise RuntimeError("start failed")
-        rows = [{"addon": "dashboard", "running": True}, {"addon": "focus", "running": failure != "row"}]
-        return [r for r in rows if r["addon"] in only]
-
-    monkeypatch.setattr(services, "stop", stop)
-    monkeypatch.setattr(services, "start", start)
     code, out, err = run("update")
     assert code == 0, err
-    both = {"dashboard", "focus"}
-    expect = {
-        None: [("stop", both), ("start", both)],
-        "row": [("stop", both), ("start", both), ("start", {"focus"})],  # one retry for what is down
-        "start": [("stop", both), ("start", both), ("start", both)],
-        "stop": [("stop", both)],
-        "stoprow": [("stop", both), ("start", {"dashboard"})],  # focus did not stop: not started again
-    }[failure]
-    assert calls == [(c, proj, o) for c, o in expect]
-    if failure is None:
-        assert "Restarting dashboard, focus… done\n" in out
-    elif failure == "row":
-        assert "Restarting dashboard… done\n" in out
-        assert "focus stopped, start it with: orch start" in out
+    assert out == "orch is up to date.\nRestarted: dashboard (x)\n" and called == [1]
+
+
+class Fleet:
+    """Two workspaces with running services, recorded in ORCH_HOME's running state; start/stop are fakes."""
+
+    def __init__(self, tmp_path, monkeypatch, failure=None):
+        self.calls, self.failure = [], failure
+        self.ws = []
+        for n in ("Pilatus", "Rigi"):
+            w = tmp_path / n
+            (w / ".orch").mkdir(parents=True)
+            self.ws.append(w.resolve())
+        self.pids = {
+            (str(w), a): 100 + i * 10 + j
+            for i, w in enumerate(self.ws)
+            for j, a in enumerate(("dashboard", "focus"))
+        }
+        monkeypatch.setattr(services, "pid_alive", lambda pid: pid != 999)
+        monkeypatch.setattr(services, "running", self.running)
+        monkeypatch.setattr(addons, "_same_user", lambda pid: True)
+        self.registered = [{"workspace": str(w), "name": "dashboard"} for w in self.ws]  # consent records
+        monkeypatch.setattr(addons, "_consents", lambda: self.registered)
+        self.forged = set()  # (workspace, addon): live pid that is NOT the add-on's server
+        monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}, "focus": {}})
+        monkeypatch.setattr(services, "_call", self.call)
+        monkeypatch.setattr(services, "stop", self.stop)
+        monkeypatch.setattr(services, "start", self.start)
+
+    def call(self, root, name, m, sub, launch=None):
+        assert sub == "status"  # the proof of life comes from the add-on itself
+        if (str(root), name) in self.forged:
+            return {"running": False}
+        return {"running": True, "pid": self.pids[(str(root), name)]}
+
+    def running(self):
+        rows = [{"workspace": w, "addon": a, "pid": p} for (w, a), p in self.pids.items()]
+        return [*rows, {"workspace": str(self.ws[0]), "addon": "dead", "pid": 999}]
+
+    def stop(self, root, only=None):
+        self.calls.append(("stop", root.name, set(only)))
+        if self.failure == "stop" and root.name == "Pilatus":
+            raise RuntimeError("stop failed")
+        return [
+            {
+                "addon": a,
+                "stopped": not (self.failure == "stoprow" and a == "focus"),
+                **({"error": "busy"} if self.failure == "stoprow" and a == "focus" else {}),
+            }
+            for a in sorted(only)
+        ]
+
+    def start(self, root, only=None, envs=None):
+        self.envs = envs
+        self.calls.append(("start", root.name, set(only)))
+        if self.failure == "start":
+            raise RuntimeError("start failed")
+        rows = []
+        for a in sorted(only):
+            up = not (self.failure == "row" and a == "focus")
+            if up:
+                self.pids[(str(root), a)] += 1000  # a NEW pid
+            rows.append({"addon": a, "running": up})
+        return rows
+
+
+def test_restarts_every_workspace_in_the_running_state(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)  # the caller is in no workspace at all
+    lines = addons._restart_updated()
+    assert lines == ["Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)"]
+    both = {"dashboard", "focus"}  # the 'dead' pid is not restarted
+    assert f.calls == [
+        ("stop", "Pilatus", both),
+        ("start", "Pilatus", both),
+        ("stop", "Rigi", both),
+        ("start", "Rigi", both),
+    ]
+    assert all(p >= 1000 for p in f.pids.values())  # every service has a new pid
+
+
+@pytest.mark.parametrize("failure", ["row", "stop", "stoprow", "start"])
+def test_restart_failures_are_named_per_service(proj, tmp_path, monkeypatch, failure):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch, failure)
+    lines = addons._restart_updated()
+    text = "\n".join(lines)
+    if failure == "row":  # focus never comes up, one retry
+        assert "Restarted: dashboard (Pilatus), dashboard (Rigi)" in text
+        assert "focus (Pilatus) stopped, start it with: orch start" in text
+        assert ("start", "Pilatus", {"focus"}) in f.calls
+    elif failure == "stop":  # Pilatus stop raises, Rigi is still restarted
+        assert "Restart dashboard (Pilatus) to use the new version (stop failed: stop failed)" in text
+        assert "Restarted: dashboard (Rigi), focus (Rigi)" in text
     elif failure == "stoprow":
-        assert "Restarting dashboard… done\n" in out
-        assert "Restart focus to use the new version (stop failed: busy)" in out
-        assert "focus stopped" not in out
-    elif failure == "stop":
-        assert "Restart dashboard to use the new version (stop failed: stop failed)" in out
+        assert "Restart focus (Pilatus) to use the new version (stop failed: busy)" in text
+        assert "focus (Pilatus) stopped" not in text
+        assert ("start", "Pilatus", {"dashboard"}) in f.calls  # focus did not stop: not started again
     else:
-        assert "dashboard stopped, start it with: orch start (start failed)" in out
-        assert "… done" not in out
+        assert "dashboard (Pilatus) stopped, start it with: orch start (start failed)" in text
+        assert "Restarted" not in text
+
+
+def test_restart_runs_under_the_services_lock(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    seen = []
+    real = services.locked
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def locked(*a, **k):
+        seen.append("in")
+        with real(*a, **k):
+            yield
+        seen.append("out")
+
+    monkeypatch.setattr(services, "locked", locked)
+    orig = f.stop
+    monkeypatch.setattr(services, "stop", lambda r, only=None: seen.append("stop") or orig(r, only))
+    addons._restart_updated()
+    assert seen[0] == "in" and seen[-1] == "out" and "stop" in seen
 
 
 def test_plain_project_only(proj, run, source):  # noqa: F811
@@ -162,7 +230,9 @@ def test_service_filter_preserves_other_records(proj, monkeypatch):
     monkeypatch.setattr(services, "workspace_rows", lambda root: [])
     calls, saved = [], []
     monkeypatch.setattr(services, "_save", lambda rows: saved.append(rows))
-    monkeypatch.setattr(services, "_call", lambda root, name, m, sub: calls.append((name, sub)) or {})
+    monkeypatch.setattr(
+        services, "_call", lambda root, name, m, sub, launch=None: calls.append((name, sub)) or {}
+    )
     services.stop(proj, only={"dashboard"})
     services.start(proj, only={"dashboard"})
     assert calls == [("dashboard", "stop"), ("dashboard", "start")]
@@ -262,9 +332,9 @@ def test_only_full_hex_shas(bad):
     assert addons._sha_or_none("0123456789abcdef" * 2 + "01234567") == "0123456789abcdef" * 2 + "01234567"
 
 
-def test_network_sha_alone_does_not_restart(proj, run, source, monkeypatch):  # noqa: F811
-    source["next"] = {"sha": B40}  # same versions, GitHub sha moved
-    monkeypatch.setattr(addons, "_restart_updated", lambda root: pytest.fail("restart on a network sha"))
+def test_sha_only_change_shows_and_restarts(proj, run, source, monkeypatch):  # noqa: F811
+    source["next"] = {"sha": B40}  # same versions, sha moved
+    monkeypatch.setattr(addons, "_restart_updated", lambda root=None: [])
     code, out, err = run("update")
     assert code == 0, err
     assert out.startswith("Updating orch 0.9.3 (main")
@@ -323,7 +393,7 @@ def test_start_and_stop_never_interleave(proj, monkeypatch):
     monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
     monkeypatch.setattr(services, "workspace_rows", lambda root: [])
 
-    def call(root, name, m, sub):
+    def call(root, name, m, sub, launch=None):
         order.append(f"{sub}-begin")
         time.sleep(0.4)
         order.append(f"{sub}-end")
@@ -363,36 +433,30 @@ def test_lock_times_out_with_a_clear_message(proj):
         th.join()
 
 
-def test_restart_retries_once_and_restores_sighup(proj, run, source, monkeypatch):  # noqa: F811
+def test_restart_retries_once_and_restores_sighup(proj, tmp_path, monkeypatch):  # noqa: F811
     import signal
 
-    (proj / ".orch").mkdir(exist_ok=True)
+    f = Fleet(tmp_path, monkeypatch)
+    f.pids = {k: v for k, v in f.pids.items() if k[1] == "dashboard" and k[0] == str(f.ws[0])}
     old_hup = signal.getsignal(signal.SIGHUP)
-    up = []
-    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
-    monkeypatch.setattr(
-        services,
-        "running",
-        lambda: [{"workspace": str(proj.resolve()), "addon": n, "pid": 5} for n in ("dashboard", *up)],
-    )
-    monkeypatch.setattr(services, "stop", lambda root, only=None: [{"addon": "dashboard", "stopped": True}])
-    calls = []
+    first = f.start
+    tries = []
 
-    def start(root, only=None):
-        calls.append(set(only))
-        if len(calls) == 1:  # first try: not up yet
+    def start(root, only=None, envs=None):
+        tries.append(1)
+        if len(tries) == 1:  # first try: not up yet
+            f.calls.append(("start", root.name, set(only)))
             return [{"addon": "dashboard", "running": False}]
-        return [{"addon": "dashboard", "running": True}]
+        return first(root, only)
 
     monkeypatch.setattr(services, "start", start)
     try:
-        code, out, err = run("update")
+        lines = addons._restart_updated()
         assert signal.getsignal(signal.SIGHUP) == old_hup  # SIGHUP is only ignored during the restart
     finally:
         signal.signal(signal.SIGHUP, old_hup)
-    assert code == 0, err
-    assert calls == [{"dashboard"}, {"dashboard"}]
-    assert "Restarting dashboard… done" in out
+    assert len(tries) == 2
+    assert lines == ["Restarted: dashboard (Pilatus)"]
 
 
 def test_spawned_services_do_not_inherit_ignored_sighup():
@@ -413,24 +477,15 @@ def test_spawned_services_do_not_inherit_ignored_sighup():
     assert r.stdout.strip() == "True"
 
 
-def test_restart_matches_services_of_a_symlinked_root(proj, run, source, monkeypatch, tmp_path):  # noqa: F811
-    (proj / ".orch").mkdir(exist_ok=True)
-    link = tmp_path / "link"
-    link.symlink_to(proj, target_is_directory=True)
-    monkeypatch.chdir(link)
-    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
-    monkeypatch.setattr(
-        services, "running", lambda: [{"workspace": str(proj.resolve()), "addon": "dashboard", "pid": 5}]
-    )
-    monkeypatch.setattr(services, "stop", lambda root, only=None: [{"addon": "dashboard", "stopped": True}])
-    calls = []
-    monkeypatch.setattr(
-        services,
-        "start",
-        lambda root, only=None: calls.append(root) or [{"addon": "dashboard", "running": True}],
-    )
-    assert addons._restart_updated(link) == ["Restarting dashboard… done"]
-    assert calls == [proj.resolve()]  # one start, no second attempt for a "not up" service
+def test_restart_ignores_caller_home_and_cwd(proj, tmp_path, monkeypatch):  # noqa: F811
+    """Services started under another HOME (launchd) are found through ORCH_HOME's running state."""
+    f = Fleet(tmp_path, monkeypatch)
+    other = tmp_path / "other-home"
+    other.mkdir()
+    monkeypatch.setenv("HOME", str(other))
+    monkeypatch.chdir(other)
+    assert addons._restart_updated()[0].startswith("Restarted: dashboard (Pilatus)")
+    assert len(f.calls) == 4
 
 
 def test_dead_output_does_not_abort_the_restart(monkeypatch):
@@ -443,3 +498,207 @@ def test_dead_output_does_not_abort_the_restart(monkeypatch):
 
     monkeypatch.setattr("sys.stdout", Dead())
     addons._say("Updating orch")  # must not raise
+
+
+def test_forged_entry_with_a_live_unrelated_pid_is_neither_signalled_nor_started(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    f.forged = {(str(f.ws[0]), "dashboard"), (str(f.ws[0]), "focus")}  # all of Pilatus is forged
+    lines = addons._restart_updated()
+    assert not [c for c in f.calls if c[1] == "Pilatus"]  # no stop, no start for that workspace
+    assert "dashboard (Pilatus) not restarted (can't verify); run orch stop, then orch start, in " + str(
+        f.ws[0]
+    ) in "\n".join(lines)
+    assert "Restarted: dashboard (Rigi), focus (Rigi)" in lines  # the verified ones still restart
+
+
+def test_one_unverified_service_is_skipped_but_the_verified_sibling_restarts(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    f.forged = {(str(f.ws[0]), "focus")}
+    lines = addons._restart_updated()
+    assert ("stop", "Pilatus", {"dashboard"}) in f.calls and ("start", "Pilatus", {"dashboard"}) in f.calls
+    assert any("focus (Pilatus) not restarted (can't verify)" in x for x in lines)
+
+
+def test_other_users_process_is_not_verified(monkeypatch):
+    monkeypatch.setattr(addons.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "0\n"})())
+    assert addons._same_user(1234) is False
+
+
+def test_unregistered_workspace_is_listed_but_never_touched(proj, tmp_path, monkeypatch):  # noqa: F811
+    """A verified-looking service in a folder the person never set up (no consent record, not the cwd
+    workspace) is not stopped and not started."""
+    f = Fleet(tmp_path, monkeypatch)
+    f.registered = [r for r in f.registered if r["workspace"] == str(f.ws[0])]  # Rigi is not registered
+    lines = addons._restart_updated()
+    assert not [c for c in f.calls if c[1] == "Rigi"]
+    assert f"dashboard (Rigi) not restarted; run orch stop, then orch start, in {f.ws[1]}" in lines
+    assert "Restarted: dashboard (Pilatus), focus (Pilatus)" in lines
+    # the workspace `orch update` runs in counts as registered
+    f.calls.clear()
+    assert addons._restart_updated(f.ws[1])[0].startswith("Restarted: dashboard (Pilatus)")
+    assert ("stop", "Rigi", {"dashboard", "focus"}) in f.calls
+
+
+def test_malformed_running_entries_are_reported_not_fatal(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    services.running_path().parent.mkdir(parents=True, exist_ok=True)
+    services.running_path().write_text(json.dumps([{"workspace": 3}, "x", {"addon": "dashboard"}]))
+    assert addons._malformed_running_entries() == 3
+    lines = addons._restart_updated()  # real services.running() reads the file: nothing usable, no KeyError
+    assert f.calls == [] or lines  # (Fleet replaces running(); the count still shows)
+    assert "3 unreadable entries in the list of running services ignored" in lines
+
+
+def test_json_update_reports_skipped_entries(proj, run, source, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(addons, "_restart_updated", lambda root=None: ["x (w) not restarted; run orch stop"])
+    code, out, err = run("update", "--json")
+    assert code == 0, err
+    assert json.loads(out)["notes"][-1] == "x (w) not restarted; run orch stop"
+
+
+# ---- restart environment: the caller's plus HOME (system) and ORCH_HOME; no record replayed ------
+
+
+def _real_home():
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_dir
+
+
+def _with_env(f, rec):
+    """The Fleet's running state carries this recorded launch environment for every service."""
+    orig = f.running
+    f.running = lambda: [{**r, "env": rec} for r in orig()]
+    services.running = f.running
+
+
+def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    _with_env(f, {"HOME": _real_home(), "PATH": "/usr/bin:/bin"})
+    other = tmp_path / "test-home"
+    other.mkdir()
+    monkeypatch.setenv("HOME", str(other))  # the updater runs with a test HOME
+    lines = addons._restart_updated()
+    assert f.envs["dashboard"]["HOME"] == _real_home()  # from pwd: the agent login is found again
+    assert f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
+    assert set(f.envs["dashboard"]) == {"HOME", "ORCH_HOME"}  # nothing else is overridden
+    assert "Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)" in lines
+
+
+def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    evil = tmp_path / "evil"
+    evil.mkdir()
+    rec = {
+        "HOME": str(evil), "PATH": f"{evil}:/usr/bin", "CODEX_HOME": str(evil), "XDG_CONFIG_HOME": str(evil),
+        "CLAUDE_CONFIG_DIR": str(evil), "PYTHONPATH": str(evil), "LD_PRELOAD": str(evil / "x.so"),
+        "DYLD_INSERT_LIBRARIES": "x", "NODE_OPTIONS": "--require x", "GIT_SSH_COMMAND": "x",
+        "ORCH_REPO": "evil", "ORCH_ROOT": str(evil),
+    }  # fmt: skip
+    _with_env(f, rec)
+    monkeypatch.setenv("PATH", "/caller/path")
+    addons._restart_updated()
+    got = f.envs["dashboard"]
+    assert got["HOME"] == _real_home() and set(got) == {"HOME", "ORCH_HOME"}  # none of the record
+    merged = launchenv_apply(got)
+    assert merged["PATH"] == "/caller/path"  # the caller's own, never the recorded one
+    for k in rec:
+        if k not in ("HOME", "PATH", "ORCH_ROOT"):
+            assert merged.get(k) != rec[k]
+
+
+def launchenv_apply(over):
+    from orch import launchenv
+
+    return launchenv.apply(dict(os.environ), over)
+
+
+def test_a_different_recorded_home_or_path_is_reported_once(proj, tmp_path, monkeypatch):  # noqa: F811
+    f = Fleet(tmp_path, monkeypatch)
+    _with_env(f, {"HOME": "/some/other/home", "PATH": "/old/path"})
+    monkeypatch.setenv("PATH", "/caller/path")
+    lines = "\n".join(addons._restart_updated())
+    assert "dashboard (Pilatus) started with a different HOME/PATH; restarted with this terminal's" in lines
+    _with_env(f, {"HOME": _real_home(), "PATH": "/caller/path"})
+    assert "different" not in "\n".join(addons._restart_updated())  # same HOME and PATH: no line
+
+
+def test_without_a_system_home_the_callers_home_is_kept_and_said(proj, tmp_path, monkeypatch):  # noqa: F811
+    from orch import launchenv
+
+    f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.setattr(launchenv, "user_home", lambda: None)
+    lines = addons._restart_updated()
+    assert "HOME" not in f.envs["dashboard"] and f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
+    assert any("could not read this user's home folder; kept this terminal's HOME" in x for x in lines)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "PYTHONSTARTUP", "NODE_OPTIONS",
+     "GIT_SSH_COMMAND", "BASH_ENV", "ENV", "PERL5LIB", "RUBYOPT"],
+)  # fmt: skip
+def test_code_loading_variables_are_never_taken_from_a_record(name):
+    from orch import launchenv
+
+    assert launchenv.denied(name)
+    assert launchenv.clean({name: "x", "HOME": "/h"}) == {"HOME": "/h"}
+
+
+def test_call_adds_the_overrides_to_the_callers_environment(proj, monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw["env"])
+        return type("R", (), {"stdout": "{}", "stderr": "", "returncode": 0})()
+
+    monkeypatch.setattr(services.subprocess, "run", fake_run)
+    monkeypatch.setenv("HOME", "/caller/home")
+    monkeypatch.setenv("PATH", "/caller/path")
+    monkeypatch.setenv("CODEX_HOME", "/caller/codex")
+    over = {"HOME": "/system/home", "ORCH_HOME": "/orch/home"}
+    services._call(proj, "dashboard", {"run": "orch_dashboard"}, "start", over)
+    assert seen["HOME"] == "/system/home" and seen["ORCH_HOME"] == "/orch/home"
+    assert seen["PATH"] == "/caller/path" and seen["CODEX_HOME"] == "/caller/codex"  # the caller's, untouched
+    assert seen["ORCH_ROOT"] == str(proj.resolve())
+
+
+def test_start_records_home_and_path_for_information_only(proj, monkeypatch):
+    (proj / ".orch").mkdir(exist_ok=True)
+    monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
+    monkeypatch.setattr(services, "workspace_rows", lambda root: [])
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(services, "_call", lambda *a, **k: {"running": True, "pid": 4242})
+    monkeypatch.setenv("HOME", "/first/home")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
+    services.start(proj)
+    rec = services.running()[0]["env"]
+    assert rec == {"HOME": "/first/home", "PATH": os.environ["PATH"]}
+    assert "sk-secret" not in services.running_path().read_text()
+    monkeypatch.setenv("HOME", "/second/home")  # `orch start` again: the same pid keeps its first record
+    services.start(proj)
+    assert services.running()[0]["env"]["HOME"] == "/first/home"
+
+
+def test_pwd_failure_note_is_said_once_per_workspace(proj, tmp_path, monkeypatch):  # noqa: F811
+    from orch import launchenv
+
+    Fleet(tmp_path, monkeypatch)
+    monkeypatch.setattr(launchenv, "user_home", lambda: None)
+    lines = addons._restart_updated()
+    notes = [x for x in lines if "could not read this user's home folder" in x]
+    assert sorted(x.split(":")[0] for x in notes) == ["Pilatus", "Rigi"]  # two workspaces, one line each
+
+
+def test_a_running_services_old_record_is_cleaned_when_carried_forward(proj, monkeypatch):
+    (proj / ".orch").mkdir(exist_ok=True)
+    monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
+    monkeypatch.setattr(services, "workspace_rows", lambda root: [])
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(services, "_call", lambda *a, **k: {"running": True, "pid": 4242})
+    services.start(proj)
+    entries = json.loads(services.running_path().read_text())
+    entries[0]["env"] = {"HOME": "/h", "LD_PRELOAD": "/evil.so", "PATH": "x" * 5000, "OTHER": "y"}
+    services.running_path().write_text(json.dumps(entries))
+    services.start(proj)  # the same pid is still running: its record stays, cleaned and size-limited
+    assert services.running()[0]["env"] == {"HOME": "/h"}

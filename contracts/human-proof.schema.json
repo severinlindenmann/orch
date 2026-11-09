@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/human-proof.schema.json",
+  "title": "orch human proof v1 (hp1): proof that a person clicked on the local page (invariant H1)",
+  "description": "See human-proof.md. The proof string is hp1.<base64url payload>.<base64url HMAC-SHA256>, passed as the first stdin line with --proof-stdin.",
+  "$defs": {
+    "op": { "enum": ["run.takeover", "run.type", "run.release", "focus.settings", "insights.settings", "record.delete_detail", "secret.add", "secret.remove", "secret.profile", "conn.allow", "checkup.accept", "checkup.rollback", "checkup.send_to_admin", "checkup.reject", "ticket.verdict", "ticket.answer", "relay.connect", "private.allow", "private.move", "config.agent_add", "check.wont_do", "check.wont_do_undo", "chat.make_ticket", "chat.send", "chat.sync", "chat.contacts", "chat.thread_sync", "update", "run.stop", "relay.allow", "group.remove_member", "group.write_as_person", "group.share_file", "group.readd_member", "config.share", "config.agents_may_finish", "look.shared_pages", "ticket.finish", "run.human_input", "addon.act"] },
+    "payload": {
+      "type": "object", "required": ["op", "target", "by", "iat", "exp", "nonce"], "additionalProperties": false,
+      "properties": {
+        "op": { "$ref": "#/$defs/op" },
+        "target": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:@-]+$", "description": "For checkup.accept: <proposal id>@<record hash hex> (proposal.md). Otherwise the exact ticket id, setting name, key/profile/connection name or proposal id." },
+        "by": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$" },
+        "iat": { "type": "integer", "minimum": 0, "description": "Unix seconds." },
+        "exp": { "type": "integer", "minimum": 0, "description": "Unix seconds, at most iat + 60." },
+        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{22}$", "description": "16 random bytes, base64url." },
+        "dev": { "const": true, "description": "Test-human proof (dev mode): valid only on a workspace marked dev, signed with its dev key; by is human:test-human." }
+      }
+    },
+    "settings_record": {
+      "type": "object", "required": ["schema", "workspaces"], "additionalProperties": false,
+      "description": "<orch home>/human-settings.json: widening settings a person set with a proof, keyed like permissions.json (sha256 of the workspace's real path, 32 hex).",
+      "properties": {
+        "schema": { "const": "orch.human-settings/1" },
+        "workspaces": { "type": "object", "propertyNames": { "pattern": "^[0-9a-f]{32}$" }, "additionalProperties": {
+          "type": "object", "propertyNames": { "pattern": "^[a-z]+\\.[a-z_]+(\\.[a-z0-9-]+)?$" },
+          "additionalProperties": { "type": "object", "required": ["value", "by", "at"], "additionalProperties": false, "properties": {
+            "value": { "oneOf": [{ "type": ["boolean", "integer"] }, { "const": "*" }, { "type": "array", "maxItems": 200, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" } }] }, "by": { "type": "string", "pattern": "^human:" }, "at": { "type": "string", "format": "date-time", "pattern": "Z$" }
+          } }
+        } }
+      }
+    }
+  }
+}

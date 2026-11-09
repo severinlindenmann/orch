@@ -70,6 +70,7 @@ def forget(root: Path, nonce: str | None) -> None:
 
 
 def start(root: Path) -> int:
+    root = root.resolve()  # --dir, cwd and ORCH_ROOT name one folder
     pid = running_pid(root)
     if pid:
         return pid
@@ -81,7 +82,7 @@ def start(root: Path) -> int:
     with runfiles.open_append(d / "automation.log") as out:
         proc = subprocess.Popen([sys.executable, "-P", "-m", "orch_automation", "--dir", str(root), "run"], cwd=root,
                                 stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                env={**os.environ, NONCE_ENV: nonce}, **kw)
+                                env={**os.environ, "ORCH_ROOT": str(root.resolve()), NONCE_ENV: nonce}, **kw)
     end = time.time() + 15
     while time.time() < end:
         rec = runfiles.read_json(d / "automation.json")

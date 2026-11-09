@@ -1,0 +1,35 @@
+{
+ "v": 1,
+ "seq": 15,
+ "run": "r_8k2m01",
+ "session": "3f2a9c1e-77aa-4b2e-9d10-1c2b3a4d5e6f",
+ "agent": "main",
+ "parent": null,
+ "at": "2026-11-16T09:12:05Z",
+ "ticket": "t_inv7c2",
+ "harness": "claude",
+ "coverage": "full",
+ "id": "r_8k2m01:15",
+ "via": "broker",
+ "kind": "key.use",
+ "text": "Key stripe-key not given: not in this profile",
+ "used": {
+  "kind": "key",
+  "name": "stripe-key",
+  "action": "get",
+  "source": "admin",
+  "version": null
+ },
+ "outcome": {
+  "ok": false,
+  "error": "Not allowed by this profile",
+  "ms": null
+ },
+ "detail": null,
+ "data": {
+  "profile": "billing",
+  "command": null,
+  "skill": null,
+  "refused": "get_off"
+ }
+}

@@ -35,7 +35,8 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
                                   and pictures only, at most 2 MB each, named by orch (`orch ticket attach`), never a person's path
   secrets/                        GITIGNORED
     publish.json                  {"url": "https://publish.severin.io", "workspace": "ws_…", "token": "orp_…"}
-    relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…", "token": "orn_…"}
+    relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…"}: no token; the token lives only in the
+                                  relay record in the guarded orch home (human-proof.md, relay.connect)
     allows.json                   {"given": [{token, peer, kind, key, mode, message_id, used}], "received": [{token, peer, kind, key}]}
     credentials.json              {"<NAME>": "<value>"} from `orch relay refresh`
     mcp.json                      {"mcpServers": {"<name>": {…}}} from `orch relay refresh`
@@ -56,6 +57,8 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
     hooks-<run>.json              tool hook settings written for one live run ({orch_hooks_file} in agent-adapter.schema.json)
     <add-on name>/                runtime files of an add-on's background process (pid, port, nonce, log).
                                   Never trusted alone: a pid is used only when > 1 and its identity is checked (addon-manifest.md, Background)
+  record/                         GITIGNORED. What agents did: runs/<run>.jsonl, detail/, jobs/, counts/, proposals/, outbox-usage/
+                                  (activity.md). Never committed; syncs with the folder if the folder syncs to a cloud drive
   addons/<name>/                  the add-on's own folder; only it writes here. GITIGNORED. Kept on remove, deleted with --purge
     (scheduler: state.json {"t_…": {"last_run", "next_run"}}, logs/<ticket>-<time>.log)
 received/                         files saved by `orch relay download` (visible, next to the work; ignore line from the relay add-on's manifest)
@@ -64,7 +67,7 @@ received/                         files saved by `orch relay download` (visible,
 ## Local-only lines (`.orch/.gitignore`, written first by `orch init` and before any secret is stored)
 
 ```
-.gitignore  .local-id  secrets/  inbox/  inbox-seen.json  inbox-notes.json  outbox/  addons/  run/  harness/  tickets/*/evidence/
+.gitignore  .local-id  secrets/  inbox/  inbox-seen.json  inbox-notes.json  outbox/  addons/  run/  harness/  tickets/*/evidence/  record/  .usage-salt
 ```
 
 The team's `.gitignore` is never edited. An active add-on adds its own lines from its manifest `gitignore` key

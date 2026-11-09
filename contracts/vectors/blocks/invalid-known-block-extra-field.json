@@ -1,0 +1,18 @@
+{
+ "name": "known block extra field",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "job",
+  "blocks": [
+   {
+    "type": "stat",
+    "label": "Rows",
+    "value": 3,
+    "html": "<b>3</b>"
+   }
+  ]
+ },
+ "valid": false,
+ "shows": [],
+ "fallback": 0
+}

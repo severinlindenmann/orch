@@ -1,0 +1,14 @@
+{
+ "schema": "orch.mcp/1",
+ "servers": {
+  "weather": {
+   "command": [
+    "uvx",
+    "weather-mcp"
+   ],
+   "env": {
+    "API_KEY": "fake-token-Q7xP2mK9vL4"
+   }
+  }
+ }
+}
