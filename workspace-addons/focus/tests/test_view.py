@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import jsonschema
@@ -187,3 +188,22 @@ def test_view_asks_orch_twice_at_the_same_time_not_one_after_the_other(ws, tmp_p
     t0 = time.monotonic()
     build(ws, str(slow))
     assert time.monotonic() - t0 < 1.7
+
+
+@pytest.mark.parametrize("loc", ["de_CH.UTF-8", "en_GB.UTF-8", "fr_FR.UTF-8"])
+def test_a_live_session_is_counted_under_any_mac_language(ws, fake_orch, monkeypatch, loc):
+    """fb20 (lane C): `ps -o lstart=` printed "Mo.  9 Nov. ..." under a non-English Mac language, the start time
+    did not parse, the run looked like another process with the same pid, and Focus said "0 Running now"."""
+    from orch_focus import livedata
+
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setenv("LANG", "C")
+    core_form = livedata._core_start(subprocess.run(  # what core writes in the claim record (UTC, ISO)
+        ["ps", "-o", "lstart=", "-p", str(os.getpid())], capture_output=True, text=True, check=True
+    ).stdout.strip())
+    assert core_form
+    monkeypatch.setenv("LC_ALL", loc)
+    monkeypatch.setenv("LANG", loc)
+    claim(ws, pid_started=core_form)
+    v = build(ws, str(fake_orch))
+    assert v["blocks"][0]["value"] == 1

@@ -444,4 +444,4 @@ def test_a_view_that_needs_a_few_seconds_is_not_stale(ws, fake_orch):
     date" and hid new sessions; the default limit leaves room for it."""
     from orch_dashboard import views
 
-    assert views.TIMEOUT >= 8.0
+    assert views.TIMEOUT >= 10.0
