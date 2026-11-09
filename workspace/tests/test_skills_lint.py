@@ -21,6 +21,7 @@ HUMAN_ONLY = {
     *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
+    "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
     "init",
     "share",

@@ -187,10 +187,12 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files", "title_auto"))
+    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files", "title_auto", "plan_first"))
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
+    if _flag(a.get("plan_first")):
+        flags.append("--plan-first")
     long_text = a.get("long_text")
     if long_text is not None:
         _text(long_text, "text", limit=MAX_LONG)
@@ -328,6 +330,26 @@ def _check_set(a):
         raise BadRequest("Say done or not done.")
     if a["done"]:
         return ["check", "done", _tid(a.get("ticket")), cid], [f"--note={TICKED_NOTE}"], []
+    return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
+
+
+def _check_wont_do(a):
+    _only(a, ("ticket", "check", "reason"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    reason = _text(a.get("reason", ""), "reason", empty=True, limit=200).strip()
+    if "\n" in reason or "\r" in reason:
+        raise BadRequest("The reason must be one line.")
+    return ["check", "wont-do", _tid(a.get("ticket")), cid], [f"--reason={reason}"] if reason else [], []
+
+
+def _check_reopen(a):
+    """Open a step again (also a Won't do step): `orch check reopen <ticket> <task>`."""
+    _only(a, ("ticket", "check"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
     return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
 
 
@@ -534,6 +556,8 @@ OPS = {
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
+    "check.wont_do": _check_wont_do,
+    "check.reopen": _check_reopen,
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,

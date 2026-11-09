@@ -34,8 +34,10 @@ from orch import (
     runs,
     runs_live,
     services,
+    sharedfolder,
     term,
     tickets,
+    workcheck,
 )
 from orch import init as init_mod
 from orch.errors import Refused
@@ -100,8 +102,7 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
-    d, n = tickets.checks_done(t)
-    return f"{d} of {n} done" if n else ""
+    return tickets.progress_text(t)
 
 
 def _line(t: dict) -> str:
@@ -151,11 +152,15 @@ def _who_added(t: dict, c: dict, ev: dict) -> str:
 
 def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:
     q = next((q for q in open_q if q.get("check") == c["id"]), None)
-    mark = "✓" if c["done"] else ("◐" if c.get("state") == "doing" else "○")
+    wont = bool(c.get("wont_do"))
+    mark = "✓" if c["done"] else ("–" if wont else ("◐" if c.get("state") == "doing" else "○"))
     line = f"  {mark} {c['id']} {c['text']}"
-    if q and not c["done"]:
+    if wont:
+        why = "".join(ch for ch in str(c.get("reason") or "") if ch.isprintable())
+        line += "   Won't do" + (f": {why}" if why else "")
+    if q and not c["done"] and not wont:
         line += f"   waiting for your answer ({q['id']})"
-    if c.get("state") == "doing" and not c["done"] and root is not None:
+    if c.get("state") == "doing" and not c["done"] and not wont and root is not None:
         who = c.get("by", "someone")
         if tickets.doing_stale(root, t, c):
             line += f"   {who} was on it ({_ago(c.get('at', ''))}, not running)"
@@ -188,7 +193,11 @@ def _show(t: dict, root: Path | None = None) -> str:
         f"Status: {tickets.STATUS_WORDS[t['status']]}" + (f" - {_progress(t)}" if _progress(t) else "")
     )
     if n and d == n:
-        out.append(f"✓ All done · {n} of {n}")
+        out.append(
+            f"✓ All done · {_progress(t)}"
+            if tickets.checks_split(t)[1] == 0
+            else f"✓ All resolved · {_progress(t)}"
+        )
     out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
@@ -208,6 +217,8 @@ def _show(t: dict, root: Path | None = None) -> str:
         cc = tickets.children_counts(tickets.list_all(root), t["id"])
         if cc["total"]:
             out.append(f"Sub-tickets: {cc['closed']} of {cc['total']} closed")
+    if root is not None and (shared := sharedfolder.line(sharedfolder.others_in_folder(root, t["id"]))):
+        out.append(shared)
     if t.get("waiting_on"):
         w = t["waiting_on"]
         if w["kind"] == "time":
@@ -356,6 +367,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
+    x = sub.add_parser("work-check", parents=[common], help="say so when files changed without a ticket")
+    x.add_argument("--hook", help=argparse.SUPPRESS)  # a tool's hook
     u = sub.add_parser("update", parents=[common], help="install the latest orch and the add-ons you use")
     u.add_argument("--project-only", action="store_true", help=argparse.SUPPRESS)
     u.add_argument("--update-nonce", help=argparse.SUPPRESS)
@@ -381,6 +394,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
         "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
+    )
+    x.add_argument(
+        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
     )
     x.add_argument(
         "--ext",
@@ -430,6 +446,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
     )
+    x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
+    x.add_argument("id")
+    x.add_argument("--goal", required=True)
+    x.add_argument("--not-included", dest="not_included")
     x = t.add_parser(
         "attach", parents=[common], help="keep a text file or picture (read from stdin) with the ticket"
     )
@@ -477,13 +497,17 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--after", required=True, metavar="CID")
     for name, hlp in (
         ("remove", "remove a task (kept in the history)"),
-        ("reopen", "open a done task again"),
+        ("reopen", "open a done or won't-do task again"),
         ("start", "mark a task as being worked on"),
         ("stop", "clear the working mark"),
     ):
         x = c.add_parser(name, parents=[common], help=hlp)
         x.add_argument("id")
         x.add_argument("check")
+    x = c.add_parser("wont-do", parents=[common], help="a person decides a task will not be done")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--reason", metavar="TEXT", help="one line, why (optional)")
     x = c.add_parser("record", parents=[common], help="record that a command ran (orch does not run it)")
     x.add_argument("id")
     x.add_argument("check")
@@ -667,6 +691,8 @@ def run(args: argparse.Namespace) -> None:
         # The e2e test human (humanproof.dev_proof_cli: test install, ~/.orch-test, allowlisted ops, no agent
         # context). Printed on stdout, to be piped into `<command> --proof-stdin`.
         print(humanproof.dev_proof_cli(root, args.op, args.target, getattr(args, "by", None)))
+    elif cmd == "work-check":
+        workcheck.run(root, args.json)
     elif cmd == "update":
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
             # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official
@@ -719,6 +745,7 @@ def run(args: argparse.Namespace) -> None:
             tickets.parse_ext_args(args.ext, lambda a: addons.active_ext_schema(root, a)),
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
+            plan_first=args.plan_first,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -801,6 +828,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "title":
         t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
         _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "plan":
+        t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
+        _out(args, t, "Plan written.")
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         r = tickets.attach(root, args.id, args.name, data, by())
@@ -853,6 +883,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
+    elif cmd == "check" and sub == "wont-do":
+        t, c = tickets.check_wont_do(root, args.id, args.check, by(), args.reason)
+        _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
     elif cmd == "check" and sub == "record":
         t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
         _out(args, c, f"Recorded for {c['id']}: {c['evidence'][-1]['ref']}")
@@ -1062,12 +1095,14 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
         args.on = "ticket:" + tickets.resolve(root, on[len("ticket:") :])
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, watchdog=None) -> int:
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
     argv = sys.argv[1:] if argv is None else list(argv)
     humanproof.CURRENT_ARGV = list(argv)  # what a hand-off to the dashboard will run (H1)
+    if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
+        return workcheck.hook_main(argv, watchdog)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]
     want_json = "--json" in argv

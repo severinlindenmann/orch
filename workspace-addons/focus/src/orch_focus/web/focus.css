@@ -39,6 +39,8 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-task.doing .st{border-color:var(--brand);border-top-color:transparent;animation:orch-spin 1.2s linear infinite}
 .fx[data-state=stopped] .fx-task.doing .st,.fx[data-state=needs] .fx-task.doing .st{animation:none;border-top-color:var(--brand)}
 .fx-task.done .tt{text-decoration:line-through;text-decoration-color:var(--text-faint)}
+.fx-task.wont .tt{text-decoration:line-through;color:var(--text-muted)}
+.fx-task-reason{padding-left:32px;font-size:11px}
 .fx-task .sub{display:block;font-size:11px;color:var(--text-faint)}
 .fx-helper{display:grid;gap:6px;padding:7px 8px;font-size:12px;color:var(--text-muted)}
 .fx-helper .row{gap:6px;flex-wrap:nowrap}

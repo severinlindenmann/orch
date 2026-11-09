@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -28,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, procs, runhooks, services, tickets
+from orch import adapters, addons, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -318,7 +319,9 @@ def new_run_id() -> str:
     return "r_" + "".join(secrets.choice(_ALPHA) for _ in range(8))
 
 
-def _new_record(tid: str, by: str, agent: str, mode: str, ticket: dict, reason: str | None) -> dict:
+def _new_record(
+    tid: str, by: str, agent: str, mode: str, ticket: dict, reason: str | None, root: Path | None = None
+) -> dict:
     t = tickets.now()
     rec = {
         "schema": "orch.run/1",
@@ -327,9 +330,11 @@ def _new_record(tid: str, by: str, agent: str, mode: str, ticket: dict, reason: 
         "by": by,
         "agent": agent,
         "mode": mode,
+        "folder": str(Path(root).resolve()) if root else None,
         "tmux": None,
         "pid": None,
         "pid_started": None,
+        "host": host(),
         "started_at": t,
         "renewed_at": t,
         "pending": False,
@@ -658,6 +663,7 @@ def claim(
     take_over: bool = False,
     reason: str | None = None,
     busy_text: str | None = None,
+    folder: Path | None = None,
 ) -> dict:
     """Take the claim on a ticket, or raise Busy. A busy ticket queues `busy_text` as input (same lock)."""
     ticket = tickets.load(root, tid)
@@ -680,7 +686,7 @@ def claim(
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
         _drop_start_prompts_locked(root, tid)
-        rec = _new_record(tid, by, agent, mode, ticket, reason)
+        rec = _new_record(tid, by, agent, mode, ticket, reason, Path(folder) if folder else root)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
@@ -722,19 +728,24 @@ def renew(root: Path, tid: str, run: str, ticket: dict | None = None, seen: bool
         return rec
 
 
+def _release_locked(root: Path, tid: str, rec: dict) -> None:
+    """Delete the claim and the files made for this run (the caller holds the run lock)."""
+    _drop_start_prompts_locked(root, tid)
+    _delete(root, tid)
+    for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
+        (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
+
+
 def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool = False) -> dict:
     """End a claim. With keep_if_pending the claim stays while input waits (the wrapper runs once more)."""
     with locked(root, tid):
         rec = read(root, tid)
         if not rec or (run and rec["run"] != run):
             return {"released": False, "pending": bool(undelivered(root, tid))}
-        _drop_start_prompts_locked(root, tid)
         waiting = bool(undelivered(root, tid))
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
-        _delete(root, tid)
-        for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
-            (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
+        _release_locked(root, tid, rec)
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
     return {"released": True, "pending": waiting}
 
@@ -791,6 +802,181 @@ def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
         return False
 
 
+# ---------------------------------------------------------------- a start that never got an agent
+
+START_TIMEOUT_SECONDS = 60  # a started run has this long to get its agent going, then it is said not to have
+
+
+def start_timeout_seconds() -> float:
+    """START_TIMEOUT_SECONDS; ORCH_RUN_START_TIMEOUT_SECONDS changes it (tests)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_START_TIMEOUT_SECONDS", START_TIMEOUT_SECONDS))
+    except ValueError:
+        return START_TIMEOUT_SECONDS
+
+
+def agent_up(rec: dict) -> bool:
+    """The agent of this claim is going: its process exists (one turn at a time) or the live tool is up."""
+    if rec.get("agent_pid") or rec.get("up"):
+        return True
+    if rec.get("mode") == "live":
+        return (rec.get("live") or {"state": "starting"}).get("state") != "starting"
+    return False
+
+
+_NO_LOGIN = re.compile(r"not logged in|log ?in|sign ?in|authenticat|api key|unauthori[sz]ed|credential", re.I)
+
+
+def start_failure_reason(root: Path, rec: dict) -> str:
+    """Why no agent appeared, as ONE OF A FIXED SET of plain messages. Never text copied from the agent's log
+    (it can hold keys, tokens or credential URLs, and this goes to ticket history, Chat, the phone, hooks)."""
+    name = str(rec.get("agent") or "")
+    with contextlib.suppress(Exception):
+        binary = (adapters.load(name, root).get("detect") or {}).get("binary")
+        if binary and not shutil.which(binary):
+            return "agent command not found"
+    tail = ""
+    log = rec.get("log")
+    if log:
+        with contextlib.suppress(OSError):
+            data = (root / log).read_bytes()[-2000:].decode("utf-8", "replace")
+            lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+            tail = lines[-1] if lines else ""
+    if tail and _NO_LOGIN.search(tail):
+        return "no login"
+    if rec.get("mode") == "live":
+        from orch import runs_live
+
+        if not shutil.which("tmux"):
+            return "tmux is not installed"
+        with contextlib.suppress(Exception):
+            if not runs_live.session_exists(root, rec["ticket"]):
+                return "couldn't open the terminal session"
+    with contextlib.suppress(Exception):
+        from orch import syncgate
+
+        if syncgate.live_holder(root) is not None:
+            return "orch is syncing"
+    return "no agent session appeared"
+
+
+def _log_detail(root: Path, rec: dict) -> str:
+    from orch.phone_view import redact
+
+    with contextlib.suppress(OSError):
+        data = (root / rec["log"]).read_bytes()[-2000:].decode("utf-8", "replace")
+        lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+        return _clip(redact(lines[-1]), 200) if lines else ""
+    return ""
+
+
+PANE_ALIVE_SECONDS = 60  # a live terminal counts as starting up while what it shows keeps changing
+
+
+def _live_pane_has_output(root: Path, tid: str, rec: dict | None = None, at: float | None = None) -> bool:
+    """A live session that shows output which CHANGED within PANE_ALIVE_SECONDS is starting up, not missing.
+    The first sight of a screen counts as a change; a screen that then stays the same (an error with an open
+    shell) stops counting after PANE_ALIVE_SECONDS, so it still times out. The hash and time of the last
+    change are kept in the run record."""
+    import hashlib
+
+    from orch import runs_live
+
+    at = time.time() if at is None else at
+    with contextlib.suppress(Exception):
+        if not runs_live.session_exists(root, tid):
+            return False
+        pane = runs_live.tmux(root, "capture-pane", "-p", "-t", runs_live.target(tid))
+        text = pane.stdout.strip() if pane is not None and pane.returncode == 0 else ""
+        if not text:
+            return False
+        digest = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+        with locked(root, tid):
+            cur = read(root, tid)
+            if not cur or (rec and cur["run"] != rec["run"]):
+                return False
+            if cur.get("pane_hash") != digest:
+                cur["pane_hash"], cur["pane_changed_at"] = digest, _iso(at)
+                _write(root, cur)
+                return True
+            return at - _parse(cur["pane_changed_at"]) < PANE_ALIVE_SECONDS
+    return False
+
+
+def _stuck(rec: dict, at: float) -> bool:
+    """No agent after the limit (a live tool gets three times as long: it is a whole terminal start-up)."""
+    limit = start_timeout_seconds() * (3 if rec.get("mode") == "live" else 1)
+    try:
+        return not agent_up(rec) and at - _parse(rec["started_at"]) >= limit
+    except (KeyError, ValueError):
+        return False
+
+
+def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | None:
+    """`orch run status` and Chat (polled): a run that had START_TIMEOUT_SECONDS and still has no agent
+    is ended, and a person is told why (the ticket waits with the reason; in Chat a message from the workspace
+    replaces "is thinking"). Returns the text said, else None. Never raises."""
+    at = time.time() if at is None else at
+    try:
+        rec = read(root, tid)
+        # only this machine's own runs (a claim file that arrived by sync is not ours to judge)
+        if not rec or rec.get("host") != host() or not _stuck(rec, at):
+            return None
+        if rec.get("mode") == "live" and _live_pane_has_output(root, tid, rec, at):
+            return None
+        text = f"Couldn't start the agent: {start_failure_reason(root, rec)}"
+        with locked(root, tid):  # decide and release in one step: a run that got its agent meanwhile stays
+            cur = read(root, tid)
+            if not cur or cur["run"] != rec["run"] or not _stuck(cur, at):
+                return None
+            _release_locked(root, tid, cur)
+        runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])
+        _stop_leftovers(root, tid, rec)  # only after the claim is really gone
+        _say_start_failed(root, tid, rec, text)
+        return text
+    except Exception as e:  # noqa: BLE001 - never fails the status call that asks, but is never silent
+        print(
+            f"orch: could not check whether {tid} got its agent: {e.__class__.__name__}: {e}", file=sys.stderr
+        )
+        return None
+
+
+def _stop_leftovers(root: Path, tid: str, rec: dict) -> None:
+    """What is left of the start: its wrapper (only when the pid is the one recorded with its start time: a
+    reused pid is never killed) and a live run's terminal session (exact name)."""
+    pid = rec.get("pid")
+    if isinstance(pid, int) and rec.get("pid_started") and _running(pid, rec["pid_started"]):
+        with contextlib.suppress(Exception):
+            kill_tree(pid)
+    if rec.get("mode") == "live":
+        from orch import runs_live
+
+        with contextlib.suppress(Exception):
+            runs_live.tmux(root, "kill-session", "-t", runs_live.target(tid))  # "=name:" matches exactly
+
+
+def _say_start_failed(root: Path, tid: str, rec: dict, text: str) -> None:
+    """Where a person looks: the run line (ticket waits with the reason), Chat, ticket history, the log."""
+    by = f"agent:{rec.get('agent')}"
+    if rec.get("log"):
+        detail = _log_detail(root, rec)  # read BEFORE orch's own line goes in: it is the agent's last line
+        with contextlib.suppress(OSError), open_log(root / rec["log"]) as f:
+            f.write((text + "\n").encode("utf-8"))
+            if detail:  # the agent's own last line, for the person who opens this log: redacted
+                f.write(("orch: the agent's last line was: " + detail + "\n").encode("utf-8"))
+    with contextlib.suppress(Exception):
+        tickets.log(root, tid, text, "orch")
+    if tickets.is_general(root, tid):  # Chat: an answer from the workspace instead of "is thinking" for ever
+        from orch import chat, relay
+
+        with contextlib.suppress(Exception):
+            chat.record(root, relay.new_id(), addons.workspace_id(root) or "workspace", "orch", text)
+    else:
+        with contextlib.suppress(Exception):
+            tickets.wait_for_start(root, tid, text, by)
+    runhooks.fire("run_state", root=root, tid=tid, run=rec["run"], state="start_failed", reason=text)
+
+
 # ---------------------------------------------------------------- what the agent is told
 
 
@@ -813,6 +999,11 @@ def _description_plan(ticket: dict) -> list[str]:
 def _done_when_plan(ticket: dict) -> list[str]:
     if not ticket.get("done_when"):
         return []
+    if _plan_open(ticket):  # the plan comes first: no "then start"
+        return [
+            "The person described what should be true when it is done: "
+            f"{_clip(ticket['done_when'], 2000)}. Use it for the done-when of the steps in the plan."
+        ]
     covers = 'Give each task `--covers "<the part of Done when it covers, quoted>"` so every part has a task.'
     if ticket.get("checklist"):
         if any(c.get("covers") for c in ticket["checklist"]):
@@ -827,6 +1018,40 @@ def _done_when_plan(ticket: dict) -> list[str]:
         "The person described what should be true when it is done: "
         f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
         f"(one check per thing that must be true). {covers} Then start."
+    ]
+
+
+PLAN_READY = "Plan ready"  # the one question of a "Show plan first" ticket (dashboard keys on it)
+PLAN_START = "Start work"
+PLAN_CHANGE = "Which step, and what should change?"
+
+
+def _plan_open(ticket: dict) -> bool:
+    """A plan_first ticket whose plan the person has not yet approved: no "Plan ready" question was answered
+    "Start work". (Open question, or answered with a change: the plan is still being made.)"""
+    if not ticket.get("plan_first"):
+        return False
+    return not any(
+        str(q.get("text", "")).startswith(PLAN_READY) and q.get("answer") == PLAN_START
+        for q in ticket.get("questions") or []
+    )
+
+
+def _plan_first_plan(ticket: dict) -> list[str]:
+    """Show plan first: plan, ask once, stop. The rule stays until "Plan ready" is answered "Start work"."""
+    if not _plan_open(ticket):
+        return []
+    tid = ticket["id"]
+    return [
+        "The person chose to see the plan first. Do NOT change any project file yet. Make the plan as in the "
+        "skill section 'Plan big work': this ticket is the parent, one sub-ticket per step with its own "
+        f"done-when (`orch ticket new --parent {tid}`), in order. Write the goal and what is not included: "
+        f'orch ticket plan {tid} --goal "<goal>" --not-included "<what is not part of it>". '
+        f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
+        '--option "Change a step" --recommend "Start work", and stop. Start the steps only after the '
+        'answer is "Start work". If the answer is "Change a step" (or asks for any change), ask one more '
+        f'question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, then ask '
+        f'"{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 
 
@@ -857,7 +1082,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
-    out[1:1] = _done_when_plan(ticket)
+    out[1:1] = _plan_first_plan(ticket) + _done_when_plan(ticket)  # the plan instruction comes first
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("description"):  # written by an agent, from the person's text: not the person's words
@@ -869,10 +1094,19 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
     out.extend(_description_plan(ticket))
-    todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
+    todo = [c for c in ticket.get("checklist") or [] if not c.get("done") and not c.get("wont_do")]
     if todo:
         out.append(
             "Still to do:\n" + "\n".join(f"- {c['id']}: {_clip(c.get('text', ''), 200)}" for c in todo[:20])
+        )
+    declined = [c for c in ticket.get("checklist") or [] if c.get("wont_do") and not c.get("done")]
+    if declined:
+        out.append(
+            "Declined by a person (do not do these): "
+            + "; ".join(
+                f"{c['id']} ({_clip(' '.join(str(c.get('reason') or 'no reason given').split()), 200)})"
+                for c in declined[:20]
+            )
         )
     hist = (ticket.get("history") or [])[-5:]
     if hist:
@@ -903,6 +1137,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         parts.append("New input:\n" + _items_text(items))
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
+    parts[:0] = _plan_first_plan(ticket)
     parts.extend(_done_when_plan(ticket))
     return "\n\n".join(parts)[:12000]
 

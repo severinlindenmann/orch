@@ -242,7 +242,41 @@ def test_fresh_prompt_carries_the_persons_note(proj):
     assert prompt.index("note on this ticket") < prompt.index("SKILL.md")  # read before anything else
 
 
-# ---------------------------------------------------------------- the footer
+def test_plan_first_prompt_plans_asks_one_question_and_stops(proj):
+    t = tickets.create(proj, "Online payments", "human:me", plan_first=True)
+    prompt = runs.fresh_prompt(t, [])
+    assert "Plan big work" in prompt and f"orch ticket new --parent {t['id']}" in prompt
+    assert f'orch ask {t["id"]} "Plan ready" --option "Start work" --option "Change a step"' in prompt
+    assert '--recommend "Start work"' in prompt and "Do NOT change any project file" in prompt
+    assert "Plan big work" in runs.resume_prompt(t, [], None, "claude")
+
+
+def test_plan_first_rule_holds_until_start_work_is_answered(proj):
+    plain = tickets.create(proj, "Small fix", "human:me")
+    assert "Plan ready" not in runs.fresh_prompt(plain, [])
+    t = tickets.create(
+        proj, "Online payments", "human:me", fields={"done_when": "Customers pay"}, plan_first=True
+    )
+    ready = {"id": "q1", "text": "Plan ready", "answer": None}
+    # 1. planning, and 2. the question is open
+    for qs in ([], [ready]):
+        t["questions"] = qs
+        assert "Do NOT change any project file" in runs.fresh_prompt(t, [])
+    # 3. "Change a step": re-plan, still no start
+    t["questions"] = [
+        {**ready, "answer": "Change a step"},
+        {"id": "q2", "text": "Which step, and what should change?", "answer": "Step 2 is too big"},
+    ]
+    for prompt in (runs.fresh_prompt(t, []), runs.resume_prompt(t, [], None, "claude")):
+        assert "Do NOT change any project file" in prompt and "then start" not in prompt.lower()
+    # 4. re-planned and asked again, still open
+    t["questions"].append({"id": "q3", "text": "Plan ready", "answer": None})
+    assert "Do NOT change any project file" in runs.fresh_prompt(t, [])
+    # 5. "Start work": the rule is gone and the ticket starts
+    t["questions"][2]["answer"] = "Start work"
+    started = runs.fresh_prompt(t, [])
+    assert "Do NOT change any project file" not in started and "then start" in started.lower()
+    assert "Do NOT change" not in runs.resume_prompt(t, [], None, "claude")
 
 
 def _inside(monkeypatch, proj, tid, agent="claude"):
@@ -428,3 +462,149 @@ def test_claim_started_survives_stop_and_second_claim(proj, new_ticket, run):
     second = runs.claim(proj, tid, "agent:test", "claude", pid=os.getpid())
     assert tickets.load(proj, tid)["started"] is True
     runs.release(proj, tid, second["run"])
+
+
+# ---- B4: "X is also changing this folder" (a hint computed from the run records, never a lock)
+
+
+def _two_runs(proj, new_ticket):
+    a, b = new_ticket("Update footer links"), new_ticket("Fix login form")
+    runs.claim(proj, a, "agent:x", "claude", pid=os.getpid())
+    runs.claim(proj, b, "agent:y", "codex", pid=os.getpid())
+    return a, b
+
+
+def test_shared_folder_two_alive_runs_see_each_other(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    assert sharedfolder.others_in_folder(proj, a) == [
+        {"ticket": b, "title": "Fix login form", "agent": "codex"}
+    ]
+    assert sharedfolder.others_in_folder(proj, b)[0]["ticket"] == a
+    assert sharedfolder.line(sharedfolder.others_in_folder(proj, a)) == (
+        '"Fix login form" is also changing this folder.'
+    )
+
+
+def test_shared_folder_dead_run_or_no_run_says_nothing(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    _edit(proj, b, pid=_dead_pid(), pid_started=None)
+    assert sharedfolder.others_in_folder(proj, a) == []
+    assert sharedfolder.others_in_folder(proj, b) == []  # this ticket's own run is gone
+    assert sharedfolder.line([]) is None
+
+
+def test_shared_folder_different_folder_says_nothing(proj, new_ticket, tmp_path):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    other = tmp_path / "copy"
+    other.mkdir()
+    _edit(proj, b, folder=str(other))
+    assert sharedfolder.others_in_folder(proj, a) == []
+
+
+def test_shared_folder_resolved_and_symlinked_paths_are_equal(proj, new_ticket, tmp_path):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    link = tmp_path / "link"
+    link.symlink_to(proj)
+    _edit(proj, b, folder=str(link))
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+    rec = json.loads(runs.record_path(proj, b).read_text(encoding="utf-8"))
+    del rec["folder"]  # an older record: started in the root
+    runs.record_path(proj, b).write_text(json.dumps(rec), encoding="utf-8")
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+
+
+def test_shared_folder_several_others_are_counted(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, _ = _two_runs(proj, new_ticket)
+    runs.claim(proj, new_ticket("Third"), "agent:z", "claude", pid=os.getpid())
+    assert sharedfolder.line(sharedfolder.others_in_folder(proj, a)) == (
+        "2 other agents are also changing this folder."
+    )
+
+
+def test_shared_folder_in_show_and_run_status(proj, new_ticket, run):
+    a, _ = _two_runs(proj, new_ticket)
+    code, out, _ = run("ticket", "show", a)
+    assert code == 0 and '"Fix login form" is also changing this folder.' in out
+    code, out, _ = run("run", "status", a, "--json")
+    assert json.loads(out)["shared_folder"]["line"].endswith("is also changing this folder.")
+    c = new_ticket("Alone")
+    assert "also changing" not in run("ticket", "show", c)[1]
+
+
+def test_shared_folder_stray_files_and_broken_records_are_skipped(proj, new_ticket, run):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    d = proj / ".orch/run/tickets"
+    (d / "notes.json").write_text("{}", encoding="utf-8")
+    (d / "t_zzzzzz.json").write_text("not json", encoding="utf-8")
+    assert [o["ticket"] for o in sharedfolder.others_in_folder(proj, a)] == [b]
+    assert "also changing" in run("ticket", "show", a)[1]
+    assert json.loads(run("run", "status", a, "--json")[1])["shared_folder"]["others"]
+
+
+def test_shared_folder_title_is_cleaned_and_a_deleted_ticket_is_not_an_id(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    p = tickets.ticket_path(proj, b)
+    t = json.loads(p.read_text(encoding="utf-8"))
+    t["title"] = "Fix\n  the\x00 login " + "very " * 30 + "form"
+    p.write_text(json.dumps(t), encoding="utf-8")
+    title = sharedfolder.others_in_folder(proj, a)[0]["title"]
+    assert title.startswith("Fix the login very") and title.endswith("…") and len(title) <= 60
+    assert "\n" not in title and "\x00" not in title
+    p.unlink()
+    assert sharedfolder.others_in_folder(proj, a)[0]["title"] == "another ticket"
+
+
+def test_shared_folder_malformed_folder_counts_as_root_and_case_is_normalised(proj, new_ticket, monkeypatch):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    _edit(proj, b, folder="relative/dir")
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1  # not absolute: the root
+    _edit(proj, b, folder="/nowhere/else\x00")
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+    monkeypatch.setattr(sharedfolder.os.path, "normcase", lambda s: s.lower())  # a case-insensitive disk
+    _edit(proj, b, folder=str(proj).upper())
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+
+
+def test_shared_folder_maybe_stale_run_does_not_count_and_claim_takes_a_folder(proj, new_ticket, tmp_path):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    _edit(proj, b, pid=None, pid_started=None, renewed_at=_ago(600))
+    assert runs.state(runs.read(proj, b)) == "maybe-stale"
+    assert sharedfolder.others_in_folder(proj, a) == []
+    c = new_ticket("Copy work")
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    rec = runs.claim(proj, c, "agent:q", "claude", pid=os.getpid(), folder=copy)
+    assert rec["folder"] == str(copy.resolve())
+    assert [o["ticket"] for o in sharedfolder.alive_in(proj, copy)] == [c]
+    assert sharedfolder.alive_in(proj, copy, exclude_ticket=c) == []
+
+
+def test_plan_first_with_done_when_does_not_say_then_start(proj):
+    t = tickets.create(
+        proj, "Online payments", "human:me", fields={"done_when": "Customers can pay"}, plan_first=True
+    )
+    prompt = runs.fresh_prompt(t, [])
+    assert "then start" not in prompt.lower() and "done-when of the steps" in prompt
+    assert prompt.index("Do NOT change any project file") < prompt.index("Customers can pay")
+    assert "orch ticket plan" in prompt and "\\n" not in prompt
+    assert "Which step, and what should change?" in prompt
+    plain = tickets.create(proj, "Other", "human:me", fields={"done_when": "x"})
+    assert "then start" in runs.fresh_prompt(plain, []).lower()

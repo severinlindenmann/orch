@@ -11,6 +11,7 @@
     let m;
     if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
+    if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
@@ -44,7 +45,7 @@
         h('p', {class: 'meta', text: 'Next step · Start ' + els.agent.textContent}), h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent})));
       return;
     }
-    const story = checks.filter(c => c.done || c.state === 'doing');
+    const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
     const heading = asking ? 'Before the question' : v.state === 'done' ? 'Work completed' : v.run.running ? 'The work is taking shape' : 'Work so far';
     const nodes = [h('h2', {text: heading})];
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
@@ -71,7 +72,7 @@
       const node = h('div', {'data-row': '', class: 'fx-ask-wrap'});
       els.qs.append(node);
       const options = (q.options || []).map(o => ({text: o, suggested: o === q.recommended}));
-      const question = {ticket: TID, key: typeof v.ticket.key === 'string' ? v.ticket.key : undefined, id: q.id, title: q.text, text: els.agent.textContent + ' waits for you. After you answer it continues in the same conversation.', options};
+      const question = {ticket: TID, key: typeof v.ticket.key === 'string' ? v.ticket.key : undefined, id: q.id, title: q.text, oneTap: true, kind: q.kind, text: els.agent.textContent + ' waits for you. After you answer it continues in the same conversation.', options};
       if (window.QuestionCard) {
         window.QuestionCard.mount(node, question, {send: async (answer) => {
           const r = await act('answer', {ticket: TID, question: q.id, answer});

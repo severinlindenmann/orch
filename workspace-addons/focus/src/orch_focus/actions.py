@@ -152,6 +152,17 @@ def _check_edit(a):
     return ["check", "edit", t, c], flags, [_text(a.get("text"))]  # the new text goes after `--`
 
 
+def _check_wont_do(a):
+    t, c = _check(a, ("reason",))
+    flags = []
+    if "reason" in a:
+        reason = a["reason"]
+        if not isinstance(reason, str) or len(reason) > 200 or any(ch in reason for ch in "\r\n") or _CONTROL.search(reason):
+            raise BadRequest("The reason must be one line, at most 200 characters.")
+        flags.append(f"--reason={reason}")
+    return ["check", "wont-do", t, c], flags, []
+
+
 def _check_move(a):
     t, c = _check(a, ("after",))
     return ["check", "move", t, c], [f"--after={_id(CID, a.get('after'), 'task')}"], []
@@ -189,6 +200,7 @@ OPS = {
     "run.send": _run_send,
     "check.add": _check_add,
     "check.edit": _check_edit,
+    "check.wont_do": _check_wont_do,
     "check.move": _check_move,
     "check.remove": _check_plain("remove"),
     "check.reopen": _check_plain("reopen"),

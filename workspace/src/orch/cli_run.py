@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from orch import adapters, cli_screen, humanproof, net, runs, runs_live, term, tickets
+from orch import adapters, cli_screen, humanproof, net, runs, runs_live, sharedfolder, term, tickets
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -170,6 +170,7 @@ def _status(args, root: Path) -> None:
     tid = args.ticket
     tickets.load(root, tid)
     runs.settle_orphan(root, tid)  # Working with no agent for a while: Ready (status matches reality)
+    runs.check_start_timeout(root, tid)  # a start that never got an agent says why
     rec = runs.read(root, tid)
     waiting = len(runs.undelivered(root, tid))
     if not rec:
@@ -190,6 +191,8 @@ def _status(args, root: Path) -> None:
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
     if st == "alive" and rec.get("mode") == "live" and runs_live.hold_text(rec):
         data["hold"] = runs_live.hold_text(rec)  # why orch waits; gone when the hold clears
+    if st == "alive" and (others := sharedfolder.others_in_folder(root, tid)):
+        data["shared_folder"] = {"others": others, "line": sharedfolder.line(others)}  # a hint, not a lock
     if st == "dead":
         text = (
             f"The earlier run on {_name(root, tid)} ended without finishing. "
