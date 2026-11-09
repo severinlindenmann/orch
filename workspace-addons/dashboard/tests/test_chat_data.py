@@ -171,3 +171,13 @@ def test_dm_actions_go_through_the_act_fence(act_server, act_orch, operation, co
     ] == []  # nothing reached the orch command
     assert post(act_server, body)[0] == 200  # the page itself (same origin, JSON) can write
     assert [c[:2] for c in acts(act_orch) if c[:2] != ["chat", "status"]] == [["chat", command]]
+
+
+def test_dm_client_id_and_optional_sync():
+    assert actions.build_argv("chat.sync_ws", {})[:2] == ["chat", "sync"]
+    args = {"workspace": "ws_abcdefghij", "text": "hi", "client_id": "m_abcdefghijklmnop"}
+    argv = actions.build_argv("chat.send_ws", args)
+    assert argv[argv.index("--client-id") + 1] == args["client_id"]
+    for bad in ("m_bad", "../x", 123):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("chat.send_ws", {**args, "client_id": bad})
