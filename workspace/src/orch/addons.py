@@ -396,12 +396,10 @@ def home(root: Path | None = None) -> Path:
 
 
 def registry_path() -> Path:
-    """The add-on list. On a normal install it is read from the account's default orch home ONLY: an
-    environment-chosen ORCH_HOME must not feed what is installed into orch's own tool environment."""
-    from orch import humanproof
-
-    if humanproof.install_kind() == "normal":
-        return real_home() / ".orch-tool" / "addons.json"
+    """The add-on list: home()/addons.json, always the same home as every other piece of state (running.json,
+    run/, installed.json). Reading it from a trusted ORCH_HOME is safe: a built-in entry is installed from the
+    shipped source, and a non-built-in entry installs only with a snapshot at the exact location in the guarded
+    home AND a hash on that home's person-allowed list (written only inside trusted_local_add)."""
     return home() / "addons.json"
 
 

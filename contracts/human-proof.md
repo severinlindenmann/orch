@@ -142,8 +142,10 @@ prefix must `lstat` as a real folder with no reparse point (junction or symlink)
 
 **Folder add-on snapshots.** A person-allowed folder add-on lives only at exactly `<account home>/.orch-tool/keys/<ws>/addon-snapshots/<content hash>`
 (on a test install also under the test home), with no link on the path, and its hash must be on the person-allowed list
-`<home>/addons-allowed.json` (written only inside the hand-off). On a normal install the add-on list is read from the default
-orch home only, never from an `ORCH_HOME`. An install from before the record existed counts as `normal` and `orch update`
+`<home>/addons-allowed.json` (written only inside the hand-off). The add-on list is `home()/addons.json` like all other state (a trusted `ORCH_HOME` included): reading it there is safe
+because a built-in entry installs from the shipped source and a non-built-in entry needs a snapshot at the exact guarded
+location AND a hash on that home's allowed list, which only the hand-off writes. The account's default orch home is only
+READ for trust decisions, never written by a run that uses another `ORCH_HOME`. An install from before the record existed counts as `normal` and `orch update`
 writes that record (never an elevation); the Windows finisher writes it back and pins `UV_TOOL_DIR` too.
 
 **Install record.** `<sys.prefix>/orch-install.json` = `{"schema": "orch.install/1", "kind": "normal|dev|test", "root": "<real path of the tool environment>"}`; it counts only
