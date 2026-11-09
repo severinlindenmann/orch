@@ -664,3 +664,35 @@ def test_session_missing_is_per_adapter_and_never_for_generic():
     assert not adapters.session_missing("claude", "rate limit reached")
     assert adapters.session_missing("codex", "Error: no rollout found for thread id 1 (code -32600)")
     assert not adapters.session_missing("generic", "No conversation found with session ID")
+
+
+@pytest.mark.real_start_guard
+def test_a_refused_start_changes_nothing(proj, new_ticket, monkeypatch):
+    from orch import runs, tickets
+
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    tid = new_ticket()
+    before = tickets.load(proj, tid)
+    for agent in ("codex", "claude"):
+        for mode in ("oneshot", "live"):
+            with pytest.raises(Refused, match="smaller folder"):
+                runs.start(proj, tid, "human:tester", agent=agent, mode=mode)
+    assert runs.read(proj, tid) is None  # no claim, no run record
+    assert tickets.load(proj, tid) == before  # no history line, no session
+    assert not list((proj / ".orch/run/logs").glob("*")) if (proj / ".orch/run/logs").exists() else True
+
+
+@pytest.mark.real_start_guard
+def test_every_start_entry_point_is_guarded(proj, new_ticket, monkeypatch, run):
+    """The CLI (`orch run start|argv`, which add-ons, Focus, the dashboard and the scheduler use), the live
+    session input path and the wrapper's follow-up turns all end in runs.start / runs.plan."""
+    from orch import runs
+
+    monkeypatch.setattr("orch.addons.home", lambda root=None: proj / "oh")
+    tid = new_ticket()
+    for sub in ("start", "argv"):
+        code, _, err = run("run", sub, tid, "--agent", "codex", "--mode", "oneshot")
+        assert code == 2 and "smaller folder" in err, (sub, code, err)
+    # the wrapper builds each follow-up turn with plan()
+    with pytest.raises(Refused, match="smaller folder"):
+        runs.plan(proj, tid, fresh=True, mode="oneshot", agent="codex", items=[])
