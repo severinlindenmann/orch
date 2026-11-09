@@ -203,10 +203,20 @@
           "type": "array", "maxItems": 200,
           "items": {
             "type": "object", "additionalProperties": false, "required": ["text", "done"],
-            "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 500 }, "done": { "type": "boolean" } }
+            "properties": {
+              "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+              "done": { "type": "boolean", "description": "true only for a step done with proof; a Won't do step is done=false with wont_do=true." },
+              "wont_do": { "const": true, "description": "Optional. A person decided this step will not be done (\"Won't do\"); the phone shows it struck through with the words Won't do. It is counted in ticket_view.wont_do, not in done." },
+              "reason": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional, only with wont_do: one plain line, why." }
+            },
+            "allOf": [
+              { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } } } },
+              { "if": { "required": ["reason"] }, "then": { "required": ["wont_do"] } }
+            ]
           }
         },
-        "done": { "type": "integer", "minimum": 0 },
+        "done": { "type": "integer", "minimum": 0, "description": "Steps done with proof (a Won't do step is not counted here)." },
+        "wont_do": { "type": "integer", "minimum": 0, "description": "Optional. Steps a person declined (Won't do); absent = 0. The phone shows \"N done, M won't do\", never \"3 of 3\" for work that was not done. done + wont_do <= total." },
         "total": { "type": "integer", "minimum": 0 },
         "history_tail": {
           "type": "array", "maxItems": 30, "description": "The ticket's last history lines (at most 30), oldest first, in plain words.",

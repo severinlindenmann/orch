@@ -20,13 +20,25 @@ def save(ws, name, value):
 
 def sent(ws, delivered=None, to="phones", ticket="t_7k3f9q"):
     qid = question(ws)["id"]
-    save(ws, "secrets/questions-sent.json", {
-        "m_test": {"ticket": ticket, "question_id": qid, "to": to},
-    })
-    p = save(ws, "run/relay/sent.jsonl", {
-        "id": "m_test", "type": "question", "to": to,
-        "delivered_at": delivered, "preview": "PRIVATE", "token": "SECRET",
-    })
+    save(
+        ws,
+        "secrets/questions-sent.json",
+        {
+            "m_test": {"ticket": ticket, "question_id": qid, "to": to},
+        },
+    )
+    p = save(
+        ws,
+        "run/relay/sent.jsonl",
+        {
+            "id": "m_test",
+            "type": "question",
+            "to": to,
+            "delivered_at": delivered,
+            "preview": "PRIVATE",
+            "token": "SECRET",
+        },
+    )
     return p
 
 
@@ -55,10 +67,18 @@ def test_phone_delivery_does_not_match_other_recipient_or_ticket(ws, to, ticket)
 
 def test_phone_delivery_outbox_message(ws):
     qid = question(ws)["id"]
-    save(ws, "outbox/m_queued.json", {
-        "schema": "orch.msg/1", "id": "m_queued", "type": "question", "to": "phones",
-        "ticket": "t_7k3f9q", "body": {"question_id": qid},
-    })
+    save(
+        ws,
+        "outbox/m_queued.json",
+        {
+            "schema": "orch.msg/1",
+            "id": "m_queued",
+            "type": "question",
+            "to": "phones",
+            "ticket": "t_7k3f9q",
+            "body": {"question_id": qid},
+        },
+    )
     assert question(ws)["sent_to_phone"] is True
     assert question(ws)["delivered"] is None
 
@@ -72,7 +92,7 @@ def test_phone_delivery_bad_mapping(ws, bad):
 
 def test_phone_delivery_bad_log_and_symlink(ws, tmp_path):
     p = sent(ws, AT)
-    p.write_text('{broken\n[]\n')
+    p.write_text("{broken\n[]\n")
     assert question(ws)["sent_to_phone"] is False
     target = tmp_path / "private.jsonl"
     target.write_text(json.dumps({"id": "m_test", "to": "phones", "type": "question", "delivered_at": AT}))

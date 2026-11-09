@@ -653,9 +653,18 @@ def shown_summary(ticket: dict) -> str:
     return _clip(redact(text), 200) if text else ""
 
 
+def _view_step(c: dict) -> dict:
+    step = {"text": _clip(c.get("text", ""), 500) or "Task", "done": bool(c.get("done"))}
+    if c.get("wont_do") and not step["done"]:  # a person's "Won't do": struck through on the phone
+        step["wont_do"] = True
+        if reason := _clip(redact(str(c.get("reason") or "")), 200):
+            step["reason"] = reason
+    return step
+
+
 def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     checklist = _shown_checklist(ticket)
-    done, total = tickets.checks_done({"checklist": checklist})
+    done, wont, total = tickets.checks_split({"checklist": checklist})
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
@@ -675,15 +684,14 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         "title": _clip(ticket.get("title", ""), 200) or "Ticket",
         "status": ticket.get("status", "open"),
         "running": running,
-        "checklist": [
-            {"text": _clip(c.get("text", ""), 500) or "Task", "done": bool(c.get("done"))}
-            for c in checklist[:200]
-        ],
+        "checklist": [_view_step(c) for c in checklist[:200]],
         "done": done,
         "total": total,
         "history_tail": hist,
         "attachments": atts,
     }
+    if wont:
+        view["wont_do"] = wont  # steps a person declined; "done" counts only steps done with proof
     if ticket.get("started") is True:
         view["started"] = True
     if shared_refs := reference_views(root, ticket):
@@ -734,7 +742,10 @@ def view_for(root: Path, tid: str) -> dict | None:
 def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     """What the phone's snapshot depends on: tasks, status and whether an agent runs now (so "<agent> is
     working" on the phone ends when the agent stops, not only when a task changes)."""
-    items = [[c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist") or []]
+    items = [
+        [c.get("text"), bool(c.get("done")), *([True] if c.get("wont_do") else [])]
+        for c in ticket.get("checklist") or []
+    ]
     running = _agent(root, ticket)[1] if root is not None else None
     data = [items, ticket.get("status"), running]
     if ticket.get("started") is True:
@@ -1024,13 +1035,13 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     update_state(root, claim)
     sent = []
     for tid, to, t, finished, before, claimed in due:
-        done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
+        shown = {"checklist": _shown_checklist(t)}
         if finished:
             if _send_result(root, tid, to, t, finished):
                 sent.append(tid)
             continue
         try:
-            relay.send_text(root, to, f"Tasks: {done} of {total} done", tid, "note", view=True)
+            relay.send_text(root, to, f"Tasks: {tickets.progress_text(shown)}", tid, "note", view=True)
             sent.append(tid)
         except Refused:  # not sent: undo the claim (also the status, so it is sent again next pull)
 
@@ -1213,8 +1224,8 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
     for ph in phones:
         have = set(done_for.get(ph, []))
         for t in [t for t in open_[:OPEN_MAX] if t["id"] not in have]:
-            done, total = tickets.checks_done({"checklist": _shown_checklist(t)})
-            text = f"Tasks: {done} of {total} done" if total else NEW_TEXT
+            progress = tickets.progress_text({"checklist": _shown_checklist(t)})
+            text = f"Tasks: {progress}" if progress else NEW_TEXT
             try:
                 relay.send_text(root, ph, text, t["id"], "note", view=True)
             except Refused:

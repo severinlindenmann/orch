@@ -348,9 +348,9 @@ def test_a_local_file_reference_is_removed_by_the_number_the_state_shows(ws, act
     (local / "t_weekly01.json").write_text(
         json.dumps([{"kind": "file", "path": str(ws.parent / "x"), "local": True}])
     )
-    shown = next(
-        x for x in data.load_state(ws, with_settings=True)["tickets"] if x["id"] == "t_weekly01"
-    )["refs"]
+    shown = next(x for x in data.load_state(ws, with_settings=True)["tickets"] if x["id"] == "t_weekly01")[
+        "refs"
+    ]
     mine = next(r for r in shown if r.get("path") == str(ws.parent / "x"))
     assert mine["n"] == 2  # len(stored) + 1
     code, text, _ = post(act_server, {"op": "ref.rm", "args": {"ticket": "t_weekly01", "n": mine["n"]}})
