@@ -568,3 +568,60 @@ def test_a_refresh_with_keys_and_an_unpaired_home_changes_nothing(acct, monkeypa
     assert not (sec / "mcp.json").exists() and not (sec / "shared.json").exists()
     assert not (sec / "credentials.json").exists() and not any(elsewhere.iterdir())
     assert not (ws / ".orch" / "tmp-refresh").exists()
+
+
+def _refresh_fixture(tws, monkeypatch):
+    import base64
+
+    from orch import relay
+
+    snap = {
+        "version": 3,
+        "skills": [
+            {
+                "name": "acme-sql",
+                "files": {"SKILL.md": base64.b64encode(b"---\nname: acme-sql\n---\n").decode()},
+            }
+        ],
+        "mcp": {"sql": {"command": "x"}},
+        "credentials": {"DB_URL": "pg://db.example/prod"},
+        "workspaces": {"workspaces": [{"id": "ws_x", "name": "X"}], "phones": []},
+    }
+    monkeypatch.setattr(relay, "_api", lambda *a, **k: (200, snap))
+    return relay
+
+
+def _nothing_replaced(ws):
+    sec = ws / ".orch" / "secrets"
+    assert not (ws / ".agents" / "skills" / "acme-sql").exists()
+    assert not (ws / ".agents" / "skills" / "orch-relay" / "workspaces.json").exists()
+    assert not (sec / "mcp.json").exists() and not (sec / "shared.json").exists()
+
+
+def test_a_planted_credentials_link_stops_the_whole_refresh(tws, monkeypatch, tmp_path):
+    relay = _refresh_fixture(tws, monkeypatch)
+    sec = tws / ".orch" / "secrets"
+    sec.mkdir(parents=True)
+    target = tmp_path / "somewhere-else"
+    target.write_text("keep me")
+    (sec / "credentials.json").symlink_to(target)
+    with pytest.raises(Refused):
+        relay.refresh(tws)
+    _nothing_replaced(tws)
+    assert target.read_text() == "keep me"
+
+
+def test_a_damaged_key_file_stops_the_whole_refresh(tws, monkeypatch):
+    relay = _refresh_fixture(tws, monkeypatch)
+    keystore.add(tws, "mine", "token", TOKEN)
+    for name in ("keys.json", "admin-keys.json"):
+        path = hp.key_dir(tws) / name
+        before = path.read_bytes() if path.exists() else None
+        hp._write_private(path, "{broken")
+        with pytest.raises(Refused, match="damaged"):
+            relay.refresh(tws)
+        _nothing_replaced(tws)
+        if before is None:
+            path.unlink()
+        else:
+            hp._write_private(path, before.decode())

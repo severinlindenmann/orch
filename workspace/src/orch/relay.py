@@ -2509,12 +2509,11 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
     sec = net.secrets_dir(root)
     sec.mkdir(parents=True, exist_ok=True)
     skills.ensure_gitignore(root)
-    for fn in ("mcp.json", "shared.json"):
+    for fn in ("credentials.json", "mcp.json", "shared.json"):
         harness.check_private_path(root, sec / fn)  # refuse before changing anything
-    if (
-        snap["credentials"] and not keystore.unsupported()
-    ):  # pairing, binding, rights: refuse before any change
-        humanproof.key_dir(root)
+    if snap["credentials"] and not keystore.unsupported():
+        # pairing, binding, rights and readable key files: refuse before any change
+        keystore.preflight(root)
     (agents / "orch-relay").mkdir(parents=True, exist_ok=True)
     os.replace(stage / "workspaces.json", agents / "orch-relay" / "workspaces.json")
     for n in names:

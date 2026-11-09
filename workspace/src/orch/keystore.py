@@ -291,6 +291,16 @@ def list_keys(root: Path) -> list[dict]:
     return out
 
 
+def preflight(root: Path) -> None:
+    """Everything set_admin needs, checked without writing a key: the folder (pairing, binding, rights)
+    and both key files readable. Refused means nothing was changed; the relay refresh calls it before it
+    replaces anything."""
+    _guard()
+    d = hp.key_dir(root)
+    _load(d)
+    _load(d, admin=True)
+
+
 def set_admin(root: Path, items: dict) -> list[str]:
     """Replace every admin key by `items` ({name: str or json object}) in ONE rename of admin-keys.json (the
     relay refresh, secrets.md "an interrupted refresh keeps the old keys"). Workspace keys are not touched. A
@@ -302,7 +312,8 @@ def set_admin(root: Path, items: dict) -> list[str]:
     d = hp.key_dir(root)
     skipped: list[str] = []
     with hp._key_lock(d):
-        _load(d)  # a damaged workspace key file refuses here, before anything is written
+        _load(d)  # a damaged key file refuses here, before anything is written
+        _load(d, admin=True)
         merged = {}
         for n, v in items.items():
             if not isinstance(n, str) or not NAME_RE.match(n):
