@@ -1,5 +1,4 @@
 """An add-on's [page] is shown under /addon/<name>/ of the dashboard; both fences stay on."""
-
 import json
 import sys
 import threading
@@ -25,8 +24,7 @@ class Up(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html")
         self.send_header(
             "Content-Security-Policy",
-            "script-src 'self'; sandbox allow-scripts"
-            if "/page/" in self.path and "/sb/" in self.path
+            "script-src 'self'; sandbox allow-scripts" if "/page/" in self.path and "/sb/" in self.path
             else "frame-ancestors 'none'",
         )
         self.send_header("Content-Length", str(len(body)))
@@ -90,11 +88,7 @@ def test_get_is_forwarded_with_the_addons_own_host_and_a_prefix(stack):
     code, body, h = call(base + "/addon/viewer/t/t_abcdef?x=1")
     assert code == 200 and b"hi" in body
     _m, path, hd = SEEN[-1]
-    assert (
-        path == "/t/t_abcdef?x=1"
-        and hd["Host"] == f"127.0.0.1:{port}"
-        and hd["X-Forwarded-Prefix"] == "/addon/viewer"
-    )
+    assert path == "/t/t_abcdef?x=1" and hd["Host"] == f"127.0.0.1:{port}" and hd["X-Forwarded-Prefix"] == "/addon/viewer"
     csp = h["Content-Security-Policy"]
     assert "frame-ancestors 'self'" in csp and "frame-ancestors 'none'" not in csp
 
@@ -123,19 +117,11 @@ def test_post_passes_dashboard_fence_then_gets_the_addons_origin(stack):
     _, _, hd = SEEN[-1]
     assert hd["Origin"] == f"http://127.0.0.1:{port}" and hd["Host"] == f"127.0.0.1:{port}"
     n = len(SEEN)
-    for headers in (
-        {**j},
-        {**j, "Origin": "http://evil.example"},
-        {**j, "Origin": base, "Sec-Fetch-Site": "cross-site"},
-        {**j, "Origin": "null"},
-        {"Origin": base, "Content-Type": "text/plain"},
-    ):
+    for headers in ({**j}, {**j, "Origin": "http://evil.example"}, {**j, "Origin": base, "Sec-Fetch-Site": "cross-site"},
+                    {**j, "Origin": "null"}, {"Origin": base, "Content-Type": "text/plain"}):
         assert call(base + "/addon/viewer/api/act", "POST", headers, b"{}")[0] in (403, 415), headers
     assert call(base + "/addon/viewer/other", "POST", {**j, "Origin": base}, b"{}")[0] == 405
-    assert (
-        call(base + "/addon/viewer/api/act", "POST", {**j, "Origin": base, "Host": "evil.example"}, b"{}")[0]
-        == 403
-    )
+    assert call(base + "/addon/viewer/api/act", "POST", {**j, "Origin": base, "Host": "evil.example"}, b"{}")[0] == 403
     assert len(SEEN) == n and host
 
 
@@ -149,15 +135,10 @@ def test_page_is_in_the_addon_data(stack, ws):
 
 def test_addon_connection_detail_has_no_token(ws, tmp_path):
     from orch_dashboard.data import _addon_detail
-
     assert _addon_detail(ws, "relay") is None  # the fixture link has no address
-    (ws / ".orch" / "secrets" / "thing.json").write_text(
-        '{"url": "https://u:p@x.example/a", "token": "SECRET"}'
-    )
+    (ws / ".orch" / "secrets" / "thing.json").write_text('{"url": "https://u:p@x.example/a", "token": "SECRET"}')
     assert _addon_detail(ws, "thing")["connected"] is False  # user info in the address is never shown
-    (ws / ".orch" / "secrets" / "thing.json").write_text(
-        '{"url": "https://x.example:8443/a", "token": "SECRET"}'
-    )
+    (ws / ".orch" / "secrets" / "thing.json").write_text('{"url": "https://x.example:8443/a", "token": "SECRET"}')
     d = _addon_detail(ws, "thing")
     assert d == {"connected": True, "address": "https://x.example:8443", "workspaces": []}
     assert _addon_detail(ws, "none") is None
@@ -165,7 +146,6 @@ def test_addon_connection_detail_has_no_token(ws, tmp_path):
 
 def test_ticket_edit_accepts_a_title_and_never_an_empty_one():
     from orch_dashboard import actions
-
     argv = actions.build_argv("ticket.edit", {"ticket": "t_abcdef", "title": "New name"})
     assert "--title=New name" in argv
     with pytest.raises(actions.BadRequest):
@@ -177,13 +157,10 @@ def test_agent_test_op_argv_and_reply(act_orch, ws):
     import threading
 
     from orch_dashboard import actions
-
     src = act_orch.read_text().replace(
         'if a[:2] in (["addon", "list"]',
         'if a[:2] == ["agents", "test"]:\n    print(json.dumps({"name": a[2], "ok": False, "reason": "Codex is not installed."}))\n    sys.exit(1)\n'
-        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "codex"}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]',
-        1,
-    )
+        'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "codex"}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]', 1)
     act_orch.write_text(src)
     assert actions.build_argv("config.agent.test", {"name": "codex"}) == ["agents", "test", "codex", "--json"]
     for bad in ({"name": "../x"}, {"name": "codex", "x": 1}, {}):
@@ -194,23 +171,9 @@ def test_agent_test_op_argv_and_reply(act_orch, ws):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         h = {"Content-Type": "application/json", "Origin": base}
-        code, body, _ = call(
-            base + "/api/act",
-            "POST",
-            h,
-            _json.dumps({"op": "config.agent.test", "args": {"name": "codex"}}).encode(),
-        )
-        assert code == 200 and _json.loads(body)["test"] == {
-            "name": "codex",
-            "ok": False,
-            "reason": "Codex is not installed.",
-        }
-        code, _, _ = call(
-            base + "/api/act",
-            "POST",
-            h,
-            _json.dumps({"op": "config.agent.test", "args": {"name": "nobody"}}).encode(),
-        )
+        code, body, _ = call(base + "/api/act", "POST", h, _json.dumps({"op": "config.agent.test", "args": {"name": "codex"}}).encode())
+        assert code == 200 and _json.loads(body)["test"] == {"name": "codex", "ok": False, "reason": "Codex is not installed."}
+        code, _, _ = call(base + "/api/act", "POST", h, _json.dumps({"op": "config.agent.test", "args": {"name": "nobody"}}).encode())
         assert code == 400
     finally:
         srv.shutdown()
@@ -231,19 +194,14 @@ def test_focus_page_files_load_cross_site_with_their_own_sandbox_csp(stack):
     post = {**cross, "Origin": base, "Content-Type": "application/json"}
     assert call(base + "/addon/focus/api/tickets", headers=cross)[0] == 403
     assert call(base + "/addon/focus/page/t_abcdef/0123456789abcdef/..%2fx.css", headers=cross)[0] == 404
-    assert call(base + "/addon/focus/page/t_abcdef/0123456789abcdef/x.css", "POST", post, b"{}")[0] in (
-        403,
-        405,
-    )
+    assert call(base + "/addon/focus/page/t_abcdef/0123456789abcdef/x.css", "POST", post, b"{}")[0] in (403, 405)
     assert len(SEEN) == n
     # an add-on that does not answer with a sandbox policy gets no cross-site read, whatever the path
     assert call(base + "/addon/viewer/page/t_abcdef/0123456789abcdef/x.css", headers=cross)[0] == 403
     assert call(base + "/addon/viewer/page/t_abcdef/0123456789abcdef/x.css")[0] == 200
     # a same-site request to a non-page path keeps the dashboard's own CSP
     _, _, h2 = call(base + "/addon/focus/t/t_abcdef")
-    assert (
-        "script-src" not in h2["Content-Security-Policy"] and "sandbox" not in h2["Content-Security-Policy"]
-    )
+    assert "script-src" not in h2["Content-Security-Policy"] and "sandbox" not in h2["Content-Security-Policy"]
 
 
 def test_cross_site_page_path_needs_the_key_segment(stack):
@@ -251,11 +209,7 @@ def test_cross_site_page_path_needs_the_key_segment(stack):
     base, _ = stack
     cross = {"Sec-Fetch-Site": "cross-site"}
     n = len(SEEN)
-    for p in (
-        "/page/t_abcdef/sb/x.css",
-        "/page/t_abcdef/short/sb/x.css",
-        "/page/t_abcdef/0123456789ABCDEF/sb/x.css",
-    ):
+    for p in ("/page/t_abcdef/sb/x.css", "/page/t_abcdef/short/sb/x.css", "/page/t_abcdef/0123456789ABCDEF/sb/x.css"):
         assert call(base + "/addon/focus" + p, headers=cross)[0] == 403, p
     assert len(SEEN) == n
 

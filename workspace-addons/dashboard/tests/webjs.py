@@ -1,5 +1,4 @@
 """The dashboard page code is split into web/app.js (shell) and web/pages/*.js; source-string tests read all of it."""
-
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"

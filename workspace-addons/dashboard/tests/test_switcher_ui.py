@@ -1,5 +1,4 @@
 """Source contracts for the local workspace menu and optional backend fields."""
-
 from .webjs import WEB
 
 

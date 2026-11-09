@@ -443,13 +443,7 @@ def test_general_conversation_is_in_the_state_but_never_a_ticket(ws):
         "questions": [],
         "history": [
             {"at": "2026-11-06T10:00:00Z", "by": "x", "via": "cli", "text": "Created"},
-            {
-                "at": "2026-11-06T10:05:00Z",
-                "by": "human:anna",
-                "via": "phone",
-                "text": "From Anna: hello",
-                "chat_message": True,
-            },
+            {"at": "2026-11-06T10:05:00Z", "by": "human:anna", "via": "phone", "text": "From Anna: hello", "chat_message": True},
         ],
     }
     (t / "t_general01.json").write_text(json.dumps(g))
@@ -691,43 +685,30 @@ def test_event_handler_flushes_initial_and_changed_revision_without_a_listener(w
 
 def test_links_shape_and_origin(act_server, act_orch):
     import http.client
-
     script = act_orch.read_text()
-    pos = script.index("\n") + 1
-    script = (
-        script[:pos]
-        + """import sys, json
+    pos = script.index('\n') + 1
+    script = script[:pos] + '''import sys, json
 if sys.argv[1:3] == ["addon", "list"]:
     print('[{"name":"publish","active":true}]'); sys.exit(0)
 if sys.argv[1:3] == ["publish", "whoami"]:
     print('{"id":"w_local"}'); sys.exit(0)
 if sys.argv[1:3] == ["publish", "list"]:
     print(json.dumps({"files":[{"id":"f_a","name":"Report","size":3,"expires_at":"2020-01-01T00:00:00Z","url":"https://example.test/f/a","key":"secretsecretsecret1"},{"id":"f_b","name":"Other","size":4,"expires_at":None,"url":"https://example.test/f/b"}],"apps":[{"token":"hidden"}]})); sys.exit(0)
-"""
-        + script[pos:]
-    )
+''' + script[pos:]
     act_orch.write_text(script)
-    code, body, _ = get(act_server + "/api/links")
+    code, body, _ = get(act_server + '/api/links')
     assert code == 200
-    rows = json.loads(body)["links"]
-    assert rows[0] == {
-        "id": "f_a",
-        "name": "Report",
-        "size": 3,
-        "expires_at": "2020-01-01T00:00:00Z",
-        "expired": True,
-        "link": "https://example.test/f/a#k=secretsecretsecret1",
-        "copy": True,
-    }
-    assert rows[1]["link"] is None and rows[1]["copy"] is False
-    assert "hidden" not in body.decode() and '"key"' not in body.decode()
-    c = http.client.HTTPConnection("127.0.0.1", int(act_server.rsplit(":", 1)[1]))
-    c.request("GET", "/api/links", headers={"Origin": "https://evil.example"})
+    rows = json.loads(body)['links']
+    assert rows[0] == {"id": 'f_a', "name": 'Report', "size": 3, "expires_at": '2020-01-01T00:00:00Z', "expired": True, "link": 'https://example.test/f/a#k=secretsecretsecret1', "copy": True}
+    assert rows[1]['link'] is None and rows[1]['copy'] is False
+    assert 'hidden' not in body.decode() and '"key"' not in body.decode()
+    c = http.client.HTTPConnection('127.0.0.1', int(act_server.rsplit(':', 1)[1]))
+    c.request('GET', '/api/links', headers={'Origin': 'https://evil.example'})
     assert c.getresponse().status == 403
 
 
 def test_links_off(server):
-    assert json.loads(get(server + "/api/links")[1]) == {"links": []}
+    assert json.loads(get(server + '/api/links')[1]) == {'links': []}
 
 
 def test_state_preserves_started(ws):

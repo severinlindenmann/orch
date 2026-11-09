@@ -219,19 +219,10 @@ def test_group_share_op_builds_the_click_argv_and_is_strict(act_server, act_orch
     for args in bad:
         assert post(act_server, {"op": "group.share", "args": args})[0] == 400, args
     assert acts(act_orch) == []
+    assert post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "Letter 1.pdf"}})[0] == 400
+    assert post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "letter.pdf"}})[0] == 200
     assert (
-        post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "Letter 1.pdf"}})[0]
-        == 400
-    )
-    assert (
-        post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "letter.pdf"}})[0]
-        == 200
-    )
-    assert (
-        post(
-            act_server,
-            {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "letter.pdf", "confirm": True}},
-        )[0]
+        post(act_server, {"op": "group.share", "args": {"ticket": "t_abcdef", "file": "letter.pdf", "confirm": True}})[0]
         == 200
     )
     first, second = acts(act_orch)[-2:]
@@ -260,21 +251,9 @@ def test_ws_ids_are_shown_as_names_in_the_page_code():
     app = (webjs.WEB / "app.js").read_text(encoding="utf-8")
     start = app.index("let wsNames")
     end = app.index("const name = value")
-    code = (
-        app[start:end]
-        + "\nwsNames = new Map([['ws_home000001', 'Home']]);\n"
-        + (
-            "console.log(JSON.stringify([clean('agent:ws_home000001 answered'), clean('Asked ws_unknown01 (group)')]));"
-        )
+    code = app[start:end] + "\nwsNames = new Map([['ws_home000001', 'Home']]);\n" + (
+        "console.log(JSON.stringify([clean('agent:ws_home000001 answered'), clean('Asked ws_unknown01 (group)')]));"
     )
-    out = subprocess.run(
-        ["node", "-e", "const array=v=>Array.isArray(v)?v:[];" + code],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    out = subprocess.run(["node", "-e", "const array=v=>Array.isArray(v)?v:[];" + code], check=False, capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
-    assert json.loads(out.stdout) == [
-        "agent:Home answered",
-        "Asked  (group)",
-    ]  # an unknown id is dropped, never shown raw
+    assert json.loads(out.stdout) == ["agent:Home answered", "Asked  (group)"]  # an unknown id is dropped, never shown raw
