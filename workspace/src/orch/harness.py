@@ -235,6 +235,7 @@ ORCH_IGNORE = [
     "tmp-refresh/",
     "harness/",
     "local/",
+    "chat/",
     "tickets/*/evidence/",
 ]
 

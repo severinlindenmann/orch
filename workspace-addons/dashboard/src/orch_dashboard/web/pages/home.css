@@ -27,3 +27,5 @@
 .ticket-title .mono{white-space:nowrap}
 .ticket-title .mono{flex:none}
 .chip.attn{background:var(--warning-soft);border-color:var(--warning);color:var(--warning)}
+.status-leaving{opacity:0;transition:opacity 160ms ease-out}
+@media(prefers-reduced-motion:reduce){.status-leaving{transition:none}}

@@ -2488,5 +2488,79 @@
         "message": "That workspace is not on this phone."
       }
     }
+  },
+  {
+    "_note": "Mute: mute all until tomorrow 08:00 (the phone computes local 08:00 and sends UTC).",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/phone/settings",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "mute_all_until": "2026-11-10T07:00:00Z"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "speak": "auto",
+        "swiss_german": false,
+        "tts_cap_usd": 10,
+        "tts_used_usd_month": 0.42,
+        "mute_all_until": "2026-11-10T07:00:00Z",
+        "group_mutes": [
+          {
+            "host": "ws_pilatus001",
+            "id": "grp_t_7k3f9q",
+            "muted_until": "forever"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "_note": "Mute: one group of host Pilatus until I turn it back on.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/phone/groups/ws_pilatus001/grp_t_7k3f9q",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "muted_until": "forever"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "host": "ws_pilatus001",
+        "id": "grp_t_7k3f9q",
+        "muted_until": "forever"
+      }
+    }
+  },
+  {
+    "_note": "Mute: a group whose host is not on the phone's list.",
+    "request": {
+      "method": "PATCH",
+      "path": "/v1/phone/groups/ws_unknown0001/grp_t_7k3f9q",
+      "headers": {
+        "X-Orch-Phone": "ph_iphone0001",
+        "Authorization": "Bearer orn_ph9Lq2Wm4Er7Ty1Ui3Op5As8Df0Gh6Jk2Lz4Xc7Vb9"
+      },
+      "body": {
+        "muted_until": null
+      }
+    },
+    "response": {
+      "status": 404,
+      "body": {
+        "error": "not_found",
+        "message": "Not found."
+      }
+    }
   }
 ]

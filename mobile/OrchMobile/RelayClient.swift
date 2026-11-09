@@ -20,6 +20,8 @@ protocol RelayAPI: Sendable {
     /// The text read aloud (`audio/mpeg`). Throws `.api(402 tts_cap_reached | 503 tts_off | 502 tts_failed | 404)`.
     func speech(messageId: String, lang: String?) async throws -> Data
     func settings() async throws -> PhoneSettings
+    func muteAll(_ mute: Mute) async throws -> PhoneSettings
+    func setGroupMute(_ key: GroupKey, mute: Mute) async throws -> GroupMute
     func updateSettings(_ patch: SettingsPatch) async throws -> PhoneSettings
     /// Redeem an invitation code (an already paired phone gets more workspaces).
     func redeem(code: String) async throws -> RedeemResponse
@@ -143,6 +145,15 @@ struct URLSessionRelayClient: RelayAPI {
     }
     func settings() async throws -> PhoneSettings {
         try JSONCoding.decoder.decode(PhoneSettings.self, from: try await request("GET", "/v1/phone/settings"))
+    }
+    func muteAll(_ mute: Mute) async throws -> PhoneSettings {
+        try JSONCoding.decoder.decode(PhoneSettings.self, from: try await request("PATCH", "/v1/phone/settings", body: MuteAllPatch(mute: mute)))
+    }
+    func setGroupMute(_ key: GroupKey, mute: Mute) async throws -> GroupMute {
+        guard BlobID.isValid(key.host), BlobID.isValid(key.id) else {
+            throw RelayError.api(status: 404, code: "not_found", message: "Group not found.")
+        }
+        return try JSONCoding.decoder.decode(GroupMute.self, from: try await request("PATCH", "/v1/phone/groups/\(key.host)/\(key.id)", body: GroupMutePatch(mute: mute)))
     }
     func updateSettings(_ patch: SettingsPatch) async throws -> PhoneSettings {
         try JSONCoding.decoder.decode(PhoneSettings.self, from: try await request("PATCH", "/v1/phone/settings", body: patch))

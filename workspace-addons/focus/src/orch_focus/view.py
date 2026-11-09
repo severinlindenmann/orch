@@ -5,6 +5,7 @@ Live now = runs in a live session; Working now = one-shot runs. Each links to it
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,18 +30,26 @@ def _item(rec: dict, ticket: dict | None, attention: bool, agents: list[dict] | 
     return item
 
 
+def _agents(root: Path, orch_bin: str | None) -> list[dict]:
+    try:
+        code, out, _ = actions.orch(root, orch_bin, ["agents", "--json"], timeout=10)
+        data = json.loads(out) if code == 0 else []
+    except (actions.Unavailable, ValueError):
+        return []
+    return [a for a in data if isinstance(a, dict)] if isinstance(data, list) else []
+
+
 def build(root: Path, orch_bin: str | None = None, now: datetime | None = None) -> dict:
     now = now or datetime.now(UTC)
     recs = livedata.records(root)
-    titles = livedata.tickets(root, orch_bin) if recs else {}
-    agents = []
+    titles: dict[str, dict] = {}
+    agents: list[dict] = []
     if recs:
-        try:
-            code, out, _ = actions.orch(root, orch_bin, ["agents", "--json"], timeout=10)
-            data = json.loads(out) if code == 0 else []
-            agents = [a for a in data if isinstance(a, dict)] if isinstance(data, list) else []
-        except (actions.Unavailable, ValueError):
-            pass
+        # both asks start an `orch` command: at the same time, so a slow machine pays for one, not two
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_titles = pool.submit(livedata.tickets, root, orch_bin)
+            f_agents = pool.submit(_agents, root, orch_bin)
+            titles, agents = f_titles.result(), f_agents.result()
     live, work = [], []
     for rec in recs:
         attention = (rec.get("live") or {}).get("state") == "attention"

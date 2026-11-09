@@ -133,6 +133,14 @@
         "tags": { "type": "array", "items": { "type": "string" } },
         "online": { "type": "boolean" },
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "can": {
+          "type": "object", "required": ["chat", "files", "tasks"], "additionalProperties": false,
+          "properties": {
+            "chat": { "type": "boolean" },
+            "files": { "type": "boolean" },
+            "tasks": { "type": "boolean" }
+          }
+        },
         "open_questions": { "type": "integer", "minimum": 0 },
         "muted_until": { "$ref": "#/$defs/muted_until" },
         "icon": { "type": ["string", "null"], "description": "look.md: an id; unknown ids fall back to the letter (read shape, not the allowlist)" },
@@ -154,12 +162,35 @@
         "speak": { "enum": ["auto", "always", "never"] },
         "swiss_german": { "type": "boolean" },
         "tts_cap_usd": { "type": "number", "minimum": 0, "maximum": 100 },
-        "tts_used_usd_month": { "type": "number", "minimum": 0 }
+        "tts_used_usd_month": { "type": "number", "minimum": 0 },
+        "mute_all_until": { "$ref": "#/$defs/muted_until", "description": "Mute all: no push of any kind to this phone while \"forever\" or in the future. Absent from an older relay = off." },
+        "group_mutes": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/group_mute" }, "description": "Active group mutes of this phone (expired ones are not listed). Absent from an older relay = none." }
+      }
+    },
+    "group_mute": {
+      "type": "object", "required": ["host", "id", "muted_until"], "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+        "id": { "type": "string", "pattern": "^grp_t_[a-z0-9]{6,16}$" },
+        "muted_until": { "oneOf": [{ "$ref": "#/$defs/time" }, { "const": "forever" }] }
+      }
+    },
+    "group_mute_request": {
+      "type": "object", "required": ["muted_until"],
+      "properties": { "muted_until": { "$ref": "#/$defs/muted_until" } }
+    },
+    "group_mute_response": {
+      "type": "object", "required": ["host", "id", "muted_until"], "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+        "id": { "type": "string", "pattern": "^grp_t_[a-z0-9]{6,16}$" },
+        "muted_until": { "$ref": "#/$defs/muted_until" }
       }
     },
     "settings_patch_request": {
-      "type": "object", "anyOf": [{ "required": ["speak"] }, { "required": ["swiss_german"] }, { "required": ["tts_cap_usd"] }],
+      "type": "object", "anyOf": [{ "required": ["speak"] }, { "required": ["swiss_german"] }, { "required": ["tts_cap_usd"] }, { "required": ["mute_all_until"] }],
       "properties": {
+        "mute_all_until": { "$ref": "#/$defs/muted_until" },
         "speak": { "enum": ["auto", "always", "never"] },
         "swiss_german": { "type": "boolean" },
         "tts_cap_usd": { "type": "number", "minimum": 0, "maximum": 100 }

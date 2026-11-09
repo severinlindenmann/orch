@@ -264,8 +264,13 @@ def proc_start(pid: int) -> str | None:
             k.CloseHandle(h)
     try:
         r = subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False
-        )
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},  # core writes the English form; a Mac in another
+        )  # language prints "Mo.  9 Nov." and the same process would look like a different one
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() or None

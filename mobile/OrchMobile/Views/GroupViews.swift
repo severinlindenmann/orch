@@ -103,7 +103,7 @@ enum GroupRoomRules {
         let name = group.name(of: event.ws ?? "")
         switch event.kind {
         case "created": return "Group started from ticket \(group.ticketKey ?? "") · \(group.title)"
-        case "member_added": return "\(group.hostName) helper added \(name) to this group"
+        case "member_added": return "\(group.hostName) added \(name) to this group"
         case "member_left": return "\(name) left this group"
         case "approved":
             let mode = event.mode == "always" ? "always" : "once"
@@ -158,20 +158,31 @@ struct GroupListRow: View {
     @Environment(AppModel.self) private var model
     let group: PhoneGroup
     var body: some View {
-        NavigationLink(value: ChatRoute.group(host: group.key.host, id: group.key.id)) {
-            HStack(spacing: 12) {
-                GroupBadges(group: group)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(group.title).themeFont(17, .semibold)
-                    lastLine.themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
-                    KeyTag(key: group.ticketKey)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                VStack(spacing: 8) {
-                    Text(ShellTime.short(group.messages.last?.at)).themeFont(12).foregroundStyle(Theme.muted)
-                    ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)))
+        TimelineView(.everyMinute) { context in
+            let muted = model.notificationsMuted(workspace: group.messages.last(where: { !$0.message.fromPhone })?.message.message.from ?? group.key.host, group: group.key, now: context.date)
+            NavigationLink(value: ChatRoute.group(host: group.key.host, id: group.key.id)) {
+                HStack(spacing: 12) {
+                    GroupBadges(group: group)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
+                            Text(group.title).themeFont(17, .semibold)
+                            if muted { MutedIcon() }
+                        }
+                        lastLine.themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                        KeyTag(key: group.ticketKey)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(spacing: 8) {
+                        Text(ShellTime.short(group.messages.last?.at)).themeFont(12).foregroundStyle(Theme.muted)
+                        ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted)
+                    }
+                }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
+            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier(Self.rowID(group))
+                .contextMenu {
+                    MuteMenu(muted: model.isGroupMuted(group.key, now: context.date)) { mute in
+                        Task { await model.setGroupMute(group.key, mute) }
+                    }
                 }
-            }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier(Self.rowID(group))
+        }
     }
 
     private var lastLine: Text {

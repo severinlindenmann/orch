@@ -416,6 +416,7 @@ async fn del_ws(
         let mut l = store::parse_list(&ws);
         if l.contains(&id) {
             l.retain(|w| w != &id);
+            store::forget_group_mutes_of(&c, &pid, &id);
             c.execute(
                 "UPDATE phones SET workspaces=?2 WHERE id=?1",
                 params![pid, serde_json::to_string(&l).unwrap()],
@@ -984,6 +985,9 @@ async fn edit_phone(
     if n == 0 {
         return Err(not_found("No such phone."));
     }
+    for w in old.iter().filter(|w| !ws.contains(w)) {
+        store::forget_group_mutes_of(&c, &id, w);
+    }
     // Workspaces that gained or lost the phone refresh their phone list.
     let changed: Vec<String> = old
         .iter()
@@ -1006,6 +1010,7 @@ async fn del_phone(
     let c = app.db.lock().unwrap();
     let old = store::phone_workspaces(&c, &id);
     let n = c.execute("DELETE FROM phones WHERE id=?1", [&id])?;
+    store::forget_phone_mutes(&c, &id);
     c.execute("DELETE FROM pair_codes WHERE phone_id=?1", [&id])?;
     if n == 0 {
         return Err(not_found("No such phone."));
