@@ -342,9 +342,135 @@ def kind_activity():
         _expect(f"activity stream_mapping {c['capture']}", got, c["events"])
 
 
+
+# --- secrets (secrets.md) --------------------------------------------------------------------------------------------
+def sec_needles(keys):
+    """[(needle, name)] for a list of {name, type, value} (value of a json key = the object)."""
+    from urllib.parse import quote
+
+    out = []
+
+    def forms(v, name):
+        cands = [v, json.dumps(v, ensure_ascii=False)[1:-1], quote(v, safe=""), base64.b64encode(v.encode()).decode()]
+        for c in dict.fromkeys(cands):
+            out.append((c, name))
+
+    def leaves(o):
+        if isinstance(o, str):
+            yield o
+        elif isinstance(o, dict):
+            for x in o.values():
+                yield from leaves(x)
+        elif isinstance(o, list):
+            for x in o:
+                yield from leaves(x)
+
+    for k in keys:
+        v, name = k["value"], k["name"]
+        if k["type"] == "json":
+            out.append((json.dumps(v, separators=(",", ":"), ensure_ascii=False), name))
+            for leaf in leaves(v):
+                if len(leaf) >= 8:
+                    forms(leaf, name)
+                    if "\n" in leaf:
+                        out.extend((ln, name) for ln in leaf.splitlines() if len(ln) >= 16)
+        else:
+            forms(v, name)
+            if "\n" in v:
+                out.extend((ln, name) for ln in v.splitlines() if len(ln) >= 16)
+    seen, uniq = set(), []
+    for n, name in sorted(out, key=lambda x: -len(x[0])):
+        if n and n not in seen:
+            seen.add(n)
+            uniq.append((n, name))
+    return uniq
+
+
+def _hide_upto(buf, needles, stop):
+    """Hide matches that START before index stop; returns (output, index where unprocessed text begins)."""
+    out, i = [], 0
+    while i < stop:
+        for n, name in needles:
+            if buf.startswith(n, i):
+                out.append(f"[hidden: {name}]")
+                i += len(n)
+                break
+        else:
+            out.append(buf[i])
+            i += 1
+    return "".join(out), i
+
+
+def sec_hide(text, needles):
+    return _hide_upto(text, needles, len(text))[0]
+
+
+def sec_hide_stream(chunks, needles):
+    longest = max((len(n) for n, _ in needles), default=1)
+    buf, out = "", []
+    for c in chunks:
+        buf += c
+        done, i = _hide_upto(buf, needles, max(0, len(buf) - (longest - 1)))
+        out.append(done)
+        buf = buf[i:]
+    out.append(sec_hide(buf, needles))
+    return out
+
+
+def sec_get(case):
+    if not case["key_in_profile"]:
+        return "not_in_profile"
+    if not case["allow_get"]:
+        return "get_off"
+    if case["stdout_tty"]:
+        return "get_to_terminal"
+    return "ok"
+
+
+def sec_resolve(entries):
+    """Which entry is used per name ('workspace' wins) and which are shadowed."""
+    used, shadowed = {}, []
+    for e in entries:
+        if e["name"] not in used or e["source"] == "workspace":
+            if e["name"] in used:
+                shadowed.append(e["name"])
+            used[e["name"]] = e["source"]
+        else:
+            shadowed.append(e["name"])
+    return {"used": dict(sorted(used.items())), "shadowed": sorted(set(shadowed))}
+
+
+def kind_secrets():
+    vp, vk, vl = _w("secrets", "profiles"), _w("secrets", "keys_file"), _w("secrets", "list_answer")
+    _examples("secret-profiles", lambda d: _msgs(vp, d))
+    _examples("secret-keys", lambda d: _msgs(vk, d))
+    _examples("secret-list", lambda d: _msgs(vl, d))
+    for f in sorted((HERE / "examples" / "secret-profiles").glob("valid-*")):
+        if re.search(r"(?i)(dapi|ghp_|sk_live|-----BEGIN)", f.read_text()):
+            fails.append(f"examples/secret-profiles/{f.name}: a profile must hold names only")
+    vec = _vec("secrets-v1.json")
+    for c in vec["hide"]:
+        needles = sec_needles(c["keys"])
+        whole = sec_hide("".join(c["chunks"]), needles)
+        _expect(f"secrets hide {c['name']} (whole)", whole, c["expect"])
+        streamed = sec_hide_stream(c["chunks"], needles)
+        _expect(f"secrets hide {c['name']} (streamed)", "".join(streamed), c["expect"])
+        for k in c["keys"]:
+            if k["type"] != "json" and k["value"] in c["expect"]:
+                fails.append(f"secrets hide {c['name']}: a value survives in expect")
+    for c in vec["get"]:
+        _expect(f"secrets get {c['name']}", sec_get(c), c["result"])
+    for c in vec["resolve"]:
+        _expect(f"secrets resolve {c['name']}", sec_resolve(c["entries"]), c["expect"])
+    for c in vec["too_short"]:
+        ok = not _msgs(vk, {"schema": "orch.keys/1", "keys": {"k": {"type": "token", "source": "workspace", "value": c["value"], "added_at": "2026-11-16T09:00:00Z"}}})
+        _expect(f"secrets too_short {c['value']!r}", ok, c["stored"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
+    "secrets": kind_secrets,
 }
 
 
