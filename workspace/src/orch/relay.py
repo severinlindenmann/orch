@@ -1056,8 +1056,8 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
         _send_proposal_result(root, mid, recorded["result"], recorded["created_at"])
         return "ticket proposal: result resent", None
 
-    pend = rec.get("pending") if isinstance((rec.get("pending") or {}).get("answer"), str) else None
-    mine = pend if pend and pend["answer"] == answer_id else None
+    pend = rec.get("pending") if isinstance(rec.get("pending"), dict) else None
+    mine = pend if pend and pend.get("answer") == answer_id else None
 
     def result(body: dict, to: str, **outcome) -> None:
         # a result reserved before making keeps its id and time: a crash between make and record resends it
@@ -1103,7 +1103,7 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
         return "ignored: the ticket proposal was already decided", None
     reserve = {"answer": answer_id, "id": new_id(), "created_at": tickets.now()}
     _set_asked(root, mid, phone=frm, pending=reserve)
-    mine = (_asked_edit(root, lambda records: records.get(mid) or {})).get("pending")
+    mine = reserve
     try:
         made = chat.make_ticket(root, mid, None, by)
     except Refused as e:
