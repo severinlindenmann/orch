@@ -107,4 +107,16 @@ final class MakeTicketResultTests: XCTestCase {
             results: [ProposalResult(result: "made", key: "PIL-15"), ProposalResult(result: "decided", key: "PIL-16")],
             now: now, workspaceLive: false), .made(key: "PIL-15"))
     }
+
+    /// The relay refuses the invalid shapes; the phone must still never crash on one, and a marker that is not a
+    /// result object or names an unknown result is not a result at all (the text stays an ordinary bubble).
+    func testInvalidVectorsDecodeSafely() throws {
+        for entry in try XCTUnwrap(vector()["invalid"] as? [[String: Any]]) {
+            let name = entry["name"] as? String ?? "?"
+            let message = try XCTUnwrap(entry["message"] as? [String: Any])
+            let body = (message["body"] as? [String: Any]) ?? [:]
+            let decoded = try JSONCoding.decoder.decode(TextBody.self, from: JSONSerialization.data(withJSONObject: body))
+            if ["unknown-result", "string-marker"].contains(name) { XCTAssertNil(decoded.proposalResult, name) }
+        }
+    }
 }
