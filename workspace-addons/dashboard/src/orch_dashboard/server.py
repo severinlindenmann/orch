@@ -224,6 +224,14 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
                 "application/json",
             )
+        if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
+            from .data import load_chat_contacts, load_chat_thread
+
+            d = (load_chat_contacts(self.root, self.orch_bin) if path.endswith("/contacts")
+                 else load_chat_thread(self.root, self.orch_bin, path.rsplit("/", 1)[1]))
+            if d is None:
+                return self._send(404, b"not found", "text/plain")
+            return self._send(200, json.dumps(d).encode(), "application/json")
         if path == "/api/chat/days":  # History: the days that have texts, newest first
             d = load_chat_days(self.root, self.orch_bin)
             return self._send(200, json.dumps(d if d is not None else []).encode(), "application/json")
@@ -398,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
         state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+        if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
+            state["chat_dm_result"] = extra
         if body.get("op") == "config.agent.test" and isinstance(
             extra, dict
         ):  # the answer of the try, plain words only
