@@ -704,6 +704,25 @@ def kind_inventory():
         _expect(f"inventory precedence {c['name']}", inv_winners(c["kind"], c["entries"]), c["winners"])
 
 
+
+# --- addon-manifest amendment (addon-manifest.md, Reserved core commands) --------------------------------------------
+RESERVED_W2B = ["record", "job", "secret", "conn", "run", "screen", "type"]
+
+
+def kind_addon_manifest():
+    if SELECT:  # without arguments the generic example loop above already checked these
+        for f in sorted((HERE / "examples" / "addon-manifest").glob("*.toml")):
+            check("addon-manifest", load(f), f.name.startswith("valid-"), f"examples/addon-manifest/{f.name}")
+        check("addon-manifest", load(HERE / "review" / "automation.orch-addon.toml"), True, "review/automation.orch-addon")
+    names = json.loads((HERE / "addon-manifest.schema.json").read_text())["properties"]["name"]["not"]["enum"]
+    for n in RESERVED_W2B:
+        if n not in names:
+            fails.append(f"addon-manifest.schema.json: {n!r} must be a reserved core name")
+    vpage, verr = _w("cli-answer", "page"), _w("cli-answer", "error")
+    _examples("cli-page", lambda d: _msgs(vpage, d))
+    _examples("cli-error", lambda d: _msgs(verr, d))
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
@@ -711,6 +730,7 @@ KINDS = {
     "jobs": kind_jobs,
     "blocks": kind_blocks,
     "inventory": kind_inventory,
+    "addon-manifest": kind_addon_manifest,
 }
 
 

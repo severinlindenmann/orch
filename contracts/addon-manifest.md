@@ -17,7 +17,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | Key | Meaning |
 |---|---|
 | `schema = "orch.addon/1"`, `orch_api = 1` | Manifest format and add-on contract version. Other values: refused |
-| `name` | `[a-z][a-z0-9-]{1,31}`, not a core command (`ticket`, `addon`, `relay`, `publish`, `init`, `update`, `config`, `start`, `stop`, `status`, … see schema). Unique in the tool env. `publish` and `relay` are built-in add-ons shipped inside the orch package (`orch/builtin/<name>/orch-addon.toml`): off until `orch addon add publish|relay`, no other add-on may take these names |
+| `name` | `[a-z][a-z0-9-]{1,31}`, not a core command (`ticket`, `addon`, `relay`, `publish`, `init`, `update`, `config`, `start`, `stop`, `status`, `run`, `record`, `job`, `secret`, `conn`, … see schema). Unique in the tool env. `publish` and `relay` are built-in add-ons shipped inside the orch package (`orch/builtin/<name>/orch-addon.toml`): off until `orch addon add publish|relay`, no other add-on may take these names |
 | `version`, `description` | `x.y.z`; one plain sentence (shown in `orch addon list` and `orch --help`) |
 | `run` | Top-level module. `orch <name> <args>` = subprocess `<orch's python> -m <run> <args>` |
 | `skill` | Folder with `SKILL.md` → copied to `.agents/skills/orch-<name>/` |
@@ -133,6 +133,39 @@ Add-ons without `background` are ignored by all three. The core never starts any
 - `orch addon list --json`: above. `orch relay status --json`: `{"configured": false}` or
   `{"configured": true, "url", "workspace"}`; it never touches the network (the dashboard shows Inbox when `configured`).
 - Errors with `--json` on stdout: `{"error": "<plain words>"}`, exit 2.
+
+## Reserved core commands for records, jobs, keys, sessions and connections (draft 02)
+
+`record`, `job`, `secret`, `conn` (and the `run screen` / `run type` subcommands, under the reserved `run`) are core commands;
+no add-on may take these names (schema; `screen` and `type` are reserved too so they never look like core verbs). Add-ons
+(Focus, Insights, the dashboard) read records, jobs, sessions and counts **only** through them, never from `.orch/record/`,
+`.orch/run/` or the key folder:
+
+| Command | Answer | Contract |
+|---|---|---|
+| `orch record tail [--ticket T \| --run R] [--since C] [--follow] --json` | NDJSON stream (`cli-answer.schema.json` `stream_line`) | activity.md |
+| `orch record query … [--limit N] [--after C] --json` | page of `orch.activity/1` events | activity.md |
+| `orch record counts [--days N] … --json` | `orch.counts/1` with inventory | counts.md |
+| `orch record delete-detail <ticket> --json` | `{"deleted": n}` (a person only) | activity.md |
+| `orch job start\|step\|progress\|artifact\|metric\|table\|link\|log\|end\|run …` | the stored `orch.job/1` event | job-events.md |
+| `orch secret env\|file\|exec\|list\|get …` | child's exit code / page of names | secrets.md |
+| `orch run screen <ticket> --follow --json` | NDJSON `orch.screen/1` stream | screen.md |
+| `orch run type <ticket> --takeover\|--release\|(keys on stdin) --by human:<user> --from local-page --json` | take-over state | screen.md |
+| `orch conn list\|show\|allow …` | page of connections / one connection | inventory.md |
+
+- **Paged answers.** A list that can grow answers `{"items": [...], "next": "<cursor>" | null}` (`cli-answer.schema.json`
+  `page`), newest first, `--limit` 1–500 (default 100), `--after <next>`. The cursor is opaque (letters, digits, `._~-`).
+- **Errors.** Exit 2, stdout `{"error": "<plain words>", "code": "<code>"}` (`cli-answer.schema.json` `error`; `code` is
+  optional and new: `refused`, `invalid`, `not_found`, `not_allowed`, `switched_off`, `locked_by_admin`, `conflict`, `gone`,
+  `too_large`, `busy`, `not_available`). Error text never holds a key value (secrets.md, Hiding).
+- **Streams** (`--follow`): one JSON object per line, flushed per line; `{"type": "ping"}` at least every 15 s; a line
+  `{"type": "error", "error", "code"}` is the last one, then exit 2. Readers skip unknown types. The add-on restarts a
+  stream with its last cursor after a drop; the core never relies on the reader keeping up (it drops a slow reader with
+  `error` code `busy` after 1 MB of unread output).
+- **A fake orch for tests: `ORCH_BIN`.** Add-ons call `$ORCH_BIN` (set by the core for every add-on run, falling back to
+  `orch` on PATH). Tests point it at the fake (`workspace/tests/fakes/orch_fake.py`, slice 0.8), which replays the contract
+  vectors (`vectors/activity-v1.json`, `examples/screen/`, `vectors/jobs-v1.json`, `examples/counts/`) for `record tail`,
+  `record counts`, `job`, `run screen`, so add-on code does not change when the real commands arrive.
 
 ## Act (the buttons and switches of a dashboard tab)
 
