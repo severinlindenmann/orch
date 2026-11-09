@@ -1283,7 +1283,13 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
     limit = tickets.ATTACH_MAX // 4  # characters: at most 2 MB in the file
     raw_text = clean_untrusted(str(body.get("text") or ""), limit + 1).strip()
     if len(raw_text) > tickets.LONG_TEXT:
-        lines.append(_long_phone_text(root, tid, mid, who, raw_text[:limit], len(raw_text) > limit))
+        try:
+            lines.append(_long_phone_text(root, tid, mid, who, raw_text[:limit], len(raw_text) > limit))
+        except (Refused, OSError):  # never fail the message on every retry: keep a start of it in the history
+            lines.append(
+                f"{_line(raw_text, 1500)}…\n"
+                f"  (Long text, {len(raw_text)} characters: the full text could not be saved.)"
+            )
     else:
         text = _line(body.get("text", ""), 2000)  # one line: it cannot fake the lines orch adds below
         if text:

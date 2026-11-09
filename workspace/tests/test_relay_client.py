@@ -1119,6 +1119,23 @@ def test_phone_long_text_is_kept_as_a_file_and_the_history_stays_short(proj, run
     assert [p.name for p in kept.parent.iterdir()] == [kept.name]  # named from the message: never twice
 
 
+def test_phone_long_text_that_cannot_be_saved_does_not_fail_the_message(proj, run, rel, monkeypatch):
+    from orch import tickets
+
+    _phone_setup(rel, run)
+
+    def boom(*a, **k):
+        raise OSError("disk says no")
+
+    monkeypatch.setattr(tickets, "attach", boom)
+    rel.inbox.append(msg("m_phone00000000010", "text", {"text": "Point\n" + "word " * 600}, frm=PHONE))
+    code, out, _ = run("relay", "inbox")
+    assert code == 0 and "new ticket t_" in out
+    t = _tickets(run)[0]
+    said = "\n".join(h["text"] for h in t["history"] if h.get("via") == "phone")
+    assert "could not be saved" in said and len(rel.sent) == 1  # described and acked once
+
+
 def test_phone_text_crash_before_seen_is_idempotent(proj, run, rel, monkeypatch):
     from orch import relay
 

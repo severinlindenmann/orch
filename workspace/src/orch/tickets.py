@@ -1919,7 +1919,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
         dfd = _open_artifacts_fd(root, tid)
         opener = lambda n: os.open(n, wflags, 0o644, dir_fd=dfd)  # noqa: E731
         remove = lambda n: os.unlink(n, dir_fd=dfd)  # noqa: E731
-        linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)  # noqa: E731
+        linker = lambda a, b: os.link(a, b, src_dir_fd=dfd, dst_dir_fd=dfd, **_nofollow_link())  # noqa: E731
         lstat = lambda n: os.stat(n, dir_fd=dfd, follow_symlinks=False)  # noqa: E731
         names = lambda: os.listdir(dfd)  # noqa: E731
         close = lambda: os.close(dfd)  # noqa: E731
@@ -1927,7 +1927,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
         d0 = artifacts_dir(root, tid)
         opener = lambda n: os.open(d0 / n, wflags, 0o644)  # noqa: E731
         remove = lambda n: (d0 / n).unlink()  # noqa: E731
-        linker = lambda a, b: os.link(d0 / a, d0 / b, follow_symlinks=False)  # noqa: E731
+        linker = lambda a, b: os.link(d0 / a, d0 / b, **_nofollow_link())  # noqa: E731
         lstat = lambda n: os.lstat(d0 / n)  # noqa: E731
         names = lambda: os.listdir(d0)  # noqa: E731
         close = lambda: None  # noqa: E731
@@ -1972,6 +1972,12 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
     return {"name": final, "size": len(data), "path": _art_rel(tid, final)}
 
 
+def _nofollow_link() -> dict:
+    # Windows CPython has no linkat: follow_symlinks=False raises NotImplementedError there. The identity
+    # check after linking (device + inode) covers a swapped file either way.
+    return {"follow_symlinks": False} if os.link in os.supports_follow_symlinks else {}
+
+
 def _publish(linker, opener, remove, lstat, tmp: str, final: str, data: bytes, written) -> None:
     """Give the finished temp file its final name without replacing anything: a hard link (then the file is
     checked to be the very one we wrote). A file system that cannot link (FAT, some network drives) gets an
@@ -1980,7 +1986,7 @@ def _publish(linker, opener, remove, lstat, tmp: str, final: str, data: bytes, w
         linker(tmp, final)
     except FileExistsError:
         raise
-    except OSError:
+    except (OSError, NotImplementedError):
         fd = opener(final)  # O_EXCL | O_NOFOLLOW; FileExistsError is the same "taken"
         try:
             with os.fdopen(fd, "wb") as f:

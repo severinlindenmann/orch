@@ -194,3 +194,27 @@ def test_part_files_are_hidden_and_old_ones_swept(proj, run):
     tickets.attach(proj, tid, "n.md", b"z", "human:t")
     assert not old.exists() and fresh.exists()
     assert [f["name"] for f in tickets.artifacts_list(proj, tid)] == ["n.md"]
+
+
+def test_attach_works_where_links_cannot_be_followed_or_made(proj, run, monkeypatch):
+    """Windows CPython: no follow_symlinks for os.link (NotImplementedError); some file systems: no links."""
+    tid = _new(run)
+    real = os.link
+
+    def windows_link(src, dst, *a, follow_symlinks=True, **k):
+        if not follow_symlinks:
+            raise NotImplementedError("link: follow_symlinks unavailable on this platform")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(os, "link", windows_link)
+    monkeypatch.setattr(os, "supports_follow_symlinks", set())  # os.link is not in it
+    r = tickets.attach(proj, tid, "a.md", b"one", "human:t")
+    assert (proj / r["path"]).read_bytes() == b"one"
+
+    def broken(*a, **k):
+        raise NotImplementedError("no links at all")
+
+    monkeypatch.setattr(os, "link", broken)
+    r2 = tickets.attach(proj, tid, "b.md", b"two", "human:t")
+    assert (proj / r2["path"]).read_bytes() == b"two"
+    assert [p.name for p in (proj / r["path"]).parent.iterdir() if p.name.startswith(".")] == []
