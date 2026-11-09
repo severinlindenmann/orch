@@ -41,6 +41,8 @@ HUMAN_ONLY = {
     "run event",
     "run _wrap",
     "publish view",  # feeds the dashboard's Shared tab
+    "dev-mark",  # test installs only: the e2e harness marks a demo workspace (never in an agent skill)
+    "dev-proof",  # test installs only: the e2e harness's scripted test human (never in an agent skill)
 }
 
 

@@ -78,6 +78,22 @@ def forget_static() -> None:
     _STATIC.clear()
 
 
+def _argv0(orch_bin):
+    try:
+        from orch.pageproof import argv0
+    except ImportError:
+        return [orch_bin]
+    return argv0(orch_bin)
+
+
+def _child_env(env, orch_bin):
+    try:
+        from orch.pageproof import child_env
+    except ImportError:
+        return {**env, "ORCH_BIN": orch_bin}
+    return child_env(env, orch_bin)
+
+
 def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float = 5.0):
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
@@ -97,13 +113,13 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
         r = subprocess.run(
-            [orch_bin, *args],
+            [*_argv0(orch_bin), *args],
             check=False,
             cwd=root,
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin},
+            env=_child_env({**os.environ, "ORCH_ROOT": str(root)}, orch_bin),
         )
         return json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -326,6 +342,9 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                     "ticket_fields": tf,
                     "acts": acts,
                     "link_kinds": kinds,
+                    # orch-shipped (an installed package) vs a local folder someone added: the page of the
+                    # latter runs sandboxed, with no way to use the person's session (H1)
+                    "shipped": a.get("source") == "built-in",
                 }
             )
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))

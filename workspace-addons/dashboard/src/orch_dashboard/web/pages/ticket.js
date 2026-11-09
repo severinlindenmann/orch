@@ -1019,6 +1019,7 @@ function pickDate(anchor, current, cb) {
 // An answer still in its Undo window is sent at once when the page is left, so it is not lost.
 const sends = new WeakMap();
 function flushPending() {
+  if (typeof mounts === 'undefined') return;  // the page was left before app.js loaded (e.g. the launch reload)
   window.DashHelpers.flushPending([...mounts.values()].map(m => ({state:m.state, send:sends.get(m)})));
 }
 addEventListener('pagehide', flushPending);

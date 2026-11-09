@@ -46,14 +46,36 @@ def dispatch(args, root: Path) -> bool:
         d = chat.read_day(root, args.day)
         _out(args, d, "\n".join(f"{m['by']}: {m['text']}" for m in d["messages"]) or "Nothing on that day.")
     elif args.sub == "make-ticket":
-        r = chat.make_ticket(root, args.message_id, args.title, getattr(args, "by", None))
+        from orch import humanproof
+
+        # a person's click (H1): proof from the page, or a hand-off. The phone path calls chat.make_ticket in
+        # this process with the relay-authenticated sender instead (relay._apply_proposal_answer).
+        who = humanproof.person_by(
+            root,
+            args,
+            "chat.make_ticket",
+            args.message_id,
+            parts={},
+            value=args.title or "",
+        )
+        r = chat.make_ticket(root, args.message_id, args.title, who)
         _out(args, r, r["key"])
     elif args.sub == "say":
         if tickets.agent_tool():
             raise Refused(
                 "Only a person writes as themselves in Chat. Use: orch relay send ... --ticket <chat>."
             )
-        r = chat.say(root, args.text, getattr(args, "by", None), new=args.new)
+        from orch import humanproof
+
+        who = humanproof.person_by(
+            root,
+            args,
+            "chat.send",
+            "general",
+            parts={},
+            value=args.text,
+        )
+        r = chat.say(root, args.text, who, new=args.new, proven=who.startswith("human:"))
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
         )
@@ -77,6 +99,16 @@ def _add_dm_parsers(sub, common):
     p.add_argument("--retry", help="replace a failed message")
 
 
+def _ws_name(root, ws):
+    """The workspace's name for a sentence (never its raw id when a name is known)."""
+    from orch import relay
+
+    try:
+        return relay.name_of(root, ws) or ws
+    except Exception:  # noqa: BLE001 - a name is a nicety
+        return ws
+
+
 def _dispatch_dm(args, root):
     if args.sub in ("contacts", "thread"):  # send and sync check this in chat.py; reading is a person's too
         if tickets.agent_tool() or not tickets.current_actor(getattr(args, "by", None)).startswith("human:"):
@@ -97,11 +129,21 @@ def _dispatch_dm(args, root):
         )
         text = "Synced."
     elif args.sub == "send":
+        from orch import humanproof
+
+        who = humanproof.person_by(
+            root,
+            args,
+            "chat.send",
+            args.workspace,
+            parts={"thread": humanproof.part(_ws_name(root, args.workspace))},
+            value=args.text,
+        )
         data = chat.dm_send(
             root,
             args.workspace,
             args.text,
-            getattr(args, "by", None),
+            who,
             retry=args.retry,
             client_id=args.client_id,
         )
