@@ -329,6 +329,7 @@ def test_nothing_that_prepares_a_copy_runs_git_with_a_copy_as_cwd():
 
 
 def test_subcommand_is_found_past_global_options(tmp_path, monkeypatch):
+    monkeypatch.setattr(safegit, "ALLOWED", safegit.ALLOWED | safegit._DIFFLIKE)  # flag handling only
     assert safegit.subcommand_index(["-C", "x", "--literal-pathspecs", "-c", "a=b", "diff"]) == 5
     assert safegit.subcommand_index(["status"]) == 0
     seen = []
@@ -420,7 +421,8 @@ def test_a_copy_holds_the_committed_bytes_whatever_the_eol_attributes(tmp_path):
         assert (wt / "a.txt").read_bytes().replace(b"\r\n", b"\n") == blob("a.txt").replace(b"\r\n", b"\n")
 
 
-def test_blame_and_format_patch_accept_the_no_textconv_flags_for_real(tmp_path):
+def test_blame_and_format_patch_accept_the_no_textconv_flags_for_real(tmp_path, monkeypatch):
+    monkeypatch.setattr(safegit, "ALLOWED", safegit.ALLOWED | safegit._DIFFLIKE)  # proves git takes the flags
     r = tmp_path / "b"
     r.mkdir()
     plain_git(r, "init", "-q")
@@ -482,7 +484,15 @@ def test_external_tools_and_interactive_modes_are_refused(args, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "args", [["add", "-A"], ["add", "--", "-p"], ["checkout", "-b", "x"], ["stash", "list"]]
+    "args",
+    [
+        ["add", "-A"],
+        ["add", "--", "-p"],
+        ["merge", "--no-edit", "x"],
+        ["stash", "list"],
+        ["commit", "-m", "msg"],
+        ["worktree", "add", "p"],
+    ],
 )
 def test_ordinary_calls_are_not_refused(args):
     assert safegit.refusal(args) is None
@@ -496,4 +506,28 @@ def test_stash_show_gets_the_no_textconv_flags(tmp_path, monkeypatch):
     safegit.run(["stash", "show", "--stat"], tmp_path, filters=False)
     i = seen[-1].index("show")
     assert seen[-1][i + 1 : i + 3] == ["--no-ext-diff", "--no-textconv"]
-    assert safegit.refusal(["cherry", "-v"]) is None  # git cherry takes no diff flags: left as it is
+    assert safegit.refusal(["cherry", "-v"])  # not an allowed command at all
+
+
+def test_every_call_runs_with_no_editor_no_prompt_and_no_stdin(tmp_path, monkeypatch):
+    got = {}
+
+    def fake_run(argv, **kw):
+        got.update(kw)
+        got["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(safegit.subprocess, "run", fake_run)
+    monkeypatch.setenv("GIT_EDITOR", "vim")
+    safegit.run(["status"], tmp_path, filters=False)
+    assert got["stdin"] == subprocess.DEVNULL
+    e = got["env"]
+    assert e["GIT_EDITOR"] == e["GIT_SEQUENCE_EDITOR"] == e["GIT_ASKPASS"] == "true"
+    assert e["GIT_TERMINAL_PROMPT"] == "0"
+    assert "core.editor=true" in got["argv"] and "sequence.editor=true" in got["argv"]
+
+
+def test_config_is_read_only_and_worktree_subcommands_are_limited():
+    assert safegit.refusal(["config", "--get", "a.b"]) is None
+    assert safegit.refusal(["config", "--includes", "--get-regexp", "x"]) is None
+    assert safegit.refusal(["worktree", "remove", "--force", "p"]) is None

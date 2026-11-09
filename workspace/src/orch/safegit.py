@@ -51,7 +51,9 @@ EMPTY_TREE = {  # by `rev-parse --show-object-format`
     "sha256": "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
 }
 TIMEOUT = 60
-REFUSED = 125  # rc: orch would not run this git call (could not check the repository's drivers)
+REFUSED = (
+    125  # rc: orch refused to run this git call for a safety reason (not allowed, interactive, no drivers)
+)
 _DRIVER = re.compile(r"^(filter\.(.+)\.(smudge|clean|process)|merge\.(.+)\.driver)$")
 _DIFFLIKE = {
     "diff",
@@ -145,7 +147,9 @@ def git_exe(cwd: Path, root: Path | None = None) -> str | None:
 def env() -> dict[str, str]:
     e = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     e["LC_ALL"] = "C"
+    # set AFTER the GIT_* strip, on purpose: nothing may open an editor, a pager prompt or ask for a password
     e["GIT_TERMINAL_PROMPT"] = "0"
+    e["GIT_EDITOR"] = e["GIT_SEQUENCE_EDITOR"] = e["GIT_ASKPASS"] = "true"
     return e
 
 
@@ -166,6 +170,8 @@ def base_args(read_only: bool = False) -> list[str]:
         "-c", "core.sshCommand=",
         "-c", "credential.helper=",
         "-c", "diff.external=",
+        "-c", "core.editor=true",
+        "-c", "sequence.editor=true",
     ]  # fmt: skip
     return ["--no-optional-locks", *out] if read_only else out
 
@@ -177,7 +183,14 @@ def _raw(argv: list[str], cwd: Path, timeout: float, data: bytes | None = None, 
     argv = [exe, *argv[1:]]
     try:
         p = subprocess.run(
-            argv, cwd=cwd, capture_output=True, input=data, env=env(), timeout=timeout, check=False
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            input=data,
+            stdin=None if data is not None else subprocess.DEVNULL,  # never waits for a terminal
+            env=env(),
+            timeout=timeout,
+            check=False,
         )
     except FileNotFoundError:
         return 127, "", "git is not installed"
@@ -212,26 +225,47 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
     return _trees[key]
 
 
-_EXTERNAL_TOOLS = {"difftool", "mergetool"}  # they run external programs by design
-_INTERACTIVE = {"add", "checkout", "reset", "restore", "stash"}
+# ALLOWLIST: orch builds every git argv itself, so only these subcommands run; the rest is refused (rc 125).
+# worktree/stash/config are further limited below. (B12/B13 need merge, commit, add, rm, reset, worktree
+# remove/prune and stash list; they are listed now so those tasks add no new surface.)
+ALLOWED = {
+    "worktree", "read-tree", "update-index", "checkout-index", "ls-files", "rev-parse", "config", "branch",
+    "symbolic-ref", "cat-file", "merge-base", "show-ref", "for-each-ref", "status", "diff", "log", "show",
+    "merge", "commit", "add", "rm", "reset", "stash",
+}  # fmt: skip
+_WORKTREE_OK = {"add", "remove", "prune", "list"}
+_CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
+_NO_MODES = {"add", "commit", "reset", "stash", "checkout", "restore", "clean", "rebase"}
+_MODE_FLAGS = ("--patch", "--interactive", "--edit")  # and every abbreviation git would accept of them
 
 
 def refusal(args: list[str]) -> str | None:
-    """Why orch will not run this git call at all (None = fine): difftool/mergetool start external programs,
-    and the interactive patch modes (-p/--patch, -i) of add/checkout/reset/restore/stash are never needed."""
+    """Why orch will not run this git call at all (None = fine). Only ALLOWED subcommands run (worktree: add,
+    remove, prune, list; stash: list, show;
+    config: reading only). Never an interactive mode: -p/-i/-e and
+    every abbreviation of --patch/--interactive/--edit (git accepts `--patc`, `--inter`)."""
     k = subcommand_index(args)
     if k >= len(args):
         return None
     cmd, rest = args[k], args[k + 1 :]
-    if cmd in _EXTERNAL_TOOLS:
-        return f"git {cmd} runs external programs; orch does not run it"
-    if cmd in _INTERACTIVE:
-        flags = rest[: rest.index("--")] if "--" in rest else rest
-        if any(
-            a in ("-p", "--patch", "-i", "--interactive") or re.fullmatch(r"-[A-Za-z]*[pi][A-Za-z]*", a)
-            for a in flags
-        ):
-            return f"git {cmd} in an interactive mode is not run by orch"
+    if cmd not in ALLOWED:
+        return f"git {cmd} is not one of the git commands orch runs"
+    flags = rest[: rest.index("--")] if "--" in rest else rest
+    if cmd == "worktree" and not (rest and rest[0] in _WORKTREE_OK):
+        return "git worktree: only add, remove, prune and list are run"
+    if cmd == "stash" and not (rest and rest[0] in ("list", "show")):
+        return "git stash: only list and show are run"
+    if cmd == "config" and not any(a in _CONFIG_READ for a in flags):
+        return "git config: orch only reads the configuration"
+    if cmd in _NO_MODES or cmd == "add":
+        for a in flags:
+            f = a.split("=", 1)[0]
+            if f.startswith("--") and len(f) >= 3 and any(m.startswith(f) for m in _MODE_FLAGS):
+                return f"git {cmd} in an interactive mode is not run by orch"
+            if re.fullmatch(r"-[A-Za-z]*[pie][A-Za-z]*", a) and cmd != "commit":
+                return f"git {cmd} in an interactive mode is not run by orch"
+            if cmd == "commit" and re.fullmatch(r"-[A-Za-z]*[pi][A-Za-z]*", a):
+                return "git commit in an interactive mode is not run by orch"
     return None
 
 
@@ -286,7 +320,8 @@ def run(
     root: Path | None = None,
 ) -> tuple[int, str, str]:
     """(exit code, stdout, stderr) of git `args` in `cwd`, hardened as the module says. rc 127: git missing,
-    124: timeout, 125: refused (the repository's drivers could not be listed). `root`: the workspace root (its
+    124: timeout, 125: refused for a safety reason (a subcommand orch does not run, an interactive mode, or
+        repository's drivers could not be listed). `root`: the workspace root (its
     folder is never searched for the git program)."""
     why = refusal(args)
     if why:
