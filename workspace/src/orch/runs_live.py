@@ -415,8 +415,8 @@ def _box_rows(lines: list[str], cy: int) -> tuple[int, int]:
 def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | None, str, bool]:
     """(unsent, pane hash, lost). lost: the notice is nowhere on the visible pane (not in the box, not
     echoed above it): the tool dropped the typed keys. unsent: True when the notice line still sits in
-    the prompt box, False when it does not, None when that cannot be told safely: copy mode, the tool's dialog shows anywhere on the pane (an
-    Enter would answer it), or tmux failed."""
+    the prompt box, False when it does not, None when that cannot be told safely: copy mode, the tool's
+    dialog shows anywhere on the pane (an Enter would answer it), or tmux failed."""
     pane = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
     if pane.returncode != 0:
         return None, "", False
