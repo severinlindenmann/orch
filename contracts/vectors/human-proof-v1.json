@@ -678,5 +678,81 @@
    "has_human_key": true,
    "ok": false
   }
+ ],
+ "relay": [
+  {
+   "name": "record only",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "file": null,
+   "env": {},
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "proxy": null,
+    "trust": "fixed"
+   }
+  },
+  {
+   "name": "workspace file matches",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "file": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "env": {},
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "proxy": null,
+    "trust": "fixed"
+   }
+  },
+  {
+   "name": "workspace file points elsewhere",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "file": {
+    "url": "https://evil.example",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "env": {},
+   "expect": "refused"
+  },
+  {
+   "name": "HTTPS_PROXY set is ignored",
+   "record": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "file": null,
+   "env": {
+    "HTTPS_PROXY": "http://127.0.0.1:8888",
+    "SSL_CERT_FILE": "/tmp/evil-ca.pem"
+   },
+   "expect": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa",
+    "proxy": null,
+    "trust": "fixed"
+   }
+  },
+  {
+   "name": "no record (file alone)",
+   "record": null,
+   "file": {
+    "url": "https://relay.example.com",
+    "workspace": "ws_aaaaaaaaaa"
+   },
+   "env": {},
+   "expect": "not_connected"
+  }
  ]
 }

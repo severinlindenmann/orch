@@ -1083,6 +1083,17 @@ def hp_settle(c):
     return out
 
 
+def relay_conn(c):
+    """Where relay calls go: only the record in the guarded home; a differing workspace file refuses; env never used."""
+    rec = c.get("record")
+    if not rec:
+        return "not_connected"
+    f = c.get("file")
+    if f is not None and (f.get("url") != rec["url"] or f.get("workspace") != rec["workspace"]):
+        return "refused"
+    return {"url": rec["url"], "workspace": rec["workspace"], "proxy": None, "trust": "fixed"}
+
+
 def dev_can_mark(c):
     """A workspace becomes dev only when a dev install creates it, and never once it has a human key."""
     return bool(c["install_dev"] and c["creating"] and not c["has_human_key"])
@@ -1111,6 +1122,8 @@ def kind_human():
                 used.append(json.loads(base64.urlsafe_b64decode(call["proof"].split(".")[1] + "=="))["nonce"])
             got.append(r)
         _expect(f"human concurrent {c['name']}", got, c["results"])
+    for c in vec["relay"]:
+        _expect(f"human relay {c['name']}", relay_conn(c), c["expect"])
     for c in vec["dev_mark"]:
         _expect(f"human dev_mark {c['name']}", dev_can_mark(c), c["ok"])
     for c in vec["home"]:

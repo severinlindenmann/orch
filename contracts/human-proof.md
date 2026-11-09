@@ -77,15 +77,28 @@ keyed by the workspace's real path like `permissions.json` (`$defs/settings_reco
 So an agent that edits `session_typing = true` changes nothing, and once a person switched `share_counts` or `live_session`
 off, an agent editing the file back to on changes nothing either. Reference `hp_settle`, vectors `settle`.
 
+## The relay connection record (`relay.connect`)
+
+The relay address, workspace id, token and the paired phones come **only** from a record in the guarded orch home
+(`<orch home>/keys/<ws>/relay.json`: `{url, workspace, token, phones, connected_by, at}`), written by `orch relay connect` /
+the dashboard's Connect with a `relay.connect` proof; `phones` is updated by each refresh fetched under that record. The
+workspace's `.orch/secrets/relay.json` is no longer authority: when it exists and its `url` or `workspace` differs from the
+record, every relay call is refused ("The relay settings in this folder were changed. Connect again from the dashboard.").
+The relay client uses no proxy from the environment (`HTTP(S)_PROXY`, `ALL_PROXY` are ignored: an empty proxy handler) and a
+fixed trust store shipped with orch or the OS default, never `SSL_CERT_FILE` / `SSL_CERT_DIR` / `REQUESTS_CA_BUNDLE`.
+Reference `relay_conn`, vectors `relay`. Admin-source classification (inventory.md) uses refreshes fetched this way only.
+
 ## Phone actions (verdict, answer from the phone)
 
 No proof is minted and the person sees no extra step. The proof is the relay channel itself: the workspace applies a phone
-verdict or answer only (1) from a message it fetched from the relay **in the same process** over TLS with its workspace token
-(`GET /v1/inbox`), never from a file read back from `.orch/inbox/` (agents can write there; saved files are for display and
-replay of non-human messages only), (2) when `from` is a `ph_` id in the `phones` list of its last refresh (the relay builds
-phone messages itself and checks sender = caller, so no workspace or agent can post as a phone), and (3) when `reply_to` names a
-question this workspace sent (relay.py `_answer_asked`, `_apply_review_answer`). `by` is `human:<phone>` from that channel,
-never from the body's own label (as relay.py `_answer_by` does today).
+verdict or answer only (1) from a message it fetched itself from the relay named in the relay record (above), over TLS with
+the record's token, without env proxies or CA overrides, never from a file read back from `.orch/inbox/` (agents can write
+there; saved files are for display and replay of non-human messages only), (2) when `from` is a `ph_` id in the record's
+`phones` list (the relay builds phone messages itself and checks sender = caller, so no workspace or agent can post as a
+phone), and (3) when `reply_to` names a question this workspace sent (relay.py `_answer_asked`, `_apply_review_answer`).
+`by` is `human:<phone>` from that channel, never from the body's own label. Any process may run the fetch (`orch relay
+inbox`); what it can apply is decided by the relay, not by the caller. Device-key-signed phone verdicts are a later step
+(Level 2 later).
 
 ## Dev mode: the test human persona (demo workspaces only)
 
