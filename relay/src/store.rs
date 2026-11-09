@@ -308,7 +308,8 @@ pub fn parse_ws_list(s: &str) -> Vec<String> {
     l
 }
 
-/// The workspace list of a phone row (the one parse `auth::phone` uses too).
+/// The workspace list of a phone row, parsed with `parse_ws_list` exactly as `auth::phone` parses it
+/// (send decisions use auth's own list; this is for the display `can` only).
 pub fn phone_list(c: &Connection, phone_id: &str) -> Vec<String> {
     c.query_row(
         "SELECT workspaces FROM phones WHERE id=?1",
