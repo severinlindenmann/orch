@@ -1022,6 +1022,49 @@ def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
         return "a ticket"
 
 
+def ticket_name(root: Path, tid: str) -> str:
+    """The ticket's title (never its id) for a sentence on the hand-off card, short."""
+    from orch import tickets
+
+    try:
+        t = str(tickets.load(root, tid).get("title", "")).strip()
+    except (Refused, OSError, ValueError, AttributeError):
+        t = ""
+    return (t[:80] + "\u2026" if len(t) > 80 else t) or "this ticket"
+
+
+def question_text(root: Path, tid: str, qid: str) -> str:
+    from orch import tickets
+
+    try:
+        q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
+        t = str((q or {}).get("text", "")).strip()
+    except (Refused, OSError, ValueError, AttributeError):
+        t = ""
+    t = t.rstrip("?! ")
+    return (t[:100] + "\u2026" if len(t) > 100 else t) or "the question"
+
+
+TEXT_HOLE = "{value}"  # the card puts the person's full text here (the same text that runs), as plain text
+
+
+def status_sentence(root: Path, tid: str, data: str) -> str:
+    """A person's ticket patch in plain words: "Move 'T' to Done?" / "Send 'T' back to work?" (never JSON)."""
+    name = ticket_name(root, tid)
+    try:
+        obj = json.loads(data)
+    except ValueError:
+        obj = {}
+    obj = obj if isinstance(obj, dict) else {}
+    status = obj.get("status")
+    words = {"done": f"Move \u201c{name}\u201d to Done?", "review": f"Move \u201c{name}\u201d to Review?"}
+    text = words.get(status) or f"Send \u201c{name}\u201d back to work?"
+    others = [k for k in obj if k != "status"]
+    if others:
+        text = text[:-1] + " (it also changes: " + ", ".join(others[:5]) + ")?"
+    return text
+
+
 SECRET_MARK = "@secret"
 
 
@@ -1081,7 +1124,7 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
                     "id": hid,
                     "op": op,
                     "target": target,
-                    "label": label[:300],
+                    "label": label[:400],
                     "value": value,
                     "argv": argv,
                     "at": now,

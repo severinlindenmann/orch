@@ -55,7 +55,7 @@ def dispatch(args, root: Path) -> bool:
             args,
             "chat.make_ticket",
             args.message_id,
-            label="Make a ticket from this Chat conversation",
+            label="Make a ticket from this Chat conversation?",
             value=args.title or "",
         )
         r = chat.make_ticket(root, args.message_id, args.title, who)
@@ -67,7 +67,14 @@ def dispatch(args, root: Path) -> bool:
             )
         from orch import humanproof
 
-        who = humanproof.person_by(root, args, "chat.send", "general", label="Write in Chat", value=args.text)
+        who = humanproof.person_by(
+            root,
+            args,
+            "chat.send",
+            "general",
+            label=f"Send \u201c{humanproof.TEXT_HOLE}\u201d to Chat?",
+            value=args.text,
+        )
         r = chat.say(root, args.text, who, new=args.new, proven=who.startswith("human:"))
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
@@ -90,6 +97,16 @@ def _add_dm_parsers(sub, common):
     p.add_argument("text")
     p.add_argument("--client-id", help="idempotent message id")
     p.add_argument("--retry", help="replace a failed message")
+
+
+def _ws_name(root, ws):
+    """The workspace's name for a sentence (never its raw id when a name is known)."""
+    from orch import relay
+
+    try:
+        return relay.name_of(root, ws) or ws
+    except Exception:  # noqa: BLE001 - a name is a nicety
+        return ws
 
 
 def _dispatch_dm(args, root):
@@ -119,7 +136,7 @@ def _dispatch_dm(args, root):
             args,
             "chat.send",
             args.workspace,
-            label="Send a message to the workspace " + args.workspace,
+            label=f"Send \u201c{humanproof.TEXT_HOLE}\u201d to {_ws_name(root, args.workspace)}?",
             value=args.text,
         )
         data = chat.dm_send(

@@ -318,7 +318,10 @@ def test_handoff_card_shows_the_exact_text_and_the_stored_value_is_what_runs(ws,
     tid, q = _ask(ws, run)
     run("answer", tid, q, "Blue -- really", "--by", "human:pat", "--json")
     card = hp.handoffs(ws)[0]
-    assert card["value"] == "Blue -- really" and "Which one?" in card["label"] and "Q" in card["label"]
+    assert card["value"] == "Blue -- really" and "Which one" in card["label"] and "Q" not in card["label"][:7]
+    assert (
+        card["label"] == "Answer \u201c{value}\u201d to \u201cWhich one\u201d?"
+    )  # the card fills {value} itself
     assert not card["label"].startswith("t_") and tid not in card["label"]  # plain words, no raw id
     # a stored value that is not in the stored command is never run
     d = hp.key_dir(ws)
@@ -500,7 +503,11 @@ def test_relay_connect_handoff_keeps_the_token_out_of_handoffs_json(ws, run, mon
     )
     assert code == 2 and "orn_SECRETTOKEN" not in out + err
     card = hp.handoffs(ws)[0]
-    assert card["op"] == "relay.connect" and "r.example" in card["label"] and "ws_a" in card["label"]
+    assert (
+        card["op"] == "relay.connect"
+        and card["label"] == "Connect to r.example?"
+        and "ws_a" not in card["label"]
+    )
     assert "orn_SECRETTOKEN" not in json.dumps(hp.handoffs(ws))
     assert "orn_SECRETTOKEN" not in (hp.key_dir(ws) / "handoffs.json").read_text()
     item = hp.handoff_take(ws, card["id"])  # what the page runs after the click
@@ -566,7 +573,8 @@ def test_relay_allow_works_via_the_hand_off_and_the_title_is_in_the_label(ws, ru
     code, out, err = run("relay", "allow", "m_deleg00000000010", "--once", "--by", "human:pat", "--json")
     assert code == 2 and given == []
     card = hp.handoffs(ws)[0]  # it IS queued now
-    assert card["op"] == "relay.allow" and "Fix it" in card["label"] and "ws_peer" in card["label"]
+    assert card["op"] == "relay.allow" and "Fix it" in card["label"] and "Peer" in card["label"]
+    assert "ws_peer" not in card["label"]
     item = hp.handoff_take(ws, card["id"])
     assert item["argv"][:2] == ["relay", "allow"]
     proof = hp.mint(hp.human_key(ws), hp.new_payload(item["op"], item["target"], "human:pat"))
@@ -960,3 +968,20 @@ def test_runner_stops_a_hung_update(ws, monkeypatch):
     assert _run_runner(ws, monkeypatch, "import time; time.sleep(30)") == 1
     st = hp.take_update_status(ws)
     assert st["state"] == "failed" and "too long" in st["reason"]
+
+
+def test_every_card_sentence_is_plain_words_without_json_or_ids(ws, run):
+    tid = _review_ticket(ws, run)
+    rev = str(tickets.load(ws, tid)["revision"])
+    run("ticket", "patch", tid, '{"status": "done"}', "--if-revision", rev, "--by", "human:pat", "--json")
+    run("ticket", "patch", tid, '{"status": "active"}', "--if-revision", rev, "--by", "human:pat", "--json")
+    run("ticket", "changes", tid, "Add tests", "--by", "human:pat", "--json")
+    run("run", "send", tid, "go on", "--by", "human:pat", "--json")
+    run("chat", "say", "Hello", "--by", "human:pat", "--json")
+    labels = sorted(h["label"] for h in hp.handoffs(ws))
+    assert "Move “T” to Done?" in labels and "Send “T” back to work?" in labels
+    assert "Send “{value}” to the agent on “T”?" in labels
+    assert "Send “{value}” to Chat?" in labels
+    assert "Send “T” back with this note: “{value}”?" in labels
+    for text in labels:
+        assert '{"' not in text and tid not in text and "t_" not in text.replace("{value}", "")

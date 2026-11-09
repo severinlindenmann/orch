@@ -285,7 +285,10 @@ def _send(args, root: Path, tid: str, by: str) -> None:
             args,
             "run.human_input",
             tid,
-            label="Send a message to " + humanproof.plain_ticket(root, tid),
+            label=(
+                f"Send \u201c{humanproof.TEXT_HOLE}\u201d to the agent on "
+                f"\u201c{humanproof.ticket_name(root, tid)}\u201d?"
+            ),
             value=args.text or "",
             # the text a person approves must be the text that runs: no file read behind the card
             no_handoff='Send the text itself: orch run send <ticket> "text"' if args.file else None,

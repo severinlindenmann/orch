@@ -678,7 +678,7 @@ def run(args: argparse.Namespace) -> None:
                 args,
                 "update",
                 humanproof.update_target(repo, ref),
-                label=f"Update orch from {repo}@{ref}",
+                label=f"Update orch from {repo}@{ref}?",
             ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
         report, notes = [], []
@@ -814,7 +814,10 @@ def run(args: argparse.Namespace) -> None:
             args,
             "ticket.verdict",
             args.id,
-            label="Send back " + humanproof.plain_ticket(root, args.id),
+            label=(
+                f"Send \u201c{humanproof.ticket_name(root, args.id)}\u201d back with this note: "
+                f"\u201c{humanproof.TEXT_HOLE}\u201d?"
+            ),
             value=args.text,
         )
         t = tickets.ask_for_changes(root, args.id, args.text, who, proven=who.startswith("human:"))
@@ -827,7 +830,7 @@ def run(args: argparse.Namespace) -> None:
                 args,
                 "ticket.verdict",
                 args.id,
-                label="Change " + humanproof.plain_ticket(root, args.id),
+                label=humanproof.status_sentence(root, args.id, args.data),
                 value=args.data,
             )
         t = tickets.patch(root, args.id, args.if_revision, args.data, who)
@@ -929,7 +932,10 @@ def run(args: argparse.Namespace) -> None:
             args,
             "ticket.answer",
             f"{args.id}:{args.question}",
-            label="Answer " + humanproof.plain_ticket(root, args.id, args.question),
+            label=(
+                f"Answer \u201c{humanproof.TEXT_HOLE}\u201d to \u201c"
+                f"{humanproof.question_text(root, args.id, args.question)}\u201d?"
+            ),
             value=args.answer,
         )
         if who.startswith("agent:") and relay.asked_to_phones(root, args.id, args.question):
