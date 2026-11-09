@@ -113,14 +113,16 @@ def _reset(monkeypatch, stamps):
 
 
 def test_exec_is_isolated_and_leaves_the_workspace_folder(monkeypatch):
+    monkeypatch.setenv("ORCH_ROOT", "/old")
     _reset(monkeypatch, [("v2",)])
     seen = {}
     monkeypatch.setattr(selfupdate, "_runs_new_code", lambda: True)
     monkeypatch.setattr(selfupdate.os, "chdir", lambda d: seen.setdefault("chdir", Path(d)))
     monkeypatch.setattr(selfupdate.os, "execv", lambda exe, argv: seen.update(exe=exe, argv=argv))
-    assert selfupdate.restart(8431, delay=0)
+    assert selfupdate.restart(8431, root=Path("/tmp") / "ws", delay=0)
     selfupdate._state["thread"].join(5)
     assert seen["argv"][:4] == [sys.executable, "-P", "-m", PKG]  # no working-folder imports
+    assert os.environ["ORCH_ROOT"] == str((Path("/tmp") / "ws").resolve())  # exactly as service.start sets it
     assert seen["chdir"] == SRC.parent  # before the exec, never the workspace folder
 
 

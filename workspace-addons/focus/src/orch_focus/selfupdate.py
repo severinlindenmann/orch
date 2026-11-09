@@ -101,13 +101,15 @@ def _runs_new_code() -> bool:
         return False
 
 
-def restart(port: int, delay: float = 0.3) -> bool:
+def restart(port: int, root: Path | None = None, delay: float = 0.3) -> bool:
     """Schedule the exec of a fresh process (once). False when not possible here (Windows, not started as
     `-m <package>`, already restarting, or this very install already failed its import check)."""
     argv = getattr(sys, "orig_argv", None)
     new = new_argv(argv, port) if argv else None
     if os.name == "nt" or not new:
         return False
+    if root is not None:  # as the service start passes it (#377): ORCH_ROOT names this workspace, resolved
+        os.environ["ORCH_ROOT"] = str(Path(root).resolve())
     with _lock:  # check-and-set is one step: concurrent requests start one restart
         now = stamp()
         if _state["restarting"] or now == _state["failed"]:
@@ -140,7 +142,7 @@ def answer(handler) -> bool:
     True = answered (the caller returns)."""
     if not changed():
         return False
-    if not restart(handler.server.server_address[1]):
+    if not restart(handler.server.server_address[1], getattr(handler, "root", None)):
         return False
     handler._send(200, PAGE, "text/html; charset=utf-8")
     return True
