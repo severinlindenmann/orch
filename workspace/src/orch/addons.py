@@ -114,6 +114,12 @@ def trusted_local_add(content_hash: str):
         _LOCAL_ADD_PROVEN = prev
 
 
+def humanproof_home(root: Path) -> Path:
+    from orch import humanproof
+
+    return humanproof.guarded_home(root)
+
+
 def prepare_local_add(root: Path, folder: Path) -> dict:
     """Request time: snapshot the folder into the guarded home. Returns {hash, short, path, snapshot}; the
     hand-off card shows `path` and `short`, the proof's target is `hash` (local_add_target)."""
@@ -131,7 +137,11 @@ def _entry_snapshot_ok(e: dict) -> bool:
     from orch import addonsnap
 
     h = e.get("hash")
-    return isinstance(h, str) and addonsnap.verify(Path(e["source"]), h)
+    return (
+        isinstance(h, str)
+        and addonsnap.is_allowed(Path(e["source"]), h)
+        and addonsnap.verify(Path(e["source"]), h)
+    )
 
 
 def _local_add_ok() -> bool:
@@ -381,6 +391,12 @@ def home(root: Path | None = None) -> Path:
 
 
 def registry_path() -> Path:
+    """The add-on list. On a normal install it is read from the account's default orch home ONLY: an
+    environment-chosen ORCH_HOME must not feed what is installed into orch's own tool environment."""
+    from orch import humanproof
+
+    if humanproof.install_kind() == "normal":
+        return real_home() / ".orch-tool" / "addons.json"
     return home() / "addons.json"
 
 
@@ -524,17 +540,36 @@ def _reinstall_anywhere() -> bool:
     return run_uv is not _REAL_RUN_UV
 
 
+def _reinstall_plan() -> dict | None:
+    """What a reinstall of orch's tool environment must carry over, or None when orch is not running from
+    one. The installer's record (valid only for this very environment) decides the kind; none (an install from
+    before the record existed) counts as `normal` and a normal record is written by this update, never an
+    elevation. A source checkout without a record is no tool environment."""
+    from orch import humanproof
+
+    kind = humanproof.read_install_record() or (None if humanproof._source_tree() else "normal")
+    if kind is None:
+        return None
+    env = Path(sys.prefix)
+    return {"kind": kind, "env": env, "pin": os.path.dirname(os.path.realpath(env))}
+
+
+def _record_text(plan: dict) -> str:
+    from orch import humanproof
+
+    return humanproof.install_record_text(plan["kind"], plan["env"])
+
+
 def _install_tool(entries: list[dict]) -> None:
     from orch import humanproof
 
-    env = Path(sys.prefix)
-    kind = humanproof.read_install_record()  # the reinstall drops the record: carry the installer's kind over
-    if kind is None and not _reinstall_anywhere():
+    plan = _reinstall_plan()
+    if plan is None and not _reinstall_anywhere():
         raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
-    with _pinned_tool_dir(env, kind is not None):
+    with _pinned_tool_dir(Path(sys.prefix), plan is not None):
         run_uv(_tool_args(entries))
-    if kind and ((env / "bin").exists() or (env / "Scripts").exists()):
-        humanproof.write_install_record(env, kind)
+    if plan and ((plan["env"] / "bin").exists() or (plan["env"] / "Scripts").exists()):
+        humanproof.write_install_record(plan["env"], plan["kind"])
 
 
 def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str) -> bool:
@@ -563,7 +598,23 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
     if save:
         reg = (registry_path(), json.dumps(sorted(entries, key=lambda e: e["name"]), indent=2))
     try:
-        log = winfinish.start(home(), [uv, *_tool_args(entries)], then, root, done, reg)
+        plan = _reinstall_plan()
+        if plan is None and not _reinstall_anywhere():
+            raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
+        extra = (
+            {
+                "env": {"UV_TOOL_DIR": plan["pin"]},
+                "record": [str(plan["env"] / "orch-install.json"), _record_text(plan)],
+            }
+            if plan
+            else None
+        )
+        argv = [uv, *_tool_args(entries)]
+        log = (
+            winfinish.start(home(), argv, then, root, done, reg, extra)
+            if extra
+            else winfinish.start(home(), argv, then, root, done, reg)
+        )
     except winfinish.Busy:
         raise Refused(
             "An add-on install or update is still finishing in the background. "
@@ -1317,6 +1368,7 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 raise Refused("This add-on changed since you allowed it. Ask for it again.")
             if not addonsnap.verify(Path(snap["snapshot"]), snap["hash"]):
                 raise Refused("The saved copy of this add-on was changed. Ask for it again.")
+            addonsnap.allow(humanproof_home(root), snap["hash"])  # only inside trusted_local_add
             origin, folder = folder, Path(snap["snapshot"])
         if not (folder / "pyproject.toml").is_file():
             raise Refused(f"{folder} is not an add-on folder (no pyproject.toml).")
