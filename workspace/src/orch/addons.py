@@ -145,7 +145,12 @@ def spec(subdir: str) -> str:
 
 
 def real_home() -> Path:
-    """The user's home from the account database on POSIX (not $HOME, which a project .envrc can set)."""
+    """The user's home from the account database on POSIX (not $HOME, which a project .envrc can set); on
+    Windows from the process token (not %USERPROFILE%, HOMEDRIVE or HOMEPATH, which a process can set)."""
+    from orch import winacl
+
+    if winacl._windows():
+        return Path(winacl.profile_dir())
     try:
         import pwd
 

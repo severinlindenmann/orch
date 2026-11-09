@@ -5,9 +5,9 @@ Level 1 (owner decision R1): an agent that reads the orch home directly is outsi
 It stops
 flags, environment, workspace files and copies, not a hostile process of the same user.
 
-Windows: POSIX rights (0700/0600) do not exist there. The folder and file are created in the user's profile
-(inherits the profile ACL: the user, SYSTEM and administrators); the explicit "user and SYSTEM only" ACL of
-secrets.md is a follow-up (slice 1.1, key store). The mode checks below are skipped on Windows.
+Windows: POSIX rights (0700/0600) do not exist there. orch.winacl does the same job: a user+SYSTEM-only ACL
+(no inheritance) is set when a folder or file is made and checked on every read, and a link, junction or other
+reparse point anywhere on the path is refused (#405).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import threading
 import time
 from pathlib import Path
 
-from orch import saferead, term
+from orch import saferead, term, winacl
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
@@ -172,7 +172,7 @@ class LooseFile(Refused):
 
 
 # Extra per-platform checks (Windows ACL: user + SYSTEM only, from the winacl hook): path -> reason|None.
-FILE_CHECKS: list = []
+FILE_CHECKS: list = [winacl.file_check]
 SAFE_DEFAULTS = {
     "focus.session_typing": False,
     "insights.share_names": False,
@@ -197,6 +197,7 @@ def _check_dir(p: Path) -> None:
             raise Refused(WRONG_RIGHTS)
         if st.st_mode & 0o077:
             p.chmod(0o700)
+    winacl.ensure_private(p)  # Windows only: a folder of this user is tightened, else refused
 
 
 def file_problem(p: Path) -> str | None:
@@ -217,6 +218,8 @@ def file_problem(p: Path) -> str | None:
 
 def _check_file(p: Path) -> None:
     why = file_problem(p)
+    if why == "unknown":  # Windows could not tell: refuse this call, reset nothing
+        raise Refused("Windows would not tell the rights of a protected file. Try again.")
     if why:
         raise LooseFile(f"{p.name}:{why}")
 
@@ -238,8 +241,22 @@ def _read_guarded(path: Path) -> bytes:
     base, rel = _home_of(path)
     data = saferead.read_private(base, rel, MAX_READ)
     if data is None:
-        raise LooseFile(f"{path.name}:read")
+        _read_refused(path)
     return data
+
+
+def _read_refused(path: Path) -> None:
+    """read_private said None. A real finding (loose rights, a link, a special file, a second name, too big)
+    is a LooseFile: the caller resets the protection. On Windows, when the file passes every check and still
+    could not be read (a transient error), refuse this call only: winacl.Unknown, no reset."""
+    why = file_problem(path)
+    if why == "unknown":
+        raise winacl.Unknown("Windows would not tell the rights of a protected file. Try again.")
+    if why is None and winacl._windows():
+        st = path.lstat()
+        if stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and st.st_size <= MAX_READ:
+            raise winacl.Unknown("Windows would not let orch read a protected file. Try again.")
+    raise LooseFile(f"{path.name}:{why or 'read'}")
 
 
 def _private_dir(p: Path, stop: Path) -> None:
@@ -251,6 +268,7 @@ def _private_dir(p: Path, stop: Path) -> None:
             c.mkdir(mode=0o700)
             if POSIX:
                 c.chmod(0o700)
+            winacl.set_private(c, True)
         _check_dir(c)
 
 
@@ -259,12 +277,16 @@ def key_dir(root: Path, create: bool = True) -> Path:
     from orch import addons
 
     home = guarded_home(root)
+    winacl.no_reparse(home)  # a symlink or junction below the profile folder (Windows)
     ws = addons.workspace_id(root, create=create)
     if ws is None:
         raise Refused("This folder has no local id yet.")
     d = home / "keys" / ws
     if create:
+        fresh = not home.exists()
         home.mkdir(parents=True, exist_ok=True)
+        if fresh:
+            winacl.set_private(home, True)
         _check_dir(home)
         _private_dir(d, home)
     else:
@@ -279,6 +301,7 @@ def _write_private(path: Path, text: str) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            winacl.set_private(tmp, False)  # before any secret is written (Windows)
             f.write(text)
         os.replace(tmp, path)
     finally:
