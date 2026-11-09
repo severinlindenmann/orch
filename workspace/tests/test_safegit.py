@@ -531,3 +531,24 @@ def test_config_is_read_only_and_worktree_subcommands_are_limited():
     assert safegit.refusal(["config", "--get", "a.b"]) is None
     assert safegit.refusal(["config", "--includes", "--get-regexp", "x"]) is None
     assert safegit.refusal(["worktree", "remove", "--force", "p"]) is None
+
+
+def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    for cmd in sorted(safegit.ALLOWED):
+        args = {
+            "worktree": ["worktree", "list"],
+            "stash": ["stash", "list"],
+            "config": ["config", "--get", "a"],
+        }
+        safegit.run(args.get(cmd, [cmd]), tmp_path, filters=False)
+        argv = seen[-1]
+        assert argv.index(cmd) > argv.index("core.fsmonitor=false"), cmd
+        for want in ("commit.gpgSign=false", "log.showSignature=false", "core.editor=true"):
+            assert want in argv, (cmd, want)
+        assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv), cmd
+    safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
+    assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None

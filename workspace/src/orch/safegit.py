@@ -170,6 +170,7 @@ def base_args(read_only: bool = False) -> list[str]:
         "-c", "core.sshCommand=",
         "-c", "credential.helper=",
         "-c", "diff.external=",
+        "-c", "log.showSignature=false",
         "-c", "core.editor=true",
         "-c", "sequence.editor=true",
     ]  # fmt: skip
@@ -235,7 +236,18 @@ ALLOWED = {
 }  # fmt: skip
 _WORKTREE_OK = {"add", "remove", "prune", "list"}
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
-_NO_MODES = {"add", "commit", "reset", "stash", "checkout", "restore", "clean", "rebase"}
+_NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
+_BAD_GLOBALS = (
+    "-c",
+    "--config-env",
+    "--exec-path",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--super-prefix",
+    "--attr-source",
+)  # safegit sets its own; a caller passes only the subcommand and its words
+_BAD_WORDS = {"--ext-diff", "--textconv", "--show-signature", "--filters"}
 _MODE_FLAGS = ("--patch", "--interactive", "--edit")  # and every abbreviation git would accept of them
 
 
@@ -245,9 +257,14 @@ def refusal(args: list[str]) -> str | None:
     config: reading only). Never an interactive mode: -p/-i/-e and
     every abbreviation of --patch/--interactive/--edit (git accepts `--patc`, `--inter`)."""
     k = subcommand_index(args)
+    for g in args[:k]:
+        if g in _BAD_GLOBALS or any(g.startswith(b + "=") for b in _BAD_GLOBALS if b.startswith("--")):
+            return f"git option {g} before the command is not allowed: orch sets git's configuration itself"
     if k >= len(args):
         return None
     cmd, rest = args[k], args[k + 1 :]
+    if any(a in _BAD_WORDS or a.split("=", 1)[0] in _BAD_WORDS for a in rest):
+        return "git: options that run external programs (--ext-diff, --textconv, --filters, ...) are refused"
     if cmd not in ALLOWED:
         return f"git {cmd} is not one of the git commands orch runs"
     flags = rest[: rest.index("--")] if "--" in rest else rest
