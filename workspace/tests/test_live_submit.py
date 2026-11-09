@@ -1059,3 +1059,29 @@ def test_a_real_detached_pane_in_copy_mode_is_released_and_gets_the_notice(proj,
     _until(lambda: runs_live.deliver(proj, tid) or _got(out, "submit"), "the notice is typed", 30)
     _until(lambda: _got(out, "submit"), "the notice is submitted", 30)
     assert _got(out, "submit") == [runs_live.notice_line(tid, False)]
+
+
+def test_a_list_clients_call_that_times_out_or_cannot_run_never_cancels(proj, monkeypatch):
+    """A timeout is a failure (0, never cancel), not an empty answer (inf, release): fail closed."""
+
+    def boom(exc):
+        def fake(root, *a, **k):
+            raise exc
+
+        return fake
+
+    for exc in (subprocess.TimeoutExpired("tmux", 3), FileNotFoundError("tmux")):
+        monkeypatch.setattr(runs_live, "tmux", boom(exc))
+        assert runs_live._client_idle(proj, "t_abc123xyz") == 0.0
+
+
+def test_the_client_list_covers_the_whole_tmux_server(proj, monkeypatch):
+    seen = []
+
+    def fake(root, *a, **k):
+        seen.append(a)
+        return subprocess.CompletedProcess(a, 0, f"{time.time() - 100}\n{time.time() - 2}\n", "")
+
+    monkeypatch.setattr(runs_live, "tmux", fake)
+    assert runs_live._client_idle(proj, "t_abc123xyz") < 10  # the newest of all clients counts
+    assert "-t" not in seen[0]

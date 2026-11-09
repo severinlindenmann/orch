@@ -441,10 +441,15 @@ def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
 
 
 def _client_idle(root: Path, tid: str) -> float:
-    """Seconds since ANY client attached to the session last pressed a key (the newest one counts). No client
-    attached at all is idle for good (inf): a pane left scrolled up after the person closed the terminal must
-    be released. 0 (never cancel) only when tmux fails or its answer cannot be read."""
-    r = tmux(root, "list-clients", "-t", target(tid), "-F", "#{client_activity}", timeout=QUICK)
+    """Seconds since ANY client of the orch tmux server last pressed a key (the newest counts). No client at
+    all is idle for good (inf): a pane left scrolled up after the person closed the terminal must be
+    released. 0 (never cancel) only when tmux fails, times out, or its answer cannot be read."""
+    # the whole server (one per workspace), not one session: a grouped or linked session shows the same
+    # pane, and any client of it counts. A call that times out or cannot run is a failure, never "none".
+    try:
+        r = tmux(root, "list-clients", "-F", "#{client_activity}", timeout=QUICK)
+    except (subprocess.TimeoutExpired, OSError):
+        return 0.0
     if r.returncode != 0:
         return 0.0
     words = r.stdout.split()
