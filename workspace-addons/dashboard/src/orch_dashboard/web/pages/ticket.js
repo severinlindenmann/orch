@@ -18,7 +18,7 @@ async function toggleTask(id, cid) {
   const t = ticketOf(id), task = array(t?.checklist).find(c => c.id === cid), lock = 'task-' + id + '-' + cid;
   if (!task || locks.has(lock)) return;
   locks.add(lock);
-  const result = await act('check.set', {ticket:t.id, check:cid, done:!task.done});
+  const result = task.wont_do ? await act('check.reopen', {ticket:t.id, check:cid}) : await act('check.set', {ticket:t.id, check:cid, done:!window.DashHelpers.resolved(task)});
   locks.delete(lock);
   render();
   if (!result.ok) window.orch.toast(result.text, 'error');
@@ -328,7 +328,7 @@ function agentBar(t) {
   const liveLink = liveLinkFor(t), run = state.runs?.[t.id];
   const line = window.DashHelpers.agentLine(t, run, Date.now(), liveLink, state.settings);
   const session = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0))[0];
-  const step = array(t.checklist).find(task => task.state === 'doing');
+  const step = array(t.checklist).find(task => !task.wont_do && task.state === 'doing');
   return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'},
     h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
     line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
@@ -550,13 +550,38 @@ function taskProofChips(t, task) {
 function taskRows(t) {
   return array(t.checklist).map((task, i) => {
     const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
-    const mark = snapshot || !task.id ? (task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (task.state === 'doing' && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
-      : h('button', {type:'button', className:'task-check' + (task.done ? ' on' : ''), role:'checkbox', 'aria-checked':String(!!task.done), 'aria-label':clean(task.text), 'data-key':'task-check-' + task.id}, task.done ? iconEl('check') : null);
+    const doing = !task.wont_do && task.state === 'doing';
+    const mark = snapshot || !task.id ? (task.wont_do ? h('span', {className:'muted'}, '–') : task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
+      : h('button', {type:'button', className:'task-check' + (task.wont_do ? ' muted' : task.done ? ' on' : ''), role:task.wont_do ? null : 'checkbox', 'aria-checked':task.wont_do ? null : String(!!task.done), 'aria-label':task.wont_do ? 'Open again' : clean(task.text), 'data-key':'task-check-' + task.id}, task.wont_do ? '–' : task.done ? iconEl('check') : null);
     if (!snapshot && task.id) mark.onclick = () => toggleTask(t.id, task.id);
+    let menu = null;
+    if (!snapshot && task.id) {
+      const reason = h('input', {type:'text', className:'input', placeholder:'Reason (optional)', 'aria-label':'Reason (optional)', maxlength:200});
+      const form = h('form', {className:'stack', hidden:true, 'data-key':'task-menu-' + task.id},
+        window.DashHelpers.resolved(task) ? null : reason,
+        h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"));
+      form.onsubmit = async event => {
+        event.preventDefault();
+        if (window.DashHelpers.resolved(task)) { const r = await act('check.reopen', {ticket:t.id, check:task.id}); render(); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
+        const lock = 'task-' + t.id + '-' + task.id;
+        if (locks.has(lock)) return;
+        locks.add(lock);
+        const result = await act('check.wont_do', {ticket:t.id, check:task.id, reason:reason.value || ''});
+        locks.delete(lock);
+        render();
+        if (!result.ok) window.orch.toast(result.text, 'error');
+      };
+      const more = h('button', {type:'button', className:'btn outline sm', 'aria-label':'More', 'aria-expanded':'false'}, '...');
+      more.onclick = () => { form.hidden = !form.hidden; more.setAttribute('aria-expanded', String(!form.hidden)); };
+      menu = h('div', {className:'stack'}, more, form);
+    }
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
-      h('div', {className:'grow'}, h('h3', {}, task.state === 'doing' && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Agent is working', 'aria-label':'Agent is working'}) : null, clean(task.text)), meta ? h('p', {className:'meta'}, meta) : null,
-        h('p', {className:'meta task-proof'}, task.state === 'doing' && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
-        taskProofChips(t, task)));
+      h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Agent is working', 'aria-label':'Agent is working'}) : null, clean(task.text)),
+        task.wont_do ? h('span', {className:'chip'}, "Won't do") : null,
+        task.wont_do && task.reason ? h('details', {}, h('summary', {className:'meta'}, 'Reason'), h('p', {className:'meta'}, clean(task.reason))) : null,
+        meta ? h('p', {className:'meta'}, meta) : null,
+        task.wont_do ? null : h('p', {className:'meta task-proof'}, doing && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
+        taskProofChips(t, task)), menu);
   });
 }
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
@@ -628,7 +653,7 @@ function ticketHistoryWho(entry) {
 }
 function ticketHistoryIsTechnical(entry) {
   const kind = String(entry.kind || entry.type || '').toLowerCase(), text = String(entry.text || '');
-  if (/answer|verdict|review|created|done/.test(kind) || /^(Created|Answered|Done|Check c\d+ done|Finished a task)|(?:->|to) done\b/i.test(text)) return false;
+  if (/answer|verdict|review|created|done/.test(kind) || /^(Marked c\d+ as won't do|Marked as won't do|Created|Answered|Done|Check c\d+ done|Finished a task)|(?:->|to) done\b/i.test(text)) return false;
   if (ticketHistoryWho(entry) === 'People' && (/edit|status/.test(kind) || /^(Edited|Status|Patched status)/i.test(text))) return false;
   return /claim|release|run|session|evidence/.test(kind) || /^(Claimed|Released|Run\b|Session\b|Added evidence|Evidence added|The agent is up|Waiting: the agent is not up)|^\S+ started$/i.test(text) ||
     (ticketHistoryWho(entry) === 'System' && (/status/.test(kind) || /^(Status|Patched status)/i.test(text)));
@@ -839,7 +864,7 @@ function detail(t) {
   const openQuestions = questions(t), selected = ticketTabs.get(t.id) || 'overview';
   const run = state.runs?.[t.id], sessions = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0));
   const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
-  const total = array(t.checklist).length, done = array(t.checklist).filter(task => task.done).length;
+  const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const tasksCard = key => t.status === 'done'
