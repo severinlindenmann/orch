@@ -9,14 +9,20 @@ import re
 from copy import deepcopy
 
 FINAL = ("done", "dropped")
-LOSER_FIELDS = ("title", "note", "summary", "owner", "due")  # a replaced value of these goes to history
+LOSER_FIELDS = ("title", "note", "summary", "owner", "due", "key", "text")  # a replaced value goes to history
 SYNC_BY = "agent:sync"
 SESSION_CAP = 32
 _MISSING = object()
 _KEY_RE = re.compile(r"^([A-Z0-9]{2,4})-([1-9][0-9]{0,8})$")
-_SPECIAL = {"id", "schema", "created_at", "updated_at", "revision", "status", "checklist", "questions", "refs",
+_SPECIAL = {"id", "updated_at", "revision", "status", "checklist", "questions", "refs",
             "history", "sessions", "ext"}
 _ANSWER = ("answer", "answered_by", "via")
+MAX_DEPTH = 32
+MAX_ITEMS = {"history": 5000, "checklist": 500, "questions": 500, "refs": 500, "sessions": 200}
+MAX_BYTES = 2_000_000
+MAX_COUNTER = 999_000_000  # keys stay inside the schema pattern (9 digits)
+_IDENT = {"checklist": lambda x: x["id"], "questions": lambda x: x["id"],
+          "sessions": lambda s: _canon([s.get("agent"), s.get("host")])}
 
 
 def _canon(x):
@@ -28,7 +34,21 @@ def _cm(x):
 
 
 def _short(x):
-    return str(x)[:200]
+    """Only for the readable text of a history line; the full value is kept in the line's `lost` field."""
+    s = str(x)
+    return s if len(s) <= 200 else s[:200] + "..."
+
+
+def _too_deep(x):
+    """Iterative (no recursion): True when nesting is deeper than MAX_DEPTH."""
+    stack = [(x, 1)]
+    while stack:
+        v, d = stack.pop()
+        if isinstance(v, (dict, list)):
+            if d > MAX_DEPTH:
+                return True
+            stack.extend((c, d + 1) for c in (v.values() if isinstance(v, dict) else v))
+    return False
 
 
 def _num(i):
@@ -42,13 +62,14 @@ class _Ctx:
     def __init__(self, a, b, now):
         self.now = now
         self.a_newer = (a.get("updated_at", ""), _canon(a)) >= (b.get("updated_at", ""), _canon(b))
-        self.lines = set()
+        self.lines = {}  # (text, canonical lost) -> lost: the full replaced value, so nothing is ever cut
+        self.old_keys = set()
 
-    def say(self, text):
-        self.lines.add("sync: " + text)
+    def say(self, text, lost=_MISSING):
+        self.lines[("sync: " + text, "" if lost is _MISSING else _canon(lost))] = lost
 
 
-def _three(ctx, base, a, b, field=None):
+def _three(ctx, base, a, b, field=None, label=""):
     """Scalar rule: changed on one side -> it; both to the same value -> it; both differ -> the newer side."""
     if _cm(a) == _cm(b):
         return a
@@ -58,17 +79,19 @@ def _three(ctx, base, a, b, field=None):
         return a
     win, lose = (a, b) if ctx.a_newer else (b, a)
     if field in LOSER_FIELDS and lose is not _MISSING:
-        ctx.say(f'{field} "{_short(lose)}" was replaced')
+        ctx.say(f'{label}{field} "{_short(lose)}" was replaced', {"field": label + field, "value": lose})
+        if field == "key" and isinstance(lose, str) and _KEY_RE.match(lose):
+            ctx.old_keys.add(lose)  # the loser's key must keep finding this ticket
     return win
 
 
-def _obj(ctx, base, a, b, skip=(), top=False):
+def _obj(ctx, base, a, b, skip=(), top=False, label=""):
     """Per-key scalar merge of three dicts."""
     out = {}
     for k in sorted(set(a) | set(b) | set(base)):
         if k in skip:
             continue
-        v = _three(ctx, base.get(k, _MISSING), a.get(k, _MISSING), b.get(k, _MISSING), k if top else None)
+        v = _three(ctx, base.get(k, _MISSING), a.get(k, _MISSING), b.get(k, _MISSING), k if top else None, label)
         if v is not _MISSING:
             out[k] = v
     return out
@@ -145,7 +168,7 @@ def _evidence(*lists):
 
 
 def _check_item(ctx, x0, xa, xb):
-    out = _obj(ctx, x0, xa, xb, skip=("evidence",))
+    out = _obj(ctx, x0, xa, xb, skip=("evidence",), top=True, label=f"{xa.get('id')} ")
     out["evidence"] = _evidence(x0.get("evidence", []), xa.get("evidence", []), xb.get("evidence", []))
     if out.get("done") and not out["evidence"]:
         out["done"] = False  # schema: done needs evidence
@@ -153,7 +176,7 @@ def _check_item(ctx, x0, xa, xb):
 
 
 def _question(ctx, x0, xa, xb):
-    out = _obj(ctx, x0, xa, xb, skip=_ANSWER)
+    out = _obj(ctx, x0, xa, xb, skip=_ANSWER, top=True, label=f"{xa.get('id')} ")
     ga, gb, g0 = ({k: x.get(k) for k in _ANSWER} for x in (xa, xb, x0))
     if ga["answer"] is not None and gb["answer"] is not None and ga != gb:
         if ga == g0:
@@ -162,7 +185,8 @@ def _question(ctx, x0, xa, xb):
             pick = ga
         else:
             pick, lose = (ga, gb) if ctx.a_newer else (gb, ga)
-            ctx.say(f'another answer "{_short(lose["answer"])}" by {lose["answered_by"]} was replaced')
+            ctx.say(f'another answer "{_short(lose["answer"])}" by {lose["answered_by"]} was replaced',
+                    {"field": f"{xa.get('id')} answer", "value": lose})
     else:  # an answered question beats an unanswered one
         pick = gb if ga["answer"] is None else ga
     out.update(pick)
@@ -186,10 +210,7 @@ def _merge(base, a, b, now):
                       b.setdefault("questions", []), lambda x, y: x.get("text") == y.get("text"), "q")
 
     out = _obj(ctx, base, a, b, skip=_SPECIAL, top=True)
-    for f in ("id", "schema", "created_at"):
-        v = a.get(f, b.get(f, base.get(f)))
-        if v is not None:
-            out[f] = v
+    out["id"] = a["id"]
 
     s0, sa, sb = base.get("status"), a.get("status"), b.get("status")
     if sa != sb and sa != s0 and sb != s0:  # both changed: a finished ticket is not silently reopened
@@ -224,12 +245,20 @@ def _merge(base, a, b, now):
         d = lambda t: t["ext"] if isinstance(t.get("ext"), dict) else {}
         out["ext"] = _deep(ctx, d(base), d(a), d(b))
 
+    if ctx.old_keys:
+        ext = out.setdefault("ext", {})
+        sync = ext["sync"] if isinstance(ext.get("sync"), dict) else ext.setdefault("sync", {})
+        sync["old_keys"] = sorted(set(old_keys_of(out)) | ctx.old_keys)
     hist = {}
     for h in base.get("history", []) + a.get("history", []) + b.get("history", []):
-        hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via")])] = h
-    old = {h.get("text") for h in hist.values() if h.get("by") == SYNC_BY}  # the same line is never added twice
-    for text in sorted(ctx.lines - old):
-        hist[_canon([now, SYNC_BY, text, None])] = {"at": now, "by": SYNC_BY, "text": text}
+        hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via"), h.get("lost")])] = h
+    old = {(h.get("text"), _canon(h["lost"]) if "lost" in h else "") for h in hist.values()
+           if h.get("by") == SYNC_BY}  # the same line is never added twice
+    for text, lost_key in sorted(set(ctx.lines) - old):
+        line = {"at": now, "by": SYNC_BY, "text": text}
+        if ctx.lines[(text, lost_key)] is not _MISSING:
+            line["lost"] = ctx.lines[(text, lost_key)]
+        hist[_canon([now, SYNC_BY, text, None, line.get("lost")])] = line
     out["history"] = sorted(hist.values(), key=lambda h: (h.get("at", ""), _canon(h)))
 
     out["revision"] = max(a.get("revision", 0), b.get("revision", 0)) + 1
@@ -237,23 +266,42 @@ def _merge(base, a, b, now):
     return out
 
 
+def _valid(base, a, b):
+    """Shape and size checks before any recursion or copy. False = cannot merge."""
+    if not all(isinstance(t, dict) for t in (base, a, b)) or a.get("id") != b.get("id"):
+        return False
+    if base and base.get("id") != a.get("id"):
+        return False
+    if not isinstance(a.get("id"), str):
+        return False
+    for t in (base, a, b):
+        if _too_deep(t):
+            return False
+        for f, cap in MAX_ITEMS.items():
+            lst = t.get(f, [])
+            if not isinstance(lst, list) or len(lst) > cap or not all(isinstance(i, dict) for i in lst):
+                return False
+        if len(_canon(t)) > MAX_BYTES:
+            return False
+        if not all(isinstance(x.get("id"), str) for f in ("checklist", "questions") for x in t.get(f, [])):
+            return False
+        for f, ident in (("checklist", _IDENT["checklist"]), ("questions", _IDENT["questions"]),
+                         ("refs", _ref_id), ("sessions", _IDENT["sessions"])):
+            ids = [ident(x) for x in t.get(f, [])]
+            if len(ids) != len(set(ids)):
+                return False  # a duplicate id would silently drop an item
+    return True
+
+
 def merge_ticket(base, upstream, mine, now):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
-    inputs cannot be merged (not objects, different ids, malformed lists): the caller pauses and keeps all three.
-    The inputs are not modified."""
-    base = {} if base is None else deepcopy(base)
-    a, b = deepcopy(upstream), deepcopy(mine)
+    inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
+    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified."""
     try:
-        if not all(isinstance(t, dict) for t in (base, a, b)) or a.get("id") != b.get("id"):
+        if not _valid({} if base is None else base, upstream, mine):
             return None
-        if base and base.get("id") != a.get("id"):
-            return None
-        for t in (base, a, b):
-            for f in ("checklist", "questions", "refs", "history", "sessions"):
-                if not all(isinstance(i, dict) for i in t.get(f, [])):
-                    return None
-        return _merge(base, a, b, now)
-    except (KeyError, TypeError, AttributeError, ValueError):
+        return _merge({} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now)
+    except Exception:  # noqa: BLE001 - a crafted ticket must never crash the sync loop
         return None
 
 
@@ -277,35 +325,57 @@ def merge_counter(base, a, b, keys=()):
         return max(x, y, key=_canon)
     out = mx(mx(base or {}, a or {}), b or {})
     last = out.get("last", 0)
-    out["last"] = max([last if isinstance(last, int) else 0] + [_key_n(k) for k in keys])
+    out["last"] = min(max([last if isinstance(last, int) and not isinstance(last, bool) else 0]
+                          + [_key_n(k) for k in keys]), MAX_COUNTER + 1)
     return out
 
 
 def old_keys_of(ticket):
-    sync = (ticket.get("ext") or {}).get("sync") or {}
-    return list(sync.get("old_keys", []))
+    ext = ticket.get("ext") if isinstance(ticket, dict) else None
+    sync = ext.get("sync") if isinstance(ext, dict) else None
+    keys = sync.get("old_keys") if isinstance(sync, dict) else None
+    return [k for k in keys if isinstance(k, str) and _KEY_RE.match(k)] if isinstance(keys, list) else []
 
 
-def renumber_key_clashes(tickets, counter, now):
-    """Tickets (by id) where two different ids share a key: the one created later (then the larger id) gets the
-    next number from the counter; its old key stays in ext.sync.old_keys so it still resolves ("DM1-13 moved to
-    DM1-15"). Returns (changed tickets by id, new counter). Pure: the inputs are not modified."""
-    tickets = {i: deepcopy(t) for i, t in tickets.items()}
-    counter = merge_counter(counter, None, None, [k for t in tickets.values() for k in [t.get("key"), *old_keys_of(t)]])
-    by_key = {}
-    for t in tickets.values():
-        if t.get("key"):
-            by_key.setdefault(t["key"], []).append(t)
-    changed = {}
-    for key in sorted(by_key):
-        for t in sorted(by_key[key], key=lambda t: (t.get("created_at", ""), t["id"]))[1:]:
-            counter["last"] += 1
-            new = f"{key.rsplit('-', 1)[0]}-{counter['last']}"
-            sync = t.setdefault("ext", {}).setdefault("sync", {})
-            sync["old_keys"] = sorted(set(sync.get("old_keys", [])) | {key})
-            t["key"] = new
-            t.setdefault("history", []).append(
-                {"at": now, "by": SYNC_BY, "text": f"sync: key changed from {key} to {new} (another ticket had it)"})
-            t["revision"] = t.get("revision", 0) + 1
-            changed[t["id"]] = t
-    return changed, counter
+def renumber_key_clashes(tickets, counter, now, held=()):
+    """Tickets (by id) where two different ids share a key. The ticket that already held the key here (`held` =
+    ids known locally before the merge) keeps it, so a backdated created_at cannot take over an existing key;
+    among equals the one created first (then the smaller id) keeps it. The others get the next numbers from the
+    counter, and their old key stays in ext.sync.old_keys so it still resolves ("DM1-13 moved to DM1-15").
+    Returns (changed tickets by id, new counter), or None when the input is malformed (bad key, ext or
+    created_at type, counter too large): the caller pauses. Pure: the inputs are not modified."""
+    try:
+        if not isinstance(tickets, dict) or _too_deep(tickets) or _too_deep(counter):
+            return None
+        tickets = deepcopy(tickets)
+        held = set(held)
+        for i, t in tickets.items():
+            if (not isinstance(t, dict) or t.get("id") != i or not isinstance(t.get("created_at", ""), str)
+                    or not isinstance(t.get("ext", {}), dict) or not isinstance(t.get("history", []), list)
+                    or (t.get("key") is not None and not (isinstance(t["key"], str) and _KEY_RE.match(t["key"])))
+                    or not isinstance((t.get("ext", {}).get("sync", {})), dict)):
+                return None
+        counter = merge_counter(counter if isinstance(counter, dict) else {}, None, None,
+                                [k for t in tickets.values() for k in [t.get("key"), *old_keys_of(t)]])
+        by_key = {}
+        for t in tickets.values():
+            if t.get("key"):
+                by_key.setdefault(t["key"], []).append(t)
+        changed = {}
+        for key in sorted(by_key):
+            order = sorted(by_key[key], key=lambda t: (t["id"] not in held, t.get("created_at", ""), t["id"]))
+            for t in order[1:]:
+                counter["last"] += 1
+                if counter["last"] > MAX_COUNTER:
+                    return None
+                new = f"{key.rsplit('-', 1)[0]}-{counter['last']}"
+                sync = t.setdefault("ext", {}).setdefault("sync", {})
+                sync["old_keys"] = sorted(set(old_keys_of(t)) | {key})
+                t["key"] = new
+                t.setdefault("history", []).append({"at": now, "by": SYNC_BY, "text":
+                                                    f"sync: key changed from {key} to {new} (another ticket had it)"})
+                t["revision"] = t.get("revision", 0) + 1 if isinstance(t.get("revision", 0), int) else 1
+                changed[t["id"]] = t
+        return changed, counter
+    except Exception:  # noqa: BLE001
+        return None

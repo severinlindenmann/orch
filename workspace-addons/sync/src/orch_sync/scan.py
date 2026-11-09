@@ -7,6 +7,7 @@ file hash. Findings never contain the matched text.
 """
 
 import hashlib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -28,7 +29,9 @@ _NAME_RE = re.compile(
     r"^(\.env.*|.*\.(pem|key|p8|p12|pfx|kdbx)|id_rsa.*|id_ed25519.*|credentials.*)$", re.IGNORECASE)
 _ARCHIVE_EXT = (".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".jar", ".war", ".apk")
 _ARCHIVE_MAGIC = (b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b", b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", b"BZh", b"\xfd7zXZ\x00")
-_MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"%PDF-", b"OggS", b"ID3", b"\x1a\x45\xdf\xa3")
+_MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"OggS", b"ID3", b"\x1a\x45\xdf\xa3")
+# a signature inside a "picture" means something is hidden in it (PDFs can carry compressed text: always a click)
+_EMBEDDED = (b"PK\x03\x04", b"PK\x05\x06", b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", b"\x1f\x8b\x08\x00")
 _TICKET_RE = re.compile(r"^tickets/t_[a-z0-9]{6,16}\.json$")
 
 
@@ -78,12 +81,14 @@ def norm_segment(seg):
 
 def norm_path(path):
     """Normalized segments (list), or None when the path is unsafe: absolute, backslash, drive letter, empty,
-    '.' or '..' segment (also after normalization), or a control character."""
-    if (not path or path.startswith(("/", "\\")) or "\\" in path or re.match(r"^[A-Za-z]:", path)
+    '.' or '..' segment (also after normalization), a segment ending in a dot or space, a ':', or a control character."""
+    if (not path or path.startswith(("/", "\\")) or "\\" in path or ":" in path
             or any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in path)):
         return None
-    parts = [norm_segment(p) for p in path.split("/")]
-    if any(p in ("", ".", "..") for p in parts) or any(p in ("", ".", "..") for p in path.split("/")):
+    raw = path.split("/")
+    parts = [norm_segment(p) for p in raw]
+    # Windows drops a trailing dot or space: `me./x` would land in `me/` there
+    if any(p in ("", ".", "..") or p[-1] in ". " for p in parts + raw):
         return None
     return parts
 
@@ -101,6 +106,30 @@ def scan_path(path):
     return out
 
 
+def _json_hits(data, is_ticket):
+    """Rule names found in the PARSED strings (keys and values) of a JSON file. Not parseable = no extra hits
+    (the byte scan above already ran). Iterative walk, no recursion."""
+    try:
+        doc = json.loads(data)
+    except Exception:  # noqa: BLE001 - includes RecursionError on absurd nesting
+        return set()
+    hits, stack = set(), [doc]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if is_ticket and isinstance(x, str) and norm_segment(k) == "token":
+                    hits.add("token-field")
+                stack.append(k)
+                stack.append(x)
+        elif isinstance(v, list):
+            stack.extend(v)
+        elif isinstance(v, str):
+            raw = v.encode("utf-8", "replace")
+            hits |= {n for n, pat in PATTERNS.items() if re.search(pat, raw)}
+    return hits
+
+
 def scan_blob(path, data):
     """All findings for one blob: path rules, token forms in the full bytes, archives and unreadable files."""
     out = scan_path(path)
@@ -109,14 +138,22 @@ def scan_blob(path, data):
     parts = norm_path(path)
     if parts is not None and _TICKET_RE.match("/".join(parts)):
         pats.update(TICKET_PATTERNS)
-    for name in sorted(pats):
-        if any(re.search(pats[name], h) for h in haystacks):
-            out.append(Finding(path, "secret", name))
+    hits = {name for name in pats if any(re.search(pats[name], h) for h in haystacks)}
+    is_ticket = parts is not None and _TICKET_RE.match("/".join(parts))
+    if is_ticket or path.lower().endswith(".json"):
+        hits |= _json_hits(data, is_ticket)  # \u escapes hide tokens from the byte patterns
+    out += [Finding(path, "secret", name) for name in sorted(hits)]
     low = path.lower()
     archive = low.endswith(_ARCHIVE_EXT) or data.startswith(_ARCHIVE_MAGIC) or data[257:262] == b"ustar"
-    if archive or not (_is_media(data) or _is_text(data)):
-        out.append(Finding(path, "cannot-check", "archive" if archive else "unknown-format", True,
-                           hashlib.sha256(data).hexdigest()))
+    why = "archive" if archive else None
+    if not why and data.startswith(b"%PDF-"):
+        why = "pdf"
+    elif not why and _is_media(data) and any(sig in data[8:] for sig in _EMBEDDED):
+        why = "media-with-archive"
+    elif not why and not (_is_media(data) or _is_text(data)):
+        why = "unknown-format"
+    if why:
+        out.append(Finding(path, "cannot-check", why, True, hashlib.sha256(data).hexdigest()))
     return out
 
 

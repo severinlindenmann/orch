@@ -57,8 +57,8 @@ def test_vector_counter(c):
 @pytest.mark.parametrize("c", VEC["key_clash"], ids=lambda c: c["name"])
 def test_vector_key_clash(c):
     before = deepcopy(c["tickets"])
-    changed, counter = renumber_key_clashes(c["tickets"], c["counter"], NOW)
-    assert {"changed": changed, "counter": counter} == c["expect"]
+    got = renumber_key_clashes(c["tickets"], c["counter"], NOW, c.get("held", ()))
+    assert (got and {"changed": got[0], "counter": got[1]}) == (c["expect"] or None)
     assert c["tickets"] == before
 
 
@@ -73,7 +73,8 @@ def test_scalar_loser_goes_to_history_and_newer_wins():
     base = tk()
     m = merge_ticket(base, up(base, T2, title="Export invoices"), up(base, T3, title="CSV export"), NOW)
     assert m["title"] == "CSV export"
-    assert m["history"][-1] == {"at": NOW, "by": "agent:sync", "text": 'sync: title "Export invoices" was replaced'}
+    assert m["history"][-1] == {"at": NOW, "by": "agent:sync", "text": 'sync: title "Export invoices" was replaced',
+                                "lost": {"field": "title", "value": "Export invoices"}}
 
 
 def test_one_sided_change_wins_without_history():
@@ -182,7 +183,7 @@ def test_key_clash_keeps_old_key_resolvable_and_two_machines_agree():
 def _rand_side(rng, base, at):
     t = deepcopy(base)
     for _ in range(rng.randint(1, 4)):
-        k = rng.choice(["title", "status", "owner", "check", "uncheck", "q", "hist", "ref", "ext", "del"])
+        k = rng.choice(["title", "status", "owner", "check", "uncheck", "q", "hist", "ref", "ext", "del", "created", "schema", "key"])
         if k == "title":
             t["title"] = rng.choice(["A", "B", "C"])
         elif k == "status":
@@ -208,6 +209,12 @@ def _rand_side(rng, base, at):
             t["refs"] = [{"kind": "web", "url": f"https://e.com/{rng.randint(1, 3)}", "at": T1, "by": "human:A"}]
         elif k == "ext":
             t.setdefault("ext", {})["automation"] = {"cron": rng.choice(["a", "b"])}
+        elif k == "created":
+            t["created_at"] = rng.choice([T1, T2, T3])
+        elif k == "schema":
+            t["schema"] = rng.choice(["orch.ticket/1", "orch.ticket/2"])
+        elif k == "key":
+            t["key"] = rng.choice(["DM1-1", "DM1-2", "DM1-3"])
         elif k == "del" and t["refs"]:
             t["refs"] = []
     t["updated_at"] = at
@@ -226,7 +233,7 @@ def test_property_symmetry_purity_and_no_loss(seed):
     assert m == merge_ticket(base, b, a, NOW)
     assert json.dumps(m, sort_keys=True) == json.dumps(merge_ticket(base, b, a, NOW), sort_keys=True)
     assert (base, a, b) == before
-    assert list(SCHEMA.iter_errors(m)) == []
+    assert m["schema"] != "orch.ticket/1" or list(SCHEMA.iter_errors(m)) == []
     have = {(h["at"], h["by"], h["text"]) for h in m["history"]}
     for side in (a, b):  # history is never dropped
         assert {(h["at"], h["by"], h["text"]) for h in side["history"]} <= have
@@ -244,3 +251,89 @@ def test_ext_sync_matches_its_contract_schema():
     changed, _ = renumber_key_clashes({"t_aaa111": t1, "t_bbb222": t2}, {"last": 14}, NOW)
     assert list(Draft202012Validator(schema).iter_errors(changed["t_bbb222"]["ext"]["sync"])) == []
     assert list(Draft202012Validator(schema).iter_errors({"old_keys": ["dm1-1"]})) != []
+
+
+# ---- review fixes (Opus review of #372) ---------------------------------------------------------------------
+
+def _nest(n):
+    d = {"leaf": 1}
+    for _ in range(n):
+        d = {"a": d}
+    return d
+
+
+def test_crafted_deep_ticket_returns_none_and_never_raises():
+    base = tk()
+    for deep in ({"ext": {"x": _nest(500)}}, {"ext": {"x": _nest(40)}}, {"note": _nest(5000)}):
+        assert merge_ticket(base, up(base, T2, **deep), up(base, T3, owner="A"), NOW) is None
+        assert merge_ticket(base, up(base, T3, owner="A"), up(base, T2, **deep), NOW) is None
+        assert merge_ticket(base, up(base, T2, **deep), up(base, T3, owner="A"), NOW) is None
+    assert merge_ticket(base, up(base, T2, ext={"x": _nest(20)}), up(base, T3, owner="A"), NOW) is not None
+    assert renumber_key_clashes({"t_abc123": up(tk(), T1, ext=_nest(500))}, {"last": 1}, NOW) is None
+
+
+def test_size_caps():
+    base = tk()
+    big = [{"at": T1, "by": "human:A", "text": f"n{i}"} for i in range(5001)]
+    assert merge_ticket(base, up(base, T2, history=big), up(base, T3), NOW) is None
+    assert merge_ticket(base, up(base, T2, note="x" * 2_100_000), up(base, T3), NOW) is None
+
+
+def test_garbage_types_never_raise():
+    base = tk()
+    for bad in ({"checklist": [{"id": 1, "text": "x"}]}, {"checklist": [{"text": "x"}]}, {"refs": [[]]},
+                {"questions": "no"}, {"sessions": [{"agent": ["x"], "host": {}}, {"agent": ["x"], "host": {}}]},
+                {"history": [{"at": 1}, {"at": "x"}]}, {"ext": {"a": 5}}, {"updated_at": 5}):
+        merge_ticket(base, up(base, T2, **bad), up(base, T3, owner="A"), NOW)  # must not raise
+
+
+def test_loser_is_never_truncated():
+    base = tk()
+    long = "x" * 1900
+    m = merge_ticket(base, up(base, T2, note=long), up(base, T3, note="short"), NOW)
+    line = next(h for h in m["history"] if "lost" in h)
+    assert line["lost"] == {"field": "note", "value": long} and len(line["text"]) < 260
+
+
+def test_duplicate_ids_cannot_merge():
+    base = tk()
+    dup = [{"id": "c1", "text": "a", "done": False, "evidence": []}, {"id": "c1", "text": "b", "done": False, "evidence": []}]
+    assert merge_ticket(base, up(base, T2, checklist=dup), up(base, T3), NOW) is None
+    assert merge_ticket(base, up(base, T3), up(base, T2, checklist=dup), NOW) is None
+    ref = {"kind": "web", "url": "https://e.com", "at": T1, "by": "human:A"}
+    assert merge_ticket(base, up(base, T2, refs=[ref, ref]), up(base, T3), NOW) is None
+
+
+def test_schema_and_created_at_follow_the_three_way_rule_in_both_orders():
+    base = tk()
+    a, b = up(base, T2, created_at=T2, schema="orch.ticket/2"), up(base, T3, created_at=T3)
+    m = merge_ticket(base, a, b, NOW)
+    assert m == merge_ticket(base, b, a, NOW) and m["created_at"] == T3 and m["schema"] == "orch.ticket/2"
+
+
+def test_key_loser_goes_to_old_keys_and_text_conflicts_are_logged():
+    base = tk()
+    m = merge_ticket(base, up(base, T2, key="DM1-15"), up(base, T3, key="DM1-16"), NOW)
+    assert m["key"] == "DM1-16" and old_keys_of(m) == ["DM1-15"]
+    c = lambda t: {"id": "c1", "text": t, "done": False, "evidence": []}
+    b2 = tk(checklist=[c("o")])
+    m = merge_ticket(b2, up(b2, T2, checklist=[c("theirs")]), up(b2, T3, checklist=[c("mine")]), NOW)
+    assert m["checklist"][0]["text"] == "mine"
+    assert [h["lost"] for h in m["history"] if "lost" in h] == [{"field": "c1 text", "value": "theirs"}]
+
+
+def test_key_clash_malformed_input_gives_none():
+    ok = tk(id="t_aaa111", key="DM1-13")
+    for bad in ({"key": [1]}, {"key": "x-1"}, {"ext": []}, {"created_at": 5}, {"ext": {"sync": []}}):
+        assert renumber_key_clashes({"t_aaa111": ok, "t_bbb222": {**tk(id="t_bbb222", key="DM1-13"), **bad}},
+                                    {"last": 1}, NOW) is None
+    assert renumber_key_clashes({"t_aaa111": ok, "t_bbb222": tk(id="t_bbb222", key="DM1-13")},
+                                {"last": 999_000_000}, NOW) is None
+    assert renumber_key_clashes("no", {}, NOW) is None
+
+
+def test_backdating_cannot_steal_a_key_the_local_ticket_holds():
+    mine = tk(id="t_bbb222", key="DM1-13", created_at=T2)
+    theirs = tk(id="t_aaa111", key="DM1-13", created_at="2001-01-01T00:00:00Z")
+    changed, _ = renumber_key_clashes({"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"])
+    assert list(changed) == ["t_aaa111"]

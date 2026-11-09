@@ -98,7 +98,7 @@ def test_click_does_not_unblock_a_secret_inside_an_archive():
 
 
 def test_known_media_is_fine():
-    for data in (b"\x89PNG\r\n\x1a\n\x00\x00", b"\xff\xd8\xff\xe0\x00", b"GIF89a\x00", b"%PDF-1.7\n\x00\xff",
+    for data in (b"\x89PNG\r\n\x1a\n\x00\x00", b"\xff\xd8\xff\xe0\x00", b"GIF89a\x00",
                  b"RIFF\x00\x00\x00\x00WEBPVP8 ", b"\x00\x00\x00\x18ftypmp42"):
         assert scan_blob("tickets/t_abc123/artifacts/m.bin", data) == []
 
@@ -128,3 +128,28 @@ def test_empty_dot_dotdot_and_control_segments_are_unsafe(path):
 @pytest.mark.parametrize("path", ["Tickets/T_ABC123.json", "tickets/t_abc\u200b123.json", "tickets/T_abc123.JSON"])
 def test_token_field_check_uses_the_normalized_ticket_path(path):
     assert ("secret", "token-field") in codes(path, b'{"token": "x"}')
+
+
+def test_json_unicode_escapes_do_not_hide_tokens():
+    esc = b'{"note": "\\u006frp_' + TOKEN_P[5:] + b'"}'
+    assert ("secret", "orp-token") in codes("tickets/t_abc123/artifacts/x.json", esc)
+    assert ("secret", "orp-token") in codes("tickets/t_abc123.json", esc)
+    assert ("secret", "token-field") in codes("tickets/t_abc123.json", b'{"to\\u006ben": "abc"}')
+    assert codes("tickets/t_abc123/artifacts/x.json", b'{"to\\u006ben": "abc"}') == []
+    nested = b'{"a": [{"b": "\\u002d----BEGIN PRIVATE KEY-----"}]}'
+    assert ("secret", "private-key") in codes("tickets/t_abc123/artifacts/n.json", nested)
+    assert scan_blob("tickets/t_abc123/artifacts/deep.json", b"[" * 100000 + b"]" * 100000) == []  # no crash
+
+
+def test_pdf_and_media_with_hidden_archive_need_a_click():
+    for name, data in (("a.pdf", b"%PDF-1.7\n%text only"), ("p.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 50 + b"PK\x03\x04zip"),
+                       ("v.mp4", b"\x00\x00\x00\x18ftypmp42" + b"Rar!\x1a\x07\x00")):
+        fs = scan_blob("tickets/t_abc123/artifacts/" + name, data)
+        assert len(fs) == 1 and fs[0].code == "cannot-check" and fs[0].needs_click, name
+
+
+@pytest.mark.parametrize("path", ["me./x", "addons /x", "tickets/t_abc123/artifacts/key.pem.",
+                                  "tickets/t_abc123/artifacts/a ", "tickets/t_abc123/artifacts/a:stream",
+                                  "tickets/t_abc123/artifacts/x.\u200b ", "me\u200b./x"])
+def test_windows_trailing_dot_space_and_colon_are_unsafe(path):
+    assert [f.rule for f in scan_path(path)] == ["unsafe-path"]

@@ -1,5 +1,5 @@
 {
- "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now) must give `expect` (null = cannot merge, caller pauses) and the SAME result with a and b swapped. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now) -> {changed, counter}. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys).",
+ "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now) must give `expect` (null = cannot merge, caller pauses) and the SAME result with a and b swapped. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now, held) -> {changed, counter} (null = malformed, caller pauses; held = ids that held the key locally, they keep it). `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys).",
  "now": "2026-11-10T12:00:00Z",
  "tickets": [
   {
@@ -50,13 +50,13 @@
     "due": "2026-12-01"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "due": "2026-12-01",
     "key": "DM1-1",
     "owner": "Ann",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -114,12 +114,12 @@
     "note": "x"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
     "note": "x",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -175,11 +175,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "CSV export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -188,7 +188,11 @@
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: title \"Export invoices\" was replaced"
+      "text": "sync: title \"Export invoices\" was replaced",
+      "lost": {
+       "field": "title",
+       "value": "Export invoices"
+      }
      }
     ],
     "revision": 3,
@@ -249,15 +253,15 @@
     "due": "2026-12-01"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "due": "2026-12-02",
     "key": "DM1-1",
     "note": "mine note",
     "owner": "Bob",
+    "schema": "orch.ticket/1",
     "summary": "mine sum",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -266,22 +270,38 @@
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: due \"2026-12-01\" was replaced"
+      "text": "sync: due \"2026-12-01\" was replaced",
+      "lost": {
+       "field": "due",
+       "value": "2026-12-01"
+      }
      },
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: note \"their note\" was replaced"
+      "text": "sync: note \"their note\" was replaced",
+      "lost": {
+       "field": "note",
+       "value": "their note"
+      }
      },
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: owner \"Ann\" was replaced"
+      "text": "sync: owner \"Ann\" was replaced",
+      "lost": {
+       "field": "owner",
+       "value": "Ann"
+      }
      },
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: summary \"their sum\" was replaced"
+      "text": "sync: summary \"their sum\" was replaced",
+      "lost": {
+       "field": "summary",
+       "value": "their sum"
+      }
      }
     ],
     "revision": 3,
@@ -342,15 +362,15 @@
     }
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "waiting_on": {
      "kind": "ticket",
      "ref": "t_zzz999"
     },
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -410,15 +430,15 @@
     "owner": "Ann"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
     "owner": "Ann",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "x_custom": {
      "k": 1
     },
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -475,12 +495,12 @@
     "owner": "Ann"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
     "owner": "Ann",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "active",
     "checklist": [],
     "questions": [],
@@ -536,11 +556,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "done",
     "checklist": [],
     "questions": [],
@@ -602,11 +622,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "dropped",
     "checklist": [],
     "questions": [],
@@ -668,11 +688,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "review",
     "checklist": [],
     "questions": [],
@@ -782,11 +802,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "active",
     "checklist": [
      {
@@ -919,11 +939,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [
      {
@@ -1037,11 +1057,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [
      {
@@ -1144,12 +1164,12 @@
     "owner": "Ann"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
     "owner": "Ann",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [
      {
@@ -1285,11 +1305,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [
      {
@@ -1432,11 +1452,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [
      {
@@ -1543,12 +1563,12 @@
     "owner": "Bob"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
     "owner": "Bob",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [
@@ -1644,11 +1664,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [
@@ -1667,7 +1687,15 @@
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: another answer \"csv\" by human:Ann was replaced"
+      "text": "sync: another answer \"csv\" by human:Ann was replaced",
+      "lost": {
+       "field": "q1 answer",
+       "value": {
+        "answer": "csv",
+        "answered_by": "human:Ann",
+        "via": "cli"
+       }
+      }
      }
     ],
     "revision": 3,
@@ -1768,11 +1796,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [
@@ -1893,11 +1921,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -1996,11 +2024,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -2102,11 +2130,11 @@
     ]
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -2195,11 +2223,11 @@
     }
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -2278,11 +2306,11 @@
     }
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -2342,12 +2370,12 @@
     "owner": "Bob"
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
     "owner": "Bob",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [
      {
@@ -2363,7 +2391,11 @@
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: owner \"Ann\" was replaced"
+      "text": "sync: owner \"Ann\" was replaced",
+      "lost": {
+       "field": "owner",
+       "value": "Ann"
+      }
      }
     ],
     "revision": 3,
@@ -2416,11 +2448,11 @@
     "revision": 5
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "Invoice export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -2462,7 +2494,11 @@
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: title \"CSV export\" was replaced"
+      "text": "sync: title \"Export invoices\" was replaced",
+      "lost": {
+       "field": "title",
+       "value": "Export invoices"
+      }
      }
     ],
     "revision": 2
@@ -2482,11 +2518,11 @@
     "revision": 2
    },
    "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
     "key": "DM1-1",
+    "schema": "orch.ticket/1",
     "title": "CSV export",
     "id": "t_abc123",
-    "schema": "orch.ticket/1",
-    "created_at": "2026-11-09T08:00:00Z",
     "status": "open",
     "checklist": [],
     "questions": [],
@@ -2495,17 +2531,474 @@
      {
       "at": "2026-11-10T12:00:00Z",
       "by": "agent:sync",
-      "text": "sync: title \"CSV export\" was replaced"
-     },
-     {
-      "at": "2026-11-10T12:00:00Z",
-      "by": "agent:sync",
-      "text": "sync: title \"Export invoices\" was replaced"
+      "text": "sync: title \"Export invoices\" was replaced",
+      "lost": {
+       "field": "title",
+       "value": "Export invoices"
+      }
      }
     ],
     "revision": 3,
     "updated_at": "2026-11-09T10:00:00Z"
    }
+  },
+  {
+   "name": "key-both-renumbered-loser-kept-in-old-keys",
+   "rule": "D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-15",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-16",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-16",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "ext": {
+     "sync": {
+      "old_keys": [
+       "DM1-15"
+      ]
+     }
+    },
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: key \"DM1-15\" was replaced",
+      "lost": {
+       "field": "key",
+       "value": "DM1-15"
+      }
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "checklist-text-edited-both-sides-loser-in-history",
+   "rule": "4",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one theirs",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "one mine",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "two",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "done": false,
+      "id": "c1",
+      "text": "one mine",
+      "evidence": []
+     },
+     {
+      "done": false,
+      "id": "c2",
+      "text": "two",
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: c1 text \"one theirs\" was replaced",
+      "lost": {
+       "field": "c1 text",
+       "value": "one theirs"
+      }
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "long-loser-kept-in-full",
+   "rule": "D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "note": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2,
+    "note": "y"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "y",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: note \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...\" was replaced",
+      "lost": {
+       "field": "note",
+       "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+     }
+    ],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "schema-and-created-at-differ-newer-wins",
+   "rule": "2",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T09:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T10:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "created_at": "2026-11-09T10:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "invalid-duplicate-checklist-ids",
+   "rule": "10",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "a",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c1",
+      "text": "b",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": null
+  },
+  {
+   "name": "invalid-duplicate-question-ids",
+   "rule": "10",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [
+     {
+      "id": "q1",
+      "text": "a",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     },
+     {
+      "id": "q1",
+      "text": "b",
+      "options": [],
+      "recommended": null,
+      "answer": null,
+      "answered_by": null,
+      "via": null
+     }
+    ],
+    "history": [],
+    "revision": 2
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": null
   },
   {
    "name": "invalid-different-ids",
@@ -2991,6 +3484,139 @@
      "last": 9
     }
    }
+  },
+  {
+   "name": "backdated-created-at-cannot-steal-held-key",
+   "counter": {
+    "last": 13
+   },
+   "held": [
+    "t_bbb222"
+   ],
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2020-01-01T00:00:00Z",
+     "updated_at": "2020-01-01T00:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T09:00:00Z",
+     "updated_at": "2026-11-09T09:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": {
+    "changed": {
+     "t_aaa111": {
+      "schema": "orch.ticket/1",
+      "id": "t_aaa111",
+      "key": "DM1-14",
+      "title": "Invoice export",
+      "status": "open",
+      "created_at": "2020-01-01T00:00:00Z",
+      "updated_at": "2020-01-01T00:00:00Z",
+      "checklist": [],
+      "refs": [],
+      "questions": [],
+      "history": [
+       {
+        "at": "2026-11-10T12:00:00Z",
+        "by": "agent:sync",
+        "text": "sync: key changed from DM1-13 to DM1-14 (another ticket had it)"
+       }
+      ],
+      "revision": 2,
+      "ext": {
+       "sync": {
+        "old_keys": [
+         "DM1-13"
+        ]
+       }
+      }
+     }
+    },
+    "counter": {
+     "last": 14
+    }
+   }
+  },
+  {
+   "name": "malformed-key-gives-null",
+   "counter": {
+    "last": 1
+   },
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "nope",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "huge-counter-gives-null",
+   "counter": {
+    "last": 999000000
+   },
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-5",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T08:00:00Z",
+     "updated_at": "2026-11-09T08:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-5",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T09:00:00Z",
+     "updated_at": "2026-11-09T09:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": null
   }
  ]
 }
