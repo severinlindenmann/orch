@@ -191,27 +191,36 @@ class Tracker:
                 return claim[k]
         return None
 
+    def pin_started(self, tid: str, run: str) -> bool:
+        """Right after Focus started a run: record {run, pid, start} of its process. Only a run with this pin
+        is ever listed or stopped (nothing is pinned later, on first sight, from a claim someone else could write)."""
+        for _ in range(8):  # a live session writes its pid a moment after the start
+            self.status_cache.pop(tid, None)
+            claim = self.run_status(tid).get("claim") or {}
+            pid = self._claim_pid(claim)
+            if claim.get("run") == run and pid is not None:
+                start = runfiles.proc_start(pid)
+                if start is None:
+                    return False
+                with self.plock:
+                    self.pins[tid] = {"run": run, "pid": pid, "start": start}
+                    self._save_pins()
+                return True
+            time.sleep(0.5)
+        return False
+
     def _ours(self, tid: str, run: str, claim: dict, running: bool) -> bool:
         """True only for a run Focus itself started (run id recorded by Focus, claim still that run, started by
-        Focus) that is alive, and whose process is the one first seen for that run: same pid and same start time
-        (a reused pid has another start time). A run another tool started later is never ours."""
+        Focus) that is alive and whose process is the one pinned when Focus started it: same pid and same start
+        time (a reused pid has another start time). No pin, or a claim that lost its pid: not ours."""
         if not (running and self.started.get(tid) == run and claim.get("run") == run and claim.get("by") == "focus"):
             return False
-        pid = self._claim_pid(claim)
-        if pid is None:
-            return True  # a session with no process yet: core's own pid + start-time check still guards the stop
-        if not runfiles.alive(pid):
-            return False
-        start = runfiles.proc_start(pid)
-        if start is None:
-            return False
-        pin = self.pins.get(tid)
-        if pin and pin.get("run") == run:
-            return pin["pid"] == pid and pin["start"] == start
         with self.plock:
-            self.pins[tid] = {"run": run, "pid": pid, "start": start}
-            self._save_pins()
-        return True
+            pin = dict(self.pins.get(tid) or {})
+        pid = self._claim_pid(claim)
+        if pin.get("run") != run or pid is None or pid != pin.get("pid") or not runfiles.alive(pid):
+            return False
+        return runfiles.proc_start(pid) == pin.get("start")
 
     def procs(self) -> list[dict]:
         """One row per run Focus started that is still running (a plain view, no secrets)."""
@@ -256,8 +265,12 @@ class Tracker:
     def stop_all(self) -> tuple[int, int]:
         """Stop every run Focus started. Returns (stopped, failed)."""
         ok = bad = 0
+        end = time.monotonic() + 40  # one request never holds a handler for minutes
         self.status_cache.clear()  # what is running is read fresh, not from the 1 s cache
         for row in self.procs():
+            if time.monotonic() > end:
+                bad += 1
+                continue
             done, _ = self.stop_proc(row["ticket"], row["run"])
             ok, bad = ok + done, bad + (not done)
         return ok, bad
@@ -653,6 +666,8 @@ class Handler(BaseHTTPRequestHandler):
         self.tracker.ticket_cache.clear()  # the view sent back must show what this action just did
         if code == 200 and body.get("op") == "run.start":
             self.tracker.note_started(args["ticket"], (extra or {}).get("run"))
+            if isinstance((extra or {}).get("run"), str) and RUN_ID.fullmatch(extra["run"]):
+                threading.Thread(target=self.tracker.pin_started, args=(args["ticket"], extra["run"]), daemon=True).start()
             self.tracker.mark_page(args["ticket"])
         elif code == 200 and body.get("op") == "run.stop":
             self.tracker.forget_started(args["ticket"])
