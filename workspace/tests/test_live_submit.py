@@ -728,9 +728,7 @@ def test_a_dim_suggestion_counts_as_empty_even_with_the_cursor_elsewhere(proj, r
     assert runs_live.deliver(proj, tid) == 1
 
 
-def test_a_scrolled_up_pane_says_so_and_orch_leaves_copy_mode_after_half_a_minute(
-    proj, run, monkeypatch
-):
+def test_a_scrolled_up_pane_says_so_and_orch_leaves_copy_mode_after_half_a_minute(proj, run, monkeypatch):
     """Lane C (C): the person scrolled up to read; the notice waited with no word on the page."""
     tid, rn, sent, screen = _held(proj, run, monkeypatch, mode="1")
     assert runs_live.deliver(proj, tid) == 0 and sent == []
