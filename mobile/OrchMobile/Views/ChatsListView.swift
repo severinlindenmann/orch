@@ -224,7 +224,7 @@ struct ChatsListView: View {
                     }
                     ShellChevron()
                 }.padding(.horizontal, 12).padding(.vertical, 14).contentShape(Rectangle())
-            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier("room-\(summary.id)")
+            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("room-\(summary.id)")
                 .contextMenu {
                     MuteMenu(muted: summary.workspace.isMuted(now: context.date)) { mute in
                         Task { await model.setMute(summary.id, mute) }

@@ -36,9 +36,16 @@ final class MuteUITests: XCTestCase {
         forever.tap()
         let unmuting = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Unmute'"), object: mute)
         XCTAssertEqual(XCTWaiter.wait(for: [unmuting], timeout: 5), .completed)
-        app.navigationBars.buttons.firstMatch.tap()
+        // -openChat may sit below the workspace screen: go back until the Chats list shows.
         let row = app.buttons["room-ws_pilatus001"]
+        for _ in 0..<3 where !row.exists {
+            let back = app.buttons["BackButton"].firstMatch
+            guard back.waitForExistence(timeout: 3) else { break }
+            back.tap()
+            _ = row.waitForExistence(timeout: 3)
+        }
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        XCTAssertTrue(row.images["Muted"].exists)
+        // The row is one button: its children (the bell-slash) are merged into its label.
+        XCTAssertTrue(row.images["Muted"].exists || row.label.contains("Muted"), "row label: \(row.label)")
     }
 }

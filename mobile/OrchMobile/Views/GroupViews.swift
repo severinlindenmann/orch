@@ -176,7 +176,7 @@ struct GroupListRow: View {
                         ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted)
                     }
                 }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityElement(children: .contain).accessibilityIdentifier(Self.rowID(group))
+            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier(Self.rowID(group))
                 .contextMenu {
                     MuteMenu(muted: model.isGroupMuted(group.key, now: context.date)) { mute in
                         Task { await model.setGroupMute(group.key, mute) }
