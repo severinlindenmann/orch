@@ -417,7 +417,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("check")
     x.add_argument("--cmd", required=True, metavar="TEXT", dest="ran", help="what ran, as text")
     x.add_argument("--exit", type=int, metavar="N", dest="exit_code", help="its exit code")
-    x.add_argument("--output", metavar="FILE", help="a file with its output (- = standard input)")
+    x.add_argument("--output", metavar="FILE", help="a plain log file in this workspace with its output")
     x = c.add_parser("done", parents=[common])
     x.add_argument("id")
     x.add_argument("check")

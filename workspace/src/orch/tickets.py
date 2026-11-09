@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, procs, term
+from orch import config, procs, saferead, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -589,7 +589,7 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
     failed = the newest recorded run (`orch check record`) has exit != 0 (also on a task not done);
     done + any proof that is not a note = passed; done + note proof only = note; not done = missing.
     changed (done, needs `root`): the newest recorded run has a files_sig and files_sig(root) is different now
-    (`stale: true` on evidence forces it). The current signature is computed at most once per call, only
+    (a stored flag is never trusted). The current signature is computed at most once per call, only
     when a
     recorded signature exists; `cache` reuses it for a few seconds (polled pages). Reads files only, runs
     nothing
@@ -614,9 +614,7 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
             per[c["id"]] = "failed"
         elif not c.get("done"):
             per[c["id"]] = "missing"
-        elif any(e.get("stale") is True for e in evs) or (
-            sig_ev is not None and isinstance(sig_ev["files_sig"], str) and moved(sig_ev)
-        ):
+        elif sig_ev is not None and isinstance(sig_ev["files_sig"], str) and moved(sig_ev):
             per[c["id"]] = "changed"
         elif any(e.get("type") != "note" for e in evs):
             per[c["id"]] = "passed"
@@ -1154,29 +1152,13 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
-    """The last TAIL_MAX characters of the output file (`-` = standard input), control characters removed.
-    Only read as text, never run. A file must be a plain file inside the workspace, not under .orch or
-    .git."""
+    """The last TAIL_MAX characters of a plain log file inside the workspace, control characters removed. Only
+    read as text, never run. All file rules live in saferead.safe_read_tail (no stdin, no dotfiles, no
+    links)."""
     if source is None:
         return None
-    if source == "-":
-        data = sys.stdin.buffer.read()[-8192:]
-    else:
-        p = Path(source)
-        p = p if p.is_absolute() else Path.cwd() / p
-        try:
-            real = p.resolve(strict=True)
-            inside = real.relative_to(Path(root).resolve())
-        except (OSError, ValueError):
-            raise Refused("The output file must be a file inside this workspace.") from None
-        if inside.parts[:1] in ((".orch",), (".git",)) or not real.is_file():
-            raise Refused("The output file must be a file inside this workspace.")
-        with real.open("rb") as f:
-            f.seek(0, os.SEEK_END)
-            f.seek(max(0, f.tell() - 8192))
-            data = f.read()
-    text = clean_untrusted(data.decode("utf-8", "replace"), 100_000)
-    return text[-TAIL_MAX:]
+    data = saferead.safe_read_tail(root, source, 8192)
+    return clean_untrusted(data.decode("utf-8", "replace"), 100_000)[-TAIL_MAX:]
 
 
 def check_record(

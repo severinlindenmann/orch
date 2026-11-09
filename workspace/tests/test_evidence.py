@@ -241,17 +241,41 @@ def test_record_stores_cmd_exit_and_output_tail(proj, run, validate, tid):
 
 
 def test_record_refusals(proj, run, tid, tmp_path):
+    def refused(*output):
+        return run("check", "record", tid, "c1", "--cmd", "x", *output)[0] == 2
+
     assert run("check", "record", tid, "c9", "--cmd", "x")[0] == 2
     assert run("check", "record", tid, "c1", "--cmd", "  ")[0] == 2
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--exit", "99999")[0] == 2
     outside = tmp_path.parent / "elsewhere.txt"
     outside.write_text("secret", encoding="utf-8")
-    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", str(outside))[0] == 2
-    (proj / ".orch" / "run").mkdir(parents=True, exist_ok=True)
-    (proj / ".orch" / "run" / "k.txt").write_text("k", encoding="utf-8")
-    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", ".orch/run/k.txt")[0] == 2
+    assert refused("--output", str(outside))
+    assert refused("--output", "-")  # standard input is gone: it is not a file inside the workspace
+    for rel in (
+        ".orch/run/k.txt",
+        ".env",
+        ".aws/log.txt",
+        "sub/.git/config",
+        "my-api-key.txt",
+        "tok.pem",
+        "a_secret.log",
+    ):
+        f = proj / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("k", encoding="utf-8")
+        assert refused("--output", rel), rel
     (proj / "link.txt").symlink_to(outside)
-    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "link.txt")[0] == 2
+    assert refused("--output", "link.txt")
+    (proj / "ok.txt").write_text("fine", encoding="utf-8")
+    (proj / "hard.txt").hardlink_to(proj / "ok.txt")
+    assert refused("--output", "hard.txt")  # two names: refused
+    os.mkfifo(proj / "pipe.txt")
+    assert refused("--output", "pipe.txt")  # a FIFO never blocks us
+    (proj / "dir.txt").mkdir()
+    assert refused("--output", "dir.txt")
     assert read(proj, tid)["checklist"][0]["evidence"] == []
+    (proj / "good.log").write_text("fine", encoding="utf-8")
+    assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "good.log")[0] == 0
 
 
 def test_evidence_record_fields_are_typed():

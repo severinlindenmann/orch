@@ -228,7 +228,7 @@ def test_files_sig_without_git_or_on_timeout(proj, repo, monkeypatch):
     monkeypatch.setattr(filesig.subprocess, "run", slow)
     assert filesig.files_sig(repo) is None
     monkeypatch.undo()
-    monkeypatch.setattr(filesig, "MAX_UNTRACKED", 1)
+    monkeypatch.setattr(filesig, "MAX_FILES", 2)
     (repo / "u1").write_text("1")
     (repo / "u2").write_text("2")
     assert filesig.files_sig(repo) is None  # size cap
@@ -326,3 +326,69 @@ def test_record_and_proof_state_never_execute(repo, run, new_ticket, monkeypatch
     assert not (repo / "PWNED").exists() and seen  # only fixed git argv lists ran
     ev = t["checklist"][0]["evidence"][0]
     assert ev["ref"] == "touch PWNED; rm -rf /" and "$(touch PWNED)" in ev["output_tail"]
+
+
+def _hostile_repo(proj, marker):
+    """A repo whose clean filter runs `touch <marker>`, set in .gitattributes AND .git/info/attributes."""
+    _git(proj, "init", "-q")
+    (proj / "a.txt").write_text("one\n", encoding="utf-8")
+    _git(proj, "add", "a.txt")
+    _git(proj, "commit", "-q", "-m", "first")
+    _git(proj, "config", "filter.evil.clean", f"touch {marker}; cat")
+    _git(proj, "config", "filter.evil.process", f"touch {marker}")
+    (proj / ".gitattributes").write_text("* filter=evil\n", encoding="utf-8")
+    (proj / ".git" / "info" / "attributes").write_text("* filter=evil\n", encoding="utf-8")
+    (proj / "a.txt").write_text("edited so git must look at it\n", encoding="utf-8")
+    (proj / "new.txt").write_text("untracked\n", encoding="utf-8")
+
+
+def test_hostile_filters_never_run(proj, run, new_ticket):
+    marker = proj.parent / (proj.name + "_MARKER")
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    _hostile_repo(proj, marker)
+    # control: a content-comparing git command WOULD run the filter here (the test is meaningful)
+    subprocess.run(["git", "diff", "HEAD"], cwd=proj, capture_output=True, check=False)
+    assert marker.exists()
+    marker.unlink()
+    assert filesig.files_sig(proj)
+    code, _, err = run("check", "record", tid, "c1", "--cmd", "pytest", "--exit", "0")
+    assert code == 0, err
+    run("check", "done", tid, "c1", "--note", "n")
+    t = tickets.load(proj, tid)
+    tickets.proof_state(t, proj)
+    run("ticket", "show", tid)
+    assert not marker.exists()
+
+
+def test_files_sig_content_not_index(repo):
+    a = filesig.files_sig(repo)
+    (repo / "a.txt").write_text("two\n", encoding="utf-8")
+    b = filesig.files_sig(repo)
+    assert b != a
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-q", "-m", "second")
+    assert filesig.files_sig(repo) == b  # add/commit alone is not a change
+    (repo / "a.txt").unlink()
+    assert filesig.files_sig(repo) not in (a, b)  # a deleted file is
+
+
+def test_files_sig_special_files_never_block_or_read(repo, tmp_path):
+    a = filesig.files_sig(repo)
+    os.mkfifo(repo / "pipe")
+    secret = tmp_path.parent / (tmp_path.name + "_s.txt")
+    secret.write_text("s", encoding="utf-8")
+    (repo / "link").symlink_to(secret)
+    os.link(secret, repo / "hard")
+    sig = filesig.files_sig(repo)  # would hang on the FIFO if it were opened blocking
+    assert sig and sig != a
+    big = repo / "big.bin"
+    big.write_bytes(b"x" * (filesig.HASH_LIMIT + 10))
+    assert filesig.files_sig(repo)
+    monkey = filesig.MAX_READ
+    try:
+        filesig.MAX_READ = 5
+        (repo / "small.txt").write_text("123456789")
+        assert filesig.files_sig(repo) is None  # read budget spent
+    finally:
+        filesig.MAX_READ = monkey

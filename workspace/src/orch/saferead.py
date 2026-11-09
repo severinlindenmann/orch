@@ -1,0 +1,145 @@
+"""The ONE place that opens a workspace file whose name or content an agent could have planted, to read bytes
+that are stored or hashed (`orch check record --output`, files_sig). Enforced here and nowhere else:
+
+- the file is opened O_NOFOLLOW|O_NONBLOCK|O_NOCTTY (a link is never followed, a FIFO never blocks);
+- the handle is fstat'ed: it must be a regular file with exactly ONE name (a hard link to ~/.ssh/... is
+refused)
+  and the same device/inode as the path had a moment before (a swap in between is refused);
+- reads come from that handle and are bounded (a tail by pread, a hash in chunks up to a limit).
+Special files (FIFO, device, socket, directory) are never read: a hash counts only their type.
+`safe_read_tail` adds the name rules for `--output`: only plain log files inside the workspace."""
+
+from __future__ import annotations
+
+import fnmatch
+import hashlib
+import os
+import stat
+from pathlib import Path
+
+from orch.errors import Refused
+
+_FLAGS = (
+    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+)
+CHUNK = 64 * 1024
+SECRETISH = ("*key*", "*secret*", "*token*", "*.pem", "*.p12", "*.pfx", "*password*", "*credential*")
+_NO = "The output file must be a plain log file inside this workspace."
+
+
+def _open_regular(path: Path) -> tuple[int, os.stat_result] | None:
+    """(fd, fstat) of a regular, single-name file opened without following links; None for anything else."""
+    try:
+        before = os.lstat(path)
+        if not stat.S_ISREG(before.st_mode):
+            return None
+        fd = os.open(path, _FLAGS)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_nlink != 1
+            or (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino)
+        ):
+            os.close(fd)
+            return None
+    except OSError:
+        os.close(fd)
+        return None
+    return fd, st
+
+
+def _name_ok(parts: tuple[str, ...]) -> bool:
+    for part in parts:
+        low = part.lower()
+        if (
+            part in (".git", ".orch")
+            or part.startswith(".")
+            or any(fnmatch.fnmatch(low, g) for g in SECRETISH)
+        ):
+            return False
+    return bool(parts)
+
+
+def safe_read_tail(root: Path, path: str, limit: int) -> bytes:
+    """The last `limit` bytes of a plain log file inside `root`. Refused (Refused) for anything else:
+    outside the
+    workspace, a path part that is `.git`, `.orch` or starts with a dot (.env, .ssh, .aws), a name like *key*,
+    *secret*, *token*, *.pem, a link or hard link, a FIFO/device/directory. Never blocks, never reads more."""
+    p = Path(path)
+    p = p if p.is_absolute() else Path.cwd() / p
+    base = Path(root).resolve()
+    try:
+        real = p.resolve(strict=True)
+        inside = real.relative_to(base).parts
+    except (OSError, ValueError):
+        raise Refused(_NO) from None
+    given = Path(os.path.abspath(p))  # the name as typed counts too, not only where a link leads
+    for b in (base, Path(root).absolute()):
+        try:
+            asked = given.relative_to(b).parts
+            break
+        except ValueError:
+            asked = inside
+    if not (_name_ok(inside) and _name_ok(asked)):
+        raise Refused(_NO)
+    opened = _open_regular(real)
+    if opened is None:
+        raise Refused(_NO)
+    fd, st = opened
+    try:
+        want = min(limit, st.st_size)
+        if hasattr(os, "pread"):
+            return os.pread(fd, want, st.st_size - want) if want else b""
+        os.lseek(fd, st.st_size - want, os.SEEK_SET)
+        return os.read(fd, want)
+    finally:
+        os.close(fd)
+
+
+def file_state(path: Path, hash_limit: int, budget: list[int]) -> str:
+    """A short string for the file as it is now, for files_sig. Regular single-name file: sha256 of up to
+    `hash_limit` bytes (streamed) + size (+ mtime when it is bigger than the limit). Link: its target text.
+    Anything else: its type only. `budget[0]` is the bytes that may still be read; spent, it becomes -1
+    (caller: None)."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return "?"
+    mode = st.st_mode
+    exe = "x" if mode & 0o111 else "-"
+    if stat.S_ISLNK(mode):
+        try:
+            return "L:" + os.readlink(path)
+        except OSError:
+            return "L?"
+    if not stat.S_ISREG(mode):
+        return "S:" + oct(stat.S_IFMT(mode))
+    if st.st_nlink != 1:
+        return f"H:{exe}:{st.st_size}:{st.st_mtime_ns}"
+    if st.st_size > hash_limit:
+        return f"B:{exe}:{st.st_size}:{st.st_mtime_ns}"
+    if budget[0] < st.st_size:
+        budget[0] = -1
+        return "?"
+    opened = _open_regular(path)
+    if opened is None:
+        return "?"
+    fd, st = opened
+    h = hashlib.sha256()
+    left = min(hash_limit, st.st_size)
+    try:
+        while left > 0:
+            data = os.read(fd, min(CHUNK, left))
+            if not data:
+                break
+            h.update(data)
+            left -= len(data)
+    except OSError:
+        return "?"
+    finally:
+        os.close(fd)
+    budget[0] -= st.st_size
+    return f"F:{exe}:{h.hexdigest()}"
