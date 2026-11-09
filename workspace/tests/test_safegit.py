@@ -1430,3 +1430,18 @@ def test_git_exe_with_root_home_and_a_planted_git_in_home_is_refused(tmp_path, m
     # ... and any run with that root is refused outright
     rc, _, err = safegit.run(["status"], other, filters=False, root=home)
     assert rc == safegit.REFUSED and "home folder" in err
+
+
+def test_runs_kill_tree_uses_the_full_path_taskkill_or_does_nothing(monkeypatch, capsys):
+    from orch import runs
+
+    monkeypatch.setattr(runs.os, "name", "nt")
+    calls = []
+    monkeypatch.setattr(runs.subprocess, "run", lambda argv, **k: calls.append(argv))
+    monkeypatch.setattr(safegit, "taskkill_exe", lambda: r"C:\Windows\System32\taskkill.exe")
+    runs.kill_tree(4321)
+    assert calls == [[r"C:\Windows\System32\taskkill.exe", "/PID", "4321", "/T", "/F"]]
+    calls.clear()
+    monkeypatch.setattr(safegit, "taskkill_exe", lambda: None)
+    runs.kill_tree(4321)
+    assert calls == [] and "taskkill.exe was not found" in capsys.readouterr().err  # no bare name is run

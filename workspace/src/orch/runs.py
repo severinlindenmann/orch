@@ -283,7 +283,16 @@ def state(rec: dict, at: float | None = None) -> str:
 def kill_tree(pid: int, grace: float = 2.0) -> None:
     """SIGTERM, then SIGKILL, a process and (when it leads its own group) the group. Windows: taskkill /T."""
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        from orch import safegit  # late: safegit needs addons
+
+        exe = safegit.taskkill_exe()  # full path in the system folder, never a bare name (project .venv, cwd)
+        if exe is None:
+            print(
+                "orch: taskkill.exe was not found in the system folder; the process was not stopped.",
+                file=sys.stderr,
+            )
+            return
+        subprocess.run([exe, "/PID", str(pid), "/T", "/F"], capture_output=True)
         return
     import signal
 
