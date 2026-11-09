@@ -20,8 +20,14 @@ from pathlib import Path
 
 from orch.errors import Refused
 
+# O_BINARY: on Windows os.open defaults to TEXT mode (CRLF -> LF, Ctrl-Z ends the read),
+# which breaks lengths and hashes.
 _FLAGS = (
-    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_NOCTTY", 0)
+    | getattr(os, "O_BINARY", 0)
 )
 CHUNK = 64 * 1024
 SECRETISH = (
