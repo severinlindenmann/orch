@@ -197,7 +197,21 @@ def apply_copy_files(root: Path, work: Path) -> None:
 
     sk = harness.harness_dir(root) / "skills"
     refused = None
+
+    def plain(rel: str) -> bool:
+        """Nothing on the way from `work` to work/rel is a link: a copy holds BRANCH content, and a committed
+        link (CLAUDE.local.md -> ~/.bashrc, .claude -> elsewhere) must not make orch write outside it."""
+        p = work
+        for part in Path(rel).parts:
+            p = p / part
+            if harness.is_link(p):
+                return False
+        return True
+
     for where in _skill_places(root):
+        if not plain(where):
+            refused = refused or Refused(f"{work / where} is a link; orch will not write through it.")
+            continue
         for n in _harness_skill_names(root):
             harness.check_harness(root, sk / n)
             try:
@@ -206,13 +220,18 @@ def apply_copy_files(root: Path, work: Path) -> None:
                 refused = refused or e
     for sh in _shared_skills(root):
         for where in _skill_places(root)[1:]:
+            if not plain(where):
+                continue
             try:
                 harness.link_skill(work, where, sh.name, sh)
             except Refused as e:
                 refused = refused or e
     for n in detected_agents(root):
         for fn, line in ((adapters.load(n).get("files") or {}).get("instructions_link") or {}).items():
-            harness.write_local_file(work, fn, line, harness_root=root)
+            if plain(fn):
+                harness.write_local_file(work, fn, line, harness_root=root)
+            else:
+                refused = refused or Refused(f"{work / fn} is a link; orch will not write through it.")
     if refused:
         raise refused
 

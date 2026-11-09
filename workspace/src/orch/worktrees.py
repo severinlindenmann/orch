@@ -37,7 +37,7 @@ import shlex
 import shutil
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from orch import addons, config, harness, runs, safegit, sharedfolder, tickets
 from orch.errors import Refused
@@ -111,10 +111,32 @@ def copies_dir(root: Path) -> Path | None:
     return ((addons.home(root) / "worktrees").resolve()) / wid[:8]
 
 
+def _safe_sub(sub) -> bool:
+    """`sub` (the workspace's folder below the git top): a plain relative path, no anchor, drive or `..`."""
+    if sub in (None, ""):
+        return True
+    if not isinstance(sub, str) or "\0" in sub or len(sub) > 1000:
+        return False
+    p = PurePosixPath(sub.replace("\\", "/"))
+    return not p.is_absolute() and ".." not in p.parts and not re.match(r"^[A-Za-z]:", sub)
+
+
 def work_dir(entry: dict) -> Path:
-    """Where the agent starts for a registry/ticket entry: the copy of the git top folder, plus `sub`."""
+    """Where the agent starts for a registry entry: the copy of the git top folder, plus `sub`. Refused if
+    `sub`
+    is not a plain relative path or the result resolves outside the copy (the registry is a local file other
+    processes can write). NOTE for all readers of `ticket.work.folders`: it is a record for people (branch,
+    base, sub, host); no code resolves a path from it. Paths come from path_for() and the registry only."""
+    top = Path(entry["path"])
     sub = entry.get("sub") or ""
-    return Path(entry["path"]) / sub if sub else Path(entry["path"])
+    if not _safe_sub(sub):
+        raise Refused("The saved folder of this copy is not usable.")
+    out = top / sub if sub else top
+    try:
+        out.resolve().relative_to(top.resolve())
+    except (ValueError, OSError, RuntimeError):
+        raise Refused("The saved folder of this copy is not usable.") from None
+    return out
 
 
 # ---------------------------------------------------------------- registry (always under the lock)
@@ -138,7 +160,10 @@ def registry(root: Path) -> dict:
         paths = [
             p
             for p in (v.get("paths") or [])
-            if isinstance(p, dict) and isinstance(p.get("path"), str) and isinstance(p.get("branch"), str)
+            if isinstance(p, dict)
+            and isinstance(p.get("path"), str)
+            and isinstance(p.get("branch"), str)
+            and _safe_sub(p.get("sub"))
         ]
         if paths:
             out[tid] = {"paths": paths, "created_at": v.get("created_at")}
@@ -176,7 +201,7 @@ def is_orch_copy(path: Path) -> bool:
     except (OSError, RuntimeError):
         return False
     for h in addons.home_candidates():
-        base = h / "worktrees"
+        base = (h / "worktrees").resolve()
         try:
             parts = p.relative_to(base).parts
         except ValueError:
@@ -346,9 +371,12 @@ def create(root: Path, ticket: str) -> dict | None:
     "also changing this folder" line."""
     with start_lock(root):
         ent = (registry(root).get(ticket) or {"paths": []})["paths"]
-        if ent and Path(ent[0]["path"]).is_dir():
+        if ent and Path(ent[0]["path"]).is_dir() and is_orch_copy(Path(ent[0]["path"])):
             return ent[0]
-        return _create(root, ticket)[0]
+        entry, why = _create(root, ticket)
+        if entry is None:
+            _note(root, ticket, why)
+        return entry
 
 
 # ---------------------------------------------------------------- files inside the copy, setup command
@@ -382,7 +410,14 @@ def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
         argv = shlex.split(cmd, posix=os.name != "nt")
     except ValueError:
         return [f"The copy setup command could not be read ({cmd}). The copy is used as it is."]
-    exe = shutil.which(argv[0]) if argv else None
+    work = work_dir(entry)
+    exe = None
+    if argv:  # `./setup.sh` means the copy's file; a bare name is looked up on the PATH
+        if os.sep in argv[0] or "/" in argv[0]:
+            c = Path(argv[0]) if os.path.isabs(argv[0]) else work / argv[0]
+            exe = str(c) if c.is_file() and os.access(c, os.X_OK) else None
+        else:
+            exe = shutil.which(argv[0])
     if not exe:
         return [
             f"The copy setup command '{argv[0] if argv else cmd}' was not found. The copy is used as it is."
@@ -394,8 +429,8 @@ def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
             out.write(f"$ {cmd}\n".encode())
             proc = subprocess.Popen(
                 argv,
-                cwd=work_dir(entry),
-                env={**os.environ, "ORCH_ROOT": str(root)},
+                cwd=work,
+                env={k: v for k, v in runs._agent_environ(root).items() if not k.startswith("GIT_")},
                 stdin=subprocess.DEVNULL,
                 stdout=out,
                 stderr=subprocess.STDOUT,
@@ -420,18 +455,31 @@ def _setup(root: Path, ticket: str, entry: dict) -> list[str]:
     return []
 
 
+def _note(root: Path, ticket: str, why: str) -> None:
+    """Why no copy was made, for whoever looks at the copy-setup log."""
+    if not why:
+        return
+    with contextlib.suppress(OSError, Refused):
+        with runs.open_log(root / ".orch" / "run" / "logs" / f"{ticket}-copy-setup.log") as out:
+            out.write(f"no separate copy: {why}\n".encode())
+
+
 def _record_on_ticket(root: Path, ticket: str, entry: dict) -> None:
+    """The ticket remembers THAT it works in a copy: branch, base, sub and the machine (host). Never the local
+    path (home folder, user name): that stays in the machine-local registry."""
+
     def fn(t: dict):
         work = t.setdefault("work", {})
         if not isinstance(work, dict):
             work = t["work"] = {}
+        host = runs.host()
         folders = [
-            f for f in work.get("folders") or [] if isinstance(f, dict) and f.get("path") != entry["path"]
+            f
+            for f in work.get("folders") or []
+            if isinstance(f, dict) and (f.get("branch"), f.get("host")) != (entry["branch"], host)
         ]
-        folders.insert(
-            0, {k: entry[k] for k in ("path", "branch", "base", "sub") if entry.get(k) is not None}
-        )
-        work["folders"] = folders
+        rec = {"branch": entry["branch"], "base": entry["base"], "sub": entry.get("sub") or "", "host": host}
+        work["folders"] = [rec, *folders]
 
     tickets.apply_op(root, ticket, fn)
 
@@ -444,37 +492,49 @@ def _alive_here(root: Path, ticket: str) -> dict | None:
     return rec if rec and runs.state(rec) in ("alive", "maybe-stale") else None
 
 
-def route(root: Path, ticket: str) -> tuple[Path, list[str]]:
-    """Where does this ticket's agent work: (folder, notes for the person). Call it inside start_lock,
-    and claim
-    the run inside the same lock. The ticket keeps its copy for life; a new copy is made only when the setting
-    asks for one (together: another alive run is in the project folder; always), git can make it, and
-    fewer than
-    `workflow.copies_max` copies exist. Anything else: the project folder."""
+def route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
+    """Where does this ticket's agent work: (folder, notes, after). Call it inside start_lock, with the claim
+    in the same lock. The ticket keeps its copy for life; a new copy is made only when the setting asks for
+    one (together: another alive run is in the project folder; always), git can make it, and fewer than
+    `workflow.copies_max` copies exist. Anything else: the project folder.
+    Under the lock only the quick part happens (decide, git worktree, register). `after` are the slow steps
+    (harness files, the setup command, the ticket's record): call them once the lock is released."""
     rec = _alive_here(root, ticket)
     if rec:  # a run is on (or about to take over) this ticket: it stays where it is
-        return workdir_for(root, rec), []
+        return workdir_for(root, rec), [], []
     reg = registry(root).get(ticket)
     if reg:
         for e in reg["paths"]:
             if Path(e["path"]).is_dir() and is_orch_copy(Path(e["path"])):
-                return work_dir(e), []
+                return work_dir(e), [], []
         # registered but gone from the disk: make it again below (same path, same branch)
     mode = config.copies_mode(root)
     if mode == "off" and not reg:
-        return root, []
+        return root, [], []
     if not reg and mode == "together" and not sharedfolder.alive_in(root, root, ticket):
-        return root, []
+        return root, [], []
     if not reg and count(root) >= config.copies_max(root):
         n = config.copies_max(root)
-        return root, [
-            f"{n} separate copies exist already (the most at once), so this works in your own folder."
-        ]
+        return (
+            root,
+            [f"{n} separate copies exist already (the most at once), so this works in your own folder."],
+            [],
+        )
     entry, why = _create(root, ticket)
     if entry is None:
-        return root, []  # no git (or not possible here): the "also changing this folder" line says the rest
-    notes = _prepare_files(root, entry)
-    notes += _setup(root, ticket, entry)
-    with contextlib.suppress(Exception):  # the ticket remembers it; a failed write must not stop the start
-        _record_on_ticket(root, ticket, entry)
-    return work_dir(entry), notes
+        _note(root, ticket, why)
+        return (
+            root,
+            [],
+            [],
+        )  # no git (or not possible here): the "also changing this folder" line says the rest
+    notes: list[str] = []
+
+    def after() -> list[str]:
+        notes.extend(_prepare_files(root, entry))
+        notes.extend(_setup(root, ticket, entry))
+        with contextlib.suppress(Exception):  # a failed write must not stop the start
+            _record_on_ticket(root, ticket, entry)
+        return notes
+
+    return work_dir(entry), [], [after]

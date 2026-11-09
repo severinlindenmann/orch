@@ -66,6 +66,14 @@ def orch_cli(cwd, root, *args):
     )
 
 
+def _route(root, ticket):
+    """route() plus the slow steps it hands back (claim_routed runs them after the lock)."""
+    folder, notes, after = worktrees.route(root, ticket)
+    for step in after:
+        notes = notes + step()
+    return folder, notes
+
+
 # ---------------------------------------------------------------- path_for
 
 
@@ -174,7 +182,7 @@ def test_without_git_no_copy_is_made(proj, new_ticket):
     t = new_ticket("No git here")
     assert worktrees.create(proj, t) is None
     assert worktrees.count(proj) == 0
-    folder, notes = worktrees.route(proj, t)
+    folder, notes = _route(proj, t)
     assert folder == proj and notes == []
     assert not (addons.home() / "worktrees").exists() or not any((addons.home() / "worktrees").rglob("t_*"))
 
@@ -230,21 +238,23 @@ def _alive(root, tid):
 def test_default_is_together_and_a_lone_agent_works_in_the_project_folder(repo):
     assert config.copies_mode(repo) == "together"
     a, _ = repo.tids
-    assert worktrees.route(repo, a) == (repo, [])
+    assert _route(repo, a) == (repo, [])
     assert worktrees.count(repo) == 0
 
 
 def test_together_makes_a_copy_for_the_second_agent_only(repo):
     a, b = repo.tids
     _alive(repo, a)
-    folder, notes = worktrees.route(repo, b)
+    folder, notes = _route(repo, b)
     assert folder != repo and worktrees.is_orch_copy(folder) and notes == []
     # the ticket keeps its copy for life, also when nobody else is around any more
     runs.release(repo, a)
-    again, _ = worktrees.route(repo, b)
+    again, _ = _route(repo, b)
     assert again == folder
     w = tickets.load(repo, b)["work"]["folders"]
-    assert len(w) == 1 and w[0]["branch"] == f"orch/{b}" and w[0]["path"] == str(folder)
+    assert (
+        len(w) == 1 and w[0]["branch"] == f"orch/{b}" and "path" not in w[0] and w[0]["host"] == runs.host()
+    )
     assert not tickets.load(repo, a).get("work")
 
 
@@ -252,13 +262,13 @@ def test_always_off_and_the_cap(repo):
     a, b = repo.tids
     config.set_copies_mode(repo, "off")
     _alive(repo, a)
-    assert worktrees.route(repo, b) == (repo, [])
+    assert _route(repo, b) == (repo, [])
     config.set_copies_mode(repo, "always")
     runs.release(repo, a)
-    f, _ = worktrees.route(repo, a)
+    f, _ = _route(repo, a)
     assert f != repo
     config.set_copies_max(repo, "1")
-    f2, notes = worktrees.route(repo, b)  # at the cap: the project folder, and it says so
+    f2, notes = _route(repo, b)  # at the cap: the project folder, and it says so
     assert f2 == repo and "1 separate copies" in notes[0]
     assert worktrees.count(repo) == 1
 
@@ -309,13 +319,13 @@ def test_setup_runs_once_in_the_copy_from_the_persons_config(repo):
     a, b = repo.tids
     config.set_copy_setup(repo, f"{shlex.quote(sys.executable)} -c \"open('ready.txt','w').write('1')\"")
     config.set_copies_mode(repo, "always")
-    f, notes = worktrees.route(repo, a)
+    f, notes = _route(repo, a)
     assert notes == [] and (f / "ready.txt").read_text() == "1"
     assert not (repo / "ready.txt").exists()
     log = (repo / ".orch" / "run" / "logs" / f"{a}-copy-setup.log").read_text()
     assert log.startswith("$ ")
     (f / "ready.txt").unlink()
-    worktrees.route(repo, a)  # the copy exists: no second setup
+    _route(repo, a)  # the copy exists: no second setup
     assert not (f / "ready.txt").exists()
 
 
@@ -323,16 +333,16 @@ def test_setup_is_never_a_shell_line_and_a_failure_only_warns(repo):
     a, b = repo.tids
     config.set_copies_mode(repo, "always")
     config.set_copy_setup(repo, f"{sys.executable} -c 'import sys; sys.exit(3)'")
-    f, notes = worktrees.route(repo, a)
+    f, notes = _route(repo, a)
     assert f != repo and "failed (exit code 3)" in notes[0]  # the copy is used anyway
     # `;` is an argument, not a second command: nothing is created by a shell
     config.set_copy_setup(repo, f"{shlex.quote(sys.executable)} -c pass ; touch evil")
-    f2, _ = worktrees.route(repo, b)
+    f2, _ = _route(repo, b)
     assert not (f2 / "evil").exists() and not (repo / "evil").exists()
     # a command that is not there warns, the copy stays
     c = tickets.create(repo, "Third", by="human:t")["id"]
     config.set_copy_setup(repo, "no-such-command-xyz --now")
-    f3, notes3 = worktrees.route(repo, c)
+    f3, notes3 = _route(repo, c)
     assert f3 != repo and "was not found" in notes3[0]
 
 
@@ -342,7 +352,7 @@ def test_setup_has_a_timeout(repo, monkeypatch):
     monkeypatch.setattr(worktrees, "SETUP_TIMEOUT", 1)
     config.set_copy_setup(repo, f"{shlex.quote(sys.executable)} -c 'import time; time.sleep(30)'")
     t0 = time.monotonic()
-    f, notes = worktrees.route(repo, a)
+    f, notes = _route(repo, a)
     assert time.monotonic() - t0 < 20 and f != repo and "stopped" in notes[0]
 
 
@@ -359,7 +369,7 @@ def test_ticket_data_never_chooses_the_setup_command(repo):
     tickets.apply_op(
         repo, a, lambda t: t.__setitem__("work", {"copy_setup": f"touch {marker}", "folders": []})
     )
-    f, notes = worktrees.route(repo, a)
+    f, notes = _route(repo, a)
     assert f != repo and notes == [] and not marker.exists()
     assert worktrees.config.copy_setup(repo) is None
 
@@ -389,7 +399,7 @@ def test_harness_files_in_the_copy_point_at_the_workspace_harness(repo):
     skills.apply_agent_files(repo)
     a, _ = repo.tids
     config.set_copies_mode(repo, "always")
-    f, notes = worktrees.route(repo, a)
+    f, notes = _route(repo, a)
     link = f / ".agents" / "skills" / "orch"
     assert link.exists() and (link / "SKILL.md").read_text() == "# orch\n"
     assert link.resolve() == (repo / ".orch" / "harness" / "skills" / "orch").resolve()
@@ -401,7 +411,7 @@ def test_trust_is_set_for_a_registered_copy_only(repo, proj, monkeypatch):
     (cfg / ".claude.json").write_text("{}")
     a, _ = repo.tids
     config.set_copies_mode(repo, "always")
-    f, _ = worktrees.route(repo, a)
+    f, _ = _route(repo, a)
     assert adapters.trust_folder("claude", f) == "set"
     doc = json.loads((cfg / ".claude.json").read_text())
     assert doc["projects"][str(f.resolve())]["hasTrustDialogAccepted"] is True
@@ -455,7 +465,7 @@ def test_a_oneshot_run_in_a_copy_starts_there_with_orch_root_and_records_the_fol
         time.sleep(0.1)
     got = json.loads(seen.read_text())
     assert Path(got["cwd"]).resolve() == copy and Path(got["root"]).resolve() == repo.resolve()
-    assert r["run"] and tickets.load(repo, a)["work"]["folders"][0]["path"] == str(copy)
+    assert r["run"] and "path" not in tickets.load(repo, a)["work"]["folders"][0]
     titles = [tickets.load(repo, p.stem)["title"] for p in (repo / ".orch" / "tickets").glob("t_*.json")]
     assert "Made by the agent" in titles  # written to the workspace store
     assert git(copy, "status", "--porcelain") == ""
@@ -489,3 +499,126 @@ def test_live_start_puts_tmux_in_the_copy_and_trusts_it(repo, monkeypatch):
         p.resolve() for p in trusted
     ]
     assert r["notes"] == []
+
+
+# ---------------------------------------------------------------- delta 1 fixes
+
+
+@pytest.mark.parametrize("sub", ["/abs", "../..", "a/../../b", "C:/x", "C:x", "\\\\srv\\share", "x\0y"])
+def test_a_registry_sub_that_leaves_the_copy_is_refused(repo, sub):
+    a, _ = repo.tids
+    e = worktrees.create(repo, a)
+    assert not worktrees._safe_sub(sub)
+    with pytest.raises(Refused):
+        worktrees.work_dir({**e, "sub": sub})
+    # a forged registry line is dropped by the reader, so route never hands it out
+    reg = json.loads((repo / ".orch/run/worktrees.json").read_text())
+    reg["tickets"][a]["paths"][0]["sub"] = sub
+    (repo / ".orch/run/worktrees.json").write_text(json.dumps(reg))
+    assert a not in worktrees.registry(repo)
+
+
+def test_a_sub_that_is_a_link_out_of_the_copy_is_refused(repo, tmp_path):
+    a, _ = repo.tids
+    e = worktrees.create(repo, a)
+    out = tmp_path / "outside"
+    out.mkdir()
+    (Path(e["path"]) / "esc").symlink_to(out)
+    with pytest.raises(Refused):
+        worktrees.work_dir({**e, "sub": "esc"})
+
+
+def test_create_gives_back_only_a_real_copy(repo):
+    a, _ = repo.tids
+    e = worktrees.create(repo, a)
+    decoy = Path(e["path"]).parent / "t_decoy1"
+    decoy.mkdir()
+    reg = json.loads((repo / ".orch/run/worktrees.json").read_text())
+    reg["tickets"][a]["paths"][0]["path"] = str(decoy)
+    (repo / ".orch/run/worktrees.json").write_text(json.dumps(reg))
+    got = worktrees.create(repo, a)
+    assert got is None or Path(got["path"]).resolve() != decoy.resolve()
+
+
+def test_is_orch_copy_works_when_the_home_is_under_a_link(repo, tmp_path, monkeypatch):
+    real = tmp_path.parent / f"{tmp_path.name}_realhome"  # outside the workspace folder
+    real.mkdir()
+    link = tmp_path.parent / f"{tmp_path.name}_linkhome"
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("ORCH_HOME", str(link / "orchhome"))
+    monkeypatch.setattr(addons, "real_home", lambda: real)
+    a, _ = repo.tids
+    f, _ = _route(repo, a) if config.set_copies_mode(repo, "always") else (None, None)
+    assert f != repo and worktrees.is_orch_copy(f)
+
+
+def test_a_committed_symlink_cannot_make_orch_write_outside_the_copy(repo, tmp_path):
+    (repo / ".orch" / "harness" / "skills" / "orch").mkdir(parents=True)
+    (repo / ".orch" / "harness" / "skills" / "orch" / "SKILL.md").write_text("# orch\n")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("mine\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (repo / "CLAUDE.local.md").symlink_to(victim)
+    (repo / ".claude").symlink_to(elsewhere, target_is_directory=True)
+    git(repo, "add", "-f", "CLAUDE.local.md", ".claude")
+    git(repo, "commit", "-qm", "links")
+    a, _ = repo.tids
+    config.set_copies_mode(repo, "always")
+    f, notes = _route(repo, a)
+    assert f != repo
+    assert victim.read_text() == "mine\n" and list(elsewhere.iterdir()) == []
+    assert any("link" in n for n in notes)
+
+
+def test_setup_env_has_no_git_variables_and_runs_a_relative_command_from_the_copy(repo, monkeypatch):
+    a, _ = repo.tids
+    monkeypatch.setenv("GIT_DIR", "/nowhere")
+    monkeypatch.setenv("GIT_WORK_TREE", "/nowhere")
+    (repo / "setup.sh").write_text("#!/bin/sh\nenv > env.txt\n")
+    (repo / "setup.sh").chmod(0o755)
+    git(repo, "add", "setup.sh")
+    git(repo, "commit", "-qm", "setup")
+    monkeypatch.delenv("GIT_DIR")
+    monkeypatch.delenv("GIT_WORK_TREE")
+    config.set_copies_mode(repo, "always")
+    config.set_copy_setup(repo, "./setup.sh")
+    monkeypatch.setenv("GIT_DIR", "/nowhere")
+    monkeypatch.setenv("ORCH_VIA", "dashboard")
+    f, notes = _route(repo, a)
+    assert notes == [], notes
+    env = (f / "env.txt").read_text()
+    assert (
+        "GIT_DIR" not in env
+        and "ORCH_VIA" not in env
+        and f"ORCH_ROOT={repo.resolve()}" in env.replace(str(repo), str(repo.resolve()))
+    )
+    monkeypatch.undo()
+
+
+def test_route_is_quick_under_the_lock_and_hands_the_slow_steps_back(repo):
+    a, _ = repo.tids
+    config.set_copies_mode(repo, "always")
+    config.set_copy_setup(repo, f"{shlex.quote(sys.executable)} -c 'import time; time.sleep(2)'")
+    t0 = time.monotonic()
+    folder, notes, after = worktrees.route(repo, a)
+    assert time.monotonic() - t0 < 2 and folder != repo and len(after) == 1 and notes == []
+    assert not (repo / ".orch/run/logs" / f"{a}-copy-setup.log").exists()  # setup has not run yet
+    assert worktrees.LOCK_WAIT > worktrees.CREATE_BUDGET
+
+
+def test_no_copy_says_why_in_the_setup_log(proj, new_ticket):
+    t = new_ticket("No git")
+    config.set_copies_mode(proj, "always")
+    f, _ = _route(proj, t)
+    assert f == proj
+    assert "no separate copy" in (proj / ".orch/run/logs" / f"{t}-copy-setup.log").read_text()
+
+
+def test_the_ticket_record_has_no_local_path(repo):
+    a, _ = repo.tids
+    config.set_copies_mode(repo, "always")
+    _route(repo, a)
+    rec = tickets.load(repo, a)["work"]["folders"][0]
+    assert set(rec) == {"branch", "base", "sub", "host"}
+    assert str(repo.resolve().parent) not in json.dumps(tickets.load(repo, a)["work"])

@@ -613,10 +613,16 @@ def claim_routed(root: Path, tid: str, by: str, agent: str, mode: str, **kw) -> 
 
     with worktrees.start_lock(root):
         try:
-            folder, notes = worktrees.route(root, tid)
+            folder, notes, after = worktrees.route(root, tid)
         except Exception:  # noqa: BLE001 - copies are an extra; a start never fails because of them
-            folder, notes = root, []
-        return claim(root, tid, by, agent, mode, folder=folder, **kw), notes
+            folder, notes, after = root, [], []
+        rec = claim(root, tid, by, agent, mode, folder=folder, **kw)
+    for step in after:  # the slow steps (harness files, setup command) run without the workspace lock
+        try:
+            notes = notes + step()
+        except Exception:  # noqa: BLE001
+            pass
+    return rec, notes
 
 
 def set_process(root: Path, tid: str, run: str, pid: int, **fields) -> bool:
