@@ -580,14 +580,14 @@ def test_open_checked_closes_the_fd_when_a_stat_fails(proj, monkeypatch):
 def test_saferead_opens_files_in_binary_mode(proj):
     """Windows os.open defaults to text mode (CRLF -> LF, Ctrl-Z ends the read).
 
-    The safe reader must ask for O_BINARY."""
-    import inspect
+    The safe reader must ask for O_BINARY, so tails and hashes are byte-exact (meaningful on Windows CI)."""
+    import hashlib
 
-    src = inspect.getsource(saferead)
-    flags_src = src[src.index("_FLAGS = (") : src.index("\n)", src.index("_FLAGS = ("))]
-    assert 'getattr(os, "O_BINARY", 0)' in flags_src
-    assert saferead._FLAGS & getattr(saferead.os, "O_BINARY", 0) == getattr(saferead.os, "O_BINARY", 0)
+    binary = getattr(saferead.os, "O_BINARY", 0)
+    assert saferead._FLAGS & binary == binary
     raw = b"line one\r\nline two\r\n\x1aafter ctrl-z\r\n"
     (proj / "out.log").write_bytes(raw)
     # byte-exact: no CRLF folding, no Ctrl-Z stop
     assert saferead.safe_read_tail(proj.resolve(), "out.log", 4096) == raw
+    state = saferead.file_state(proj.resolve(), "out.log", 1 << 20, [1 << 20])
+    assert hashlib.sha256(raw).hexdigest() in state
