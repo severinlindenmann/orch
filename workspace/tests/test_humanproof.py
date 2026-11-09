@@ -458,7 +458,7 @@ def test_symlinked_and_oversized_and_hardlinked_files_are_loose(tws):
 
 
 def test_install_record_read_through_saferead(tmp_path, monkeypatch):
-    (tmp_path / "orch-install.json").write_text('{"kind": "dev"}')
+    (tmp_path / "orch-install.json").write_text(hp.install_record_text("dev", tmp_path))
     monkeypatch.setattr(hp.sys, "prefix", str(tmp_path))
     assert hp.install_kind() == "dev"
     (tmp_path / "orch-install.json").unlink()

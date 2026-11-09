@@ -494,22 +494,22 @@ def _tool_args(entries: list[dict]) -> list[str]:
     return args
 
 
-def _tool_env_dir() -> Path | None:
-    """<uv tool dir>/orch-workspace: the one folder orch's own tool environment lives in."""
-    uv = _which_uv()
-    if not uv:
-        return None
+@contextlib.contextmanager
+def _pinned_tool_dir(env: Path, active: bool):
+    """uv reinstalls into the place the person installed to (the record's root's parent), never into where
+    the caller's UV_TOOL_DIR or XDG_DATA_HOME would send it."""
+    if not active:
+        yield
+        return
+    keep = os.environ.get("UV_TOOL_DIR")
+    os.environ["UV_TOOL_DIR"] = os.path.dirname(os.path.realpath(env))
     try:
-        r = subprocess.run([uv, "tool", "dir"], text=True, capture_output=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    out = r.stdout.strip()
-    return Path(out) / "orch-workspace" if r.returncode == 0 and out else None
-
-
-def _in_tool_env(env: Path) -> bool:
-    want = _tool_env_dir()
-    return want is not None and os.path.realpath(env) == os.path.realpath(want)
+        yield
+    finally:
+        if keep is None:
+            os.environ.pop("UV_TOOL_DIR", None)
+        else:
+            os.environ["UV_TOOL_DIR"] = keep
 
 
 def _reinstall_anywhere() -> bool:
@@ -521,10 +521,11 @@ def _install_tool(entries: list[dict]) -> None:
     from orch import humanproof
 
     env = Path(sys.prefix)
-    if not _reinstall_anywhere() and not _in_tool_env(env):
-        raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
     kind = humanproof.read_install_record()  # the reinstall drops the record: carry the installer's kind over
-    run_uv(_tool_args(entries))
+    if kind is None and not _reinstall_anywhere():
+        raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
+    with _pinned_tool_dir(env, kind is not None):
+        run_uv(_tool_args(entries))
     if kind and ((env / "bin").exists() or (env / "Scripts").exists()):
         humanproof.write_install_record(env, kind)
 

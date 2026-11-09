@@ -38,7 +38,8 @@ uv tool install --reinstall --refresh "$SPEC"
 # The install record (orch-install.json) is written here, by this installer, into orch's own tool environment.
 # No orch command writes it: an agent cannot make its own workspace a test or dev install.
 TOOL_DIR="$(uv tool dir)/orch-workspace"
-printf '{"kind": "%s", "schema": "orch.install/1"}\n' "$KIND" > "$TOOL_DIR/orch-install.json"
+ROOT="$(cd "$TOOL_DIR" && pwd -P)"  # the real path of the tool environment: the record is valid only here
+printf '{"kind": "%s", "root": "%s", "schema": "orch.install/1"}\n' "$KIND" "$ROOT" > "$TOOL_DIR/orch-install.json"
 case "$KIND" in normal) ;; *) echo "*** $(echo "$KIND" | tr a-z A-Z) INSTALL: this orch is marked as a $KIND install. ***" ;; esac
 BIN="$HOME/.local/bin"
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
