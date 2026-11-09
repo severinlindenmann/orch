@@ -290,34 +290,89 @@ HOLD_WORDS = {
     "unreadable": "Waiting: the agent's window cannot be read right now.",
 }
 _PROMPT_GLYPH = re.compile(r"^\s*[>\u276f\u203a]\s?")
-_DIM = re.compile(r"\x1b\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m")  # SGR 2 (dim/faint): a tool's grey suggestion
+_ANSI = re.compile(r"\x1b\[([0-9;:]*)([A-Za-z])")
+
+
+def _grey(params: list[int]) -> bool:
+    """A foreground colour a tool uses for its grey hint text (256-colour greys, or a truecolour grey)."""
+    if params[:1] == [5] and len(params) >= 2:
+        return params[1] in (8, 102, 145, 243, 244, 245, 246, 247) or 232 <= params[1] <= 250
+    if params[:1] == [2] and len(params) >= 4:
+        r, g, b = params[1:4]
+        return max(r, g, b) - min(r, g, b) <= 8 and max(r, g, b) <= 170
+    return False
+
+
+def _dim_flags(raw_row: str) -> list[tuple[str, bool]]:
+    """(character, drawn dim) for every character of a row with its colour codes. Dim: SGR 2 on its own, or a
+    grey foreground. The `2` inside `38;2;r;g;b` / `48;2;...` is a colour value, never "dim"."""
+    out: list[tuple[str, bool]] = []
+    dim = grey = False
+    pos = 0
+    for m in _ANSI.finditer(raw_row):
+        out += [(c, dim or grey) for c in raw_row[pos : m.start()]]
+        pos = m.end()
+        if m.group(2) != "m":
+            continue
+        try:
+            codes = [int(x) if x else 0 for x in m.group(1).replace(":", ";").split(";")] or [0]
+        except ValueError:
+            continue
+        i = 0
+        while i < len(codes):
+            c = codes[i]
+            if c == 0:
+                dim = grey = False
+            elif c == 22:
+                dim = False
+            elif c == 2:
+                dim = True
+            elif c in (38, 48):
+                kind = codes[i + 1 : i + 2]
+                n = 4 if kind == [2] else 2 if kind == [5] else 0
+                if c == 38:
+                    grey = _grey(codes[i + 1 : i + 1 + n])
+                i += n
+            elif c == 39:
+                grey = False
+            i += 1
+    out += [(c, dim or grey) for c in raw_row[pos:]]
+    return out
 
 
 def _box_text(pane: str, cy: int, cx: int | None, raw: str | None = None) -> str:
-    """What a person typed in the prompt box ("" when it is empty). The tool's own grey suggestion counts
-    as empty: it is drawn dim, and the cursor sits on its first character (typed text: cursor at its end)."""
+    """What is in the prompt box ("" only when it is certainly empty). Fail closed: the box counts as empty
+    when it has no characters, or when EVERY visible character of its body is drawn dim or grey AND the
+    cursor sits on the first one (the tool's own suggestion). Anything else, or any doubt, is text."""
     lines = pane.split("\n")
     a, b = _box_rows(lines, cy)
     rows = [_PROMPT_GLYPH.sub("", ln, count=1).strip() for ln in lines[a:b]]
     text = " ".join(r for r in rows if r)
     if not text:
         return ""
+    if raw is None or cx is None:
+        return text
+    rl = raw.split("\n")
+    plain = [_ANSI.sub("", ln) for ln in rl]
+    if len(plain) != len(lines):
+        return text
+    ra, rb = _box_rows(plain, cy)
+    if (ra, rb) != (a, b):
+        return text
+    seen = 0
+    for ln in rl[ra:rb]:
+        flags = _dim_flags(ln)
+        head = _PROMPT_GLYPH.match("".join(c for c, _ in flags))
+        for c, dim in flags[head.end() if head else 0 :]:
+            if c.strip():
+                seen += 1
+                if not dim:
+                    return text
     first = next((ln for ln in lines[a:b] if _PROMPT_GLYPH.sub("", ln, count=1).strip()), "")
     head = _PROMPT_GLYPH.match(first)
     after = first[head.end() :] if head else first
     start = (head.end() if head else 0) + len(after) - len(after.lstrip())
-    if cx is not None and cx == start and len(rows) == 1:
-        return ""  # the cursor on the first character: a suggestion, not typed text
-    if raw is not None:
-        rl = raw.split("\n")
-        ra, rb = _box_rows([_ANSI.sub("", ln) for ln in rl], cy)
-        body = [ln for ln in rl[ra:rb] if _PROMPT_GLYPH.sub("", _ANSI.sub("", ln), count=1).strip()]
-        if body and all(_DIM.search(ln) for ln in body):
-            return ""
-    return text
-
-
-_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    return "" if seen and len([r for r in rows if r]) == 1 and cx == start else text
 
 
 def _hold_reason(root: Path, tid: str, dialog: str | None) -> str | None:
@@ -361,8 +416,18 @@ def _note_hold(root: Path, tid: str, rec: dict, why: str | None) -> None:
             age = time.time() - runs._parse(cur["since"])
         except (KeyError, ValueError):
             return
-        if age >= COPY_MODE_CANCEL_SECONDS:
+        if age >= COPY_MODE_CANCEL_SECONDS and _client_idle(root, tid) >= COPY_MODE_CANCEL_SECONDS:
             tmux(root, "send-keys", "-t", target(tid), "-X", "cancel", timeout=QUICK)
+
+
+def _client_idle(root: Path, tid: str) -> float:
+    """Seconds since a person last pressed a key in tmux (the client's own clock); 0 when unknown: orch
+    leaves copy mode only for a person who has not touched the keyboard (a person still scrolling reads)."""
+    r = tmux(root, "display-message", "-p", "-t", target(tid), "#{client_activity}", timeout=QUICK)
+    try:
+        return max(0.0, time.time() - float(r.stdout.split()[0])) if r.returncode == 0 else 0.0
+    except (ValueError, IndexError):
+        return 0.0
 
 
 def _type_line(root: Path, tid: str, line: str, timeout: float = 20) -> bool:
@@ -415,7 +480,13 @@ def deliver(root: Path, tid: str, stop=None) -> int:
         rec.pop("hold", None)
         rec["live"] = {"state": "working", "since": tickets.now()}
         rec["renewed_at"] = tickets.now()
-        rec["submit"] = {"at": tickets.now(), "line": line, "enters": 1, "nudges": nudges + 1}
+        rec["submit"] = {
+            "at": tickets.now(),
+            "line": line,
+            "enters": 1,
+            "nudges": nudges + 1,
+            "live_since": rec["live"]["since"],
+        }
         runs._write(root, rec)
         return len(items)
 
@@ -502,7 +573,7 @@ def _look(root: Path, tid: str, line: str, dialog: str | None) -> tuple[bool | N
     digest = hashlib.sha256(pane.stdout.encode("utf-8")).hexdigest()[:16]
     d = tmux(root, "display-message", "-p", "-t", target(tid), "#{pane_in_mode} #{cursor_y}", timeout=QUICK)
     try:
-        in_mode, y = d.stdout.split()
+        in_mode, y = d.stdout.split()[:2]
         cy = int(y)
     except ValueError:
         return None, digest, False
@@ -590,10 +661,21 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             and not s.get("retyped")
             and age < SUBMIT_WATCHDOG_SECONDS
         ):
-            # fb18: the tool dropped the typed keys (still redrawing): the notice is nowhere on the pane, so
-            # it was never taken. Type it once more instead of waiting for the tool's own idle reminder.
-            again, _, still = _look(root, tid, s.get("line") or "", dialog)
-            if still and not (stop is not None and stop.is_set()) and _type_line(root, tid, s["line"], QUICK):
+            # fb18: the tool dropped the typed keys: the notice is nowhere on the pane. Type it once more, but
+            # only when nothing suggests it was taken or that a person is at the keyboard: the input still
+            # waits, the run has not moved on, the pane did not change between two looks, and (last moment,
+            # as for the first notice) no copy mode, dialog or unsent text.
+            if digest != s.get("lost_digest"):
+                s["lost_digest"], s["lost_at"] = digest, runs._iso(t)
+            elif (
+                t - runs._parse(s["lost_at"]) >= 1.0
+                and runs.undelivered(root, tid)
+                and (rec.get("live") or {}).get("state") == "working"
+                and (rec.get("live") or {}).get("since") == s.get("live_since")
+                and _hold_reason(root, tid, dialog) is None
+                and not (stop is not None and stop.is_set())
+                and _type_line(root, tid, s["line"], QUICK)
+            ):
                 s["retyped"] = True
                 did = "typed_again"
                 _log_submit(root, tid, run, f"typed the notice again: not on the screen at {int(age)} s")

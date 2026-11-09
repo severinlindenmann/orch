@@ -192,7 +192,7 @@ def _stuck(proj, run, monkeypatch, pane=None, mode="0", text="Please add a rain 
     line = runs_live.notice_line(tid, False)
     sent = []
     want = pane if pane is not None else _screen(line)
-    screen = {"pane": _screen(""), "mode": "0"}  # an empty prompt while orch types the notice
+    screen = {"pane": _screen(""), "mode": "0", "cx": 2, "raw": None}  # an empty prompt while orch types
 
     def fake(root, *a, **k):
         if a[0] == "send-keys":
@@ -201,9 +201,11 @@ def _stuck(proj, run, monkeypatch, pane=None, mode="0", text="Please add a rain 
             raise AssertionError("orch never pastes")
         if a[0] == "capture-pane":
             pn = screen["pane"]
+            if "-e" in a and screen["raw"] is not None:
+                return subprocess.CompletedProcess(a, 0, screen["raw"], "")
             return subprocess.CompletedProcess(a, 0, pn() if callable(pn) else pn, "")
         if a[0] == "display-message":
-            return subprocess.CompletedProcess(a, 0, f"{screen['mode']} 49\n", "")
+            return subprocess.CompletedProcess(a, 0, f"{screen['mode']} 49 {screen['cx']}\n", "")
         return subprocess.CompletedProcess(a, 0, "", "")
 
     monkeypatch.setattr(runs_live, "session_exists", lambda root, t: True)
@@ -647,19 +649,85 @@ def test_no_notice_while_the_tool_never_said_it_is_up(proj, run, monkeypatch):
     assert runs_live.deliver(proj, tid) == 0 and len(sent) == n
 
 
+def _dim_box(text):
+    return _screen("").replace("> ", "> \x1b[2m" + text + "\x1b[0m")
+
+
 def test_a_notice_that_never_reached_the_screen_is_typed_again_once(proj, run, monkeypatch):
     """fb18: the tool was still redrawing after its turn, dropped the typed notice and only showed its own
-    suggestion in the empty box (`commit the pilatus-pptx skill too`). The notice was neither in the box nor
-    anywhere above it, but "not in the box" was read as "taken": nothing went in until the tool's own idle
-    reminder, about two minutes later. A notice nowhere on the pane is typed again (once)."""
+    suggestion in the empty box. Neither in the box nor above it: it was never taken. Typed again, once, when
+    two looks (a second apart) saw the same pane."""
     ghost = _screen("commit the pilatus-pptx skill too", above="Brewed for 5m 1s")
     tid, rn, item, sent, screen = _stuck(proj, run, monkeypatch, pane=ghost)
+    screen["raw"] = _dim_box("commit the pilatus-pptx skill too")
     line = runs_live.notice_line(tid, False)
     assert _at(proj, tid, rn, 1) is None
-    assert _at(proj, tid, rn, 3) == "typed_again" and sent[2:] == [line, "Enter"]
-    assert _at(proj, tid, rn, 5) is None and sent[2:] == [line, "Enter"]  # once, never a loop
+    assert _at(proj, tid, rn, 3) is None  # first look: remembered, nothing typed
+    assert _at(proj, tid, rn, 3.5) is None  # not a second apart yet
+    assert _at(proj, tid, rn, 5) == "typed_again" and sent[2:] == [line, "Enter"]
+    assert _at(proj, tid, rn, 7) is None and sent[2:] == [line, "Enter"]  # once, never a loop
     assert runs.read(proj, tid)["submit"]["retyped"] is True
-    assert "commit the pilatus" not in "".join(sent)  # the tool's text is never answered with Enter alone
+
+
+def _lost(proj, run, monkeypatch, box="", raw=None, cx=2):
+    ghost = _screen(box, above="Brewed for 5m 1s")
+    tid, rn, item, sent, screen = _stuck(proj, run, monkeypatch, pane=ghost)
+    screen["raw"], screen["cx"] = raw, cx
+    return tid, rn, sent, screen
+
+
+def test_no_second_notice_into_a_prompt_a_person_is_typing_in(proj, run, monkeypatch):
+    tid, rn, sent, screen = _lost(proj, run, monkeypatch, box="rm -rf build && ", cx=16)
+    for sec in (3, 5, 7, 70):
+        assert _at(proj, tid, rn, sec) is None
+    assert sent[2:] == []
+
+
+SGRS = ["\x1b[38;2;220;220;220m", "\x1b[48;2;10;10;10m", "\x1b[38;5;15m", "\x1b[1m"]
+
+
+@pytest.mark.parametrize("sgr", SGRS)
+def test_a_coloured_typed_prompt_is_text_not_dim(proj, run, monkeypatch, sgr):
+    """High 1: the 2 in 38;2;r;g;b is a colour value, never "dim"; a dim hint on the row does not clear it."""
+    raw = _screen("").replace("> ", "> " + sgr + "build now\x1b[0m \x1b[2m(enter to send)\x1b[0m")
+    tid, rn, sent, screen = _lost(proj, run, monkeypatch, box="build now (enter to send)", raw=raw, cx=2)
+    for sec in (3, 5, 7):
+        assert _at(proj, tid, rn, sec) is None
+    assert sent[2:] == []
+    assert runs_live._hold_reason(proj, tid, None) == "text"
+
+
+def test_typed_text_with_the_cursor_moved_home_is_still_text(proj, run, monkeypatch):
+    """High 2: Home / Ctrl-A puts the cursor on the first character; that alone never means empty."""
+    tid, rn, sent, screen = _lost(
+        proj, run, monkeypatch, box="rm -rf build", raw=_screen("rm -rf build"), cx=2
+    )
+    assert runs_live._hold_reason(proj, tid, None) == "text"
+
+
+def test_a_dim_suggestion_with_the_cursor_at_its_start_is_empty(proj, run, monkeypatch):
+    tid, rn, sent, screen = _lost(proj, run, monkeypatch, box="commit it", raw=_dim_box("commit it"), cx=2)
+    assert runs_live._hold_reason(proj, tid, None) is None
+    screen["cx"] = 9  # the cursor elsewhere: doubt, hold
+    assert runs_live._hold_reason(proj, tid, None) == "text"
+
+
+def test_a_notice_that_was_taken_and_scrolled_away_is_not_typed_again(proj, run, monkeypatch):
+    """Medium 1: the agent read the input (delivered), or the pane kept changing, or the run moved on."""
+    for how in ("read", "moved", "changing"):
+        tid, rn, sent, screen = _lost(proj, run, monkeypatch, raw=_dim_box(""))
+        if how == "read":
+            runs_live.read_input(proj, tid, rn, True)
+            assert not runs.read(proj, tid).get("submit")
+        elif how == "moved":
+            runs_live._set_state(proj, tid, rn, "idle")
+        else:
+            counter = iter(range(100))
+            screen["pane"] = lambda c=counter: _screen("", above=f"output {next(c)}")
+        for sec in (3, 5, 7, 70):
+            if runs.read(proj, tid).get("submit"):
+                assert _at(proj, tid, rn, sec) in (None, "gave_up")
+        assert sent[2:] == [], how
 
 
 def test_a_lost_notice_is_not_typed_again_over_a_dialog_or_when_it_shows_above(proj, run, monkeypatch):
@@ -682,7 +750,7 @@ def _held(proj, run, monkeypatch, box="", mode="0", cx=2, raw=None):
     rec["up"] = True
     runs._write(proj, rec)
     sent = []
-    screen = {"box": box, "mode": mode, "cx": cx, "raw": raw}
+    screen = {"box": box, "mode": mode, "cx": cx, "raw": raw, "activity": None}
 
     def fake(root, *a, **k):
         if a[0] == "send-keys":
@@ -693,6 +761,8 @@ def _held(proj, run, monkeypatch, box="", mode="0", cx=2, raw=None):
                 pane = screen["raw"]
             return subprocess.CompletedProcess(a, 0, pane, "")
         if a[0] == "display-message":
+            if a[-1] == "#{client_activity}":
+                return subprocess.CompletedProcess(a, 0, f"{screen['activity'] or ''}\n", "")
             return subprocess.CompletedProcess(a, 0, f"{screen['mode']} 49 {screen['cx']}\n", "")
         return subprocess.CompletedProcess(a, 0, "", "")
 
@@ -716,16 +786,22 @@ def test_a_prompt_with_the_persons_unsent_text_is_not_typed_into(proj, run, monk
 
 
 def test_the_tools_grey_suggestion_counts_as_an_empty_prompt(proj, run, monkeypatch):
-    """fb18 screenshot: `commit the pilatus-pptx skill too` was the tool's own suggestion (cursor on its first
-    character), not typed text."""
-    tid, rn, sent, _ = _held(proj, run, monkeypatch, box="commit the pilatus-pptx skill too", cx=2)
+    """fb18 screenshot: `commit the pilatus-pptx skill too` was the tool's own suggestion: drawn dim, with the
+    cursor on its first character."""
+    text = "commit the pilatus-pptx skill too"
+    tid, rn, sent, _ = _held(proj, run, monkeypatch, box=text, cx=2, raw=_dim_box(text))
     assert runs_live.deliver(proj, tid) == 1 and sent[-1] == "Enter"
 
 
-def test_a_dim_suggestion_counts_as_empty_even_with_the_cursor_elsewhere(proj, run, monkeypatch):
-    raw = _screen("").replace("> ", "> \x1b[2mcommit the skill too\x1b[0m")
-    tid, rn, sent, _ = _held(proj, run, monkeypatch, box="commit the skill too", cx=9, raw=raw)
-    assert runs_live.deliver(proj, tid) == 1
+def test_a_suggestion_without_proof_that_it_is_dim_is_held(proj, run, monkeypatch):
+    tid, rn, sent, _ = _held(proj, run, monkeypatch, box="commit it", cx=2)  # no colour information
+    assert runs_live.deliver(proj, tid) == 0 and sent == []
+    assert runs.read(proj, tid)["hold"]["why"] == "text"
+
+
+def test_dim_text_with_the_cursor_elsewhere_is_held(proj, run, monkeypatch):
+    tid, rn, sent, _ = _held(proj, run, monkeypatch, box="commit it", cx=9, raw=_dim_box("commit it"))
+    assert runs_live.deliver(proj, tid) == 0 and sent == []
 
 
 def test_a_scrolled_up_pane_says_so_and_orch_leaves_copy_mode_after_half_a_minute(proj, run, monkeypatch):
@@ -736,6 +812,9 @@ def test_a_scrolled_up_pane_says_so_and_orch_leaves_copy_mode_after_half_a_minut
     assert rec["hold"]["why"] == "scrolled" and "scrolled up" in runs_live.line(rec, proj)
     rec["hold"]["since"] = runs._iso(time.time() - runs_live.COPY_MODE_CANCEL_SECONDS - 1)
     runs._write(proj, rec)
+    screen["activity"] = time.time() - 5  # a person is still scrolling: left alone
+    assert runs_live.deliver(proj, tid) == 0 and sent == []
+    screen["activity"] = time.time() - 60  # no key for a minute: orch leaves copy mode
     assert runs_live.deliver(proj, tid) == 0 and sent == ["cancel"]  # tmux send-keys -X cancel
     screen["mode"] = "0"
     assert runs_live.deliver(proj, tid) == 1 and sent[-2:] == [runs_live.notice_line(tid, False), "Enter"]
