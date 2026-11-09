@@ -1,0 +1,938 @@
+{
+ "v": 1,
+ "about": "activity.md reference cases. validate.py activity checks every case against its reference functions (act_*). stream_mapping lines are copied verbatim from the real captures in workspace/tests/fixtures/w2b/codex/ (codex-cli 0.163.0, branch w2b/p0-fixtures).",
+ "ids": [
+  {
+   "name": "tool call id kept",
+   "tool_call_id": "toolu_01ABcd",
+   "run": "r_8k2m01",
+   "seq": 7,
+   "id": "toolu_01ABcd"
+  },
+  {
+   "name": "no tool call id",
+   "tool_call_id": null,
+   "run": "r_8k2m01",
+   "seq": 7,
+   "id": "r_8k2m01:7"
+  },
+  {
+   "name": "unsafe id hashed",
+   "tool_call_id": "call/../x y",
+   "run": "r_8k2m01",
+   "seq": 7,
+   "id": "x_547202005627c6b9548175b580367a6a"
+  }
+ ],
+ "detail_names": [
+  {
+   "id": "toolu_01ABcd",
+   "file": "toolu_01ABcd"
+  },
+  {
+   "id": "r_8k2m01:1:item_3",
+   "file": "x_d82a7707579deefad2c433ee6537d2e6"
+  }
+ ],
+ "dedupe": [
+  {
+   "name": "hook and log same step",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_1",
+     "via": "hook",
+     "kind": "step",
+     "outcome": null
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_1",
+     "via": "log",
+     "kind": "step",
+     "outcome": null
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_1",
+     "via": "hook",
+     "kind": "step",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 5
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_1",
+     "via": "log",
+     "kind": "step",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 5
+     }
+    }
+   ],
+   "keep": [
+    0,
+    2
+   ]
+  },
+  {
+   "name": "log first then hook wins",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_1",
+     "via": "log",
+     "kind": "step",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 5
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_1",
+     "via": "hook",
+     "kind": "step",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 5
+     }
+    }
+   ],
+   "keep": [
+    1
+   ]
+  },
+  {
+   "name": "finished without started",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_2",
+     "via": "log",
+     "kind": "step",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 5
+     }
+    }
+   ],
+   "keep": [
+    0
+   ]
+  },
+  {
+   "name": "same id other kind kept",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_3",
+     "via": "hook",
+     "kind": "helper.start",
+     "outcome": null
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_3",
+     "via": "hook",
+     "kind": "step",
+     "outcome": null
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "two hook lines first wins",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_4",
+     "via": "hook",
+     "kind": "step",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 5
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_4",
+     "via": "hook",
+     "kind": "step",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 5
+     }
+    }
+   ],
+   "keep": [
+    0
+   ]
+  }
+ ],
+ "retention": [
+  {
+   "name": "older than keep_days",
+   "now": "2026-11-16T00:00:00Z",
+   "keep_days": 90,
+   "max_mb": 2048,
+   "runs": [
+    {
+     "run": "r_old0001",
+     "ended": "2026-08-01T00:00:00Z",
+     "detail_mb": 5,
+     "file_mb": 1
+    },
+    {
+     "run": "r_new0001",
+     "ended": "2026-11-10T00:00:00Z",
+     "detail_mb": 5,
+     "file_mb": 1
+    }
+   ],
+   "expect": {
+    "delete_detail": [
+     "r_old0001"
+    ],
+    "delete_run": [
+     "r_old0001"
+    ],
+    "fold_first": [
+     "r_old0001"
+    ]
+   }
+  },
+  {
+   "name": "cap: oldest detail first, then run files, running run never",
+   "now": "2026-11-16T00:00:00Z",
+   "keep_days": 90,
+   "max_mb": 10,
+   "runs": [
+    {
+     "run": "r_a000001",
+     "ended": "2026-11-01T00:00:00Z",
+     "detail_mb": 4,
+     "file_mb": 2
+    },
+    {
+     "run": "r_b000001",
+     "ended": "2026-11-02T00:00:00Z",
+     "detail_mb": 4,
+     "file_mb": 2
+    },
+    {
+     "run": "r_live001",
+     "ended": null,
+     "detail_mb": 6,
+     "file_mb": 1
+    }
+   ],
+   "expect": {
+    "delete_detail": [
+     "r_a000001",
+     "r_b000001"
+    ],
+    "delete_run": [
+     "r_a000001"
+    ],
+    "fold_first": [
+     "r_a000001"
+    ]
+   }
+  },
+  {
+   "name": "under the cap nothing",
+   "now": "2026-11-16T00:00:00Z",
+   "keep_days": 30,
+   "max_mb": 2048,
+   "runs": [
+    {
+     "run": "r_a000001",
+     "ended": "2026-11-01T00:00:00Z",
+     "detail_mb": 4,
+     "file_mb": 2
+    }
+   ],
+   "expect": {
+    "delete_detail": [],
+    "delete_run": [],
+    "fold_first": []
+   }
+  }
+ ],
+ "fail_closed": [
+  {
+   "name": "store hider",
+   "hider": "store",
+   "pytest": false,
+   "test_env": false,
+   "write": true
+  },
+  {
+   "name": "no hider",
+   "hider": "none",
+   "pytest": true,
+   "test_env": true,
+   "write": false
+  },
+  {
+   "name": "test hider outside pytest",
+   "hider": "test",
+   "pytest": false,
+   "test_env": true,
+   "write": false
+  },
+  {
+   "name": "test hider without env",
+   "hider": "test",
+   "pytest": true,
+   "test_env": false,
+   "write": false
+  },
+  {
+   "name": "test hider in tests",
+   "hider": "test",
+   "pytest": true,
+   "test_env": true,
+   "write": true
+  }
+ ],
+ "stream_mapping": [
+  {
+   "capture": "list-files.jsonl",
+   "ctx": {
+    "run": "r_cx00001",
+    "ticket": "t_inv7c2",
+    "harness": "codex",
+    "at": "2026-11-16T09:00:00Z"
+   },
+   "lines": [
+    "{\"type\":\"thread.started\",\"thread_id\":\"00000000-0000-0000-0000-000000000001\"}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}",
+    "{\"type\":\"turn.started\"}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"I’ll check the directory recursively.\"}}",
+    "{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"rg --files --hidden -g '\\\"'!.git'\\\"'\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"rg --files --hidden -g '\\\"'!.git'\\\"'\\\"\",\"aggregated_output\":\"e1\\nreadme.txt\\nsub/a.py\\nnotes.txt\\n\",\"exit_code\":0,\"status\":\"completed\"}}",
+    "{\"type\":\"item.started\",\"item\":{\"id\":\"item_4\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'rg --files --hidden --no-ignore'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'rg --files --hidden --no-ignore'\",\"aggregated_output\":\"e1\\nreadme.txt\\nnotes.txt\\nsub/a.py\\n\",\"exit_code\":0,\"status\":\"completed\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_5\",\"type\":\"agent_message\",\"text\":\"The files are `e1`, `readme.txt`, `notes.txt`, and `sub/a.py`.\"}}",
+    "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":42892,\"cached_input_tokens\":40448,\"cache_write_input_tokens\":0,\"output_tokens\":139,\"reasoning_output_tokens\":26}}"
+   ],
+   "events": [
+    {
+     "v": 1,
+     "id": "r_cx00001:1",
+     "seq": 1,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "Working",
+     "data": {
+      "state": "working"
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:1:item_2",
+     "seq": 2,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": "detail/r_cx00001/x_56222ff8dd408f5f99c51cabd2cb98d7.json",
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "I’ll check the directory recursively.",
+     "data": {
+      "state": "working",
+      "say": "I’ll check the directory recursively."
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:1:item_3",
+     "seq": 3,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "step",
+     "text": "rg --files --hidden -g '!.git'"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:1:item_3",
+     "seq": 4,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": null
+     },
+     "detail": "detail/r_cx00001/x_429d041b6e04ea14d46bf74c174d77e2.json",
+     "coverage": "full",
+     "kind": "step",
+     "text": "rg --files --hidden -g '!.git'"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:1:item_4",
+     "seq": 5,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "step",
+     "text": "rg --files --hidden --no-ignore"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:1:item_4",
+     "seq": 6,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": null
+     },
+     "detail": "detail/r_cx00001/x_20810cd985b98c2ecf419264f702423c.json",
+     "coverage": "full",
+     "kind": "step",
+     "text": "rg --files --hidden --no-ignore"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:1:item_5",
+     "seq": 7,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": "detail/r_cx00001/x_f0d3b53d099c008a8df867f15f4ef879.json",
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "The files are `e1`, `readme.txt`, `notes.txt`, and `sub/a.py`.",
+     "data": {
+      "state": "working",
+      "say": "The files are `e1`, `readme.txt`, `notes.txt`, and `sub/a.py`."
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:8",
+     "seq": 8,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "usage",
+     "text": "Tokens: 42892 in, 139 out",
+     "data": {
+      "tokens_in": 42892,
+      "tokens_out": 139
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00001:9",
+     "seq": 9,
+     "run": "r_cx00001",
+     "session": "00000000-0000-0000-0000-000000000001",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "Idle",
+     "data": {
+      "state": "idle"
+     }
+    }
+   ]
+  },
+  {
+   "capture": "failing-command.jsonl",
+   "ctx": {
+    "run": "r_cx00002",
+    "ticket": "t_inv7c2",
+    "harness": "codex",
+    "at": "2026-11-16T09:00:00Z"
+   },
+   "lines": [
+    "{\"type\":\"thread.started\",\"thread_id\":\"00000000-0000-0000-0000-000000000002\"}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}",
+    "{\"type\":\"turn.started\"}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"I’ll run the command and check the result.\\n\"}}",
+    "{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'cat does-not-exist.txt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'cat does-not-exist.txt'\",\"aggregated_output\":\"cat: does-not-exist.txt: No such file or directory\\n\",\"exit_code\":1,\"status\":\"failed\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"The command failed with exit code 1 because `does-not-exist.txt` does not exist.\"}}",
+    "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":28467,\"cached_input_tokens\":24320,\"cache_write_input_tokens\":0,\"output_tokens\":73,\"reasoning_output_tokens\":0}}"
+   ],
+   "events": [
+    {
+     "v": 1,
+     "id": "r_cx00002:1",
+     "seq": 1,
+     "run": "r_cx00002",
+     "session": "00000000-0000-0000-0000-000000000002",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "Working",
+     "data": {
+      "state": "working"
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00002:1:item_2",
+     "seq": 2,
+     "run": "r_cx00002",
+     "session": "00000000-0000-0000-0000-000000000002",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": "detail/r_cx00002/x_18b96b33fca122cd2381e2f3505dd202.json",
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "I’ll run the command and check the result.",
+     "data": {
+      "state": "working",
+      "say": "I’ll run the command and check the result."
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00002:1:item_3",
+     "seq": 3,
+     "run": "r_cx00002",
+     "session": "00000000-0000-0000-0000-000000000002",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "step",
+     "text": "cat does-not-exist.txt"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00002:1:item_3",
+     "seq": 4,
+     "run": "r_cx00002",
+     "session": "00000000-0000-0000-0000-000000000002",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": {
+      "ok": false,
+      "error": "Exit code 1: cat: does-not-exist.txt: No such file or directory",
+      "ms": null
+     },
+     "detail": "detail/r_cx00002/x_1002ce30b8770d28249862796d078314.json",
+     "coverage": "full",
+     "kind": "step",
+     "text": "cat does-not-exist.txt"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00002:1:item_4",
+     "seq": 5,
+     "run": "r_cx00002",
+     "session": "00000000-0000-0000-0000-000000000002",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": "detail/r_cx00002/x_bbcb60e7e0c1e7919dafd63d26198e59.json",
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "The command failed with exit code 1 because `does-not-exist.txt` does not exist.",
+     "data": {
+      "state": "working",
+      "say": "The command failed with exit code 1 because `does-not-exist.txt` does not exist."
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00002:6",
+     "seq": 6,
+     "run": "r_cx00002",
+     "session": "00000000-0000-0000-0000-000000000002",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "usage",
+     "text": "Tokens: 28467 in, 73 out",
+     "data": {
+      "tokens_in": 28467,
+      "tokens_out": 73
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00002:7",
+     "seq": 7,
+     "run": "r_cx00002",
+     "session": "00000000-0000-0000-0000-000000000002",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "Idle",
+     "data": {
+      "state": "idle"
+     }
+    }
+   ]
+  },
+  {
+   "capture": "read-summarise.jsonl",
+   "ctx": {
+    "run": "r_cx00003",
+    "ticket": "t_inv7c2",
+    "harness": "codex",
+    "at": "2026-11-16T09:00:00Z"
+   },
+   "lines": [
+    "{\"type\":\"thread.started\",\"thread_id\":\"00000000-0000-0000-0000-000000000003\"}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}",
+    "{\"type\":\"turn.started\"}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"I’ll read readme.txt and summarize it in one sentence.\\n\"}}",
+    "{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'cat readme.txt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'cat readme.txt'\",\"aggregated_output\":\"The deploy runs nightly at 02:00. Failures page the on-call. Rollback is one command.\\n\",\"exit_code\":0,\"status\":\"completed\"}}",
+    "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"Deployments run nightly at 02:00, failures page the on-call, and rollback takes one command.\"}}",
+    "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":28460,\"cached_input_tokens\":26240,\"cache_write_input_tokens\":0,\"output_tokens\":76,\"reasoning_output_tokens\":0}}"
+   ],
+   "events": [
+    {
+     "v": 1,
+     "id": "r_cx00003:1",
+     "seq": 1,
+     "run": "r_cx00003",
+     "session": "00000000-0000-0000-0000-000000000003",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "Working",
+     "data": {
+      "state": "working"
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00003:1:item_2",
+     "seq": 2,
+     "run": "r_cx00003",
+     "session": "00000000-0000-0000-0000-000000000003",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": "detail/r_cx00003/x_d8fa90b9bc2fe46deb2498cc98283117.json",
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "I’ll read readme.txt and summarize it in one sentence.",
+     "data": {
+      "state": "working",
+      "say": "I’ll read readme.txt and summarize it in one sentence."
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00003:1:item_3",
+     "seq": 3,
+     "run": "r_cx00003",
+     "session": "00000000-0000-0000-0000-000000000003",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "step",
+     "text": "cat readme.txt"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00003:1:item_3",
+     "seq": 4,
+     "run": "r_cx00003",
+     "session": "00000000-0000-0000-0000-000000000003",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": {
+      "kind": "tool",
+      "name": "Run command",
+      "action": null,
+      "source": "builtin",
+      "version": null
+     },
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": null
+     },
+     "detail": "detail/r_cx00003/x_49768c6c8f3e870256d1ff080b70eabd.json",
+     "coverage": "full",
+     "kind": "step",
+     "text": "cat readme.txt"
+    },
+    {
+     "v": 1,
+     "id": "r_cx00003:1:item_4",
+     "seq": 5,
+     "run": "r_cx00003",
+     "session": "00000000-0000-0000-0000-000000000003",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": "detail/r_cx00003/x_052a2308925891c5069c136fe1240313.json",
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "Deployments run nightly at 02:00, failures page the on-call, and rollback takes one command.",
+     "data": {
+      "state": "working",
+      "say": "Deployments run nightly at 02:00, failures page the on-call, and rollback takes one command."
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00003:6",
+     "seq": 6,
+     "run": "r_cx00003",
+     "session": "00000000-0000-0000-0000-000000000003",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "usage",
+     "text": "Tokens: 28460 in, 76 out",
+     "data": {
+      "tokens_in": 28460,
+      "tokens_out": 76
+     }
+    },
+    {
+     "v": 1,
+     "id": "r_cx00003:7",
+     "seq": 7,
+     "run": "r_cx00003",
+     "session": "00000000-0000-0000-0000-000000000003",
+     "agent": "main",
+     "parent": null,
+     "at": "2026-11-16T09:00:00Z",
+     "ticket": "t_inv7c2",
+     "harness": "codex",
+     "via": "log",
+     "used": null,
+     "outcome": null,
+     "detail": null,
+     "coverage": "full",
+     "kind": "run.state",
+     "text": "Idle",
+     "data": {
+      "state": "idle"
+     }
+    }
+   ]
+  }
+ ]
+}

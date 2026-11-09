@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/activity.schema.json",
+  "title": "orch activity event v1 (orch.activity/1, one line of .orch/record/runs/<run>.jsonl)",
+  "description": "One thing an agent run did, the same for every agent tool. See activity.md. Written only by the core record writer, which hides exact key values first (fail closed). Readers skip unknown kinds and keep unknown fields. text and every string are plain text (shown with textContent).",
+  "type": "object",
+  "required": ["v", "id", "seq", "run", "session", "agent", "parent", "at", "ticket", "harness", "via", "kind", "text", "used", "outcome", "detail", "coverage"],
+  "properties": {
+    "v": { "const": 1 },
+    "id": { "$ref": "#/$defs/event_id", "description": "The agent tool's own tool-call id when the source has one, else '<run>:<seq>' (activity.md, Ids)." },
+    "seq": { "type": "integer", "minimum": 1, "description": "Position in this run file, +1 per written line, set by the single writer." },
+    "run": { "$ref": "#/$defs/run" },
+    "session": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:-]+$" }], "description": "The agent tool's session id, or null." },
+    "agent": { "$ref": "#/$defs/agent" },
+    "parent": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/agent" }], "description": "Who started this agent: null for main, else main or another helper." },
+    "at": { "$ref": "#/$defs/time" },
+    "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
+    "harness": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Adapter name of the run (agent-adapter.schema.json key or [agents.<name>] entry); 'generic' for a user entry; 'none' for a job run without an agent." },
+    "via": { "enum": ["hook", "log", "broker", "job", "core"], "description": "Who wrote it: hook = the tool's own hook (instant), log = a collector reading the tool's log or stream, broker = orch secret, job = orch job / $ORCH_EVENTS, core = orch itself (ticket changes, run state, take-over)." },
+    "kind": { "enum": ["step", "task.start", "task.done", "ask", "denial", "helper.start", "helper.end", "run.state", "usage", "key.use", "job", "session.input"] },
+    "text": { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Short display line, one line, key values hidden." },
+    "used": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "required": ["kind", "name", "action", "source", "version"], "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["skill", "tool", "mcp", "key", "helper"], "description": "Shown as Skill, Tool, Connection, Key, Helper (wording: 'MCP' only under Details)." },
+            "name": { "$ref": "#/$defs/name" },
+            "action": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/name" }], "description": "Tool of a connection (read_file), key delivery (env, file, exec, get), or null." },
+            "source": { "enum": ["harness", "admin", "workspace", "builtin", "marketplace"], "description": "harness = the agent tool's own settings, admin = shared by the admin, workspace = this workspace, builtin = part of orch or of the agent tool, marketplace = an installed add-on." },
+            "version": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/version" }], "description": "Content hash of the skill or connection config at the time of use (inventory.md)." }
+          }
+        }
+      ]
+    },
+    "outcome": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "required": ["ok", "error", "ms"], "additionalProperties": false,
+          "properties": {
+            "ok": { "type": ["boolean", "null"], "description": "null = finished, result unknown to the source." },
+            "error": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" }] },
+            "ms": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }] }
+          }
+        }
+      ],
+      "description": "null = started, not finished yet. A later line with the same id and kind carries the outcome (activity.md, Dedupe)."
+    },
+    "detail": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[A-Za-z0-9_-]{1,128}\\.json$" }], "description": "Full payload file, relative to .orch/record/; null = details not available." },
+    "coverage": { "enum": ["full", "partial"], "description": "full = the source saw everything of this step; partial = something is missing (no chat text, cut output, no helper)." },
+    "data": { "type": "object", "description": "Per-kind fields (activity.md, Kinds). Unknown fields are kept." }
+  },
+  "allOf": [
+    { "if": { "properties": { "agent": { "const": "main" } } }, "then": { "properties": { "parent": { "type": "null" } } }, "else": { "properties": { "parent": { "$ref": "#/$defs/agent" } } } },
+    { "if": { "properties": { "kind": { "const": "step" } } }, "then": { "properties": { "via": { "enum": ["hook", "log"] }, "used": { "type": "object", "properties": { "kind": { "enum": ["skill", "tool", "mcp"] } } } } } },
+    { "if": { "properties": { "kind": { "enum": ["task.start", "task.done"] } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "required": ["check"], "properties": { "check": { "type": "string", "pattern": "^c[0-9]{1,4}$" } } } } } },
+    { "if": { "properties": { "kind": { "const": "ask" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "required": ["q"], "properties": { "q": { "type": "string", "pattern": "^q[0-9]{1,4}$" } } } } } },
+    { "if": { "properties": { "kind": { "const": "denial" } } }, "then": { "properties": { "outcome": { "type": "object", "properties": { "ok": { "const": false } } } } } },
+    { "if": { "properties": { "kind": { "enum": ["helper.start", "helper.end"] } } }, "then": { "properties": { "agent": { "pattern": "^h_[0-9]{1,4}$" }, "used": { "type": "object", "properties": { "kind": { "const": "helper" } } } } } },
+    { "if": { "properties": { "kind": { "const": "run.state" } } }, "then": { "required": ["data"], "properties": { "data": { "required": ["state"], "properties": { "state": { "enum": ["starting", "working", "waiting_you", "idle", "done", "failed", "stopped"] } } } } } },
+    { "if": { "properties": { "kind": { "const": "usage" } } }, "then": { "required": ["data"], "properties": { "data": { "anyOf": [{ "required": ["used"] }, { "required": ["tokens_in"] }], "properties": { "used": { "type": "number", "minimum": 0, "maximum": 1 }, "window": { "type": "string", "maxLength": 32 }, "status": { "enum": ["ok", "warning", "limited"] }, "tokens_in": { "type": "integer", "minimum": 0 }, "tokens_out": { "type": "integer", "minimum": 0 } } } } } },
+    { "if": { "properties": { "kind": { "const": "key.use" } } }, "then": {
+      "required": ["data"],
+      "properties": {
+        "via": { "const": "broker" }, "detail": { "type": "null" },
+        "used": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "key" }, "action": { "enum": ["env", "file", "exec", "get"] }, "source": { "enum": ["workspace", "admin"] } } },
+        "outcome": { "type": "object" },
+        "data": { "required": ["profile", "command"], "additionalProperties": false, "properties": {
+          "profile": { "$ref": "#/$defs/name" },
+          "command": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,64}$" }], "description": "Base name of the program the key was handed to; never its arguments." },
+          "skill": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/name" }] },
+          "refused": { "enum": ["not_in_profile", "get_off", "get_to_terminal", "missing", "too_short", "switched_off"] }
+        } }
+      }
+    } },
+    { "if": { "properties": { "kind": { "const": "job" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "job" }, "data": { "required": ["job", "type", "state"], "properties": {
+      "job": { "type": "string", "pattern": "^j_[a-z0-9]{6,32}$" },
+      "type": { "enum": ["start", "step", "progress", "artifact", "metric", "table", "link", "log", "end", "lost"] },
+      "state": { "enum": ["running", "ok", "failed", "cancelled", "lost"] }
+    } } } } },
+    { "if": { "properties": { "kind": { "const": "session.input" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "used": { "type": "null" }, "detail": { "type": "null" }, "data": { "required": ["by", "from", "since", "ended", "reason", "keys"], "additionalProperties": false, "properties": {
+      "by": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$", "description": "Only a person can take over." },
+      "from": { "const": "local-page" },
+      "since": { "$ref": "#/$defs/time" },
+      "ended": { "$ref": "#/$defs/time" },
+      "reason": { "enum": ["released", "idle", "run-ended", "switched-off", "locked-by-admin"] },
+      "keys": { "type": "integer", "minimum": 0, "description": "How many key presses were sent. The typed text is never stored." }
+    } } } } }
+  ],
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" },
+    "agent": { "type": "string", "pattern": "^(main|h_[0-9]{1,4})$" },
+    "event_id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_.:-]+$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$" },
+    "version": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "detail_file": {
+      "type": "object", "required": ["v", "id", "run", "input", "output", "truncated", "hidden"], "additionalProperties": false,
+      "description": "One file .orch/record/detail/<run>/<file id>.json: the full payload of one event, key values hidden.",
+      "properties": {
+        "v": { "const": 1 },
+        "id": { "$ref": "#/$defs/event_id" },
+        "run": { "$ref": "#/$defs/run" },
+        "input": { "description": "What went in (tool input, prompt, command), any JSON." },
+        "output": { "description": "What came out (tool result, chat text), any JSON." },
+        "truncated": { "type": "boolean", "description": "true = cut at the 1 MB per-file cap." },
+        "hidden": { "type": "integer", "minimum": 0, "description": "How many key values were hidden in this file." }
+      }
+    }
+  }
+}

@@ -4,7 +4,8 @@ crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json)
 phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
-Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py
+Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
+With kinds (activity, secrets, jobs, blocks, inventory, addon-manifest, screen, counts, proposal) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -136,6 +137,234 @@ def check(kind, doc, want_ok, label):
     errs = errors(kind, doc)
     if bool(errs) == want_ok:
         fails.append(f"{label}: expected {'valid' if want_ok else 'invalid'}, got {errs[0].message if errs else 'valid'}")
+
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Draft 02 (Live + Insights): record, keys, jobs, blocks, inventory, screen, counts, proposals.
+# `validate.py <kind> [<kind> ...]` runs only those kinds; no argument = everything (the checks above, then these).
+# ---------------------------------------------------------------------------------------------------------------------
+import shlex
+from datetime import datetime, timedelta
+
+SELECT = sys.argv[1:]
+
+
+def _w(name, defname=None):
+    schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text()))
+    if defname:
+        schema = {"$ref": f"#/$defs/{defname}", "$defs": schema["$defs"]}
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+def _examples(folder, errfn):
+    files = sorted((HERE / "examples" / folder).glob("*.*"))
+    for f in files:
+        errs = errfn(load(f))
+        want = f.name.startswith("valid-")
+        if bool(errs) == want:
+            fails.append(f"examples/{folder}/{f.name}: expected {'valid' if want else 'invalid'}, got {errs[0] if errs else 'valid'}")
+    for prefix in ("valid-", "invalid-"):
+        if not any(f.name.startswith(prefix) for f in files):
+            fails.append(f"examples/{folder}: needs at least one {prefix}* example")
+
+
+def _msgs(v, doc):
+    return [e.message for e in v.iter_errors(doc)]
+
+
+def _vec(name):
+    return json.loads((HERE / "vectors" / name).read_text())
+
+
+def _expect(label, got, want):
+    if got != want:
+        fails.append(f"{label}: expected {json.dumps(want, ensure_ascii=False)[:300]}, got {json.dumps(got, ensure_ascii=False)[:300]}")
+
+
+def _core_clean(*names):
+    for name in names:
+        hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text())
+        if hit:
+            fails.append(f"{name}.schema.json names an add-on or agent tool: {hit.group(0)!r}")
+
+
+# --- activity (activity.md) ------------------------------------------------------------------------------------------
+EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
+FILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+PRECEDENCE = {"hook": 2, "broker": 2, "job": 2, "core": 2, "log": 1}
+
+
+def act_event_id(tool_call_id, run, seq):
+    """The tool's own id when it is a safe id; an unsafe one is hashed (still the same for hook and log); none -> run:seq."""
+    if tool_call_id is None:
+        return f"{run}:{seq}"
+    if EVENT_ID.match(tool_call_id):
+        return tool_call_id
+    return "x_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:32]
+
+
+def act_detail_name(event_id):
+    return event_id if FILE_ID.match(event_id) else "x_" + hashlib.sha256(event_id.encode()).hexdigest()[:32]
+
+
+def act_dedupe(lines):
+    """Indices of the lines readers keep: per (run, id, kind, finished) the highest precedence, ties -> first written."""
+    best = {}
+    for i, ln in enumerate(lines):
+        key = (ln["run"], ln["id"], ln["kind"], ln.get("outcome") is not None)
+        if key not in best or PRECEDENCE[ln["via"]] > PRECEDENCE[lines[best[key]]["via"]]:
+            best[key] = i
+    return sorted(best.values())
+
+
+def _t(s):
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+
+
+def act_retention(case):
+    now, keep, cap = _t(case["now"]), case["keep_days"], case["max_mb"]
+    runs = [dict(r) for r in case["runs"]]
+    out = {"delete_detail": [], "delete_run": []}
+    for r in runs:
+        if r["ended"] and now - _t(r["ended"]) > timedelta(days=keep):
+            if r["detail_mb"]:
+                out["delete_detail"].append(r["run"])
+            out["delete_run"].append(r["run"])
+            r["detail_mb"] = r["file_mb"] = 0
+    ended = sorted((r for r in runs if r["ended"] and r["file_mb"]), key=lambda r: r["ended"])
+    while sum(r["detail_mb"] + r["file_mb"] for r in runs) > cap:
+        with_detail = [r for r in ended if r["detail_mb"]]
+        if with_detail:
+            with_detail[0]["detail_mb"] = 0
+            out["delete_detail"].append(with_detail[0]["run"])
+            continue
+        left = [r for r in ended if r["file_mb"]]
+        if not left:
+            break
+        left[0]["file_mb"] = 0
+        out["delete_run"].append(left[0]["run"])
+    out["fold_first"] = list(out["delete_run"])
+    return out
+
+
+def act_write_allowed(case):
+    if case["hider"] == "store":
+        return True
+    if case["hider"] == "test":
+        return bool(case["pytest"] and case["test_env"])
+    return False
+
+
+def _one_line(text, n):
+    return " ".join(str(text).split())[:n]
+
+
+def _shell_unwrap(cmd):
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return cmd
+    if len(parts) == 3 and Path(parts[0]).name in ("sh", "bash", "zsh") and parts[1] in ("-c", "-lc"):
+        return parts[2]
+    return cmd
+
+
+def act_map_stream(lines, ctx):
+    """Reference mapping of an item.* JSON stream (one-shot collector) to orch.activity/1 events (activity.md)."""
+    run, out, turn, session = ctx["run"], [], 0, None
+
+    def emit(**k):
+        ev = {"v": 1, "id": k.pop("id", None), "seq": len(out) + 1, "run": run, "session": session, "agent": "main",
+              "parent": None, "at": ctx["at"], "ticket": ctx["ticket"], "harness": ctx["harness"], "via": "log",
+              "used": None, "outcome": None, "detail": None, "coverage": "full"}
+        ev.update(k)
+        if ev["id"] is None:
+            ev["id"] = f"{run}:{ev['seq']}"
+        out.append(ev)
+
+    for raw in lines:
+        m = json.loads(raw)
+        t, item = m.get("type"), m.get("item") or {}
+        if t == "thread.started":
+            session = m.get("thread_id")
+        elif t == "turn.started":
+            turn += 1
+            emit(kind="run.state", text="Working", data={"state": "working"})
+        elif t in ("item.started", "item.completed") and item.get("type") == "command_execution":
+            eid = f"{run}:{turn}:{item['id']}"
+            used = {"kind": "tool", "name": "Run command", "action": None, "source": "builtin", "version": None}
+            text = _one_line(_shell_unwrap(item.get("command", "")), 200)
+            if t == "item.started":
+                emit(id=eid, kind="step", text=text, used=used)
+            else:
+                code = item.get("exit_code")
+                ok = None if code is None else code == 0
+                first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
+                err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
+                emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
+                     detail=f"detail/{run}/{act_detail_name(eid)}.json")
+        elif t == "item.completed" and item.get("type") == "agent_message":
+            eid = f"{run}:{turn}:{item['id']}"
+            say = _one_line(item.get("text", ""), 200)
+            emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
+                 detail=f"detail/{run}/{act_detail_name(eid)}.json")
+        elif t == "turn.completed":
+            u = m.get("usage") or {}
+            emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
+                 data={"tokens_in": u.get("input_tokens", 0), "tokens_out": u.get("output_tokens", 0)})
+            emit(kind="run.state", text="Idle", data={"state": "idle"})
+    return out
+
+
+def kind_activity():
+    v = _w("activity")
+    vd = _w("activity", "detail_file")
+    _examples("activity", lambda d: _msgs(v, d))
+    _examples("activity-detail", lambda d: _msgs(vd, d))
+    _core_clean("activity")
+    vec = _vec("activity-v1.json")
+    for c in vec["ids"]:
+        _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
+    for c in vec["detail_names"]:
+        _expect(f"activity detail_names {c['id']}", act_detail_name(c["id"]), c["file"])
+    for c in vec["dedupe"]:
+        _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
+    for c in vec["retention"]:
+        _expect(f"activity retention {c['name']}", act_retention(c), c["expect"])
+    for c in vec["fail_closed"]:
+        _expect(f"activity fail_closed {c['name']}", act_write_allowed(c), c["write"])
+    for c in vec["stream_mapping"]:
+        got = act_map_stream(c["lines"], c["ctx"])
+        for ev in got:
+            for e in v.iter_errors(ev):
+                fails.append(f"activity stream_mapping {c['capture']} seq {ev['seq']}: {e.message}")
+        _expect(f"activity stream_mapping {c['capture']}", got, c["events"])
+
+
+# --- dispatch (keep last in this block) ------------------------------------------------------------------------------
+KINDS = {
+    "activity": kind_activity,
+}
+
+
+def _finish(label):
+    if fails:
+        print("\n".join("FAIL " + f for f in fails))
+        sys.exit(1)
+    print(f"{label}: ALL OK")
+    sys.exit(0)
+
+
+if SELECT:
+    _unknown = [k for k in SELECT if k not in KINDS]
+    if _unknown:
+        print(f"Unknown kind: {', '.join(_unknown)}. Kinds: {', '.join(KINDS)}")
+        sys.exit(2)
+    for _k in dict.fromkeys(SELECT):
+        KINDS[_k]()
+    _finish("contracts " + " ".join(dict.fromkeys(SELECT)))
+# ---------------------------------------------------------------------------------------------------------------------
 
 
 for kind in V:
@@ -994,6 +1223,8 @@ for prefix in ("valid-", "invalid-"):
     if not any(f.name.startswith(prefix) for f in cg_files):
         fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
 
+for _fn in KINDS.values():
+    _fn()
 if fails:
     print("\n".join("FAIL " + f for f in fails))
     sys.exit(1)
