@@ -46,7 +46,7 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act".split()
+    "run.human_input addon.act addon.add_local".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -82,18 +82,43 @@ def _source_tree() -> bool:
     return (here.parents[2] / "pyproject.toml").is_file() and here.parent.name == "orch"
 
 
-def install_kind() -> str:
-    """normal | dev | test. The install record sits in orch's own tool environment
-    (<sys.prefix>/orch-install.json,
-    written by the installer). No record: running from the source tree = test, anything else = normal."""
+INSTALL_KINDS = ("normal", "dev", "test")
+
+
+def install_record_path() -> Path:
+    return Path(os.path.realpath(sys.prefix)) / "orch-install.json"
+
+
+def read_install_record() -> str | None:
+    """The kind written by the installer into orch's own tool environment, or None (no usable record)."""
     try:
-        raw = saferead.read_private(Path(os.path.realpath(sys.prefix)), "orch-install.json", 4096)
+        raw = saferead.read_private(install_record_path().parent, "orch-install.json", 4096)
         data = json.loads(raw) if raw is not None else None
-        kind = data.get("kind") if isinstance(data, dict) else None
-        if kind in ("normal", "dev", "test"):
-            return kind
     except (OSError, ValueError):
-        pass
+        return None
+    kind = data.get("kind") if isinstance(data, dict) else None
+    return kind if kind in INSTALL_KINDS else None
+
+
+def install_record_text(kind: str) -> str:
+    """The record's text, as install.sh / install.ps1 write it after `uv tool install` (orch.install/1)."""
+    if kind not in INSTALL_KINDS:
+        raise ValueError("kind must be normal, dev or test")
+    return json.dumps({"schema": "orch.install/1", "kind": kind}, sort_keys=True) + "\n"
+
+
+def write_install_record(env_dir: Path, kind: str) -> None:
+    """Only for the update that reinstalls the tool environment (which drops the record): it carries over the
+    kind the installer wrote, never a new one. No orch command takes a kind from its caller."""
+    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind))
+
+
+def install_kind() -> str:
+    """normal | dev | test. The installer's record in orch's own tool environment decides; with no record a
+    source-tree run (the test suite) is `test` and any other install is `normal`."""
+    kind = read_install_record()
+    if kind:
+        return kind
     return "test" if _source_tree() else "normal"
 
 
@@ -610,6 +635,33 @@ def effective(root: Path, setting: str, file_value: bool) -> bool:
     return bool(file_value and (rec_val if rec_val is not None else default))
 
 
+# ------------------------------------------------------------------------------------------- launch token
+
+LAUNCH_SERVERS = ("focus", "dashboard")
+
+
+def is_test_workspace(root: Path) -> bool:
+    """A test install AND a workspace whose realpath is under the literal <account home>/.orch-test."""
+    account = account_home()
+    return (
+        install_kind() == "test"
+        and _prefix_is_real_dir(account)
+        and _under(os.path.realpath(root), str(account).rstrip("/") + "/.orch-test")
+    )
+
+
+def printable_launch_url(root: Path, server: str, base_url: str) -> str:
+    """TEST-ONLY exception to "the launch token is never printed" (human-proof.md): `orch start --no-open
+    --print-launch-url`, on a test install and a test workspace only, so the Playwright lane can open a page
+    session. Refused everywhere else."""
+    if not is_test_workspace(root):
+        raise Refused("Printing a launch link works only on a test install, in a test folder.")
+    token = write_launch_token(root, server)  # the ONE writer (below): same file, format, 30 s, single use
+    if token is None:
+        raise Refused("A launch link could not be made.")
+    return f"{base_url.rstrip('/')}/#launch={token}"
+
+
 # ------------------------------------------------------------------------------------------- reset
 
 
@@ -1117,7 +1169,7 @@ def write_launch_token(root: Path, server: str) -> str | None:
     """The one-time token that bootstraps a page session: <key folder>/launch-<server>.token (0600, once,
     30 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
     printed or logged."""
-    if server not in ("focus", "dashboard"):
+    if server not in LAUNCH_SERVERS:
         return None
     try:
         d = key_dir(root)

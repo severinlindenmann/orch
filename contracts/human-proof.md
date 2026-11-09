@@ -129,6 +129,20 @@ The hand-off page says **"Requested by a command"**, shows the full action, targ
 allowed, the key profile, the update version), never puts focus on the confirm button, and hand-offs are rate-limited per op
 (at most 3 pending per op, a new one replaces the oldest). No typed confirm words (owner rule). A confirmation on `/dev/tty`
 is not used: a live agent runs in its own tmux pane with a terminal too, so a tty proves nothing.
+**Test-only exception (launch link).** `orch start --no-open --print-launch-url` prints each page server's
+`http://127.0.0.1:<port>/#launch=<token>` (and writes the one-time token as in step 3), so the browser-test lane can open a
+page session on the test network. It is honoured **only** when `install_kind() == "test"` (the installer's record, or a
+source-tree run) **and** the workspace's realpath is under the literal `<account home>/.orch-test/`; on a normal or dev
+install, or for any other folder, it is refused before anything starts ("only on a test install"). It is never offered on a
+person's own install, and a dev kit does not get it.
+
+**Install record.** `<sys.prefix>/orch-install.json` = `{"schema": "orch.install/1", "kind": "normal|dev|test"}`, written
+by `install.sh` / `install.ps1` straight into the tool environment after `uv tool install` (default `normal`; `test` or `dev`
+only through the installer option the person running it gives: `ORCH_INSTALL_KIND=test sh install.sh`, `-InstallKind test`),
+never by an orch command. `orch update` carries the existing kind over a reinstall. No record: a source-tree run is `test`,
+any other install is `normal`. `ORCH_REPO` / `ORCH_REF` are honoured only on a dev or test install or inside the person-gated
+`orch update`; on a normal install they are ignored (and the person is told).
+
 What Level 1 promises: an agent cannot finish a human-only action with flags, environment, a tty or a forged workspace file;
 it can ask for a hand-off, which the person sees as a request from a command and has to click.
 
@@ -169,6 +183,7 @@ rows add a named case.
 | `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
 | `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
 | `run.human_input` | input that counts as a person's and may start a run (runs.py 375-397 `human_waiting`: today any `human:` by or phone line in the agent-writable `.orch/run/pending/<tid>.jsonl`) | ticket | page, phone | `pending` |
+| `addon.add_local` | `orch addon add ./folder`: code from a folder runs inside orch's tool environment (normal installs only through this hand-off; dev/test installs may add directly) | sha256[:32] of the folder's real path (card shows the path) | page, terminal | – |
 | `addon.act` (`who: people`) | an add-on button the manifest marks for people only (addons.py 599, 1051) | `<add-on>:<verb>:<ticket>` | page | – |
 | relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network), never a workspace token | – |
 

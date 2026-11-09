@@ -1,5 +1,9 @@
+param([string]$InstallKind = "normal")
+if ($env:ORCH_INSTALL_KIND -and $PSBoundParameters.Count -eq 0) { $InstallKind = $env:ORCH_INSTALL_KIND }
+if ($InstallKind -notin @("normal","dev","test")) { throw "InstallKind must be normal, dev or test." }
 # orch installer (Windows): installs uv if missing, then orch.
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
+# -InstallKind test|dev (given by the person running this installer) marks a test or dev install; default normal.
 # Works for a standard user: no admin rights, no git, no change to the execution policy.
 # Not "Stop": Windows PowerShell turns a native tool's stderr (uv's progress lines) into errors when the output is
 # redirected, which would abort the install. Every native call is checked by its exit code instead.
@@ -34,6 +38,11 @@ if ($arch -eq "ARM64") {
 }
 uv tool install --reinstall --refresh @py $spec
 if ($LASTEXITCODE -ne 0) { throw "uv tool install failed" }
+# The install record is written here, by this installer, into orch's own tool environment (no orch command does).
+$toolDir = Join-Path (uv tool dir) "orch-workspace"
+$record = [ordered]@{ kind = $InstallKind; schema = "orch.install/1" } | ConvertTo-Json -Compress
+[System.IO.File]::WriteAllText((Join-Path $toolDir "orch-install.json"), $record + "`n")
+if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTALL: this orch is marked as a $InstallKind install. ***" }
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 $toolBin = (uv tool dir --bin)
 if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
