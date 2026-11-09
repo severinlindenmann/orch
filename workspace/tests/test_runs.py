@@ -505,3 +505,59 @@ def test_shared_folder_in_show_and_run_status(proj, new_ticket, run):
     assert json.loads(out)["shared_folder"]["line"].endswith("is also changing this folder.")
     c = new_ticket("Alone")
     assert "also changing" not in run("ticket", "show", c)[1]
+
+
+def test_shared_folder_stray_files_and_broken_records_are_skipped(proj, new_ticket, run):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    d = proj / ".orch/run/tickets"
+    (d / "notes.json").write_text("{}", encoding="utf-8")
+    (d / "t_zzzzzz.json").write_text("not json", encoding="utf-8")
+    assert [o["ticket"] for o in sharedfolder.others_in_folder(proj, a)] == [b]
+    assert "also changing" in run("ticket", "show", a)[1]
+    assert json.loads(run("run", "status", a, "--json")[1])["shared_folder"]["others"]
+
+
+def test_shared_folder_title_is_cleaned_and_a_deleted_ticket_is_not_an_id(proj, new_ticket):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    p = tickets.ticket_path(proj, b)
+    t = json.loads(p.read_text(encoding="utf-8"))
+    t["title"] = "Fix\n  the\x00 login " + "very " * 30 + "form"
+    p.write_text(json.dumps(t), encoding="utf-8")
+    title = sharedfolder.others_in_folder(proj, a)[0]["title"]
+    assert title.startswith("Fix the login very") and title.endswith("…") and len(title) <= 60
+    assert "\n" not in title and "\x00" not in title
+    p.unlink()
+    assert sharedfolder.others_in_folder(proj, a)[0]["title"] == "another ticket"
+
+
+def test_shared_folder_malformed_folder_counts_as_root_and_case_is_normalised(proj, new_ticket, monkeypatch):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    _edit(proj, b, folder="relative/dir")
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1  # not absolute: the root
+    _edit(proj, b, folder="/nowhere/else\x00")
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+    monkeypatch.setattr(sharedfolder.os.path, "normcase", lambda s: s.lower())  # a case-insensitive disk
+    _edit(proj, b, folder=str(proj).upper())
+    assert len(sharedfolder.others_in_folder(proj, a)) == 1
+
+
+def test_shared_folder_maybe_stale_run_does_not_count_and_claim_takes_a_folder(proj, new_ticket, tmp_path):
+    from orch import sharedfolder
+
+    a, b = _two_runs(proj, new_ticket)
+    _edit(proj, b, pid=None, pid_started=None, renewed_at=_ago(600))
+    assert runs.state(runs.read(proj, b)) == "maybe-stale"
+    assert sharedfolder.others_in_folder(proj, a) == []
+    c = new_ticket("Copy work")
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    rec = runs.claim(proj, c, "agent:q", "claude", pid=os.getpid(), folder=copy)
+    assert rec["folder"] == str(copy.resolve())
+    assert [o["ticket"] for o in sharedfolder.alive_in(proj, copy)] == [c]
+    assert sharedfolder.alive_in(proj, copy, exclude_ticket=c) == []

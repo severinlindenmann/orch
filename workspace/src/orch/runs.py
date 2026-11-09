@@ -563,6 +563,7 @@ def claim(
     take_over: bool = False,
     reason: str | None = None,
     busy_text: str | None = None,
+    folder: Path | None = None,
 ) -> dict:
     """Take the claim on a ticket, or raise Busy. A busy ticket queues `busy_text` as input (same lock)."""
     ticket = tickets.load(root, tid)
@@ -585,7 +586,7 @@ def claim(
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
         _drop_start_prompts_locked(root, tid)
-        rec = _new_record(tid, by, agent, mode, ticket, reason, root)
+        rec = _new_record(tid, by, agent, mode, ticket, reason, Path(folder) if folder else root)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
