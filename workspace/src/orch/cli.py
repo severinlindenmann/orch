@@ -102,8 +102,7 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
-    d, n = tickets.checks_done(t)
-    return f"{d} of {n} done" if n else ""
+    return tickets.progress_text(t)
 
 
 def _line(t: dict) -> str:
@@ -153,11 +152,15 @@ def _who_added(t: dict, c: dict, ev: dict) -> str:
 
 def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:
     q = next((q for q in open_q if q.get("check") == c["id"]), None)
-    mark = "✓" if c["done"] else ("◐" if c.get("state") == "doing" else "○")
+    wont = bool(c.get("wont_do"))
+    mark = "✓" if c["done"] else ("–" if wont else ("◐" if c.get("state") == "doing" else "○"))
     line = f"  {mark} {c['id']} {c['text']}"
-    if q and not c["done"]:
+    if wont:
+        why = "".join(ch for ch in str(c.get("reason") or "") if ch.isprintable())
+        line += "   Won't do" + (f": {why}" if why else "")
+    if q and not c["done"] and not wont:
         line += f"   waiting for your answer ({q['id']})"
-    if c.get("state") == "doing" and not c["done"] and root is not None:
+    if c.get("state") == "doing" and not c["done"] and not wont and root is not None:
         who = c.get("by", "someone")
         if tickets.doing_stale(root, t, c):
             line += f"   {who} was on it ({_ago(c.get('at', ''))}, not running)"
@@ -190,7 +193,11 @@ def _show(t: dict, root: Path | None = None) -> str:
         f"Status: {tickets.STATUS_WORDS[t['status']]}" + (f" - {_progress(t)}" if _progress(t) else "")
     )
     if n and d == n:
-        out.append(f"✓ All done · {n} of {n}")
+        out.append(
+            f"✓ All done · {_progress(t)}"
+            if tickets.checks_split(t)[1] == 0
+            else f"✓ All resolved · {_progress(t)}"
+        )
     out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
     extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
     if extra:
@@ -490,13 +497,17 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--after", required=True, metavar="CID")
     for name, hlp in (
         ("remove", "remove a task (kept in the history)"),
-        ("reopen", "open a done task again"),
+        ("reopen", "open a done or won't-do task again"),
         ("start", "mark a task as being worked on"),
         ("stop", "clear the working mark"),
     ):
         x = c.add_parser(name, parents=[common], help=hlp)
         x.add_argument("id")
         x.add_argument("check")
+    x = c.add_parser("wont-do", parents=[common], help="a person decides a task will not be done")
+    x.add_argument("id")
+    x.add_argument("check")
+    x.add_argument("--reason", metavar="TEXT", help="one line, why (optional)")
     x = c.add_parser("record", parents=[common], help="record that a command ran (orch does not run it)")
     x.add_argument("id")
     x.add_argument("check")
@@ -693,7 +704,8 @@ def run(args: argparse.Namespace) -> None:
                 args,
                 "update",
                 humanproof.update_target(repo, ref),
-                parts={"source": humanproof.part(f"{repo}@{ref}")},
+                parts={"source": f"{repo}@{ref}"},
+                exact=f"{repo}@{ref}",
             ).startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
         report, notes = [], []
@@ -871,6 +883,20 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
+    elif cmd == "check" and sub == "wont-do":
+        who = humanproof.person_by(
+            root,
+            args,
+            "check.wont_do",
+            f"{args.id}:{args.check}",
+            value=args.reason or "",
+            parts={
+                "title": humanproof.ticket_name(root, args.id),
+                "step": humanproof.step_text(root, args.id, args.check),
+            },
+        )
+        t, c = tickets.check_wont_do(root, args.id, args.check, who, args.reason)
+        _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
     elif cmd == "check" and sub == "record":
         t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
         _out(args, c, f"Recorded for {c['id']}: {c['evidence'][-1]['ref']}")
@@ -888,6 +914,19 @@ def run(args: argparse.Namespace) -> None:
             t, c = tickets.check_remove(root, args.id, args.check, who)
             msg = f"{c['id']} removed. It and its proof are kept in the history."
         elif sub == "reopen":
+            if humanproof.step_is_wont_do(root, args.id, args.check) and not (
+                who.startswith("agent:") or tickets.agent_tool()
+            ):  # undoing a person's Won't do is a person's decision (H1): proof or hand-off
+                who = humanproof.person_by(
+                    root,
+                    args,
+                    "check.wont_do_undo",
+                    f"{args.id}:{args.check}",
+                    parts={
+                        "title": humanproof.ticket_name(root, args.id),
+                        "step": humanproof.step_text(root, args.id, args.check),
+                    },
+                )
             t, c = tickets.check_reopen(root, args.id, args.check, who)
             msg = f"{c['id']} is open again. Its proof stays in the history."
         elif sub == "start":

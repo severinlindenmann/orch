@@ -59,7 +59,8 @@ def dispatch(args, root: Path) -> bool:
                 "addon.add_local",
                 info["hash"],
                 argv=queued,
-                parts={"path": humanproof.part(info["path"]), "short": humanproof.part(info["short"])},
+                parts={"path": humanproof.tail(info["path"]), "short": humanproof.part(info["short"])},
+                exact=info["path"],
             )
             if not who.startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)

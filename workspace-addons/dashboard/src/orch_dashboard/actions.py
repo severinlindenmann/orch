@@ -119,6 +119,8 @@ PROOF_OPS = {
     "chat.say": ("chat.send", lambda a: "general"),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
     "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
+    "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
     "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
 }
 
@@ -127,6 +129,8 @@ def proof_for(op, args):
     """(core op, target) when this click needs a proof, else None."""
     if op == "ticket.patch" and isinstance(args.get("data"), dict) and "status" in args["data"]:
         return "ticket.verdict", args.get("ticket")
+    if op == "check.set" and args.get("done") is False:  # un-ticking may undo a Won't do (a person's decision)
+        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}"
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None
 
@@ -333,6 +337,26 @@ def _check_set(a):
     return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
 
 
+def _check_wont_do(a):
+    _only(a, ("ticket", "check", "reason"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    reason = _text(a.get("reason", ""), "reason", empty=True, limit=200).strip()
+    if "\n" in reason or "\r" in reason:
+        raise BadRequest("The reason must be one line.")
+    return ["check", "wont-do", _tid(a.get("ticket")), cid], [f"--reason={reason}"] if reason else [], []
+
+
+def _check_reopen(a):
+    """Open a step again (also a Won't do step): `orch check reopen <ticket> <task>`."""
+    _only(a, ("ticket", "check"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
+
+
 def _ref_add(a):
     _only(a, ("ticket", "target"))
     return ["ref", "add", _tid(a.get("ticket"))], [], [_text(a.get("target"), "reference")]
@@ -536,6 +560,8 @@ OPS = {
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
+    "check.wont_do": _check_wont_do,
+    "check.reopen": _check_reopen,
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,

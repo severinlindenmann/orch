@@ -17,6 +17,8 @@
   function cap(t) { t = String(t == null ? "" : t).replace(/\s+/g, " ").replace(/[\u201c\u201d\u201e\u00ab\u00bb"]/g, "'"); return t.length > 120 ? t.slice(0, 120) + "\u2026" : t; }
   function q(t) { var s = el("span"); s.className = "ho-part"; s.style.fontWeight = "600"; s.textContent = "\u201c" + cap(t) + "\u201d"; return s; }
   function plain(t) { var s = el("span"); s.style.fontWeight = "600"; s.textContent = cap(t); return s; }
+  // a target that matters (a server, a source, a folder) is never cut in the sentence; the full value is also in the exact block
+  function full(t) { var s = el("span"); s.style.cssText = "font-weight:600;overflow-wrap:anywhere"; s.textContent = String(t == null ? "" : t); return s; }
   function say(parts) {  // [string | element]...
     var s = el("span"); s.className = "ho-sentence"; s.style.cssText = "flex:1;min-width:200px";
     parts.forEach(function (p) { s.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
@@ -31,24 +33,32 @@
     },
     "run.human_input": function (p) { return ["Send a message to the agent on ", q(p.title), "?"]; },
     "chat.send": function (p) { return p.thread ? ["Send a message to ", plain(p.thread), "?"] : ["Send a message in Chat?"]; },
+    "check.wont_do": function (p) { return ["Mark ", q(p.step), " on ", q(p.title), " as won't do?"]; },
+    "check.wont_do_undo": function (p) { return ["Open ", q(p.step), " on ", q(p.title), " again?"]; },
     "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
-    "update": function (p) { return ["Update orch from ", plain(p.source), "?"]; },
-    "relay.connect": function (p) { return ["Connect to ", plain(p.host), "?"]; },
+    "update": function (p) { return ["Update orch from ", full(p.source), "?"]; },
+    "relay.connect": function (p) { return ["Connect to ", full(p.host), "?"]; },
     "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
-    "addon.add_local": function (p) { return ["Add the add-on from ", plain(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
+    "addon.add_local": function (p) { return ["Add the add-on from ", full(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
   };
   function sentence(i) {
     var p = i.parts && typeof i.parts === "object" ? i.parts : {};
     var f = TEMPLATES[i.op];
     return say(f ? f(p) : ["Do something on this computer?"]);
   }
-  function exact(i) {  // the exact text that will be sent, never merged into the sentence
-    if (!i.value) return null;
+  var EXACT_LABEL = {"relay.connect": "Exact address:", "update": "Exact source:", "addon.add_local": "Exact folder:"};
+  function block(label, text) {
     var d = el("div"); d.className = "ho-exact"; d.style.cssText = "flex-basis:100%;margin-top:4px";
-    var l = el("div", "Exact text:", "meta"); l.style.cssText = "font-size:12px;opacity:.75";
-    var pre = el("pre"); pre.textContent = String(i.value); pre.style.cssText = "margin:2px 0 0;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font:13px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto";
+    var l = el("div", label, "meta"); l.style.cssText = "font-size:12px;opacity:.75";
+    var pre = el("pre"); pre.textContent = String(text); pre.style.cssText = "margin:2px 0 0;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font:13px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto";
     d.appendChild(l); d.appendChild(pre);
     return d;
+  }
+  function exact(i) {  // the exact text / target that will be used, never merged into the sentence, never cut
+    var w = el("div"); w.style.cssText = "flex-basis:100%";
+    if (i.exact) w.appendChild(block(EXACT_LABEL[i.op] || "Exact value:", i.exact));
+    if (i.value) w.appendChild(block("Exact text:", i.value));
+    return w.childNodes.length ? w : null;
   }
   function buttons(i) {
     var row = el("span", "", "ho-btns");

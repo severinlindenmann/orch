@@ -841,7 +841,8 @@ def test_a_folder_addon_needs_a_click_and_installs_from_the_snapshot(ws, run, mo
     card = hp.handoffs(ws)[0]
     info = addons.prepare_local_add(ws, folder)
     assert card["op"] == "addon.add_local" and card["target"] == info["hash"] and len(info["hash"]) == 64
-    assert card["parts"] == {"path": str(folder.resolve()), "short": info["short"]}
+    assert card["exact"] == str(folder.resolve()) and card["parts"]["short"] == info["short"]
+    assert str(folder.resolve()).endswith(card["parts"]["path"].lstrip("\u2026"))
     item = hp.handoff_take(ws, card["id"])  # one click: the page takes the item and runs it with a proof
     proof = _proof(ws, item["op"], item["target"])
     code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
@@ -931,7 +932,7 @@ def test_the_queued_add_command_carries_the_absolute_path_the_card_shows(ws, run
     assert code == 2
     card = hp.handoffs(ws)[0]
     item = hp.handoff_take(ws, card["id"])
-    assert card["parts"]["path"] == str(folder.resolve()) and str(folder.resolve()) in item["argv"]
+    assert card["exact"] == str(folder.resolve()) and str(folder.resolve()) in item["argv"]
     assert "../../rel-addon" not in item["argv"]
 
 
@@ -1016,3 +1017,147 @@ def test_untrusted_title_is_a_literal_part_the_exact_value_is_separate_and_the_s
     assert [i["text"] for i in runs.human_waiting(ws, tid)] == [
         "Please add tests {value}"
     ]  # the stored value ran
+
+
+# ------------------------------------------------------------------ security-relevant targets are never cut
+
+
+def test_a_relay_url_with_a_name_or_password_is_refused(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    for url in ("https://user@r.example", "https://user:pw@r.example", "https://r.example@evil.example"):
+        code, out, err = run(
+            "relay", "connect", url, "--workspace", "w", "--token", "orn_T", "--by", "human:pat", "--json"
+        )
+        assert code == 2 and "name or password" in out + err and hp.handoffs(ws) == [], url
+
+
+def test_the_connect_card_shows_hostname_and_port_built_from_the_url_and_a_long_host_in_full(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    host = ".".join(["a" * 50] * 4) + ".example"  # 208 characters, over the free-text cut
+    run(
+        "relay", "connect", f"https://{host}:8443/path?x=1", "--workspace", "w", "--token", "orn_T",
+        "--by", "human:pat", "--json",
+    )  # fmt: skip
+    card = hp.handoffs(ws)[0]
+    assert (
+        card["parts"] == {"host": f"{host}:8443"} and card["exact"] == f"{host}:8443"
+    )  # in full, no cut, no path
+    assert hp.part(host).endswith("…")  # (free text WOULD have been cut)
+
+
+def test_the_update_source_is_shown_in_full(ws, run, monkeypatch):
+    from orch import addons
+
+    long_repo = "https://example.org/" + "r" * 200
+    monkeypatch.setenv("ORCH_REPO", long_repo)  # a test install honours the override
+    monkeypatch.setenv("ORCH_REF", "main")
+    run("update", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    assert card["parts"]["source"] == card["exact"] == f"{addons.repo()}@{addons.ref()}"
+    assert len(card["exact"]) > hp.PART_MAX
+
+
+def test_a_long_addon_path_shows_its_end_in_the_sentence_and_the_full_path_in_the_exact_block(
+    ws, run, monkeypatch
+):
+    from orch import addons
+
+    deep = ws.parent
+    for i in range(6):
+        deep = deep / (f"long-folder-name-{i}-" + "x" * 20)
+    folder = deep / "real-folder"
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("x\n")
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))
+    run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    assert card["exact"] == str(folder.resolve()) and len(card["exact"]) > 100
+    assert card["parts"]["path"].startswith("…") and card["parts"]["path"].endswith("/real-folder")  # the END
+    assert hp.handoff_take(ws, card["id"]) is not None
+    # a card whose full target is not what the command carries is never run
+    run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    d = hp.key_dir(ws)
+    items = json.loads((d / "handoffs.json").read_text())
+    items[0]["exact"] = "/somewhere/else"
+    hp._write_private(d / "handoffs.json", json.dumps(items))
+    assert hp.handoff_take(ws, items[0]["id"]) is None
+
+
+def test_free_text_is_cut_in_the_sentence_but_the_exact_block_keeps_it_whole(ws, run):
+    tid, q = _ask(ws, run)
+    long_answer = "word " * 100
+    run("answer", tid, q, long_answer, "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    assert card["value"] == long_answer  # whole
+    assert len(card["parts"]["question"]) <= hp.PART_MAX + 1
+
+
+# ------------------------------------------------------------------ #386 Won't do: needs the proof
+
+
+def _ticket_with_step(ws, run):
+    code, out, _ = run("ticket", "new", "Plan", "--json", "--by", "agent:x")
+    tid = json.loads(out)["id"]
+    code, out, _ = run("check", "add", tid, "Write the file", "--json", "--by", "agent:x")
+    return tid, json.loads(out)["id"]
+
+
+def test_wont_do_needs_the_proof_and_hands_off_with_plain_parts(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    code, out, err = run(
+        "check", "wont-do", tid, cid, "--reason", "not needed", "--by", "human:pat", "--json"
+    )
+    assert code == 2 and "Continue" in out + err
+    assert not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    card = hp.handoffs(ws)[0]
+    assert (
+        card["op"] == "check.wont_do" and card["target"] == f"{tid}:{cid}" and card["value"] == "not needed"
+    )
+    assert card["parts"] == {"title": "Plan", "step": "Write the file"}
+    item = hp.handoff_take(ws, card["id"])
+    code, out, err = _cli(run, monkeypatch, _proof(ws, item["op"], item["target"]), *item["argv"])
+    assert code == 0, out + err
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert step["wont_do"] is True and step["by"] == "human:pat"  # by from the proof
+
+
+def test_wont_do_forged_flag_and_agent_are_refused(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    wrong = _proof(ws, "check.wont_do", f"{tid}:c9")
+    code, *_ = _cli(run, monkeypatch, wrong, "check", "wont-do", tid, cid, "--json")
+    assert code == 2 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    code, *_ = run("check", "wont-do", tid, cid, "--by", "agent:x", "--json")
+    assert code == 2 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+
+
+def test_undoing_a_wont_do_needs_a_proof_but_reopening_a_done_step_stays_free(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    _cli(
+        run, monkeypatch, _proof(ws, "check.wont_do", f"{tid}:{cid}"), "check", "wont-do", tid, cid, "--json"
+    )
+    code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
+    assert code == 2 and tickets.load(ws, tid)["checklist"][0].get("wont_do") is True  # still won't do
+    card = [h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"][0]
+    assert card["parts"] == {"title": "Plan", "step": "Write the file"}
+    code, *_ = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "check.wont_do_undo", f"{tid}:{cid}"),
+        "check",
+        "reopen",
+        tid,
+        cid,
+        "--json",
+    )
+    assert code == 0 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    # an ordinary done step reopens as before: no proof, no hand-off
+    code, out, _ = run("check", "add", tid, "Second", "--json", "--by", "agent:x")
+    c2 = json.loads(out)["id"]
+    run("check", "done", tid, c2, "--note", "x", "--json", "--by", "agent:x")
+    code, *_ = run("check", "reopen", tid, c2, "--by", "human:pat", "--json")
+    assert code == 0

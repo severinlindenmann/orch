@@ -337,4 +337,30 @@ def test_the_listing_sends_structured_parts_and_the_exact_value_never_a_sentence
     c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
     item = json.loads(c.getresponse().read())[0]
     assert item["parts"] == {"title": "T {value}", "question": "Which"} and item["value"] == "Blue {value}"
+    assert item["exact"] == ""
     assert "argv" not in item and "label" not in item
+
+
+def test_the_listing_carries_the_full_exact_target_for_a_long_host(live):
+    root, port = live
+    host = ".".join(["a" * 50] * 4) + ".example"
+    hp.request_handoff(
+        root, "relay.connect", host, "", "", argv=["relay", "connect", f"https://{host}", "--workspace", "w"],
+        parts={"host": host}, exact=host,
+    )  # fmt: skip
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
+    item = json.loads(c.getresponse().read())[0]
+    assert item["exact"] == host and item["parts"]["host"] == host and len(host) > 120
+
+
+def test_wont_do_clicks_need_a_proof_on_the_real_server_path():
+    from orch_dashboard import actions as a
+
+    assert a.proof_for("check.wont_do", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do", "t_a:c1")
+    assert a.proof_for("check.reopen", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do_undo", "t_a:c1")
+    assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": False}) == (
+        "check.wont_do_undo",
+        "t_a:c1",
+    )
+    assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": True}) is None

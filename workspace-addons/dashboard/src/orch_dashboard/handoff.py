@@ -15,7 +15,7 @@ except ImportError:  # standalone use without orch: no hand-offs
     run_with_proof = None
     start_detached = None
 
-SHOW = ("id", "op", "target", "parts", "value", "at")
+SHOW = ("id", "op", "target", "parts", "value", "exact", "at")
 
 
 def listing(root: Path) -> list[dict]:
