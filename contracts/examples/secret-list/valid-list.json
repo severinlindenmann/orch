@@ -1,0 +1,5 @@
+{"items": [
+ {"name": "databricks-token", "type": "token", "source": "workspace", "profiles": ["databricks"], "state": "ok", "last_used": "2026-11-16T09:12:05Z", "uses_7d": 14, "shadowed": false},
+ {"name": "google-sa.json", "type": "json", "source": "admin", "profiles": ["google"], "state": "managed", "last_used": "2026-11-15T10:00:00Z", "uses_7d": 9, "shadowed": false},
+ {"name": "old-slack-token", "type": "token", "source": "workspace", "profiles": [], "state": "unused", "last_used": null, "uses_7d": 0, "shadowed": false}
+], "next": null}

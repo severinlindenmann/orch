@@ -1,0 +1,448 @@
+{
+ "v": 1,
+ "about": "counts.md and usage-counts.md reference cases (cnt_items, usage_name, usage_queue in validate.py).",
+ "denominators": [
+  {
+   "name": "skill seen by 2 tools, one cannot report skills",
+   "runs": [
+    {
+     "run": "r_a000001",
+     "ticket": "t_aaaaaa",
+     "sees": [
+      "skill",
+      "tool",
+      "mcp",
+      "key"
+     ],
+     "events": [
+      {
+       "kind": "skill",
+       "name": "invoice-export",
+       "source": "workspace",
+       "ok": true
+      },
+      {
+       "kind": "tool",
+       "name": "Read",
+       "source": "builtin",
+       "ok": true
+      },
+      {
+       "kind": "tool",
+       "name": "Read",
+       "source": "builtin",
+       "ok": true
+      }
+     ]
+    },
+    {
+     "run": "r_b000001",
+     "ticket": "t_bbbbbb",
+     "sees": [
+      "skill",
+      "tool",
+      "mcp",
+      "key"
+     ],
+     "events": [
+      {
+       "kind": "skill",
+       "name": "invoice-export",
+       "source": "workspace",
+       "ok": false
+      },
+      {
+       "kind": "key",
+       "name": "stripe-key",
+       "source": "admin",
+       "ok": false,
+       "refused": true
+      }
+     ]
+    },
+    {
+     "run": "r_c000001",
+     "ticket": "t_cccccc",
+     "sees": [
+      "tool",
+      "key"
+     ],
+     "events": [
+      {
+       "kind": "tool",
+       "name": "Run command",
+       "source": "builtin",
+       "ok": null
+      }
+     ]
+    }
+   ],
+   "inventory": [
+    {
+     "kind": "skill",
+     "name": "monthly-close",
+     "source": "workspace"
+    },
+    {
+     "kind": "mcp",
+     "name": "weather",
+     "source": "workspace"
+    }
+   ],
+   "items": [
+    {
+     "kind": "key",
+     "name": "stripe-key",
+     "source": "admin",
+     "runs": {
+      "used": 1,
+      "of": 3,
+      "unseen": 0
+     },
+     "uses": 1,
+     "ok": 0,
+     "failed": 0,
+     "refused": 1,
+     "unknown": 0,
+     "seen": "yes"
+    },
+    {
+     "kind": "mcp",
+     "name": "weather",
+     "source": "workspace",
+     "runs": {
+      "used": 0,
+      "of": 2,
+      "unseen": 1
+     },
+     "uses": 0,
+     "ok": 0,
+     "failed": 0,
+     "refused": 0,
+     "unknown": 0,
+     "seen": "not_seen"
+    },
+    {
+     "kind": "skill",
+     "name": "invoice-export",
+     "source": "workspace",
+     "runs": {
+      "used": 2,
+      "of": 2,
+      "unseen": 1
+     },
+     "uses": 2,
+     "ok": 1,
+     "failed": 1,
+     "refused": 0,
+     "unknown": 0,
+     "seen": "yes"
+    },
+    {
+     "kind": "skill",
+     "name": "monthly-close",
+     "source": "workspace",
+     "runs": {
+      "used": 0,
+      "of": 2,
+      "unseen": 1
+     },
+     "uses": 0,
+     "ok": 0,
+     "failed": 0,
+     "refused": 0,
+     "unknown": 0,
+     "seen": "not_seen"
+    },
+    {
+     "kind": "tool",
+     "name": "Read",
+     "source": "builtin",
+     "runs": {
+      "used": 1,
+      "of": 3,
+      "unseen": 0
+     },
+     "uses": 2,
+     "ok": 2,
+     "failed": 0,
+     "refused": 0,
+     "unknown": 0,
+     "seen": "yes"
+    },
+    {
+     "kind": "tool",
+     "name": "Run command",
+     "source": "builtin",
+     "runs": {
+      "used": 1,
+      "of": 3,
+      "unseen": 0
+     },
+     "uses": 1,
+     "ok": 0,
+     "failed": 0,
+     "refused": 0,
+     "unknown": 1,
+     "seen": "yes"
+    }
+   ]
+  },
+  {
+   "name": "nothing could see connections",
+   "runs": [
+    {
+     "run": "r_c000001",
+     "ticket": "t_cccccc",
+     "sees": [
+      "tool"
+     ],
+     "events": []
+    }
+   ],
+   "inventory": [
+    {
+     "kind": "mcp",
+     "name": "weather",
+     "source": "workspace"
+    }
+   ],
+   "items": [
+    {
+     "kind": "mcp",
+     "name": "weather",
+     "source": "workspace",
+     "runs": {
+      "used": 0,
+      "of": 0,
+      "unseen": 1
+     },
+     "uses": 0,
+     "ok": 0,
+     "failed": 0,
+     "refused": 0,
+     "unknown": 0,
+     "seen": "unknown"
+    }
+   ]
+  }
+ ],
+ "names": [
+  {
+   "name": "own skill hidden",
+   "kind": "skill",
+   "item": "candidate-x-offer",
+   "source": "workspace",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": null,
+    "ref": "h_5122bcb9f87887fe"
+   }
+  },
+  {
+   "name": "own skill shared",
+   "kind": "skill",
+   "item": "candidate-x-offer",
+   "source": "workspace",
+   "share_names": true,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": "candidate-x-offer",
+    "ref": null
+   }
+  },
+  {
+   "name": "admin skill sent",
+   "kind": "skill",
+   "item": "acme-sql",
+   "source": "admin",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": "acme-sql",
+    "ref": null
+   }
+  },
+  {
+   "name": "built-in tool sent",
+   "kind": "tool",
+   "item": "Read",
+   "source": "builtin",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": "Read",
+    "ref": null
+   }
+  },
+  {
+   "name": "own agent-tool connection hidden",
+   "kind": "mcp",
+   "item": "my-notes",
+   "source": "harness",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": null,
+    "ref": "h_25cdad2facf017b4"
+   }
+  },
+  {
+   "name": "source none is hidden",
+   "kind": "skill",
+   "item": "unknown-thing",
+   "source": "none",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": null,
+    "ref": "h_1be40455de0769f7"
+   }
+  },
+  {
+   "name": "source mystery is hidden",
+   "kind": "skill",
+   "item": "odd-source",
+   "source": "mystery",
+   "share_names": false,
+   "salt": "local-salt-for-tests",
+   "sent": {
+    "name": null,
+    "ref": "h_9e70e1483e588c9d"
+   }
+  }
+ ],
+ "queue": [
+  {
+   "name": "send oldest first, never today",
+   "share_counts": true,
+   "policy": "on",
+   "connected": true,
+   "today": "2026-11-16",
+   "pending": [
+    "2026-11-14",
+    "2026-11-15",
+    "2026-11-16"
+   ],
+   "expect": {
+    "send": [
+     "2026-11-14",
+     "2026-11-15"
+    ],
+    "drop": []
+   }
+  },
+  {
+   "name": "offline keeps the queue",
+   "share_counts": true,
+   "policy": "on",
+   "connected": false,
+   "today": "2026-11-16",
+   "pending": [
+    "2026-11-14",
+    "2026-11-15",
+    "2026-11-16"
+   ],
+   "expect": {
+    "send": [],
+    "drop": []
+   }
+  },
+  {
+   "name": "older than 60 days dropped",
+   "share_counts": true,
+   "policy": "on",
+   "connected": true,
+   "today": "2026-11-16",
+   "pending": [
+    "2026-09-01",
+    "2026-11-15"
+   ],
+   "expect": {
+    "send": [
+     "2026-11-15"
+    ],
+    "drop": [
+     "2026-09-01"
+    ]
+   }
+  },
+  {
+   "name": "workspace switched off clears",
+   "share_counts": false,
+   "policy": "on",
+   "connected": true,
+   "today": "2026-11-16",
+   "pending": [
+    "2026-11-14",
+    "2026-11-15",
+    "2026-11-16"
+   ],
+   "expect": {
+    "send": [],
+    "drop": [
+     "2026-11-14",
+     "2026-11-15",
+     "2026-11-16"
+    ]
+   }
+  },
+  {
+   "name": "admin switched off clears",
+   "share_counts": true,
+   "policy": "off",
+   "connected": true,
+   "today": "2026-11-16",
+   "pending": [
+    "2026-11-14",
+    "2026-11-15",
+    "2026-11-16"
+   ],
+   "expect": {
+    "send": [],
+    "drop": [
+     "2026-11-14",
+     "2026-11-15",
+     "2026-11-16"
+    ]
+   }
+  }
+ ],
+ "idempotent": [
+  {
+   "name": "same day twice replaces",
+   "puts": [
+    {
+     "workspace": "ws_aaaaaaaaaa",
+     "day": "2026-11-15",
+     "body": {
+      "runs": 3
+     }
+    },
+    {
+     "workspace": "ws_aaaaaaaaaa",
+     "day": "2026-11-15",
+     "body": {
+      "runs": 4
+     }
+    },
+    {
+     "workspace": "ws_bbbbbbbbbb",
+     "day": "2026-11-15",
+     "body": {
+      "runs": 1
+     }
+    }
+   ],
+   "expect": {
+    "results": [
+     "stored",
+     "replaced",
+     "stored"
+    ],
+    "days": 2
+   }
+  }
+ ]
+}

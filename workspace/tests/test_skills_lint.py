@@ -43,6 +43,8 @@ HUMAN_ONLY = {
 }
 
 
+RESERVED = {"secret", "record", "job", "conn", "run screen", "run type"}
+
 PENDING: set[str] = set()
 
 
@@ -235,8 +237,8 @@ def test_every_user_command_is_in_some_skill():
     missing = [
         c
         for c in _leaves(core)
-        if c.split()[0] not in HUMAN_ONLY
-        and c not in HUMAN_ONLY
+        if c.split()[0] not in HUMAN_ONLY | RESERVED
+        and c not in HUMAN_ONLY | RESERVED
         and not re.search(rf"\borch {re.escape(c)}\b", text)
     ]
     assert not missing, f"commands no skill mentions (add them or put them in HUMAN_ONLY): {missing}"

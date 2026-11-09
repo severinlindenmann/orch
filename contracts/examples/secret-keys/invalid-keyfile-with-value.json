@@ -1,0 +1,1 @@
+{"schema": "orch.keys/1", "keys": {"deploy-key": {"type": "key-file", "source": "workspace", "file": "deploy-key", "value": "fake-token-Q7xP2mK9vL4", "added_at": "2026-11-16T09:00:00Z"}}}

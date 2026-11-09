@@ -16,9 +16,14 @@ from orch import (
     cli_chat,
     cli_clients,
     cli_config,
+    cli_conn,
+    cli_job,
     cli_look,
     cli_needs,
+    cli_record,
     cli_run,
+    cli_screen,
+    cli_secret,
     cli_status,
     fields,
     mobile_mode,
@@ -524,6 +529,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_clients.add_parsers(sub, common)
     cli_run.add_parsers(sub, common)
     cli_needs.add_parsers(sub, common)
+    cli_conn.add_parsers(sub, common)
+    cli_job.add_parsers(sub, common)
+    cli_record.add_parsers(sub, common)
+    cli_secret.add_parsers(sub, common)
+    cli_screen.add_parsers(sub, common)
     cli_config.add_parsers(sub, common)
     cli_look.add_parsers(sub, common)
     cli_chat.add_parsers(sub, common)
@@ -538,7 +548,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
     top = p._subparsers._group_actions[0]
     top._choices_actions[:] = [
-        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
+        a
+        for a in top._choices_actions
+        if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS and a.help != argparse.SUPPRESS
     ]
     return p
 
@@ -630,6 +642,13 @@ def run(args: argparse.Namespace) -> None:
     elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
+        pass
+    elif (
+        cli_conn.dispatch(args, root)
+        or cli_job.dispatch(args, root)
+        or cli_record.dispatch(args, root)
+        or cli_secret.dispatch(args, root)
+    ):
         pass
     elif cli_chat.dispatch(args, root) or cli_look.dispatch(args, root):
         pass

@@ -1,0 +1,419 @@
+{
+ "v": 1,
+ "about": "job-events.md reference cases (job_replay, job_is_lost, job_progress_from_line in validate.py).",
+ "replay": [
+  {
+   "name": "happy path",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "step",
+     "step": "a",
+     "label": "A",
+     "state": "running"
+    },
+    {
+     "type": "progress",
+     "done": 1,
+     "total": 2
+    },
+    {
+     "type": "step",
+     "step": "a",
+     "label": "A",
+     "state": "done"
+    },
+    {
+     "type": "end",
+     "status": "ok"
+    }
+   ],
+   "results": [
+    "ok",
+    "ok",
+    "ok",
+    "ok",
+    "ok"
+   ],
+   "state": "ok"
+  },
+  {
+   "name": "before start",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "log",
+     "text": "x"
+    },
+    {
+     "type": "start",
+     "title": "Export"
+    }
+   ],
+   "results": [
+    "not_started",
+    "ok"
+   ],
+   "state": "running"
+  },
+  {
+   "name": "second start",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "start",
+     "title": "Export"
+    }
+   ],
+   "results": [
+    "ok",
+    "already_started"
+   ],
+   "state": "running"
+  },
+  {
+   "name": "after end",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "end",
+     "status": "failed"
+    },
+    {
+     "type": "end",
+     "status": "ok"
+    },
+    {
+     "type": "log",
+     "text": "late"
+    }
+   ],
+   "results": [
+    "ok",
+    "ok",
+    "ended",
+    "ended"
+   ],
+   "state": "failed"
+  },
+  {
+   "name": "other run",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "log",
+     "text": "x",
+     "run": "r_other001"
+    },
+    {
+     "type": "log",
+     "text": "y",
+     "job": "j_other0001"
+    }
+   ],
+   "results": [
+    "ok",
+    "other_run",
+    "other_run"
+   ],
+   "state": "running"
+  },
+  {
+   "name": "lost only by orch",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "lost",
+     "reason": "quiet"
+    },
+    {
+     "type": "lost",
+     "by": "orch",
+     "reason": "quiet"
+    },
+    {
+     "type": "end",
+     "status": "ok"
+    }
+   ],
+   "results": [
+    "ok",
+    "not_allowed",
+    "ok",
+    "ended"
+   ],
+   "state": "lost"
+  },
+  {
+   "name": "by from a program",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "end",
+     "status": "ok",
+     "by": "orch"
+    }
+   ],
+   "results": [
+    "ok",
+    "not_allowed"
+   ],
+   "state": "running"
+  },
+  {
+   "name": "finished step cannot go back",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "step",
+     "step": "a",
+     "label": "A",
+     "state": "failed"
+    },
+    {
+     "type": "step",
+     "step": "a",
+     "label": "A",
+     "state": "running"
+    },
+    {
+     "type": "step",
+     "step": "b",
+     "label": "B",
+     "state": "skipped"
+    }
+   ],
+   "results": [
+    "ok",
+    "ok",
+    "step_finished",
+    "ok"
+   ],
+   "state": "running"
+  },
+  {
+   "name": "progress over total",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "progress",
+     "done": 5,
+     "total": 4
+    },
+    {
+     "type": "progress",
+     "done": 2,
+     "total": 4
+    },
+    {
+     "type": "progress",
+     "done": 1,
+     "total": 4
+    }
+   ],
+   "results": [
+    "ok",
+    "invalid",
+    "ok",
+    "ok"
+   ],
+   "state": "running"
+  },
+  {
+   "name": "cap",
+   "binding": {
+    "job": "j_x7k2m9",
+    "run": "r_8k2m01"
+   },
+   "cap": 3,
+   "events": [
+    {
+     "type": "start",
+     "title": "Export"
+    },
+    {
+     "type": "log",
+     "text": "1"
+    },
+    {
+     "type": "log",
+     "text": "2"
+    },
+    {
+     "type": "log",
+     "text": "3"
+    },
+    {
+     "type": "end",
+     "status": "ok"
+    }
+   ],
+   "results": [
+    "ok",
+    "ok",
+    "ok",
+    "cap",
+    "cap"
+   ],
+   "state": "running"
+  }
+ ],
+ "lost": [
+  {
+   "name": "quiet 10 min",
+   "state": "running",
+   "now": "2026-11-16T09:20:00Z",
+   "last_event_at": "2026-11-16T09:10:00Z",
+   "lost": true
+  },
+  {
+   "name": "quiet 9 min",
+   "state": "running",
+   "now": "2026-11-16T09:19:00Z",
+   "last_event_at": "2026-11-16T09:10:00Z",
+   "lost": false
+  },
+  {
+   "name": "own quiet minutes",
+   "state": "running",
+   "now": "2026-11-16T09:40:00Z",
+   "last_event_at": "2026-11-16T09:10:00Z",
+   "quiet_minutes": 60,
+   "lost": false
+  },
+  {
+   "name": "process gone",
+   "state": "running",
+   "now": "2026-11-16T09:11:00Z",
+   "last_event_at": "2026-11-16T09:10:00Z",
+   "process_gone": true,
+   "lost": true
+  },
+  {
+   "name": "run ended",
+   "state": "running",
+   "now": "2026-11-16T09:11:00Z",
+   "last_event_at": "2026-11-16T09:10:00Z",
+   "run_ended": true,
+   "lost": true
+  },
+  {
+   "name": "already ended",
+   "state": "ok",
+   "now": "2026-11-17T09:00:00Z",
+   "last_event_at": "2026-11-16T09:10:00Z",
+   "lost": false
+  }
+ ],
+ "progress_pattern": [
+  {
+   "line": "12/40 files",
+   "progress": {
+    "done": 12,
+    "total": 40
+   }
+  },
+  {
+   "line": "  3 / 7",
+   "progress": {
+    "done": 3,
+    "total": 7
+   }
+  },
+  {
+   "line": "45% done",
+   "progress": {
+    "done": 45.0,
+    "total": 100,
+    "unit": "%"
+   }
+  },
+  {
+   "line": "99.5%",
+   "progress": {
+    "done": 99.5,
+    "total": 100,
+    "unit": "%"
+   }
+  },
+  {
+   "line": "date 2026/11/16",
+   "progress": null
+  },
+  {
+   "line": "50/0",
+   "progress": null
+  },
+  {
+   "line": "9/4",
+   "progress": null
+  },
+  {
+   "line": "150%",
+   "progress": null
+  },
+  {
+   "line": "took 45% of memory",
+   "progress": null
+  }
+ ]
+}

@@ -1,0 +1,29 @@
+{
+ "name": "markup stays text",
+ "doc": {
+  "schema": "orch.blocks/1",
+  "from": "agent",
+  "blocks": [
+   {
+    "type": "summary",
+    "text": "<b>bold</b> <script>alert(1)</script>"
+   },
+   {
+    "type": "kv",
+    "items": [
+     {
+      "key": "<i>k</i>",
+      "value": "[link](https://x.example)"
+     }
+    ]
+   }
+  ]
+ },
+ "valid": true,
+ "shows": [
+  "<b>bold</b> <script>alert(1)</script>",
+  "<i>k</i>",
+  "[link](https://x.example)"
+ ],
+ "fallback": 0
+}
