@@ -378,12 +378,12 @@ def _hold_reason(root: Path, tid: str, dialog: str | None, boxed: bool = True) -
     r = tmux(
         root, "capture-pane", "-e", "-p", "-t", target(tid), ";",
         "display-message", "-p", "-t", target(tid),
-        "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x} #{alternate_on} #{cursor_flag}",
+        "@@orch #{pane_in_mode} #{cursor_y} #{cursor_x} #{alternate_on} #{cursor_flag} #{pane_width}",
         timeout=QUICK,
     )  # fmt: skip
     body, _, state = r.stdout.rpartition("@@orch ")
     fields = state.split()
-    if r.returncode != 0 or len(fields) < 5:
+    if r.returncode != 0 or len(fields) < 6:
         return "unreadable"
     if fields[0] != "0":
         return "scrolled"
@@ -392,7 +392,7 @@ def _hold_reason(root: Path, tid: str, dialog: str | None, boxed: bool = True) -
     if _dialog_shows(pane, dialog):
         return "dialog"
     try:
-        cy, cx, alt, cursor = int(fields[1]), int(fields[2]), fields[3], fields[4]
+        cy, cx, alt, cursor, width = int(fields[1]), int(fields[2]), fields[3], fields[4], int(fields[5])
     except ValueError:
         return "unreadable"
     lines = pane.split("\n")
@@ -402,6 +402,8 @@ def _hold_reason(root: Path, tid: str, dialog: str | None, boxed: bool = True) -
         return "text" if _box_text(pane, cy, cx, raw) else None
     if alt != "0" or cursor != "1" or not 0 <= cy < len(lines):
         return "unsure"  # an alternate screen, a hidden cursor or a cursor off the capture: any doubt holds
+    if cx == 0 and cy > 0 and len(lines[cy - 1].rstrip()) >= width:
+        return "unsure"  # a draft that filled the row exactly leaves the cursor on an empty row below it
     return "text" if _PROMPT_GLYPH.sub("", lines[cy], count=1).strip() else None
 
 

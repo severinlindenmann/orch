@@ -177,12 +177,12 @@ def test_an_enter_the_tool_dropped_is_sent_again_and_submits_once(proj, run, tui
 B = "─" * 40
 
 
-def _combo(a, plain, raw, mode, cy, cx, alt="0", cursor="1"):
+def _combo(a, plain, raw, mode, cy, cx, alt="0", cursor="1", width=200):
     """The answer of the one-call screen+cursor read (capture-pane -e -p ; display-message)."""
     shown = raw if raw is not None else plain
     if cy == 49:  # "the usual cursor": the last (empty) line of the screen
         cy = len(plain.split("\n")) - 1
-    return subprocess.CompletedProcess(a, 0, f"{shown}\n@@orch {mode} {cy} {cx} {alt} {cursor}\n", "")
+    return subprocess.CompletedProcess(a, 0, f"{shown}\n@@orch {mode} {cy} {cx} {alt} {cursor} {width}\n", "")
 
 
 def _screen(box="", above="", below="  auto mode on"):
@@ -907,13 +907,13 @@ def test_the_real_tmux_accepts_the_one_call_read_and_the_client_target(proj, run
     assert runs_live._client_idle(proj, tid) == 0.0  # nobody attached: unknown, never cancels
 
 
-def _hold(proj, run, monkeypatch, pane, boxed, cy=None, alt="0", cursor="1", cx=0):
+def _hold(proj, run, monkeypatch, pane, boxed, cy=None, alt="0", cursor="1", cx=0, width=200):
     tid, rn, sent, screen = _held(proj, run, monkeypatch)
     lines = pane.split("\n")
 
     def fake(root, *a, **k):
         if a[0] == "capture-pane" and ";" in a:
-            return _combo(a, pane, None, "0", len(lines) - 1 if cy is None else cy, cx, alt, cursor)
+            return _combo(a, pane, None, "0", len(lines) - 1 if cy is None else cy, cx, alt, cursor, width)
         return subprocess.CompletedProcess(a, 0, "", "")
 
     monkeypatch.setattr(runs_live, "tmux", fake)
@@ -949,3 +949,20 @@ def test_a_plain_tool_is_judged_by_the_cursor_line(proj, run, monkeypatch):
 def test_a_plain_tool_with_any_doubt_about_the_cursor_holds(proj, run, monkeypatch, kw):
     pane = "\n".join(["old output", "", ""])
     assert _hold(proj, run, monkeypatch, pane, boxed=False, **kw) == "unsure"
+
+
+def test_a_plain_tool_whose_draft_filled_the_row_holds(proj, run, monkeypatch):
+    """An exact-width draft leaves the cursor at column 0 of an empty row; the draft is on the row above."""
+    draft = "x" * 40
+    pane = "\n".join(["old output", draft, "", ""])
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=40) == "unsure"
+    assert _hold(proj, run, monkeypatch, pane, boxed=False, cy=2, cx=0, width=80) is None  # ordinary output
+
+
+def test_every_adapter_with_a_live_mode_declares_whether_it_draws_a_box():
+    """A plain tool that omitted `prompt_box` would be treated as boxed and wait forever: say it."""
+    from orch import adapters
+
+    for name, a in adapters._registry().items():
+        if a.get("live"):
+            assert isinstance(a["live"].get("prompt_box"), bool), name
