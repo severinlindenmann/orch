@@ -697,6 +697,51 @@ def test_an_agent_session_pull_never_imports(tmp_path, monkeypatch):
     _pull_with(monkeypatch, tmp_path, [msg])
     assert not chat._dm_path(tmp_path, OTHER).exists()
     monkeypatch.setattr(tickets, "agent_tool", lambda: None)
-    _pull_with(monkeypatch, tmp_path, [])  # the workspace's own next pull picks the saved file up
+    second = {**msg, "id": "m_secondmsg0000001", "body": {"text": "again"}}
+    _pull_with(
+        monkeypatch, tmp_path, [second]
+    )  # the workspace's own next pull (with a workspace text) catches up
     monkeypatch.setattr(tickets, "current_actor", lambda by=None: by or "human:me")
-    assert [m["text"] for m in chat.dm_read(tmp_path, OTHER)["messages"]] == ["hi"]
+    assert sorted(m["text"] for m in chat.dm_read(tmp_path, OTHER)["messages"]) == ["again", "hi"]
+
+
+def test_import_runs_only_for_saved_workspace_texts_never_blocks_and_logs_once(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        relay,
+        "_read_dir",
+        lambda root: {"workspaces": [{"id": OTHER, "name": "P", "can_send": {"text": True}}]},
+    )
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    calls = []
+    real = chat._dm_sync_contacts
+    monkeypatch.setattr(chat, "_dm_sync_contacts", lambda *a, **k: calls.append(k) or real(*a, **k))
+    phone = {"id": MID, "from": "ph_abcdefghij", "type": "text", "body": {"text": "x"}}
+    group_free_ws_file = {"id": "m_filemessage00001", "from": OTHER, "type": "file", "body": {}}
+    chat.dm_import_on_pull(tmp_path, [phone, group_free_ws_file])
+    assert calls == []  # no workspace text saved: nothing to do
+    ws_text = {"id": "m_wstext000000001a", "from": OTHER, "type": "text", "body": {"text": "hi"}}
+    chat.dm_import_on_pull(tmp_path, [ws_text])
+    assert calls == [{"wait": 0.3}]
+    # a busy chat lock skips the cycle quietly and fast
+    import time
+
+    lock = tickets.tickets_dir(tmp_path) / ".lock-chat"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("x")
+    started = time.monotonic()
+    chat.dm_import_on_pull(tmp_path, [ws_text])
+    assert time.monotonic() - started < 3 and capsys.readouterr().err == ""
+    lock.unlink()
+    # a failure is logged, but only once per 10 minutes
+    monkeypatch.setattr(chat, "_contacts_list", lambda root: (_ for _ in ()).throw(RuntimeError("boom")))
+    chat._DM_IMPORT_LOGGED[0] = 0.0
+    chat.dm_import_on_pull(tmp_path, [ws_text])
+    chat.dm_import_on_pull(tmp_path, [ws_text])
+    assert capsys.readouterr().err.count("could not import") == 1
+
+
+def test_display_time_clamps(tmp_path):
+    arrival = "2026-11-09T12:00:00Z"
+    assert chat._shown_at("2026-11-08T11:00:00Z", arrival, []) == arrival  # more than 24 h before arrival
+    assert chat._shown_at("1970-01-01T00:00:00Z", arrival, []) == arrival
+    assert chat._shown_at("2026-11-08T13:00:00Z", arrival, []) == "2026-11-08T13:00:00Z"

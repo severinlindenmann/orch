@@ -931,7 +931,7 @@ def _shown_at(peer_at, arrival: str, earlier: list) -> str:
         at = at.replace(tzinfo=dt.UTC) if at.tzinfo is None else at.astimezone(dt.UTC)
         arrived = dt.datetime.fromisoformat(str(arrival).replace("Z", "+00:00"))
         arrived = arrived.replace(tzinfo=dt.UTC) if arrived.tzinfo is None else arrived.astimezone(dt.UTC)
-        if at > arrived + dt.timedelta(minutes=5):
+        if at > arrived + dt.timedelta(minutes=5) or at < arrived - dt.timedelta(hours=24) or at.year < 2000:
             return arrival
         for m in reversed(earlier):
             prev = dt.datetime.fromisoformat(str(m.get("shown_at") or m.get("at")).replace("Z", "+00:00"))
@@ -1066,13 +1066,13 @@ def dm_sync_all(root: Path, by: str | None = None) -> list[dict]:
     return contacts(root)
 
 
-def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
+def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
     # Validate storage before acquiring a lock, which itself creates directories.
     for contact in peers:
         _dm_path(root, contact["ws"])
     if (root / ".orch").is_symlink():
         raise Refused("Chat storage must not be a link.")
-    with tickets._locked(root, "chat"):
+    with tickets._locked(root, "chat", wait=wait):
         data = {}
         for c in peers:
             try:
@@ -1139,13 +1139,31 @@ def _dm_sync_contacts(root: Path, peers: list[dict]) -> None:
             _dm_write(root, ws, data[ws])
 
 
-def dm_import_on_pull(root: Path) -> None:
+_DM_IMPORT_LOGGED = [0.0]
+
+
+def dm_import_on_pull(root: Path, saved: list | None = None) -> None:
     """Called by the workspace's own relay pull (never in an agent session): inbound workspace texts reach their thread
     within one pull cycle, whether or not anyone opens Chat. Same bounded import as `orch chat sync` (seen ids, caps,
-    link and id checks); a failure here never disturbs the pull."""
+    link and id checks). It runs only when this pull saved a workspace text, waits at most 0.3 s for the chat lock
+    (a busy lock skips this cycle; the next pull imports), and a failure never disturbs the pull: it is logged at
+    most once every 10 minutes."""
+    import sys
+    import time
+
     if tickets.agent_tool():
         return
-    with contextlib.suppress(Exception):
+    if saved is not None and not any(
+        isinstance(m, dict) and m.get("type") == "text" and str(m.get("from", "")).startswith("ws_")
+        for m in saved
+    ):
+        return
+    try:
         peers = _contacts_list(root)
         if peers:
-            _dm_sync_contacts(root, peers)
+            _dm_sync_contacts(root, peers, wait=0.3)
+    except Exception as e:  # noqa: BLE001 - bookkeeping, the pull itself must go on
+        busy = "busy" in str(e)
+        if not busy and time.monotonic() - _DM_IMPORT_LOGGED[0] > 600:
+            _DM_IMPORT_LOGGED[0] = time.monotonic()
+            print(f"orch: could not import workspace messages into Chat: {str(e)[:200]}", file=sys.stderr)

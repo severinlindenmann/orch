@@ -1295,7 +1295,7 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
         _api(root, "POST", "/v1/inbox/ack", {"ids": [m["id"] for m in ok]})
     from orch import chat
 
-    chat.dm_import_on_pull(root)  # workspace texts reach their Chat thread within this pull cycle
+    chat.dm_import_on_pull(root, ok)  # a saved workspace text reaches its Chat thread within this pull cycle
     return ok, arrival
 
 
