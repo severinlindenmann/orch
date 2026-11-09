@@ -20,7 +20,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import addons, skills
+from orch import addons, launchenv, skills
 from orch.errors import Refused
 
 _local = threading.local()  # lock depth per thread: reentrant inside one thread only
@@ -173,8 +173,11 @@ def _default_signals() -> None:
             signal.signal(getattr(signal, sig), signal.SIG_DFL)
 
 
-def _call(root: Path, name: str, m: dict, sub: str) -> dict:
-    env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
+def _call(root: Path, name: str, m: dict, sub: str, launch: dict[str, str] | None = None) -> dict:
+    """`launch`: the recorded launch environment of this service (validated): it replaces the caller's
+    allowlisted variables (HOME, PATH, ...), so a restart starts with what the service had."""
+    base = launchenv.apply(dict(os.environ), launch) if launch else dict(os.environ)
+    env = {**base, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
     try:
         r = subprocess.run(
             [sys.executable, "-P", "-m", m["run"], sub, "--json"],
@@ -220,23 +223,27 @@ def _workspace_root(root: Path) -> Path:
     return root
 
 
-def start(root: Path, only: set[str] | None = None) -> list[dict]:
+def start(
+    root: Path, only: set[str] | None = None, envs: dict[str, dict[str, str]] | None = None
+) -> list[dict]:
+    """envs: per add-on the (validated) recorded launch environment to start it with (a restart)."""
     with locked():
-        return _start(root, only)
+        return _start(root, only, envs or {})
 
 
-def _start(root: Path, only: set[str] | None = None) -> list[dict]:
+def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -> list[dict]:
     """Start the background process of every active add-on here. One row per add-on."""
     root = _workspace_root(root).resolve()
     skills.ensure_gitignore(root)  # .orch/run/ (runtime files of the add-ons) stays out of git
     rows = []
+    before = running()
     entries = [
-        e for e in running() if e["workspace"] != str(root) or (only is not None and e["addon"] not in only)
+        e for e in before if e["workspace"] != str(root) or (only is not None and e["addon"] not in only)
     ]
     for name, m in _services(root).items():
         if only is not None and name not in only:
             continue
-        res = _call(root, name, m, "start")
+        res = _call(root, name, m, "start", envs.get(name))
         row = {"addon": name, "running": bool(res.get("running")) and "error" not in res}
         if pid_alive(res.get("pid")):
             row["pid"] = res["pid"]
@@ -246,6 +253,13 @@ def _start(root: Path, only: set[str] | None = None) -> list[dict]:
             row["error"] = _printable(res["error"])
         rows.append(row)
         if row["running"] and isinstance(row.get("pid"), int):
+            old = next((e for e in before if e["workspace"] == str(root) and e["addon"] == name), None)
+            if name in envs:
+                launch = envs[name]  # a restart keeps what it had
+            elif old and old.get("pid") == row["pid"] and old.get("env"):
+                launch = old["env"]  # it was already running: its launch environment stays
+            else:
+                launch = launchenv.capture(root=root)
             entries.append(
                 {
                     "workspace": str(root),
@@ -254,6 +268,7 @@ def _start(root: Path, only: set[str] | None = None) -> list[dict]:
                     "pid": row["pid"],
                     **({"url": row["url"]} if row.get("url") else {}),
                     "started_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "env": launch,
                 }
             )
     _save(entries)
