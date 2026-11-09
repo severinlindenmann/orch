@@ -55,7 +55,7 @@ def can_import(root: Path | None) -> bool:
     --user or PYTHONPATH install)."""
     try:
         argv = hook_argv("x")[:-3] + ["--version"]
-        r = subprocess.run(argv, cwd=root, capture_output=True, timeout=30)
+        r = subprocess.run(argv, cwd=root, capture_output=True, timeout=10)
     except (ValueError, OSError, subprocess.SubprocessError):
         return False
     return r.returncode == 0
