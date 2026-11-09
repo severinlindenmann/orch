@@ -603,13 +603,17 @@ def _init_guard(cwd: Path) -> None:
 
 
 def _patch_is_verdict(root: Path, args) -> bool:
-    """A `ticket patch` that moves a ticket in Review to Done as a person is the verdict "Looks good"."""
+    """A person's `ticket patch` to Done, or one that moves a ticket away from Review, is a verdict and needs
+    the person's proof (no two-step bypass: Review -> active -> done)."""
     if (getattr(args, "by", None) or "").startswith("agent:") or tickets.agent_tool():
         return False
     try:
-        if json.loads(args.data).get("status") != "done":
+        status = json.loads(args.data).get("status")
+        if status is None:
             return False
-        return tickets.load(root, args.id)["status"] == "review"
+        if status == "done":
+            return True
+        return tickets.load(root, args.id)["status"] == "review" and status != "review"
     except (ValueError, AttributeError, KeyError, Refused):
         return False
 

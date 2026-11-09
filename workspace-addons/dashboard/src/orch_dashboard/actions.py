@@ -123,7 +123,7 @@ PROOF_OPS = {
 
 def proof_for(op, args):
     """(core op, target) when this click needs a proof, else None."""
-    if op == "ticket.patch" and isinstance(args.get("data"), dict) and args["data"].get("status") == "done":
+    if op == "ticket.patch" and isinstance(args.get("data"), dict) and "status" in args["data"]:
         return "ticket.verdict", args.get("ticket")
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None

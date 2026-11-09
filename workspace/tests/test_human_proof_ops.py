@@ -246,7 +246,9 @@ def test_dev_workspace_accepts_the_test_human(ws, run, monkeypatch):
 def test_handoff_cap_drops_new_requests(ws):
     for i in range(3):
         assert hp.request_handoff(ws, "update", f"orch{i}", argv=["update", str(i)]) is True
-    assert hp.request_handoff(ws, "update", "orch9", argv=["update", "9"]) is False  # dropped, nothing evicted
+    assert (
+        hp.request_handoff(ws, "update", "orch9", argv=["update", "9"]) is False
+    )  # dropped, nothing evicted
     assert [h["target"] for h in hp.handoffs(ws)] == ["orch0", "orch1", "orch2"]
 
 
@@ -455,3 +457,24 @@ def test_two_threads_with_the_same_token_exactly_one_session_then_revoked(ws, ca
     assert not s.can_mint({"Host": "127.0.0.1:1", "Cookie": f"{pageproof.COOKIE}={first}"}, 1)
     err = capsys.readouterr().err
     assert "used twice" in err and tok not in err and first not in err
+
+
+def test_looks_good_cannot_be_bypassed_in_two_steps(ws, run):
+    tid = _review_ticket(ws, run)
+    rev = lambda: str(tickets.load(ws, tid)["revision"])  # noqa: E731
+    # step 1: away from Review as a person, no proof
+    code, *_ = run(
+        "ticket", "patch", tid, '{"status": "active"}', "--if-revision", rev(), "--by", "human:x", "--json"
+    )
+    assert code == 2 and tickets.load(ws, tid)["status"] == "review"
+    tickets.apply_op(ws, tid, lambda t: t.update(status="active"))  # an agent's own move
+    # step 2: to done as a person, no proof
+    code, *_ = run(
+        "ticket", "patch", tid, '{"status": "done"}', "--if-revision", rev(), "--by", "human:x", "--json"
+    )
+    assert code == 2 and tickets.load(ws, tid)["status"] == "active"
+    # non-status edits stay free
+    code, *_ = run(
+        "ticket", "patch", tid, '{"note": "n"}', "--if-revision", rev(), "--by", "human:x", "--json"
+    )
+    assert code == 0
