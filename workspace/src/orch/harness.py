@@ -218,7 +218,9 @@ def exclude_set(root: Path, tag: str, lines: list[str]) -> bool:
 
 # Local paths relative to .orch/: orch's own .gitignore keeps them out of git with or without git info
 # exclude, written before anything else and independent of linking. It lists itself.
-ORCH_IGNORE = [
+# The contract list (contracts/local-files.md, "Local-only lines"): ONE constant, and a test parses the contract
+# and checks it is the same, so the two cannot drift.
+CONTRACT_IGNORE = [
     ".gitignore",
     ".local-id",
     "secrets/",
@@ -228,11 +230,16 @@ ORCH_IGNORE = [
     "outbox/",
     "addons/",
     "run/",
-    "tmp-refresh/",
     "harness/",
+    "tickets/*/evidence/",
+    "record/",
+    ".usage-salt",
+]
+ORCH_IGNORE = [
+    *CONTRACT_IGNORE,
+    "tmp-refresh/",
     "local/",
     "chat/",
-    "tickets/*/evidence/",
     "tickets/.lock-*",  # per-ticket write locks
     # Personal by default (9 Nov): tickets (history, phone texts, artifacts, the Chat ticket), the counter and the
     # per-person settings stay out of a team repo. Fixed patterns only, never derived from data.
@@ -564,6 +571,13 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
     """Keep secrets and other local files out of git. Fails closed: when neither .orch/.gitignore nor
     .git/info/exclude can be written, it refuses (so no secret is stored unprotected). `lines` are the
     extra root-relative patterns for the exclude block (links, local instruction files)."""
+    if lines is None:  # a rewrite keeps every orch-owned exclude line (skill links, local instruction files)
+        try:
+            from orch import skills
+
+            lines = skills._exclude_lines(root)
+        except (Refused, OSError, ValueError, KeyError):
+            lines = None
     ignore = [*ORCH_IGNORE, *_general_lines(root)]
     text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ignore) + "\n"
     ok = False
