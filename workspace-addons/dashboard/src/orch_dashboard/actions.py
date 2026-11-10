@@ -522,6 +522,32 @@ def _copies_set(a):
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
 
 
+def _copies_clean(a):
+    """The Clean up now button (settings): `orch copy clean`, the same sweep every start runs."""
+    _only(a, ())
+    return ["copy", "clean", "--json"], [], []
+
+
+def _copies_remove_orphaned(a):
+    """Remove the copies of a project that is gone or moved (a person's click; changes are saved first when git
+    can reach the project, else the copies stay). `ws8` is the 8-character folder name `copies_disk` lists."""
+    _only(a, ("ws8",))
+    v = a.get("ws8")
+    if not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{8}", v):
+        raise BadRequest("That is not a copies folder.")
+    return ["copy", "remove-orphaned", v, "--json"], [], []
+
+
+def _copies_retry(a):
+    """Try again (settings), for a copy kept because git was interrupted: `orch copy retry <ticket>` (core
+    removes the stale lock file of that copy and cleans it; a person's click only)."""
+    _only(a, ("ticket",))
+    v = a.get("ticket")
+    if not isinstance(v, str) or not TID.fullmatch(v):
+        raise BadRequest("That is not a ticket.")
+    return ["copy", "retry", v, "--json"], [], []
+
+
 def _ticket_field(a):
     """One add-on field: `orch ticket set <id> <addon>.<field> -- <value>` (core types and checks it; empty clears).
     The add-on must be on here (checked in run_op)."""
@@ -743,6 +769,9 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "copies.set": _copies_set,
+    "copies.clean": _copies_clean,
+    "copies.remove_orphaned": _copies_remove_orphaned,
+    "copies.retry": _copies_retry,
     "ticket.field": _ticket_field,
 }
 
@@ -944,11 +973,18 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "config.permissions",
             "workflow.set",
             "copies.set",
+            "copies.clean",
+            "copies.remove_orphaned",
+            "copies.retry",
             "share.set",
             "private.move",
             "private.allow",
         ):
             _audit(root, op, args)
+        if op in ("copies.clean", "copies.remove_orphaned", "copies.retry"):
+            from . import data as _data
+
+            _data.copies_disk_forget(root)
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None

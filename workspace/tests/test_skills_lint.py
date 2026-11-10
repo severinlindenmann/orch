@@ -23,6 +23,9 @@ HUMAN_ONLY = {
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
     "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
+    "copy clean",  # a person's call (the dashboard's "Clean up now"); `orch copy` is hidden from help
+    "copy retry",  # a person's "Try again" (agents are refused)
+    "copy remove-orphaned",  # a person decides about copies of a moved project
     "init",
     "share",
     "private",  # a person's approvals and Move to private (agents are refused)
