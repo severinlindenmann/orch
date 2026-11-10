@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -535,6 +536,42 @@ def _addon_detail(root: Path, name: str) -> dict | None:
     return out
 
 
+_DISK: dict = {}  # root -> {"at": monotonic, "val": dict | None, "busy": bool}
+_DISK_LOCK = threading.Lock()
+DISK_TTL = 20.0
+
+
+def _disk_count(root: Path, key: str) -> None:
+    try:
+        from orch import worktrees
+
+        val = worktrees.usage(root, seconds=3.0)
+    except Exception:  # noqa: BLE001 - the line just stays at "..."
+        val = None
+    with _DISK_LOCK:
+        _DISK[key] = {"at": time.monotonic(), "val": val, "busy": False}
+
+
+def copies_disk(root: Path) -> dict | None:
+    """{copies, bytes, partial} for the settings line "Copies on this computer", or None while it is being
+    counted (the page shows "..."). The walk runs on a thread (capped by core), never on the request."""
+    key = str(root)
+    with _DISK_LOCK:
+        e = _DISK.get(key)
+        fresh = e is not None and time.monotonic() - e["at"] < DISK_TTL
+        if e is not None and (fresh or e["busy"]):
+            return e["val"]
+        _DISK[key] = {"at": e["at"] if e else 0.0, "val": e["val"] if e else None, "busy": True}
+        old = e["val"] if e else None
+    threading.Thread(target=_disk_count, args=(root, key), daemon=True).start()
+    return old
+
+
+def copies_disk_forget(root: Path) -> None:
+    with _DISK_LOCK:
+        _DISK.pop(str(root), None)
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = (
@@ -560,6 +597,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "copy_setup": copy_setup(root) or "",
+        "copies_disk": copies_disk(root),
         "folder": str(root),
         "share": share,
         "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto

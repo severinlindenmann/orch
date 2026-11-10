@@ -109,7 +109,7 @@ def test_start_writes_its_files_in_orchs_home_and_marks_pending(tmp_path, monkey
     assert (tmp_path / "finish.pending").read_text() == "4242"  # the finisher's pid
     assert calls[0][:2] == ["/base/python", "-I"] and calls[0][2] == str(tmp_path / "finish" / "finish.py")
     job = json.loads((tmp_path / "finish" / "job.json").read_text())
-    assert job["then"][0]["argv"][1:] == ["-P", "-m", "orch", "update", "--project-only"]
+    assert job["then"][0]["argv"][1:] == ["-I", "-P", "-m", "orch", "update", "--project-only"]
 
 
 def test_start_refuses_without_an_outside_python(tmp_path, monkeypatch):

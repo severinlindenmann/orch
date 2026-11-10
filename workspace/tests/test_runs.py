@@ -537,6 +537,8 @@ def test_shared_folder_in_show_and_run_status(proj, new_ticket, run):
     assert code == 0 and '"Fix login form" is also changing this folder.' in out
     code, out, _ = run("run", "status", a, "--json")
     assert json.loads(out)["shared_folder"]["line"].endswith("is also changing this folder.")
+    code, out, _ = run("run", "status", a)  # lane C D6b: the text output has the line too
+    assert code == 0 and out.rstrip().endswith('"Fix login form" is also changing this folder.')
     c = new_ticket("Alone")
     assert "also changing" not in run("ticket", "show", c)[1]
 

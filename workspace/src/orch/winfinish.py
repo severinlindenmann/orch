@@ -194,7 +194,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "registry": [str(registry[0]), registry[1]] if registry else None,
         "env": (extra or {}).get("env"),
         "record": (extra or {}).get("record"),
-        "then": [{"argv": [str(py), "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
+        "then": [{"argv": [str(py), "-I", "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
         "log": str(log_path(home)),
         "done": done,
         "pending": str(home / "finish.pending"),

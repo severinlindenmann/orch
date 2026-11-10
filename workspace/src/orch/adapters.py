@@ -382,6 +382,89 @@ def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None
     return "skipped"
 
 
+def _encode_folder(folder: Path) -> str:
+    """How the tool names a folder's conversation directory (same rule as transcript_exists)."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(folder))
+
+
+def forget_folder(name: str, folder: Path, base: Path, environ: Mapping[str, str] | None = None) -> list[str]:
+    """After a separate copy is removed: take back the traces the tool left for exactly that folder, if its
+    adapter declares them: its conversation folder (session.transcript: <home>/projects/<encoded folder>)
+    and its trust entry (live.trust: the one key of this folder). `folder` is a copy path orch made and
+    already verified (worktrees.remove); `base` is the folder the copies live in: a folder that is not
+    inside it is refused here as well. Returns what was removed; never raises. The tool's config is read,
+    that one key deleted and written back atomically; malformed or changing: left untouched."""
+    done: list[str] = []
+    try:
+        a = load(name, None) if name else {}
+        folder = Path(os.path.abspath(folder))
+        if folder.is_symlink() or not str(folder).startswith(str(Path(os.path.abspath(base))) + os.sep):
+            return done
+        env = os.environ if environ is None else environ
+        t = (a.get("session") or {}).get("transcript")
+        if t and t.get("path", [None])[-2:-1] == ["{folder}"] and t["path"][:-2] == ["projects"]:
+            tb = Path(env.get(t.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / t["home"])
+            enc = _encode_folder(folder)
+            d = tb.joinpath(*t["path"][:-2], enc)
+            if (
+                enc
+                and len(enc) <= 200
+                and d.is_dir()
+                and not d.is_symlink()
+                and d.parent == tb.joinpath(*t["path"][:-2])
+            ):
+                if _rm_tree_nofollow(d):
+                    done.append(f"{name}: conversation folder")
+        tr = (a.get("live") or {}).get("trust")
+        if tr and tr.get("path", [None])[-2:-1] == ["{folder}"]:
+            tb = Path(env.get(tr.get("dir_env") or "", "") or env.get("HOME") or Path.home())
+            if _drop_json_key(tb / tr["file"], [*tr["path"][:-2]], str(folder)):
+                done.append(f"{name}: trust entry")
+    except Exception:  # noqa: BLE001 - cleanup of traces is best effort
+        pass
+    return done
+
+
+def _rm_tree_nofollow(d: Path) -> bool:
+    from orch import worktrees
+
+    return worktrees.rmtree_nofollow(d)
+
+
+def _drop_json_key(f: Path, parents: list[str], key: str) -> bool:
+    """Delete parents...[key] from the JSON object in `f` (exactly that key, everything else kept). Atomic
+    replace after a re-read check; a link, a malformed file or a file that changed meanwhile: untouched."""
+    if f.is_symlink() or not f.is_file():
+        return False
+    for _ in range(3):
+        try:
+            raw = f.read_bytes()
+            doc = json.loads(raw)
+        except (OSError, ValueError):
+            return False
+        node = doc
+        for k in parents:
+            node = node.get(k) if isinstance(node, dict) else None
+        if not isinstance(node, dict) or key not in node:
+            return False
+        del node[key]
+        tmp = f.with_name(f".{f.name}.orch-{os.getpid()}.tmp")
+        try:
+            mode = f.stat().st_mode & 0o777
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                json.dump(doc, out, indent=2, ensure_ascii=False)
+            if f.read_bytes() != raw:
+                continue
+            os.replace(tmp, f)
+            return True
+        except OSError:
+            return False
+        finally:
+            tmp.unlink(missing_ok=True)
+    return False
+
+
 def screen(name: str, root: Path | None, text: str, tid: str) -> dict | None:
     """The first live.screens entry whose match is in the pane text, with its say filled in, or None.
     An entry with answer is a harmless first-run screen the run's wrapper may pass (see runs_live)."""
