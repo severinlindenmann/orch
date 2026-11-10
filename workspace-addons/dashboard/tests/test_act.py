@@ -772,13 +772,20 @@ def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypat
     assert env["ORCH_VIA"] == "dashboard"
 
 
-def test_workflow_state_defaults_off_and_reads_core_config(ws):
-    from orch import config
+def test_workflow_state_defaults_off_and_reads_core_config(tmp_path, monkeypatch):
+    from orch import addons, config
 
     from orch_dashboard.data import load_settings
 
+    # agents_may_finish is a recorded grant: a test workspace pairs only with a test home
+    acct = tmp_path / "acct"
+    (acct / ".orch-test" / "home").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
+    ws = acct / ".orch-test" / "ws"
+    (ws / ".orch").mkdir(parents=True)
     assert load_settings(ws, None)["agents_may_finish"] is False
-    config.set_agents_may_finish(ws, True)
+    config.set_agents_may_finish(ws, True, "human:tester")
     assert load_settings(ws, None)["agents_may_finish"] is True
 
 
@@ -1097,8 +1104,17 @@ def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
     assert argv[argv.index("--by") + 1].startswith("human:")
     assert build_argv("copies.set", {"setup": "  "})[-1] == "none"  # empty clears
     assert build_argv("copies.set", {"setup": "--flag x"})[-2:] == ["--", "--flag x"]  # never an option
-    for bad in ({"mode": "sometimes"}, {"max": 0}, {"max": "3"}, {"max": True}, {"setup": "a\nb"},
-                {"setup": "x" * 501}, {"mode": "off", "max": 2}, {}, {"mode": "off", "extra": 1}):
+    for bad in (
+        {"mode": "sometimes"},
+        {"max": 0},
+        {"max": "3"},
+        {"max": True},
+        {"setup": "a\nb"},
+        {"setup": "x" * 501},
+        {"mode": "off", "max": 2},
+        {},
+        {"mode": "off", "extra": 1},
+    ):
         with pytest.raises(BadRequest):
             build_argv("copies.set", bad)
 

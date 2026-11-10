@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -62,6 +63,14 @@ def _actor(args) -> str:
     return "agent:" + str(tickets.agent_tool()) if tickets.agent_tool() else who
 
 
+def _person(args, root: Path, op: str, target: str, **kw) -> str:
+    """A person's own decision (H1): the proof from the page, or a hand-off. An agent is refused in words."""
+    who = humanproof.person_by(root, args, op, target, **kw)
+    if not who.startswith("human:"):
+        raise Refused(humanproof.AGENT_REFUSED)
+    return who
+
+
 def _out(args, data, text: str) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
@@ -71,7 +80,7 @@ AGENT_ASKS = (
 )
 
 
-def _person(root: Path, args, op: str, target: str, what: str, parts: dict, exact: str | None = None) -> str:
+def _proven(root: Path, args, op: str, target: str, what: str, parts: dict, exact: str | None = None) -> str:
     """The person behind a human-only op (invariant H1, one proof mechanism: humanproof.person_by). With
     --proof-stdin: the person in a verified proof. An agent is refused and told to use `orch ask`. A person at
     a terminal without a proof leaves a hand-off on the page and is refused until they click there."""
@@ -234,12 +243,17 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
-        if args.value == "on" and _actor(args).startswith("agent:"):
-            raise Refused(
-                "Only a person can allow agents to mark tickets Done. Ask them to run: "
-                "orch config set workflow.agents_may_finish on"
+        who = None
+        if args.value == "on":
+            if _actor(args).startswith("agent:"):
+                raise Refused(
+                    "Only a person can allow agents to mark tickets Done. Ask them to run: "
+                    "orch config set workflow.agents_may_finish on"
+                )
+            who = _person(
+                args, root, "config.agents_may_finish", "on", parts={"setting": "agents_may_finish"}
             )
-        value = config.set_agents_may_finish(root, args.value == "on")
+        value = config.set_agents_may_finish(root, args.value == "on", who or _actor(args))
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if _actor(args).startswith("agent:"):  # copy_setup is a command orch runs: only a person chooses it
@@ -251,6 +265,15 @@ def _config(args, root: Path) -> None:
             v = config.set_copies_max(root, args.value)
             text = f"Saved: at most {v} separate copies at once."
         else:
+            setup = args.value.strip()
+            if setup not in (
+                "",
+                "none",
+            ):  # a command orch runs in every new copy: a person's proof, bound to it
+                _person(
+                    args, root, "config.copy_setup", hashlib.sha256(setup.encode()).hexdigest(),
+                    value=args.value, exact=setup,
+                )  # fmt: skip
             v = config.set_copy_setup(root, args.value)
             text = f"Saved: a new copy is prepared with: {v}." if v else "Saved: nothing runs in a new copy."
         _out(args, {args.key: v}, text)
@@ -262,7 +285,15 @@ def _config(args, root: Path) -> None:
             f"Saved: workspace.code = {code}. New tickets get {code}-<n>; existing keys stay as they are.",
         )
     elif args.sub == "set" and args.key == "workspace.permissions":
-        mode = config.set_permissions(root, args.value, _actor(args))
+        who = _actor(args)
+        modes = config.PERMISSION_MODES
+        if (
+            args.value in modes
+            and not who.startswith("agent:")
+            and modes.index(args.value) > modes.index(config.permissions(root))
+        ):  # giving agents MORE room is a person's decision (lowering is free for anyone)
+            who = _person(args, root, "config.permissions", args.value, parts={"mode": args.value})
+        mode = config.set_permissions(root, args.value, who)
         _out(
             args,
             {"workspace.permissions": mode},
@@ -306,7 +337,7 @@ def _config(args, root: Path) -> None:
                 parts["interactive"] = args.interactive
             if args.prompt_via:
                 parts["prompt"] = args.prompt_via
-            _person(
+            _proven(
                 root,
                 args,
                 "config.agent_add",
@@ -343,6 +374,8 @@ def _share(args, root: Path) -> None:
     if args.state != "status":
         if tickets.agent_tool():
             raise Refused("Only a person can share the orch entry with the team.")
+        if args.state == "on":  # off needs no proof
+            _person(args, root, "config.share", "on", parts={})
         (harness.share_on if args.state == "on" else harness.share_off)(root)
     on = harness.share_state(root)
     _out(
@@ -394,7 +427,7 @@ def _private(args, root: Path) -> None:
         config.require_person(_actor(args), "allow an agent command to run")  # an agent hears the ask text
         if shown is None or not shown["showable"] or shown["key"] != args.key:
             raise Refused("That command is not waiting for a yes here (or changed). Look at: orch private")
-        _person(
+        _proven(
             root,
             args,
             "private.allow",
@@ -407,7 +440,7 @@ def _private(args, root: Path) -> None:
         _out(args, {"allowed": [done]}, f"Allowed on this computer: {done}.")
         return
     if args.state == "move":
-        who = _person(root, args, "private.move", "move", "move these files out of the team repo", {})
+        who = _proven(root, args, "private.move", "move", "move these files out of the team repo", {})
         moved = harness.move_to_private(root, who)
         if args.json:
             print(json.dumps({"moved": len(moved)}))

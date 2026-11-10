@@ -54,15 +54,27 @@ PROOF_OPS = {
     "ticket.done": ("ticket.verdict", lambda a: a.get("ticket")),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),
     "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:reopen"),
+    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:edit"),
+    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:remove"),
 }
 
 
 def proof_for(op, args):
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None
+
+
+# What any scripted request may do without a page session: add or move a task (an agent does the same through
+# the CLI as itself), and, KNOWN GAP (follow-up), start/stop a run and the phone switch: an embedded Focus page
+# (under the dashboard, no session of its own) keeps its started-run bookkeeping in Focus, so these three stay
+# open until that has a session path. Every other op acts as the person and needs the page session (watch-only
+# without one); an op in PROOF_OPS also needs the person's proof.
+FREE_OPS = frozenset({"check.add", "check.move", "run.start", "run.stop", "mobile.set"})
+
+
+def needs_session(op) -> bool:
+    return isinstance(op, str) and op not in FREE_OPS
 
 
 def _id(rx: re.Pattern, v, what: str) -> str:
@@ -282,7 +294,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
     need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
-    if need and mint is None:
+    if (need or (orch_bin == SELF and needs_session(op))) and mint is None:
         raise NeedsPerson("Open Focus from this computer (orch focus open) to do this.")
     code, stdout, stderr = orch(root, orch_bin, argv, proof=mint(*need) if need else None)
     if code == 124:

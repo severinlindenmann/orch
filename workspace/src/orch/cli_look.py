@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import look, tickets
+from orch import humanproof, look, tickets
 from orch.errors import Refused
 
 
@@ -74,7 +74,12 @@ def dispatch(args, root: Path) -> bool:
         _out(args, d, _show_text(d))
     elif args.sub == "shared-pages":
         if args.value is not None:
-            look.set_shared_pages(root, args.value == "on", _actor(args))
+            who = _actor(args)
+            if not who.startswith("agent:"):  # a person's choice (any change): the proof, or a hand-off
+                who = humanproof.person_by(
+                    root, args, "look.shared_pages", args.value, parts={"on": args.value == "on"}
+                )
+            look.set_shared_pages(root, args.value == "on", who)
         on = look.shared_pages(root)
         state = "on" if on else "off"
         _out(args, {"on": on}, f"Shared file pages show the workspace name and icon: {state}")
@@ -83,7 +88,14 @@ def dispatch(args, root: Path) -> bool:
             raise Refused("Say what to change: --icon <id>|none or --color <token>|auto.")
         icon = look.UNSET if args.icon is None else (None if args.icon.lower() == "none" else args.icon)
         color = look.UNSET if args.color is None else (None if args.color.lower() == "auto" else args.color)
-        d = look.set_look(root, icon, color, _actor(args))
+        who = _actor(args)
+        if not who.startswith(
+            "agent:"
+        ):  # "chosen by a person" is a person's say-so: the proof, or a hand-off
+            who = humanproof.person_by(
+                root, args, "look.icon", "look", parts={"icon": str(args.icon), "color": str(args.color)}
+            )
+        d = look.set_look(root, icon, color, who)
         late = [s for s, ok in d["sent"].items() if not ok]
         text = f"Icon: {d['icon'] or 'first letter'}   Colour: {d['color'] or 'auto'}"
         if late:

@@ -66,7 +66,7 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -75,6 +75,7 @@ SETTING_DEFAULTS = {
     "insights.share_names": False,
     "secret.allow_get": False,
     "conn.allow": False,
+    "workflow.agents_may_finish": False,
 }
 _TARGET_RE = re.compile(r"[A-Za-z0-9_.:@-]+")
 _BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
@@ -765,8 +766,27 @@ def _settings_write(root: Path, setting: str, value, by: str) -> None:
         _write_private(path, json.dumps(data, indent=2, sort_keys=True))
 
 
+_CONN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # same shape as inventory.NAME_RE
+
+
+def is_conn_grant_key(setting) -> bool:
+    """Exactly `conn.allow.<connection name>` with a well-formed name (no arbitrary suffix)."""
+    if not isinstance(setting, str) or not setting.startswith("conn.allow."):
+        return False
+    return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
+
+
 def record_set(root: Path, setting: str, value, by: str) -> None:
-    """A person set the value with a verified proof: the caller also writes the file. Record = the grant."""
+    """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
+    but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
+    an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
+    moment where the file says on and the record is stale."""
+    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting):
+        raise Refused("That is not a setting a person has to allow.")
+    if value is not False and not str(by).startswith("human:"):
+        raise Refused(AGENT_REFUSED)
+    if value is False and not str(by).startswith("human:"):
+        by = "reset"  # a lowering by anyone else: the tombstone names no person
     _settings_write(root, setting, value, by)
 
 
@@ -1306,7 +1326,7 @@ CURRENT_ARGV: list[str] | None = None
 HANDOFF_HEADS = {
     "ticket.answer": (("answer",),),
     "run.human_input": (("run", "send"),),
-    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch")),
+    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch"), ("ticket", "status")),
     "relay.allow": (("relay", "allow"),),
     "relay.connect": (("relay", "connect"),),
     "update": (("update",),),
@@ -1315,9 +1335,18 @@ HANDOFF_HEADS = {
     "check.wont_do": (("check", "wont-do"),),
     "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
     "chat.make_ticket": (("chat", "make-ticket"),),
+    "config.agents_may_finish": (("config", "set"),),
+    "config.copy_setup": (("config", "set"),),
+    "config.permissions": (("config", "set"),),
+    "config.agent_add": (("config", "agent", "add"),),
     "private.allow": (("private", "allow"),),
     "private.move": (("private", "move"),),
-    "config.agent_add": (("config", "agent", "add"),),
+    "config.share": (("share", "on"),),
+    "look.shared_pages": (("look", "shared-pages"),),
+    "look.icon": (("look", "set"),),
+    "group.write_as_person": (("relay", "group", "say"), ("relay", "group", "reply")),
+    "group.remove_member": (("relay", "group", "remove"),),
+    "group.share_file": (("relay", "group", "share"), ("relay", "group", "send-file")),
 }
 
 
@@ -1359,7 +1388,7 @@ def agent_add_exact(command: str, interactive: str | None = None, prompt: str | 
 
 def exact_in_argv(op: str, exact: str, argv) -> bool:
     """The full value(s) shown in the card's exact block must be part of the command that runs."""
-    if op in ("relay.connect", "addon.add_local"):
+    if op in ("relay.connect", "addon.add_local", "group.share_file"):
         return exact in " ".join(argv)
     if op == "config.agent_add":
         words = list(argv)
@@ -1374,7 +1403,7 @@ def exact_in_argv(op: str, exact: str, argv) -> bool:
     return True
 
 
-EXACT_OPS = ("relay.connect", "addon.add_local", "config.agent_add", "private.allow")
+EXACT_OPS = ("relay.connect", "addon.add_local", "group.share_file", "config.agent_add", "private.allow")
 
 
 def _clean_argv(argv) -> list[str] | None:
@@ -1386,13 +1415,26 @@ def _clean_argv(argv) -> list[str] | None:
         if a == "--by":
             skip = True
             continue
-        if a.startswith("--by=") or a == "--proof-stdin":
-            continue
+        if a.startswith("--by=") or a in ("--proof-stdin", "--unchecked-ok"):
+            continue  # --unchecked-ok skips the password check: a hand-off refuses in words, the page asks
         out.append(a)
     return out if all(isinstance(x, str) and len(x) <= 4000 for x in out) and len(out) <= 20 else None
 
 
 VALUE_MAX = 4000  # the exact text a person approves is shown whole; longer is not queued
+
+
+def group_target(root: Path, host: str, group: str) -> str:
+    """The proof target for an act in a joined group: `<host workspace id>:<group id>`. A group id
+    is only unique per host, so the host is part of what the person approves. The CLI and the dashboard both
+    build it here (one place), so a proof for host A is never good for host B."""
+    from orch import relay
+
+    try:
+        host = relay.resolve(root, host) if root is not None else host
+    except Refused:
+        pass  # the command itself refuses an unknown host in words
+    return f"{host}:{group}"
 
 
 def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
