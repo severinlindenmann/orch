@@ -269,8 +269,8 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
 
 def _no_hooks(cwd: Path | None = None, root: Path | None = None) -> str:
     """core.hooksPath for every call. POSIX: /dev/null (a device: it can't be a folder or be redirected).
-    Windows: the absolute device path //./NUL (git for Windows is to accept it; the next Windows run checks it;
-    if it rejects it, use a random 32-hex name below %LOCALAPPDATA%\\orch, never created).
+    Windows: the absolute device path //./NUL (git for Windows is to accept it; the next Windows run
+    checks it; if it rejects it, use a random 32-hex name below %LOCALAPPDATA%\\orch, never created).
     Invariant: hooksPath is a fixed device path or a random never-created name; never derived from a file
     or folder that exists. (cwd and root are accepted for the callers' sake and unused.)"""
     if os.name != "nt":
