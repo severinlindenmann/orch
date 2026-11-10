@@ -224,11 +224,18 @@ agent input. Binding ticket and workspace means a valid line copied into another
 `<guarded orch home>/keys/<ws>/delivered.json`, checked and written atomically on consume, so deleting `delivered_at` or
 re-appending a consumed line never delivers it again (reference `pending_is_human`,
 `pending_deliver`, vectors `pending`, `deliver`).
-**Synced "won't do"** (`check.wont_do` arriving through a sync merge): another machine's human key cannot be checked here, so it
-counts as a person's only when the receiving core's relay client recorded it from a relay-authenticated sender (a phone, or a
-person-attributed message the relay authenticated), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`, `"wontdo1." + workspace id + "." + canonical JSON
-of the item`), a different prefix from the pending MAC so the two can never be confused. Anything else is an agent's
-(reference `wontdo_is_human`, vectors `wont_do`).
+**Synced "won't do"** (`check.wont_do` arriving through a sync merge, and its undo): another machine's human key cannot be checked
+here, so a step's decision counts as a person's only when the receiving core's relay client recorded it from a
+relay-authenticated sender (a phone, or a person-attributed message the relay authenticated), or when it carries the receiving
+core's own MAC = HMAC-SHA256(`human.key`, `"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of
+{check, wont_do, reason}`) (an undo is the same record with `wont_do` false and `reason` null), a different prefix from the pending
+MAC so the two can never be confused. The MAC binds WHERE the decision belongs, so a valid decision copied onto another ticket or
+step is not the person's; it covers the decision record, not the whole step (renames, evidence and merge normalisation do not
+invalidate it) and is stored on the step as `wont_mac`. The text of `by` (`human:...`) is **never** looked at. The sync merge
+(`merge_ticket(..., person)`, `person` = the receiving core's verdict, `humanproof.wont_verifier`; no verifier = nobody is a person)
+keeps a Won't do only when it verifies; a synced copy that DROPS a verified Won't do is an undo under the same rule (kept unless
+the dropping copy carries the core's MAC for the undo record); a step one side deleted outright comes back. Anything else is an
+agent's (reference `wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
 
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).

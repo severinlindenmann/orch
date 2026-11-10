@@ -1076,9 +1076,10 @@
    "name": "synced won't-do without relay attribution -> not the person's",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
+    "wont_do": true,
     "reason": "not needed"
    },
    "relay_authenticated_sender": false,
@@ -1089,11 +1090,11 @@
    "name": "synced won't-do with by human: only",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
-    "reason": "not needed",
-    "by": "human:severin"
+    "wont_do": true,
+    "reason": "not needed"
    },
    "relay_authenticated_sender": false,
    "mac": null,
@@ -1103,9 +1104,10 @@
    "name": "recorded from a relay-authenticated phone sender",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
+    "wont_do": true,
     "reason": "not needed"
    },
    "relay_authenticated_sender": true,
@@ -1116,52 +1118,126 @@
    "name": "receiving core's own wontdo1 MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
+    "wont_do": true,
     "reason": "not needed"
    },
    "relay_authenticated_sender": false,
-   "mac": "rp94TB3QmXKONkYBWgpZ5Y07qA2vSrKC-efxbRVcqjk",
+   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
    "human": true
+  },
+  {
+   "name": "the undo (wont_do false, reason null) with the core's own MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": false,
+    "reason": null
+   },
+   "relay_authenticated_sender": false,
+   "mac": "Vljhx4-IgUVHpoAaEvq9BHIMVEdq15UWkqizGOI6-0g",
+   "human": true
+  },
+  {
+   "name": "an undo MAC is not a won't-do MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "Vljhx4-IgUVHpoAaEvq9BHIMVEdq15UWkqizGOI6-0g",
+   "human": false
+  },
+  {
+   "name": "valid decision copied onto another ticket -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_other99",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
+   "human": false
+  },
+  {
+   "name": "valid decision copied onto another step -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c3",
+    "wont_do": true,
+    "reason": "not needed"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
+   "human": false
+  },
+  {
+   "name": "reason changed after signing -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "other"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
+   "human": false
   },
   {
    "name": "another machine's MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
+    "wont_do": true,
     "reason": "not needed"
    },
    "relay_authenticated_sender": false,
-   "mac": "aexF4UZBK53dmbYWTZTXiZwQAym1_SoGhpKpOWyOqZk",
+   "mac": "6hAQGVJr8cTtFtCFsP0xqu6nktXpuVGGAabsHsVCeic",
    "human": false
   },
   {
    "name": "MAC made for another workspace",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
+    "wont_do": true,
     "reason": "not needed"
    },
    "relay_authenticated_sender": false,
-   "mac": "d2CinkJuyLMLdxb6u2AO_6pY2gch7hRefO942LgEV9w",
+   "mac": "qcMK4ra3tInTcqkX6v2LxtxQ0EiTcy_jR8k0AoxBArs",
    "human": false
   },
   {
    "name": "a pending1 MAC over the same JSON is not a won't-do MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
+    "wont_do": true,
     "reason": "not needed"
    },
    "relay_authenticated_sender": false,
-   "mac": "5dlQ9ufItG_om8dULXlqhi-rE-p9X3TF4sM7xmzmmIQ",
+   "mac": "cOI4OHRAm702s8pobhriFZe0BOLL9g453iNjJPo6vAI",
    "human": false
   }
  ]

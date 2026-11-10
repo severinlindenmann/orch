@@ -10,16 +10,34 @@ from orch_sync.merge import merge_counter, merge_ticket, old_keys_of, renumber_k
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 VEC = json.loads((CONTRACTS / "vectors" / "ticket-merge-v1.json").read_text(encoding="utf-8"))
-SCHEMA = Draft202012Validator(json.loads((CONTRACTS / "ticket.schema.json").read_text(encoding="utf-8")),
-                              format_checker=FormatChecker())
+SCHEMA = Draft202012Validator(
+    json.loads((CONTRACTS / "ticket.schema.json").read_text(encoding="utf-8")), format_checker=FormatChecker()
+)
 NOW = VEC["now"]
+
+
+def PERSON(step, ticket):  # the vectors' stand-in for the receiving core (humanproof.wont_verifier)
+    return step.get("wont_mac") == f"valid:{ticket}:{step.get('id')}"
+
+
 T1, T2, T3 = "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z", "2026-11-09T10:00:00Z"
 
 
 def tk(**kw):
-    t = {"schema": "orch.ticket/1", "id": "t_abc123", "key": "DM1-1", "title": "Invoice export", "status": "open",
-         "created_at": T1, "updated_at": T1, "checklist": [], "refs": [], "questions": [], "history": [],
-         "revision": 1}
+    t = {
+        "schema": "orch.ticket/1",
+        "id": "t_abc123",
+        "key": "DM1-1",
+        "title": "Invoice export",
+        "status": "open",
+        "created_at": T1,
+        "updated_at": T1,
+        "checklist": [],
+        "refs": [],
+        "questions": [],
+        "history": [],
+        "revision": 1,
+    }
     t.update(kw)
     return t
 
@@ -37,11 +55,14 @@ def texts(t):
 
 # ---- the shared vectors, both directions -------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("c", VEC["tickets"], ids=lambda c: c["name"])
 def test_vector_ticket(c):
     before = deepcopy((c["base"], c["a"], c["b"]))
-    assert merge_ticket(c["base"], c["a"], c["b"], NOW) == c["expect"]
-    assert merge_ticket(c["base"], c["b"], c["a"], NOW) == c["expect"]  # symmetric: two machines converge
+    assert merge_ticket(c["base"], c["a"], c["b"], NOW, PERSON) == c["expect"]
+    assert (
+        merge_ticket(c["base"], c["b"], c["a"], NOW, PERSON) == c["expect"]
+    )  # symmetric: two machines converge
     assert (c["base"], c["a"], c["b"]) == before  # pure
     if c["expect"] is not None:
         assert list(SCHEMA.iter_errors(c["expect"])) == []
@@ -69,12 +90,17 @@ def test_every_rule_has_a_vector():
 
 # ---- hand-written expectations (so the vectors are not only the code's own output) -------------------------
 
+
 def test_scalar_loser_goes_to_history_and_newer_wins():
     base = tk()
     m = merge_ticket(base, up(base, T2, title="Export invoices"), up(base, T3, title="CSV export"), NOW)
     assert m["title"] == "CSV export"
-    assert m["history"][-1] == {"at": NOW, "by": "agent:sync", "text": 'sync: title "Export invoices" was replaced',
-                                "lost": {"field": "title", "value": "Export invoices"}}
+    assert m["history"][-1] == {
+        "at": NOW,
+        "by": "agent:sync",
+        "text": 'sync: title "Export invoices" was replaced',
+        "lost": {"field": "title", "value": "Export invoices"},
+    }
 
 
 def test_one_sided_change_wins_without_history():
@@ -99,10 +125,20 @@ def test_done_with_a_new_open_item_becomes_active():
 
 def test_checklist_clash_older_side_keeps_the_id_and_refs_follow():
     c = lambda t: {"id": "c1", "text": t, "done": False, "evidence": []}
-    q = {"id": "q1", "text": "?", "options": [], "recommended": None, "answer": None, "answered_by": None,
-         "via": None, "check": "c1"}
+    q = {
+        "id": "q1",
+        "text": "?",
+        "options": [],
+        "recommended": None,
+        "answer": None,
+        "answered_by": None,
+        "via": None,
+        "check": "c1",
+    }
     base = tk()
-    m = merge_ticket(base, up(base, T2, checklist=[c("old")]), up(base, T3, checklist=[c("new")], questions=[q]), NOW)
+    m = merge_ticket(
+        base, up(base, T2, checklist=[c("old")]), up(base, T3, checklist=[c("new")], questions=[q]), NOW
+    )
     assert [(x["id"], x["text"]) for x in m["checklist"]] == [("c1", "old"), ("c2", "new")]
     assert m["questions"][0]["check"] == "c2"
 
@@ -115,27 +151,52 @@ def test_done_needs_evidence_else_open():
 
 def test_both_answers_newer_wins_other_kept_in_history():
     def q(ans, by):
-        return {"id": "q1", "text": "?", "options": [], "recommended": None, "answer": ans, "answered_by": by,
-                "via": "cli" if ans else None}
+        return {
+            "id": "q1",
+            "text": "?",
+            "options": [],
+            "recommended": None,
+            "answer": ans,
+            "answered_by": by,
+            "via": "cli" if ans else None,
+        }
+
     base = tk(questions=[q(None, None)])
-    m = merge_ticket(base, up(base, T2, questions=[q("csv", "human:A")]), up(base, T3, questions=[q("xlsx", "human:B")]), NOW)
-    assert m["questions"][0]["answer"] == "xlsx" and 'another answer "csv" by human:A was replaced' in texts(m)[-1]
+    m = merge_ticket(
+        base,
+        up(base, T2, questions=[q("csv", "human:A")]),
+        up(base, T3, questions=[q("xlsx", "human:B")]),
+        NOW,
+    )
+    assert (
+        m["questions"][0]["answer"] == "xlsx"
+        and 'another answer "csv" by human:A was replaced' in texts(m)[-1]
+    )
 
 
 def test_history_and_evidence_never_lost():
     h = lambda at, t: {"at": at, "by": "human:A", "text": t}
     base = tk(history=[h(T1, "created")])
-    m = merge_ticket(base, up(base, T2, history=base["history"] + [h(T3, "x")]),
-                     up(base, T3, history=base["history"] + [h(T2, "y")]), NOW)
+    m = merge_ticket(
+        base,
+        up(base, T2, history=base["history"] + [h(T3, "x")]),
+        up(base, T3, history=base["history"] + [h(T2, "y")]),
+        NOW,
+    )
     assert texts(m) == ["created", "y", "x"]
 
 
 def test_sessions_cap_keeps_newest():
     def s(i):
         return {"agent": "a", "id": f"s{i}", "host": f"h{i}", "last_used": f"2026-11-09T08:{i:02d}:00Z"}
+
     base = tk()
-    m = merge_ticket(base, up(base, T2, sessions=[s(i) for i in range(20)]),
-                     up(base, T3, sessions=[s(i) for i in range(20, 40)]), NOW)
+    m = merge_ticket(
+        base,
+        up(base, T2, sessions=[s(i) for i in range(20)]),
+        up(base, T3, sessions=[s(i) for i in range(20, 40)]),
+        NOW,
+    )
     assert len(m["sessions"]) == 32 and m["sessions"][-1]["id"] == "s39" and m["sessions"][0]["id"] == "s8"
 
 
@@ -162,6 +223,7 @@ def test_unmergeable_gives_none(bad):
 
 # ---- counter and key clash ----------------------------------------------------------------------------------
 
+
 def test_counter_highest_wins_and_counts_old_keys():
     assert merge_counter({"last": 3}, {"last": 5}, {"last": 4})["last"] == 5
     assert merge_counter({"last": 3}, {"last": 3}, {"last": 3}, ["DM1-12", "junk"])["last"] == 12
@@ -174,16 +236,37 @@ def test_key_clash_keeps_old_key_resolvable_and_two_machines_agree():
     ch2, c2 = renumber_key_clashes({"t_bbb222": t2, "t_aaa111": t1}, {"last": 14}, NOW)
     assert (ch1, c1) == (ch2, c2) and list(ch1) == ["t_bbb222"] and c1["last"] == 15
     new = ch1["t_bbb222"]
-    assert new["key"] == "DM1-15" and old_keys_of(new) == ["DM1-13"] and "DM1-13 to DM1-15" in new["history"][-1]["text"]
+    assert (
+        new["key"] == "DM1-15"
+        and old_keys_of(new) == ["DM1-13"]
+        and "DM1-13 to DM1-15" in new["history"][-1]["text"]
+    )
     assert list(SCHEMA.iter_errors(new)) == []
 
 
 # ---- property style: random three-way inputs ---------------------------------------------------------------
 
+
 def _rand_side(rng, base, at):
     t = deepcopy(base)
     for _ in range(rng.randint(1, 4)):
-        k = rng.choice(["title", "status", "owner", "check", "uncheck", "q", "hist", "ref", "ext", "del", "created", "schema", "key"])
+        k = rng.choice(
+            [
+                "title",
+                "status",
+                "owner",
+                "check",
+                "uncheck",
+                "q",
+                "hist",
+                "ref",
+                "ext",
+                "del",
+                "created",
+                "schema",
+                "key",
+            ]
+        )
         if k == "title":
             t["title"] = rng.choice(["A", "B", "C"])
         elif k == "status":
@@ -193,20 +276,36 @@ def _rand_side(rng, base, at):
         elif k == "check":
             n = rng.randint(1, 3)
             t["checklist"] = [c for c in t["checklist"] if c["id"] != f"c{n}"] + [
-                {"id": f"c{n}", "text": rng.choice(["x", "y", "z"]), "done": False, "evidence": []}]
+                {"id": f"c{n}", "text": rng.choice(["x", "y", "z"]), "done": False, "evidence": []}
+            ]
         elif k == "uncheck" and t["checklist"]:
             t["checklist"].pop(rng.randrange(len(t["checklist"])))
         elif k == "q":
             n = rng.randint(1, 2)
             ans = rng.choice([None, "yes", "no"])
             t["questions"] = [x for x in t["questions"] if x["id"] != f"q{n}"] + [
-                {"id": f"q{n}", "text": rng.choice(["p", "r"]), "options": [], "recommended": None, "answer": ans,
-                 "answered_by": "human:A" if ans else None, "via": "cli" if ans else None}]
+                {
+                    "id": f"q{n}",
+                    "text": rng.choice(["p", "r"]),
+                    "options": [],
+                    "recommended": None,
+                    "answer": ans,
+                    "answered_by": "human:A" if ans else None,
+                    "via": "cli" if ans else None,
+                }
+            ]
         elif k == "hist":
-            t["history"].append({"at": f"2026-11-09T0{rng.randint(1, 9)}:00:00Z", "by": "human:A",
-                                 "text": rng.choice(["m", "n", "o"])})
+            t["history"].append(
+                {
+                    "at": f"2026-11-09T0{rng.randint(1, 9)}:00:00Z",
+                    "by": "human:A",
+                    "text": rng.choice(["m", "n", "o"]),
+                }
+            )
         elif k == "ref":
-            t["refs"] = [{"kind": "web", "url": f"https://e.com/{rng.randint(1, 3)}", "at": T1, "by": "human:A"}]
+            t["refs"] = [
+                {"kind": "web", "url": f"https://e.com/{rng.randint(1, 3)}", "at": T1, "by": "human:A"}
+            ]
         elif k == "ext":
             t.setdefault("ext", {})["automation"] = {"cron": rng.choice(["a", "b"])}
         elif k == "created":
@@ -238,9 +337,18 @@ def test_property_symmetry_purity_and_no_loss(seed):
     for side in (a, b):  # history is never dropped
         assert {(h["at"], h["by"], h["text"]) for h in side["history"]} <= have
     one = merge_ticket(base, a, a, NOW)  # merging a side with itself changes nothing but the revision
+
     def norm(t):  # history and the order of added items come back in a fixed order
-        return {k: (sorted(v, key=lambda x: json.dumps(x, sort_keys=True)) if k in ("history", "checklist", "questions") else v)
-                for k, v in t.items() if k != "revision"}
+        return {
+            k: (
+                sorted(v, key=lambda x: json.dumps(x, sort_keys=True))
+                if k in ("history", "checklist", "questions")
+                else v
+            )
+            for k, v in t.items()
+            if k != "revision"
+        }
+
     assert norm(one) == norm(a)
 
 
@@ -254,6 +362,7 @@ def test_ext_sync_matches_its_contract_schema():
 
 
 # ---- review fixes (Opus review of #372) ---------------------------------------------------------------------
+
 
 def _nest(n):
     d = {"leaf": 1}
@@ -281,9 +390,16 @@ def test_size_caps():
 
 def test_garbage_types_never_raise():
     base = tk()
-    for bad in ({"checklist": [{"id": 1, "text": "x"}]}, {"checklist": [{"text": "x"}]}, {"refs": [[]]},
-                {"questions": "no"}, {"sessions": [{"agent": ["x"], "host": {}}, {"agent": ["x"], "host": {}}]},
-                {"history": [{"at": 1}, {"at": "x"}]}, {"ext": {"a": 5}}, {"updated_at": 5}):
+    for bad in (
+        {"checklist": [{"id": 1, "text": "x"}]},
+        {"checklist": [{"text": "x"}]},
+        {"refs": [[]]},
+        {"questions": "no"},
+        {"sessions": [{"agent": ["x"], "host": {}}, {"agent": ["x"], "host": {}}]},
+        {"history": [{"at": 1}, {"at": "x"}]},
+        {"ext": {"a": 5}},
+        {"updated_at": 5},
+    ):
         merge_ticket(base, up(base, T2, **bad), up(base, T3, owner="A"), NOW)  # must not raise
 
 
@@ -297,7 +413,10 @@ def test_loser_is_never_truncated():
 
 def test_duplicate_ids_cannot_merge():
     base = tk()
-    dup = [{"id": "c1", "text": "a", "done": False, "evidence": []}, {"id": "c1", "text": "b", "done": False, "evidence": []}]
+    dup = [
+        {"id": "c1", "text": "a", "done": False, "evidence": []},
+        {"id": "c1", "text": "b", "done": False, "evidence": []},
+    ]
     assert merge_ticket(base, up(base, T2, checklist=dup), up(base, T3), NOW) is None
     assert merge_ticket(base, up(base, T3), up(base, T2, checklist=dup), NOW) is None
     ref = {"kind": "web", "url": "https://e.com", "at": T1, "by": "human:A"}
@@ -325,24 +444,42 @@ def test_key_loser_goes_to_old_keys_and_text_conflicts_are_logged():
 def test_key_clash_malformed_input_gives_none():
     ok = tk(id="t_aaa111", key="DM1-13")
     for bad in ({"key": [1]}, {"key": "x-1"}, {"ext": []}, {"created_at": 5}, {"ext": {"sync": []}}):
-        assert renumber_key_clashes({"t_aaa111": ok, "t_bbb222": {**tk(id="t_bbb222", key="DM1-13"), **bad}},
-                                    {"last": 1}, NOW) is None
-    assert renumber_key_clashes({"t_aaa111": ok, "t_bbb222": tk(id="t_bbb222", key="DM1-13")},
-                                {"last": 999_000_000}, NOW) is None
+        assert (
+            renumber_key_clashes(
+                {"t_aaa111": ok, "t_bbb222": {**tk(id="t_bbb222", key="DM1-13"), **bad}}, {"last": 1}, NOW
+            )
+            is None
+        )
+    assert (
+        renumber_key_clashes(
+            {"t_aaa111": ok, "t_bbb222": tk(id="t_bbb222", key="DM1-13")}, {"last": 999_000_000}, NOW
+        )
+        is None
+    )
     assert renumber_key_clashes("no", {}, NOW) is None
 
 
 def test_backdating_cannot_steal_a_key_the_local_ticket_holds():
     mine = tk(id="t_bbb222", key="DM1-13", created_at=T2)
     theirs = tk(id="t_aaa111", key="DM1-13", created_at="2001-01-01T00:00:00Z")
-    changed, _ = renumber_key_clashes({"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"])
+    changed, _ = renumber_key_clashes(
+        {"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"]
+    )
     assert list(changed) == ["t_aaa111"]
 
 
 def test_question_answered_by_differs_only_is_symmetric():
     def q(by, via):
-        return {"id": "q1", "text": "?", "options": [], "recommended": None, "answer": None, "answered_by": by,
-                "via": via}
+        return {
+            "id": "q1",
+            "text": "?",
+            "options": [],
+            "recommended": None,
+            "answer": None,
+            "answered_by": by,
+            "via": via,
+        }
+
     base = tk(questions=[q(None, None)])
     a, b = up(base, T2, questions=[q("human:A", "cli")]), up(base, T3, questions=[q("human:B", "web")])
     assert merge_ticket(base, a, b, NOW) == merge_ticket(base, b, a, NOW)
@@ -357,13 +494,14 @@ def test_counter_never_raises_on_garbage():
 
 # ---- Won't do: a person's decision (human `by`); done vs won't do is one side wholesale
 
+
 def _step(**kw):
     c = {"id": "c1", "text": "Email finance", "done": False, "evidence": []}
     c.update(kw)
     return c
 
 
-WONT = {"wont_do": True, "reason": "Not needed", "by": "human:Ann", "at": T2}
+WONT = {"wont_do": True, "reason": "Not needed", "by": "human:Ann", "at": T2, "wont_mac": "valid:t_abc123:c1"}
 DONE = {
     "done": True,
     "evidence": [{"type": "note", "ref": "sent it", "by": "agent:claude", "at": T2}],
@@ -376,18 +514,18 @@ def test_wont_do_from_a_person_syncs():
     base = tk(checklist=[_step()])
     a = up(base, T2, checklist=[_step(**WONT)])
     for x, y in ((a, base), (base, a)):
-        out = merge_ticket(base, x, y, NOW)
+        out = merge_ticket(base, x, y, NOW, PERSON)
         assert out["checklist"][0]["wont_do"] is True and out["checklist"][0]["reason"] == "Not needed"
         assert list(SCHEMA.iter_errors(out)) == []
 
 
-def test_wont_do_without_a_human_by_is_dropped():
+def test_wont_do_without_the_cores_say_so_is_dropped_whatever_by_says():
     base = tk(checklist=[_step()])
-    for by in ("agent:claude", None):
+    for by in ("agent:claude", "human:Ann", None):  # `by: human:` alone is NOT the person
         item = _step(wont_do=True, reason="sneaky", **({"by": by, "at": T2} if by else {}))
         a = up(base, T2, checklist=[item])
         for x, y in ((a, base), (base, a)):
-            c = merge_ticket(base, x, y, NOW)["checklist"][0]
+            c = merge_ticket(base, x, y, NOW, PERSON)["checklist"][0]
             assert "wont_do" not in c and "reason" not in c
 
 
@@ -396,13 +534,13 @@ def test_done_vs_wont_do_is_one_side_wholesale():
     a = up(base, T2, checklist=[_step(**WONT)])
     b = up(base, T3, checklist=[_step(**DONE)])
     for x, y in ((a, b), (b, a)):
-        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        c = merge_ticket(base, x, y, NOW, PERSON)["checklist"][0]
         assert c == _step(**DONE)  # b is newer: its item, no mixed fields
-        assert list(SCHEMA.iter_errors(merge_ticket(base, x, y, NOW))) == []
+        assert list(SCHEMA.iter_errors(merge_ticket(base, x, y, NOW, PERSON))) == []
     a2 = up(base, T3, checklist=[_step(**WONT)])
     b2 = up(base, T2, checklist=[_step(**DONE)])
     for x, y in ((a2, b2), (b2, a2)):
-        assert merge_ticket(base, x, y, NOW)["checklist"][0] == _step(**WONT)
+        assert merge_ticket(base, x, y, NOW, PERSON)["checklist"][0] == _step(**WONT)
 
 
 def test_two_recorded_runs_of_the_same_command_are_both_kept():
@@ -491,7 +629,7 @@ def test_one_sided_forged_wont_do_is_dropped():
     new_item = _step(id="c2", text="New", wont_do=True, by="agent:claude")
     a = up(base, T2, checklist=[forged, new_item])  # edited-vs-unchanged and a one-sided new item
     for x, y in ((a, base), (base, a)):
-        for c in merge_ticket(base, x, y, NOW)["checklist"]:
+        for c in merge_ticket(base, x, y, NOW, PERSON)["checklist"]:
             assert "wont_do" not in c and "reason" not in c
 
 
@@ -502,3 +640,55 @@ def test_conflict_pick_with_done_and_no_evidence_is_not_done():
     for x, y in ((a, b), (b, a)):
         c = merge_ticket(base, x, y, NOW)["checklist"][0]
         assert c["done"] is False
+
+
+# ---- #425: Won't do counts as the person's only by the receiving core's say-so (never by `by: human:`) ----------
+
+
+def test_without_a_verifier_nobody_is_a_person_fail_closed():
+    base = tk(checklist=[_step()])
+    a = up(base, T2, checklist=[_step(**WONT)])  # a perfectly signed-looking item, but no verifier is given
+    for x, y in ((a, base), (base, a)):
+        c = merge_ticket(base, x, y, NOW)["checklist"][0]
+        assert "wont_do" not in c and "reason" not in c
+        c = merge_ticket(base, x, y, NOW, lambda step, ticket: 1 / 0)["checklist"][0]  # a verifier that fails
+        assert "wont_do" not in c
+
+
+def test_a_forged_by_human_is_not_kept_but_the_signed_one_is():
+    base = tk(checklist=[_step(), _step(id="c2", text="Other")])
+    forged = _step(**{**WONT, "wont_mac": None})
+    signed = _step(id="c2", text="Other", **{**WONT, "wont_mac": "valid:t_abc123:c2"})
+    a = up(base, T2, checklist=[forged, signed])
+    for x, y in ((a, base), (base, a)):
+        c1, c2 = merge_ticket(base, x, y, NOW, PERSON)["checklist"]
+        assert "wont_do" not in c1 and c2["wont_do"] is True
+
+
+def test_a_decision_copied_onto_another_ticket_or_step_is_not_the_persons():
+    base = tk(checklist=[_step()])
+    for mac in ("valid:t_other99:c1", "valid:t_abc123:c7"):
+        a = up(base, T2, checklist=[_step(**{**WONT, "wont_mac": mac})])
+        for x, y in ((a, base), (base, a)):
+            assert "wont_do" not in merge_ticket(base, x, y, NOW, PERSON)["checklist"][0]
+
+
+def test_a_dropped_wont_do_is_an_undo_kept_unless_that_copy_verifies():
+    base = tk(checklist=[_step(**WONT)])
+    agent = up(base, T2, checklist=[_step()])  # an agent's copy without the Won't do
+    for x, y in ((agent, base), (base, agent)):
+        c = merge_ticket(base, x, y, NOW, PERSON)["checklist"][0]
+        assert c["wont_do"] is True and c["reason"] == "Not needed" and c["done"] is False
+    undone = up(base, T2, checklist=[_step(wont_mac="valid:t_abc123:c1")])  # the person's undo, signed
+    for x, y in ((undone, base), (base, undone)):
+        c = merge_ticket(base, x, y, NOW, PERSON)["checklist"][0]
+        assert "wont_do" not in c and "reason" not in c
+
+
+def test_one_side_deleting_a_persons_wont_do_step_does_not_delete_it():
+    base = tk(checklist=[_step(**WONT)])
+    gone = up(base, T2, checklist=[])
+    for x, y in ((gone, base), (base, gone)):
+        assert [c["wont_do"] for c in merge_ticket(base, x, y, NOW, PERSON)["checklist"]] == [True]
+    both = merge_ticket(base, gone, up(base, T3, checklist=[]), NOW, PERSON)
+    assert both["checklist"] == []  # both sides deleted it: final

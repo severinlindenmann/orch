@@ -1057,14 +1057,68 @@ def unconsume(root: Path, ids: list[str]) -> None:
 # ------------------------------------------------------------------------------------------- won't do
 
 
-def wontdo_mac(key: bytes, workspace: str, item: dict) -> str:
-    return _b64u(hmac.new(key, f"wontdo1.{workspace}.{_canon(item)}".encode(), hashlib.sha256).digest())
+def wontdo_mac(key: bytes, workspace: str, ticket: str, decision: dict) -> str:
+    """wontdo1.<workspace id>.<ticket id>.<canonical {check, wont_do, reason}>: binds WHERE the decision
+    belongs, so a valid decision copied onto another ticket or step is not the person's. An undo is the same
+    decision with wont_do false and reason null."""
+    return _b64u(
+        hmac.new(key, f"wontdo1.{workspace}.{ticket}.{_canon(decision)}".encode(), hashlib.sha256).digest()
+    )
 
 
-def wontdo_is_human(key: bytes, workspace: str, item: dict, mac, relay_authenticated_sender: bool) -> bool:
+def wontdo_is_human(
+    key: bytes, workspace: str, ticket: str, decision: dict, mac, relay_authenticated_sender: bool
+) -> bool:
     if relay_authenticated_sender:
         return True
-    return isinstance(mac, str) and bool(mac) and hmac.compare_digest(mac, wontdo_mac(key, workspace, item))
+    return (
+        isinstance(mac, str)
+        and bool(mac)
+        and hmac.compare_digest(mac, wontdo_mac(key, workspace, ticket, decision))
+    )
+
+
+def wont_decision(step: dict) -> dict:
+    """The step's decision record, the thing the MAC covers (not the whole step: renames, evidence and merge
+    normalisation do not invalidate it)."""
+    on = step.get("wont_do") is True
+    return {"check": step.get("id"), "wont_do": on, "reason": (step.get("reason") if on else None)}
+
+
+def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
+    """The receiving core's own wontdo1 MAC for this step's decision (None when there is no usable key)."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws:
+            return None
+        return wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
+    except (Refused, OSError):
+        return None
+
+
+def wont_verifier(root: Path, relay_ok=None):
+    """`person(step, ticket_id) -> bool` for the sync merge: True only for a decision with the core's own MAC
+    (or one the relay client recorded from an authenticated sender: `relay_ok(step, ticket_id)`). The text
+    `by: human:` is never looked at. Fails closed: no key, no workspace id = nobody."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        key = human_key(root, create=False)
+    except (Refused, OSError):
+        return lambda step, ticket: False
+    if not ws:
+        return lambda step, ticket: False
+
+    def person(step, ticket) -> bool:
+        if not isinstance(step, dict) or not isinstance(ticket, str):
+            return False
+        relay = bool(relay_ok and relay_ok(step, ticket))
+        return wontdo_is_human(key, ws, ticket, wont_decision(step), step.get("wont_mac"), relay)
+
+    return person
 
 
 def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:

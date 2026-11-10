@@ -15,15 +15,28 @@ SYNC_BY = "agent:sync"
 SESSION_CAP = 32
 _MISSING = object()
 _KEY_RE = re.compile(r"^([A-Z0-9]{2,4})-([1-9][0-9]{0,8})$")
-_SPECIAL = {"id", "updated_at", "revision", "status", "checklist", "questions", "refs",
-            "history", "sessions", "ext"}
+_SPECIAL = {
+    "id",
+    "updated_at",
+    "revision",
+    "status",
+    "checklist",
+    "questions",
+    "refs",
+    "history",
+    "sessions",
+    "ext",
+}
 _ANSWER = ("answer", "answered_by", "via")
 MAX_DEPTH = 32
 MAX_ITEMS = {"history": 5000, "checklist": 500, "questions": 500, "refs": 500, "sessions": 200}
 MAX_BYTES = 2_000_000
 MAX_COUNTER = 999_000_000  # keys stay inside the schema pattern (9 digits)
-_IDENT = {"checklist": lambda x: x["id"], "questions": lambda x: x["id"],
-          "sessions": lambda s: _canon([s.get("agent"), s.get("host")])}
+_IDENT = {
+    "checklist": lambda x: x["id"],
+    "questions": lambda x: x["id"],
+    "sessions": lambda s: _canon([s.get("agent"), s.get("host")]),
+}
 
 
 def _canon(x):
@@ -60,11 +73,20 @@ def _num(i):
 class _Ctx:
     """One merge: which side is newer (symmetric: updated_at, then canonical json) and the history lines."""
 
-    def __init__(self, a, b, now):
+    def __init__(self, a, b, now, person=None):
         self.now = now
+        self.ticket = a.get("id")
+        self._person = person  # person(step, ticket id) -> bool, from the receiving core; None = nobody
         self.a_newer = (a.get("updated_at", ""), _canon(a)) >= (b.get("updated_at", ""), _canon(b))
         self.lines = {}  # (text, canonical lost) -> lost: the full replaced value, so nothing is ever cut
         self.old_keys = set()
+
+    def verified(self, step):
+        """The receiving core vouches for this step's decision (Won't do or its undo). Never raises."""
+        try:
+            return bool(self._person and self._person(step, self.ticket))
+        except Exception:  # noqa: BLE001 - a verifier that fails vouches for nobody
+            return False
 
     def say(self, text, lost=_MISSING):
         self.lines[("sync: " + text, "" if lost is _MISSING else _canon(lost))] = lost
@@ -92,7 +114,9 @@ def _obj(ctx, base, a, b, skip=(), top=False, label=""):
     for k in sorted(set(a) | set(b) | set(base)):
         if k in skip:
             continue
-        v = _three(ctx, base.get(k, _MISSING), a.get(k, _MISSING), b.get(k, _MISSING), k if top else None, label)
+        v = _three(
+            ctx, base.get(k, _MISSING), a.get(k, _MISSING), b.get(k, _MISSING), k if top else None, label
+        )
         if v is not _MISSING:
             out[k] = v
     return out
@@ -120,7 +144,9 @@ def _renumber_clashes(ctx, base, a, b, same, prefix):
     """Both sides added an item with the same id but different content: the older side keeps the id, the newer
     side's item gets the next free one. Returns the renames per side."""
     bids = {x["id"] for x in base}
-    clash = [x["id"] for x in a if x["id"] not in bids and any(y["id"] == x["id"] and not same(x, y) for y in b)]
+    clash = [
+        x["id"] for x in a if x["id"] not in bids and any(y["id"] == x["id"] and not same(x, y) for y in b)
+    ]
     used = {x["id"] for x in base + a + b}
     ren = {"a": {}, "b": {}}
     newer = "a" if ctx.a_newer else "b"
@@ -209,27 +235,42 @@ def _evidence(*lists):
     return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
 
 
-def _person_wont(x):
-    return x.get("wont_do") is True and str(x.get("by", "")).startswith("human:")
+_DECISION = ("wont_do", "reason", "wont_mac", "by", "at")
+
+
+def _person_wont(ctx, x):
+    """A step's Won't do counts as the person's only when the RECEIVING CORE says so (`person`: its own wontdo1
+    MAC, or a relay-authenticated sender it recorded). The text of `by` is never looked at; with no verifier
+    nobody is a person (fail closed)."""
+    return x.get("wont_do") is True and ctx.verified(x)
 
 
 def _drop_wont(x):
-    return {k: v for k, v in x.items() if k not in ("wont_do", "reason")}
+    return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac")}
 
 
 def _check_item(ctx, x0, xa, xb):
-    # Won't do is a person's decision: a side without a human `by` cannot bring it in (the rule of
-    # orch.tickets.check_wont_do), and done vs won't do is one side's item wholesale, never a field mix.
-    x0, xa, xb = ({**x} if not x.get("wont_do") or _person_wont(x) else _drop_wont(x) for x in (x0, xa, xb))
+    # Won't do is a person's decision (human-proof.md "Synced won't do"): a side the core does not vouch for
+    # cannot bring it in, and cannot take it away either (a copy that DROPS a person's wont_do is an undo, kept
+    # only when that copy verifies); done vs won't do is one side's item wholesale, never a field mix.
+    held = _person_wont(ctx, x0) if x0 else False
+    keep = lambda x: {**x} if not x.get("wont_do") or _person_wont(ctx, x) else _drop_wont(x)
+    sides = []
+    for x in (xa, xb):
+        if held and not x.get("wont_do") and not ctx.verified(x):
+            x = {**x, **{k: x0[k] for k in _DECISION if k in x0}, "done": False}  # an unproven drop: restored
+        sides.append(keep(x))
+    xa, xb = sides
+    x0 = keep(x0)
     if (xa.get("wont_do") and xb.get("done")) or (xb.get("wont_do") and xa.get("done")):
-        return _normalize_check(dict(xa if ctx.a_newer else xb))
-    return _normalize_check(_check_merged(ctx, x0, xa, xb))
+        return _normalize_check(ctx, dict(xa if ctx.a_newer else xb))
+    return _normalize_check(ctx, _check_merged(ctx, x0, xa, xb))
 
 
-def _normalize_check(x):
-    """The one rule for every merged step (one-sided, edited, picked or merged): Won't do stays only with a
-    human `by`, then the step is not done and not doing; done needs proof."""
-    if x.get("wont_do") and not _person_wont(x):
+def _normalize_check(ctx, x):
+    """The one rule for every merged step (one-sided, edited, picked or merged): Won't do stays only with the
+    core's say-so, then the step is not done and not doing; done needs proof."""
+    if x.get("wont_do") and not _person_wont(ctx, x):
         x = _drop_wont(x)
     if "reason" in x and not x.get("wont_do"):
         x = {k: v for k, v in x.items() if k != "reason"}
@@ -259,8 +300,10 @@ def _question(ctx, x0, xa, xb):
             pick = ga
         else:
             pick, lose = (ga, gb) if ctx.a_newer else (gb, ga)
-            ctx.say(f'another answer "{_short(lose["answer"])}" by {lose["answered_by"]} was replaced',
-                    {"field": f"{xa.get('id')} answer", "value": lose})
+            ctx.say(
+                f'another answer "{_short(lose["answer"])}" by {lose["answered_by"]} was replaced',
+                {"field": f"{xa.get('id')} answer", "value": lose},
+            )
     elif ga["answer"] is None and gb["answer"] is None:
         pick = ga if ctx.a_newer else gb  # symmetric even when only answered_by/via differ
     else:  # an answered question beats an unanswered one
@@ -273,17 +316,29 @@ def _ref_id(r):
     return _canon([r.get(k) for k in ("kind", "url", "ticket", "name", "path")])
 
 
-def _merge(base, a, b, now):
-    ctx = _Ctx(a, b, now)
+def _merge(base, a, b, now, person=None):
+    ctx = _Ctx(a, b, now, person)
     # the same id added on both sides with different content: the newer side's item is renumbered
-    ren = _renumber_clashes(ctx, base.get("checklist", []), a.setdefault("checklist", []),
-                            b.setdefault("checklist", []), lambda x, y: x.get("text") == y.get("text"), "c")
+    ren = _renumber_clashes(
+        ctx,
+        base.get("checklist", []),
+        a.setdefault("checklist", []),
+        b.setdefault("checklist", []),
+        lambda x, y: x.get("text") == y.get("text"),
+        "c",
+    )
     for side, t in (("a", a), ("b", b)):
         for q in t.get("questions", []):
             if q.get("check") in ren[side]:
                 q["check"] = ren[side][q["check"]]
-    _renumber_clashes(ctx, base.get("questions", []), a.setdefault("questions", []),
-                      b.setdefault("questions", []), lambda x, y: x.get("text") == y.get("text"), "q")
+    _renumber_clashes(
+        ctx,
+        base.get("questions", []),
+        a.setdefault("questions", []),
+        b.setdefault("questions", []),
+        lambda x, y: x.get("text") == y.get("text"),
+        "q",
+    )
 
     out = _obj(ctx, base, a, b, skip=_SPECIAL, top=True)
     out["id"] = a["id"]
@@ -300,24 +355,56 @@ def _merge(base, a, b, now):
     def ids(lst):
         return [x["id"] for x in lst]
 
-    cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
-                lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
-    cl = {k: _normalize_check(v) for k, v in cl.items()}
+    cl = _keyed(
+        base.get("checklist", []),
+        a["checklist"],
+        b["checklist"],
+        lambda x: x["id"],
+        lambda x0, xa, xb: _check_item(ctx, x0, xa, xb),
+    )
+    cl = {k: _normalize_check(ctx, v) for k, v in cl.items()}
+    # a person's Won't do step that ONE side deleted outright comes back: a deletion carries no proof (removing
+    # one needs the person's proof, which is only checked where it is made). Both sides deleting it is final.
+    still = {x.get("id") for t in (a, b) for x in t.get("checklist", []) if isinstance(x, dict)}
+    for x0 in base.get("checklist", []):
+        if (
+            isinstance(x0, dict)
+            and x0.get("id") not in cl
+            and x0.get("id") in still
+            and _person_wont(ctx, x0)
+        ):
+            cl[x0["id"]] = _normalize_check(ctx, dict(x0))
     out["checklist"] = _order(cl, ids(base.get("checklist", [])))
     if out["status"] == "done" and any(not (c.get("done") or c.get("wont_do")) for c in out["checklist"]):
         out["status"] = "active"
         ctx.say("reopened, a new checklist item came in")
-    qs = _keyed(base.get("questions", []), a["questions"], b["questions"], lambda x: x["id"],
-                lambda x0, xa, xb: _question(ctx, x0, xa, xb))
+    qs = _keyed(
+        base.get("questions", []),
+        a["questions"],
+        b["questions"],
+        lambda x: x["id"],
+        lambda x0, xa, xb: _question(ctx, x0, xa, xb),
+    )
     out["questions"] = _order(qs, ids(base.get("questions", [])))
-    refs = _keyed(base.get("refs", []), a.get("refs", []), b.get("refs", []), _ref_id,
-                  lambda r0, ra, rb: _obj(ctx, r0, ra, rb))
+    refs = _keyed(
+        base.get("refs", []),
+        a.get("refs", []),
+        b.get("refs", []),
+        _ref_id,
+        lambda r0, ra, rb: _obj(ctx, r0, ra, rb),
+    )
     out["refs"] = _order(refs, [_ref_id(r) for r in base.get("refs", [])], key=lambda i: i)
     if any("sessions" in t for t in (base, a, b)):
-        sess = _keyed(base.get("sessions", []), a.get("sessions", []), b.get("sessions", []),
-                      lambda s: _canon([s.get("agent"), s.get("host")]),
-                      lambda s0, sa, sb: max(sa, sb, key=lambda s: (s.get("last_used", ""), _canon(s))))
-        out["sessions"] = sorted(sess.values(), key=lambda s: (s.get("last_used", ""), _canon(s)))[-SESSION_CAP:]
+        sess = _keyed(
+            base.get("sessions", []),
+            a.get("sessions", []),
+            b.get("sessions", []),
+            lambda s: _canon([s.get("agent"), s.get("host")]),
+            lambda s0, sa, sb: max(sa, sb, key=lambda s: (s.get("last_used", ""), _canon(s))),
+        )
+        out["sessions"] = sorted(sess.values(), key=lambda s: (s.get("last_used", ""), _canon(s)))[
+            -SESSION_CAP:
+        ]
     if "ext" in a or "ext" in b:
         d = lambda t: t["ext"] if isinstance(t.get("ext"), dict) else {}
         out["ext"] = _deep(ctx, d(base), d(a), d(b))
@@ -329,8 +416,11 @@ def _merge(base, a, b, now):
     hist = {}
     for h in base.get("history", []) + a.get("history", []) + b.get("history", []):
         hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via"), h.get("lost")])] = h
-    old = {(h.get("text"), _canon(h["lost"]) if "lost" in h else "") for h in hist.values()
-           if h.get("by") == SYNC_BY}  # the same line is never added twice
+    old = {
+        (h.get("text"), _canon(h["lost"]) if "lost" in h else "")
+        for h in hist.values()
+        if h.get("by") == SYNC_BY
+    }  # the same line is never added twice
     for text, lost_key in sorted(set(ctx.lines) - old):
         line = {"at": now, "by": SYNC_BY, "text": text}
         if ctx.lines[(text, lost_key)] is not _MISSING:
@@ -362,22 +452,28 @@ def _valid(base, a, b):
             return False
         if not all(isinstance(x.get("id"), str) for f in ("checklist", "questions") for x in t.get(f, [])):
             return False
-        for f, ident in (("checklist", _IDENT["checklist"]), ("questions", _IDENT["questions"]),
-                         ("refs", _ref_id), ("sessions", _IDENT["sessions"])):
+        for f, ident in (
+            ("checklist", _IDENT["checklist"]),
+            ("questions", _IDENT["questions"]),
+            ("refs", _ref_id),
+            ("sessions", _IDENT["sessions"]),
+        ):
             ids = [ident(x) for x in t.get(f, [])]
             if len(ids) != len(set(ids)):
                 return False  # a duplicate id would silently drop an item
     return True
 
 
-def merge_ticket(base, upstream, mine, now):
+def merge_ticket(base, upstream, mine, now, person=None):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
-    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified."""
+    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified.
+    `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
+    wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so."""
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
-        return _merge({} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now)
+        return _merge({} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person)
     except Exception:  # noqa: BLE001 - a crafted ticket must never crash the sync loop
         return None
 
@@ -390,6 +486,7 @@ def _key_n(k):
 def merge_counter(base, a, b, keys=()):
     """ticket-counter.json: `last` = the highest of all sides and of every key number in `keys` (current and old
     keys). Other int entries: per-key max (recursively); anything else: the larger canonical json."""
+
     def mx(x, y):
         if isinstance(x, dict) and isinstance(y, dict):
             return {k: mx(x.get(k, _MISSING), y.get(k, _MISSING)) for k in sorted(set(x) | set(y))}
@@ -400,13 +497,20 @@ def merge_counter(base, a, b, keys=()):
         if isinstance(x, int) and isinstance(y, int) and not isinstance(x, bool):
             return max(x, y)
         return max(x, y, key=_canon)
+
     def clean(x):
         return x if isinstance(x, dict) and not _too_deep(x) else {}
+
     try:
         out = mx(mx(clean(base), clean(a)), clean(b))
         last = out.get("last", 0)
-        out["last"] = min(max([last if isinstance(last, int) and not isinstance(last, bool) else 0]
-                              + [_key_n(k) for k in keys]), MAX_COUNTER + 1)
+        out["last"] = min(
+            max(
+                [last if isinstance(last, int) and not isinstance(last, bool) else 0]
+                + [_key_n(k) for k in keys]
+            ),
+            MAX_COUNTER + 1,
+        )
         return out
     except Exception:  # noqa: BLE001 - e.g. unsortable keys: fall back to what the keys alone say
         return {"last": min(max([0] + [_key_n(k) for k in keys]), MAX_COUNTER + 1)}
@@ -432,13 +536,22 @@ def renumber_key_clashes(tickets, counter, now, held=()):
         tickets = deepcopy(tickets)
         held = set(held)
         for i, t in tickets.items():
-            if (not isinstance(t, dict) or t.get("id") != i or not isinstance(t.get("created_at", ""), str)
-                    or not isinstance(t.get("ext", {}), dict) or not isinstance(t.get("history", []), list)
-                    or (t.get("key") is not None and not (isinstance(t["key"], str) and _KEY_RE.match(t["key"])))
-                    or not isinstance((t.get("ext", {}).get("sync", {})), dict)):
+            if (
+                not isinstance(t, dict)
+                or t.get("id") != i
+                or not isinstance(t.get("created_at", ""), str)
+                or not isinstance(t.get("ext", {}), dict)
+                or not isinstance(t.get("history", []), list)
+                or (t.get("key") is not None and not (isinstance(t["key"], str) and _KEY_RE.match(t["key"])))
+                or not isinstance((t.get("ext", {}).get("sync", {})), dict)
+            ):
                 return None
-        counter = merge_counter(counter if isinstance(counter, dict) else {}, None, None,
-                                [k for t in tickets.values() for k in [t.get("key"), *old_keys_of(t)]])
+        counter = merge_counter(
+            counter if isinstance(counter, dict) else {},
+            None,
+            None,
+            [k for t in tickets.values() for k in [t.get("key"), *old_keys_of(t)]],
+        )
         by_key = {}
         for t in tickets.values():
             if t.get("key"):
@@ -454,8 +567,13 @@ def renumber_key_clashes(tickets, counter, now, held=()):
                 sync = t.setdefault("ext", {}).setdefault("sync", {})
                 sync["old_keys"] = sorted(set(old_keys_of(t)) | {key})
                 t["key"] = new
-                t.setdefault("history", []).append({"at": now, "by": SYNC_BY, "text":
-                                                    f"sync: key changed from {key} to {new} (another ticket had it)"})
+                t.setdefault("history", []).append(
+                    {
+                        "at": now,
+                        "by": SYNC_BY,
+                        "text": f"sync: key changed from {key} to {new} (another ticket had it)",
+                    }
+                )
                 t["revision"] = t.get("revision", 0) + 1 if isinstance(t.get("revision", 0), int) else 1
                 changed[t["id"]] = t
         return changed, counter

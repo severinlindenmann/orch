@@ -1125,9 +1125,11 @@ def pending_deliver(c):
     return c["line"]["id"] not in c["delivered_ids"]
 
 
-def _wontdo_mac(key, workspace, item):
-    canon = json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{canon}".encode(), hashlib.sha256).digest())
+def _wontdo_mac(key, workspace, ticket, decision):
+    """wontdo1.<workspace id>.<ticket id>.<canonical {check, wont_do, reason}>: the MAC binds WHERE the decision
+    belongs, so a valid decision copied onto another ticket or step is not the person's."""
+    canon = json.dumps(decision, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{ticket}.{canon}".encode(), hashlib.sha256).digest())
 
 
 def wontdo_is_human(c):
@@ -1135,7 +1137,7 @@ def wontdo_is_human(c):
     if c.get("relay_authenticated_sender"):
         return True
     m = c.get("mac")
-    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["item"]))
+    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["ticket"], c["decision"]))
 
 
 def relay_conn(c):

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -1336,3 +1337,46 @@ def test_the_cli_says_the_notice_once_and_the_page_still_has_it(ws, run, capsys)
     code, out, err = run("ticket", "list", "--json")
     assert hp.RESET_NOTICE not in err  # not twice
     assert [n["text"] for n in hp.read_notices(ws)] == [hp.RESET_NOTICE]  # the page still shows it
+
+
+# ------------------------------------------------------------ #425: the core signs a Won't do and its undo
+
+
+def test_a_verifier_without_a_key_vouches_for_nobody(ws, run):
+    tid, cid = _ticket_with_step(ws, run)
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert hp.wont_verifier(ws)({**step, "wont_do": True, "wont_mac": "x"}, tid) is False
+
+
+def test_wont_do_and_its_undo_are_signed_and_the_sync_verifier_accepts_only_them(ws, run, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workspace-addons" / "sync" / "src"))
+    from orch_sync.merge import merge_ticket
+
+    tid, cid = _ticket_with_step(ws, run)
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")  # (this creates the key)
+    person = hp.wont_verifier(ws)
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--reason", "not needed", "--json")
+    t1 = tickets.load(ws, tid)
+    step = t1["checklist"][0]
+    assert step["wont_do"] is True and step["wont_mac"] and person(step, tid)
+    # a forged `by: human:` without a MAC, or a copy on another ticket or step: not the person's
+    assert not person({**step, "wont_mac": None, "by": "human:Ann"}, tid)
+    assert not person(step, "t_other99") and not person({**step, "id": "c9"}, tid)
+    assert not person({**step, "reason": "changed"}, tid)
+    # a synced agent copy that drops it is not accepted; a drop with the core's undo MAC is
+    base = t1
+    agent = {**t1, "updated_at": "2099-01-01T00:00:00Z", "checklist": [{**step, "wont_do": None}]}
+    agent["checklist"][0].pop("wont_do")
+    agent["checklist"][0].pop("reason", None)
+    agent["checklist"][0].pop("wont_mac", None)
+    merged = merge_ticket(base, agent, base, "2099-01-02T00:00:00Z", person)
+    assert merged["checklist"][0]["wont_do"] is True
+    undo_proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, undo_proof, "check", "reopen", tid, cid, "--json")
+    t2 = tickets.load(ws, tid)
+    undone = t2["checklist"][0]
+    assert "wont_do" not in undone and undone["wont_mac"] and person(undone, tid)
+    merged = merge_ticket(
+        base, {**t2, "updated_at": "2099-01-01T00:00:00Z"}, base, "2099-01-02T00:00:00Z", person
+    )
+    assert "wont_do" not in merged["checklist"][0]
