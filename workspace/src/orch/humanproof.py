@@ -780,8 +780,12 @@ def conn_grants(root: Path) -> dict:
         return {}
     out = {}
     for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
-        if key.startswith("conn.allow.") and isinstance(rec, dict) and "value" in rec:
-            out[key[len("conn.allow.") :]] = rec["value"]
+        if not (key.startswith("conn.allow.") and isinstance(rec, dict)):
+            continue
+        val = rec.get("value")
+        # only "*" or a list of action names is a grant; a tombstone (False) or any other type is none
+        if val == "*" or (isinstance(val, list) and all(isinstance(a, str) for a in val)):
+            out[key[len("conn.allow.") :]] = val
     return out
 
 

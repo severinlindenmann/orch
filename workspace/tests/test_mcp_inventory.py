@@ -232,6 +232,27 @@ def test_allow_needs_a_proof_made_grant(tmp_path, monkeypatch):
     assert inventory.connections(root)[0][0]["allow_all"]
 
 
+def test_tombstone_or_odd_grant_means_no_actions(tmp_path, monkeypatch):
+    acct = tmp_path / "acct"
+    base = acct / ".orch-test"
+    root = base / "ws"
+    (root / ".orch").mkdir(parents=True)
+    (base / "home").mkdir()
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(base / "home"))
+    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    _mcp(root, {"s": {"command": ["p"]}}, allow={"s": ["read"]})
+    for bad in (False, None, True, 1, {"read": True}, ["read", 3]):
+        humanproof.record_set(root, "conn.allow.s", bad, "human:a")
+        assert humanproof.conn_grants(root) == {}
+        i = inventory.connections(root)[0][0]
+        assert not any(a["allowed"] for a in i["actions"]) and not i["allow_all"]
+    humanproof.record_set(root, "conn.allow.s", ["read"], "human:a")
+    assert humanproof.conn_grants(root) == {"s": ["read"]}
+    humanproof.record_set(root, "conn.allow.s", False, "human:a")  # tombstone after a grant
+    assert not any(a["allowed"] for a in inventory.connections(root)[0][0]["actions"])
+
+
 def test_unreadable_grant_store_means_no_grants(env):
     root, _, _ = env  # not a test workspace: the guarded home is refused
     _mcp(root, {"s": {"command": ["p"]}}, allow={"s": "*"})
