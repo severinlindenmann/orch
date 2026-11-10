@@ -1058,9 +1058,10 @@ def unconsume(root: Path, ids: list[str]) -> None:
 
 
 def wontdo_mac(key: bytes, workspace: str, ticket: str, decision: dict) -> str:
-    """wontdo1.<workspace id>.<ticket id>.<canonical {check, wont_do, reason}>: binds WHERE the decision
-    belongs, so a valid decision copied onto another ticket or step is not the person's. An undo is the same
-    decision with wont_do false and reason null."""
+    """wontdo1.<workspace id>.<ticket id>.<canonical decision {check, wont_do, reason, text, covers, nonce}>:
+    binds WHERE the decision belongs (another ticket or step) and WHAT it is about (the step's text and
+    covers); the nonce makes equal decisions differ. An undo is the same record with wont_do false and
+    reason null. FRESHNESS comes from the ledger (see below), not from the MAC."""
     return _b64u(
         hmac.new(key, f"wontdo1.{workspace}.{ticket}.{_canon(decision)}".encode(), hashlib.sha256).digest()
     )
@@ -1079,29 +1080,78 @@ def wontdo_is_human(
 
 
 def wont_decision(step: dict) -> dict:
-    """The step's decision record, the thing the MAC covers (not the whole step: renames, evidence and merge
-    normalisation do not invalidate it)."""
+    """The step's decision record, the thing the MAC covers: which step, the decision and its reason, WHAT the
+    person decided about (the step's text and `covers`: rewriting the step drops the Won't do) and a random
+    `nonce` (equal decisions get different MACs). Evidence and merge normalisation are not part of it."""
     on = step.get("wont_do") is True
-    return {"check": step.get("id"), "wont_do": on, "reason": (step.get("reason") if on else None)}
+    return {
+        "check": step.get("id"),
+        "wont_do": on,
+        "reason": (step.get("reason") if on else None),
+        "text": step.get("text"),
+        "covers": step.get("covers"),
+        "nonce": step.get("wont_nonce"),
+    }
+
+
+# The LEDGER (guarded home, next to human.key): keys/<ws>/wont.json holds, per "<ticket>:<check>", the CURRENT
+# wontdo1 MAC of that step's decision (null = tombstone, the step was removed). A MAC is accepted only when it
+# IS the current entry, so replaying an older signed "on" or "undo", or reusing the id of a removed step, does
+# not verify. A missing, loose or damaged ledger vouches for nobody (fail closed).
+LEDGER = "wont.json"
+
+
+def _ledger_read(root: Path) -> dict | None:
+    try:
+        d = key_dir(root, create=False)
+        data = _read_json(root, d / LEDGER, {"entries": {}})
+    except (Refused, OSError):
+        return None
+    ent = data.get("entries") if isinstance(data, dict) else None
+    return ent if isinstance(ent, dict) else None
+
+
+def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            ent = _ledger_read(root)
+            if ent is None:
+                ent = {}
+            ent[f"{ticket}:{check}"] = mac
+            _write_private(d / LEDGER, json.dumps({"schema": "orch.wont-ledger/1", "entries": ent}))
+        return True
+    except (Refused, OSError):
+        return False
 
 
 def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
-    """The receiving core's own wontdo1 MAC for this step's decision (None when there is no usable key)."""
+    """The receiving core's own wontdo1 MAC for this step's decision, recorded as the CURRENT entry of the
+    ledger (None when there is no usable key or ledger). The step must already carry a fresh `wont_nonce`."""
     from orch import addons
 
     try:
         ws = addons.workspace_id(root, create=False)
-        if not ws:
+        if not ws or not isinstance(step.get("wont_nonce"), str):
             return None
-        return wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
+        mac = wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
     except (Refused, OSError):
         return None
+    return mac if _ledger_set(root, ticket, str(step.get("id")), mac) else None
+
+
+def wont_forget(root: Path, ticket: str, check: str) -> None:
+    """A step was removed (a proven removal): tombstone its ledger entry, so no old MAC verifies on a new step
+    that reuses the id."""
+    _ledger_set(root, ticket, check, None)
 
 
 def wont_verifier(root: Path, relay_ok=None):
-    """`person(step, ticket_id) -> bool` for the sync merge: True only for a decision with the core's own MAC
-    (or one the relay client recorded from an authenticated sender: `relay_ok(step, ticket_id)`). The text
-    `by: human:` is never looked at. Fails closed: no key, no workspace id = nobody."""
+    """`person(step, ticket_id) -> bool` for the sync merge: True only for a decision whose MAC is valid for
+    the step's content AND is the CURRENT ledger entry for that step (or one the relay client recorded from an
+    authenticated sender: `relay_ok(step, ticket_id, decision)` must compare the FULL decision record against
+    what the relay recorded, never "this step was touched by a relay sender"). The text `by: human:` is never
+    looked at. Fails closed: no key, no workspace id, no readable ledger = nobody."""
     from orch import addons
 
     try:
@@ -1109,14 +1159,21 @@ def wont_verifier(root: Path, relay_ok=None):
         key = human_key(root, create=False)
     except (Refused, OSError):
         return lambda step, ticket: False
-    if not ws:
+    ledger = _ledger_read(root)
+    if not ws or ledger is None:
         return lambda step, ticket: False
 
     def person(step, ticket) -> bool:
         if not isinstance(step, dict) or not isinstance(ticket, str):
             return False
-        relay = bool(relay_ok and relay_ok(step, ticket))
-        return wontdo_is_human(key, ws, ticket, wont_decision(step), step.get("wont_mac"), relay)
+        decision = wont_decision(step)
+        if relay_ok and relay_ok(step, ticket, decision):
+            return True
+        mac = step.get("wont_mac")
+        current = ledger.get(f"{ticket}:{step.get('id')}")
+        if not isinstance(mac, str) or not mac or not isinstance(current, str):
+            return False
+        return hmac.compare_digest(mac, current) and wontdo_is_human(key, ws, ticket, decision, mac, False)
 
     return person
 

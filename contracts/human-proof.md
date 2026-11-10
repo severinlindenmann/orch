@@ -226,16 +226,23 @@ re-appending a consumed line never delivers it again (reference `pending_is_huma
 `pending_deliver`, vectors `pending`, `deliver`).
 **Synced "won't do"** (`check.wont_do` arriving through a sync merge, and its undo): another machine's human key cannot be checked
 here, so a step's decision counts as a person's only when the receiving core's relay client recorded it from a
-relay-authenticated sender (a phone, or a person-attributed message the relay authenticated), or when it carries the receiving
-core's own MAC = HMAC-SHA256(`human.key`, `"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of
-{check, wont_do, reason}`) (an undo is the same record with `wont_do` false and `reason` null), a different prefix from the pending
-MAC so the two can never be confused. The MAC binds WHERE the decision belongs, so a valid decision copied onto another ticket or
-step is not the person's; it covers the decision record, not the whole step (renames, evidence and merge normalisation do not
-invalidate it) and is stored on the step as `wont_mac`. The text of `by` (`human:...`) is **never** looked at. The sync merge
-(`merge_ticket(..., person)`, `person` = the receiving core's verdict, `humanproof.wont_verifier`; no verifier = nobody is a person)
-keeps a Won't do only when it verifies; a synced copy that DROPS a verified Won't do is an undo under the same rule (kept unless
-the dropping copy carries the core's MAC for the undo record); a step one side deleted outright comes back. Anything else is an
-agent's (reference `wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
+relay-authenticated sender (a phone, or a person-attributed message the relay authenticated; the hook compares the FULL decision
+record, never "this step was touched by a relay sender"), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`,
+`"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of {check, wont_do, reason, text, covers, nonce}`) (an undo is
+the same record with `wont_do` false and `reason` null; the nonce is random and fresh for every signing, so equal decisions get
+different MACs), a different prefix from the pending MAC so the two can never be confused, stored on the step as `wont_mac` (+
+`wont_nonce`). The MAC binds WHERE the decision belongs (a valid decision copied onto another ticket or step is not the person's) and
+WHAT it is about (the step's text and covers: an agent that rewrites the step loses the Won't do and the person has to decide again;
+a proven `check edit` of a Won't do step re-signs it). **Freshness is the ledger's job, not the MAC's:** the guarded home keeps
+`keys/<ws>/wont.json`, per `<ticket>:<check>` the CURRENT MAC (null = tombstone, written by a proven removal); the verifier accepts a
+MAC only when it IS the current entry, so replaying an older signed "on" or "undo" or reusing the id of a removed step does not
+verify. A missing, loose or damaged ledger vouches for nobody (fail closed). The text of `by` (`human:...`) is **never** looked at.
+The sync merge (`merge_ticket(..., person)`, `person` = the receiving core's verdict, `humanproof.wont_verifier`; no verifier =
+nobody is a person) holds ONE invariant: **with a base, a step's decision fields (`wont_do`, `reason`, `wont_mac`, `wont_nonce`) differ
+from the base's only when that step verifies; otherwise they are the base's**, whether the side dropped the decision, changed it,
+garbled its MAC or replayed an old one, and before any "newer side wins" pick. A step one side deleted outright comes back (a
+deletion carries no proof; a person's removal is proven where it is made). Anything else is an agent's (reference
+`wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
 
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).

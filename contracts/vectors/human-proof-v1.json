@@ -1080,7 +1080,10 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
    "mac": null,
@@ -1094,7 +1097,10 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
    "mac": null,
@@ -1108,7 +1114,10 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": true,
    "mac": null,
@@ -1122,24 +1131,30 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
    "human": true
   },
   {
-   "name": "the undo (wont_do false, reason null) with the core's own MAC",
+   "name": "the undo (wont_do false, reason null, its own nonce) with the core's own MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
    "ticket": "t_inv7c2",
    "decision": {
     "check": "c2",
     "wont_do": false,
-    "reason": null
+    "reason": null,
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "0f1e2d3c4b5a6978"
    },
    "relay_authenticated_sender": false,
-   "mac": "Vljhx4-IgUVHpoAaEvq9BHIMVEdq15UWkqizGOI6-0g",
+   "mac": "Nw_U7SkTxw5vjxH4wN_rMcN_IIRb1y3VPA3vw4mh19U",
    "human": true
   },
   {
@@ -1150,10 +1165,13 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "Vljhx4-IgUVHpoAaEvq9BHIMVEdq15UWkqizGOI6-0g",
+   "mac": "Nw_U7SkTxw5vjxH4wN_rMcN_IIRb1y3VPA3vw4mh19U",
    "human": false
   },
   {
@@ -1164,10 +1182,13 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
    "human": false
   },
   {
@@ -1178,10 +1199,13 @@
    "decision": {
     "check": "c3",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
    "human": false
   },
   {
@@ -1192,10 +1216,64 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "other"
+    "reason": "other",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "Xb8pzCdI4gQeHqkCyF7_I-ZpJaV4IKC2gY6NWFeEk0s",
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "step text rewritten after signing -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email the auditor instead",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "step covers changed after signing -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": "all of it",
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "another nonce -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "ffffffffffffffff"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
    "human": false
   },
   {
@@ -1206,10 +1284,13 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "6hAQGVJr8cTtFtCFsP0xqu6nktXpuVGGAabsHsVCeic",
+   "mac": "6wE7sr8ElsiezLHJF7h__69lI0AOU3QB7O1tsNBRZ0I",
    "human": false
   },
   {
@@ -1220,10 +1301,13 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "qcMK4ra3tInTcqkX6v2LxtxQ0EiTcy_jR8k0AoxBArs",
+   "mac": "unpGFGHzLA47vaBq-mz0JByOAvqKkfBALRqXH47QQoQ",
    "human": false
   },
   {
@@ -1234,10 +1318,13 @@
    "decision": {
     "check": "c2",
     "wont_do": true,
-    "reason": "not needed"
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "cOI4OHRAm702s8pobhriFZe0BOLL9g453iNjJPo6vAI",
+   "mac": "-gjQnEPgFLotgtG22TNvHuw0VEAROqBVzr1NWg1khjw",
    "human": false
   }
  ]
