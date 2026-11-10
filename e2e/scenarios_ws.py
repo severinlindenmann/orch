@@ -38,18 +38,22 @@ def w0(e):
     """The REAL one-liner from GitHub raw (ref from E2E_INSTALL_REF, default develop) in a bare HOME without uv."""
     ref = os.environ.get("E2E_INSTALL_REF", "develop")
     home = e.tmp / "w0home"
-    (home / "proj").mkdir(parents=True)
-    # its own tool home under the REAL home (the only place orch trusts), never the real ~/.orch-tool
+    home.mkdir(parents=True)
+    # like lane C's test network: a TEST install, and the workspace + tool home under <real home>/.orch-test
+    # (never the real ~/.orch-tool); the harness marks the demo workspace dev, then the test human proves updates
     real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
-    ohome = real / f".orch-e2e-w0-{os.getpid()}"
+    base = real / ".orch-test" / f"e2e-w0-{os.getpid()}"
+    ohome = base / "home"
+    (base / "proj").mkdir(parents=True)
     ohome.mkdir()
-    e.cleanup.append(lambda: shutil.rmtree(ohome, ignore_errors=True))
+    e.cleanup.append(lambda: shutil.rmtree(base, ignore_errors=True))
     env = {"HOME": str(home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "USER": "e2e", "LANG": "C.UTF-8", "TERM": "dumb",
-           "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref, "ORCH_HOME": str(ohome), "ORCH_HOME_STRICT": "1"}
+           "GIT_TERMINAL_PROMPT": "0", "ORCH_REF": ref, "ORCH_HOME": str(ohome), "ORCH_HOME_STRICT": "1",
+           "ORCH_INSTALL_KIND": "test"}
     url = f"https://raw.githubusercontent.com/severinlindenmann/orch/{ref}/install.sh"
 
-    def run(cmd, cwd=None, timeout=600):
-        p = subprocess.run(cmd, cwd=cwd or home, env=env, capture_output=True, text=True, timeout=timeout)
+    def run(cmd, cwd=None, timeout=600, input=None):
+        p = subprocess.run(cmd, cwd=cwd or home, env=env, capture_output=True, text=True, timeout=timeout, input=input)
         return p.returncode, p.stdout, p.stderr
 
     check(shutil.which("uv", path=env["PATH"]) is None, "uv must not be on the bare PATH")
@@ -59,12 +63,19 @@ def w0(e):
     env["PATH"] = f"{home}/.local/bin:{env['PATH']}"
     rc, out, err = run(["orch", "--version"])
     check(rc == 0 and "orch" in out.lower(), f"orch --version: {out!r} {err[-200:]}")
-    proj = home / "proj"
+    proj = base / "proj"
     rc, out, err = run(["orch", "init"], cwd=proj)
     check(rc == 0 and (proj / ".orch/tickets").is_dir(), f"orch init: {err[-200:]}")
+    rc, out, err = run(["orch", "dev-mark"], cwd=proj)  # the harness marks the demo workspace dev (before any key)
+    check(rc == 0, f"orch dev-mark: {(err or out)[-200:]}")
     skill = proj / ".agents/skills/orch/SKILL.md"
     skill.write_text("tampered\n")
     rc, out, err = run(["orch", "update"], cwd=proj)
+    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
+        # a person's action (H1): the scripted test human proves it in a dev demo workspace
+        prc, proof, perr = run(["orch", "dev-proof", "update", "orch"], cwd=proj)
+        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
+        rc, out, err = run(["orch", "update", "--proof-stdin"], cwd=proj, input=proof.strip() + "\n")
     check(rc == 0 and skill.read_text() != "tampered\n", f"orch update did not refresh the skill: rc={rc} {err[-200:]}")
     return f"one-liner ({ref}) -> uv fetched, version, init, update ok"
 

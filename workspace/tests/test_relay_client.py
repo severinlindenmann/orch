@@ -9,6 +9,18 @@ from fakes import WS
 PEER = "ws_reports001"
 
 
+@pytest.fixture
+def ghome(proj, monkeypatch):
+    """A usable guarded orch home for the proj workspace (the real pairing rules are tested in
+    test_secret_store.py and test_humanproof.py)."""
+    from orch import humanproof as hp
+
+    h = proj.parent / f"{proj.name}_ghome"
+    h.mkdir(mode=0o700)
+    monkeypatch.setattr(hp, "guarded_home", lambda root: h)
+    return h
+
+
 def connect(run, srv):
     return run("relay", "connect", srv.url, "--workspace", WS, "--token", srv.token)
 
@@ -319,7 +331,7 @@ def skill_snapshot(files):
     return {"name": "acme-sql", "version": 2, "files": {k: b64(v) for k, v in files.items()}}
 
 
-def test_refresh_installs_and_removes_shared_skills(proj, run, rel, monkeypatch):
+def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monkeypatch):
     from orch import adapters
 
     monkeypatch.setattr(
@@ -330,7 +342,7 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, monkeypatch)
         version=7,
         skills=[skill_snapshot({"SKILL.md": b"---\nname: acme-sql\n---\n", "ref/a.md": b"x"})],
         mcp={"sql": {"command": "x"}},
-        credentials={"DB_URL": "pg://x"},
+        credentials={"DB_URL": "pg://db.example/x"},
     )
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
     code, out, _ = run("relay", "refresh")
@@ -339,7 +351,10 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, monkeypatch)
     assert (d / "ref/a.md").read_bytes() == b"x" and (d / ".orch-shared").exists()
     assert (proj / ".claude/skills/acme-sql/SKILL.md").exists()  # linked per skill
     s = proj / ".orch/secrets"
-    assert json.loads((s / "credentials.json").read_text()) == {"DB_URL": "pg://x"}
+    from orch import keystore
+
+    assert not (s / "credentials.json").exists()  # the admin's keys are not in the workspace
+    assert keystore.get_value(proj, "DB_URL") == "pg://db.example/x"
     assert json.loads((s / "mcp.json").read_text()) == {"mcpServers": {"sql": {"command": "x"}}}
     assert json.loads((s / "shared.json").read_text()) == {"version": 7, "skills": ["acme-sql"]}
     assert not (proj / ".orch/tmp-refresh").exists()
@@ -1606,8 +1621,8 @@ def test_relay_answer_without_a_run_queues_nothing(proj, run, new_ticket, rel):
     assert runs.undelivered(proj, tid) == []
 
 
-def test_refresh_refuses_when_a_gitignore_shows_credentials_and_leaves_secrets_alone(
-    proj, run, rel, monkeypatch
+def test_refresh_refuses_when_a_gitignore_shows_a_private_file_and_leaves_secrets_alone(
+    proj, run, rel, ghome, monkeypatch
 ):
     import subprocess
 
@@ -1627,7 +1642,7 @@ def test_refresh_refuses_when_a_gitignore_shows_credentials_and_leaves_secrets_a
     (proj / ".orch").mkdir(exist_ok=True)
     (proj / ".orch/.gitignore").write_text("# team\n", encoding="utf-8")
     (proj / ".gitignore").write_text(
-        "!/.orch/secrets/\n/.orch/secrets/*\n!/.orch/secrets/credentials.json\n", encoding="utf-8"
+        "!/.orch/secrets/\n/.orch/secrets/*\n!/.orch/secrets/mcp.json\n", encoding="utf-8"
     )
     git("add", "-f", ".")
     git("commit", "-qm", "team")
@@ -1638,6 +1653,7 @@ def test_refresh_refuses_when_a_gitignore_shows_credentials_and_leaves_secrets_a
     assert code != 0
     s = proj / ".orch/secrets"
     assert not (s / "credentials.json").exists() and not (s / "mcp.json").exists()
+    assert not list((ghome / "keys").glob("*/keys.json"))  # nothing reached the key store either
     assert sorted(p.name for p in s.iterdir()) == before
 
 

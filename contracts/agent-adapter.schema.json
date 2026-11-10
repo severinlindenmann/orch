@@ -19,7 +19,7 @@
   "$defs": {
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
     "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" },
-    "arg": { "type": "string", "pattern": "^([^{}]|\\{(prompt|session|new_session|orch_hooks_file|allow)\\})*$" },
+    "arg": { "type": "string", "pattern": "^([^{}]|\\{(prompt|session|new_session|orch_hooks_file|allow|reminder_json)\\})*$" },
     "argv": {
       "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/arg" },
       "if": { "contains": { "type": "string", "pattern": "\\{prompt\\}" } },
@@ -33,6 +33,14 @@
       "additionalProperties": false,
       "properties": {
         "label": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Shown to people. \"{name}\" = the user's entry name." },
+        "store_args": {
+          "type": "object", "additionalProperties": false, "required": ["after", "args"],
+          "description": "Optional, built-in adapters only (orch ignores it elsewhere). For a tool sandboxed to its working folder: when the agent works in a separate copy of the project, `--add-dir <workspace>/.orch` is inserted into the oneshot argv after the template word `after`, so the workspace's own store stays writable. Nothing else is allowed here: exactly `--add-dir` and `{store}` once.",
+          "properties": {
+            "after": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "args": { "const": ["--add-dir", "{store}"] }
+          }
+        },
         "detect": {
           "oneOf": [
             { "type": "null" },
@@ -53,7 +61,8 @@
             "fresh": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "const": "{command}" }] },
             "resume": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "type": "null" }], "description": "null = cannot resume: every run starts fresh from the ticket and its summary." },
             "stream_args": { "$ref": "#/$defs/argv", "description": "Optional. Added for a machine-readable event stream." },
-            "allow_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to retry with a tool allowed ({allow})." }
+            "allow_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to retry with a tool allowed ({allow})." },
+            "settings_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to pass the reminder hooks inline ({reminder_json} = the tool's settings JSON built from reminder_hooks)." }
           }
         },
         "live": {
@@ -144,6 +153,29 @@
             { "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" }, "additionalProperties": { "type": "string", "pattern": "^orch run event --kind [a-z-]{1,24}$" } }
           ],
           "description": "Tool hook event -> the orch command it runs. orch writes them into a per-run file ({orch_hooks_file})."
+        },
+        "reminder_hooks": {
+          "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
+          "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z][a-z0-9-]{0,31}$" },
+          "description": "Optional. Tool hook event -> `orch work-check --hook <tool>`: one plain line at the start of a turn when files changed and no ticket is active. Added to the per-run hooks file (live) and passed inline by oneshot.settings_args. The command always exits 0."
+        },
+        "reminder": {
+          "type": "object", "required": ["settings_file", "output"], "additionalProperties": false,
+          "properties": {
+            "settings_file": { "$ref": "#/$defs/path", "description": "The tool's local (uncommitted) settings file below the project, where `orch init` merges reminder_hooks." },
+            "skip": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" }, "description": "Names (folders; a name ending .md is a file) the tool's own setup puts in the project: left out of the work-check scan." },
+            "input": {
+              "type": "object", "additionalProperties": false,
+              "properties": {
+                "event": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Field of the hook's stdin JSON that names the event." },
+                "cwd": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Field of the hook's stdin JSON that names the tool's current folder." },
+                "default_event": { "type": "string", "pattern": "^[A-Za-z]{1,32}$", "description": "The event assumed when stdin gives none (one of reminder_hooks)." }
+              },
+              "description": "Names in the hook's stdin JSON."
+            },
+            "output": { "type": "object", "description": "What the hook prints, as JSON: \"{event}\" and \"{line}\" in any string are replaced by the hook event name and the one reminder line." }
+          },
+          "description": "Optional. How the work-check hook talks to this tool (see reminder_hooks)."
         },
         "session": {
           "type": "object", "required": ["id"], "additionalProperties": false,

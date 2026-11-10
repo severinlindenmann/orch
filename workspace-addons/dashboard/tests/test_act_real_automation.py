@@ -1,5 +1,6 @@
 """addon.act against the REAL automation CLI (not a fake add-on that accepts anything): the argv the dashboard builds must be
 accepted by `orch automation act`. Only `orch` itself is faked (ticket list, ext set/unset, run start); the add-on is real."""
+
 import json
 import shutil
 import stat
@@ -16,7 +17,7 @@ from .test_act import post
 
 AUTOMATION = Path(__file__).resolve().parents[2] / "automation"
 
-FAKE = '''#!{py}
+FAKE = """#!{py}
 import json, os, subprocess, sys
 from pathlib import Path
 d = Path(__file__).parent
@@ -35,7 +36,7 @@ if a[:2] == ["ticket", "list"]:
     print(json.dumps([{{"id": "t_abcdef", "title": "Weekly", "status": "open", "revision": 1,
                         "ext": {{"automation": {{"recurring": True, "cron": "0 8 * * *"}}}}}}])); sys.exit(0)
 print("{{}}")
-'''
+"""
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
@@ -51,11 +52,28 @@ def test_run_toggle_and_delete_are_accepted_by_the_real_automation_cli(ws, tmp_p
     me = actions.actor()
     try:
         for verb in ("toggle", "run", "delete", "repeat", "copy"):
-            code, text, _ = post(base, {"op": "addon.act", "args": {"addon": "automation", "verb": verb, "target": "t_abcdef", **({"value": "every day at 9"} if verb == "repeat" else {})}})
+            code, text, _ = post(
+                base,
+                {
+                    "op": "addon.act",
+                    "args": {
+                        "addon": "automation",
+                        "verb": verb,
+                        "target": "t_abcdef",
+                        **({"value": "every day at 9"} if verb == "repeat" else {}),
+                    },
+                },
+            )
             assert code == 200, (verb, text)
         calls = [json.loads(x) for x in (d / "calls.jsonl").read_text().splitlines()]
         inner = [c for c in calls if c[0] in ("ext", "run")]
-        assert [c[:2] for c in inner] == [["ext", "set"], ["run", "start"], ["ext", "set"], ["ext", "unset"], ["ext", "set"]]  # Run now also records the last run
+        assert [c[:2] for c in inner] == [
+            ["ext", "set"],
+            ["run", "start"],
+            ["ext", "set"],
+            ["ext", "unset"],
+            ["ext", "set"],
+        ]  # Run now also records the last run
         assert all(c[c.index("--by") + 1] == me for c in inner), inner  # the person, not the scheduler
     finally:
         srv.shutdown()

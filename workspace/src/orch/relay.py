@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import harness, net, runs, skillrender, skills, tickets
+from orch import harness, humanproof, keystore, net, runs, skillrender, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -972,7 +972,7 @@ def _set_asked(root: Path, mid: str, **fields) -> dict:
 def ack_proposal(root: Path, mid: str, made: dict) -> None:
     """Closes the phone's proposal card when the DASHBOARD made the ticket first: the ordinary ack ("Got it:
     <title>", with the new ticket and its key), once, to where the question went. When a phone's own answer
-    made it, nothing is sent: the card already shows the result ("Ticket made"), no second text.
+    made it, no ack is sent: the proposal result closes the card ("Ticket made").
     Only for a proposal asked on the phones."""
 
     def claim(asked):
@@ -989,6 +989,38 @@ def ack_proposal(root: Path, mid: str, made: dict) -> None:
     except BaseException:
         _set_asked(root, mid, acked=False)
         raise
+
+
+def _proposal_result_text(result: dict) -> str:
+    if result["result"] == "refused":
+        return "Couldn't make the ticket"
+    if result.get("key"):
+        return f"Ticket made: {result['key']}"
+    return "Already decided"
+
+
+def _refusal_reason(exc: Exception) -> str:
+    if getattr(exc, "needs_person", False) or str(exc).startswith("Only a person"):
+        return "needs_person"
+    return "unavailable"
+
+
+def _send_proposal_result(root: Path, mid: str, result: dict, created_at: str) -> None:
+    try:
+        sent = _message(
+            root,
+            result["to"],
+            "text",
+            {"text": _proposal_result_text(result["body"]), "proposal_result": result["body"]},
+            None,
+            reply_to=mid,
+            mid=result["id"],
+            created_at=created_at,
+        )
+        if not sent.get("sent"):
+            log_send_failure(root, f"proposal result {result['id']} failed", "not sent")
+    except (Refused, OSError) as exc:
+        log_send_failure(root, f"proposal result {result['id']} failed", exc)
 
 
 def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
@@ -1017,28 +1049,68 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
         with contextlib.suppress(Refused, OSError):
             tickets.note_history(root, tickets.ensure_general(root, by), by, text, via)
 
-    if _asked_edit(root, lambda asked: (asked.get(mid) or {}).get("done")):
-        line(f'A second answer to the ticket proposal "{title}" was ignored')
-        return "ignored: the ticket proposal was already decided", None
+    rec = _asked_edit(root, lambda records: records.get(mid) or {})
+    answer_id = str(msg["id"])
+    recorded = rec.get("results", {}).get(answer_id)
+    if ans == "make" and recorded and recorded["phone"] == frm:
+        _send_proposal_result(root, mid, recorded["result"], recorded["created_at"])
+        return "ticket proposal: result resent", None
+
+    pend = rec.get("pending") if isinstance(rec.get("pending"), dict) else None
+    mine = pend if pend and pend.get("answer") == answer_id else None
+
+    def result(body: dict, to: str, **outcome) -> None:
+        # a result reserved before making keeps its id and time: a crash between make and record resends it
+        saved = {"id": (mine or {}).get("id") or new_id(), "to": to, "body": body}
+        created_at = (mine or {}).get("created_at") or tickets.now()
+        results = dict(rec.get("results", {}))
+        results[answer_id] = {"phone": frm, "result": saved, "created_at": created_at}
+        _set_asked(root, mid, results=results, pending=None, **outcome)
+        _send_proposal_result(root, mid, saved, created_at)
+
     state = chat.proposal_state(root, mid)
-    if state in ("made", "gone") or (state == "open" and ans == "not_now"):
-        _set_asked(root, mid, done=state if state != "open" else "not_now")
-        if ans == "not_now" and state == "open":
+    if mine and ans == "make" and state == "made" and not rec.get("done"):
+        # a crash after making and before the result was recorded: this answer made it, so it is `made`
+        made = chat.make_ticket(root, mid, None, by)  # idempotent: the same ticket
+        result({"result": "made", "key": made["key"]}, "phones", done="make")
+        return f"made {made['key']} from a ticket proposal (via {via})", made["ticket"]
+    if rec.get("done") or state in ("made", "gone"):
+        line(
+            f'A second answer to the ticket proposal "{title}" was ignored'
+            if rec.get("done")
+            else f'A phone answer to the ticket proposal "{title}" came too late and was ignored'
+        )
+        if ans == "make":
+            # Every phone already received the made broadcast. Only its original delivery is retried.
+            if any(r["result"]["body"]["result"] == "made" for r in rec.get("results", {}).values()):
+                return "ignored: the ticket proposal was already decided", None
+            body = {"result": "decided"}
+            if state == "made":
+                # The idempotent return reads the ticket's display key; suppress any new ordinary ack.
+                _set_asked(root, mid, phone=frm)
+                with contextlib.suppress(Refused, OSError):
+                    body["key"] = chat.make_ticket(root, mid, None, by)["key"]
+            result(body, frm, done=rec.get("done") or state)
+        else:
+            _set_asked(root, mid, done=rec.get("done") or state)
+        return "ignored: the ticket proposal was already decided", None
+    if ans == "not_now":
+        if state == "open":
+            _set_asked(root, mid, done="not_now")
             line(f'Not now, from the phone: the ticket proposal "{title}"')
             return "ticket proposal: not now", None
         line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
         return "ignored: the ticket proposal was already decided", None
-    if ans == "not_now":  # making has started: it finishes, the answer changes nothing
-        line(f'A phone answer to the ticket proposal "{title}" came too late and was ignored')
-        return "ignored: the ticket proposal was already decided", None
-    _set_asked(root, mid, phone=frm)
+    reserve = {"answer": answer_id, "id": new_id(), "created_at": tickets.now()}
+    _set_asked(root, mid, phone=frm, pending=reserve)
+    mine = reserve
     try:
         made = chat.make_ticket(root, mid, None, by)
     except Refused as e:
-        _set_asked(root, mid, done="refused")
+        result({"result": "refused", "reason": _refusal_reason(e)}, frm, done="refused")
         line("A ticket proposal answer from the phone was not used: " + str(e)[:120])
         return f"not applied: {e}", None
-    _set_asked(root, mid, done="make")
+    result({"result": "made", "key": made["key"]}, "phones", done="make")
     return f"made {made['key']} from a ticket proposal (via {via})", made["ticket"]
 
 
@@ -1210,7 +1282,7 @@ def _to_waiting_agent(root: Path, tid: str, q: dict, by: str) -> None:
 
     with contextlib.suppress(Refused, OSError):
         if by.startswith("human:"):
-            runs_live.pass_answer(root, tid, q, by)
+            runs_live.pass_answer(root, tid, q, by, proven=True)
         elif (rec := runs.read(root, tid)) and runs.state(rec) == "alive":
             runs_live.send(
                 root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer"
@@ -1721,6 +1793,19 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     an ack (reply_to = its id) and later a "working" update. Idempotent by message id.
     Returns (note, ticket id)."""
     mid, frm = msg["id"], msg["from"]
+    try:
+        runs.require_signing(root)  # FIRST: nothing is written when the person's input cannot be signed
+    except runs.Unsigned:
+        if not final:
+            raise Transient("The protected folder is not usable.") from None  # tried again on the next pulls
+        with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError):
+            send_text(
+                root,
+                frm,
+                "Not saved on the computer: its protected folder can't be used right now. Try again shortly.",
+                reply_to=mid,
+            )
+        return "not saved: the protected folder is not usable (the phone was told)", ""
     body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
     who = _line(name_of(root, frm), 100) or _line(frm, 100)
     by = _by_relay(frm)
@@ -2412,7 +2497,7 @@ def refresh(root: Path) -> str:
     skipped: list[str] = []
     try:
         names = _stage(stage, snap, skipped)
-        _commit(root, stage, snap, names)
+        _commit(root, stage, snap, names, skipped)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     skillrender.refresh_skills(root)
@@ -2468,7 +2553,6 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     if not isinstance(mcp, dict) or not isinstance(cred, dict):
         raise Refused("The snapshot has bad MCP or credentials. Nothing changed.")
     net.write_json(stage / "mcp.json", {"mcpServers": mcp}, True)
-    net.write_json(stage / "credentials.json", cred, True)
     net.write_json(stage / "shared.json", {"version": snap["version"], "skills": names})
     ws = snap.get("workspaces")
     if not isinstance(ws, dict) or not isinstance(ws.get("workspaces"), list):
@@ -2477,7 +2561,28 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     return names
 
 
-def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
+def _admin_keys(root: Path, cred: dict, skipped: list[str]) -> None:
+    """The admin's keys go into the guarded orch home (keystore.set_admin: one rename, an interrupted refresh
+    keeps the old keys), never into the workspace. No keys and no usable guarded home (nothing could be stored
+    there): nothing to store. Keys but no usable home: Refused (_commit checks this first, before anything
+    changes). A leftover credentials.json of an older refresh is always deleted (removing a secret is
+    safe)."""
+    paired = False
+    try:
+        humanproof.guarded_home(root)
+        paired = True
+    except Refused:
+        if cred:
+            raise
+    if paired:
+        skipped.extend(keystore.set_admin(root, cred))
+    legacy = net.secrets_dir(root) / "credentials.json"
+    if legacy.exists() or legacy.is_symlink():
+        harness.check_private_path(root, legacy)
+        legacy.unlink(missing_ok=True)
+
+
+def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list[str]) -> None:
     agents = root / ".agents" / "skills"
     for n in names:  # refuse before changing anything
         dest = agents / n
@@ -2490,6 +2595,15 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
     skills.ensure_gitignore(root)
     for fn in ("credentials.json", "mcp.json", "shared.json"):
         harness.check_private_path(root, sec / fn)  # refuse before changing anything
+    try:
+        humanproof.guarded_home(root)
+        pairs = True
+    except Refused:
+        if snap["credentials"]:
+            raise
+        pairs = False
+    if pairs:  # pairing, binding, rights and readable key files: refuse before any change, with keys or not
+        keystore.preflight(root)
     (agents / "orch-relay").mkdir(parents=True, exist_ok=True)
     os.replace(stage / "workspaces.json", agents / "orch-relay" / "workspaces.json")
     for n in names:
@@ -2502,8 +2616,9 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str]) -> None:
             if d.is_dir() and not skills._is_link(d) and (d / SHARED_MARK).exists() and d.name not in names:
                 shutil.rmtree(d)
                 skills.unlink_skill(root, d.name)
-    net.replace_private(stage / "credentials.json", sec / "credentials.json")
     net.replace_private(stage / "mcp.json", sec / "mcp.json")
+    # before shared.json: a failure here leaves the old version, so the next refresh retries
+    _admin_keys(root, snap["credentials"], skipped)
     skills.apply_agent_files(root)
     net.replace_private(stage / "shared.json", sec / "shared.json")
 
