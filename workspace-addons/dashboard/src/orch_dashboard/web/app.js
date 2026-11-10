@@ -484,6 +484,7 @@ main.addEventListener('click', async event => {
   if (action === 'inline') startInline(control);
   if (action === 'ref-preview') { previewReference(control); return; }
   if (action === 'copies-mode') { settingsSend('copies.set', {mode:control.dataset.mode}, 'copies'); return; }
+  if (action === 'copies-clean') { settingsSend('copies.clean', {}, 'copies-clean'); return; }
   if (action === 'copies-setup') { settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies'); return; }
   if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }
   if (action === 'link-add') startLinkAdd(control);

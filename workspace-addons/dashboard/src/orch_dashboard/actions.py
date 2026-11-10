@@ -443,6 +443,12 @@ def _copies_set(a):
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
 
 
+def _copies_clean(a):
+    """The Clean up now button (settings): `orch copy clean`, the same sweep every start runs."""
+    _only(a, ())
+    return ["copy", "clean", "--json"], [], []
+
+
 def _ticket_field(a):
     """One add-on field: `orch ticket set <id> <addon>.<field> -- <value>` (core types and checks it; empty clears).
     The add-on must be on here (checked in run_op)."""
@@ -647,6 +653,7 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "copies.set": _copies_set,
+    "copies.clean": _copies_clean,
     "ticket.field": _ticket_field,
 }
 
@@ -846,9 +853,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "config.permissions",
             "workflow.set",
             "copies.set",
+            "copies.clean",
             "share.set",
         ):
             _audit(root, op, args)
+        if op == "copies.clean":
+            from . import data as _data
+
+            _data.copies_disk_forget(root)
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None

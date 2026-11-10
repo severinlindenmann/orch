@@ -1104,3 +1104,11 @@ def test_ticket_new_plan_first(value):
 def test_ticket_new_plan_first_requires_boolean(value):
     with pytest.raises(actions.BadRequest):
         actions._ticket_new({"title": "Plan", "plan_first": value})
+
+
+def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("copies.clean", {})[:3] == ["copy", "clean", "--json"]
+    with pytest.raises(BadRequest):
+        build_argv("copies.clean", {"path": "/"})
