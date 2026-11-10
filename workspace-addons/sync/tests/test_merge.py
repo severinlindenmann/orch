@@ -815,3 +815,44 @@ def test_two_different_verifying_decisions_cannot_exist_and_if_a_verifier_said_s
     loud = lambda step, ticket: step.get("wont_do") is True  # a (wrong) verifier that vouches for both
     for x, y in ((a, b), (b, a)):
         assert "wont_do" not in merge_ticket(base, x, y, NOW, loud)["checklist"][0]  # fail closed
+
+
+# ---- RR3: a renumbering never moves an item the core vouches for (updated_at is peer-controlled) --------------
+
+
+def _by_id(t, i):
+    return next(c for c in t["checklist"] if c["id"] == i)
+
+
+@pytest.mark.parametrize("agent_at", [T1, T3])  # the agent copy older, then newer
+def test_a_clash_renumbers_the_agents_item_never_the_persons_signed_one(agent_at):
+    base = tk(checklist=[_step()])
+    mine_c2 = signed(_step(id="c2", text="Call the bank", **WONT))
+    person = person_for(ledger_of(mine_c2))
+    mine = up(base, T2, checklist=[_step(), mine_c2])
+    agent = up(base, agent_at, checklist=[_step(), _step(id="c2", text="Skip the security review")])
+    for x, y in ((mine, agent), (agent, mine)):
+        out = merge_ticket(base, x, y, NOW, person)
+        kept = _by_id(out, "c2")
+        assert kept["wont_do"] is True and kept["text"] == "Call the bank"  # the signed item kept its id
+        moved = [c for c in out["checklist"] if c["text"] == "Skip the security review"]
+        assert len(moved) == 1 and moved[0]["id"] != "c2" and "wont_do" not in moved[0]
+
+
+def test_two_vouched_items_with_one_id_cannot_be_merged_and_the_caller_pauses():
+    base = tk(checklist=[_step()])
+    one = signed(_step(id="c2", text="Call the bank", **WONT), "n1")
+    two = signed(_step(id="c2", text="Another decision", **WONT), "n2")
+    loud = lambda step, ticket: step.get("wont_do") is True  # a (wrong) verifier that vouches for both
+    a, b = up(base, T2, checklist=[_step(), one]), up(base, T3, checklist=[_step(), two])
+    for x, y in ((a, b), (b, a)):
+        assert merge_ticket(base, x, y, NOW, loud) is None
+
+
+def test_without_a_vouched_item_updated_at_still_decides_the_clash():
+    base = tk(checklist=[_step()])
+    old = up(base, T1, checklist=[_step(), _step(id="c2", text="First")])
+    new = up(base, T3, checklist=[_step(), _step(id="c2", text="Second")])
+    for x, y in ((old, new), (new, old)):
+        out = merge_ticket(base, x, y, NOW, person_for({}))
+        assert _by_id(out, "c2")["text"] == "First"  # the older keeps the id (as before)

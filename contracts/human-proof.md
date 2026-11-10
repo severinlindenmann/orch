@@ -241,7 +241,7 @@ nobody is a person) holds ONE invariant: **with a base that holds a person's dec
 `wont_nonce`, `wont_mac`, and, for an "on", `text` and `covers`: `humanproof.SIGNED_STEP_FIELDS` + the MAC, the same list the signer
 uses, a test fails if they drift) differs from the base's only when that side verifies; otherwise it is the base's**, whether the
 side dropped the decision, changed it, rewrote only the text or covers, garbled its MAC or replayed an old one, and before any
-"newer side wins" pick. A step one side deleted outright comes back (a
+"newer side wins" pick. A renumbering (both sides added a different step with the same id) never moves an item the core vouches for, whatever `updated_at` says (a peer controls it): the other side's step is renumbered; two vouched items with one id cannot be merged and the caller pauses. A step one side deleted outright comes back (a
 deletion carries no proof; a person's removal is proven where it is made). Anything else is an agent's (reference
 `wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
 
