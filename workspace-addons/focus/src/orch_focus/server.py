@@ -71,6 +71,8 @@ class Tracker:
         self.root, self.orch_bin = root, orch_bin
         self.lock = threading.Lock()
         self.plock = threading.Lock()  # started + pins: handler threads change them together
+        self.stop = threading.Event()  # set when the server closes: pin threads end instead of polling on
+        self.pin_threads: list[threading.Thread] = []
         self.seen_sig = ""
         self.tickets: dict[str, dict] = {}
         self.status_cache: dict[str, tuple[float, dict]] = {}
@@ -193,10 +195,26 @@ class Tracker:
                 return claim[k]
         return None
 
+    def start_pin(self, tid: str, run: str) -> None:
+        t = threading.Thread(target=self.pin_started, args=(tid, run), daemon=True, name="focus-pin")
+        with self.plock:
+            self.pin_threads = [x for x in self.pin_threads if x.is_alive()] + [t]
+        t.start()
+
+    def close(self) -> None:
+        """End the pin threads and wait for them, so none outlives the server (or the test that started it)."""
+        self.stop.set()
+        with self.plock:
+            threads = list(self.pin_threads)
+        for t in threads:
+            t.join(timeout=5)
+
     def pin_started(self, tid: str, run: str) -> bool:
         """Right after Focus started a run: record {run, pid, start} of its process. Only a run with this pin
         is ever listed or stopped (nothing is pinned later, on first sight, from a claim someone else could write)."""
         for _ in range(60):  # a live session writes its pid a moment after the start (up to 30 s)
+            if self.stop.is_set():
+                return False
             self.status_cache.pop(tid, None)
             claim = self.run_status(tid).get("claim") or {}
             pid = self._claim_pid(claim)
@@ -208,7 +226,8 @@ class Tracker:
                     self.pins[tid] = {"run": run, "pid": pid, "start": start}
                     self._save_pins()
                 return True
-            time.sleep(0.5)
+            if self.stop.wait(0.5):
+                return False
         import sys
 
         print(f"focus: no process id for run {run} on {tid} after 30 s; it stays out of Running now", file=sys.stderr)
@@ -716,7 +735,7 @@ class Handler(BaseHTTPRequestHandler):
         if code == 200 and body.get("op") == "run.start":
             self.tracker.note_started(args["ticket"], (extra or {}).get("run"))
             if isinstance((extra or {}).get("run"), str) and RUN_ID.fullmatch(extra["run"]):
-                threading.Thread(target=self.tracker.pin_started, args=(args["ticket"], extra["run"]), daemon=True).start()
+                self.tracker.start_pin(args["ticket"], extra["run"])
             self.tracker.mark_page(args["ticket"])
         elif code == 200 and body.get("op") == "run.stop":
             self.tracker.forget_started(args["ticket"])
@@ -758,6 +777,8 @@ class _Server(ThreadingHTTPServer):
     def server_close(self):
         if hasattr(self, "ticker_stop"):
             self.ticker_stop.set()
+        if hasattr(self, "tracker"):
+            self.tracker.close()
         if hasattr(self, "revisions"):  # not yet set when the bind failed
             self.revisions.close()
         super().server_close()
@@ -774,6 +795,7 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
     tracker = Tracker(root, orch_bin)
     srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=session))
     srv.revisions = Revisions(root)
+    srv.tracker = tracker
     srv.ticker_stop = stop = threading.Event()
 
     def ticker():  # the clock of a working ticket moves without anyone watching

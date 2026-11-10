@@ -1085,7 +1085,8 @@ def hp_verify(c):
 
 
 SETTING_DEFAULTS = {"focus.live_session": True, "focus.session_typing": False, "insights.share_counts": True,
-                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False}
+                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False,
+                    "workflow.agents_may_finish": False}
 
 
 def hp_settle(c):
@@ -1125,9 +1126,12 @@ def pending_deliver(c):
     return c["line"]["id"] not in c["delivered_ids"]
 
 
-def _wontdo_mac(key, workspace, item):
-    canon = json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{canon}".encode(), hashlib.sha256).digest())
+def _wontdo_mac(key, workspace, ticket, decision):
+    """wontdo1.<workspace id>.<ticket id>.<canonical decision {check, wont_do, reason, text, covers, nonce}>: binds
+    WHERE the decision belongs (ticket, step) and WHAT it is about (the step's text and covers); the nonce makes
+    equal decisions differ. Freshness (replays, reused step ids) is the ledger's job, not the MAC's."""
+    canon = json.dumps(decision, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{ticket}.{canon}".encode(), hashlib.sha256).digest())
 
 
 def wontdo_is_human(c):
@@ -1135,7 +1139,7 @@ def wontdo_is_human(c):
     if c.get("relay_authenticated_sender"):
         return True
     m = c.get("mac")
-    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["item"]))
+    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["ticket"], c["decision"]))
 
 
 def relay_conn(c):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,7 @@ from .look import LOOK_OPS
 from .look import forget as look_forget
 from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 try:
     from orch.pageproof import SELF, argv0, run_with_proof
 except ImportError:  # standalone use without orch: nothing runs
@@ -120,23 +122,90 @@ PROOF_OPS = {
     "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
     "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
     "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:reopen"),
+    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:edit"),
+    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:remove"),
     "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
+    "config.permissions": ("config.permissions", lambda a: a.get("mode")),
+    "config.agent.add": ("config.agent_add", lambda a: a.get("name")),
+    "look.set": ("look.icon", lambda a: "look"),
 }
 
 
-def proof_for(op, args):
+def proof_for(op, args, root=None):
     """(core op, target) when this click needs a proof, else None."""
     if op == "ticket.patch" and isinstance(args.get("data"), dict) and "status" in args["data"]:
         return "ticket.verdict", args.get("ticket")
     if (
         op == "check.set" and args.get("done") is False
     ):  # un-ticking may undo a Won't do (a person's decision)
-        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}"
+        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}:reopen"
+    if op == "group.say":  # writing into a group as the person (host: by ticket; invited: by group)
+        if args.get("ticket"):
+            return "group.write_as_person", str(args["ticket"])
+        from orch import humanproof as _hp
+
+        return "group.write_as_person", _hp.group_target(root, str(args.get("host")), str(args.get("group")))
+    if op == "group.remove":
+        return "group.remove_member", f"{args.get('ticket')}:{args.get('workspace')}"
+    if (
+        op == "group.share" and root is not None
+    ):  # the proof binds the file's CONTENT (the core hashes the same)
+        return "group.share_file", f"{args.get('ticket')}:{_share_sha(root, args)}"
+    if op == "workflow.set":  # allowing agents to finish tickets (off needs no proof)
+        return ("config.agents_may_finish", "on") if args.get("on") is True else None
+    if op == "copies.set" and "setup" in args:  # a command orch runs in every new copy; clearing is free
+        v = args.get("setup")
+        if isinstance(v, str) and v.strip() not in ("", "none"):
+            return "config.copy_setup", hashlib.sha256(v.strip().encode()).hexdigest()
+        return None
+    if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
+        return ("config.share", "on") if args.get("on") is True else None
+    if op == "look.shared":
+        return "look.shared_pages", "on" if args.get("on") is True else "off"
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None
+
+
+# Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
+# itself (a ticket, a task, a note, a reference), nothing that speaks or decides for the person. EVERY other op acts
+# as the person (`--by human:...`): the server refuses it without a page session (watch-only), and an op with a
+# core gate (PROOF_OPS) also needs the person's proof.
+FREE_OPS = frozenset(
+    {
+        "ticket.new",
+        "ticket.paste",
+        "ticket.edit",
+        "ticket.field",
+        "ticket.patch",
+        "log",
+        "check.add",
+        "ref.add",
+        "ref.rm",
+        "look.description",
+        "config.agent.test",
+    }
+)
+
+
+def _share_sha(root, args) -> str:
+    """The content hash the core computes for the same artifact (a person's click shares a ticket artifact). Read
+    here with the file inside the ticket's artifacts folder only; anything else gives a target no proof matches."""
+    import hashlib
+    from pathlib import Path
+
+    art = (Path(root) / ".orch" / "tickets" / str(args.get("ticket")) / "artifacts").resolve()
+    try:
+        path = (art / str(args.get("file"))).resolve()
+        if art not in path.parents or not path.is_file() or path.stat().st_size > 25 * 1024 * 1024:
+            return "unreadable"
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return "unreadable"
+
+
+def needs_session(op) -> bool:
+    return isinstance(op, str) and op not in FREE_OPS
 
 
 def _tid(v) -> str:
@@ -776,7 +845,7 @@ def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, byte
     saved, failed = [], []
     for hint, raw in files:
         try:
-            r = subprocess.run(
+            r = _run(
                 [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
                 check=False,
                 cwd=root,
@@ -811,7 +880,11 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
     argv = build_argv(op, args)
-    need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
+    if orch_bin == SELF and needs_session(op) and mint is None:  # before anything is read, hashed or run (F8)
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
+    need = (
+        proof_for(op, args, root) if orch_bin == SELF else None
+    )  # a test fake (explicit ORCH_BIN) needs none
     files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
@@ -830,15 +903,13 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
-    if need and mint is None:
-        raise NeedsPerson("Open the dashboard from this computer to do this.")
     try:
         if need:
             r = run_with_proof(
                 argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
             )
         else:
-            r = subprocess.run(
+            r = _run(
                 [*argv0(orch_bin), *argv],
                 check=False,
                 cwd=root,

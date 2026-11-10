@@ -66,7 +66,7 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -75,6 +75,7 @@ SETTING_DEFAULTS = {
     "insights.share_names": False,
     "secret.allow_get": False,
     "conn.allow": False,
+    "workflow.agents_may_finish": False,
 }
 _TARGET_RE = re.compile(r"[A-Za-z0-9_.:@-]+")
 _BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
@@ -765,8 +766,27 @@ def _settings_write(root: Path, setting: str, value, by: str) -> None:
         _write_private(path, json.dumps(data, indent=2, sort_keys=True))
 
 
+_CONN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # same shape as inventory.NAME_RE
+
+
+def is_conn_grant_key(setting) -> bool:
+    """Exactly `conn.allow.<connection name>` with a well-formed name (no arbitrary suffix)."""
+    if not isinstance(setting, str) or not setting.startswith("conn.allow."):
+        return False
+    return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
+
+
 def record_set(root: Path, setting: str, value, by: str) -> None:
-    """A person set the value with a verified proof: the caller also writes the file. Record = the grant."""
+    """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
+    but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
+    an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
+    moment where the file says on and the record is stale."""
+    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting):
+        raise Refused("That is not a setting a person has to allow.")
+    if value is not False and not str(by).startswith("human:"):
+        raise Refused(AGENT_REFUSED)
+    if value is False and not str(by).startswith("human:"):
+        by = "reset"  # a lowering by anyone else: the tombstone names no person
     _settings_write(root, setting, value, by)
 
 
@@ -1076,14 +1096,150 @@ def unconsume(root: Path, ids: list[str]) -> None:
 # ------------------------------------------------------------------------------------------- won't do
 
 
-def wontdo_mac(key: bytes, workspace: str, item: dict) -> str:
-    return _b64u(hmac.new(key, f"wontdo1.{workspace}.{_canon(item)}".encode(), hashlib.sha256).digest())
+def wontdo_mac(key: bytes, workspace: str, ticket: str, decision: dict) -> str:
+    """wontdo1.<workspace id>.<ticket id>.<canonical decision {check, wont_do, reason, text, covers, nonce}>:
+    binds WHERE the decision belongs (another ticket or step) and WHAT it is about (the step's text and
+    covers); the nonce makes equal decisions differ. An undo is the same record with wont_do false and
+    reason null. FRESHNESS comes from the ledger (see below), not from the MAC."""
+    return _b64u(
+        hmac.new(key, f"wontdo1.{workspace}.{ticket}.{_canon(decision)}".encode(), hashlib.sha256).digest()
+    )
 
 
-def wontdo_is_human(key: bytes, workspace: str, item: dict, mac, relay_authenticated_sender: bool) -> bool:
+def wontdo_is_human(
+    key: bytes, workspace: str, ticket: str, decision: dict, mac, relay_authenticated_sender: bool
+) -> bool:
     if relay_authenticated_sender:
         return True
-    return isinstance(mac, str) and bool(mac) and hmac.compare_digest(mac, wontdo_mac(key, workspace, item))
+    return (
+        isinstance(mac, str)
+        and bool(mac)
+        and hmac.compare_digest(mac, wontdo_mac(key, workspace, ticket, decision))
+    )
+
+
+# The step fields the signed decision record is built from. ONE source of truth: wont_decision() reads exactly
+# these, and the sync merge pins exactly these (+ the MAC itself) while a verified decision is held
+# (orch_sync.merge._SIGNED; a test fails if the two drift apart).
+SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce")
+
+
+def wont_decision(step: dict) -> dict:
+    """The step's decision record, the thing the MAC covers: which step, the decision and its reason, a random
+    `nonce` (equal decisions get different MACs) and, ONLY for an "on" record, WHAT the person decided about
+    (the step's text and `covers`: rewriting the step needs the person again). An undo record carries no text
+    or covers, so a later rename of the reopened step cannot make the undo stop verifying."""
+    on = step.get("wont_do") is True
+    return {
+        "check": step.get("id"),
+        "wont_do": on,
+        "reason": (step.get("reason") if on else None),
+        "text": (step.get("text") if on else None),
+        "covers": (step.get("covers") if on else None),
+        "nonce": step.get("wont_nonce"),
+    }
+
+
+# The LEDGER (guarded home, next to human.key): keys/<ws>/wont.json holds, per "<ticket>:<check>", the CURRENT
+# wontdo1 MAC of that step's decision (null = tombstone, the step was removed). A MAC is accepted only when it
+# IS the current entry, so replaying an older signed "on" or "undo", or reusing the id of a removed step, does
+# not verify. A missing, loose or damaged ledger vouches for nobody (fail closed).
+LEDGER = "wont.json"
+
+
+LEDGER_DAMAGED = (
+    "orch's record of your Won't do decisions is damaged, so this was not saved. Nothing was changed. "
+    "Close orch and start it again; orch then resets its protection and you can decide again."
+)
+
+
+def _ledger_read(root: Path) -> dict | None:
+    """The ledger entries: {} when there is none yet, None when it cannot be trusted (damaged or loose)."""
+    try:
+        d = key_dir(root, create=False)
+        data = _read_json(root, d / LEDGER, {"entries": {}})
+    except (Refused, OSError):
+        return None
+    ent = data.get("entries") if isinstance(data, dict) else None
+    return ent if isinstance(ent, dict) else None
+
+
+def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
+    """Make `mac` the current entry. A damaged ledger is NEVER overwritten (that would wipe every other
+    entry): returns False and keeps the file."""
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            ent = _ledger_read(root)
+            if ent is None:
+                return False
+            ent[f"{ticket}:{check}"] = mac
+            _write_private(d / LEDGER, json.dumps({"schema": "orch.wont-ledger/1", "entries": ent}))
+        return True
+    except (Refused, OSError):
+        return False
+
+
+def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
+    """The receiving core's own wontdo1 MAC for this step's decision, recorded as the CURRENT entry of the
+    ledger (None when there is no usable key or ledger). The step must already carry a fresh `wont_nonce`."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws or not isinstance(step.get("wont_nonce"), str):
+            return None
+        mac = wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
+    except (Refused, OSError):
+        return None
+    if not _ledger_set(root, ticket, str(step.get("id")), mac):
+        raise Refused(LEDGER_DAMAGED)  # visible: the decision is not saved half-signed
+    return mac
+
+
+def wont_forget(root: Path, ticket: str, check: str) -> None:
+    """A step was removed (a proven removal): tombstone its ledger entry (whatever the step file still says),
+    so no old MAC verifies on a new step that reuses the id. Nothing to do when the ledger has no entry for
+    it; a damaged ledger is left as it is (it vouches for nobody anyway)."""
+    ent = _ledger_read(root)
+    if ent and ent.get(f"{ticket}:{check}") is not None:
+        _ledger_set(root, ticket, check, None)
+
+
+def wont_verifier(root: Path, relay_ok=None):
+    """`person(step, ticket_id) -> bool` for the sync merge: True only for a decision whose MAC is valid for
+    the step's content AND is the CURRENT ledger entry for that step (or one the relay client recorded from an
+    authenticated sender: `relay_ok(step, ticket_id, decision)` must compare the FULL decision record against
+    what the relay recorded, never "this step was touched by a relay sender"). The ledger is read at each
+    call, so the sync caller must read, merge and write under the ticket's apply_op lock (the ledger cannot
+    move between the merge and the write). The text `by: human:` is never
+    looked at. Fails closed: no key, no workspace id, no readable ledger = nobody."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        key = human_key(root, create=False)
+    except (Refused, OSError):
+        return lambda step, ticket: False
+    if not ws:
+        return lambda step, ticket: False
+
+    def person(step, ticket) -> bool:
+        if not isinstance(step, dict) or not isinstance(ticket, str):
+            return False
+        decision = wont_decision(step)
+        if relay_ok and relay_ok(step, ticket, decision):
+            return True
+        ledger = _ledger_read(root)  # read at the moment of asking, never a snapshot taken earlier
+        if ledger is None:
+            return False  # damaged / loose: nobody
+        mac = step.get("wont_mac")
+        current = ledger.get(f"{ticket}:{step.get('id')}")
+        if not isinstance(mac, str) or not mac or not isinstance(current, str):
+            return False
+        return hmac.compare_digest(mac, current) and wontdo_is_human(key, ws, ticket, decision, mac, False)
+
+    return person
 
 
 def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:
@@ -1163,7 +1319,7 @@ CURRENT_ARGV: list[str] | None = None
 HANDOFF_HEADS = {
     "ticket.answer": (("answer",),),
     "run.human_input": (("run", "send"),),
-    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch")),
+    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch"), ("ticket", "status")),
     "relay.allow": (("relay", "allow"),),
     "relay.connect": (("relay", "connect"),),
     "update": (("update",),),
@@ -1172,6 +1328,16 @@ HANDOFF_HEADS = {
     "check.wont_do": (("check", "wont-do"),),
     "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
     "chat.make_ticket": (("chat", "make-ticket"),),
+    "config.agents_may_finish": (("config", "set"),),
+    "config.copy_setup": (("config", "set"),),
+    "config.permissions": (("config", "set"),),
+    "config.agent_add": (("config", "agent", "add"),),
+    "config.share": (("share", "on"),),
+    "look.shared_pages": (("look", "shared-pages"),),
+    "look.icon": (("look", "set"),),
+    "group.write_as_person": (("relay", "group", "say"), ("relay", "group", "reply")),
+    "group.remove_member": (("relay", "group", "remove"),),
+    "group.share_file": (("relay", "group", "share"), ("relay", "group", "send-file")),
 }
 
 
@@ -1184,13 +1350,26 @@ def _clean_argv(argv) -> list[str] | None:
         if a == "--by":
             skip = True
             continue
-        if a.startswith("--by=") or a == "--proof-stdin":
-            continue
+        if a.startswith("--by=") or a in ("--proof-stdin", "--unchecked-ok"):
+            continue  # --unchecked-ok skips the password check: a hand-off refuses in words, the page asks
         out.append(a)
     return out if all(isinstance(x, str) and len(x) <= 4000 for x in out) and len(out) <= 20 else None
 
 
 VALUE_MAX = 4000  # the exact text a person approves is shown whole; longer is not queued
+
+
+def group_target(root: Path, host: str, group: str) -> str:
+    """The proof target for an act in a joined group: `<host workspace id>:<group id>`. A group id
+    is only unique per host, so the host is part of what the person approves. The CLI and the dashboard both
+    build it here (one place), so a proof for host A is never good for host B."""
+    from orch import relay
+
+    try:
+        host = relay.resolve(root, host) if root is not None else host
+    except Refused:
+        pass  # the command itself refuses an unknown host in words
+    return f"{host}:{group}"
 
 
 def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
@@ -1351,7 +1530,11 @@ def request_handoff(
     if len(value) > VALUE_MAX or (value and value not in argv):
         return False
     exact = str(exact)[:2000] if exact else ""
-    if exact and op in ("relay.connect", "addon.add_local") and exact not in " ".join(argv):
+    if (
+        exact
+        and op in ("relay.connect", "addon.add_local", "group.share_file")
+        and exact not in " ".join(argv)
+    ):
         return False  # the shown full target must be part of the command that runs
     try:
         d = key_dir(root)

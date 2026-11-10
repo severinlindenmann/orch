@@ -42,7 +42,8 @@ def live(tmp_path, monkeypatch):
     def no_child(argv, *a, **k):
         return subprocess.CompletedProcess(argv, 1, "", "")
 
-    monkeypatch.setattr(subprocess, "run", no_child)
+    monkeypatch.setattr(actions, "_run", no_child)
+    monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: no_child(argv))
     srv = make_server(root, 0, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield root, srv.server_address[1]
@@ -153,11 +154,8 @@ def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
         assert st == 403, (op, body)
     from orch_focus import actions
 
-    assert actions.proof_for("check.edit", {"ticket": "t_a", "check": "c1"}) == (
-        "check.wont_do_undo",
-        "t_a:c1",
-    )
-    assert actions.proof_for("check.remove", {"ticket": "t_a", "check": "c1"}) == (
-        "check.wont_do_undo",
-        "t_a:c1",
-    )
+    for action in ("edit", "remove", "reopen"):  # the ACTION is part of the proof target
+        assert actions.proof_for(f"check.{action}", {"ticket": "t_a", "check": "c1"}) == (
+            "check.wont_do_undo",
+            f"t_a:c1:{action}",
+        )

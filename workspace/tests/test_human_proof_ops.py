@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -1147,7 +1148,7 @@ def test_undoing_a_wont_do_needs_a_proof_but_reopening_a_done_step_stays_free(ws
     code, *_ = _cli(
         run,
         monkeypatch,
-        _proof(ws, "check.wont_do_undo", f"{tid}:{cid}"),
+        _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:reopen"),
         "check",
         "reopen",
         tid,
@@ -1224,10 +1225,18 @@ def test_remove_and_rename_of_a_wont_do_need_the_proof_and_hand_off(ws, run, mon
     assert cards["remove"]["parts"] == {"title": "Plan", "step": "Write the file", "n": 1, "action": "remove"}
     # with the proof: it works, and by comes from the proof
     target = f"{tid}:{cid}"
+    # the ACTION is part of the target: a proof for one action does not do another
+    for wrong_action, argv in (
+        ("reopen", ("check", "edit", tid, cid, "Renamed")),
+        ("edit", ("check", "remove", tid, cid)),
+    ):
+        proof = _proof(ws, "check.wont_do_undo", f"{target}:{wrong_action}")
+        assert _cli(run, monkeypatch, proof, *argv, "--json")[0] == 2
+    assert tickets.load(ws, tid)["checklist"][0]["text"] == "Write the file"
     code, *_ = _cli(
         run,
         monkeypatch,
-        _proof(ws, "check.wont_do_undo", target),
+        _proof(ws, "check.wont_do_undo", target + ":edit"),
         "check",
         "edit",
         tid,
@@ -1237,7 +1246,14 @@ def test_remove_and_rename_of_a_wont_do_need_the_proof_and_hand_off(ws, run, mon
     )
     assert code == 0 and tickets.load(ws, tid)["checklist"][0]["text"] == "Renamed"
     code, *_ = _cli(
-        run, monkeypatch, _proof(ws, "check.wont_do_undo", target), "check", "remove", tid, cid, "--json"
+        run,
+        monkeypatch,
+        _proof(ws, "check.wont_do_undo", target + ":remove"),
+        "check",
+        "remove",
+        tid,
+        cid,
+        "--json",
     )
     assert code == 0 and tickets.load(ws, tid)["checklist"] == []
 
@@ -1246,7 +1262,7 @@ def test_an_agent_cannot_remove_or_rename_a_wont_do_even_with_a_forged_flag(ws, 
     tid, cid = _wont_do_step(ws, run, monkeypatch)
     for argv in (("check", "remove", tid, cid), ("check", "edit", tid, cid, "X")):
         assert run(*argv, "--by", "agent:x", "--json")[0] == 2
-    wrong = _proof(ws, "check.wont_do_undo", f"{tid}:c9")
+    wrong = _proof(ws, "check.wont_do_undo", f"{tid}:c9:remove")
     assert _cli(run, monkeypatch, wrong, "check", "remove", tid, cid, "--json")[0] == 2
     assert tickets.load(ws, tid)["checklist"][0]["wont_do"] is True
 
@@ -1336,3 +1352,706 @@ def test_the_cli_says_the_notice_once_and_the_page_still_has_it(ws, run, capsys)
     code, out, err = run("ticket", "list", "--json")
     assert hp.RESET_NOTICE not in err  # not twice
     assert [n["text"] for n in hp.read_notices(ws)] == [hp.RESET_NOTICE]  # the page still shows it
+
+
+# ------------------------------------------------------------ #425: the core signs a Won't do and its undo
+
+
+def test_a_verifier_without_a_key_vouches_for_nobody(ws, run):
+    tid, cid = _ticket_with_step(ws, run)
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert hp.wont_verifier(ws)({**step, "wont_do": True, "wont_mac": "x"}, tid) is False
+
+
+def _sync_mod():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workspace-addons" / "sync" / "src"))
+    from orch_sync import merge
+
+    return merge
+
+
+def _signed_wont(ws, run, monkeypatch, reason="not needed"):
+    tid, cid = _ticket_with_step(ws, run)
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--reason", reason, "--json")
+    return tid, cid
+
+
+def test_wont_do_is_signed_into_the_ledger_and_the_verifier_accepts_only_the_current_entry(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert step["wont_do"] is True and step["wont_mac"] and step["wont_nonce"] and person(step, tid)
+    assert hp._ledger_read(ws) == {f"{tid}:{cid}": step["wont_mac"]}  # the CURRENT entry
+    # forged `by: human:` without a MAC, a copy on another ticket or step, any changed decision field: no
+    assert not person({**step, "wont_mac": None, "by": "human:Ann"}, tid)
+    assert not person(step, "t_other99") and not person({**step, "id": "c9"}, tid)
+    for field, value in (
+        ("reason", "changed"),
+        ("text", "rewritten"),
+        ("covers", "all of it"),
+        ("wont_nonce", "x"),
+    ):
+        assert not person({**step, field: value}, tid), field
+
+
+def test_a_replayed_older_decision_and_a_reused_id_do_not_verify_but_the_current_ones_do(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on1 = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:reopen")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    undo2 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(undo2, tid) and not person(on1, tid)  # the older signed "on" is no longer current
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--json")
+    on3 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(on3, tid) and not person(undo2, tid) and not person(on1, tid)  # old undo / old on: replays
+    # a proven removal tombstones the entry: the old MAC does not verify on a new step that reuses the id
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:remove")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None
+    assert not hp.wont_verifier(ws)(on3, tid)
+
+
+def test_a_proven_edit_of_a_wont_do_step_re_signs_it_for_the_new_text(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    before = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:edit")
+    _cli(run, monkeypatch, proof, "check", "edit", tid, cid, "Write the other file", "--json")
+    after = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert after["text"] == "Write the other file" and after["wont_do"] is True
+    assert after["wont_mac"] != before["wont_mac"] and person(after, tid)  # re-signed, current
+    assert not person(before, tid)  # the old signed decision (old text) is superseded
+
+
+def test_a_missing_or_damaged_ledger_vouches_for_nobody(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    assert hp.wont_verifier(ws)(step, tid)
+    hp._write_private(ledger, "{not json")
+    assert not hp.wont_verifier(ws)(step, tid)  # damaged: closed
+    ledger.unlink()
+    assert not hp.wont_verifier(ws)(step, tid)  # missing: nobody was ever signed
+
+
+def test_the_relay_hook_is_decision_scoped(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    hp.human_key(ws)  # (the verifier needs a key to be more than "nobody")
+    step = tickets.load(ws, tid)["checklist"][0]
+    seen = []
+    person = hp.wont_verifier(ws, relay_ok=lambda st, t, decision: seen.append(decision) or False)
+    assert person({**step, "wont_do": True}, tid) is False
+    assert seen and seen[0]["wont_do"] is True and seen[0]["check"] == cid and "text" in seen[0]
+
+
+def test_sync_merge_with_the_real_verifier_end_to_end(ws, run, monkeypatch):
+    merge = _sync_mod()
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    base = tickets.load(ws, tid)
+    person = hp.wont_verifier(ws)
+    old = "2099-01-01T00:00:00Z"
+    now = "2099-01-02T00:00:00Z"
+    rewrite = {
+        **base,
+        "updated_at": old,
+        "checklist": [{**base["checklist"][0], "text": "skip the security review"}],
+    }
+    out = merge.merge_ticket(base, rewrite, base, now, person)
+    step0 = base["checklist"][0]
+    assert (
+        out["checklist"][0]["wont_do"] is True and out["checklist"][0]["text"] == step0["text"]
+    )  # no change
+    changed = {**base, "updated_at": old, "checklist": [{**base["checklist"][0], "reason": "agent was here"}]}
+    out = merge.merge_ticket(base, changed, base, now, person)
+    assert out["checklist"][0]["reason"] == "not needed" and out["checklist"][0]["wont_do"] is True
+    assert (
+        merge.merge_ticket(base, rewrite, base, now)["checklist"][0].get("wont_do") is None
+    )  # no verifier = nobody
+
+
+def test_every_caller_of_merge_ticket_passes_a_verifier():
+    """merge_ticket has no production caller yet; when the sync loop is wired up it MUST pass
+    humanproof.wont_verifier(root) (no verifier = every Won't do is dropped on every sync)."""
+    import ast
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = []
+    for src in list((root / "workspace" / "src").rglob("*.py")) + list(
+        (root / "workspace-addons").glob("*/src/**/*.py")
+    ):
+        if src.name == "merge.py" and "orch_sync" in str(src):
+            continue
+        for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", getattr(node.func, "id", "")) == "merge_ticket"
+            ):
+                if len(node.args) < 5 and not any(k.arg == "person" for k in node.keywords):
+                    offenders.append(f"{src.relative_to(root)}:{node.lineno}")
+    assert not offenders, (
+        "merge_ticket without person= (humanproof.wont_verifier(root)); the caller must also read, merge "
+        "and write under the ticket's apply_op lock (the verifier reads the ledger at each call): "
+        + ", ".join(offenders)
+    )
+
+
+def test_the_signed_fields_are_one_source_of_truth_for_the_signer_and_the_merge():
+    """If the decision record starts to cover another step field, or the merge pins another, this fails: the
+    signer (humanproof.wont_decision / SIGNED_STEP_FIELDS) and orch_sync.merge._SIGNED can not drift apart."""
+    merge = _sync_mod()
+    assert tuple(merge._SIGNED) == tuple(hp.SIGNED_STEP_FIELDS) + ("wont_mac",)
+    step = {
+        "id": "c1", "text": "T", "done": False, "evidence": [], "wont_do": True, "reason": "r", "covers": "c",
+        "wont_nonce": "n", "wont_mac": "m", "by": "human:x", "at": "2026-11-10T00:00:00Z", "state": None,
+    }  # fmt: skip
+    base = hp.wont_decision(step)
+    for field in hp.SIGNED_STEP_FIELDS:  # every signed field moves the record ...
+        assert hp.wont_decision({**step, field: "changed" if field != "wont_do" else False}) != base, field
+    for field, value in (
+        ("evidence", [1]),
+        ("done", True),
+        ("by", "agent:x"),
+        ("at", "x"),
+        ("wont_mac", "other"),
+    ):
+        assert hp.wont_decision({**step, field: value}) == base, field  # ... and nothing else does
+    off = hp.wont_decision({**step, "wont_do": False})
+    assert off["text"] is None and off["covers"] is None and off["reason"] is None  # an undo binds no text
+
+
+def test_a_damaged_ledger_is_never_overwritten_and_the_decision_is_refused(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    hp._write_private(ledger, "{not json")
+    # another step's decision is refused visibly; the damaged file is kept as it is (not wiped with {})
+    code, out, err = run("check", "add", tid, "Second", "--json", "--by", "agent:x")
+    c2 = json.loads(out)["id"]
+    proof = _proof(ws, "check.wont_do", f"{tid}:{c2}")
+    code, out, err = _cli(run, monkeypatch, proof, "check", "wont-do", tid, c2, "--json")
+    assert code == 2 and "damaged" in out + err and "start it again" in out + err
+    assert ledger.read_text() == "{not json"
+    assert not tickets.load(ws, tid)["checklist"][1].get("wont_do")  # nothing half done
+
+
+def test_the_verifier_reads_the_ledger_when_asked_not_at_creation(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    person = hp.wont_verifier(ws)  # created BEFORE the next decision
+    old = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:reopen")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    assert not person(
+        old, tid
+    )  # the ledger moved on after the verifier was made: the old "on" is not current
+
+
+def test_a_proven_remove_tombstones_even_when_the_step_file_lost_its_mac(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on = tickets.load(ws, tid)["checklist"][0]
+    tickets.apply_op(
+        ws, tid, lambda t: [t["checklist"][0].pop(k) for k in ("wont_mac", "wont_nonce")]
+    )  # stripped
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:remove")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None  # tombstoned from the ledger, not from the step file
+    assert not hp.wont_verifier(ws)(on, tid)
+
+
+# ------------------------------------------------------------------ 1.0a-3: the remaining person-only rows
+
+
+def _no_hand_off_leaks(ws):
+    assert all("token" not in json.dumps(h).lower() for h in hp.handoffs(ws))
+
+
+def test_agents_may_finish_on_needs_the_proof_off_is_free(ws, run, monkeypatch):
+    code, out, err = run("config", "set", "workflow.agents_may_finish", "on", "--by", "human:pat", "--json")
+    assert code == 2 and "Continue" in out + err
+    assert hp.handoffs(ws)[0]["op"] == "config.agents_may_finish"
+    assert run("config", "get", "workflow.agents_may_finish", "--json")[1].count("false") >= 1
+    wrong = _proof(ws, "config.agents_may_finish", "off")
+    assert (
+        _cli(run, monkeypatch, wrong, "config", "set", "workflow.agents_may_finish", "on", "--json")[0] == 2
+    )
+    proof = _proof(ws, "config.agents_may_finish", "on")
+    assert (
+        _cli(run, monkeypatch, proof, "config", "set", "workflow.agents_may_finish", "on", "--json")[0] == 0
+    )
+    assert run("config", "set", "workflow.agents_may_finish", "off", "--by", "human:pat", "--json")[0] == 0
+
+
+def test_raising_permissions_needs_the_proof_lowering_is_free_for_anyone(ws, run, monkeypatch):
+    run(
+        "config", "set", "workspace.permissions", "ask", "--by", "human:pat", "--json"
+    )  # lowering/equal: free
+    code, out, err = run("config", "set", "workspace.permissions", "full", "--by", "human:pat", "--json")
+    assert code == 2 and hp.handoffs(ws)[0]["parts"] == {"mode": "full"}
+    proof = _proof(ws, "config.permissions", "full")
+    assert _cli(run, monkeypatch, proof, "config", "set", "workspace.permissions", "full", "--json")[0] == 0
+    assert (
+        run("config", "set", "workspace.permissions", "ask", "--by", "agent:x", "--json")[0] == 0
+    )  # agents lower
+    assert (
+        run("config", "set", "workspace.permissions", "full", "--by", "agent:x", "--json")[0] == 2
+    )  # never raise
+
+
+def test_adding_an_agent_command_needs_the_proof_and_shows_it_in_full(ws, run, monkeypatch):
+    cmd = "mine --task {prompt}"
+    code, out, err = run("config", "agent", "add", "mine", f"--command={cmd}", "--by", "human:pat", "--json")
+    assert code == 2
+    card = hp.handoffs(ws)[0]
+    assert card["op"] == "config.agent_add" and card["exact"] == cmd and card["parts"] == {"name": "mine"}
+    proof = _proof(ws, "config.agent_add", "mine")
+    code, *_ = _cli(run, monkeypatch, proof, "config", "agent", "add", "mine", f"--command={cmd}", "--json")
+    assert code == 0
+    # F5: an agent never adds one (until #374), and the card shows --interactive as well
+    code, out, err = run("config", "agent", "add", "other", f"--command={cmd}", "--by", "agent:x", "--json")
+    assert code != 0 and "other" not in (ws / ".orch" / "config.toml").read_text()
+    run(
+        "config", "agent", "add", "live", f"--command={cmd}", "--interactive=live --tty", "--by", "human:pat",
+        "--json",
+    )  # fmt: skip
+    live = [h for h in hp.handoffs(ws) if h["target"] == "live"][0]
+    assert cmd in live["exact"] and "live --tty" in live["exact"]
+
+
+def test_share_on_needs_the_proof_off_is_free(ws, run, monkeypatch):
+    code, *_ = run("share", "on", "--by", "human:pat", "--json")
+    assert code == 2 and hp.handoffs(ws)[0]["op"] == "config.share"
+    wrong = _proof(ws, "config.share", "off")
+    assert _cli(run, monkeypatch, wrong, "share", "on", "--json")[0] == 2
+
+
+def test_look_shared_pages_and_icon_need_the_proof_for_a_person_but_not_for_an_agent(ws, run, monkeypatch):
+    code, *_ = run("look", "shared-pages", "off", "--by", "human:pat", "--json")
+    assert (
+        code == 2
+        and hp.handoffs(ws)[0]["op"] == "look.shared_pages"
+        and hp.handoffs(ws)[0]["parts"] == {"on": False}
+    )
+    code, *_ = run("look", "set", "--icon", "bolt", "--by", "human:pat", "--json")
+    assert code == 2 and [h for h in hp.handoffs(ws) if h["op"] == "look.icon"]
+    assert run("look", "set", "--icon", "bolt", "--by", "agent:x", "--json")[0] == 0  # an agent's own choice
+    proof = _proof(ws, "look.icon", "look")
+    assert _cli(run, monkeypatch, proof, "look", "set", "--icon", "bolt", "--json")[0] == 0
+
+
+def test_group_person_acts_need_the_proof_and_an_agent_keeps_its_own_path(ws, run, monkeypatch):
+    from conftest import turn_on
+
+    from orch import relay
+
+    turn_on(ws, "relay")
+    monkeypatch.setattr(relay, "resolve", lambda root, name: "ws_peer00001")
+    monkeypatch.setattr(relay, "name_of", lambda root, w: "Peer")
+    tid, _ = _ticket_with_step(ws, run)
+    code, *_ = run("relay", "group", "say", tid, "--dashboard", "hello", "--by", "human:pat", "--json")
+    assert code == 2 and [h for h in hp.handoffs(ws) if h["op"] == "group.write_as_person"]
+    code, *_ = run("relay", "group", "remove", tid, "peer", "--by", "human:pat", "--json")
+    assert code == 2 and [h for h in hp.handoffs(ws) if h["op"] == "group.remove_member"]
+    f = ws / "report.txt"
+    f.write_text("one")
+    code, *_ = run("relay", "group", "share", tid, str(f), "--click", "--by", "human:pat", "--json")
+    assert code == 2
+    card = [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
+    assert card and card[0]["target"].startswith(f"{tid}:") and len(card[0]["target"]) == len(tid) + 1 + 64
+    # F4: the card shows the full resolved path, and --unchecked-ok never rides along in the stored command
+    assert card[0]["exact"] == str(f.resolve())
+    run(
+        "relay",
+        "group",
+        "share",
+        tid,
+        "report.txt",
+        "--click",
+        "--unchecked-ok",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    stored = [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
+    assert all("--unchecked-ok" not in h["argv"] for h in stored)
+    assert any(str(f.resolve()) in h["argv"] for h in stored)  # a relative name is stored as the full path
+
+
+# ------------------------------------------- group acts: an agent claim is downgraded, bytes are bound
+
+
+def _group_env(ws, monkeypatch):
+    from conftest import turn_on
+
+    from orch import relay
+
+    turn_on(ws, "relay")
+    monkeypatch.setattr(relay, "resolve", lambda root, name: "ws_peer00001")
+    monkeypatch.setattr(relay, "name_of", lambda root, w: "Peer")
+
+
+def test_an_agent_claim_never_reaches_the_person_path_and_gets_the_downgraded_action(ws, run, monkeypatch):
+    from orch import chat_groups as cg
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    seen = []
+    monkeypatch.setattr(cg, "say", lambda root, t, text, via, to, by: seen.append(("say", via)) or {})
+    monkeypatch.setattr(
+        cg,
+        "share_file",
+        lambda root, t, p, title, to, click, by, conf, expect_sha=None: seen.append(("share", click)) or {},
+    )
+    f = ws / "report.txt"
+    f.write_text("x")
+    run("relay", "group", "say", tid, "--dashboard", "hi", "--by", "agent:x", "--json")
+    run("relay", "group", "share", tid, str(f), "--click", "--by", "agent:x", "--json")
+    assert seen == [("say", "helper"), ("share", False)]  # no person path: via helper, confined share
+    assert run("relay", "group", "remove", tid, "peer", "--by", "agent:x", "--json")[0] == 2  # never removes
+    assert hp.handoffs(ws) == []  # an agent claim does not even queue a hand-off
+
+
+def test_the_person_path_runs_only_for_a_verified_proof(ws, run, monkeypatch):
+    from orch import chat_groups as cg
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    seen = []
+    monkeypatch.setattr(cg, "say", lambda root, t, text, via, to, by: seen.append(via) or {})
+    # a terminal flag without a proof: refused and handed off, never "via dashboard"
+    assert run("relay", "group", "say", tid, "--dashboard", "hi", "--by", "human:pat", "--json")[0] == 2
+    assert seen == []
+    proof = _proof(ws, "group.write_as_person", tid)
+    assert _cli(run, monkeypatch, proof, "relay", "group", "say", tid, "--dashboard", "hi", "--json")[0] == 0
+    assert seen == ["dashboard"]
+
+
+def test_a_group_share_proof_covers_exactly_the_uploaded_bytes_and_a_swap_is_refused(ws, run, monkeypatch):
+    from orch import chat_groups as cg
+    from orch import relay
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    f = ws / "report.txt"
+    f.write_text("the approved bytes")
+    sha = hp_sha = __import__("hashlib").sha256(b"the approved bytes").hexdigest()
+    uploaded = []
+    monkeypatch.setattr(
+        relay,
+        "_api",
+        lambda root, m, p, data=None, t=0: (200, uploaded.append(data) or {"sha256": sha, "size": len(data)}),
+    )
+    code, out, err = run("relay", "group", "share", tid, str(f), "--click", "--by", "human:pat", "--json")
+    assert (
+        code == 2 and hp.handoffs(ws)[0]["target"] == f"{tid}:{hp_sha}"
+    )  # the proof target IS the content hash
+    # a swap between the proof and the upload: refused, nothing uploaded
+    real = cg.read_shared
+    calls = []
+
+    def swapping(path, root, confined):
+        calls.append(1)
+        if len(calls) == 2:  # the second read (the upload's) sees other bytes
+            return b"swapped in by an agent"
+        return real(path, root, confined)
+
+    monkeypatch.setattr(cg, "read_shared", swapping)
+    proof = _proof(ws, "group.share_file", f"{tid}:{hp_sha}")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "relay", "group", "share", tid, str(f), "--click", "--json"
+    )
+    assert code == 2 and "changed after you approved" in out + err and uploaded == []
+
+
+def test_no_call_site_ignores_what_as_person_returns():
+    """`_as_person` returns the verified identity or None; a caller that drops the value would run the
+    person's path on a mere 'did not raise'."""
+    import ast
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "orch" / "cli_clients.py").read_text(
+        encoding="utf-8"
+    )
+
+    def is_call(n):
+        return isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_as_person"
+
+    def names(expr):
+        return {x.id for x in ast.walk(expr) if isinstance(x, ast.Name)}
+
+    bad, seen = [], 0
+    for fn in [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)]:
+        branch_tests = [n.test for n in ast.walk(fn) if isinstance(n, (ast.If, ast.IfExp))]
+        tested = set().union(*[names(t) for t in branch_tests]) if branch_tests else set()
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Assign) and is_call(n.value):  # assigned: the name must decide a branch
+                seen += 1
+                targets = {t.id for t in n.targets if isinstance(t, ast.Name)}
+                if not targets & tested:
+                    bad.append(n.lineno)
+            elif isinstance(n, (ast.If, ast.IfExp)) and is_call(n.test):
+                seen += 1  # used directly as the condition
+            elif isinstance(n, ast.Expr) and is_call(n.value):  # a bare statement drops the value
+                bad.append(n.lineno)
+        bound = {n.lineno for n in ast.walk(fn) if isinstance(n, ast.Assign) and is_call(n.value)}
+        bound |= {
+            n.test.lineno for n in ast.walk(fn) if isinstance(n, (ast.If, ast.IfExp)) and is_call(n.test)
+        }
+        for n in ast.walk(fn):  # any other use (argument, bool(), return, comprehension) is not a branch
+            if (
+                is_call(n)
+                and n.lineno not in bound
+                and not any(isinstance(p, ast.Assign) and p.value is n for p in ast.walk(fn))
+            ):
+                bad.append(n.lineno)
+    assert seen >= 5 and not bad, f"_as_person result not decided on at lines {sorted(set(bad))}"
+
+
+def test_the_upload_receives_the_very_bytes_that_were_hashed_read_once(ws, run, monkeypatch):
+    """share_file reads the file ONCE, hashes those bytes against the proof and uploads that same object: no
+    second open or read on the way (hash-then-reopen would keep the swap window)."""
+    import hashlib
+
+    from orch import chat_groups as cg
+    from orch import relay
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    f = ws / "report.txt"
+    f.write_text("the approved bytes")
+    sha = hashlib.sha256(b"the approved bytes").hexdigest()
+    reads, uploads = [], []
+    real = cg.read_shared
+
+    def counting(path, root, confined):
+        data = real(path, root, confined)
+        reads.append(data)
+        return data
+
+    def fake_api(root, method, path, data=None, timeout=0):
+        uploads.append(data)
+        raise Refused("stop here: the upload was captured")  # nothing after the upload matters
+
+    monkeypatch.setattr(cg, "read_shared", counting)
+    monkeypatch.setattr(cg, "ensure_group", lambda root, t, by: "grp_t_abcdef")
+    monkeypatch.setattr(relay, "_api", fake_api)
+    proof = _proof(ws, "group.share_file", f"{tid}:{sha}")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "relay", "group", "share", tid, str(f), "--click", "--json"
+    )
+    assert len(reads) == 2  # the CLI's hash for the proof target + the ONE read inside share_file
+    assert all(isinstance(u, bytes) for u in uploads) and uploads == [
+        b"the approved bytes"
+    ]  # bytes, never a path
+    assert uploads[0] is reads[-1]  # the same in-memory object that was hashed in share_file
+
+
+def test_agents_may_finish_cannot_be_granted_by_editing_config_toml(ws, run):
+    """F1: the switch is a recorded grant; a config.toml line an agent appended grants nothing."""
+    from orch import config
+
+    config.set_key(ws, "workflow", "agents_may_finish", True)  # what an agent's file edit amounts to
+    assert (ws / ".orch" / "config.toml").exists()
+    assert config.agents_may_finish(ws) is False
+    assert run("config", "get", "workflow.agents_may_finish", "--json")[1].count("false") >= 1
+
+
+def test_ticket_status_done_is_the_verdict_and_needs_the_proof(ws, run, monkeypatch):
+    """F3: `ticket status <id> done` (and leaving Review by it) is a verdict like `ticket patch`."""
+    tid = _review_ticket(ws, run)
+    for who in ("human:me", None):
+        extra = ("--by", who) if who else ()
+        code, out, err = run("ticket", "status", tid, "done", *extra, "--json")
+        assert code == 2 and tickets.load(ws, tid)["status"] == "review", (who, out, err)
+    card = [h for h in hp.handoffs(ws) if h["op"] == "ticket.verdict"]
+    assert card and card[0]["target"] == tid
+    code, out, err = run("ticket", "status", tid, "active", "--by", "human:me", "--json")
+    assert code == 2 and tickets.load(ws, tid)["status"] == "review"  # leaving Review is a verdict too
+    wrong = _proof(ws, "ticket.verdict", "T-other")
+    assert _cli(run, monkeypatch, wrong, "ticket", "status", tid, "done", "--json")[0] == 2
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "ticket.verdict", tid), "ticket", "status", tid, "done"
+    )
+    assert code == 0, out + err
+    assert tickets.load(ws, tid)["status"] == "done"
+    # an agent's done still lands in Review, and other moves stay free
+    tid2 = _review_ticket(ws, run)
+    tickets.apply_op(ws, tid2, lambda t: t.update(status="open"))
+    assert run("ticket", "status", tid2, "ready", "--by", "human:me", "--json")[0] == 0
+
+
+def test_every_status_writer_asks_the_verdict_gate():
+    """F3 structural rule: a command that writes a ticket's status (tickets.set_status / tickets.patch) is
+    inside a function that also calls cli._verdict_who (the one gate); the other writers are the phone's
+    accept (own channel, a person's certificate) and sync's merge (the ledger/authority rules)."""
+    import ast
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "orch"
+    writers = {}
+    for f in sorted(src.glob("*.py")):
+        tree = ast.parse(f.read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "tickets"
+                and node.func.attr in ("set_status", "patch", "accept_review")
+            ):
+                writers.setdefault(f.name, []).append((node.func.attr, node.lineno))
+    assert set(writers) <= {"cli.py", "relay.py", "chat_groups.py", "phone_view.py", "cli_run.py"}, writers
+    cli_src = (src / "cli.py").read_text()
+    for attr, line in writers.get("cli.py", []):
+        if attr == "accept_review":
+            continue
+        block = "\n".join(cli_src.splitlines()[line - 12 : line])
+        assert "_verdict_who(" in block, f"cli.py:{line} writes a ticket status without the verdict gate"
+    for name in ("relay.py", "chat_groups.py", "phone_view.py", "cli_run.py"):
+        for attr, line in writers.get(name, []):
+            assert attr == "accept_review" and name == "relay.py", (name, attr, line)
+
+
+def test_copy_setup_is_a_command_orch_runs_so_it_needs_the_proof(ws, run, monkeypatch):
+    """F6: `config set workflow.copy_setup <cmd>` is bound to the command's hash; an agent is refused; copies
+    and clearing the setup stay free for a person."""
+    import hashlib
+
+    cmd = "make prepare"
+    code, out, err = run("config", "set", "workflow.copy_setup", cmd, "--by", "human:pat", "--json")
+    assert code == 2
+    card = [h for h in hp.handoffs(ws) if h["op"] == "config.copy_setup"][0]
+    sha = hashlib.sha256(cmd.encode()).hexdigest()
+    assert card["target"] == sha and card["exact"] == cmd
+    assert run("config", "set", "workflow.copy_setup", "echo pwned", "--by", "agent:x", "--json")[0] != 0
+    assert run("config", "get", "workflow.copy_setup", "--json")[1].count("null") == 1
+    wrong = _proof(ws, "config.copy_setup", hashlib.sha256(b"other").hexdigest())
+    assert _cli(run, monkeypatch, wrong, "config", "set", "workflow.copy_setup", cmd, "--json")[0] == 2
+    proof = _proof(ws, "config.copy_setup", sha)
+    assert _cli(run, monkeypatch, proof, "config", "set", "workflow.copy_setup", cmd, "--json")[0] == 0
+    assert run("config", "get", "workflow.copy_setup", "--json")[1].count(cmd) == 1
+    assert run("config", "set", "workflow.copy_setup", "none", "--by", "human:pat", "--json")[0] == 0  # free
+    assert run("config", "set", "workflow.copies", "off", "--by", "human:pat", "--json")[0] == 0
+
+
+def test_the_proof_op_tables_agree():
+    """F7: schema enum, OPS and HANDOFF_HEADS name the same ops (the contract table lists each one)."""
+    import json as _json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2] / "contracts"
+    schema = _json.loads((root / "human-proof.schema.json").read_text())["$defs"]["op"]["enum"]
+    assert set(schema) == set(hp.OPS)
+    md = (root / "human-proof.md").read_text()
+    missing = [op for op in hp.OPS if f"`{op}`" not in md]
+    assert not missing, missing
+
+
+def test_joined_group_acts_bind_the_host_not_only_the_group_id(ws, run, monkeypatch):
+    """Two hosts can use the same group id: the proof target is <host>:<group>, the card names the right group
+    and host, and a proof for host A is refused for host B. The dashboard builds the very same target."""
+    from conftest import turn_on
+
+    from orch import chat_groups as cg
+    from orch import relay
+
+    turn_on(ws, "relay")
+    gid = "grp_t_abcdef12"
+    names = {"ws_hosta00001": "Alpha", "ws_hostb00002": "Beta"}
+    monkeypatch.setattr(relay, "resolve", lambda root, name: name)
+    monkeypatch.setattr(relay, "name_of", lambda root, w: names[w])
+    monkeypatch.setattr(
+        cg,
+        "view",
+        lambda root: {
+            "hosted": [],
+            "joined": [
+                {"host": "ws_hosta00001", "id": gid, "title": "Alpha plan"},
+                {"host": "ws_hostb00002", "id": gid, "title": "Beta plan"},
+            ],
+        },
+    )
+    sent = []
+    monkeypatch.setattr(cg, "say_member", lambda *a, **k: sent.append(a) or {"id": "m"})
+    cmd = ("relay", "group", "reply", "ws_hosta00001", gid, "hello", "--dashboard")
+    code, *_ = run(*cmd, "--by", "human:pat", "--json")
+    assert code == 2 and not sent
+    card = [h for h in hp.handoffs(ws) if h["op"] == "group.write_as_person"][0]
+    assert card["target"] == f"ws_hosta00001:{gid}"
+    assert card["parts"] == {"title": "Alpha plan", "host": "Alpha"}
+    other = _proof(ws, "group.write_as_person", f"ws_hostb00002:{gid}")
+    assert (
+        _cli(run, monkeypatch, other, *cmd, "--json")[0] == 2 and not sent
+    )  # host B's proof, host A's group
+    bare = _proof(ws, "group.write_as_person", gid)  # the old group-only target no longer works
+    assert _cli(run, monkeypatch, bare, *cmd, "--json")[0] == 2 and not sent
+    good = _proof(ws, "group.write_as_person", f"ws_hosta00001:{gid}")
+    assert _cli(run, monkeypatch, good, *cmd, "--json")[0] == 0 and len(sent) == 1
+
+
+@pytest.mark.parametrize("setting", sorted(hp.SETTING_DEFAULTS))
+def test_every_widening_setting_off_is_a_tombstone_and_stays_off(ws, setting):
+    """One writer for every key: on needs a person, off writes the False record first, and neither a file that
+    says on again nor a later read brings the grant back."""
+    hp.key_dir(ws)  # the guarded home exists
+    with pytest.raises(Refused):
+        hp.record_set(ws, setting, True, "agent:x")  # an agent never grants
+    hp.record_set(ws, setting, True, "human:pat")
+    assert hp.effective(ws, setting, True) is True
+    hp.record_set(ws, setting, False, "human:pat")  # off: the tombstone is written at once
+    path, wkey = hp._settings_path(ws)
+    rec = json.loads(path.read_text())["workspaces"][wkey][setting]
+    assert rec["value"] is False
+    assert hp.effective(ws, setting, True) is False  # the file edited back to on: still off
+    assert hp.effective(ws, setting, True) is False  # and again after the read
+    from jsonschema import validate
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[2] / "contracts" / "human-proof.schema.json").read_text()
+    )
+    validate(
+        json.loads(path.read_text()),
+        {"$ref": "#/$defs/settings_record", "$defs": schema["$defs"]},
+    )
+
+
+def test_agents_may_finish_off_writes_the_tombstone_before_the_file(ws, run):
+    from orch import config
+
+    config.set_agents_may_finish(ws, True, "human:pat")
+    assert config.agents_may_finish(ws) is True
+    config.set_agents_may_finish(ws, False, "agent:x")
+    path, wkey = hp._settings_path(ws)
+    assert json.loads(path.read_text())["workspaces"][wkey]["workflow.agents_may_finish"]["value"] is False
+    config.set_key(ws, "workflow", "agents_may_finish", True)  # the line is re-added to config.toml
+    assert config.agents_may_finish(ws) is False
+    with pytest.raises(Refused):
+        config.set_agents_may_finish(ws, True, "agent:x")
+
+
+def test_conn_grant_keys_are_exact_and_need_a_person(ws):
+    """Connection grants are widening settings: only `conn.allow.<valid name>`, a grant needs a person, an off
+    is a tombstone. No arbitrary suffix an agent controls reaches the record."""
+    hp.key_dir(ws)
+    for bad in (
+        "conn.allow.",
+        "conn.allow.a/b",
+        "conn.allow..x",
+        "conn.allow.x y",
+        "conn.allow." + "a" * 65,
+        "conn.allowx",
+    ):
+        with pytest.raises(Refused):
+            hp.record_set(ws, bad, ["read"], "human:pat")
+    with pytest.raises(Refused):
+        hp.record_set(ws, "conn.allow.s", ["read"], "agent:x")
+    hp.record_set(ws, "conn.allow.s", ["read"], "human:pat")
+    assert hp.conn_grants(ws) == {"s": ["read"]}
+    hp.record_set(ws, "conn.allow.s", False, "agent:x")  # lowering is free, names no person
+    path, wkey = hp._settings_path(ws)
+    assert json.loads(path.read_text())["workspaces"][wkey]["conn.allow.s"]["by"] == "reset"
+    assert hp.conn_grants(ws) == {}

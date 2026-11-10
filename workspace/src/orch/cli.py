@@ -643,7 +643,8 @@ def _undo_gated(root: Path, args, who: str, action: str, call, value: str = ""):
     """check reopen / edit / remove on a step that may be a Won't do: the requirement is decided UNDER THE
     TICKET LOCK (tickets.NeedsProof), so there is no check-then-act gap and a ticket that cannot be read
     refuses. `call(who, proven)` runs the locked operation."""
-    target = f"{args.id}:{args.check}"
+    # the ACTION is part of the proof's target: a proof for "reopen" does not rename or remove the step
+    target = f"{args.id}:{args.check}:{action}"
     if getattr(args, "proof_stdin", False):
         return call(humanproof.person_by(root, args, "check.wont_do_undo", target), True)
     try:
@@ -660,20 +661,36 @@ def _undo_gated(root: Path, args, who: str, action: str, call, value: str = ""):
         return call(who, who.startswith("human:"))
 
 
-def _patch_is_verdict(root: Path, args) -> bool:
-    """A person's `ticket patch` to Done, or one that moves a ticket away from Review, is a verdict and needs
-    the person's proof (no two-step bypass: Review -> active -> done)."""
-    if (getattr(args, "by", None) or "").startswith("agent:") or tickets.agent_tool():
+def _is_verdict(root: Path, args, tid: str, status) -> bool:
+    """THE one place that decides "this ticket status change by a person is a verdict" (Done, or away from
+    Review). Every writer of a ticket's status from a person's command (`ticket status`, `ticket patch`)
+    calls it; test_every_status_writer_asks_the_verdict_gate walks the source to keep it so."""
+    if status is None or (getattr(args, "by", None) or "").startswith("agent:") or tickets.agent_tool():
         return False
+    if status == "done":
+        return True
     try:
-        status = json.loads(args.data).get("status")
-        if status is None:
-            return False
-        if status == "done":
-            return True
-        return tickets.load(root, args.id)["status"] == "review" and status != "review"
-    except (ValueError, AttributeError, KeyError, Refused):
+        return tickets.load(root, tid)["status"] == "review" and status != "review"
+    except (KeyError, Refused):
         return False
+
+
+def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = "") -> str:
+    """The person's proof for a verdict (or the plain actor when the change is no verdict)."""
+    try:
+        status = json.loads(data).get("status")
+    except (ValueError, AttributeError):
+        status = None
+    if not _is_verdict(root, args, tid, status):
+        return by
+    return humanproof.person_by(
+        root,
+        args,
+        "ticket.verdict",
+        tid,
+        parts=humanproof.status_parts(root, tid, data),
+        value=shown,  # only a word of the command itself
+    )
 
 
 def run(args: argparse.Namespace) -> None:
@@ -715,6 +732,8 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "work-check":
         workcheck.run(root, args.json)
     elif cmd == "update":
+        if not args.project_only:  # first: with another ORCH_HOME there is nothing a click could approve
+            addons.tool_env_change_ok()
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
             # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official
             # channel or the one the install came from). It is part of what the person approves AND of the
@@ -810,7 +829,8 @@ def run(args: argparse.Namespace) -> None:
         t = _visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
-        t = tickets.set_status(root, args.id, args.status, by())
+        who = _verdict_who(root, args, args.id, json.dumps({"status": args.status}), by())
+        t = tickets.set_status(root, args.id, args.status, who)
         warn = _child_warning(root, t)
         _out(
             args,
@@ -872,16 +892,9 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.ask_for_changes(root, args.id, args.text, who, proven=who.startswith("human:"))
         _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
-        who = by()
-        if _patch_is_verdict(root, args):  # Looks good: Review -> Done by a person needs the person's proof
-            who = humanproof.person_by(
-                root,
-                args,
-                "ticket.verdict",
-                args.id,
-                parts=humanproof.status_parts(root, args.id, args.data),
-                value=args.data,
-            )
+        who = _verdict_who(
+            root, args, args.id, args.data, by(), args.data
+        )  # Looks good needs the person's proof
         t = tickets.patch(root, args.id, args.if_revision, args.data, who)
         warn = _child_warning(root, t)
         _out(

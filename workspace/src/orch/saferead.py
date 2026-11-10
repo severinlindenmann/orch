@@ -240,17 +240,91 @@ def _win_open_raw(path: str):
     return fd, info.attrs, info.links, buf.value
 
 
+def _strip_prefix(p: str) -> str:
+    """Drop the long-path prefixes: `\\\\?\\UNC\\h\\s` becomes `\\\\h\\s`, `\\\\?\\C:\\x` becomes `C:\\x`."""
+    if p.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + p[8:]
+    if p.startswith("\\\\?\\") or p.startswith("\\\\.\\"):
+        return p[4:]
+    return p
+
+
+def _dos_target(dev: str) -> str | None:
+    """What QueryDosDeviceW says for a drive letter, as a plain path: a subst drive (`\\??\\C:\\dir`, or
+    `\\??\\UNC\\h\\s`) gives its target; a real disk (`\\Device\\HarddiskVolume3`) or a network drive (asked
+    next, `_is_network_dev`) gives None."""
+    if dev.startswith("\\??\\"):
+        return _strip_prefix("\\\\?\\" + dev[4:])
+    return None
+
+
+def _is_network_dev(dev: str) -> bool:
+    low = dev.lower()
+    return "lanmanredirector" in low or low.startswith("\\device\\mup")
+
+
+def _win_resolve(p: str) -> str | None:
+    """Windows only: `p` (no long-path prefix) as one long, real path: a subst drive replaced by its target, a
+    mapped network drive by its UNC name (WNetGetUniversalNameW), 8.3 names expanded (GetLongPathNameW).
+    None when Windows can not say. Tests replace this."""
+    import ctypes
+    import re
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    mpr = ctypes.WinDLL("mpr", use_last_error=True)
+    W = ctypes.c_wchar_p
+    k32.QueryDosDeviceW.argtypes = [W, ctypes.c_wchar_p, ctypes.c_uint32]
+    k32.GetLongPathNameW.argtypes = [W, ctypes.c_wchar_p, ctypes.c_uint32]
+    s = p
+    m = re.match(r"^([A-Za-z]:)(\\.*)?$", s)
+    if m:
+        drive, rest = m.group(1), m.group(2) or ""
+        dev = ctypes.create_unicode_buffer(1024)
+        if not k32.QueryDosDeviceW(drive, dev, 1024):
+            return None
+        tgt = _dos_target(dev.value)
+        if tgt is not None:
+            s = tgt.rstrip("\\") + rest
+        elif _is_network_dev(dev.value):
+            size = ctypes.c_uint32(4096)
+            buf = ctypes.create_string_buffer(4096)
+            mpr.WNetGetUniversalNameW.argtypes = [
+                W,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_uint32),
+            ]
+            if mpr.WNetGetUniversalNameW(s, 1, buf, ctypes.byref(size)) != 0:  # UNIVERSAL_NAME_INFO_LEVEL
+                return None
+            ptr = ctypes.c_void_p.from_buffer(buf).value
+            if not ptr:
+                return None
+            s = ctypes.wstring_at(ptr)
+    long = ctypes.create_unicode_buffer(32768)
+    n = k32.GetLongPathNameW(s, long, 32768)
+    if n == 0 or n >= 32768:
+        return None
+    return long.value
+
+
+def _canon(p: str) -> str | None:
+    """One canonical long form of a Windows path, for both sides of the final-path check: prefixes
+    dropped, subst and mapped drives replaced by their target, 8.3 expanded, case folded, slashes unified.
+    None (refuse) when it can not be made."""
+    try:
+        got = _win_resolve(_strip_prefix(p))
+    except (OSError, ImportError, AttributeError, ValueError, TypeError, ctypes.ArgumentError):
+        return None
+    if not got:
+        return None
+    return ntpath.normcase(ntpath.normpath(_strip_prefix(got)))
+
+
 def _same_path(a: str, b: str) -> bool:
-    """Windows path equality: case-insensitive, slash = backslash, and the long-path prefixes dropped."""
-
-    def norm(p: str) -> str:
-        if p.startswith("\\\\?\\UNC\\"):
-            p = "\\\\" + p[8:]
-        elif p.startswith("\\\\?\\"):
-            p = p[4:]
-        return ntpath.normcase(ntpath.normpath(p))
-
-    return norm(a) == norm(b)
+    """Do two Windows paths name the same place, once both are in the canonical long form? A path that can not
+    be made canonical is never the same."""
+    ca, cb = _canon(a), _canon(b)
+    return ca is not None and ca == cb
 
 
 def _open_windows(path: str, expected: str) -> tuple[int, os.stat_result] | None:

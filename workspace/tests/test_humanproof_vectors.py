@@ -71,7 +71,12 @@ def test_deliver(c):
 @pytest.mark.parametrize("c", VEC["wont_do"], ids=_ids(VEC["wont_do"]))
 def test_wont_do(c):
     got = hp.wontdo_is_human(
-        bytes.fromhex(c["key"]), c["workspace"], c["item"], c["mac"], c["relay_authenticated_sender"]
+        bytes.fromhex(c["key"]),
+        c["workspace"],
+        c["ticket"],
+        c["decision"],
+        c["mac"],
+        c["relay_authenticated_sender"],
     )
     assert got is c["human"]
 

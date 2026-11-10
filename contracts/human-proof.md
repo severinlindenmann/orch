@@ -66,12 +66,15 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 ## Settings: records and tombstones
 
 Every switch that widens what can happen (`[focus] live_session`, `[focus] session_typing`, `[insights] share_counts`,
-`[insights] share_names`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
+`[insights] share_names`, `[workflow] agents_may_finish`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
 `profiles.toml` / `.orch/mcp.json` as named, and the core also keeps a record in `<guarded orch home>/human-settings.json`,
 keyed by the workspace's real path like `permissions.json` (`$defs/settings_record`).
 - Setting a value **with a proof** writes the file and the record.
 - **Lowering** (turning something off, sharing less) works from the file or the CLI without a proof, and the core writes a
-  **tombstone** record (`value: false`) the first time it sees the lowered value.
+  **tombstone** record (`value: false`) on EVERY lowering, before it touches the file (one writer, `humanproof.record_set`,
+  for every key; a grant through it needs a verified `human:` by). A tombstone's `by` is `human:...`, `file`
+  (the core saw a lowered file value) or `reset` (a lowering by anything that is not a verified person, or a safe reset), see `$defs/settings_record`.
+  Workspace `workflow.agents_may_finish` is one of these keys (default off).
 - **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
   on, `share_counts` on (owner decisions 3C, I5); everything else off.
 For list values (connection allow lists) a narrower file narrows the record (`grant ∩ file`), the list form of a
@@ -184,7 +187,7 @@ rows add a named case.
 | `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get` | key / profile | page, terminal | `verify` key profile, `settle` allow_get |
 | `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
 | `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<hash>` (proposal.md) / id | page | proposal `steps` |
-| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review | ticket | page, phone | `verify` ticket verdict |
+| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict |
 | `ticket.answer` | answering a Needs-you question | `<ticket>:<question>` | page, phone | `verify` ticket answer |
 | `relay.connect` | `orch relay connect`, changing the relay address | relay host | page, terminal | `verify` relay connect |
 | `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` | page, terminal | `verify` private allow |
@@ -197,11 +200,14 @@ rows add a named case.
 | `run.stop` | Focus Stop / Stop all (today `by=focus`) | ticket or `all` | page | – (an agent may still stop its own run, `ORCH_RUN` = that run) |
 | `relay.allow` | `orch relay allow <id> --once\|--permanent` (cli_clients.py 587): lets another workspace delegate or start work here | `<message id>:<once\|permanent>` | page, terminal | `verify` relay allow |
 | `group.remove_member` | remove a workspace from a group chat (cli_clients.py 283) | `<group>:<workspace>` | page, terminal | – |
-| `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | group | page, terminal | – |
-| `group.share_file` | share a file with a group, checked or not checkable (cli_clients.py 250/252, chat_groups.py 1505, 2656) | `<group>:<file sha256>` | page, terminal | – |
+| `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | host-side group: the ticket id; joined group: `<host ws id>:<group id>` (an id is only unique per host) | page, terminal | – |
+| `group.share_file` | share a file with a group, checked or not checkable (cli_clients.py 250/252, chat_groups.py 1505, 2656) | host side: `<ticket>:<file sha256>`; joined: `<host ws id>:<group id>:<file sha256>` | page, terminal | – |
 | `group.readd_member` | re-add a removed member (chat_groups.py 1049) | `<group>:<workspace>` | page, terminal | – |
 | `config.share` | `orch config share on\|off` (cli_config.py 270): the marked block in the team's AGENTS.md | `on` / `off` (off needs no proof) | page, terminal | – |
 | `config.agents_may_finish` | `orch config set workflow.agents_may_finish on` (cli_config.py 210) | setting (off needs no proof) | page, terminal | `settle` class |
+| `config.permissions` | `orch config set workspace.permissions <mode>`, raising only (lowering is free for anyone) | the new `mode` | page, terminal | – |
+| `look.icon` | `orch look set` (icon and colour of the workspace, shown to peers and on shared pages) | `look` | page, terminal | – |
+| `config.copy_setup` | `orch config set workflow.copy_setup <command>`: a command orch runs in every new separate copy (clearing it needs no proof; an agent is refused) | sha256 of the command (the card shows it in full) | page, terminal | – |
 | `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
 | `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
 | `run.human_input` | input that counts as a person's and may start a run (runs.py 375-397 `human_waiting`: today any `human:` by or phone line in the agent-writable `.orch/run/pending/<tid>.jsonl`) | ticket | page, phone | `pending` |
@@ -224,11 +230,26 @@ agent input. Binding ticket and workspace means a valid line copied into another
 `<guarded orch home>/keys/<ws>/delivered.json`, checked and written atomically on consume, so deleting `delivered_at` or
 re-appending a consumed line never delivers it again (reference `pending_is_human`,
 `pending_deliver`, vectors `pending`, `deliver`).
-**Synced "won't do"** (`check.wont_do` arriving through a sync merge): another machine's human key cannot be checked here, so it
-counts as a person's only when the receiving core's relay client recorded it from a relay-authenticated sender (a phone, or a
-person-attributed message the relay authenticated), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`, `"wontdo1." + workspace id + "." + canonical JSON
-of the item`), a different prefix from the pending MAC so the two can never be confused. Anything else is an agent's
-(reference `wontdo_is_human`, vectors `wont_do`).
+**Synced "won't do"** (`check.wont_do` arriving through a sync merge, and its undo): another machine's human key cannot be checked
+here, so a step's decision counts as a person's only when the receiving core's relay client recorded it from a
+relay-authenticated sender (a phone, or a person-attributed message the relay authenticated; the hook compares the FULL decision
+record, never "this step was touched by a relay sender"), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`,
+`"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of {check, wont_do, reason, text, covers, nonce}`) (an undo is
+the same record with `wont_do` false and `reason`, `text` and `covers` null, so a later rename of the reopened step cannot make the undo stop verifying; the nonce is random and fresh for every signing, so equal decisions get
+different MACs), a different prefix from the pending MAC so the two can never be confused, stored on the step as `wont_mac` (+
+`wont_nonce`). The MAC binds WHERE the decision belongs (a valid decision copied onto another ticket or step is not the person's) and
+WHAT an "on" decision is about (the step's text and covers: only a proven `check edit` of a Won't do step, which re-signs it, changes them). **Freshness is the ledger's job, not the MAC's:** the guarded home keeps
+`keys/<ws>/wont.json`, per `<ticket>:<check>` the CURRENT MAC (null = tombstone, written by a proven removal); the verifier accepts a
+MAC only when it IS the current entry, so replaying an older signed "on" or "undo" or reusing the id of a removed step does not
+verify. A missing, loose or damaged ledger vouches for nobody (fail closed). The text of `by` (`human:...`) is **never** looked at.
+The sync merge (`merge_ticket(..., person)`, `person` = the receiving core's verdict, `humanproof.wont_verifier`; no verifier =
+nobody is a person) holds ONE invariant: **with a base that holds a person's decision, every step field the signed record covers (`wont_do`, `reason`,
+`wont_nonce`, `wont_mac`, and, for an "on", `text` and `covers`: `humanproof.SIGNED_STEP_FIELDS` + the MAC, the same list the signer
+uses, a test fails if they drift) differs from the base's only when that side verifies; otherwise it is the base's**, whether the
+side dropped the decision, changed it, rewrote only the text or covers, garbled its MAC or replayed an old one, and before any
+"newer side wins" pick. A renumbering (both sides added a different step with the same id) never moves an item the core vouches for, whatever `updated_at` says (a peer controls it): the other side's step is renumbered; two vouched items with one id cannot be merged and the caller pauses. A step one side deleted outright comes back (a
+deletion carries no proof; a person's removal is proven where it is made). Anything else is an agent's (reference
+`wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
 
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).

@@ -9,6 +9,10 @@ function L($m) { Add-Content -Path $log -Value $m }
 function Check($ok, $what) { if ($ok) { L "ok: $what" } else { L "FAIL: $what"; $script:fails += $what } }
 L ""; L "=== dashboard (Playwright inside the machine)"
 $pub = Split-Path $env:ORCH_INSTALL_PS1
+# #431: a TEST install and a test workspace under <profile>\.orch-test (so --print-launch-url works)
+$env:ORCH_INSTALL_KIND = "test"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.orch-test\home" | Out-Null
+$env:ORCH_HOME = "$env:USERPROFILE\.orch-test\home"
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 if (-not (Get-Command orch -ErrorAction SilentlyContinue)) {
     L "--- install"
@@ -31,8 +35,9 @@ function WaitFinish($out, $since) {  # add-on installs finish in the background 
 
 $title = "Windows dashboard smoke"
 $env:ORCH_AGENT = "claude"  # as standard-user-flow.ps1: init links .claude\skills (no agent is installed here)
-$p = "$env:USERPROFILE\orch-dash"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+$p = "$env:USERPROFILE\.orch-test\orch-dash"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 O init | Out-String | % { L $_ }
+Remove-Item Env:ORCH_AGENT -ErrorAction SilentlyContinue  # the dashboard server and its commands must not look like an agent tool
 O ticket new "`"$title`"" | Out-String | % { L $_ }
 Check ($LASTEXITCODE -eq 0) "a ticket for the dashboard"
 # Always add: "addon list" also names an add-on installed for another workspace (standard-user-flow installs the
@@ -67,7 +72,12 @@ Check (Test-Path "$pw\node_modules\playwright") "Playwright installed for this u
 
 $shots = "$env:USERPROFILE\orch-shots"
 if ($url) {
-    $smoke = cmd /c "node dashboard-smoke.mjs $url `"$shots`" `"$title`" < NUL 2>&1" | Out-String
+    # the URL orch prints for a person: the launch token is in its fragment (single use, 30 s): fetched last
+    Set-Location $p   # the workspace folder: orch finds its workspace from the current folder
+    $lo = O start --no-open --print-launch-url --json | Out-String; Set-Location $pw; L ($lo -replace '#launch=[A-Za-z0-9_-]+', '#launch=<token>')
+    $launch = [regex]::Match($lo, 'http://127\.0\.0\.1:\d+/?#launch=[A-Za-z0-9_-]+').Value
+    Check ([bool]$launch) "orch printed a launch URL with a token"
+    $smoke = cmd /c "node dashboard-smoke.mjs $url `"$shots`" `"$title`" `"$launch`" < NUL 2>&1" | Out-String
     $code = $LASTEXITCODE
     L $smoke
     Check ($code -eq 0) "dashboard smoke: every page step passed"
