@@ -395,7 +395,7 @@ GIT_CLICKS = (
     (
         "config.agent.add",
         {"name": "mine", "command": "x {prompt}"},
-        ("config.agent_add", actions._agent_add_target({"name": "mine", "command": "x {prompt}"})),
+        ("config.agent_add", hp.agent_add_target("mine", "x {prompt}")),
         ["config", "agent", "add", "mine"],
     ),
 )
@@ -530,7 +530,7 @@ def test_the_core_gated_config_ops_mint_for_the_right_target():
     assert acts.proof_for("config.permissions", {"mode": "full"}) == ("config.permissions", "full")
     assert acts.proof_for("config.agent.add", {"name": "mine", "command": "mine {prompt}"}) == (
         "config.agent_add",
-        acts._agent_add_target({"name": "mine", "command": "mine {prompt}"}),  # name + digest of every value
+        hp.agent_add_target("mine", "mine {prompt}"),  # core's own function, not the dashboard's
     )
     assert acts.proof_for("look.shared", {"on": True}) == ("look.shared_pages", "on")
     assert acts.proof_for("look.shared", {"on": False}) == ("look.shared_pages", "off")

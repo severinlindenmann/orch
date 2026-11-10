@@ -135,10 +135,11 @@ PROOF_OPS = {
 
 
 def _agent_add_target(a):
-    """The proof target of config.agent_add: the name and a digest of EVERY saved value (core's
-    humanproof.agent_add_target builds the same; the dashboard never offers a live command)."""
-    doc = json.dumps([a.get("command"), "", a.get("prompt_via") or ""])
-    return f"{a.get('name')}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()}"
+    """The proof target of config.agent_add: core's one definition (name + digest of every saved value; the
+    dashboard never offers a live command)."""
+    from orch import humanproof
+
+    return humanproof.agent_add_target(a.get("name"), a.get("command"), None, a.get("prompt_via"))
 
 
 def proof_for(op, args, root=None):
