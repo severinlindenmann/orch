@@ -245,7 +245,7 @@ def _shared_skills(root: Path) -> list[Path]:
         return []
     out = []
     for p in sorted(base.iterdir()):
-        if p.is_dir() and not harness.is_link(p) and (p / ".orch-shared").exists():
+        if not harness.is_link(p) and p.is_dir() and (p / ".orch-shared").exists():
             if harness.safe_skill_name(p.name):
                 out.append(p)
             else:

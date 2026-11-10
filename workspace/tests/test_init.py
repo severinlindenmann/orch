@@ -1137,3 +1137,107 @@ def test_reminder_hooks_of_a_run_need_the_import_check(monkeypatch):
     assert all(
         len(g) == 1 for g in adapters.hooks_doc("claude", "r_1")["hooks"].values()
     )  # no reminder group
+
+
+# ---- #438: Windows, a junction must never be traversed (WinError 448) and is replaced by a copy
+
+
+def _win448(monkeypatch, junctions):
+    """Mock Windows: paths in `junctions` are junctions; traversing one raises WinError 448."""
+    import pathlib
+
+    from orch import harness
+
+    real_is_dir = pathlib.Path.is_dir
+    real_is_link = harness.is_link
+    monkeypatch.setattr(harness.sys, "platform", "win32")
+
+    def is_dir(self, *a, **k):
+        if self in junctions:
+            raise OSError(448, "The path cannot be traversed because it contains an untrusted mount point")
+        return real_is_dir(self, *a, **k)
+
+    monkeypatch.setattr(pathlib.Path, "is_dir", is_dir)
+    monkeypatch.setattr(harness, "is_link", lambda p: p in junctions or real_is_link(p))
+    return harness
+
+
+def test_shared_skills_does_not_traverse_a_junction(proj, monkeypatch):
+    base = proj / ".agents/skills"
+    (base / "orch").mkdir(parents=True)
+    _win448(monkeypatch, {base / "orch"})
+    assert skills._shared_skills(proj) == []  # raised OSError 448 at p.is_dir() before
+
+
+def test_old_junction_is_migrated_and_second_init_works(proj, run, monkeypatch):
+    import os
+
+    from orch import harness
+
+    target = proj / ".orch/harness/skills/orch"
+    assert run("init")[0] == 0
+    dest = proj / ".agents/skills/orch"
+    junctions: set = set()
+    _win448(monkeypatch, junctions)
+    monkeypatch.setattr(skills, "_skill_places", lambda root: [".agents/skills"])
+    real_rmdir = os.rmdir
+
+    def rmdir(p, *a, **k):
+        junctions.discard(Path(p))
+        real_rmdir(p, *a, **k)
+
+    monkeypatch.setattr(os, "rmdir", rmdir)
+    monkeypatch.setattr(os, "readlink", lambda p: "\\\\?\\" + str(target.absolute()))
+    # turn the first run's result into "a junction an old orch made"
+    if dest.is_symlink():
+        dest.unlink()
+    else:
+        import shutil
+
+        shutil.rmtree(dest)
+    dest.mkdir()  # empty folder: rmdir works like on a junction
+    junctions.add(dest)
+    assert harness.is_link(dest)
+    assert skills._shared_skills(proj) == []
+    skills.apply_agent_files(proj)  # the repeated init: no crash
+    assert dest.is_dir() and not harness.is_link(dest)
+    assert (dest / harness.COPY_MARK).is_file() and (dest / "SKILL.md").is_file()
+    skills.apply_agent_files(proj)  # and once more: the copy is kept in sync
+    assert (dest / "SKILL.md").is_file()
+
+
+def test_junction_to_somewhere_else_is_not_replaced(proj, monkeypatch):
+    import os
+
+    from orch import harness
+
+    base = proj / ".agents/skills"
+    (base / "orch").mkdir(parents=True)
+    h = _win448(monkeypatch, {base / "orch"})
+    monkeypatch.setattr(os, "readlink", lambda p: str(proj / "elsewhere"))
+    assert not h._own_junction(base / "orch", proj / ".orch/harness/skills/orch")
+    with pytest.raises(harness.Refused):
+        h.link_skill(proj, ".agents/skills", "orch")
+
+
+def test_windows_makes_a_copy_not_a_junction(proj, run, monkeypatch):
+    from orch import harness
+
+    monkeypatch.setattr(harness.sys, "platform", "win32")
+    assert run("init")[0] == 0
+    cp = proj / ".agents/skills/orch"
+    assert cp.is_dir() and not cp.is_symlink() and (cp / harness.COPY_MARK).is_file()
+
+
+def test_relay_file_in_a_copy_survives_sync(proj, run, monkeypatch):
+    from orch import harness
+
+    monkeypatch.setattr(harness.sys, "platform", "win32")
+    sk = proj / ".orch/harness/skills/orch-relay"
+    sk.mkdir(parents=True)
+    (sk / "SKILL.md").write_text("relay", encoding="utf-8")
+    assert run("init")[0] == 0
+    cp = proj / ".agents/skills/orch-relay"
+    (cp / "workspaces.json").write_text("{}", encoding="utf-8")
+    assert run("init")[0] == 0
+    assert (cp / "workspaces.json").read_text(encoding="utf-8") == "{}"
