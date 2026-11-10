@@ -1076,10 +1076,14 @@
    "name": "synced won't-do without relay attribution -> not the person's",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
-    "reason": "not needed"
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
    "mac": null,
@@ -1089,11 +1093,14 @@
    "name": "synced won't-do with by human: only",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
+    "wont_do": true,
     "reason": "not needed",
-    "by": "human:severin"
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
    "mac": null,
@@ -1103,10 +1110,14 @@
    "name": "recorded from a relay-authenticated phone sender",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
-    "reason": "not needed"
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": true,
    "mac": null,
@@ -1116,52 +1127,238 @@
    "name": "receiving core's own wontdo1 MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
-    "reason": "not needed"
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "rp94TB3QmXKONkYBWgpZ5Y07qA2vSrKC-efxbRVcqjk",
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
    "human": true
+  },
+  {
+   "name": "the undo (wont_do false, reason/text/covers null, its own nonce) with the core's own MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": false,
+    "reason": null,
+    "text": null,
+    "covers": null,
+    "nonce": "0f1e2d3c4b5a6978"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "qUzKWwNHYC0M7x_hlC1q-PWOOpdTpS34dLSBo4CLyvI",
+   "human": true
+  },
+  {
+   "name": "an undo MAC is not a won't-do MAC",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "qUzKWwNHYC0M7x_hlC1q-PWOOpdTpS34dLSBo4CLyvI",
+   "human": false
+  },
+  {
+   "name": "an undo record binds no text: the same undo MAC still verifies when the step was renamed (text is not part of an undo)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": false,
+    "reason": null,
+    "text": null,
+    "covers": null,
+    "nonce": "0f1e2d3c4b5a6978"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "qUzKWwNHYC0M7x_hlC1q-PWOOpdTpS34dLSBo4CLyvI",
+   "human": true
+  },
+  {
+   "name": "a won't-do record that claims text null does not match the MAC of the 'on' with its text",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": null,
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "valid decision copied onto another ticket -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_other99",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "valid decision copied onto another step -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c3",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "reason changed after signing -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "other",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "step text rewritten after signing -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email the auditor instead",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "step covers changed after signing -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": "all of it",
+    "nonce": "a1b2c3d4e5f60718"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
+  },
+  {
+   "name": "another nonce -> not the person's",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "decision": {
+    "check": "c2",
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "ffffffffffffffff"
+   },
+   "relay_authenticated_sender": false,
+   "mac": "dE3bWaREWAJlIWyNTqGy5GeBrnGCSXX_wUn9HgFsX3s",
+   "human": false
   },
   {
    "name": "another machine's MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
-    "reason": "not needed"
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "aexF4UZBK53dmbYWTZTXiZwQAym1_SoGhpKpOWyOqZk",
+   "mac": "6wE7sr8ElsiezLHJF7h__69lI0AOU3QB7O1tsNBRZ0I",
    "human": false
   },
   {
    "name": "MAC made for another workspace",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
-    "reason": "not needed"
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "d2CinkJuyLMLdxb6u2AO_6pY2gch7hRefO942LgEV9w",
+   "mac": "unpGFGHzLA47vaBq-mz0JByOAvqKkfBALRqXH47QQoQ",
    "human": false
   },
   {
    "name": "a pending1 MAC over the same JSON is not a won't-do MAC",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "workspace": "ws_aaaaaaaaaa",
-   "item": {
-    "ticket": "t_inv7c2",
+   "ticket": "t_inv7c2",
+   "decision": {
     "check": "c2",
-    "reason": "not needed"
+    "wont_do": true,
+    "reason": "not needed",
+    "text": "Email finance",
+    "covers": null,
+    "nonce": "a1b2c3d4e5f60718"
    },
    "relay_authenticated_sender": false,
-   "mac": "5dlQ9ufItG_om8dULXlqhi-rE-p9X3TF4sM7xmzmmIQ",
+   "mac": "-gjQnEPgFLotgtG22TNvHuw0VEAROqBVzr1NWg1khjw",
    "human": false
   }
  ]

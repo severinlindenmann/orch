@@ -1372,6 +1372,21 @@ def _person_only(by: str, item: dict, tid: str, cid: str) -> None:
         _refuse_if_wont_do(item, tid, cid)
 
 
+def _sign_wont(root: Path, tid: str, item: dict) -> None:
+    """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
+    a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
+    step as an agent's, which is the safe side)."""
+    from orch import humanproof
+
+    item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
+    mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
+    if mac:
+        item["wont_mac"] = mac
+    else:
+        item.pop("wont_mac", None)
+        item.pop("wont_nonce", None)  # (no usable key: unsigned, so the sync treats it as an agent's)
+
+
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
     """A person decides a step will not be done. Person only, enforced here like accept_review: `by` must be
     human: and no agent tool may be in the environment; an agent can only ask (orch ask ...). The step stays
@@ -1394,6 +1409,7 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         else:
             item.pop("reason", None)
         item.update({"by": by, "at": now()})
+        _sign_wont(root, tid, item)
         add_history(t, by, f"Marked {cid} as won't do")
         return item
 
@@ -1502,6 +1518,10 @@ def check_edit(
             item["covers"] = covers
             if text is None:
                 add_history(t, by, f"Linked {cid} to Done when")
+        if item.get("wont_do"):
+            _sign_wont(
+                root, tid, item
+            )  # a proven edit of a Won't do step re-signs it for the new text/covers
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
@@ -1531,6 +1551,11 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
+        from orch import humanproof
+
+        humanproof.wont_forget(
+            root, tid, cid
+        )  # tombstone (whatever the file says): no old MAC on a reused id
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
@@ -1555,6 +1580,9 @@ def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
             for k in ("wont_do", "reason"):
                 item.pop(k, None)
             _clear_doing(item)
+            _sign_wont(
+                root, tid, item
+            )  # the person's undo, signed: a synced copy may drop wont_do only with it
             add_history(t, by, f"Reopened {cid}")
             return item
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
