@@ -263,6 +263,24 @@ def _confirm(args):
     return ask
 
 
+def _as_person(args, root: Path, op: str, target: str, **kw) -> None:
+    """A person's own act in a group (H1): the proof from the page, or a hand-off. Not asked of an agent: an
+    agent session keeps its own (unprivileged) path, where chat_groups refuses to speak as the person."""
+    if tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:"):
+        return
+    if not humanproof.person_by(root, args, op, target, **kw).startswith("human:"):
+        raise Refused(humanproof.AGENT_REFUSED)
+
+
+def _file_sha(root: Path, path: str) -> str:
+    """The content hash of a file a person is about to share (the proof's target binds the content)."""
+    import hashlib
+
+    from orch import chat_groups as cg
+
+    return hashlib.sha256(cg.read_shared(root / Path(path), root, confined=False)).hexdigest()
+
+
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -275,12 +293,24 @@ def run_group(args, root: Path, out) -> None:
         rows += [f"{g['title']} ({g['host']}/{g['id']}) - invited" for g in v["joined"]]
         out(args, v, "\n".join(rows) or "No groups.")
     elif sub == "say":
+        if args.dashboard:  # writing into the group AS the person
+            _as_person(
+                args, root, "group.write_as_person", tid,
+                parts={"title": humanproof.ticket_name(root, tid)}, value=args.text,
+            )  # fmt: skip
         r = cg.say(root, tid, args.text, "dashboard" if args.dashboard else "helper", args.to_person, by)
         out(args, r, "Written into the group.")
     elif sub == "add":
         r = cg.add_member(root, tid, ws, by)
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
     elif sub == "remove":
+        _as_person(
+            args, root, "group.remove_member", f"{tid}:{args.workspace}",
+            parts={
+                "title": humanproof.ticket_name(root, tid),
+                "workspace": humanproof.part(relay.name_of(root, ws)),
+            },
+        )  # fmt: skip
         tickets.require_human("Remove this workspace from the group?", "removing a member")
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
@@ -288,10 +318,22 @@ def run_group(args, root: Path, out) -> None:
         m = cg.ask(root, tid, ws, args.question, by)
         out(args, m, _sent_line(root, m, "Question sent to {}."))
     elif sub == "share":
+        if args.click:  # a person shares a file with the group: the proof binds the file's content
+            _as_person(
+                args, root, "group.share_file", f"{tid}:{_file_sha(root, args.file)}",
+                parts={
+                    "title": humanproof.ticket_name(root, tid),
+                    "file": humanproof.part(Path(args.file).name),
+                },
+            )  # fmt: skip
         r = cg.share_file(root, tid, Path(args.file), args.title, None, args.click, by, _confirm(args))
         out(args, r, "Shared with the group.")
     elif sub == "reply":
         if args.dashboard:
+            _as_person(
+                args, root, "group.write_as_person", args.group,
+                parts={"title": humanproof.part(args.group)}, value=args.text,
+            )  # fmt: skip
             tickets.require_human("Write into the group as yourself?", "writing as the person")
         m = cg.say_member(
             root,

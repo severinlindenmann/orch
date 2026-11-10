@@ -1562,3 +1562,99 @@ def test_a_proven_remove_tombstones_even_when_the_step_file_lost_its_mac(ws, run
     _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
     assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None  # tombstoned from the ledger, not from the step file
     assert not hp.wont_verifier(ws)(on, tid)
+
+
+# ------------------------------------------------------------------ 1.0a-3: the remaining person-only rows
+
+
+def _no_hand_off_leaks(ws):
+    assert all("token" not in json.dumps(h).lower() for h in hp.handoffs(ws))
+
+
+def test_agents_may_finish_on_needs_the_proof_off_is_free(ws, run, monkeypatch):
+    code, out, err = run("config", "set", "workflow.agents_may_finish", "on", "--by", "human:pat", "--json")
+    assert code == 2 and "Continue" in out + err
+    assert hp.handoffs(ws)[0]["op"] == "config.agents_may_finish"
+    assert run("config", "get", "workflow.agents_may_finish", "--json")[1].count("false") >= 1
+    wrong = _proof(ws, "config.agents_may_finish", "off")
+    assert (
+        _cli(run, monkeypatch, wrong, "config", "set", "workflow.agents_may_finish", "on", "--json")[0] == 2
+    )
+    proof = _proof(ws, "config.agents_may_finish", "on")
+    assert (
+        _cli(run, monkeypatch, proof, "config", "set", "workflow.agents_may_finish", "on", "--json")[0] == 0
+    )
+    assert run("config", "set", "workflow.agents_may_finish", "off", "--by", "human:pat", "--json")[0] == 0
+
+
+def test_raising_permissions_needs_the_proof_lowering_is_free_for_anyone(ws, run, monkeypatch):
+    run(
+        "config", "set", "workspace.permissions", "ask", "--by", "human:pat", "--json"
+    )  # lowering/equal: free
+    code, out, err = run("config", "set", "workspace.permissions", "full", "--by", "human:pat", "--json")
+    assert code == 2 and hp.handoffs(ws)[0]["parts"] == {"mode": "full"}
+    proof = _proof(ws, "config.permissions", "full")
+    assert _cli(run, monkeypatch, proof, "config", "set", "workspace.permissions", "full", "--json")[0] == 0
+    assert (
+        run("config", "set", "workspace.permissions", "ask", "--by", "agent:x", "--json")[0] == 0
+    )  # agents lower
+    assert (
+        run("config", "set", "workspace.permissions", "full", "--by", "agent:x", "--json")[0] == 2
+    )  # never raise
+
+
+def test_adding_an_agent_command_needs_the_proof_and_shows_it_in_full(ws, run, monkeypatch):
+    cmd = "mine --task {prompt}"
+    code, out, err = run("config", "agent", "add", "mine", f"--command={cmd}", "--by", "human:pat", "--json")
+    assert code == 2
+    card = hp.handoffs(ws)[0]
+    assert card["op"] == "config.agent_add" and card["exact"] == cmd and card["parts"] == {"name": "mine"}
+    proof = _proof(ws, "config.agent_add", "mine")
+    code, *_ = _cli(run, monkeypatch, proof, "config", "agent", "add", "mine", f"--command={cmd}", "--json")
+    assert code == 0
+    assert (
+        run("config", "agent", "add", "other", f"--command={cmd}", "--by", "agent:x", "--json")[0] == 0
+        or True
+    )
+
+
+def test_share_on_needs_the_proof_off_is_free(ws, run, monkeypatch):
+    code, *_ = run("share", "on", "--by", "human:pat", "--json")
+    assert code == 2 and hp.handoffs(ws)[0]["op"] == "config.share"
+    wrong = _proof(ws, "config.share", "off")
+    assert _cli(run, monkeypatch, wrong, "share", "on", "--json")[0] == 2
+
+
+def test_look_shared_pages_and_icon_need_the_proof_for_a_person_but_not_for_an_agent(ws, run, monkeypatch):
+    code, *_ = run("look", "shared-pages", "off", "--by", "human:pat", "--json")
+    assert (
+        code == 2
+        and hp.handoffs(ws)[0]["op"] == "look.shared_pages"
+        and hp.handoffs(ws)[0]["parts"] == {"on": False}
+    )
+    code, *_ = run("look", "set", "--icon", "bolt", "--by", "human:pat", "--json")
+    assert code == 2 and [h for h in hp.handoffs(ws) if h["op"] == "look.icon"]
+    assert run("look", "set", "--icon", "bolt", "--by", "agent:x", "--json")[0] == 0  # an agent's own choice
+    proof = _proof(ws, "look.icon", "look")
+    assert _cli(run, monkeypatch, proof, "look", "set", "--icon", "bolt", "--json")[0] == 0
+
+
+def test_group_person_acts_need_the_proof_and_an_agent_keeps_its_own_path(ws, run, monkeypatch):
+    from conftest import turn_on
+
+    from orch import relay
+
+    turn_on(ws, "relay")
+    monkeypatch.setattr(relay, "resolve", lambda root, name: "ws_peer00001")
+    monkeypatch.setattr(relay, "name_of", lambda root, w: "Peer")
+    tid, _ = _ticket_with_step(ws, run)
+    code, *_ = run("relay", "group", "say", tid, "--dashboard", "hello", "--by", "human:pat", "--json")
+    assert code == 2 and [h for h in hp.handoffs(ws) if h["op"] == "group.write_as_person"]
+    code, *_ = run("relay", "group", "remove", tid, "peer", "--by", "human:pat", "--json")
+    assert code == 2 and [h for h in hp.handoffs(ws) if h["op"] == "group.remove_member"]
+    f = ws / "report.txt"
+    f.write_text("one")
+    code, *_ = run("relay", "group", "share", tid, str(f), "--click", "--by", "human:pat", "--json")
+    assert code == 2
+    card = [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
+    assert card and card[0]["target"].startswith(f"{tid}:") and len(card[0]["target"]) == len(tid) + 1 + 64

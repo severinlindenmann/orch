@@ -48,6 +48,9 @@
     "config.share": function () { return ["Share the orch entry with your team (AGENTS.md)?"]; },
     "look.shared_pages": function (p) { return [p.on ? "Show the workspace name and icon on shared file pages?" : "Stop showing the workspace name and icon on shared file pages?"]; },
     "look.icon": function () { return ["Change the workspace icon and colour?"]; },
+    "group.write_as_person": function (p) { return ["Write into the group ", q(p.title), " as yourself?"]; },
+    "group.remove_member": function (p) { return ["Remove ", q(p.workspace), " from the group ", q(p.title), "?"]; },
+    "group.share_file": function (p) { return ["Share ", q(p.file), " with the group ", q(p.title), "?"]; },
     "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
     "update": function (p) { return ["Update orch from ", full(p.source), "?"]; },
     "relay.connect": function (p) {

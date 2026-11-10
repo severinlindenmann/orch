@@ -361,7 +361,10 @@ def test_wont_do_clicks_need_a_proof_on_the_real_server_path():
     from orch_dashboard import actions as a
 
     assert a.proof_for("check.wont_do", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do", "t_a:c1")
-    assert a.proof_for("check.reopen", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do_undo", "t_a:c1:reopen")
+    assert a.proof_for("check.reopen", {"ticket": "t_a", "check": "c1"}) == (
+        "check.wont_do_undo",
+        "t_a:c1:reopen",
+    )
     assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": False}) == (
         "check.wont_do_undo",
         "t_a:c1:reopen",
@@ -377,3 +380,116 @@ def test_check_edit_and_remove_clicks_need_a_proof_on_the_real_server_path():
     assert a.proof_for("check.remove", args) == ("check.wont_do_undo", "t_abcdef:c1:remove")
     assert a.build_argv("check.remove", args)[:4] == ["check", "remove", "t_abcdef", "c1"]
     assert a.build_argv("check.edit", {**args, "text": "a -- b"})[-2:] == ["--", "a -- b"]
+
+
+# ---- 1.0a-3: every op that acts as the person needs the page session (watch-only without one) ---------------
+
+TID = "t_abcdef"
+ACT_ARGS = {
+    "link.extend": {"id": "f_abc", "days": 3},
+    "link.stop": {"id": "f_abc"},
+    "answer": {"ticket": TID, "question": "q1", "answer": "x"},
+    "ticket.changes": {"ticket": TID, "text": "more"},
+    "chat.say": {"text": "hi"},
+    "chat.make_ticket": {"id": "m_abcdefghijkl"},
+    "check.set": {"ticket": TID, "check": "c1", "done": True},
+    "check.wont_do": {"ticket": TID, "check": "c1"},
+    "check.reopen": {"ticket": TID, "check": "c1"},
+    "check.edit": {"ticket": TID, "check": "c1", "text": "x"},
+    "check.remove": {"ticket": TID, "check": "c1"},
+    "run.start": {"ticket": TID},
+    "run.stop": {"ticket": TID},
+    "run.send": {"ticket": TID, "text": "x"},
+    "addon.start": {},
+    "addon.act": {"addon": "scheduler", "verb": "pause", "target": TID},
+    "config.agent": {"name": "claude"},
+    "config.agent.add": {"name": "mine", "command": "mine {prompt}"},
+    "config.permissions": {"mode": "auto"},
+    "addon.set": {"name": "scheduler", "on": True},
+    "share.set": {"on": True},
+    "workflow.set": {"on": True},
+    "look.set": {"icon": "bolt", "color": "auto"},
+    "look.shared": {"on": False},
+    "mobile.set": {"on": True},
+    "mobile.ack": {},
+    "chat.send_ws": {"workspace": "ws_abcdefghij", "text": "hi"},
+    "chat.sync_ws": {},
+    "mobile.hours": {"hours": 8},
+    "group.say": {"ticket": TID, "text": "hi"},
+    "group.share": {"ticket": TID, "file": "report.txt"},
+    "group.add": {"ticket": TID, "workspace": "peer"},
+    "group.remove": {"ticket": TID, "workspace": "peer"},
+    "relay.reply": {"to": "peer", "message": "m_abcdefghijklmnop", "text": "ok"},
+    "relay.topic": {"message": "m_abcdefghijklmnop", "title": "A topic"},
+    "message.send": {"workspace": "peer", "text": "hi"},
+}
+
+
+def test_every_person_op_is_refused_without_a_session_and_starts_no_child(live, monkeypatch):
+    import subprocess
+
+    from orch_dashboard import actions as acts
+
+    _root, port = live
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: calls.append(a))
+    missing = [op for op in acts.OPS if acts.needs_session(op) and op not in ACT_ARGS]
+    assert not missing, f"add valid args for: {missing}"
+    for op, args in ACT_ARGS.items():
+        assert acts.needs_session(op), op
+        st, _, body = post(port, "/api/act", {"op": op, "args": args})
+        assert st == 403, (op, st, body)
+    assert calls == []  # nothing was run for any of them
+
+
+def test_the_free_ops_stay_free(live):
+    from orch_dashboard import actions as acts
+
+    for op in (
+        "ticket.new",
+        "ticket.paste",
+        "ticket.edit",
+        "ticket.field",
+        "log",
+        "check.add",
+        "ref.add",
+        "ref.rm",
+    ):
+        assert not acts.needs_session(op), op
+    assert acts.proof_for("ticket.patch", {"ticket": TID, "data": {"note": "x"}}) is None
+
+
+def test_the_core_gated_config_ops_mint_for_the_right_target():
+    from orch_dashboard import actions as acts
+
+    assert acts.proof_for("workflow.set", {"on": True}) == ("config.agents_may_finish", "on")
+    assert acts.proof_for("workflow.set", {"on": False}) is None  # off needs no proof
+    assert acts.proof_for("share.set", {"on": True}) == ("config.share", "on")
+    assert acts.proof_for("share.set", {"on": False}) is None
+    assert acts.proof_for("config.permissions", {"mode": "full"}) == ("config.permissions", "full")
+    assert acts.proof_for("config.agent.add", {"name": "mine"}) == ("config.agent_add", "mine")
+    assert acts.proof_for("look.shared", {"on": True}) == ("look.shared_pages", "on")
+    assert acts.proof_for("look.shared", {"on": False}) == ("look.shared_pages", "off")
+    assert acts.proof_for("look.set", {"icon": "bolt"}) == ("look.icon", "look")
+
+
+def test_group_clicks_mint_for_the_right_target_and_a_share_binds_the_files_content(tmp_path):
+    from orch_dashboard import actions as acts
+
+    assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)
+    assert acts.proof_for("group.say", {"group": "grp_t_abcdef", "host": "peer", "text": "x"}) == (
+        "group.write_as_person",
+        "grp_t_abcdef",
+    )
+    assert acts.proof_for("group.remove", {"ticket": TID, "workspace": "peer"}) == (
+        "group.remove_member",
+        f"{TID}:peer",
+    )
+    art = tmp_path / ".orch" / "tickets" / TID / "artifacts"
+    art.mkdir(parents=True)
+    (art / "report.txt").write_text("one")
+    a = acts.proof_for("group.share", {"ticket": TID, "file": "report.txt"}, tmp_path)
+    (art / "report.txt").write_text("two")
+    b = acts.proof_for("group.share", {"ticket": TID, "file": "report.txt"}, tmp_path)
+    assert a[0] == b[0] == "group.share_file" and a[1] != b[1] and a[1].startswith(f"{TID}:")  # content-bound

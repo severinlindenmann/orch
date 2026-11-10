@@ -130,7 +130,7 @@ PROOF_OPS = {
 }
 
 
-def proof_for(op, args):
+def proof_for(op, args, root=None):
     """(core op, target) when this click needs a proof, else None."""
     if op == "ticket.patch" and isinstance(args.get("data"), dict) and "status" in args["data"]:
         return "ticket.verdict", args.get("ticket")
@@ -138,6 +138,14 @@ def proof_for(op, args):
         op == "check.set" and args.get("done") is False
     ):  # un-ticking may undo a Won't do (a person's decision)
         return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}:reopen"
+    if op == "group.say":  # writing into a group as the person (host: by ticket; invited: by group)
+        return "group.write_as_person", str(args.get("ticket") or args.get("group"))
+    if op == "group.remove":
+        return "group.remove_member", f"{args.get('ticket')}:{args.get('workspace')}"
+    if (
+        op == "group.share" and root is not None
+    ):  # the proof binds the file's CONTENT (the core hashes the same)
+        return "group.share_file", f"{args.get('ticket')}:{_share_sha(root, args)}"
     if op == "workflow.set":  # allowing agents to finish tickets (off needs no proof)
         return ("config.agents_may_finish", "on") if args.get("on") is True else None
     if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
@@ -167,6 +175,19 @@ FREE_OPS = frozenset(
         "config.agent.test",
     }
 )
+
+
+def _share_sha(root, args) -> str:
+    import hashlib
+    from pathlib import Path
+
+    from orch import chat_groups as cg
+
+    path = Path(root) / ".orch" / "tickets" / str(args.get("ticket")) / "artifacts" / str(args.get("file"))
+    try:
+        return hashlib.sha256(cg.read_shared(path, Path(root), confined=False)).hexdigest()
+    except Exception:  # noqa: BLE001 - an unreadable file: a target no proof can match
+        return "unreadable"
 
 
 def needs_session(op) -> bool:
@@ -789,7 +810,13 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
     argv = build_argv(op, args)
-    need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
+    need = (
+        proof_for(op, args, root) if orch_bin == SELF else None
+    )  # a test fake (explicit ORCH_BIN) needs none
+    if (
+        need or (orch_bin == SELF and needs_session(op))
+    ) and mint is None:  # before anything is looked up or run
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
     files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
@@ -808,8 +835,6 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
-    if (need or (orch_bin == SELF and needs_session(op))) and mint is None:
-        raise NeedsPerson("Open the dashboard from this computer to do this.")
     try:
         if need:
             r = run_with_proof(

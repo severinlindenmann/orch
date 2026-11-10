@@ -1314,6 +1314,9 @@ HANDOFF_HEADS = {
     "config.share": (("share", "on"),),
     "look.shared_pages": (("look", "shared-pages"),),
     "look.icon": (("look", "set"),),
+    "group.write_as_person": (("relay", "group", "say"), ("relay", "group", "reply")),
+    "group.remove_member": (("relay", "group", "remove"),),
+    "group.share_file": (("relay", "group", "share"),),
 }
 
 
