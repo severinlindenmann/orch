@@ -9,19 +9,8 @@ def no_grants(root, orch_home) -> dict:
 
 
 def proof_grants(root, orch_home=None) -> dict:
-    """conn.allow grants recorded with a proof, read from the guarded human-settings record (humanproof).
-    Any unreadable record or home means no grants (fail closed).
-    orch_home is unused: the guarded home decides."""
-    try:
-        path, wkey = humanproof._settings_path(root)
-        data = humanproof._settings_load(root, path)
-    except (humanproof.Refused, OSError):
-        return {}
-    out = {}
-    for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
-        if key.startswith("conn.allow.") and isinstance(rec, dict) and "value" in rec:
-            out[key[len("conn.allow.") :]] = rec["value"]
-    return out
+    """Proof-made conn.allow grants from the guarded record (fail closed); orch_home is unused."""
+    return humanproof.conn_grants(root)
 
 
 def resolve(items: list[dict]) -> tuple[list[dict], list[dict]]:

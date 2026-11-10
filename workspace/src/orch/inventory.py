@@ -20,7 +20,7 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from orch import addons, agentsdata
+from orch import addons, agentsdata, humanproof
 
 ORDER = ["workspace", "admin", "harness"]
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -185,15 +185,8 @@ def harness_servers(root: Path, account_home: Path | None = None) -> dict[str, d
 
 
 def _grants(root: Path, orch_home: Path) -> dict:
-    """conn.allow grants recorded with a proof (human-settings.json), by connection name."""
-    wid = addons.workspace_id(root)
-    doc = _read(orch_home / "human-settings.json")
-    ws = _dig(doc, ["workspaces", wid]) if wid else {}
-    out = {}
-    for key, rec in ws.items():
-        if key.startswith("conn.allow.") and isinstance(rec, dict) and "value" in rec:
-            out[key[len("conn.allow.") :]] = rec["value"]
-    return out
+    """conn.allow grants recorded with a proof (the guarded human-settings record), by connection name."""
+    return humanproof.conn_grants(root)
 
 
 def _expand(x, actions: set[str]) -> set[str]:

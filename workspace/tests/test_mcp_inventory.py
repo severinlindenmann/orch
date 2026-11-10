@@ -7,7 +7,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import addons, inventory
+from orch import addons, humanproof, inventory
 
 VEC = json.loads((CONTRACTS / "vectors" / "inventory-v1.json").read_text(encoding="utf-8"))
 SCHEMA = json.loads((CONTRACTS / "inventory.schema.json").read_text(encoding="utf-8"))
@@ -210,27 +210,32 @@ def test_versions_are_content_hashes(env):
     assert inventory.connections(root)[0][0]["version"] != v1
 
 
-def test_allow_needs_a_proof_made_grant(env):
-    root, _, orch_home = env
+def test_allow_needs_a_proof_made_grant(tmp_path, monkeypatch):
+    acct = tmp_path / "acct"
+    base = acct / ".orch-test"
+    root = base / "ws"
+    (root / ".orch").mkdir(parents=True)
+    (base / "home").mkdir()
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(base / "home"))
+    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
     _mcp(root, {"s": {"command": ["p"], "profile": "x"}}, allow={"s": ["read", "write"]})
     i = inventory.connections(root)[0][0]
     assert [a["allowed"] for a in i["actions"]] == [False, False] and not i[
         "allow_all"
     ]  # agent-written entry: not allowed
-    _w(
-        orch_home / "human-settings.json",
-        {
-            "schema": "orch.human-settings/1",
-            "workspaces": {
-                WID: {"conn.allow.s": {"value": ["read"], "by": "human:a", "at": "2026-11-16T09:00:00Z"}}
-            },
-        },
-    )
+    humanproof.record_set(root, "conn.allow.s", ["read"], "human:a")
     i = inventory.connections(root)[0][0]
     assert {a["name"]: a["allowed"] for a in i["actions"]} == {"read": True, "write": False}
     _mcp(root, {"s": {"command": ["p"]}}, allow={"s": "*"})
-    _w(orch_home / "human-settings.json", {"workspaces": {WID: {"conn.allow.s": {"value": "*"}}}})
+    humanproof.record_set(root, "conn.allow.s", "*", "human:a")
     assert inventory.connections(root)[0][0]["allow_all"]
+
+
+def test_unreadable_grant_store_means_no_grants(env):
+    root, _, _ = env  # not a test workspace: the guarded home is refused
+    _mcp(root, {"s": {"command": ["p"]}}, allow={"s": "*"})
+    assert not inventory.connections(root)[0][0]["allow_all"]
 
 
 def test_profile_state_ok_when_keys_exist(env):
