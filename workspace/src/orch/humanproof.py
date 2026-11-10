@@ -66,7 +66,7 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local config.permissions look.icon".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -75,6 +75,7 @@ SETTING_DEFAULTS = {
     "insights.share_names": False,
     "secret.allow_get": False,
     "conn.allow": False,
+    "workflow.agents_may_finish": False,
 }
 _TARGET_RE = re.compile(r"[A-Za-z0-9_.:@-]+")
 _BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
@@ -1299,7 +1300,7 @@ CURRENT_ARGV: list[str] | None = None
 HANDOFF_HEADS = {
     "ticket.answer": (("answer",),),
     "run.human_input": (("run", "send"),),
-    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch")),
+    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch"), ("ticket", "status")),
     "relay.allow": (("relay", "allow"),),
     "relay.connect": (("relay", "connect"),),
     "update": (("update",),),
@@ -1309,6 +1310,7 @@ HANDOFF_HEADS = {
     "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
     "chat.make_ticket": (("chat", "make-ticket"),),
     "config.agents_may_finish": (("config", "set"),),
+    "config.copy_setup": (("config", "set"),),
     "config.permissions": (("config", "set"),),
     "config.agent_add": (("config", "agent", "add"),),
     "config.share": (("share", "on"),),
@@ -1329,8 +1331,8 @@ def _clean_argv(argv) -> list[str] | None:
         if a == "--by":
             skip = True
             continue
-        if a.startswith("--by=") or a == "--proof-stdin":
-            continue
+        if a.startswith("--by=") or a in ("--proof-stdin", "--unchecked-ok"):
+            continue  # --unchecked-ok skips the password check: a hand-off refuses in words, the page asks
         out.append(a)
     return out if all(isinstance(x, str) and len(x) <= 4000 for x in out) and len(out) <= 20 else None
 
@@ -1496,7 +1498,11 @@ def request_handoff(
     if len(value) > VALUE_MAX or (value and value not in argv):
         return False
     exact = str(exact)[:2000] if exact else ""
-    if exact and op in ("relay.connect", "addon.add_local") and exact not in " ".join(argv):
+    if (
+        exact
+        and op in ("relay.connect", "addon.add_local", "group.share_file")
+        and exact not in " ".join(argv)
+    ):
         return False  # the shown full target must be part of the command that runs
     try:
         d = key_dir(root)

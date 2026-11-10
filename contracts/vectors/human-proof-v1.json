@@ -409,7 +409,8 @@
   "insights.share_counts",
   "insights.share_names",
   "secret.allow_get",
-  "conn.allow"
+  "conn.allow",
+  "workflow.agents_may_finish"
  ],
  "settle": [
   {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import shutil
@@ -219,14 +220,17 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
+        who = None
         if args.value == "on":
             if _actor(args).startswith("agent:"):
                 raise Refused(
                     "Only a person can allow agents to mark tickets Done. Ask them to run: "
                     "orch config set workflow.agents_may_finish on"
                 )
-            _person(args, root, "config.agents_may_finish", "on", parts={"setting": "agents_may_finish"})
-        value = config.set_agents_may_finish(root, args.value == "on")
+            who = _person(
+                args, root, "config.agents_may_finish", "on", parts={"setting": "agents_may_finish"}
+            )
+        value = config.set_agents_may_finish(root, args.value == "on", who)
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if _actor(args).startswith("agent:"):  # copy_setup is a command orch runs: only a person chooses it
@@ -238,6 +242,15 @@ def _config(args, root: Path) -> None:
             v = config.set_copies_max(root, args.value)
             text = f"Saved: at most {v} separate copies at once."
         else:
+            setup = args.value.strip()
+            if setup not in (
+                "",
+                "none",
+            ):  # a command orch runs in every new copy: a person's proof, bound to it
+                _person(
+                    args, root, "config.copy_setup", hashlib.sha256(setup.encode()).hexdigest(),
+                    value=args.value, exact=setup,
+                )  # fmt: skip
             v = config.set_copy_setup(root, args.value)
             text = f"Saved: a new copy is prepared with: {v}." if v else "Saved: nothing runs in a new copy."
         _out(args, {args.key: v}, text)
@@ -286,16 +299,20 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
-            if not _actor(args).startswith("agent:"):
-                # a command orch will run for every task: a person approves it, shown in full
-                _person(
-                    args,
-                    root,
-                    "config.agent_add",
-                    args.name,
-                    parts={"name": humanproof.part(args.name)},
-                    exact=args.command,
-                )
+            # a command orch will run for every task: only a person approves it, shown in full (both the
+            # command and the live-session one). An agent is refused until private allow (#374) gates what
+            # a config.toml command may run (F5): editing config.toml by hand is the same class, Level 2.
+            exact = args.command
+            if args.interactive:
+                exact = f"Command: {args.command}\nLive session command: {args.interactive}"
+            _person(
+                args,
+                root,
+                "config.agent_add",
+                args.name,
+                parts={"name": humanproof.part(args.name)},
+                exact=exact,
+            )
             config.add_agent(root, args.name, args.command, args.interactive, prompt=args.prompt_via)
             tail = (
                 "starts fresh each run; no live steps"

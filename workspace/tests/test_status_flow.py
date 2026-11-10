@@ -7,6 +7,20 @@ from orch import config, runs, tickets
 from orch.errors import Refused
 
 
+@pytest.fixture
+def proj(proj, monkeypatch):
+    """agents_may_finish is a recorded grant (F1): the workspace must be a test workspace with a test home."""
+    from orch import addons
+
+    base = addons.real_home() / ".orch-test"
+    root = base / "ws"
+    (root / ".orch").mkdir(parents=True)
+    (base / "home").mkdir()
+    monkeypatch.setenv("ORCH_HOME", str(base / "home"))
+    monkeypatch.chdir(root)
+    return root
+
+
 @pytest.mark.parametrize("path", ["status", "patch"])
 def test_agent_finish(proj, run, new_ticket, path):
     tid = new_ticket()
@@ -106,7 +120,7 @@ def test_finish_with_proof(proj, run, new_ticket, patch, allowed):
     tid = new_ticket()
     run("check", "add", tid, "Test it")
     assert run("check", "done", tid, "c1", "--note", "Verified")[0] == 0
-    config.set_agents_may_finish(proj, allowed)
+    config.set_agents_may_finish(proj, allowed, "human:tester")
     before = tickets.load(proj, tid)
     if patch:
         after = tickets.patch(proj, tid, before["revision"], '{"status":"done"}', "agent:generic")
@@ -152,7 +166,7 @@ def test_list_order_and_closed_filter(proj, run, new_ticket):
 @pytest.mark.parametrize("allowed", [False, True])
 def test_status_history_uses_resolved_actor(proj, run, new_ticket, monkeypatch, path, status, allowed):
     tid = new_ticket()
-    config.set_agents_may_finish(proj, allowed)
+    config.set_agents_may_finish(proj, allowed, "human:tester")
     before = tickets.load(proj, tid)
     monkeypatch.setenv("ORCH_AGENT", "generic")
     args = (

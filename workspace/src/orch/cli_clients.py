@@ -286,6 +286,30 @@ def _file_sha(root: Path, path: str) -> str:
     return hashlib.sha256(cg.read_shared(Path(path), root, confined=False)).hexdigest()
 
 
+def _group_title(root: Path, group: str) -> str:
+    """The group's name for a card (never its raw id); an unknown group is "a group chat"."""
+    from orch import chat_groups as cg
+
+    try:
+        v = cg.view(root)
+        for g in [*v["hosted"], *v["joined"]]:
+            if g.get("id") == group and g.get("title"):
+                return str(g["title"])
+    except (Refused, OSError, KeyError):
+        pass
+    return "a group chat"
+
+
+def _share_card(args) -> dict:
+    """What the share card must show and what the page will run (F4): the full resolved path of the file (the
+    card shows it in an "Exact file:" block) and a command with that absolute path, so the page's folder can
+    never turn a relative name into another file."""
+    full = str(Path(args.file).resolve())
+    argv = humanproof._clean_argv(humanproof.CURRENT_ARGV) or []
+    argv = [full if a == args.file else a for a in argv]
+    return {"exact": full, "argv": argv}
+
+
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -334,6 +358,7 @@ def run_group(args, root: Path, out) -> None:
                     "title": humanproof.ticket_name(root, tid),
                     "file": humanproof.part(Path(args.file).name),
                 },
+                **_share_card(args),
             ):  # fmt: skip
                 click = True
         # the bytes that are uploaded are checked against the bytes the proof covers (expect_sha)
@@ -356,7 +381,7 @@ def run_group(args, root: Path, out) -> None:
         ):  # only a verified person speaks as themselves; an agent claim is downgraded to helper
             as_person = _as_person(
                 args, root, "group.write_as_person", args.group,
-                parts={"title": humanproof.part(args.group)}, value=args.text,
+                parts={"title": humanproof.part(_group_title(root, args.group))}, value=args.text,
             )  # fmt: skip
         m = cg.say_member(
             root,
@@ -375,7 +400,11 @@ def run_group(args, root: Path, out) -> None:
             sha = _file_sha(root, args.file)
             if _as_person(
                 args, root, "group.share_file", f"{args.group}:{sha}",
-                parts={"title": humanproof.part(args.group), "file": humanproof.part(Path(args.file).name)},
+                parts={
+                    "title": humanproof.part(_group_title(root, args.group)),
+                    "file": humanproof.part(Path(args.file).name),
+                },
+                **_share_card(args),
             ):  # fmt: skip
                 click = True
         m = cg.share_member(

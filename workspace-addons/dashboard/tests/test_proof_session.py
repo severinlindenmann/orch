@@ -408,6 +408,7 @@ ACT_ARGS = {
     "addon.set": {"name": "scheduler", "on": True},
     "share.set": {"on": True},
     "workflow.set": {"on": True},
+    "copies.set": {"mode": "off"},
     "look.set": {"icon": "bolt", "color": "auto"},
     "look.shared": {"on": False},
     "mobile.set": {"on": True},
@@ -493,3 +494,27 @@ def test_group_clicks_mint_for_the_right_target_and_a_share_binds_the_files_cont
     (art / "report.txt").write_text("two")
     b = acts.proof_for("group.share", {"ticket": TID, "file": "report.txt"}, tmp_path)
     assert a[0] == b[0] == "group.share_file" and a[1] != b[1] and a[1].startswith(f"{TID}:")  # content-bound
+
+
+def test_copy_setup_click_mints_for_the_hash_of_the_command_only():
+    import hashlib
+
+    from orch_dashboard import actions as acts
+
+    got = acts.proof_for("copies.set", {"setup": "  make prepare "})
+    assert got == ("config.copy_setup", hashlib.sha256(b"make prepare").hexdigest())
+    assert acts.proof_for("copies.set", {"setup": ""}) is None  # clearing needs none
+    assert acts.proof_for("copies.set", {"setup": "none"}) is None
+    assert acts.proof_for("copies.set", {"mode": "off"}) is None
+
+
+def test_no_session_means_no_file_read_before_the_refusal(monkeypatch, tmp_path):
+    """F8: a request without a page session is refused before the artifact is hashed."""
+    from orch_dashboard import actions as acts
+
+    def boom(*a, **k):
+        raise AssertionError("the artifact was read before the session check")
+
+    monkeypatch.setattr(acts, "_share_sha", boom)
+    with pytest.raises(acts.NeedsPerson):
+        acts.run_op(tmp_path, acts.SELF, "group.share", {"ticket": TID, "file": "a.txt"}, mint=None)

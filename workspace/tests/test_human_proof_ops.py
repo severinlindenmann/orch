@@ -1612,10 +1612,15 @@ def test_adding_an_agent_command_needs_the_proof_and_shows_it_in_full(ws, run, m
     proof = _proof(ws, "config.agent_add", "mine")
     code, *_ = _cli(run, monkeypatch, proof, "config", "agent", "add", "mine", f"--command={cmd}", "--json")
     assert code == 0
-    assert (
-        run("config", "agent", "add", "other", f"--command={cmd}", "--by", "agent:x", "--json")[0] == 0
-        or True
-    )
+    # F5: an agent never adds one (until #374), and the card shows --interactive as well
+    code, out, err = run("config", "agent", "add", "other", f"--command={cmd}", "--by", "agent:x", "--json")
+    assert code != 0 and "other" not in (ws / ".orch" / "config.toml").read_text()
+    run(
+        "config", "agent", "add", "live", f"--command={cmd}", "--interactive=live --tty", "--by", "human:pat",
+        "--json",
+    )  # fmt: skip
+    live = [h for h in hp.handoffs(ws) if h["target"] == "live"][0]
+    assert cmd in live["exact"] and "live --tty" in live["exact"]
 
 
 def test_share_on_needs_the_proof_off_is_free(ws, run, monkeypatch):
@@ -1658,6 +1663,23 @@ def test_group_person_acts_need_the_proof_and_an_agent_keeps_its_own_path(ws, ru
     assert code == 2
     card = [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
     assert card and card[0]["target"].startswith(f"{tid}:") and len(card[0]["target"]) == len(tid) + 1 + 64
+    # F4: the card shows the full resolved path, and --unchecked-ok never rides along in the stored command
+    assert card[0]["exact"] == str(f.resolve())
+    run(
+        "relay",
+        "group",
+        "share",
+        tid,
+        "report.txt",
+        "--click",
+        "--unchecked-ok",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    stored = [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
+    assert all("--unchecked-ok" not in h["argv"] for h in stored)
+    assert any(str(f.resolve()) in h["argv"] for h in stored)  # a relative name is stored as the full path
 
 
 # ------------------------------------------- group acts: an agent claim is downgraded, bytes are bound
@@ -1754,14 +1776,39 @@ def test_no_call_site_ignores_what_as_person_returns():
     src = (Path(__file__).resolve().parents[1] / "src" / "orch" / "cli_clients.py").read_text(
         encoding="utf-8"
     )
-    bad = [
-        n.lineno
-        for n in ast.walk(ast.parse(src))
-        if isinstance(n, ast.Expr)
-        and isinstance(n.value, ast.Call)
-        and getattr(n.value.func, "id", "") == "_as_person"
-    ]
-    assert not bad, f"_as_person result ignored at lines {bad}"
+
+    def is_call(n):
+        return isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_as_person"
+
+    def names(expr):
+        return {x.id for x in ast.walk(expr) if isinstance(x, ast.Name)}
+
+    bad, seen = [], 0
+    for fn in [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)]:
+        branch_tests = [n.test for n in ast.walk(fn) if isinstance(n, (ast.If, ast.IfExp))]
+        tested = set().union(*[names(t) for t in branch_tests]) if branch_tests else set()
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Assign) and is_call(n.value):  # assigned: the name must decide a branch
+                seen += 1
+                targets = {t.id for t in n.targets if isinstance(t, ast.Name)}
+                if not targets & tested:
+                    bad.append(n.lineno)
+            elif isinstance(n, (ast.If, ast.IfExp)) and is_call(n.test):
+                seen += 1  # used directly as the condition
+            elif isinstance(n, ast.Expr) and is_call(n.value):  # a bare statement drops the value
+                bad.append(n.lineno)
+        bound = {n.lineno for n in ast.walk(fn) if isinstance(n, ast.Assign) and is_call(n.value)}
+        bound |= {
+            n.test.lineno for n in ast.walk(fn) if isinstance(n, (ast.If, ast.IfExp)) and is_call(n.test)
+        }
+        for n in ast.walk(fn):  # any other use (argument, bool(), return, comprehension) is not a branch
+            if (
+                is_call(n)
+                and n.lineno not in bound
+                and not any(isinstance(p, ast.Assign) and p.value is n for p in ast.walk(fn))
+            ):
+                bad.append(n.lineno)
+    assert seen >= 5 and not bad, f"_as_person result not decided on at lines {sorted(set(bad))}"
 
 
 def test_the_upload_receives_the_very_bytes_that_were_hashed_read_once(ws, run, monkeypatch):
@@ -1801,3 +1848,104 @@ def test_the_upload_receives_the_very_bytes_that_were_hashed_read_once(ws, run, 
         b"the approved bytes"
     ]  # bytes, never a path
     assert uploads[0] is reads[-1]  # the same in-memory object that was hashed in share_file
+
+
+def test_agents_may_finish_cannot_be_granted_by_editing_config_toml(ws, run):
+    """F1: the switch is a recorded grant; a config.toml line an agent appended grants nothing."""
+    from orch import config
+
+    config.set_key(ws, "workflow", "agents_may_finish", True)  # what an agent's file edit amounts to
+    assert (ws / ".orch" / "config.toml").exists()
+    assert config.agents_may_finish(ws) is False
+    assert run("config", "get", "workflow.agents_may_finish", "--json")[1].count("false") >= 1
+
+
+def test_ticket_status_done_is_the_verdict_and_needs_the_proof(ws, run, monkeypatch):
+    """F3: `ticket status <id> done` (and leaving Review by it) is a verdict like `ticket patch`."""
+    tid = _review_ticket(ws, run)
+    for who in ("human:me", None):
+        extra = ("--by", who) if who else ()
+        code, out, err = run("ticket", "status", tid, "done", *extra, "--json")
+        assert code == 2 and tickets.load(ws, tid)["status"] == "review", (who, out, err)
+    card = [h for h in hp.handoffs(ws) if h["op"] == "ticket.verdict"]
+    assert card and card[0]["target"] == tid
+    code, out, err = run("ticket", "status", tid, "active", "--by", "human:me", "--json")
+    assert code == 2 and tickets.load(ws, tid)["status"] == "review"  # leaving Review is a verdict too
+    wrong = _proof(ws, "ticket.verdict", "T-other")
+    assert _cli(run, monkeypatch, wrong, "ticket", "status", tid, "done", "--json")[0] == 2
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "ticket.verdict", tid), "ticket", "status", tid, "done"
+    )
+    assert code == 0, out + err
+    assert tickets.load(ws, tid)["status"] == "done"
+    # an agent's done still lands in Review, and other moves stay free
+    tid2 = _review_ticket(ws, run)
+    tickets.apply_op(ws, tid2, lambda t: t.update(status="open"))
+    assert run("ticket", "status", tid2, "ready", "--by", "human:me", "--json")[0] == 0
+
+
+def test_every_status_writer_asks_the_verdict_gate():
+    """F3 structural rule: a command that writes a ticket's status (tickets.set_status / tickets.patch) is
+    inside a function that also calls cli._verdict_who (the one gate); the other writers are the phone's
+    accept (own channel, a person's certificate) and sync's merge (the ledger/authority rules)."""
+    import ast
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "orch"
+    writers = {}
+    for f in sorted(src.glob("*.py")):
+        tree = ast.parse(f.read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "tickets"
+                and node.func.attr in ("set_status", "patch", "accept_review")
+            ):
+                writers.setdefault(f.name, []).append((node.func.attr, node.lineno))
+    assert set(writers) <= {"cli.py", "relay.py", "chat_groups.py", "phone_view.py", "cli_run.py"}, writers
+    cli_src = (src / "cli.py").read_text()
+    for attr, line in writers.get("cli.py", []):
+        if attr == "accept_review":
+            continue
+        block = "\n".join(cli_src.splitlines()[line - 12 : line])
+        assert "_verdict_who(" in block, f"cli.py:{line} writes a ticket status without the verdict gate"
+    for name in ("relay.py", "chat_groups.py", "phone_view.py", "cli_run.py"):
+        for attr, line in writers.get(name, []):
+            assert attr == "accept_review" and name == "relay.py", (name, attr, line)
+
+
+def test_copy_setup_is_a_command_orch_runs_so_it_needs_the_proof(ws, run, monkeypatch):
+    """F6: `config set workflow.copy_setup <cmd>` is bound to the command's hash; an agent is refused; copies
+    and clearing the setup stay free for a person."""
+    import hashlib
+
+    cmd = "make prepare"
+    code, out, err = run("config", "set", "workflow.copy_setup", cmd, "--by", "human:pat", "--json")
+    assert code == 2
+    card = [h for h in hp.handoffs(ws) if h["op"] == "config.copy_setup"][0]
+    sha = hashlib.sha256(cmd.encode()).hexdigest()
+    assert card["target"] == sha and card["exact"] == cmd
+    assert run("config", "set", "workflow.copy_setup", "echo pwned", "--by", "agent:x", "--json")[0] != 0
+    assert run("config", "get", "workflow.copy_setup", "--json")[1].count("null") == 1
+    wrong = _proof(ws, "config.copy_setup", hashlib.sha256(b"other").hexdigest())
+    assert _cli(run, monkeypatch, wrong, "config", "set", "workflow.copy_setup", cmd, "--json")[0] == 2
+    proof = _proof(ws, "config.copy_setup", sha)
+    assert _cli(run, monkeypatch, proof, "config", "set", "workflow.copy_setup", cmd, "--json")[0] == 0
+    assert run("config", "get", "workflow.copy_setup", "--json")[1].count(cmd) == 1
+    assert run("config", "set", "workflow.copy_setup", "none", "--by", "human:pat", "--json")[0] == 0  # free
+    assert run("config", "set", "workflow.copies", "off", "--by", "human:pat", "--json")[0] == 0
+
+
+def test_the_proof_op_tables_agree():
+    """F7: schema enum, OPS and HANDOFF_HEADS name the same ops (the contract table lists each one)."""
+    import json as _json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2] / "contracts"
+    schema = _json.loads((root / "human-proof.schema.json").read_text())["$defs"]["op"]["enum"]
+    assert set(schema) == set(hp.OPS)
+    md = (root / "human-proof.md").read_text()
+    missing = [op for op in hp.OPS if f"`{op}`" not in md]
+    assert not missing, missing

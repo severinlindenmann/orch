@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -148,6 +149,11 @@ def proof_for(op, args, root=None):
         return "group.share_file", f"{args.get('ticket')}:{_share_sha(root, args)}"
     if op == "workflow.set":  # allowing agents to finish tickets (off needs no proof)
         return ("config.agents_may_finish", "on") if args.get("on") is True else None
+    if op == "copies.set" and "setup" in args:  # a command orch runs in every new copy; clearing is free
+        v = args.get("setup")
+        if isinstance(v, str) and v.strip() not in ("", "none"):
+            return "config.copy_setup", hashlib.sha256(v.strip().encode()).hexdigest()
+        return None
     if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
         return ("config.share", "on") if args.get("on") is True else None
     if op == "look.shared":
@@ -840,13 +846,11 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
     argv = build_argv(op, args)
+    if orch_bin == SELF and needs_session(op) and mint is None:  # before anything is read, hashed or run (F8)
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
     need = (
         proof_for(op, args, root) if orch_bin == SELF else None
     )  # a test fake (explicit ORCH_BIN) needs none
-    if (
-        need or (orch_bin == SELF and needs_session(op))
-    ) and mint is None:  # before anything is looked up or run
-        raise NeedsPerson("Open the dashboard from this computer to do this.")
     files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:

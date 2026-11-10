@@ -261,10 +261,22 @@ def insights_share_names(root: Path | None) -> bool:
 
 
 def agents_may_finish(root: Path | None) -> bool:
-    return root is not None and (read(root).get("workflow") or {}).get("agents_may_finish") is True
+    """A widening switch (F1): the file value alone grants nothing; a person's proven "on" is recorded in the
+    orch home (humanproof.effective): appending the key to config.toml cannot let an agent finish tickets."""
+    from orch import humanproof
+
+    if root is None:
+        return False
+    file_value = (read(root).get("workflow") or {}).get("agents_may_finish") is True
+    return humanproof.effective(root, "workflow.agents_may_finish", file_value)
 
 
-def set_agents_may_finish(root: Path, value: bool) -> bool:
+def set_agents_may_finish(root: Path, value: bool, by: str | None = None) -> bool:
+    """`by` = the verified person; only a proven "on" is recorded (the caller has checked the proof)."""
+    from orch import humanproof
+
+    if value and by:
+        humanproof.record_set(root, "workflow.agents_may_finish", True, by)
     set_key(root, "workflow", "agents_may_finish", value)
     return value
 
