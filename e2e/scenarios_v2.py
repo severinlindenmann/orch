@@ -23,7 +23,7 @@ from lib import Fail, check, free_port, http, scenario, wait_http
 
 AGENT = Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"
 NEEDS_FIXTURE = Path(__file__).parent / "fixtures" / "needs-addon"
-ESSENTIALS = ("uv", "node", "git", "python3", "ps", "sh", "env", "sleep", "cat", "date", "ls", "head", "tail", "kill", "mkdir", "rm", "cp", "tr", "grep")
+ESSENTIALS = ("uv", "node", "git", "python3", "ps", "sh", "env", "sleep", "cat", "date", "ls", "head", "tail", "kill", "mkdir", "rm", "cp", "tr", "grep", "true")
 
 
 def wait_for(fn, secs: float = 30, step: float = 0.1):
@@ -1111,3 +1111,57 @@ def u1_upgrade_from_old_orch(e):
     on = {r["name"] for r in rows if r.get("active")}
     check({"dashboard", "focus", "automation"} <= on, f"active add-ons after the upgrade: {sorted(on)}")
     check("scheduler" not in on, f"the old scheduler is still listed as on: {sorted(on)}")
+
+
+# ------------------------------------------------------------------------------------------------ copies cleanup (B12)
+
+
+@scenario("G1-CLEAN")
+def g1_clean(e):
+    """Separate copies are always taken back: two runs -> two copies -> Done -> count 0, folders and branches gone;
+    a run killed and its ticket deleted -> the next `orch start` removes the copy."""
+    w = W(e, "G1-CLEAN").init()
+    w.sh(["git", "config", "user.email", "e2e@localhost"], check_rc=True)
+    w.sh(["git", "config", "user.name", "e2e"], check_rc=True)
+    w.sh(["git", "add", "-A"], check_rc=True)
+    w.sh(["git", "commit", "-qm", "init"], check_rc=True)
+    w.agent("--silent 4")
+    w.o("config", "set", "workflow.copies", "always", by=None)
+    reg = w.root / ".orch" / "run" / "worktrees.json"
+
+    def listed() -> list[str]:
+        try:
+            return sorted(json.loads(reg.read_text())["tickets"])
+        except (OSError, ValueError, KeyError):
+            return []
+
+    def branches() -> list[str]:
+        return w.sh(["git", "branch", "--list", "orch/*", "--format=%(refname:short)"])[1].split()
+
+    a, b = w.ticket("First change"), w.ticket("Second change")
+    for t in (a, b):
+        w.j("run", "start", t)
+    check(listed() == sorted([a, b]), f"two copies expected in the registry, got {listed()}")
+    folders = [Path(w.claim(t)["folder"]) for t in (a, b)]
+    check(all(f.is_dir() and f != w.root for f in folders), f"copy folders: {folders}")
+    check(len(branches()) == 2, f"branches {branches()}")
+    for t in (a, b):
+        w.wait_done(t)
+        w.o("ticket", "status", t, "done")
+    check(listed() == [], f"registry after Done: {listed()}")
+    check(not any(f.exists() for f in folders), "a copy folder is still there after Done")
+    check(branches() == [], f"branches after Done: {branches()}")
+    # crash case: the agent is killed, the ticket is deleted, the next `orch start` takes the copy back
+    c = w.ticket("Crashing change")
+    w.agent("--silent 60", name="slow")
+    w.j("run", "start", c)
+    claim = w.wait_claim(c)
+    folder = Path(w.claim(c)["folder"])
+    check(folder.is_dir() and listed() == [c], f"copy of the crashing ticket: {folder} {listed()}")
+    os.kill(claim["agent_pid"], signal.SIGKILL)  # the PID the claim recorded: nothing else
+    w.wait_done(c)
+    (w.root / ".orch" / "tickets" / f"{c}.json").unlink()
+    w.o("start", "--no-open", by=None)
+    check(listed() == [] and not folder.exists(), f"the next start left the copy: {listed()} {folder.exists()}")
+    rc, out, _ = w.o("copy", "clean", "--json", by=None)
+    check(json.loads(out)["copies"] == 0, f"copies left: {out}")
