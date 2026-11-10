@@ -13,6 +13,8 @@ import re
 import subprocess
 from pathlib import Path
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
+
 MAX_TEXT = 2000
 MAX_TASK = 500
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
@@ -277,7 +279,7 @@ def orch(
         if proof:
             r = run_with_proof(argv, proof, orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=timeout)
         else:
-            r = subprocess.run(
+            r = _run(
                 [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
                 stdin=subprocess.DEVNULL, env=human_env(root, orch_bin),
             )  # fmt: skip

@@ -62,7 +62,7 @@ def test_relay_rejects_bad_args(op, args, words, field):
 )
 def test_relay_requires_active_addon(ws, monkeypatch, op, args, words, field, rows):
     monkeypatch.setattr(actions, "run_orch", lambda *a: rows)
-    monkeypatch.setattr(actions.subprocess, "run", lambda *a, **kw: pytest.fail("ran action"))
+    monkeypatch.setattr(actions, "_run", lambda *a, **kw: pytest.fail("ran action"))
     with pytest.raises(actions.BadRequest, match="not on"):
         actions.run_op(ws, "orch", op, args)
 
@@ -80,5 +80,5 @@ def test_relay_runs_argv_when_on(ws, monkeypatch, op, args, words, field):
 
     monkeypatch.setattr(actions, "run_orch", read)
     monkeypatch.setattr(actions, "human_env", lambda *a: {})
-    monkeypatch.setattr(actions.subprocess, "run", run)
+    monkeypatch.setattr(actions, "_run", run)
     assert actions.run_op(ws, "orch", op, args) == (200, "", {})

@@ -42,7 +42,8 @@ def live(tmp_path, monkeypatch):
     def no_child(argv, *a, **k):
         return subprocess.CompletedProcess(argv, 1, "", "")
 
-    monkeypatch.setattr(subprocess, "run", no_child)
+    monkeypatch.setattr(actions, "_run", no_child)
+    monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: no_child(argv))
     srv = make_server(root, 0, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield root, srv.server_address[1]

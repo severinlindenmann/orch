@@ -14,7 +14,7 @@ from orch import (
 )
 from orch import humanproof as hp
 
-from orch_dashboard import actions
+from orch_dashboard import actions, data
 from orch_dashboard.server import make_server
 
 
@@ -42,7 +42,9 @@ def live(tmp_path, monkeypatch):
     def no_child(argv, *a, **k):
         return subprocess.CompletedProcess(argv, 1, "", "")
 
-    monkeypatch.setattr(subprocess, "run", no_child)
+    monkeypatch.setattr(actions, "_run", no_child)
+    monkeypatch.setattr(data, "_run", no_child)
+    monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: no_child(argv))
     srv = make_server(root, 0, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield root, srv.server_address[1]

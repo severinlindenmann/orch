@@ -235,10 +235,20 @@ def test_pins_of_runs_that_are_not_started_are_dropped_on_load(server, ws, fake_
 def test_pin_started_waits_up_to_30_s_and_logs_when_it_never_gets_a_pid(
     server, fake_orch, monkeypatch, capsys
 ):
-    from orch_focus import server as srv
-
     sleeps = []
-    monkeypatch.setattr(srv.time, "sleep", lambda s: sleeps.append(s))
+
+    class Clock:  # the wait between two looks at the claim; no real sleeping, and nothing global is patched
+        def is_set(self):
+            return False
+
+        def set(self):
+            pass
+
+        def wait(self, s):
+            sleeps.append(s)
+            return False
+
+    monkeypatch.setattr(_tr(server), "stop", Clock())
     _start(server)
     _status(fake_orch)  # no pid
     assert _tr(server).pin_started(TID, "r_start001") is False

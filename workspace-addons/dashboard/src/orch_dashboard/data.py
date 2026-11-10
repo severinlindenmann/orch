@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from . import look, mobile, phone_delivery
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
 def _me() -> str:
     from .actions import actor  # actions imports this module
@@ -112,7 +113,7 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
 
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
-        r = subprocess.run(
+        r = _run(
             [*_argv0(orch_bin), *args],
             check=False,
             cwd=root,
