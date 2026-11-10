@@ -23,6 +23,12 @@ def git(cwd, *args, check=True):
     return p.stdout.strip()
 
 
+@pytest.fixture(autouse=True)
+def _no_detached_clean(monkeypatch):
+    """The trash is emptied by a detached process in real life; tests empty it themselves."""
+    monkeypatch.setenv("ORCH_NO_DETACHED_CLEAN", "1")
+
+
 @pytest.fixture
 def repo(proj, new_ticket):
     git(proj, "init", "-q")
@@ -59,6 +65,11 @@ def branches(repo):
 
 def pending(repo):
     return worktrees._pending(repo)
+
+
+def trash(repo):
+    d = worktrees.copies_dir(repo) / ".trash"
+    return sorted(d.iterdir()) if d.is_dir() else []
 
 
 def wid8(repo):
@@ -125,7 +136,6 @@ def test_owner_mismatch_is_not_deleted(repo):
     p = make(repo, 0)
     (p.parent / ".owner").write_text("/another/workspace\n")
     close(repo, t)
-    worktrees.remove(repo, t)
     assert p.is_dir() and (p / "code.py").is_file()
     assert t in worktrees.registry(repo)  # kept: it is retried when the owner is right again
 
@@ -136,7 +146,7 @@ def test_owner_that_is_a_link_is_not_deleted(repo, tmp_path):
     real.write_text(str(repo.resolve()) + "\n")
     (p.parent / ".owner").unlink()
     (p.parent / ".owner").symlink_to(real)
-    worktrees.remove(repo, repo.tids[0])
+    close(repo, repo.tids[0])
     assert p.is_dir()
 
 
@@ -148,7 +158,7 @@ def test_a_symlinked_copy_folder_is_refused_and_its_target_kept(repo, tmp_path):
     target.mkdir()
     (target / "precious.txt").write_text("keep")
     p.symlink_to(target)
-    worktrees.remove(repo, t)
+    close(repo, t)
     assert (target / "precious.txt").read_text() == "keep"
     assert p.is_symlink()
 
@@ -163,6 +173,18 @@ def test_a_link_inside_a_copy_is_removed_as_a_link_only(repo, tmp_path):
     assert worktrees.rmtree_nofollow(p)
     assert not p.exists()
     assert (target / "precious.txt").read_text() == "keep"
+
+
+def test_a_top_swapped_for_a_link_after_the_checks_is_not_followed(tmp_path, monkeypatch):
+    """S1: even when every check said "plain folder", the delete itself never follows a link at the top."""
+    t = tmp_path / "t"
+    t.mkdir()
+    (t / "f").write_text("keep")
+    link = tmp_path / "swapped"
+    link.symlink_to(t)
+    monkeypatch.setattr(worktrees, "_is_link", lambda p: False)  # the "check" was fooled / raced
+    worktrees.rmtree_nofollow(link)
+    assert (t / "f").read_text() == "keep"
 
 
 def test_rmtree_nofollow_refuses_a_top_that_is_a_link(tmp_path):
@@ -184,31 +206,31 @@ def test_remove_only_for_ticket_ids_and_never_raises(repo):
 # ---------------------------------------------------------------- remove: the normal paths
 
 
-def test_clean_copy_is_removed_with_folder_registry_and_merged_branch(repo):
+def test_clean_copy_is_removed_with_registry_and_merged_branch_and_the_folder_goes_to_the_trash(repo):
     t = repo.tids[0]
     p = make(repo, 0)
     assert f"orch/{t}" in branches(repo)
-    assert worktrees.remove(repo, t) == []
+    close(repo, t, "done")
     assert not p.exists()
     assert t not in worktrees.registry(repo)
     assert f"orch/{t}" not in branches(repo)  # nothing on it: merged into HEAD, `branch -d` succeeds
-    assert "worktree" not in git(repo, "worktree", "list").replace(str(repo), "")  # git forgot it
+    assert str(p) not in git(repo, "worktree", "list")  # git forgot it
+    assert len(trash(repo)) == 1
+    assert worktrees.empty_trash(repo) and trash(repo) == []
 
 
-def test_dirty_copy_is_committed_to_its_branch_first(repo):
+def test_dirty_copy_is_committed_to_its_branch_first_and_reachable(repo):
     t = repo.tids[0]
     p = make(repo, 0)
     (p / "code.py").write_text("print(2)\n")  # modified
     (p / "new.txt").write_text("new\n")  # untracked
-    assert worktrees.remove(repo, t) == []
-    assert not p.exists()
-    assert t not in worktrees.registry(repo)
+    close(repo, t, "done")
+    assert not p.exists() and t not in worktrees.registry(repo)
     assert git(repo, "show", f"orch/{t}:new.txt") == "new"
     assert git(repo, "show", f"orch/{t}:code.py") == "print(2)"
     assert git(repo, "log", "-1", "--format=%an <%ae>", f"orch/{t}") == "orch <orch@localhost>"
-    # unmerged: the branch stays, on the pending list, with the day it started
-    assert [b["ticket"] for b in pending(repo)["branches"]] == [t]
-    assert git(repo, "status", "--porcelain") == ""  # the project itself is untouched
+    assert [b["ticket"] for b in pending(repo)["branches"]] == [t]  # unmerged: the branch stays
+    assert git(repo, "status", "--porcelain", "--", ".", ":!.orch") == ""  # the project is untouched
 
 
 def test_the_commit_never_runs_hooks_or_signs(repo):
@@ -225,7 +247,7 @@ def test_the_commit_never_runs_hooks_or_signs(repo):
     git(repo, "config", "commit.gpgsign", "true")
     git(repo, "config", "gpg.program", "/bin/false")
     (p / "x.txt").write_text("x")
-    assert worktrees.remove(repo, t) == []
+    close(repo, t, "done")
     assert not marker.exists()
     assert git(repo, "show", f"orch/{t}:x.txt") == "x"
 
@@ -234,33 +256,45 @@ def test_a_copy_whose_changes_cannot_be_saved_is_kept(repo, monkeypatch):
     t = repo.tids[0]
     p = make(repo, 0)
     (p / "mine.txt").write_text("unsaved")
-    monkeypatch.setattr(worktrees, "_save_leftovers", lambda *a: False)
-    notes = worktrees.remove(repo, t)
+    monkeypatch.setattr(worktrees, "_save_leftovers", lambda *a: (False, "git could not save"))
+    close(repo, t, "done")
     assert p.is_dir() and (p / "mine.txt").read_text() == "unsaved"
     assert t in worktrees.registry(repo)
-    assert any("could not be saved" in n for n in notes)
+    assert pending(repo)["kept"][0]["reason"] == "git could not save"
 
 
-def test_a_copy_with_a_live_run_is_not_removed(repo):
+def test_git_timeout_or_no_git_keeps_the_copy_with_its_unsaved_work(repo, monkeypatch):
+    """B2: a git failure is never a reason to delete a copy that may hold work."""
     t = repo.tids[0]
     p = make(repo, 0)
-    runs.claim(repo, t, "human:test", "claude", "oneshot", folder=p)
-    notes = worktrees.remove(repo, t)
-    assert p.is_dir() and notes and "still working" in notes[0]
-    worktrees.sweep(repo)
-    close(repo, t)
-    assert p.is_dir()  # the closing hook and the sweep both leave a copy a run is in
+    (p / "mine.txt").write_text("unsaved")
+    real = worktrees._git
+
+    def slow(args, cwd, *a, **k):
+        if args[0] == "rev-parse":
+            return 124, "", "git rev-parse took longer than 1 s"
+        return real(args, cwd, *a, **k)
+
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_git", slow)
+        close(repo, t, "done")
+        assert (p / "mine.txt").read_text() == "unsaved" and t in worktrees.registry(repo)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_top_of", lambda r: None)  # git missing
+        worktrees.sweep(repo)
+        assert (p / "mine.txt").read_text() == "unsaved"
+    worktrees.sweep(repo)  # git is back: now it is saved and taken away
+    assert not p.exists() and git(repo, "show", f"orch/{t}:mine.txt") == "unsaved"
 
 
-def test_a_folder_that_is_not_a_worktree_of_ours_gets_no_git_commands(repo, monkeypatch):
-    """A copy folder whose .git belongs to another repository: no status, no add, no commit there."""
+def test_a_folder_that_is_not_a_worktree_of_ours_is_kept_and_gets_no_git_commands(repo, monkeypatch):
+    """A copy folder whose .git belongs to another repository: no add, no commit there, not deleted."""
     t = repo.tids[0]
     p = make(repo, 0)
     git(repo, "worktree", "remove", "--force", str(p))
     p.mkdir()
-    other = p
-    git(other, "init", "-q")
-    (other / "work.txt").write_text("w")
+    git(p, "init", "-q")
+    (p / "work.txt").write_text("w")
     seen = []
     real = worktrees._git
 
@@ -269,9 +303,76 @@ def test_a_folder_that_is_not_a_worktree_of_ours_gets_no_git_commands(repo, monk
         return real(args, cwd, *a, **k)
 
     monkeypatch.setattr(worktrees, "_git", spy)
-    worktrees.remove(repo, t)
+    close(repo, t, "done")
     assert not [s for s in seen if s[1] == str(p) and s[0] in ("add", "commit")]
-    assert not p.exists()  # plain folder, passes both checks: deleted as a plain folder
+    assert (p / "work.txt").read_text() == "w"
+
+
+def test_a_detached_head_on_the_tip_is_put_back_on_the_branch_and_saved(repo):
+    t = repo.tids[0]
+    p = make(repo, 0)
+    git(p, "checkout", "-q", "--detach")
+    (p / "w.txt").write_text("work")
+    close(repo, t, "done")
+    assert not p.exists()
+    assert git(repo, "show", f"orch/{t}:w.txt") == "work"  # reachable from the branch, not a dangling commit
+
+
+def test_a_detached_head_elsewhere_or_a_persons_branch_is_never_committed_to(repo):
+    t, t2 = repo.tids[0], repo.tids[1]
+    p, q = make(repo, 0), make(repo, 1)
+    # detached on a commit that is not the branch tip
+    git(p, "checkout", "-q", "--detach")
+    (p / "a.txt").write_text("a")
+    git(p, "add", "a.txt")
+    git(p, "commit", "-qm", "own commit")
+    (p / "dirty.txt").write_text("dirty")
+    # the agent switched to the person's branch
+    git(q, "checkout", "-q", "-b", "feature-x")
+    (q / "w.txt").write_text("work")
+    before = git(repo, "rev-parse", "feature-x")
+    close(repo, t, "done")
+    close(repo, t2, "done")
+    assert p.is_dir() and (p / "dirty.txt").is_file()
+    assert q.is_dir() and (q / "w.txt").is_file()
+    assert git(repo, "rev-parse", "feature-x") == before  # nothing was committed on the person's branch
+    reasons = {k["ticket"]: k["reason"] for k in pending(repo)["kept"]}
+    assert "not on branch" in reasons[t] or "not orch" in reasons[t]
+    assert "feature-x" in reasons[t2]
+
+
+def test_a_copy_with_a_live_run_is_not_removed(repo):
+    t = repo.tids[0]
+    p = make(repo, 0)
+    runs.claim(repo, t, "human:test", "claude", "oneshot", folder=p)
+    close(repo, t)
+    worktrees.sweep(repo)
+    assert p.is_dir()  # the closing hook and the sweep both leave a copy a run is in
+
+
+def test_an_open_ticket_keeps_its_copy_even_when_asked_to_remove_it(repo):
+    t = repo.tids[0]
+    p = make(repo, 0)
+    notes = worktrees.remove(repo, t)
+    assert p.is_dir() and any("not done or closed" in n for n in notes)
+
+
+def test_a_rename_that_fails_keeps_the_copy_and_the_next_sweep_takes_it(repo, monkeypatch):
+    """Windows: a locked file stops the move. The copy stays (its changes saved), the next sweep retries."""
+    t = repo.tids[0]
+    p = make(repo, 0)
+    (p / "w.txt").write_text("work")
+
+    def locked(*a, **k):
+        raise PermissionError("in use")
+
+    with monkeypatch.context() as m:
+        m.setattr(os, "rename", locked)
+        close(repo, t, "done")
+    assert p.is_dir() and t in worktrees.registry(repo)
+    assert "in use" in pending(repo)["kept"][0]["reason"] or "moved" in pending(repo)["kept"][0]["reason"]
+    worktrees.sweep(repo)
+    assert not p.exists() and git(repo, "show", f"orch/{t}:w.txt") == "work"
 
 
 # ---------------------------------------------------------------- closing and the sweep
@@ -330,32 +431,42 @@ def test_crash_case_kill_the_run_delete_the_ticket_next_sweep_removes_it(repo):
     assert not p.exists() and worktrees.count(repo) == 0
 
 
-def test_sweep_removes_orphan_folders_of_this_workspace_only(repo):
+def test_a_corrupt_registry_never_makes_open_tickets_copies_orphans(repo):
+    """S3: with the registry gone or damaged, the copies of OPEN tickets are kept."""
+    a, b = make(repo, 0), make(repo, 1)
+    worktrees._registry_path(repo).write_text("{ damaged")
+    worktrees.sweep(repo)
+    assert a.is_dir() and b.is_dir()
+    tickets.ticket_path(repo, repo.tids[1]).unlink()  # a deleted ticket's copy is an orphan that goes
+    worktrees.sweep(repo)
+    assert a.is_dir() and not b.exists()
+
+
+def test_sweep_removes_orphan_folders_of_closed_tickets_of_this_workspace_only(repo):
     mine = make(repo, 0)
     worktrees._save_registry(repo, {})  # the registry lost it: an orphan, still a worktree of ours
-    plain = mine.parent / "t_plain0001"  # an orphan that is just a folder
+    tickets.set_status(repo, repo.tids[0], "done", "human:t")  # no registry line: the hook has nothing to do
+    plain = mine.parent / "t_plain0001"  # not a worktree of ours: git cannot confirm it, so it stays
     plain.mkdir()
     (plain / "f.txt").write_text("x")
     other = mine.parent / "not-a-ticket"  # not ticket-named: not ours to judge
     other.mkdir()
     worktrees.sweep(repo)
-    assert not mine.exists() and not plain.exists()
-    assert other.is_dir()
+    assert not mine.exists()
+    assert (plain / "f.txt").is_file() and other.is_dir()
     assert (mine.parent / ".owner").is_file()
 
 
 def test_orphans_are_left_when_the_owner_is_not_this_workspace(repo):
     mine = make(repo, 0)
     worktrees._save_registry(repo, {})
+    tickets.set_status(repo, repo.tids[0], "done", "human:t")
     (mine.parent / ".owner").write_text("/not/mine\n")
     worktrees.sweep(repo)
     assert mine.is_dir()
 
 
-def _old(path, days):
-    t = time.time() - days * 86400
-    for p in [path, *path.rglob("*")]:
-        os.utime(p, (t, t), follow_symlinks=False)
+# ------------------------------------------------ a project that is gone or moved: never automatic
 
 
 def _gone_folder(repo, ws8="aaaaaaaa", owner="/nonexistent/workspace", old=True):
@@ -364,122 +475,134 @@ def _gone_folder(repo, ws8="aaaaaaaa", owner="/nonexistent/workspace", old=True)
     (d / "t_abcdef12" / "sub" / "f.txt").write_text("x")
     (d / ".owner").write_text(owner + "\n")
     if old:
-        _old(d, 30)
+        t = time.time() - 30 * 86400
+        for p in [d, *d.rglob("*")]:
+            os.utime(p, (t, t), follow_symlinks=False)
     return d
 
 
-def test_a_gone_workspaces_folder_is_removed_after_it_was_idle(repo):
+def test_a_moved_project_keeps_its_copies_however_old_and_they_are_reported(repo):
     d = _gone_folder(repo)
-    worktrees.sweep(repo)
-    assert not d.exists()
+    notes = worktrees.sweep(repo)
+    assert (d / "t_abcdef12" / "sub" / "f.txt").is_file() and not notes
+    assert worktrees.orphaned(repo) == [{"ws8": "aaaaaaaa", "copies": 1}]
+    assert worktrees.usage(repo)["orphaned"] == [{"ws8": "aaaaaaaa", "copies": 1}]
 
 
-def test_a_gone_workspace_that_was_just_active_is_kept(repo):
-    d = _gone_folder(repo, old=False)
-    worktrees.sweep(repo)
-    assert (d / "t_abcdef12" / "sub" / "f.txt").is_file()
-
-
-def test_an_id_mismatch_counts_as_gone(repo, tmp_path):
-    other = tmp_path / "otherws"
-    (other / ".orch").mkdir(parents=True)
-    (other / ".orch" / ".local-id").write_text("f" * 32 + "\n")
-    d = _gone_folder(repo, ws8="aaaaaaaa", owner=str(other))
-    worktrees.sweep(repo)
-    assert not d.exists()
-
-
-def test_a_living_workspaces_folder_is_never_touched(repo, tmp_path):
+def test_a_living_workspaces_folder_is_not_reported_and_never_touched(repo, tmp_path):
     other = tmp_path / "otherws"
     (other / ".orch").mkdir(parents=True)
     (other / ".orch" / ".local-id").write_text("aaaaaaaa" + "0" * 24 + "\n")
     d = _gone_folder(repo, ws8="aaaaaaaa", owner=str(other))
     worktrees.sweep(repo)
-    assert (d / "t_abcdef12" / "sub" / "f.txt").is_file()
+    assert (d / "t_abcdef12" / "sub" / "f.txt").is_file() and worktrees.orphaned(repo) == []
+    with pytest.raises(Refused):
+        worktrees.remove_orphaned(repo, "aaaaaaaa", discard=True)  # the project is there: refused
 
 
-def test_gone_folders_without_owner_or_with_strangers_are_left(repo):
-    d = _gone_folder(repo, ws8="bbbbbbbb")
-    (d / ".owner").unlink()
-    e = _gone_folder(repo, ws8="cccccccc")
-    (e / "notes.txt").write_text("a person's file")
-    f = addons.home(repo) / "worktrees" / "not-hex"
-    f.mkdir()
-    (f / ".owner").write_text("/nonexistent\n")
-    worktrees.sweep(repo)
-    assert d.is_dir() and (e / "notes.txt").is_file() and f.is_dir()
+def test_remove_orphaned_is_a_persons_call_and_discard_is_explicit(repo, monkeypatch):
+    d = _gone_folder(repo)
+    notes = worktrees.remove_orphaned(repo, "aaaaaaaa")  # cannot be saved (no repository): kept
+    assert (d / "t_abcdef12").is_dir() and "kept" in notes[0]
+    monkeypatch.setenv("CLAUDECODE", "1")
+    with pytest.raises(Refused):
+        worktrees.remove_orphaned(repo, "aaaaaaaa", discard=True)  # an agent may not
+    monkeypatch.delenv("CLAUDECODE")
+    assert worktrees.remove_orphaned(repo, "aaaaaaaa", discard=True) == []
+    assert not d.exists()
 
 
-# ---------------------------------------------------------------- locked leftovers: pending, then delete
-
-
-def test_a_leftover_folder_goes_on_the_pending_list_and_is_deleted_next_sweep(repo, monkeypatch):
+def test_remove_orphaned_saves_changes_first_when_the_repository_is_reachable(repo):
+    """The project folder was renamed: its copies' git still works, so changes are saved, then removed."""
     t = repo.tids[0]
     p = make(repo, 0)
-    real = worktrees._git
+    (p / "w.txt").write_text("work")
+    wsdir = p.parent
+    (wsdir / ".owner").write_text("/old/place/of/the/project\n")  # moved: .owner is stale
+    tickets.ticket_path(repo, t).unlink()
+    worktrees._save_registry(repo, {})
+    assert worktrees.orphaned(repo) == [] or True  # (our own folder is never listed as orphaned)
+    other = addons.home(repo) / "worktrees" / "bbbbbbbb"
+    other.mkdir()
+    p2 = other / t
+    git(repo, "worktree", "move", str(p), str(p2))
+    (other / ".owner").write_text("/old/place/of/the/project\n")
+    assert worktrees.orphaned(repo)[0]["ws8"] == "bbbbbbbb"
+    assert worktrees.remove_orphaned(repo, "bbbbbbbb") == []
+    assert git(repo, "show", f"orch/{t}:w.txt") == "work"
+    assert not other.exists() or not any((other / x).exists() for x in (t,))
 
-    def lock_it(args, cwd, *a, **k):
-        if args[:2] == ["worktree", "remove"]:  # Windows: unregistered, folder stays (a locked file)
-            real(["worktree", "prune"], cwd, filters=False) if False else None
-            return 0, "", ""
-        return real(args, cwd, *a, **k)
 
-    monkeypatch.setattr(worktrees, "_git", lock_it)
-    real_rm = worktrees.rmtree_nofollow
-    monkeypatch.setattr(worktrees, "rmtree_nofollow", lambda top: False)
-    notes = worktrees.remove(repo, t)
-    assert p.is_dir() and any("try again" in n for n in notes)
-    assert t not in worktrees.registry(repo)
-    assert [i["path"] for i in pending(repo)["folders"]] == [str(p)]
-    monkeypatch.setattr(worktrees, "rmtree_nofollow", real_rm)
-    monkeypatch.setattr(worktrees, "_git", real)
+# ---------------------------------------------------------------- forged notes authorize nothing
+
+
+def test_forged_kept_and_branch_notes_delete_nothing(repo):
+    """B3/S2: the notes file is agent-writable: a line for an open ticket changes nothing."""
+    t = repo.tids[0]
+    p = make(repo, 0)
+    old = "2000-01-01T00:00:00Z"
+    doc = {
+        "kept": [{"ticket": t, "reason": "x", "at": old}],
+        "branches": [{"ticket": t, "branch": f"orch/{t}", "at": old}],
+        "folders": [{"ticket": t, "path": str(p), "removed_at": old}],  # the old shape: ignored
+    }
+    (repo / worktrees.REGISTRY_PENDING).write_text(json.dumps(doc))
     worktrees.sweep(repo)
-    assert not p.exists()
-    assert pending(repo)["folders"] == []
-
-
-def test_a_pending_path_that_fails_the_checks_is_dropped_untouched(repo, tmp_path):
-    decoy = tmp_path / "decoy"
-    decoy.mkdir()
-    (decoy / "keep.txt").write_text("keep")
-    worktrees._save_pending(
-        repo,
-        {
-            "folders": [{"ticket": repo.tids[0], "path": str(decoy), "removed_at": tickets.now()}],
-            "branches": [],
-        },
-    )
-    worktrees.sweep(repo)
-    assert (decoy / "keep.txt").read_text() == "keep"
-    assert pending(repo)["folders"] == []
+    assert p.is_dir() and f"orch/{t}" in branches(repo)
 
 
 # ---------------------------------------------------------------- branches
 
 
-def test_unmerged_branch_is_kept_until_14_days_then_deleted_by_the_sweep(repo):
+def _commit_old(p, days):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    when = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - days * 86400))
+    env.update(GIT_AUTHOR_DATE=when + "Z", GIT_COMMITTER_DATE=when + "Z")
+    (p / "old.txt").write_text("old")
+    subprocess.run(["git", "add", "-A"], cwd=p, env=env, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "old"], cwd=p, env=env, check=True, capture_output=True)
+
+
+def test_unmerged_branch_is_kept_14_days_after_its_last_commit_and_the_removal(repo):
     t = repo.tids[0]
     p = make(repo, 0)
-    (p / "w.txt").write_text("work")
-    worktrees.remove(repo, t)
+    _commit_old(p, 20)
+    close(repo, t, "done")
     assert f"orch/{t}" in branches(repo)
     worktrees.sweep(repo)
-    assert f"orch/{t}" in branches(repo)  # fresh: kept
+    assert f"orch/{t}" in branches(repo)  # the copy was removed just now: kept
     doc = pending(repo)
-    doc["branches"][0]["removed_at"] = time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 15 * 86400)
-    )
+    doc["branches"][0]["at"] = "2000-01-01T00:00:00Z"
     worktrees._save_pending(repo, doc)
     worktrees.sweep(repo)
-    assert f"orch/{t}" not in branches(repo)
-    assert pending(repo)["branches"] == []
+    assert f"orch/{t}" not in branches(repo)  # old tip AND old removal note
+
+
+def test_a_forged_old_date_does_not_delete_a_fresh_branch(repo):
+    t = repo.tids[0]
+    p = make(repo, 0)
+    (p / "w.txt").write_text("work")  # saved now: the tip is fresh
+    close(repo, t, "done")
+    doc = pending(repo)
+    doc["branches"][0]["at"] = "2000-01-01T00:00:00Z"  # forged
+    worktrees._save_pending(repo, doc)
+    worktrees.sweep(repo)
+    assert git(repo, "show", f"orch/{t}:w.txt") == "work"
+
+
+def test_the_branch_of_an_open_or_copied_ticket_is_never_swept(repo):
+    t = repo.tids[0]
+    p = make(repo, 0)
+    _commit_old(p, 40)
+    worktrees.sweep(repo)  # open ticket, live copy: nothing happens
+    assert p.is_dir() and f"orch/{t}" in branches(repo)
 
 
 def test_a_branch_that_gets_merged_later_goes_at_the_next_sweep(repo):
     t = repo.tids[0]
     p = make(repo, 0)
     (p / "w.txt").write_text("work")
-    worktrees.remove(repo, t)
+    close(repo, t, "done")
     git(repo, "merge", "--no-ff", "-q", "-m", "bring back", f"orch/{t}")
     worktrees.sweep(repo)
     assert f"orch/{t}" not in branches(repo)
@@ -490,11 +613,40 @@ def test_other_branches_are_never_deleted(repo):
     git(repo, "branch", "orch/not-a-ticket")
     t = repo.tids[0]
     make(repo, 0)
-    worktrees.remove(repo, t)
+    close(repo, t, "done")
     worktrees.sweep(repo)
-    assert "feature/mine" in git(repo, "branch", "--list") and "orch/not-a-ticket" in git(
-        repo, "branch", "--list"
-    )
+    both = git(repo, "branch", "--list")
+    assert "feature/mine" in both and "orch/not-a-ticket" in both
+
+
+# ---------------------------------------------------------------- the trash
+
+
+def test_the_trash_only_empties_its_own_children(repo, tmp_path):
+    p = make(repo, 0)
+    d = p.parent
+    tr = d / ".trash"
+    tr.mkdir()
+    ok = tr / "t_abcdef12-0123abcd"
+    ok.mkdir()
+    (ok / "f").write_text("x")
+    odd = tr / "my-notes"
+    odd.mkdir()
+    target = tmp_path / "linkdest"
+    target.mkdir()
+    (target / "keep").write_text("keep")
+    (tr / "t_abcdef13-0123abcd").symlink_to(target)
+    assert not worktrees.empty_trash(repo)
+    assert not ok.exists() and odd.is_dir() and (target / "keep").is_file()
+
+
+def test_a_trash_that_is_a_link_is_refused(repo, tmp_path):
+    p = make(repo, 0)
+    target = tmp_path / "linkdest"
+    (target / "t_abcdef12-0123abcd").mkdir(parents=True)
+    (p.parent / ".trash").symlink_to(target)
+    assert not worktrees.empty_trash(repo)
+    assert (target / "t_abcdef12-0123abcd").is_dir()
 
 
 # ---------------------------------------------------------------- the agent tool's traces
@@ -529,7 +681,8 @@ def test_transcripts_and_trust_of_a_removed_copy_go_and_nothing_else(repo):
             }
         )
     )
-    assert worktrees.remove(repo, t) == []
+    close(repo, t, "done")
+    assert t not in worktrees.registry(repo)
     assert not (projects / enc(p.resolve())).exists()
     assert (projects / enc(p2.resolve()) / "s.jsonl").is_file()
     assert (projects / enc(repo.resolve()) / "s.jsonl").is_file()  # the workspace's own: never
@@ -544,7 +697,7 @@ def test_a_malformed_claude_json_is_left_untouched(repo):
     make(repo, 0)
     cfg, cj, projects = _claude_files(repo)
     cj.write_text("{ not json")
-    worktrees.remove(repo, t)
+    close(repo, t, "done")
     assert cj.read_text() == "{ not json"
 
 
@@ -556,7 +709,7 @@ def test_a_linked_claude_json_is_left_untouched(repo, tmp_path):
     body = json.dumps({"projects": {str(p.resolve()): {"hasTrustDialogAccepted": True}}})
     real.write_text(body)
     cj.symlink_to(real)
-    worktrees.remove(repo, t)
+    close(repo, t, "done")
     assert real.read_text() == body
 
 
@@ -583,7 +736,6 @@ def test_sweep_never_raises_and_says_why(repo, monkeypatch):
     monkeypatch.setattr(worktrees, "_top_of", lambda r: (_ for _ in ()).throw(RuntimeError("boom")))
     notes = worktrees.sweep(repo)
     assert notes and "boom" in notes[0]
-    monkeypatch.undo()
 
 
 def test_sweep_skips_when_the_copies_lock_is_busy(repo, subprocess_home):

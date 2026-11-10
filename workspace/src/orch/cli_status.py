@@ -31,7 +31,15 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
     c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
-    c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
+    cc = c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
+    cc.add_argument("--trash", action="store_true", help=argparse.SUPPRESS)  # empty the trash (detached run)
+    ro = c.add_parser(
+        "remove-orphaned",
+        parents=[common],
+        help="remove the copies of a project that is gone (a person's call)",
+    )
+    ro.add_argument("ws8", help="the copies folder (8 characters), as `orch copy clean` lists it")
+    ro.add_argument("--discard", action="store_true", help="also remove copies whose changes cannot be saved")
 
 
 def _home_path(p: str) -> str:
@@ -161,15 +169,26 @@ def _services_cmd(args, root: Path) -> None:
 def _copy_clean(args, root: Path) -> None:
     from orch import worktrees
 
+    if args.sub == "remove-orphaned":
+        notes = worktrees.remove_orphaned(root, args.ws8, args.discard)
+        _out(args, {"notes": notes}, "\n".join(notes) or "Removed.")
+        return
+    if args.trash:
+        worktrees.empty_trash(root)
+        return
     notes = worktrees.sweep(root)
     u = worktrees.usage(root)
     lines = [
         *notes,
         f"{u['copies']} separate copies are in use." if u["copies"] else "No separate copies left.",
     ]
+    for o in u["orphaned"]:
+        lines.append(
+            f"{o['copies']} copies of a project that is gone or moved: orch copy remove-orphaned {o['ws8']}"
+        )
     _out(
         args,
-        {"copies": u["copies"], "bytes": u["bytes"], "partial": u["partial"], "notes": notes},
+        {k: u[k] for k in ("copies", "bytes", "partial", "orphaned")} | {"notes": notes},
         "\n".join(lines),
     )
 

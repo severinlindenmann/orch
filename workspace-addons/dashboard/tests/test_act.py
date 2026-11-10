@@ -1112,3 +1112,17 @@ def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
     assert build_argv("copies.clean", {})[:3] == ["copy", "clean", "--json"]
     with pytest.raises(BadRequest):
         build_argv("copies.clean", {"path": "/"})
+
+
+def test_copies_remove_orphaned_takes_one_folder_name_only():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("copies.remove_orphaned", {"ws8": "aaaaaaaa"})[:4] == [
+        "copy",
+        "remove-orphaned",
+        "aaaaaaaa",
+        "--json",
+    ]
+    for bad in ({}, {"ws8": "../x"}, {"ws8": "AAAAAAAA"}, {"ws8": "aaaaaaaa", "discard": True}, {"ws8": 5}):
+        with pytest.raises(BadRequest):
+            build_argv("copies.remove_orphaned", bad)

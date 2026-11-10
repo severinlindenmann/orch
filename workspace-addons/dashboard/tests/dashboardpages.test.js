@@ -95,7 +95,7 @@ test('Separate copies card: three choices, the saved one is selected, setup and 
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
-  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  const c = vm.createContext({h, array:x => Array.isArray(x) ? x : [], snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const card = vm.runInContext('copiesCard', c)({copies:'always', copies_max:5, copy_setup:'npm ci'});
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
@@ -112,14 +112,17 @@ test('Copies on this computer line: count, size, "..." while counting, Clean up 
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
-  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  const c = vm.createContext({h, array:x => Array.isArray(x) ? x : [], snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const text = d => vm.runInContext('copiesDiskText', c)(d);
   assert.match(text(null), /^…/);
   assert.equal(text({copies:2, bytes:1.4e9, partial:false}), '2 copies · 1.4 GB · removed by themselves when a ticket is done');
   assert.match(text({copies:1, bytes:5e6, partial:true}), /^1 copy · more than 5 MB/);
-  const card = vm.runInContext('copiesCard', c)({copies_disk:{copies:0, bytes:0}});
+  assert.match(text({copies:1, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}]}), /2 copies from a moved or deleted project/);
+  const card = vm.runInContext('copiesCard', c)({copies_disk:{copies:0, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}]}});
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const btn = all(card, n => n.attrs?.['data-action'] === 'copies-clean')[0];
   assert.equal(btn.children[0], 'Clean up now');
+  assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-orphaned').length, 1);
+  assert.match(JSON.stringify(card), /files git ignores/);
 });

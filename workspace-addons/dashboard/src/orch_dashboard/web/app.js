@@ -484,6 +484,10 @@ main.addEventListener('click', async event => {
   if (action === 'inline') startInline(control);
   if (action === 'ref-preview') { previewReference(control); return; }
   if (action === 'copies-mode') { settingsSend('copies.set', {mode:control.dataset.mode}, 'copies'); return; }
+  if (action === 'copies-orphaned') {
+    (async () => { for (const o of array(state.settings?.copies_disk?.orphaned)) await settingsSend('copies.remove_orphaned', {ws8:o.ws8}, 'copies-clean'); })();
+    return;
+  }
   if (action === 'copies-clean') { settingsSend('copies.clean', {}, 'copies-clean'); return; }
   if (action === 'copies-setup') { settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies'); return; }
   if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }

@@ -449,6 +449,16 @@ def _copies_clean(a):
     return ["copy", "clean", "--json"], [], []
 
 
+def _copies_remove_orphaned(a):
+    """Remove the copies of a project that is gone or moved (a person's click; changes are saved first when git
+    can reach the project, else the copies stay). `ws8` is the 8-character folder name `copies_disk` lists."""
+    _only(a, ("ws8",))
+    v = a.get("ws8")
+    if not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{8}", v):
+        raise BadRequest("That is not a copies folder.")
+    return ["copy", "remove-orphaned", v, "--json"], [], []
+
+
 def _ticket_field(a):
     """One add-on field: `orch ticket set <id> <addon>.<field> -- <value>` (core types and checks it; empty clears).
     The add-on must be on here (checked in run_op)."""
@@ -654,6 +664,7 @@ OPS = {
     "workflow.set": _workflow_set,
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
+    "copies.remove_orphaned": _copies_remove_orphaned,
     "ticket.field": _ticket_field,
 }
 
@@ -854,10 +865,11 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "workflow.set",
             "copies.set",
             "copies.clean",
+            "copies.remove_orphaned",
             "share.set",
         ):
             _audit(root, op, args)
-        if op == "copies.clean":
+        if op in ("copies.clean", "copies.remove_orphaned"):
             from . import data as _data
 
             _data.copies_disk_forget(root)
