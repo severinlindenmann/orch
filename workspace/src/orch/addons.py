@@ -1420,6 +1420,11 @@ def batch_install(root: Path):
     )
 
 
+def batched() -> set[str]:
+    """Names collected by the running batch_install (installed together when it ends)."""
+    return {c["name"] for c, _ in _BATCH or []}
+
+
 def add(root: Path, source: str, yes: bool = False, project_only: bool = False) -> None:
     """Install (if needed) and turn on in this workspace. `source` = built-in name or ./folder."""
     note = ignored_source_note()

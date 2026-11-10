@@ -79,12 +79,18 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
         if sys.stdin.readline().strip().lower() not in ("y", "yes"):
             raise Refused("Not confirmed. Nothing was changed.")
     names = [r["name"] for r in rows]
+    now: list[str] = []  # turned on at once (already installed); the rest wait for the one reinstall
     try:
         # one reinstall for all of them (on Windows a second background install is refused while one runs)
         with addons.batch_install(root), contextlib.redirect_stdout(io.StringIO()):
             for n in names:
                 addons.add(root, n, yes=True)
+                if n not in addons.batched():
+                    now.append(n)
     except Exception as e:
+        for n in reversed(now):
+            with contextlib.suppress(Exception):
+                addons.remove(root, n)
         raise Refused(f"Could not turn on {', '.join(names)}: {e} Nothing was changed.") from e
     return names
 
