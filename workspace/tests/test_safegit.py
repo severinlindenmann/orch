@@ -133,16 +133,37 @@ def test_every_call_carries_the_hardening(tmp_path, monkeypatch):
     safegit.run(["status"], tmp_path, read_only=True, filters=False)
     argv = seen[-1][0]
     assert "--no-optional-locks" in argv and "core.fsmonitor=false" in argv and "protocol.allow=never" in argv
-    assert any(a.startswith("core.hooksPath=") and "/orch-no-hooks/" in a for a in argv)
+    assert any(a.startswith("core.hooksPath=") and a == "core.hooksPath=" + os.devnull for a in argv)
     assert "core.longpaths=true" in argv and "core.untrackedCache=false" in argv
     e = safegit.env(tmp_path, None, "/bin/true")
     assert "GIT_DIR" not in e and e["GIT_TERMINAL_PROMPT"] == "0"
 
 
-def test_hooks_path_is_a_fresh_path_that_does_not_exist():
-    a, b = safegit._no_hooks(), safegit._no_hooks()
-    assert a != b and not Path(a).exists() and not Path(b).exists()
-    assert Path(a).parent == Path(tempfile.gettempdir()) / "orch-no-hooks"
+def test_hooks_path_is_os_devnull_and_a_planted_shared_folder_is_never_used(hostile, tmp_path):
+    assert safegit._no_hooks() == os.devnull
+    r, marker = hostile
+    shared = Path(tempfile.gettempdir()) / "orch-no-hooks"  # the predictable folder another user could plant
+    created = not shared.exists()
+    shared.mkdir(exist_ok=True)
+    planted = [shared / "post-checkout", shared / "reference-transaction"]
+    try:
+        for hook in planted:
+            sh(hook, f"touch {marker}.{hook.name}")
+        wt = tmp_path / "wt"
+        assert (
+            safegit.run(["worktree", "add", "--no-checkout", "-b", "x", str(wt), "HEAD"], r, filters=False)[0]
+            == 0
+        )
+        assert safegit.run(["read-tree", "HEAD"], wt, filters=False)[0] == 0
+        assert safegit.run(["checkout-index", "-a", "-f", "-u"], wt)[0] == 0
+        assert safegit.run(["worktree", "remove", "--force", str(wt)], r, filters=False)[0] == 0
+        assert safegit.run(["branch", "-D", "x"], r, filters=False)[0] == 0
+        assert marks(marker) == []
+    finally:
+        for hook in planted:
+            hook.unlink(missing_ok=True)
+        if created:
+            shared.rmdir()
 
 
 def test_sentinel_empty_driver_values_really_prevent_execution(tmp_path):
@@ -568,7 +589,7 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         for want in ("commit.gpgSign=false", "log.showSignature=false"):
             assert want in argv, (cmd, want)
         assert any(a.startswith("core.editor=/") for a in argv), cmd
-        assert any(a.startswith("core.hooksPath=") and "/orch-no-hooks/" in a for a in argv), cmd
+        assert any(a.startswith("core.hooksPath=") and a == "core.hooksPath=" + os.devnull for a in argv), cmd
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
 

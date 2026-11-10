@@ -36,9 +36,7 @@ import os
 import re
 import shlex
 import subprocess
-import tempfile
 import threading
-import uuid
 from pathlib import Path
 
 from orch import addons
@@ -270,10 +268,10 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
 
 
 def _no_hooks() -> str:
-    """A path that does not exist: as core.hooksPath git runs no hooks. Fresh per call (unguessable), never
-    created. Under the system temp folder, not the orch home: this must work (and never raise) when the
-    orch home is missing or untrusted."""
-    return (Path(tempfile.gettempdir()) / "orch-no-hooks" / uuid.uuid4().hex).as_posix()
+    """core.hooksPath for every call: os.devnull (/dev/null, NUL on Windows). It can never be a folder holding
+    hooks, it needs nothing from the orch home, and there is no predictable shared path an other user could
+    plant files in (a /tmp/orch-no-hooks folder would be). Git looks for <hooksPath>/<hook> and finds none."""
+    return Path(os.devnull).as_posix() if os.name != "nt" else os.devnull
 
 
 def base_args(true: str, read_only: bool = False) -> list[str]:
