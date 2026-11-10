@@ -1,11 +1,27 @@
 """Effective connection recipes, projected only from the names-only inventory."""
 
-from orch import inventory
+from orch import humanproof, inventory
 
 
 def no_grants(root, orch_home) -> dict:
     """Placeholder until the proof-backed grant store is wired."""
     return {}
+
+
+def proof_grants(root, orch_home=None) -> dict:
+    """conn.allow grants recorded with a proof, read from the guarded human-settings record (humanproof).
+    Any unreadable record or home means no grants (fail closed).
+    orch_home is unused: the guarded home decides."""
+    try:
+        path, wkey = humanproof._settings_path(root)
+        data = humanproof._settings_load(root, path)
+    except (humanproof.Refused, OSError):
+        return {}
+    out = {}
+    for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
+        if key.startswith("conn.allow.") and isinstance(rec, dict) and "value" in rec:
+            out[key[len("conn.allow.") :]] = rec["value"]
+    return out
 
 
 def resolve(items: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -27,7 +43,7 @@ def resolve(items: list[dict]) -> tuple[list[dict], list[dict]]:
     return winners, shadowed
 
 
-def effective(root, *, orch_home=None, account_home=None, grants=no_grants) -> dict:
+def effective(root, *, orch_home=None, account_home=None, grants=proof_grants) -> dict:
     """Return winner and shadowed recipe references, never launch commands or values."""
     items, also = inventory.connections(root, orch_home=orch_home, account_home=account_home, grants=grants)
     recipes = []

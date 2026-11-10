@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from conftest import CONTRACTS
 
-from orch import addons, conn_config, inventory
+from orch import addons, conn_config, humanproof, inventory
 
 VEC = json.loads((CONTRACTS / "vectors" / "inventory-v1.json").read_text(encoding="utf-8"))
 WID = "0123456789abcdef0123456789abcdef"
@@ -135,6 +135,23 @@ def test_no_grants_and_intersection(env):
     assert result["connections"][0]["allowed_actions"] == ["read"]
     assert not result["connections"][0]["allow_all"]
     assert conn_config.no_grants(root, orch_home) == {}
+
+
+def test_default_reads_the_real_proof_grant_store(tmp_path, monkeypatch):
+    acct = tmp_path / "acct"
+    base = acct / ".orch-test"
+    root = base / "ws"
+    (root / ".orch").mkdir(parents=True)
+    (base / "home").mkdir()
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(base / "home"))
+    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    _mcp(root, {"s": {"command": ["srv"]}}, {"s": ["write", "read"]})
+    assert conn_config.proof_grants(root) == {}
+    humanproof.record_set(root, "conn.allow.s", ["read"], "human:test")
+    assert conn_config.proof_grants(root) == {"s": ["read"]}
+    got = conn_config.effective(root)["connections"][0]
+    assert got["allowed_actions"] == ["read"] and not got["allow_all"]
 
 
 def test_unknown_source_and_pure_resolve():
