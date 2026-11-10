@@ -419,7 +419,10 @@ def test_init_other_by_a_person_leaves_a_hand_off_and_saves_nothing(ws, run, mon
     monkeypatch.delenv("CLAUDECODE", raising=False)
     _fake_init_tty(monkeypatch)
     code, out, err = run("init")
-    assert code == 2
+    assert code == 0, out + err  # init goes on: the rest is set up, the summary names the pending step
+    assert "orch is ready" in out and "Confirm 'mine' on the page" in out
+    assert "orch config set workspace.agent mine" in out
+    assert (ws / ".agents" / "skills" / "orch" / "SKILL.md").exists()
     assert "mine" not in (config.read(ws).get("agents") or {})
     card = hp.handoffs(ws)[0]
     assert card["op"] == "config.agent_add" and card["target"] == hp.agent_add_target("mine", "mine {prompt}")

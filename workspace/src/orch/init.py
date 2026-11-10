@@ -150,15 +150,21 @@ def _other(root: Path) -> str:
 
     from orch import humanproof
 
-    who = humanproof.person_by(
-        root,
-        SimpleNamespace(proof_stdin=False, by=None),
-        "config.agent_add",
-        humanproof.agent_add_target(name, cmd),
-        parts={"name": name, "command": cmd},
-        exact=humanproof.agent_add_exact(cmd),
-        argv=["config", "agent", "add", name, "--command", cmd],
-    )
+    try:
+        who = humanproof.person_by(
+            root,
+            SimpleNamespace(proof_stdin=False, by=None),
+            "config.agent_add",
+            humanproof.agent_add_target(name, cmd),
+            parts={"name": name, "command": cmd},
+            exact=humanproof.agent_add_exact(cmd),
+            argv=["config", "agent", "add", name, "--command", cmd],
+        )
+    except Refused as e:  # a person: the hand-off is on the page; init goes on with everything else
+        return (
+            f"Agent: not set yet. {e} Confirm '{name}' on the page, "
+            f"then run: orch config set workspace.agent {name}"
+        )
     if not who.startswith("human:"):
         raise Refused(config.ONLY_PERSON_AGENT.format(what="add an agent command"))
     config.add_agent(root, name, cmd, approve=True, by=who)  # a person: approve ONLY what they typed
