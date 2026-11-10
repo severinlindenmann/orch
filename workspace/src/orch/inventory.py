@@ -20,7 +20,7 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from orch import addons, agentsdata
+from orch import addons, agentsdata, humanproof
 
 ORDER = ["workspace", "admin", "harness"]
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -84,8 +84,9 @@ def winners(entries: list[dict]) -> dict[str, str]:
     """Same as inv_winners for connections: the best source per name."""
     best: dict[str, str] = {}
     for e in entries:
-        if e["name"] not in best or ORDER.index(e["source"]) < ORDER.index(best[e["name"]]):
-            best[e["name"]] = e["source"]
+        source = e["source"] if e["source"] in ORDER else "workspace"
+        if e["name"] not in best or ORDER.index(source) < ORDER.index(best[e["name"]]):
+            best[e["name"]] = source
     return dict(sorted(best.items()))
 
 
@@ -184,15 +185,8 @@ def harness_servers(root: Path, account_home: Path | None = None) -> dict[str, d
 
 
 def _grants(root: Path, orch_home: Path) -> dict:
-    """conn.allow grants recorded with a proof (human-settings.json), by connection name."""
-    wid = addons.workspace_id(root)
-    doc = _read(orch_home / "human-settings.json")
-    ws = _dig(doc, ["workspaces", wid]) if wid else {}
-    out = {}
-    for key, rec in ws.items():
-        if key.startswith("conn.allow.") and isinstance(rec, dict) and "value" in rec:
-            out[key[len("conn.allow.") :]] = rec["value"]
-    return out
+    """conn.allow grants recorded with a proof (the guarded human-settings record), by connection name."""
+    return humanproof.conn_grants(root)
 
 
 def _expand(x, actions: set[str]) -> set[str]:
@@ -228,7 +222,7 @@ def _profile_state(root: Path, orch_home: Path, profile: str | None) -> str:
 # --- the list ---
 
 
-def connections(root: Path, *, orch_home: Path | None = None, account_home: Path | None = None):
+def connections(root: Path, *, orch_home: Path | None = None, account_home: Path | None = None, grants=None):
     """(items, also_from). items = schema `connection` objects of every source, sorted by name then source;
     the winner of a name has shadowed false, the others true. also_from = {name: [other sources]}."""
     root = Path(root)
@@ -247,11 +241,13 @@ def connections(root: Path, *, orch_home: Path | None = None, account_home: Path
     for name, server in harness_servers(root, account_home).items():
         found.append(("harness", name, server))
 
-    file_allow, grants = workspace_allow(root), _grants(root, home)
+    file_allow, grants = workspace_allow(root), (_grants if grants is None else grants)(root, home)
     entries = []
     for source, name, server in found:
         e = _entry(name, server, source)
         if e:
+            if e["source"] not in ORDER:
+                e["source"] = "workspace"
             entries.append(e)
     entries.sort(
         key=lambda e: (e["name"], ORDER.index(e["source"]))
@@ -261,7 +257,7 @@ def connections(root: Path, *, orch_home: Path | None = None, account_home: Path
     for e in entries:
         name = e["name"]
         entry, grant = file_allow.get(name), grants.get(name)
-        known = sorted(set(e.pop("_actions")) | set(_expand(entry, set())) | set(_expand(grant, set())))
+        known = sorted(set(e.pop("_actions")) or (_expand(entry, set()) | _expand(grant, set())))
         ok = set(allowed(entry, grant, known))
         is_win = name not in first
         first.add(name)

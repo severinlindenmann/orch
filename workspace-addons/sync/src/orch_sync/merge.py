@@ -218,11 +218,15 @@ def _evidence(*lists):
     return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
 
 
-# ONE place for what a person's Won't do pins. _SIGNED = every step field the signed decision record is built
-# from (humanproof.SIGNED_STEP_FIELDS, a test fails if the two drift apart) + the MAC itself. While the base
-# holds a verified "on" decision ALL of them change only through a side that verifies; any other change is "no
-# change from base". Without a held "on" the decision fields alone are pinned (text and covers are then free:
-# an undo record does not bind them).
+# ONE place for what a person's Won't do decides. The receiving core's ledger holds ONE current entry per step, so
+# at most one of base / a / b can verify: that item is the step's AUTHORITY (not the base: a stale base proves
+# nothing). _SIGNED = every step field the signed decision record is built from (humanproof.SIGNED_STEP_FIELDS, a
+# test fails if the two drift apart) + the MAC itself.
+#   - authority is an "on": EVERY input and the merged result take ALL _SIGNED fields from it (text and covers
+#     change only through a proven, re-signed edit);
+#   - authority is an undo: they take the decision fields (_DECISION); text and covers are then free (an undo
+#     record does not bind them);
+#   - no authority (nothing verifies, or no verifier): no Won't do at all.
 _SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_mac")
 _DECISION = ("wont_do", "reason", "wont_nonce", "wont_mac")
 
@@ -239,47 +243,38 @@ def _drop_wont(x):
     return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")}
 
 
-def _fields(x0):
-    """The step fields a side may not change on its own: all signed ones while base holds a verified "on",
-    else the decision fields."""
-    return _SIGNED if x0 and x0.get("wont_do") is True else _DECISION
+def _authority(ctx, *items):
+    """The one item among `items` the core vouches for (a decision: on, or an undo), else None. Two different
+    verifying decisions cannot exist with one current ledger entry per step; if a verifier ever vouched for two
+    (it must not), nobody is the authority: fail closed."""
+    found = [x for x in items if x and ctx.verified(x)]
+    if not found:
+        return None
+    first = _canon({k: found[0].get(k) for k in _SIGNED})
+    if any(_canon({k: x.get(k) for k in _SIGNED}) != first for x in found[1:]):
+        return None
+    return found[0]
 
 
-def _same_decision(x, x0, fields=_DECISION):
-    return all(x.get(k) == (x0 or {}).get(k) for k in fields)
-
-
-def _pinned(ctx, x, x0):
-    """A side's (or the merged result's) pinned fields as they count. INVARIANT: with a base that holds a
-    person's decision, a field the signed record covers differs from base's only when the core vouches for the
-    side (its MAC is valid for the decision (and for an "on", the step's text and covers) AND is the CURRENT
-    ledger entry, so a replay does not verify). Otherwise those fields are base's, present or missing: a changed
-    reason, a garbage or missing MAC, a dropped wont_do, a rewritten text or covers, a replay all come back to
-    base."""
-    held = ctx.verified(x0) if x0 else False
-    fields = _fields(x0) if held else _DECISION
-    if _same_decision(x, x0, fields) or ctx.verified(x):
-        return x
+def _impose(x, auth):
+    """`x` with the authority's say: all signed fields from an "on" authority, the decision fields from an undo,
+    no Won't do at all without an authority."""
+    if auth is None:
+        return _drop_wont(x)
+    fields = _SIGNED if auth.get("wont_do") is True else _DECISION
     y = {k: v for k, v in x.items() if k not in fields}
-    y.update({k: x0[k] for k in fields if x0 and k in x0})
+    y.update({k: auth[k] for k in fields if k in auth})
     if y.get("wont_do"):
         y["done"] = False
     return y
 
 
 def _check_item(ctx, x0, xa, xb):
-    # Won't do is a person's decision (human-proof.md "Synced won't do"): a side the core does not vouch for
-    # cannot bring it in, change it or take it away, and an older signed decision cannot be replayed over a newer
-    # one; done vs won't do (or two different verified decisions) is one side's item wholesale, never a field mix.
-    xa, xb = _pinned(ctx, xa, x0), _pinned(ctx, xb, x0)
-
-    def keep(x):
-        return {**x} if not x.get("wont_do") or _person_wont(ctx, x) else _drop_wont(x)
-
-    xa, xb, x0 = keep(xa), keep(xb), keep(x0)
-    if not _same_decision(xa, x0) and not _same_decision(xb, x0) and not _same_decision(xa, xb):
-        pick = max((xa, xb), key=_canon)  # two verified decisions (cannot both be current): a fixed pick
-        return _normalize_check(ctx, dict(pick))
+    # Won't do is a person's decision (human-proof.md "Synced won't do"): only the authority (the input the core
+    # vouches for) says what a Won't do is; every other input takes its fields, so an unverified side cannot bring
+    # one in, change it or take it away, and an older signed decision cannot be replayed over a newer one.
+    auth = _authority(ctx, x0, xa, xb)
+    x0, xa, xb = (_impose(x, auth) if x else x for x in (x0, xa, xb))
     if (xa.get("wont_do") and xb.get("done")) or (xb.get("wont_do") and xa.get("done")):
         return _normalize_check(ctx, dict(xa if ctx.a_newer else xb))
     return _normalize_check(ctx, _check_merged(ctx, x0, xa, xb))
@@ -361,8 +356,13 @@ def _merge(base, a, b, now, person=None):
 
     cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
                 lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
-    base_cl = {x.get('id'): x for x in base.get('checklist', []) if isinstance(x, dict)}
-    cl = {k: _normalize_check(ctx, _pinned(ctx, v, base_cl[k]) if k in base_cl else v) for k, v in cl.items()}
+    seen = {}
+    for side, t in (("0", base), ("a", a), ("b", b)):
+        for x in t.get("checklist", []):
+            if isinstance(x, dict):
+                seen.setdefault(x.get("id"), {})[side] = x
+    for k, v in list(cl.items()):  # the same authority decides the merged result (also the one-sided paths)
+        cl[k] = _normalize_check(ctx, _impose(v, _authority(ctx, *seen.get(k, {}).values())))
     # a person's Won't do step that ONE side deleted outright comes back: a deletion carries no proof (removing
     # one needs the person's proof, which is only checked where it is made). Both sides deleting it is final.
     still = {x.get("id") for t in (a, b) for x in t.get("checklist", []) if isinstance(x, dict)}
@@ -441,7 +441,9 @@ def merge_ticket(base, upstream, mine, now, person=None):
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
     lists): the caller pauses and keeps all three. Never raises. The inputs are not modified.
     `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
-    wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so."""
+    wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so. The
+    verdict reads the core's ledger when asked: the sync caller must read, merge and write under the ticket's
+    apply_op lock, so the ledger cannot move between the merge and the write."""
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None

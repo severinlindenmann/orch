@@ -770,6 +770,25 @@ def record_set(root: Path, setting: str, value, by: str) -> None:
     _settings_write(root, setting, value, by)
 
 
+def conn_grants(root: Path) -> dict:
+    """conn.allow grants recorded with a proof, by connection name ("*" or a list of actions). Unreadable
+    record or home = no grants (fail closed)."""
+    try:
+        path, wkey = _settings_path(root)
+        data = _settings_load(root, path)
+    except (Refused, OSError):
+        return {}
+    out = {}
+    for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
+        if not (key.startswith("conn.allow.") and isinstance(rec, dict)):
+            continue
+        val = rec.get("value")
+        # only "*" or a list of action names is a grant; a tombstone (False) or any other type is none
+        if val == "*" or (isinstance(val, list) and all(isinstance(a, str) for a in val)):
+            out[key[len("conn.allow.") :]] = val
+    return out
+
+
 def effective(root: Path, setting: str, file_value: bool) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
@@ -1171,7 +1190,9 @@ def wont_verifier(root: Path, relay_ok=None):
     """`person(step, ticket_id) -> bool` for the sync merge: True only for a decision whose MAC is valid for
     the step's content AND is the CURRENT ledger entry for that step (or one the relay client recorded from an
     authenticated sender: `relay_ok(step, ticket_id, decision)` must compare the FULL decision record against
-    what the relay recorded, never "this step was touched by a relay sender"). The text `by: human:` is never
+    what the relay recorded, never "this step was touched by a relay sender"). The ledger is read at each
+    call, so the sync caller must read, merge and write under the ticket's apply_op lock (the ledger cannot
+    move between the merge and the write). The text `by: human:` is never
     looked at. Fails closed: no key, no workspace id, no readable ledger = nobody."""
     from orch import addons
 

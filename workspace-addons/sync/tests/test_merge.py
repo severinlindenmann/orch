@@ -423,20 +423,21 @@ def test_wont_do_without_the_cores_say_so_is_dropped_whatever_by_says():
             assert "wont_do" not in c and "reason" not in c
 
 
-def test_done_vs_wont_do_is_one_side_wholesale():
+def test_done_vs_wont_do_a_verified_decision_wins_and_an_unverified_one_does_not():
     base = tk(checklist=[_step()])
     on = signed(_step(**WONT))
     person = person_for(ledger_of(on))
-    a = up(base, T2, checklist=[on])
-    b = up(base, T3, checklist=[_step(**DONE)])
+    for newer_done in (True, False):
+        a = up(base, T2 if newer_done else T3, checklist=[on])
+        b = up(base, T3 if newer_done else T2, checklist=[_step(**DONE)])
+        for x, y in ((a, b), (b, a)):
+            out = merge_ticket(base, x, y, NOW, person)
+            assert out["checklist"][0]["wont_do"] is True and out["checklist"][0]["done"] is False
+            assert list(SCHEMA.iter_errors(out)) == []
+    forged = _step(**WONT)  # no MAC: the newer done side wins wholesale as before
+    a, b = up(base, T2, checklist=[forged]), up(base, T3, checklist=[_step(**DONE)])
     for x, y in ((a, b), (b, a)):
-        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert c == _step(**DONE)  # b is newer: its item, no mixed fields
-        assert list(SCHEMA.iter_errors(merge_ticket(base, x, y, NOW, person))) == []
-    a2 = up(base, T3, checklist=[on])
-    b2 = up(base, T2, checklist=[_step(**DONE)])
-    for x, y in ((a2, b2), (b2, a2)):
-        assert merge_ticket(base, x, y, NOW, person)["checklist"][0] == on
+        assert merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0] == _step(**DONE)
 
 
 def test_two_recorded_runs_of_the_same_command_are_both_kept():
@@ -742,3 +743,75 @@ def test_one_side_deleting_a_persons_wont_do_step_does_not_delete_it():
         assert [c["wont_do"] for c in merge_ticket(base, x, y, NOW, person)["checklist"]] == [True]
     both = merge_ticket(base, gone, up(base, T3, checklist=[]), NOW, person)
     assert both["checklist"] == []  # both sides deleted it: final
+
+
+# ---- RR2: the ledger's CURRENT entry is the authority, not the base (a stale base proves nothing) -------------
+
+
+def _rename(step, text):
+    return {**step, "text": text}
+
+
+def test_stale_base_with_the_persons_newer_on_and_an_agent_rename_of_the_stale_copy():
+    on1 = signed(_step(**WONT), "n1")
+    on2 = signed(_step(**{**WONT, "reason": "Not needed any more"}), "n2")  # re-signed since the last sync
+    stale = tk(checklist=[on1])
+    person = person_for(ledger_of(on2))
+    newer = up(stale, T3, checklist=[on2])
+    agent = up(stale, T2, checklist=[_rename(on1, "skip security review")])
+    for x, y in ((newer, agent), (agent, newer)):
+        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
+        assert c["wont_do"] is True and c["reason"] == "Not needed any more" and c["text"] == "Email finance"
+
+
+def test_stale_base_with_the_persons_newer_on_and_the_agent_dropping_wont_do_on_its_stale_copy():
+    on1 = signed(_step(**WONT), "n1")
+    on2 = signed(_step(**{**WONT, "reason": "Not needed any more"}), "n2")
+    stale = tk(checklist=[on1])
+    person = person_for(ledger_of(on2))
+    newer = up(stale, T3, checklist=[on2])
+    dropper = up(stale, T2, checklist=[_step()])
+    for x, y in ((newer, dropper), (dropper, newer)):
+        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
+        assert c["wont_do"] is True and c["reason"] == "Not needed any more"
+
+
+def test_stale_base_on_with_the_current_undo_on_one_side_stays_undone_and_the_rename_is_free():
+    on1, undo2 = signed(_step(**WONT), "n1"), signed(_step(), "n2")
+    stale = tk(checklist=[on1])
+    person = person_for(ledger_of(undo2))
+    undone = up(stale, T3, checklist=[undo2])
+    agent = up(stale, T2, checklist=[_rename(on1, "Email finance, renamed")])
+    for x, y in ((undone, agent), (agent, undone)):
+        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
+        assert "wont_do" not in c and c["text"] == "Email finance, renamed"
+
+
+def test_stale_base_undo_with_the_persons_newer_on_and_an_agent_rename_of_the_stale_undo():
+    undo2, on3 = signed(_step(), "n2"), signed(_step(**WONT), "n3")
+    stale = tk(checklist=[undo2])
+    person = person_for(ledger_of(on3))
+    newer = up(stale, T3, checklist=[on3])
+    agent = up(stale, T2, checklist=[_rename(undo2, "skip security review")])
+    for x, y in ((newer, agent), (agent, newer)):
+        c = merge_ticket(stale, x, y, NOW, person)["checklist"][0]
+        assert c["wont_do"] is True and c["text"] == "Email finance"
+
+
+def test_no_authority_means_no_wont_do_even_a_stale_bases():
+    on1 = signed(_step(**WONT))
+    base = tk(checklist=[on1])
+    for x, y in ((up(base, T2, checklist=[on1]), base), (base, up(base, T2, checklist=[on1]))):
+        assert "wont_do" not in merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0]
+
+
+def test_two_different_verifying_decisions_cannot_exist_and_if_a_verifier_said_so_nobody_wins():
+    on1, on2 = signed(_step(**WONT), "n1"), signed(_step(**{**WONT, "reason": "other"}), "n2")
+    ledger = ledger_of(on2)
+    person = person_for(ledger)
+    assert person(on2, TK) and not person(on1, TK)  # one current entry: at most one input can verify
+    base = tk(checklist=[_step()])
+    a, b = up(base, T2, checklist=[on1]), up(base, T3, checklist=[on2])
+    loud = lambda step, ticket: step.get("wont_do") is True  # a (wrong) verifier that vouches for both
+    for x, y in ((a, b), (b, a)):
+        assert "wont_do" not in merge_ticket(base, x, y, NOW, loud)["checklist"][0]  # fail closed
