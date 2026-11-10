@@ -1348,35 +1348,134 @@ def test_a_verifier_without_a_key_vouches_for_nobody(ws, run):
     assert hp.wont_verifier(ws)({**step, "wont_do": True, "wont_mac": "x"}, tid) is False
 
 
-def test_wont_do_and_its_undo_are_signed_and_the_sync_verifier_accepts_only_them(ws, run, monkeypatch):
+def _sync_mod():
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workspace-addons" / "sync" / "src"))
-    from orch_sync.merge import merge_ticket
+    from orch_sync import merge
 
+    return merge
+
+
+def _signed_wont(ws, run, monkeypatch, reason="not needed"):
     tid, cid = _ticket_with_step(ws, run)
-    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")  # (this creates the key)
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--reason", reason, "--json")
+    return tid, cid
+
+
+def test_wont_do_is_signed_into_the_ledger_and_the_verifier_accepts_only_the_current_entry(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
     person = hp.wont_verifier(ws)
-    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--reason", "not needed", "--json")
-    t1 = tickets.load(ws, tid)
-    step = t1["checklist"][0]
-    assert step["wont_do"] is True and step["wont_mac"] and person(step, tid)
-    # a forged `by: human:` without a MAC, or a copy on another ticket or step: not the person's
+    assert step["wont_do"] is True and step["wont_mac"] and step["wont_nonce"] and person(step, tid)
+    assert hp._ledger_read(ws) == {f"{tid}:{cid}": step["wont_mac"]}  # the CURRENT entry
+    # forged `by: human:` without a MAC, a copy on another ticket or step, any changed decision field: no
     assert not person({**step, "wont_mac": None, "by": "human:Ann"}, tid)
     assert not person(step, "t_other99") and not person({**step, "id": "c9"}, tid)
-    assert not person({**step, "reason": "changed"}, tid)
-    # a synced agent copy that drops it is not accepted; a drop with the core's undo MAC is
-    base = t1
-    agent = {**t1, "updated_at": "2099-01-01T00:00:00Z", "checklist": [{**step, "wont_do": None}]}
-    agent["checklist"][0].pop("wont_do")
-    agent["checklist"][0].pop("reason", None)
-    agent["checklist"][0].pop("wont_mac", None)
-    merged = merge_ticket(base, agent, base, "2099-01-02T00:00:00Z", person)
-    assert merged["checklist"][0]["wont_do"] is True
-    undo_proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
-    _cli(run, monkeypatch, undo_proof, "check", "reopen", tid, cid, "--json")
-    t2 = tickets.load(ws, tid)
-    undone = t2["checklist"][0]
-    assert "wont_do" not in undone and undone["wont_mac"] and person(undone, tid)
-    merged = merge_ticket(
-        base, {**t2, "updated_at": "2099-01-01T00:00:00Z"}, base, "2099-01-02T00:00:00Z", person
-    )
-    assert "wont_do" not in merged["checklist"][0]
+    for field, value in (
+        ("reason", "changed"),
+        ("text", "rewritten"),
+        ("covers", "all of it"),
+        ("wont_nonce", "x"),
+    ):
+        assert not person({**step, field: value}, tid), field
+
+
+def test_a_replayed_older_decision_and_a_reused_id_do_not_verify_but_the_current_ones_do(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on1 = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    undo2 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(undo2, tid) and not person(on1, tid)  # the older signed "on" is no longer current
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--json")
+    on3 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(on3, tid) and not person(undo2, tid) and not person(on1, tid)  # old undo / old on: replays
+    # a proven removal tombstones the entry: the old MAC does not verify on a new step that reuses the id
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None
+    assert not hp.wont_verifier(ws)(on3, tid)
+
+
+def test_a_proven_edit_of_a_wont_do_step_re_signs_it_for_the_new_text(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    before = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "edit", tid, cid, "Write the other file", "--json")
+    after = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert after["text"] == "Write the other file" and after["wont_do"] is True
+    assert after["wont_mac"] != before["wont_mac"] and person(after, tid)  # re-signed, current
+    assert not person(before, tid)  # the old signed decision (old text) is superseded
+
+
+def test_a_missing_or_damaged_ledger_vouches_for_nobody(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    assert hp.wont_verifier(ws)(step, tid)
+    hp._write_private(ledger, "{not json")
+    assert not hp.wont_verifier(ws)(step, tid)  # damaged: closed
+    ledger.unlink()
+    assert not hp.wont_verifier(ws)(step, tid)  # missing: nobody was ever signed
+
+
+def test_the_relay_hook_is_decision_scoped(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    hp.human_key(ws)  # (the verifier needs a key to be more than "nobody")
+    step = tickets.load(ws, tid)["checklist"][0]
+    seen = []
+    person = hp.wont_verifier(ws, relay_ok=lambda st, t, decision: seen.append(decision) or False)
+    assert person({**step, "wont_do": True}, tid) is False
+    assert seen and seen[0]["wont_do"] is True and seen[0]["check"] == cid and "text" in seen[0]
+
+
+def test_sync_merge_with_the_real_verifier_end_to_end(ws, run, monkeypatch):
+    merge = _sync_mod()
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    base = tickets.load(ws, tid)
+    person = hp.wont_verifier(ws)
+    old = "2099-01-01T00:00:00Z"
+    now = "2099-01-02T00:00:00Z"
+    rewrite = {
+        **base,
+        "updated_at": old,
+        "checklist": [{**base["checklist"][0], "text": "skip the security review"}],
+    }
+    out = merge.merge_ticket(base, rewrite, base, now, person)
+    assert "wont_do" not in out["checklist"][0]  # rewriting the step under a Won't do drops it
+    changed = {**base, "updated_at": old, "checklist": [{**base["checklist"][0], "reason": "agent was here"}]}
+    out = merge.merge_ticket(base, changed, base, now, person)
+    assert out["checklist"][0]["reason"] == "not needed" and out["checklist"][0]["wont_do"] is True
+    assert (
+        merge.merge_ticket(base, rewrite, base, now)["checklist"][0].get("wont_do") is None
+    )  # no verifier = nobody
+
+
+def test_every_caller_of_merge_ticket_passes_a_verifier():
+    """merge_ticket has no production caller yet; when the sync loop is wired up it MUST pass
+    humanproof.wont_verifier(root) (no verifier = every Won't do is dropped on every sync)."""
+    import ast
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = []
+    for src in list((root / "workspace" / "src").rglob("*.py")) + list(
+        (root / "workspace-addons").glob("*/src/**/*.py")
+    ):
+        if src.name == "merge.py" and "orch_sync" in str(src):
+            continue
+        for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", getattr(node.func, "id", "")) == "merge_ticket"
+            ):
+                if len(node.args) < 5 and not any(k.arg == "person" for k in node.keywords):
+                    offenders.append(f"{src.relative_to(root)}:{node.lineno}")
+    assert not offenders, "merge_ticket without person= (wont_verifier): " + ", ".join(offenders)

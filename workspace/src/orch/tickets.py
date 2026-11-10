@@ -1378,11 +1378,13 @@ def _sign_wont(root: Path, tid: str, item: dict) -> None:
     step as an agent's, which is the safe side)."""
     from orch import humanproof
 
-    mac = humanproof.wont_sign(root, tid, item)
+    item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
+    mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
     if mac:
         item["wont_mac"] = mac
     else:
         item.pop("wont_mac", None)
+        item.pop("wont_nonce", None)
 
 
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
@@ -1516,6 +1518,10 @@ def check_edit(
             item["covers"] = covers
             if text is None:
                 add_history(t, by, f"Linked {cid} to Done when")
+        if item.get("wont_do"):
+            _sign_wont(
+                root, tid, item
+            )  # a proven edit of a Won't do step re-signs it for the new text/covers
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
@@ -1545,6 +1551,10 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
+        if item.get("wont_mac"):
+            from orch import humanproof
+
+            humanproof.wont_forget(root, tid, cid)  # tombstone: an old MAC never verifies on a reused id
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"

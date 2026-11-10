@@ -218,13 +218,13 @@ def _evidence(*lists):
     return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
 
 
-_DECISION = ("wont_do", "reason", "wont_mac", "by", "at")
+_DECISION = ("wont_do", "reason", "wont_mac", "wont_nonce")  # a step's decision fields (they move together)
 
 
 def _person_wont(ctx, x):
     """A step's Won't do counts as the person's only when the RECEIVING CORE says so (`person`: its own wontdo1
-    MAC, or a relay-authenticated sender it recorded). The text of `by` is never looked at; with no verifier
-    nobody is a person (fail closed)."""
+    MAC over the decision, the step's text and covers, that is the CURRENT ledger entry; or a relay-
+    authenticated sender it recorded). The text of `by` is never looked at; with no verifier nobody is a person."""
     return x.get("wont_do") is True and ctx.verified(x)
 
 
@@ -232,22 +232,38 @@ def _drop_wont(x):
     return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac")}
 
 
+def _same_decision(x, x0):
+    return all(x.get(k) == (x0 or {}).get(k) for k in _DECISION)
+
+
+def _pinned(ctx, x, x0):
+    """A side's (or the merged result's) decision as it counts. INVARIANT: a decision that differs from base's
+    counts only when the core vouches for it (its MAC is valid for the step's text and covers AND is the CURRENT
+    ledger entry, so an older signed decision replayed later does not verify). Otherwise the step is "no change
+    from base" for EVERY decision field, present or missing (a changed reason, a garbage or missing MAC, a
+    dropped wont_do, a replay all come back to base)."""
+    if _same_decision(x, x0) or ctx.verified(x):
+        return x
+    y = {k: v for k, v in x.items() if k not in _DECISION}
+    y.update({k: x0[k] for k in _DECISION if x0 and k in x0})
+    if y.get("wont_do"):
+        y["done"] = False
+    return y
+
+
 def _check_item(ctx, x0, xa, xb):
     # Won't do is a person's decision (human-proof.md "Synced won't do"): a side the core does not vouch for
-    # cannot bring it in, and cannot take it away either (a copy that DROPS a person's wont_do is an undo, kept
-    # only when that copy verifies); done vs won't do is one side's item wholesale, never a field mix.
-    held = _person_wont(ctx, x0) if x0 else False
+    # cannot bring it in, change it or take it away, and an older signed decision cannot be replayed over a newer
+    # one; done vs won't do (or two different verified decisions) is one side's item wholesale, never a field mix.
+    xa, xb = _pinned(ctx, xa, x0), _pinned(ctx, xb, x0)
 
     def keep(x):
         return {**x} if not x.get("wont_do") or _person_wont(ctx, x) else _drop_wont(x)
 
-    sides = []
-    for x in (xa, xb):
-        if held and not x.get("wont_do") and not ctx.verified(x):
-            x = {**x, **{k: x0[k] for k in _DECISION if k in x0}, "done": False}  # an unproven drop: restored
-        sides.append(keep(x))
-    xa, xb = sides
-    x0 = keep(x0)
+    xa, xb, x0 = keep(xa), keep(xb), keep(x0)
+    if not _same_decision(xa, x0) and not _same_decision(xb, x0) and not _same_decision(xa, xb):
+        pick = max((xa, xb), key=_canon)  # two verified decisions (cannot both be current): a fixed pick
+        return _normalize_check(ctx, dict(pick))
     if (xa.get("wont_do") and xb.get("done")) or (xb.get("wont_do") and xa.get("done")):
         return _normalize_check(ctx, dict(xa if ctx.a_newer else xb))
     return _normalize_check(ctx, _check_merged(ctx, x0, xa, xb))
@@ -329,7 +345,8 @@ def _merge(base, a, b, now, person=None):
 
     cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
                 lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
-    cl = {k: _normalize_check(ctx, v) for k, v in cl.items()}
+    base_cl = {x.get('id'): x for x in base.get('checklist', []) if isinstance(x, dict)}
+    cl = {k: _normalize_check(ctx, _pinned(ctx, v, base_cl[k]) if k in base_cl else v) for k, v in cl.items()}
     # a person's Won't do step that ONE side deleted outright comes back: a deletion carries no proof (removing
     # one needs the person's proof, which is only checked where it is made). Both sides deleting it is final.
     still = {x.get("id") for t in (a, b) for x in t.get("checklist", []) if isinstance(x, dict)}

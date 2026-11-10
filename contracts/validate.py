@@ -1126,8 +1126,9 @@ def pending_deliver(c):
 
 
 def _wontdo_mac(key, workspace, ticket, decision):
-    """wontdo1.<workspace id>.<ticket id>.<canonical {check, wont_do, reason}>: the MAC binds WHERE the decision
-    belongs, so a valid decision copied onto another ticket or step is not the person's."""
+    """wontdo1.<workspace id>.<ticket id>.<canonical decision {check, wont_do, reason, text, covers, nonce}>: binds
+    WHERE the decision belongs (ticket, step) and WHAT it is about (the step's text and covers); the nonce makes
+    equal decisions differ. Freshness (replays, reused step ids) is the ledger's job, not the MAC's."""
     canon = json.dumps(decision, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{ticket}.{canon}".encode(), hashlib.sha256).digest())
 
