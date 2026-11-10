@@ -10,8 +10,8 @@ import time
 
 import pytest
 
+from orch import filesig, procs, runs, safegit, tickets, workcheck
 from orch import init as init_mod
-from orch import procs, runs, tickets, workcheck
 
 
 def _git(proj, *args):
@@ -207,34 +207,35 @@ def test_hostile_git_filter_never_runs(ws):
     assert not marker.exists()
 
 
-def test_git_runs_with_the_hardened_flags(ws, monkeypatch):
+def test_git_runs_through_safegit_with_the_hardened_flags(ws, monkeypatch):
     seen = []
-    real = subprocess.run
+    real = subprocess.Popen
 
     def spy(argv, *a, **k):
         seen.append((list(argv), dict(k.get("env") or {})))
         return real(argv, *a, **k)
 
-    monkeypatch.setattr(workcheck.subprocess, "run", spy)
+    monkeypatch.setattr(safegit.subprocess, "Popen", spy)
     monkeypatch.setenv("GIT_DIR", "/nonexistent")
     _edit(ws)
     assert workcheck.check(ws)["remind"] is True
     assert seen
     for argv, env in seen:
-        assert os.path.isabs(argv[0])  # resolved once, never a bare "git"
-        assert argv[1:8] == [
-            "--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c",
-            "core.hooksPath=/dev/null", "-c",
-        ]  # fmt: skip
-        assert "core.untrackedCache=false" in argv
+        assert os.path.isabs(argv[0])  # resolved by safegit, never a bare "git"
+        assert argv[1] == "--no-optional-locks"
+        for want in ("core.fsmonitor=false", "core.untrackedCache=false", "protocol.allow=never"):
+            assert want in argv
+        assert (
+            "core.hooksPath=/dev/null" if os.name != "nt" else "core.hooksPath=//./NUL"
+        ) in argv  # from safegit
         assert not any(k.startswith("GIT_DIR") for k in env)
         assert not {"diff", "status", "log", "show", "add", "commit"} & set(argv)
 
 
-def _fake_git(folder):
+def _fake_git(folder, marker="planted.txt"):
     folder.mkdir(parents=True, exist_ok=True)
     f = folder / ("git.exe" if os.name == "nt" else "git")
-    f.write_text("#!/bin/sh\ntouch planted.txt\n")
+    f.write_text(f"#!/bin/sh\ntouch {marker}\n")
     f.chmod(0o755)
     return f
 
@@ -243,13 +244,12 @@ def test_git_is_never_taken_from_the_project_or_a_relative_path_entry(ws, monkey
     real = shutil.which("git")
     _fake_git(ws / "tools")
     _fake_git(ws / "bin")
-    monkeypatch.setattr(workcheck, "_GIT_EXE", [])
+    monkeypatch.setattr(safegit, "_exes", {})
     # the project's folders first on PATH, a relative entry, the current folder: all skipped
     path = os.pathsep.join([str(ws / "tools"), "bin", "", ".", str(ws), os.path.dirname(real)])
     monkeypatch.setenv("PATH", path)
     monkeypatch.chdir(ws)
-    exe = workcheck._git_exe(ws)
-    assert exe == real and str(ws) not in exe
+    assert safegit.git_exe(ws) == real
     _edit(ws)
     assert workcheck.check(ws)["remind"] is True
     assert not (ws / "planted.txt").exists()
@@ -257,11 +257,48 @@ def test_git_is_never_taken_from_the_project_or_a_relative_path_entry(ws, monkey
 
 def test_git_only_inside_the_project_means_no_git_and_a_walk(ws, monkeypatch):
     _fake_git(ws / "tools")
-    monkeypatch.setattr(workcheck, "_GIT_EXE", [])
+    monkeypatch.setattr(safegit, "_exes", {})
     monkeypatch.setenv("PATH", str(ws / "tools"))
-    assert workcheck._git_exe(ws) is None
+    assert safegit.git_exe(ws) is None
     _edit(ws)
     assert workcheck.check(ws)["files"] == 2 and not (ws / "planted.txt").exists()  # b.txt + tools/git
+
+
+def test_hostile_repo_runs_nothing_in_the_hook_and_files_sig(ws, tmp_path, monkeypatch, capsys):
+    """A fake git and true in the workspace PATH, a repo hook, an fsmonitor and a filter driver: nothing runs,
+    and the hook output is the same as in a clean repo."""
+    marker = tmp_path / "RAN"
+    for d in ("tools", "bin"):
+        _fake_git(ws / d, marker=str(marker))
+        t = ws / d / "true"
+        t.write_text(f"#!/bin/sh\ntouch {marker}\n")
+        t.chmod(0o755)
+    hooks = ws / ".git" / "hooks"
+    for h in ("reference-transaction", "post-index-change", "pre-commit"):
+        (hooks / h).write_text(f"#!/bin/sh\ntouch {marker}\n")
+        (hooks / h).chmod(0o755)
+    _git(ws, "config", "core.fsmonitor", f"touch {marker}; echo")
+    _git(ws, "config", "core.hooksPath", str(hooks))
+    _git(ws, "config", "filter.x.clean", f"touch {marker}; cat")
+    _git(ws, "config", "filter.x.smudge", f"touch {marker}; cat")
+    (ws / ".gitattributes").write_text("*.txt filter=x\n")
+    clean = shutil.which("git")
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join([str(ws / "tools"), str(ws / "bin"), os.path.dirname(clean), "/usr/bin", "/bin"]),
+    )
+    monkeypatch.setattr(safegit, "_exes", {})
+    _edit(ws)
+
+    def no_walk(*a, **k):
+        raise AssertionError("git was expected to work: the folder must not be walked")
+
+    monkeypatch.setattr(workcheck, "_walk_names", no_walk)
+    rc, out = _hook(monkeypatch, ws, capsys=capsys)
+    assert rc == 0 and out.strip()  # the reminder line is still printed
+    assert workcheck.check(ws)["files"] >= 2
+    assert filesig.files_sig(ws)
+    assert not marker.exists() and not (ws / "planted.txt").exists()
 
 
 def test_find_root_stays_in_its_own_project(tmp_path, monkeypatch):
@@ -283,28 +320,6 @@ def test_hook_unknown_tool_or_missing_arg_is_silent(ws, monkeypatch, capsys):
     assert workcheck.hook_main(["work-check", "--hook", "nosuchtool"]) == 0
     assert workcheck.hook_main(["work-check", "--hook"]) == 0
     assert capsys.readouterr().out == ""
-
-
-def test_inside_uses_commonpath_not_startswith(tmp_path):
-    root = tmp_path.anchor or os.sep  # a drive root / filesystem root
-    assert workcheck._inside(str(tmp_path / "a" / "b"), root)
-    assert workcheck._inside(root, root)
-    (tmp_path / "proj").mkdir()
-    (tmp_path / "project-tools").mkdir()
-    assert not workcheck._inside(
-        str(tmp_path / "project-tools"), str(tmp_path / "proj")
-    )  # a prefix is no parent
-    assert workcheck._inside(str(tmp_path / "proj"), str(tmp_path / "proj"))
-
-
-def test_git_is_found_by_hand_per_path_entry(tmp_path, monkeypatch):
-    other = tmp_path / "other"
-    proj = tmp_path / "proj"
-    proj.mkdir()
-    gitf = _fake_git(other)
-    monkeypatch.setattr(workcheck, "_GIT_EXE", [])
-    monkeypatch.setenv("PATH", os.pathsep.join(["rel/bin", str(other)]))
-    assert workcheck._git_exe(proj) == str(gitf)
 
 
 def test_find_root_needs_a_boundary_to_walk_up(tmp_path, monkeypatch):

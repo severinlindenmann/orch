@@ -370,6 +370,8 @@ main.addEventListener('drop', event => {
   moveTicket(id, col.dataset.status);
 });
 main.addEventListener('change', async event => {
+  const cap = event.target.closest('[data-key="settings-copies-max"]');
+  if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const perm = event.target.closest('[data-settings-permissions]');
   if (perm) {
     if (snapshot || settingsBusy.has('permissions')) return;
@@ -481,6 +483,8 @@ main.addEventListener('click', async event => {
   if (action === 'new') ticketForm();
   if (action === 'inline') startInline(control);
   if (action === 'ref-preview') { previewReference(control); return; }
+  if (action === 'copies-mode') { settingsSend('copies.set', {mode:control.dataset.mode}, 'copies'); return; }
+  if (action === 'copies-setup') { settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies'); return; }
   if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }
   if (action === 'link-add') startLinkAdd(control);
   if (action === 'link-remove') { event.preventDefault(); removeLink(control); return; }

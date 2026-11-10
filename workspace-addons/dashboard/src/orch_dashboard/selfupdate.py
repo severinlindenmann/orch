@@ -16,6 +16,8 @@ import threading
 import time
 from pathlib import Path
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
+
 PKG = "orch_" + Path(__file__).resolve().parent.name.removeprefix("orch_")
 _HERE = Path(__file__).resolve().parent
 _TTL = 2.0
@@ -88,7 +90,7 @@ def new_argv(orig: list[str], port: int) -> list[str] | None:
 def _runs_new_code() -> bool:
     """The same isolation as the exec: -P, the package's parent folder as cwd, the same environment."""
     try:
-        r = subprocess.run(
+        r = _run(
             [sys.executable, "-P", "-c", f"import {PKG}.server"],
             capture_output=True,
             check=False,

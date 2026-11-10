@@ -21,6 +21,7 @@ from .look import LOOK_OPS
 from .look import forget as look_forget
 from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 try:
     from orch.pageproof import SELF, argv0, run_with_proof
 except ImportError:  # standalone use without orch: nothing runs
@@ -417,6 +418,32 @@ def _workflow_set(a):
     return ["config", "set", "workflow.agents_may_finish", "on" if a["on"] else "off"], [], []
 
 
+COPY_MODES = ("off", "together", "always")
+
+
+def _copies_set(a):
+    """Separate copies (settings): exactly one of mode | max | setup, each one `orch config set workflow.<key>`.
+    The setup command is a command orch runs in a new copy: it travels after `--` as one value, and core
+    refuses it from an agent (a person's click only)."""
+    _only(a, ("mode", "max", "setup"))
+    given = [k for k in ("mode", "max", "setup") if k in a]
+    if len(given) != 1:
+        raise BadRequest("Change one setting at a time.")
+    key = given[0]
+    v = a[key]
+    if key == "mode":
+        if v not in COPY_MODES:
+            raise BadRequest("Pick Off, When agents work together, or Every time.")
+        return ["config", "set", "workflow.copies", v], [], []
+    if key == "max":
+        if type(v) is not int or not 1 <= v <= 20:
+            raise BadRequest("Pick a number of copies from 1 to 20.")
+        return ["config", "set", "workflow.copies_max", str(v)], [], []
+    if not isinstance(v, str) or len(v) > 500 or any(c in v for c in "\r\n\x00"):
+        raise BadRequest("Write the command on one line, at most 500 characters.")
+    return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
+
+
 def _ticket_field(a):
     """One add-on field: `orch ticket set <id> <addon>.<field> -- <value>` (core types and checks it; empty clears).
     The add-on must be on here (checked in run_op)."""
@@ -620,6 +647,7 @@ OPS = {
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
+    "copies.set": _copies_set,
     "ticket.field": _ticket_field,
 }
 
@@ -720,7 +748,7 @@ def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, byte
     saved, failed = [], []
     for hint, raw in files:
         try:
-            r = subprocess.run(
+            r = _run(
                 [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
                 check=False,
                 cwd=root,
@@ -782,7 +810,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
                 argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
             )
         else:
-            r = subprocess.run(
+            r = _run(
                 [*argv0(orch_bin), *argv],
                 check=False,
                 cwd=root,
@@ -818,6 +846,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "config.agent",
             "config.permissions",
             "workflow.set",
+            "copies.set",
             "share.set",
         ):
             _audit(root, op, args)

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -1336,3 +1337,213 @@ def test_the_cli_says_the_notice_once_and_the_page_still_has_it(ws, run, capsys)
     code, out, err = run("ticket", "list", "--json")
     assert hp.RESET_NOTICE not in err  # not twice
     assert [n["text"] for n in hp.read_notices(ws)] == [hp.RESET_NOTICE]  # the page still shows it
+
+
+# ------------------------------------------------------------ #425: the core signs a Won't do and its undo
+
+
+def test_a_verifier_without_a_key_vouches_for_nobody(ws, run):
+    tid, cid = _ticket_with_step(ws, run)
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert hp.wont_verifier(ws)({**step, "wont_do": True, "wont_mac": "x"}, tid) is False
+
+
+def _sync_mod():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workspace-addons" / "sync" / "src"))
+    from orch_sync import merge
+
+    return merge
+
+
+def _signed_wont(ws, run, monkeypatch, reason="not needed"):
+    tid, cid = _ticket_with_step(ws, run)
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--reason", reason, "--json")
+    return tid, cid
+
+
+def test_wont_do_is_signed_into_the_ledger_and_the_verifier_accepts_only_the_current_entry(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert step["wont_do"] is True and step["wont_mac"] and step["wont_nonce"] and person(step, tid)
+    assert hp._ledger_read(ws) == {f"{tid}:{cid}": step["wont_mac"]}  # the CURRENT entry
+    # forged `by: human:` without a MAC, a copy on another ticket or step, any changed decision field: no
+    assert not person({**step, "wont_mac": None, "by": "human:Ann"}, tid)
+    assert not person(step, "t_other99") and not person({**step, "id": "c9"}, tid)
+    for field, value in (
+        ("reason", "changed"),
+        ("text", "rewritten"),
+        ("covers", "all of it"),
+        ("wont_nonce", "x"),
+    ):
+        assert not person({**step, field: value}, tid), field
+
+
+def test_a_replayed_older_decision_and_a_reused_id_do_not_verify_but_the_current_ones_do(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on1 = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    undo2 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(undo2, tid) and not person(on1, tid)  # the older signed "on" is no longer current
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--json")
+    on3 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(on3, tid) and not person(undo2, tid) and not person(on1, tid)  # old undo / old on: replays
+    # a proven removal tombstones the entry: the old MAC does not verify on a new step that reuses the id
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None
+    assert not hp.wont_verifier(ws)(on3, tid)
+
+
+def test_a_proven_edit_of_a_wont_do_step_re_signs_it_for_the_new_text(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    before = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "edit", tid, cid, "Write the other file", "--json")
+    after = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert after["text"] == "Write the other file" and after["wont_do"] is True
+    assert after["wont_mac"] != before["wont_mac"] and person(after, tid)  # re-signed, current
+    assert not person(before, tid)  # the old signed decision (old text) is superseded
+
+
+def test_a_missing_or_damaged_ledger_vouches_for_nobody(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    assert hp.wont_verifier(ws)(step, tid)
+    hp._write_private(ledger, "{not json")
+    assert not hp.wont_verifier(ws)(step, tid)  # damaged: closed
+    ledger.unlink()
+    assert not hp.wont_verifier(ws)(step, tid)  # missing: nobody was ever signed
+
+
+def test_the_relay_hook_is_decision_scoped(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    hp.human_key(ws)  # (the verifier needs a key to be more than "nobody")
+    step = tickets.load(ws, tid)["checklist"][0]
+    seen = []
+    person = hp.wont_verifier(ws, relay_ok=lambda st, t, decision: seen.append(decision) or False)
+    assert person({**step, "wont_do": True}, tid) is False
+    assert seen and seen[0]["wont_do"] is True and seen[0]["check"] == cid and "text" in seen[0]
+
+
+def test_sync_merge_with_the_real_verifier_end_to_end(ws, run, monkeypatch):
+    merge = _sync_mod()
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    base = tickets.load(ws, tid)
+    person = hp.wont_verifier(ws)
+    old = "2099-01-01T00:00:00Z"
+    now = "2099-01-02T00:00:00Z"
+    rewrite = {
+        **base,
+        "updated_at": old,
+        "checklist": [{**base["checklist"][0], "text": "skip the security review"}],
+    }
+    out = merge.merge_ticket(base, rewrite, base, now, person)
+    step0 = base["checklist"][0]
+    assert (
+        out["checklist"][0]["wont_do"] is True and out["checklist"][0]["text"] == step0["text"]
+    )  # no change
+    changed = {**base, "updated_at": old, "checklist": [{**base["checklist"][0], "reason": "agent was here"}]}
+    out = merge.merge_ticket(base, changed, base, now, person)
+    assert out["checklist"][0]["reason"] == "not needed" and out["checklist"][0]["wont_do"] is True
+    assert (
+        merge.merge_ticket(base, rewrite, base, now)["checklist"][0].get("wont_do") is None
+    )  # no verifier = nobody
+
+
+def test_every_caller_of_merge_ticket_passes_a_verifier():
+    """merge_ticket has no production caller yet; when the sync loop is wired up it MUST pass
+    humanproof.wont_verifier(root) (no verifier = every Won't do is dropped on every sync)."""
+    import ast
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = []
+    for src in list((root / "workspace" / "src").rglob("*.py")) + list(
+        (root / "workspace-addons").glob("*/src/**/*.py")
+    ):
+        if src.name == "merge.py" and "orch_sync" in str(src):
+            continue
+        for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", getattr(node.func, "id", "")) == "merge_ticket"
+            ):
+                if len(node.args) < 5 and not any(k.arg == "person" for k in node.keywords):
+                    offenders.append(f"{src.relative_to(root)}:{node.lineno}")
+    assert not offenders, (
+        "merge_ticket without person= (humanproof.wont_verifier(root)); the caller must also read, merge "
+        "and write under the ticket's apply_op lock (the verifier reads the ledger at each call): "
+        + ", ".join(offenders)
+    )
+
+
+def test_the_signed_fields_are_one_source_of_truth_for_the_signer_and_the_merge():
+    """If the decision record starts to cover another step field, or the merge pins another, this fails: the
+    signer (humanproof.wont_decision / SIGNED_STEP_FIELDS) and orch_sync.merge._SIGNED can not drift apart."""
+    merge = _sync_mod()
+    assert tuple(merge._SIGNED) == tuple(hp.SIGNED_STEP_FIELDS) + ("wont_mac",)
+    step = {
+        "id": "c1", "text": "T", "done": False, "evidence": [], "wont_do": True, "reason": "r", "covers": "c",
+        "wont_nonce": "n", "wont_mac": "m", "by": "human:x", "at": "2026-11-10T00:00:00Z", "state": None,
+    }  # fmt: skip
+    base = hp.wont_decision(step)
+    for field in hp.SIGNED_STEP_FIELDS:  # every signed field moves the record ...
+        assert hp.wont_decision({**step, field: "changed" if field != "wont_do" else False}) != base, field
+    for field, value in (
+        ("evidence", [1]),
+        ("done", True),
+        ("by", "agent:x"),
+        ("at", "x"),
+        ("wont_mac", "other"),
+    ):
+        assert hp.wont_decision({**step, field: value}) == base, field  # ... and nothing else does
+    off = hp.wont_decision({**step, "wont_do": False})
+    assert off["text"] is None and off["covers"] is None and off["reason"] is None  # an undo binds no text
+
+
+def test_a_damaged_ledger_is_never_overwritten_and_the_decision_is_refused(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    hp._write_private(ledger, "{not json")
+    # another step's decision is refused visibly; the damaged file is kept as it is (not wiped with {})
+    code, out, err = run("check", "add", tid, "Second", "--json", "--by", "agent:x")
+    c2 = json.loads(out)["id"]
+    proof = _proof(ws, "check.wont_do", f"{tid}:{c2}")
+    code, out, err = _cli(run, monkeypatch, proof, "check", "wont-do", tid, c2, "--json")
+    assert code == 2 and "damaged" in out + err and "start it again" in out + err
+    assert ledger.read_text() == "{not json"
+    assert not tickets.load(ws, tid)["checklist"][1].get("wont_do")  # nothing half done
+
+
+def test_the_verifier_reads_the_ledger_when_asked_not_at_creation(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    person = hp.wont_verifier(ws)  # created BEFORE the next decision
+    old = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    assert not person(
+        old, tid
+    )  # the ledger moved on after the verifier was made: the old "on" is not current
+
+
+def test_a_proven_remove_tombstones_even_when_the_step_file_lost_its_mac(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on = tickets.load(ws, tid)["checklist"][0]
+    tickets.apply_op(
+        ws, tid, lambda t: [t["checklist"][0].pop(k) for k in ("wont_mac", "wont_nonce")]
+    )  # stripped
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None  # tombstoned from the ledger, not from the step file
+    assert not hp.wont_verifier(ws)(on, tid)

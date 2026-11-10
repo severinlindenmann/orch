@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from . import look, mobile, phone_delivery
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
 def _me() -> str:
     from .actions import actor  # actions imports this module
@@ -112,7 +113,7 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
 
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
-        r = subprocess.run(
+        r = _run(
             [*_argv0(orch_bin), *args],
             check=False,
             cwd=root,
@@ -543,7 +544,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
-    from orch.config import agents_may_finish
+    from orch.config import agents_may_finish, copies_max, copies_mode, copy_setup
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
@@ -556,6 +557,9 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         share = False
     return {
         "agents_may_finish": agents_may_finish(root),
+        "copies": copies_mode(root),
+        "copies_max": copies_max(root),
+        "copy_setup": copy_setup(root) or "",
         "folder": str(root),
         "share": share,
         "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto

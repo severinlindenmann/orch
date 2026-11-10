@@ -19,7 +19,7 @@ def test_orch_calls_leave_the_agent_variables_out(monkeypatch, tmp_path):
 
         return R()
 
-    monkeypatch.setattr(actions.subprocess, "run", fake_run)
+    monkeypatch.setattr(actions, "_run", fake_run)
     actions.orch(Path(tmp_path), "/bin/orch", ["ticket", "list"])
     for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CODEX_HOME", "ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET"):
         assert k not in got, k

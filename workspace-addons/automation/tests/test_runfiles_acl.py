@@ -14,7 +14,7 @@ def win(monkeypatch):
     calls = []
     monkeypatch.setattr(runfiles, "WINDOWS", True)
     monkeypatch.setattr(runfiles, "user_sid", lambda: SID)
-    monkeypatch.setattr(runfiles.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(runfiles, "_run", lambda cmd, **kw: calls.append(cmd))
     monkeypatch.setattr(runfiles, "system_icacls", lambda: "C:\\Windows\\System32\\icacls.exe")
     return calls
 
@@ -38,7 +38,7 @@ def test_existing_folders_are_not_touched(tmp_path, win):
 def test_posix_never_calls_icacls(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(runfiles, "WINDOWS", False)
-    monkeypatch.setattr(runfiles.subprocess, "run", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(runfiles, "_run", lambda *a, **k: calls.append(a))
     (tmp_path / ".orch").mkdir()
     runfiles.run_dir(tmp_path, "x")
     assert calls == []
@@ -48,7 +48,7 @@ def test_icacls_failure_does_not_break(tmp_path, monkeypatch, win):
     def boom(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd, 1)
 
-    monkeypatch.setattr(runfiles.subprocess, "run", boom)
+    monkeypatch.setattr(runfiles, "_run", boom)
     (tmp_path / ".orch").mkdir()
     assert runfiles.run_dir(tmp_path, "x").is_dir()
 

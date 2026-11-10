@@ -13,6 +13,7 @@ from pathlib import Path
 
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 WINDOWS = os.name == "nt"
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
 
 def reparse(p: Path) -> bool:
@@ -126,7 +127,7 @@ def grant_user(d: Path) -> None:
         raise RuntimeError(f"{d} is not a plain folder; orch does not use it. Remove it and try again.")
     try:
         # /L: act on a link itself, never on its target
-        subprocess.run(
+        _run(
             [system_icacls(), str(d), "/grant", f"*{sid}:(OI)(CI)F", "/L"],
             capture_output=True,
             timeout=20,
@@ -263,7 +264,7 @@ def proc_start(pid: int) -> str | None:
         finally:
             k.CloseHandle(h)
     try:
-        r = subprocess.run(
+        r = _run(
             ["ps", "-o", "lstart=", "-p", str(pid)],
             capture_output=True,
             text=True,
@@ -281,7 +282,7 @@ def command(pid: int) -> str:
     if os.name == "nt":
         return ""
     try:
-        r = subprocess.run(
+        r = _run(
             ["ps", "-ww", "-o", "command=", "-p", str(pid)],
             capture_output=True,
             text=True,

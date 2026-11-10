@@ -342,6 +342,13 @@ function sharedFolderLine(t) {
   const text = state.runs?.[t.id]?.shared_folder?.line;
   return typeof text === 'string' && text ? h('p', {className:'shared-folder muted', 'data-key':'shared-folder'}, clean(text)) : null;
 }
+// Draft 1b: a ticket that works in its own copy of the project says so, in one quiet line (path and branch behind a click).
+function copyLine(t) {
+  const f = Array.isArray(t.work?.folders) ? t.work.folders.filter(x => x && typeof x.path === 'string') : [];
+  if (!f.length) return null;
+  return h('div', {className:'shared-folder muted', 'data-key':'work-copy'}, h('span', {}, 'Works in a separate copy of your project, so other agents do not change the same files.'),
+    h('details', {className:'det'}, h('summary', {}, 'Details'), h('div', {}, f.map(x => h('p', {className:'mono'}, clean(String(x.branch || '')) + ' · ' + clean(x.path))))));
+}
 const surface = via => clean(via === 'cli' ? 'terminal' : via);
 function proofLabel(ev) {
   const kind = ev.type || ev.kind;
@@ -798,7 +805,7 @@ function ticketPlan(t, q, children) {
     h('h2', {}, clean(q.text)),
     goal ? h('p', {className:'preserve-lines'}, h('strong', {}, 'Goal: '), clean(goal)) : null,
     notIn ? h('p', {className:'meta preserve-lines'}, h('strong', {}, 'Not included: '), clean(notIn)) : null,
-    h('ol', {className:'ticket-plan-steps'}, children.filter(c => c.status !== 'dropped').sort((x, y) => (Number(String(x.key).split('-').pop()) || 0) - (Number(String(y.key).split('-').pop()) || 0)).map(child =>
+    h('ol', {className:'ticket-plan-steps'}, children.filter(c => c.status !== 'dropped').map(child =>
       h('li', {}, h('div', {className:'stack'}, h('strong', {}, clean(child.title)),
         child.done_when ? h('p', {className:'meta preserve-lines'}, 'Done when ' + clean(child.done_when)) : null,
         editing && !snapshot && ['open', 'ready'].includes(child.status) && !array(child.checklist).some(c => c.done)
@@ -899,7 +906,7 @@ function detail(t) {
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), planQ ? null : openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && !planQ && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t), headerProof(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,
-      !fresh && !planQ && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !planQ && !['done', 'review'].includes(t.status) ? sharedFolderLine(t) : null, !fresh && !planQ && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
+      !fresh && !planQ && !['done', 'review'].includes(t.status) ? agentBar(t) : null, !fresh && !planQ && !['done', 'review'].includes(t.status) ? sharedFolderLine(t) : null, copyLine(t), !fresh && !planQ && !['done', 'review'].includes(t.status) ? liveSessionStrip(t) : null,
       snapshot ? null : h('div', {className:'tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label]) => ticketButton(label, 'ghost', () => selectTicketTab(t.id, id), {id:'ticket-tab-' + id, role:'tab', 'aria-selected':selected === id, 'aria-controls':'ticket-panel-' + id}))),
       panel('overview', [t.description ? h('p', {className:'muted preserve-lines', 'data-key':'description'}, clean(t.description), ' ', h('small', {className:'meta'}, '— written by ' + ticketActor(t.description_by))) : null, t.summary ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, clean(t.summary)) : null, ticketOutcomeCard(t), !planQ && (children.length || (!parent && !t.parent)) ? ticketParts(t, children) : null, ticketFiles(t), tasksCard('overview-tasks'), addonRows(t), ticketLinks(t)]),
       panel('tasks', tasksCard('tasks')),
