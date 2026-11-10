@@ -384,6 +384,58 @@ def test_check_edit_and_remove_clicks_need_a_proof_on_the_real_server_path():
     assert a.build_argv("check.edit", {**args, "text": "a -- b"})[-2:] == ["--", "a -- b"]
 
 
+GIT_CLICKS = (
+    ("private.move", {}, ("private.move", "move"), ["private", "move"]),
+    (
+        "private.allow",
+        {"name": "mine", "key": "a" * 64},
+        ("private.allow", "mine:" + "a" * 64),
+        ["private", "allow", "mine", "--key", "a" * 64],
+    ),
+    (
+        "config.agent.add",
+        {"name": "mine", "command": "x {prompt}"},
+        ("config.agent_add", hp.agent_add_target("mine", "x {prompt}")),
+        ["config", "agent", "add", "mine"],
+    ),
+)
+
+
+@pytest.mark.parametrize(("op", "args", "need", "head"), GIT_CLICKS)
+def test_git_clicks_take_the_page_proof_with_their_own_op_and_target(op, args, need, head):
+    assert actions.proof_for(op, args) == need
+    assert actions.build_argv(op, args)[: len(head)] == head
+
+
+@pytest.mark.parametrize(("op", "args", "need", "head"), GIT_CLICKS)
+def test_git_click_without_a_session_is_watch_only(live, monkeypatch, op, args, need, head):
+    _root, port = live
+    ran = []
+    monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(actions, "_agent_exists", lambda *a: False)
+    assert post(port, "/api/act", {"op": op, "args": args})[0] == 403 and ran == []
+
+
+@pytest.mark.parametrize(("op", "args", "need", "head"), GIT_CLICKS)
+def test_git_click_with_a_session_is_one_step_with_a_proof(live, monkeypatch, op, args, need, head):
+    root, port = live
+    ck = session(root, port)
+    seen = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(
+        actions, "run_with_proof", lambda argv, proof, **kw: seen.append((argv, proof)) or R()
+    )
+    monkeypatch.setattr(actions, "_agent_exists", lambda *a: False)
+    st, _, _ = post(port, "/api/act", {"op": op, "args": args}, {"Cookie": ck})
+    assert st == 200 and len(seen) == 1  # one click, one command, one proof
+    payload = json.loads(__import__("base64").urlsafe_b64decode(seen[0][1].split(".")[1] + "=="))
+    assert (payload["op"], payload["target"]) == need
+    assert seen[0][0][: len(head)] == head
+
+
 # ---- 1.0a-3: every op that acts as the person needs the page session (watch-only without one) ---------------
 
 TID = "t_abcdef"
@@ -407,6 +459,8 @@ ACT_ARGS = {
     "config.agent": {"name": "claude"},
     "config.agent.add": {"name": "mine", "command": "mine {prompt}"},
     "config.permissions": {"mode": "auto"},
+    "private.move": {},
+    "private.allow": {"name": "mine", "key": "a" * 64},
     "addon.set": {"name": "scheduler", "on": True},
     "share.set": {"on": True},
     "workflow.set": {"on": True},
@@ -477,7 +531,10 @@ def test_the_core_gated_config_ops_mint_for_the_right_target():
     assert acts.proof_for("share.set", {"on": True}) == ("config.share", "on")
     assert acts.proof_for("share.set", {"on": False}) is None
     assert acts.proof_for("config.permissions", {"mode": "full"}) == ("config.permissions", "full")
-    assert acts.proof_for("config.agent.add", {"name": "mine"}) == ("config.agent_add", "mine")
+    assert acts.proof_for("config.agent.add", {"name": "mine", "command": "mine {prompt}"}) == (
+        "config.agent_add",
+        hp.agent_add_target("mine", "mine {prompt}"),  # core's own function, not the dashboard's
+    )
     assert acts.proof_for("look.shared", {"on": True}) == ("look.shared_pages", "on")
     assert acts.proof_for("look.shared", {"on": False}) == ("look.shared_pages", "off")
     assert acts.proof_for("look.set", {"icon": "bolt"}) == ("look.icon", "look")

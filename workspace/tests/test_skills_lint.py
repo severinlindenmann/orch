@@ -28,6 +28,7 @@ HUMAN_ONLY = {
     "copy remove-orphaned",  # a person decides about copies of a moved project
     "init",
     "share",
+    "private",  # a person's approvals and Move to private (agents are refused)
     "update",
     "start",
     "stop",

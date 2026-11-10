@@ -203,7 +203,7 @@ def test_argv_on_another_host_starts_fresh(proj, new_ticket, run, monkeypatch):
 
 def test_generic_agent_argv_has_no_session(proj, new_ticket, run):
     tid = new_ticket("Do it")
-    config.add_agent(proj, "my-agent", "my-agent --prompt {prompt}")
+    config.add_agent(proj, "my-agent", "my-agent --prompt {prompt}", approve=True)
     _choose(proj, "my-agent")
     j = json.loads(run("run", "argv", tid, "--json")[1])
     assert j["agent"] == "my-agent" and j["adapter"] == "generic" and j["session"] is None
@@ -219,7 +219,7 @@ def test_prompt_file_and_allow(proj, new_ticket, run):
     )
     assert j["argv"][-1] == "Say hi" and "Bash(git push:*)" in j["argv"]
     assert j["argv"].index("--allowedTools") < j["argv"].index("--")
-    config.add_agent(proj, "gen", "gen {prompt}")
+    config.add_agent(proj, "gen", "gen {prompt}", approve=True)
     _choose(proj, "gen")
     j = json.loads(run("run", "argv", tid, "--allow", "Edit", "--json")[1])
     assert "Edit" not in j["argv"]  # the generic adapter ignores it
@@ -229,7 +229,7 @@ def test_fresh_prompt_has_title_summary_and_what_changed(proj, new_ticket, run):
     tid = new_ticket("Invoice export")
     tickets.set_summary(proj, tid, "Half done", "human:me")
     tickets.log(proj, tid, "Anna sent the numbers", "human:anna")
-    config.add_agent(proj, "gen", "gen {prompt}")
+    config.add_agent(proj, "gen", "gen {prompt}", approve=True)
     _choose(proj, "gen")
     prompt = json.loads(run("run", "argv", tid, "--json")[1])["argv"][-1]
     assert "Invoice export" in prompt and "Half done" in prompt and "Anna sent the numbers" in prompt
@@ -431,7 +431,7 @@ def test_a_lock_that_refuses_with_permission_error_is_waited_for_then_taken(proj
 
 def test_the_wrapper_errors_go_to_the_run_log_not_nowhere(proj, new_ticket, run, monkeypatch):
     tid = new_ticket()
-    config.add_agent(proj, "x", f"{sys.executable} -c pass {{prompt}}")
+    config.add_agent(proj, "x", f"{sys.executable} -c pass {{prompt}}", approve=True)
     config.set_key(proj, "workspace", "agent", "x")
     seen = {}
 

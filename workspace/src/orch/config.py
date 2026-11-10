@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import tomllib
 from pathlib import Path
 
@@ -33,10 +34,162 @@ def read(root: Path) -> dict:
         raise Refused(f"{p} is not valid TOML ({e}). Fix it, or remove the line you added last.") from None
 
 
+# ---- THE trust rule: orch runs a settings-supplied agent command only if THIS person approved exactly that
+# command on THIS machine. Approvals live in the orch home (like permissions.json), never in the workspace,
+# and do not depend on git, links or where the file came from. Any error = not approved.
+
+
+def _approvals_path() -> Path:
+    from orch import addons
+
+    return addons.home() / "agent-approvals.json"
+
+
+def _entry_key(root: Path, name: str, e: dict) -> str:
+    ws = str(root.resolve())
+    doc = [ws, name, e.get("adapter"), e.get("command"), e.get("interactive"), e.get("prompt")]
+    return hashlib.sha256(json.dumps(doc).encode("utf-8")).hexdigest()
+
+
+def _runs_command(e: dict) -> bool:
+    return bool(e.get("command") or e.get("interactive"))
+
+
+def agent_approved(root: Path, name: str, e: dict) -> bool:
+    if not _runs_command(e):
+        return True
+    try:
+        data = json.loads(_approvals_path().read_text(encoding="utf-8"))
+        return isinstance(data, list) and _entry_key(root, name, e) in data
+    except Exception:  # noqa: BLE001 - fail closed on anything
+        return False
+
+
+def approve_agent(root: Path, name: str, e: dict) -> None:
+    """A person's yes for exactly this command here (the hash covers workspace, name, adapter, command,
+    interactive and prompt: any change asks again)."""
+    p = _approvals_path()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else []
+    except (OSError, ValueError):
+        data = []
+    if not isinstance(data, list):
+        data = []
+    k = _entry_key(root, name, e)
+    if k not in data:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_text(json.dumps(data[-500:] + [k]), encoding="utf-8")
+            os.replace(tmp, p)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+def _raw_entries(root: Path) -> dict[str, dict]:
+    out = {}
+    try:
+        agents = read(root).get("agents") or {}
+    except Refused:
+        return {}
+    for name, e in agents.items():
+        if isinstance(e, dict) and NAME_RE.fullmatch(name) and isinstance(e.get("adapter"), str):
+            out[name] = {
+                k: e[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(e.get(k), str)
+            }
+    return out
+
+
+SHOW_MAX = 500  # an entry with a longer field cannot be shown in full, so it cannot be approved
+
+
+def _safe_text(v: str) -> bool:
+    """Plain printable text only: no control (C0/C1, ESC), format (bidi, zero-width), line/paragraph
+    separator, private-use or unassigned character, and no space but the plain one.
+    What is shown is exactly what is hashed."""
+    import unicodedata
+
+    return len(v) <= SHOW_MAX and all(
+        c == " " or (unicodedata.category(c) not in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"))
+        for c in v
+    )
+
+
+def pending_agents(root: Path) -> list[dict]:
+    """Entries of this workspace's settings that name a command nobody approved here. Every field the approval
+    covers is returned in full, plus `key` (the hash the approval is bound to) and `showable`."""
+    out = []
+    for n, e in _raw_entries(root).items():
+        if agent_approved(root, n, e):
+            continue
+        fields = {k: e.get(k) for k in ("adapter", "command", "interactive", "prompt")}
+        out.append(
+            {
+                "name": n,
+                **fields,
+                "key": _entry_key(root, n, e),
+                "showable": all(_safe_text(v) for v in fields.values() if isinstance(v, str))
+                and _safe_text(n),
+            }
+        )
+    return out
+
+
+ONLY_PERSON_AGENT = (
+    'Only a person can {what}. Ask them with orch ask: orch ask <ticket> "{what}?" --option yes --option no'
+)
+
+
+def require_person(by: str | None, what: str) -> None:
+    """The second lock behind the CLI's proof check (like set_permissions): an agent is refused here too, so
+    no caller can save or approve an agent command for an agent. `by` None = the keyboard."""
+    if by is not None and not by.startswith("human:"):  # an allowlist: a person, or nobody named
+        raise Refused(ONLY_PERSON_AGENT.format(what=what))
+
+
+def allow_agent(root: Path, name: str, key: str, by: str | None = None) -> str:
+    """Approve exactly ONE entry, and only if it is still what was shown (its key matches now). A person only
+    (refused for an agent here too). Never approves several entries."""
+    require_person(by, "allow an agent command to run")
+    e = _raw_entries(root).get(name) if isinstance(name, str) else None
+    if e is None:
+        raise Refused("That agent is not in this workspace's settings (any more). Please look again.")
+    if not isinstance(key, str) or _entry_key(root, name, e) != key:
+        raise Refused("That command changed since you looked. Please look again.")
+    if not (_safe_text(name) and all(_safe_text(v) for v in e.values() if isinstance(v, str))):
+        raise Refused(
+            "That command cannot be shown safely (too long or odd characters), so it cannot be allowed."
+        )
+    approve_agent(root, name, e)
+    return name
+
+
+def untrusted_note(root: Path) -> str | None:
+    """Plain line for a command this machine has not approved; None when nothing waits."""
+    p = pending_agents(root)
+    if not p:
+        return None
+    if not p[0]["showable"]:
+        return "This workspace asks to run a command orch can't show safely. It is not run."
+    c = p[0]["command"] or p[0]["interactive"] or ""
+    return f"This workspace asks to run `{c[:200]}`. Allow it on this machine first: orch private"
+
+
+def _builtin_names() -> set[str]:
+    from orch import adapters
+
+    return set(adapters.builtin_names())
+
+
 def agent_name(root: Path) -> str | None:
-    """The agent that does the work here ([workspace] agent), or None when nobody chose."""
+    """The agent that does the work here ([workspace] agent), or None when nobody chose. A name that is not
+    built in counts only when its command is approved here."""
     v = (read(root).get("workspace") or {}).get("agent")
-    return v if isinstance(v, str) and v else None
+    if not (isinstance(v, str) and v):
+        return None
+    if v not in _builtin_names() and v not in agent_entries(root):
+        return None
+    return v
 
 
 PERMISSION_MODES = ("ask", "auto", "full")
@@ -330,14 +483,8 @@ def set_code(root: Path, value: str) -> str:
 
 
 def agent_entries(root: Path) -> dict[str, dict]:
-    """The user's [agents.<name>] entries, only well-formed ones."""
-    out = {}
-    for name, e in (read(root).get("agents") or {}).items():
-        if isinstance(e, dict) and NAME_RE.match(name) and isinstance(e.get("adapter"), str):
-            out[name] = {
-                k: e[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(e.get(k), str)
-            }
-    return out
+    """The [agents.<name>] entries that may be used: well-formed, approved here when they run a command."""
+    return {n: e for n, e in _raw_entries(root).items() if agent_approved(root, n, e)}
 
 
 def _value(v: str | int | bool) -> str:
@@ -439,8 +586,12 @@ def add_agent(
     interactive: str | None = None,
     adapter: str = "generic",
     prompt: str | None = None,
+    approve: bool = False,
+    by: str | None = None,
 ):
-    if not NAME_RE.match(name):
+    """Save an agent entry. A person only: an agent (`by` = agent:...) is refused before it writes."""
+    require_person(by, "add an agent command")
+    if not NAME_RE.fullmatch(name):
         raise Refused(f"'{name}' is not a name orch can use. Use lowercase letters, digits and '-'.")
     for k, v in (("command", command), ("interactive", interactive)):
         if v is not None and not (1 <= len(v) <= 500 and "\n" not in v and "\r" not in v):
@@ -455,9 +606,30 @@ def add_agent(
         if prompt not in ("arg", "stdin"):
             raise Refused("The prompt goes in with 'arg' or 'stdin'.")
         set_key(root, f"agents.{name}", "prompt", prompt)
+    if (
+        approve
+    ):  # a person typed it here: approve ONLY what they typed, and only if the file says exactly that
+        typed = {"adapter": adapter, "command": command}
+        if interactive:
+            typed["interactive"] = interactive
+        if prompt:
+            typed["prompt"] = prompt
+        if _raw_entries(root).get(name) == typed:
+            approve_agent(root, name, typed)
+        else:
+            print(
+                f"orch: '{name}' also has other settings here, so it is not allowed yet: orch private",
+                file=sys.stderr,
+            )
 
 
 # ---- the one notice for a command that comes from a folder's settings
+
+
+def select_agent(root: Path, name: str, by: str | None = None) -> None:
+    """Make `name` the workspace's default agent. A person only (an agent is refused)."""
+    require_person(by, "choose the agent for this workspace")
+    set_key(root, "workspace", "agent", name)
 
 
 def _seen_path() -> Path:

@@ -81,6 +81,12 @@ def load(name: str, root: Path | None = None) -> dict:
     base = entry["adapter"] if entry else name
     reg = _registry()
     if base not in reg:
+        for pend in config.pending_agents(root) if root is not None else []:
+            if pend["name"] == name:
+                raise Refused(
+                    f"This workspace asks to run an agent '{name}'. "
+                    "Allow it on this machine first (Settings, or: orch private)."
+                )
         raise Refused(f"No agent called '{name}'. See what is available: orch agents")
     a = copy.deepcopy(reg[base])
     a["name"], a["adapter"] = name, base
@@ -243,6 +249,8 @@ def permission_line(root: Path) -> str:
 def command_notice(name: str, mode: str = "oneshot", root: Path | None = None) -> str | None:
     """The one-time line for a command that comes from this folder's settings: names the command that will
     run. None for built-in adapters, or when this machine has seen that command before."""
+    if root is not None and (why := config.untrusted_note(root)):
+        return why
     a = load(name, root)
     cmd = a["interactive"] if mode == "live" else a["command"]
     if not a["from_settings"] or not cmd or a["adapter"] != "generic":

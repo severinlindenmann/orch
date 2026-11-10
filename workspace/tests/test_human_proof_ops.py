@@ -1608,18 +1608,19 @@ def test_adding_an_agent_command_needs_the_proof_and_shows_it_in_full(ws, run, m
     code, out, err = run("config", "agent", "add", "mine", f"--command={cmd}", "--by", "human:pat", "--json")
     assert code == 2
     card = hp.handoffs(ws)[0]
-    assert card["op"] == "config.agent_add" and card["exact"] == cmd and card["parts"] == {"name": "mine"}
-    proof = _proof(ws, "config.agent_add", "mine")
+    assert card["op"] == "config.agent_add" and card["exact"] == f"Command: {cmd}"
+    assert card["parts"] == {"name": "mine", "command": cmd}  # name + EVERY saved value, bound in the target
+    proof = _proof(ws, "config.agent_add", hp.agent_add_target("mine", cmd))
     code, *_ = _cli(run, monkeypatch, proof, "config", "agent", "add", "mine", f"--command={cmd}", "--json")
     assert code == 0
-    # F5: an agent never adds one (until #374), and the card shows --interactive as well
+    # F5: an agent never adds one, and the card shows --interactive as well
     code, out, err = run("config", "agent", "add", "other", f"--command={cmd}", "--by", "agent:x", "--json")
     assert code != 0 and "other" not in (ws / ".orch" / "config.toml").read_text()
     run(
         "config", "agent", "add", "live", f"--command={cmd}", "--interactive=live --tty", "--by", "human:pat",
         "--json",
     )  # fmt: skip
-    live = [h for h in hp.handoffs(ws) if h["target"] == "live"][0]
+    live = [h for h in hp.handoffs(ws) if h["target"].startswith("live:")][0]
     assert cmd in live["exact"] and "live --tty" in live["exact"]
 
 

@@ -126,10 +126,20 @@ PROOF_OPS = {
     "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:edit"),
     "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:remove"),
     "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
+    "private.move": ("private.move", lambda a: "move"),
+    "private.allow": ("private.allow", lambda a: f"{a.get('name')}:{a.get('key')}"),
     "config.permissions": ("config.permissions", lambda a: a.get("mode")),
-    "config.agent.add": ("config.agent_add", lambda a: a.get("name")),
+    "config.agent.add": ("config.agent_add", lambda a: _agent_add_target(a)),
     "look.set": ("look.icon", lambda a: "look"),
 }
+
+
+def _agent_add_target(a):
+    """The proof target of config.agent_add: core's one definition (name + digest of every saved value; the
+    dashboard never offers a live command)."""
+    from orch import humanproof
+
+    return humanproof.agent_add_target(a.get("name"), a.get("command"), None, a.get("prompt_via"))
 
 
 def proof_for(op, args, root=None):
@@ -651,6 +661,21 @@ def _share_set(a):
     return ["share", "on" if a["on"] else "off"], [], []
 
 
+def _private_move(a):
+    _only(a, ())
+    return ["private", "move"], [], []
+
+
+def _private_allow(a):
+    """Allow ONE settings command, bound to what the person saw: the name and the key (hash) of the entry."""
+    _only(a, ("name", "key"))
+    if not (isinstance(a.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", a["name"])):
+        raise BadRequest("Pick the agent.")
+    if not (isinstance(a.get("key"), str) and re.fullmatch(r"[0-9a-f]{64}", a["key"])):
+        raise BadRequest("Look at the command again.")
+    return ["private", "allow", a["name"], "--key", a["key"]], [], []
+
+
 def _config_agent_test(a):
     """Try an agent: `orch agents test <name> --json` answers {name, ok, reason}. Changes nothing, so no --by."""
     _only(a, ("name",))
@@ -736,6 +761,8 @@ OPS = {
     "config.permissions": _config_permissions,
     "addon.set": _addon_set,
     "share.set": _share_set,
+    "private.move": _private_move,
+    "private.allow": _private_allow,
     **MOBILE_OPS,
     **LOOK_OPS,
     "ref.add": _ref_add,
@@ -950,6 +977,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "copies.remove_orphaned",
             "copies.retry",
             "share.set",
+            "private.move",
+            "private.allow",
         ):
             _audit(root, op, args)
         if op in ("copies.clean", "copies.remove_orphaned", "copies.retry"):
