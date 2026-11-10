@@ -326,9 +326,9 @@ def test_recommended_failure_turns_none_on(proj, monkeypatch):
 
     monkeypatch.setattr(addons, "add", add)
     monkeypatch.setattr(addons, "remove", lambda root, n, purge=False: off.append(n))
-    with pytest.raises(skills.Refused, match="Nothing was changed"):
+    with pytest.raises(skills.Refused, match="Turned off again: a1"):
         init.recommended(proj, yes=True)
-    assert on == ["a1"] and off == ["a1"]
+    assert on == ["a1"] and off == ["a1"]  # turned on at once, so undone; collected ones are never installed
 
 
 def test_recommended_also_turns_on_shipped_addons_that_are_not_installed(proj, monkeypatch):

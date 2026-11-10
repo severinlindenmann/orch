@@ -56,11 +56,15 @@ def busy():
 
 def main():
     busy()
-    say("waiting for orch to exit")
+    say("waiting for orch to exit (pid %d; folders: %s)" % (os.getpid(), ", ".join(job["free"])))
     deadline = time.time() + job["wait"]
-    while not all(free(p) for p in job["free"]):
+    while True:
+        busy_paths = [p for p in job["free"] if not free(p)]
+        if not busy_paths:
+            break
         if time.time() > deadline:
-            say("RESULT fail: orch did not exit in time; nothing was changed. Run the command again.")
+            say("RESULT fail: still in use after %ds: %s. Nothing was changed. Run the command again."
+                % (job["wait"], ", ".join(busy_paths)))
             return 1
         busy()
         time.sleep(0.5)
