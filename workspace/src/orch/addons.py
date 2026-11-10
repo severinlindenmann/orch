@@ -448,7 +448,7 @@ def registry(ships_check: bool = True) -> list[dict]:
     return out
 
 
-def _tool_env_change_ok() -> None:
+def tool_env_change_ok() -> None:
     """Anything that reinstalls orch's own tool environment (update, add-on add/remove) is a person's op on
     the account's own orch folder: on a NORMAL install with another ORCH_HOME it is refused, never run from
     that folder's add-on list."""
@@ -630,7 +630,7 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
     """
     from orch import winfinish
 
-    _tool_env_change_ok()
+    tool_env_change_ok()
     if not winfinish.needed():
         _install_tool(entries)
         if save:
