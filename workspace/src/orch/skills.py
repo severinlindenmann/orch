@@ -188,6 +188,57 @@ def apply_agent_files(root: Path) -> list[str]:
     return done
 
 
+def apply_copy_files(root: Path, work: Path) -> None:
+    """apply_agent_files for a separate copy of the project (git worktree) at `work`: the same skill links and
+    local instruction files, but the links point at the WORKSPACE's harness (the copy has no .orch/harness) and
+    the instruction file imports it by full path. The excludes live in the shared .git/info/exclude of the
+    repository, already written for the workspace. One refused link does not stop the others."""
+    from orch import adapters
+
+    sk = harness.harness_dir(root) / "skills"
+    refused = None
+
+    def plain(rel: str) -> bool:
+        """Nothing on the way from `work` to work/rel is a link: a copy holds BRANCH content, and a committed
+        link (a local instruction file or skills folder pointing elsewhere) must not make orch write outside it."""
+        p = work
+        for part in Path(rel).parts:
+            p = p / part
+            if harness.is_link(p):
+                return False
+        return True
+
+    for where in _skill_places(root):
+        if not plain(where):
+            refused = refused or Refused(f"{work / where} is a link; orch will not write through it.")
+            continue
+        for n in _harness_skill_names(root):
+            harness.check_harness(root, sk / n)
+            if harness.is_link(work / where / n) and not harness._same(work / where / n, sk / n):
+                refused = refused or Refused(f"{work / where / n} is a link to somewhere else.")
+                continue
+            try:
+                harness.link_skill(work, where, n, sk / n)
+            except Refused as e:
+                refused = refused or e
+    for sh in _shared_skills(root):
+        for where in _skill_places(root)[1:]:
+            if not plain(where):
+                continue
+            try:
+                harness.link_skill(work, where, sh.name, sh)
+            except Refused as e:
+                refused = refused or e
+    for n in detected_agents(root):
+        for fn, line in ((adapters.load(n).get("files") or {}).get("instructions_link") or {}).items():
+            if plain(fn):
+                harness.write_local_file(work, fn, line, harness_root=root)
+            else:
+                refused = refused or Refused(f"{work / fn} is a link; orch will not write through it.")
+    if refused:
+        raise refused
+
+
 def _shared_skills(root: Path) -> list[Path]:
     base = root / ".agents" / "skills"
     if not base.is_dir() or harness.is_link(base):

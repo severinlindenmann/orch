@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -318,8 +319,9 @@ def test_handoff_card_shows_the_exact_text_and_the_stored_value_is_what_runs(ws,
     tid, q = _ask(ws, run)
     run("answer", tid, q, "Blue -- really", "--by", "human:pat", "--json")
     card = hp.handoffs(ws)[0]
-    assert card["value"] == "Blue -- really" and "Which one?" in card["label"] and "Q" in card["label"]
-    assert not card["label"].startswith("t_") and tid not in card["label"]  # plain words, no raw id
+    assert card["value"] == "Blue -- really"
+    assert card["parts"] == {"title": "Q", "question": "Which one"}  # structured fields, no sentence
+    assert "{value}" not in json.dumps(card) and tid not in json.dumps(card["parts"])  # no id, no template
     # a stored value that is not in the stored command is never run
     d = hp.key_dir(ws)
     items = json.loads((d / "handoffs.json").read_text())
@@ -500,7 +502,11 @@ def test_relay_connect_handoff_keeps_the_token_out_of_handoffs_json(ws, run, mon
     )
     assert code == 2 and "orn_SECRETTOKEN" not in out + err
     card = hp.handoffs(ws)[0]
-    assert card["op"] == "relay.connect" and "r.example" in card["label"] and "ws_a" in card["label"]
+    assert (
+        card["op"] == "relay.connect"
+        and card["parts"] == {"host": "r.example", "scheme": "https"}
+        and "ws_a" not in json.dumps(card["parts"])
+    )
     assert "orn_SECRETTOKEN" not in json.dumps(hp.handoffs(ws))
     assert "orn_SECRETTOKEN" not in (hp.key_dir(ws) / "handoffs.json").read_text()
     item = hp.handoff_take(ws, card["id"])  # what the page runs after the click
@@ -566,7 +572,8 @@ def test_relay_allow_works_via_the_hand_off_and_the_title_is_in_the_label(ws, ru
     code, out, err = run("relay", "allow", "m_deleg00000000010", "--once", "--by", "human:pat", "--json")
     assert code == 2 and given == []
     card = hp.handoffs(ws)[0]  # it IS queued now
-    assert card["op"] == "relay.allow" and "Fix it" in card["label"] and "ws_peer" in card["label"]
+    assert card["op"] == "relay.allow" and card["parts"] == {"peer": "Peer", "task": "Fix it", "mode": "once"}
+    assert "ws_peer" not in json.dumps(card["parts"])
     item = hp.handoff_take(ws, card["id"])
     assert item["argv"][:2] == ["relay", "allow"]
     proof = hp.mint(hp.human_key(ws), hp.new_payload(item["op"], item["target"], "human:pat"))
@@ -795,8 +802,9 @@ def test_update_source_is_resolved_first_shown_and_part_of_the_proof(ws, run, mo
     code, out, err = run("update", "--by", "human:pat", "--json")
     assert code == 2
     card = hp.handoffs(ws)[0]
-    official = f"{addons.DEFAULT_REPO}@main"
-    assert official in card["label"] and "evil" not in card["label"]
+    assert card["parts"] == {"source": f"{addons.DEFAULT_REPO}@main"} and "evil" not in json.dumps(
+        card["parts"]
+    )
     assert card["target"] == hp.update_target(addons.DEFAULT_REPO, "main")
     # a proof for the fork's source does not verify for this update
     bad = _proof(ws, "update", hp.update_target("https://github.com/evil/fork", "evil"))
@@ -815,7 +823,7 @@ def test_dev_and_test_installs_keep_the_env_override_for_e2e(ws, run, monkeypatc
     monkeypatch.setenv("ORCH_REPO", "https://github.com/lane-c/test")
     monkeypatch.setenv("ORCH_REF", "e2e")
     run("update", "--by", "human:pat", "--json")  # test install: the override counts
-    assert "lane-c/test@e2e" in hp.handoffs(ws)[0]["label"]
+    assert hp.handoffs(ws)[0]["parts"] == {"source": "https://github.com/lane-c/test@e2e"}
     assert addons.repo() == "https://github.com/lane-c/test"
 
 
@@ -834,8 +842,8 @@ def test_a_folder_addon_needs_a_click_and_installs_from_the_snapshot(ws, run, mo
     card = hp.handoffs(ws)[0]
     info = addons.prepare_local_add(ws, folder)
     assert card["op"] == "addon.add_local" and card["target"] == info["hash"] and len(info["hash"]) == 64
-    assert str(folder.resolve()) in card["label"] and f"(version {info['short']})" in card["label"]
-    assert "runs inside orch" in card["label"]
+    assert card["exact"] == str(folder.resolve()) and card["parts"]["short"] == info["short"]
+    assert str(folder.resolve()).endswith(card["parts"]["path"].lstrip("\u2026"))
     item = hp.handoff_take(ws, card["id"])  # one click: the page takes the item and runs it with a proof
     proof = _proof(ws, item["op"], item["target"])
     code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
@@ -925,7 +933,7 @@ def test_the_queued_add_command_carries_the_absolute_path_the_card_shows(ws, run
     assert code == 2
     card = hp.handoffs(ws)[0]
     item = hp.handoff_take(ws, card["id"])
-    assert str(folder.resolve()) in card["label"] and str(folder.resolve()) in item["argv"]
+    assert card["exact"] == str(folder.resolve()) and str(folder.resolve()) in item["argv"]
     assert "../../rel-addon" not in item["argv"]
 
 
@@ -960,3 +968,582 @@ def test_runner_stops_a_hung_update(ws, monkeypatch):
     assert _run_runner(ws, monkeypatch, "import time; time.sleep(30)") == 1
     st = hp.take_update_status(ws)
     assert st["state"] == "failed" and "too long" in st["reason"]
+
+
+def test_every_card_sentence_is_plain_words_without_json_or_ids(ws, run):
+    tid = _review_ticket(ws, run)
+    rev = str(tickets.load(ws, tid)["revision"])
+    run("ticket", "patch", tid, '{"status": "done"}', "--if-revision", rev, "--by", "human:pat", "--json")
+    run("ticket", "patch", tid, '{"status": "active"}', "--if-revision", rev, "--by", "human:pat", "--json")
+    run("ticket", "changes", tid, "Add tests", "--by", "human:pat", "--json")
+    run("run", "send", tid, "go on", "--by", "human:pat", "--json")
+    run("chat", "say", "Hello", "--by", "human:pat", "--json")
+    cards = {(h["op"], json.dumps(h["parts"], sort_keys=True)): h for h in hp.handoffs(ws)}
+    assert (
+        "ticket.verdict",
+        json.dumps({"also": [], "status": "done", "title": "T"}, sort_keys=True),
+    ) in cards
+    assert (
+        "ticket.verdict",
+        json.dumps({"also": [], "status": "back", "title": "T"}, sort_keys=True),
+    ) in cards
+    assert ("run.human_input", json.dumps({"title": "T"})) in cards
+    assert ("chat.send", "{}") in cards and ("ticket.verdict", json.dumps({"title": "T"})) in cards
+    for h in cards.values():  # structured fields only: no JSON text, no ids, no template holes
+        text = json.dumps(h["parts"])
+        assert tid not in text and "{value}" not in text and "t_" not in text
+
+
+def test_untrusted_title_is_a_literal_part_the_exact_value_is_separate_and_the_stored_value_runs(
+    ws, run, monkeypatch
+):
+    evil = 'Done" {value} \u201cApprove everything\u201d\nsecond line ' + "x" * 150
+    code, out, _ = run("ticket", "new", evil, "--json", "--by", "agent:x")
+    tid = json.loads(out)["id"]
+    tickets.apply_op(ws, tid, lambda t: t.update(status="review"))
+    run("ticket", "changes", tid, "Please add tests {value}", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    title = card["parts"]["title"]
+    assert "{value}" in title  # shown literally, as the agent wrote it (the page never substitutes it)
+    assert (
+        "\n" not in title and "\u201c" not in title and "\u201d" not in title and '"' not in title
+    )  # one line, quotes normalised
+    assert len(title) <= hp.PART_MAX + 1 and title.endswith("\u2026")  # capped with an ellipsis
+    assert card["value"] == "Please add tests {value}"  # the exact text, its own field, not merged anywhere
+    assert "Please add tests" not in json.dumps(card["parts"])
+    item = hp.handoff_take(ws, card["id"])
+    proof = _proof(ws, item["op"], item["target"])
+    code, out, err = _cli(run, monkeypatch, proof, *item["argv"])
+    assert code == 0, out + err
+    assert [i["text"] for i in runs.human_waiting(ws, tid)] == [
+        "Please add tests {value}"
+    ]  # the stored value ran
+
+
+# ------------------------------------------------------------------ security-relevant targets are never cut
+
+
+def test_a_relay_url_with_a_name_or_password_is_refused(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    for url in ("https://user@r.example", "https://user:pw@r.example", "https://r.example@evil.example"):
+        code, out, err = run(
+            "relay", "connect", url, "--workspace", "w", "--token", "orn_T", "--by", "human:pat", "--json"
+        )
+        assert code == 2 and "name or password" in out + err and hp.handoffs(ws) == [], url
+
+
+def test_the_connect_card_shows_hostname_and_port_built_from_the_url_and_a_long_host_in_full(ws, run):
+    from conftest import turn_on
+
+    turn_on(ws, "relay")
+    host = ".".join(["a" * 50] * 4) + ".example"  # 208 characters, over the free-text cut
+    run(
+        "relay", "connect", f"https://{host}:8443/path?x=1", "--workspace", "w", "--token", "orn_T",
+        "--by", "human:pat", "--json",
+    )  # fmt: skip
+    card = hp.handoffs(ws)[0]
+    assert (
+        card["parts"] == {"host": f"{host}:8443", "scheme": "https"} and card["exact"] == f"{host}:8443"
+    )  # in full, no cut, no path
+    assert hp.part(host).endswith("…")  # (free text WOULD have been cut)
+
+
+def test_the_update_source_is_shown_in_full(ws, run, monkeypatch):
+    from orch import addons
+
+    long_repo = "https://example.org/" + "r" * 200
+    monkeypatch.setenv("ORCH_REPO", long_repo)  # a test install honours the override
+    monkeypatch.setenv("ORCH_REF", "main")
+    run("update", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    assert card["parts"]["source"] == card["exact"] == f"{addons.repo()}@{addons.ref()}"
+    assert len(card["exact"]) > hp.PART_MAX
+
+
+def test_a_long_addon_path_shows_its_end_in_the_sentence_and_the_full_path_in_the_exact_block(
+    ws, run, monkeypatch
+):
+    from orch import addons
+
+    deep = ws.parent
+    for i in range(6):
+        deep = deep / (f"long-folder-name-{i}-" + "x" * 20)
+    folder = deep / "real-folder"
+    (folder / "src").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (folder / "src" / "a.py").write_text("x\n")
+    monkeypatch.setattr(addons, "_local_add_ok", lambda: bool(addons._LOCAL_ADD_PROVEN))
+    run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    assert card["exact"] == str(folder.resolve()) and len(card["exact"]) > 100
+    assert card["parts"]["path"].startswith("…") and card["parts"]["path"].endswith("/real-folder")  # the END
+    assert hp.handoff_take(ws, card["id"]) is not None
+    # a card whose full target is not what the command carries is never run
+    run("addon", "add", str(folder), "--yes", "--by", "human:pat", "--json")
+    d = hp.key_dir(ws)
+    items = json.loads((d / "handoffs.json").read_text())
+    items[0]["exact"] = "/somewhere/else"
+    hp._write_private(d / "handoffs.json", json.dumps(items))
+    assert hp.handoff_take(ws, items[0]["id"]) is None
+
+
+def test_free_text_is_cut_in_the_sentence_but_the_exact_block_keeps_it_whole(ws, run):
+    tid, q = _ask(ws, run)
+    long_answer = "word " * 100
+    run("answer", tid, q, long_answer, "--by", "human:pat", "--json")
+    card = hp.handoffs(ws)[0]
+    assert card["value"] == long_answer  # whole
+    assert len(card["parts"]["question"]) <= hp.PART_MAX + 1
+
+
+# ------------------------------------------------------------------ #386 Won't do: needs the proof
+
+
+def _ticket_with_step(ws, run):
+    code, out, _ = run("ticket", "new", "Plan", "--json", "--by", "agent:x")
+    tid = json.loads(out)["id"]
+    code, out, _ = run("check", "add", tid, "Write the file", "--json", "--by", "agent:x")
+    return tid, json.loads(out)["id"]
+
+
+def test_wont_do_needs_the_proof_and_hands_off_with_plain_parts(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    code, out, err = run(
+        "check", "wont-do", tid, cid, "--reason", "not needed", "--by", "human:pat", "--json"
+    )
+    assert code == 2 and "Continue" in out + err
+    assert not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    card = hp.handoffs(ws)[0]
+    assert (
+        card["op"] == "check.wont_do" and card["target"] == f"{tid}:{cid}" and card["value"] == "not needed"
+    )
+    assert card["parts"] == {"title": "Plan", "step": "Write the file", "n": 1}
+    item = hp.handoff_take(ws, card["id"])
+    code, out, err = _cli(run, monkeypatch, _proof(ws, item["op"], item["target"]), *item["argv"])
+    assert code == 0, out + err
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert step["wont_do"] is True and step["by"] == "human:pat"  # by from the proof
+
+
+def test_wont_do_forged_flag_and_agent_are_refused(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    wrong = _proof(ws, "check.wont_do", f"{tid}:c9")
+    code, *_ = _cli(run, monkeypatch, wrong, "check", "wont-do", tid, cid, "--json")
+    assert code == 2 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    code, *_ = run("check", "wont-do", tid, cid, "--by", "agent:x", "--json")
+    assert code == 2 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+
+
+def test_undoing_a_wont_do_needs_a_proof_but_reopening_a_done_step_stays_free(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    _cli(
+        run, monkeypatch, _proof(ws, "check.wont_do", f"{tid}:{cid}"), "check", "wont-do", tid, cid, "--json"
+    )
+    code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
+    assert code == 2 and tickets.load(ws, tid)["checklist"][0].get("wont_do") is True  # still won't do
+    card = [h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"][0]
+    assert card["parts"] == {"title": "Plan", "step": "Write the file", "n": 1, "action": "reopen"}
+    code, *_ = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "check.wont_do_undo", f"{tid}:{cid}"),
+        "check",
+        "reopen",
+        tid,
+        cid,
+        "--json",
+    )
+    assert code == 0 and not tickets.load(ws, tid)["checklist"][0].get("wont_do")
+    # an ordinary done step reopens as before: no proof, no hand-off
+    code, out, _ = run("check", "add", tid, "Second", "--json", "--by", "agent:x")
+    c2 = json.loads(out)["id"]
+    run("check", "done", tid, c2, "--note", "x", "--json", "--by", "agent:x")
+    code, *_ = run("check", "reopen", tid, c2, "--by", "human:pat", "--json")
+    assert code == 0
+
+
+def test_undo_is_decided_under_the_lock_a_load_error_requires_the_proof_and_a_swap_is_refused(
+    ws, run, monkeypatch
+):
+    tid, cid = _ticket_with_step(ws, run)
+    # a done step: free to reopen, no proof, no hand-off
+    code, out, _ = run("check", "add", tid, "Plain", "--json", "--by", "agent:x")
+    plain = json.loads(out)["id"]
+    run("check", "done", tid, plain, "--note", "x", "--json", "--by", "agent:x")
+    assert run("check", "reopen", tid, plain, "--by", "human:pat", "--json")[0] == 0
+    # the step becomes wont_do BETWEEN anything a caller could have checked and the locked reopen: the locked
+    # operation itself refuses (nothing is decided before the lock)
+    orig = tickets.apply_op
+
+    def become_wont_do_first(root, t, op):
+        if t == tid:
+            tickets.apply_op = orig  # one swap only
+            orig(root, tid, lambda x: x["checklist"][0].update(wont_do=True))
+        return orig(root, t, op)
+
+    monkeypatch.setattr(tickets, "apply_op", become_wont_do_first)
+    code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
+    monkeypatch.setattr(tickets, "apply_op", orig)
+    assert code == 2 and tickets.load(ws, tid)["checklist"][0].get("wont_do") is True
+    assert [h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"]  # asked for the click instead
+    # the library call itself needs the explicit proven flag
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_reopen(ws, tid, cid, "human:pat")
+    assert tickets.check_reopen(ws, tid, cid, "human:pat", proven=True)[1]["id"] == cid
+
+
+def test_a_ticket_that_cannot_be_read_fails_closed_for_the_undo(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    (ws / ".orch" / "tickets" / f"{tid}.json").write_text("{not json")
+    code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
+    assert code == 2 and "proven" not in out  # refused: nothing was reopened without a proof
+
+
+# ---------------------------------------------------------- rename / remove of a Won't do need the proof too
+
+
+def _wont_do_step(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    _cli(
+        run, monkeypatch, _proof(ws, "check.wont_do", f"{tid}:{cid}"), "check", "wont-do", tid, cid, "--json"
+    )
+    assert tickets.load(ws, tid)["checklist"][0]["wont_do"] is True
+    return tid, cid
+
+
+def test_remove_and_rename_of_a_wont_do_need_the_proof_and_hand_off(ws, run, monkeypatch):
+    tid, cid = _wont_do_step(ws, run, monkeypatch)
+    for argv in (("check", "remove", tid, cid), ("check", "edit", tid, cid, "Renamed")):
+        code, out, err = run(*argv, "--by", "human:pat", "--json")
+        assert code == 2 and "Continue" in out + err, argv
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert step["wont_do"] is True and step["text"] == "Write the file"  # nothing changed
+    cards = {h["parts"]["action"]: h for h in hp.handoffs(ws) if h["op"] == "check.wont_do_undo"}
+    assert set(cards) == {"remove", "edit"} and cards["edit"]["value"] == "Renamed"
+    assert cards["remove"]["parts"] == {"title": "Plan", "step": "Write the file", "n": 1, "action": "remove"}
+    # with the proof: it works, and by comes from the proof
+    target = f"{tid}:{cid}"
+    code, *_ = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "check.wont_do_undo", target),
+        "check",
+        "edit",
+        tid,
+        cid,
+        "Renamed",
+        "--json",
+    )
+    assert code == 0 and tickets.load(ws, tid)["checklist"][0]["text"] == "Renamed"
+    code, *_ = _cli(
+        run, monkeypatch, _proof(ws, "check.wont_do_undo", target), "check", "remove", tid, cid, "--json"
+    )
+    assert code == 0 and tickets.load(ws, tid)["checklist"] == []
+
+
+def test_an_agent_cannot_remove_or_rename_a_wont_do_even_with_a_forged_flag(ws, run, monkeypatch):
+    tid, cid = _wont_do_step(ws, run, monkeypatch)
+    for argv in (("check", "remove", tid, cid), ("check", "edit", tid, cid, "X")):
+        assert run(*argv, "--by", "agent:x", "--json")[0] == 2
+    wrong = _proof(ws, "check.wont_do_undo", f"{tid}:c9")
+    assert _cli(run, monkeypatch, wrong, "check", "remove", tid, cid, "--json")[0] == 2
+    assert tickets.load(ws, tid)["checklist"][0]["wont_do"] is True
+
+
+def test_editing_and_removing_an_ordinary_step_stay_free(ws, run):
+    tid, cid = _ticket_with_step(ws, run)
+    assert run("check", "edit", tid, cid, "New text", "--by", "human:pat", "--json")[0] == 0
+    assert run("check", "remove", tid, cid, "--by", "human:pat", "--json")[0] == 0
+    assert hp.handoffs(ws) == []
+
+
+def test_the_library_edit_and_remove_decide_under_the_lock(ws, run, monkeypatch):
+    tid, cid = _wont_do_step(ws, run, monkeypatch)
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_edit(ws, tid, cid, "x", "human:pat")
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_remove(ws, tid, cid, "human:pat")
+    # a step that BECOMES wont_do between a caller's look and the locked operation is refused too
+    t2, c2 = _ticket_with_step(ws, run)
+    orig = tickets.apply_op
+
+    def swap(root, t, op):
+        if t == t2:
+            tickets.apply_op = orig
+            orig(root, t2, lambda x: x["checklist"][0].update(wont_do=True))
+        return orig(root, t, op)
+
+    monkeypatch.setattr(tickets, "apply_op", swap)
+    with pytest.raises(tickets.NeedsProof):
+        tickets.check_remove(ws, t2, c2, "human:pat")
+    monkeypatch.setattr(tickets, "apply_op", orig)
+    assert tickets.load(ws, t2)["checklist"][0]["wont_do"] is True
+
+
+def test_wont_do_cards_show_the_step_number_and_the_connect_card_the_scheme(ws, run):
+    from conftest import turn_on
+
+    tid, cid = _ticket_with_step(ws, run)
+    run("check", "wont-do", tid, cid, "--by", "human:pat", "--json")
+    assert hp.handoffs(ws)[0]["parts"]["n"] == 1
+    turn_on(ws, "relay")
+    run(
+        "relay",
+        "connect",
+        "http://r.example:8080",
+        "--workspace",
+        "w",
+        "--token",
+        "orn_T",
+        "--by",
+        "human:pat",
+        "--json",
+    )
+    card = [h for h in hp.handoffs(ws) if h["op"] == "relay.connect"][0]
+    assert card["parts"] == {"host": "r.example:8080", "scheme": "http"}
+
+
+# ------------------------------------------------------------ notices: reading never clears, only "Got it"
+
+
+def _queue_notice(ws):
+    d = hp.key_dir(ws)
+    at = "2026-11-10T00:00:00Z"
+    nid = hp._notice_id("protection_reset", at, hp.RESET_NOTICE)
+    note = {"id": nid, "kind": "protection_reset", "at": at, "text": hp.RESET_NOTICE}
+    hp._write_private(d / "notices.json", json.dumps([note]))
+    return note["id"]
+
+
+def test_reading_a_notice_never_clears_it_only_the_ack_does(ws):
+    nid = _queue_notice(ws)
+    first, second = hp.read_notices(ws), hp.read_notices(ws)
+    assert (
+        first == second and first[0]["id"] == nid and first[0]["text"] == hp.RESET_NOTICE
+    )  # read twice: there
+    assert hp.ack_notice(ws, "nope") is False and hp.read_notices(ws)
+    assert hp.ack_notice(ws, nid) is True
+    assert hp.read_notices(ws) == []  # acknowledged: gone
+    assert hp.ack_notice(ws, nid) is False
+
+
+def test_the_cli_says_the_notice_once_and_the_page_still_has_it(ws, run, capsys):
+    _queue_notice(ws)
+    code, out, err = run("ticket", "list", "--json")
+    assert code == 0 and hp.RESET_NOTICE in err  # said once, in words, on stderr (stdout stays JSON)
+    json.loads(out)
+    code, out, err = run("ticket", "list", "--json")
+    assert hp.RESET_NOTICE not in err  # not twice
+    assert [n["text"] for n in hp.read_notices(ws)] == [hp.RESET_NOTICE]  # the page still shows it
+
+
+# ------------------------------------------------------------ #425: the core signs a Won't do and its undo
+
+
+def test_a_verifier_without_a_key_vouches_for_nobody(ws, run):
+    tid, cid = _ticket_with_step(ws, run)
+    step = tickets.load(ws, tid)["checklist"][0]
+    assert hp.wont_verifier(ws)({**step, "wont_do": True, "wont_mac": "x"}, tid) is False
+
+
+def _sync_mod():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workspace-addons" / "sync" / "src"))
+    from orch_sync import merge
+
+    return merge
+
+
+def _signed_wont(ws, run, monkeypatch, reason="not needed"):
+    tid, cid = _ticket_with_step(ws, run)
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--reason", reason, "--json")
+    return tid, cid
+
+
+def test_wont_do_is_signed_into_the_ledger_and_the_verifier_accepts_only_the_current_entry(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert step["wont_do"] is True and step["wont_mac"] and step["wont_nonce"] and person(step, tid)
+    assert hp._ledger_read(ws) == {f"{tid}:{cid}": step["wont_mac"]}  # the CURRENT entry
+    # forged `by: human:` without a MAC, a copy on another ticket or step, any changed decision field: no
+    assert not person({**step, "wont_mac": None, "by": "human:Ann"}, tid)
+    assert not person(step, "t_other99") and not person({**step, "id": "c9"}, tid)
+    for field, value in (
+        ("reason", "changed"),
+        ("text", "rewritten"),
+        ("covers", "all of it"),
+        ("wont_nonce", "x"),
+    ):
+        assert not person({**step, field: value}, tid), field
+
+
+def test_a_replayed_older_decision_and_a_reused_id_do_not_verify_but_the_current_ones_do(
+    ws, run, monkeypatch
+):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on1 = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    undo2 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(undo2, tid) and not person(on1, tid)  # the older signed "on" is no longer current
+    proof = _proof(ws, "check.wont_do", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "wont-do", tid, cid, "--json")
+    on3 = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert person(on3, tid) and not person(undo2, tid) and not person(on1, tid)  # old undo / old on: replays
+    # a proven removal tombstones the entry: the old MAC does not verify on a new step that reuses the id
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None
+    assert not hp.wont_verifier(ws)(on3, tid)
+
+
+def test_a_proven_edit_of_a_wont_do_step_re_signs_it_for_the_new_text(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    before = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "edit", tid, cid, "Write the other file", "--json")
+    after = tickets.load(ws, tid)["checklist"][0]
+    person = hp.wont_verifier(ws)
+    assert after["text"] == "Write the other file" and after["wont_do"] is True
+    assert after["wont_mac"] != before["wont_mac"] and person(after, tid)  # re-signed, current
+    assert not person(before, tid)  # the old signed decision (old text) is superseded
+
+
+def test_a_missing_or_damaged_ledger_vouches_for_nobody(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    step = tickets.load(ws, tid)["checklist"][0]
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    assert hp.wont_verifier(ws)(step, tid)
+    hp._write_private(ledger, "{not json")
+    assert not hp.wont_verifier(ws)(step, tid)  # damaged: closed
+    ledger.unlink()
+    assert not hp.wont_verifier(ws)(step, tid)  # missing: nobody was ever signed
+
+
+def test_the_relay_hook_is_decision_scoped(ws, run, monkeypatch):
+    tid, cid = _ticket_with_step(ws, run)
+    hp.human_key(ws)  # (the verifier needs a key to be more than "nobody")
+    step = tickets.load(ws, tid)["checklist"][0]
+    seen = []
+    person = hp.wont_verifier(ws, relay_ok=lambda st, t, decision: seen.append(decision) or False)
+    assert person({**step, "wont_do": True}, tid) is False
+    assert seen and seen[0]["wont_do"] is True and seen[0]["check"] == cid and "text" in seen[0]
+
+
+def test_sync_merge_with_the_real_verifier_end_to_end(ws, run, monkeypatch):
+    merge = _sync_mod()
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    base = tickets.load(ws, tid)
+    person = hp.wont_verifier(ws)
+    old = "2099-01-01T00:00:00Z"
+    now = "2099-01-02T00:00:00Z"
+    rewrite = {
+        **base,
+        "updated_at": old,
+        "checklist": [{**base["checklist"][0], "text": "skip the security review"}],
+    }
+    out = merge.merge_ticket(base, rewrite, base, now, person)
+    step0 = base["checklist"][0]
+    assert (
+        out["checklist"][0]["wont_do"] is True and out["checklist"][0]["text"] == step0["text"]
+    )  # no change
+    changed = {**base, "updated_at": old, "checklist": [{**base["checklist"][0], "reason": "agent was here"}]}
+    out = merge.merge_ticket(base, changed, base, now, person)
+    assert out["checklist"][0]["reason"] == "not needed" and out["checklist"][0]["wont_do"] is True
+    assert (
+        merge.merge_ticket(base, rewrite, base, now)["checklist"][0].get("wont_do") is None
+    )  # no verifier = nobody
+
+
+def test_every_caller_of_merge_ticket_passes_a_verifier():
+    """merge_ticket has no production caller yet; when the sync loop is wired up it MUST pass
+    humanproof.wont_verifier(root) (no verifier = every Won't do is dropped on every sync)."""
+    import ast
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = []
+    for src in list((root / "workspace" / "src").rglob("*.py")) + list(
+        (root / "workspace-addons").glob("*/src/**/*.py")
+    ):
+        if src.name == "merge.py" and "orch_sync" in str(src):
+            continue
+        for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", getattr(node.func, "id", "")) == "merge_ticket"
+            ):
+                if len(node.args) < 5 and not any(k.arg == "person" for k in node.keywords):
+                    offenders.append(f"{src.relative_to(root)}:{node.lineno}")
+    assert not offenders, (
+        "merge_ticket without person= (humanproof.wont_verifier(root)); the caller must also read, merge "
+        "and write under the ticket's apply_op lock (the verifier reads the ledger at each call): "
+        + ", ".join(offenders)
+    )
+
+
+def test_the_signed_fields_are_one_source_of_truth_for_the_signer_and_the_merge():
+    """If the decision record starts to cover another step field, or the merge pins another, this fails: the
+    signer (humanproof.wont_decision / SIGNED_STEP_FIELDS) and orch_sync.merge._SIGNED can not drift apart."""
+    merge = _sync_mod()
+    assert tuple(merge._SIGNED) == tuple(hp.SIGNED_STEP_FIELDS) + ("wont_mac",)
+    step = {
+        "id": "c1", "text": "T", "done": False, "evidence": [], "wont_do": True, "reason": "r", "covers": "c",
+        "wont_nonce": "n", "wont_mac": "m", "by": "human:x", "at": "2026-11-10T00:00:00Z", "state": None,
+    }  # fmt: skip
+    base = hp.wont_decision(step)
+    for field in hp.SIGNED_STEP_FIELDS:  # every signed field moves the record ...
+        assert hp.wont_decision({**step, field: "changed" if field != "wont_do" else False}) != base, field
+    for field, value in (
+        ("evidence", [1]),
+        ("done", True),
+        ("by", "agent:x"),
+        ("at", "x"),
+        ("wont_mac", "other"),
+    ):
+        assert hp.wont_decision({**step, field: value}) == base, field  # ... and nothing else does
+    off = hp.wont_decision({**step, "wont_do": False})
+    assert off["text"] is None and off["covers"] is None and off["reason"] is None  # an undo binds no text
+
+
+def test_a_damaged_ledger_is_never_overwritten_and_the_decision_is_refused(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    hp._write_private(ledger, "{not json")
+    # another step's decision is refused visibly; the damaged file is kept as it is (not wiped with {})
+    code, out, err = run("check", "add", tid, "Second", "--json", "--by", "agent:x")
+    c2 = json.loads(out)["id"]
+    proof = _proof(ws, "check.wont_do", f"{tid}:{c2}")
+    code, out, err = _cli(run, monkeypatch, proof, "check", "wont-do", tid, c2, "--json")
+    assert code == 2 and "damaged" in out + err and "start it again" in out + err
+    assert ledger.read_text() == "{not json"
+    assert not tickets.load(ws, tid)["checklist"][1].get("wont_do")  # nothing half done
+
+
+def test_the_verifier_reads_the_ledger_when_asked_not_at_creation(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    person = hp.wont_verifier(ws)  # created BEFORE the next decision
+    old = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    assert not person(
+        old, tid
+    )  # the ledger moved on after the verifier was made: the old "on" is not current
+
+
+def test_a_proven_remove_tombstones_even_when_the_step_file_lost_its_mac(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on = tickets.load(ws, tid)["checklist"][0]
+    tickets.apply_op(
+        ws, tid, lambda t: [t["checklist"][0].pop(k) for k in ("wont_mac", "wont_nonce")]
+    )  # stripped
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None  # tombstoned from the ledger, not from the step file
+    assert not hp.wont_verifier(ws)(on, tid)

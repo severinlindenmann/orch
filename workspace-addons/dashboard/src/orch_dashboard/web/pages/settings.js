@@ -58,6 +58,27 @@ function workflowCard(settings) {
         settingsText('p', {className:'meta'}, 'Off: agents send finished work to Review and you decide when it is Done.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Agents may mark tickets Done', 'aria-checked':!!settings.agents_may_finish, 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')}))));
 }
+// Separate copies (draft 1f): a copy of the project per ticket so agents do not edit the same files.
+const COPY_CHOICES = [['off', 'Off'], ['together', 'When agents work together'], ['always', 'Every time']];
+function copiesCard(settings) {
+  const mode = COPY_CHOICES.some(c => c[0] === settings.copies) ? settings.copies : 'together', busy = settingsBusy.has('copies');
+  const setup = h('input', {type:'text', className:'input', style:'width:100%;margin-top:6px', maxLength:500, value:settings.copy_setup || '', placeholder:'e.g. npm ci', 'aria-label':'Prepare a copy with', 'data-key':'settings-copy-setup', disabled:snapshot || busy});
+  const cap = h('select', {className:'input', style:'flex:none;width:5.5rem', 'aria-label':'Most copies at once', 'data-key':'settings-copies-max', disabled:snapshot || busy},
+    [1, 2, 3, 4, 5, 6, 8, 10, 20].map(n => h('option', {value:String(n)}, String(n))));
+  cap.value = String(settings.copies_max || 3);
+  return h('div', {className:'stack', 'data-key':'settings-copies'}, h('h2', {className:'set-sub'}, 'Separate copies'),
+    h('div', {className:'card'},
+      h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Separate copies'),
+        settingsText('p', {className:'meta'}, "Give an agent its own copy of the project so agents don't edit the same files."),
+        h('div', {className:'row', style:'flex-wrap:wrap;gap:8px;margin-top:8px', role:'radiogroup', 'aria-label':'Separate copies'}, COPY_CHOICES.map(([id, label]) =>
+          h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:snapshot || busy}, label))))),
+      h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Most copies at once'),
+        settingsText('p', {className:'meta'}, 'When this many exist, the next agent works in your own folder.'), cap)),
+      h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Prepare a copy with'),
+        settingsText('p', {className:'meta'}, 'Runs once in each new copy, e.g. installing packages. Leave empty for nothing.'), setup,
+        h('button', {type:'button', className:'btn sm outline', style:'margin-top:8px', 'data-key':'settings-copy-setup-save', 'data-action':'copies-setup', disabled:snapshot || busy}, 'Save'))),
+      h('p', {className:'meta card-row'}, 'Needs git. Without git you only get the warning line.')));
+}
 function settingsPage() {
   const settings = state.settings;
   const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
@@ -91,7 +112,7 @@ function settingsPage() {
     panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
       h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'}, settingsText('p', {className:'mono'}, settings.folder), h('p', {className:'meta'}, 'Stored on this computer'))))),
-      shareCard(settings), workflowCard(settings)]),
+      shareCard(settings), workflowCard(settings), copiesCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the default. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Default agent'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
       permissionsCard(settings)]),

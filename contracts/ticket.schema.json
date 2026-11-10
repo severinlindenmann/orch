@@ -73,6 +73,26 @@
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
     "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
+    "work": {
+      "type": "object",
+      "description": "Optional. The ticket works in a separate copy of the project (a git worktree made by orch, branch orch/<ticket>), kept for the life of the ticket. A record for people and other machines: it holds NO local path (those stay in the machine-local registry .orch/run/worktrees.json) and no code resolves a path from it. A single-repo workspace has one entry per machine; more repositories add entries.",
+      "properties": {
+        "folders": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["branch"],
+            "properties": {
+              "branch": { "type": "string", "minLength": 1, "maxLength": 200, "description": "The branch the copy works on, orch/<ticket>." },
+              "base": { "type": "string", "pattern": "^[0-9a-f]{40,64}$", "description": "The commit the copy was made from." },
+              "sub": { "type": "string", "maxLength": 1000, "description": "The workspace folder below the git top folder ('' when the workspace is the top)." },
+              "host": { "type": "string", "maxLength": 100, "description": "The machine that made the copy (same value as a session's host)." }
+            }
+          }
+        }
+      }
+    },
     "sessions": {
       "type": "array",
       "maxItems": 32,
@@ -110,13 +130,20 @@
         "done": { "type": "boolean" },
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
         "state": { "const": "doing", "description": "Optional. 'doing' = someone works on this item now (by, at say who and since when). Absent = not started or done (see done)." },
+        "wont_do": { "const": true, "description": "Optional. true = a person decided this step will not be done (\"Won't do\"). It counts as resolved for finishing the ticket, needs no evidence and is never done=true. Set and cleared only by a person; an agent can only ask (a question). Absent = a normal step." },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional, only with wont_do: one plain line, why. Cleared with wont_do." },
+        "wont_nonce": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. A random value fresh for every signed Won't do decision (or its undo); part of what wont_mac covers, so equal decisions get different MACs. See human-proof.md, Synced won't do." },
+        "wont_mac": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The receiving core's own wontdo1 MAC over this step's decision {check, wont_do, reason, text, covers, nonce} (human-proof.md 'Synced won't do'): written when a person's Won't do (or its undo) was made here with a proof. The sync merge keeps a Won't do only when this is also the CURRENT entry of the receiving core's ledger, never by the text of `by`. Informational for every other reader." },
         "by": { "$ref": "#/$defs/who" },
         "at": { "$ref": "#/$defs/time" },
         "covers": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Optional. The part of the ticket's done_when this task covers, quoted in plain words. Used for the 'Done when' coverage line; absent = the task is not linked to a part." }
       },
-      "if": { "properties": { "done": { "const": true } } },
-      "then": { "properties": { "evidence": { "minItems": 1 } } },
-      "description": "Evidence-based: done=true needs at least one evidence entry."
+      "allOf": [
+        { "if": { "properties": { "done": { "const": true } } }, "then": { "properties": { "evidence": { "minItems": 1 } } } },
+        { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } }, "not": { "required": ["state"] } } },
+        { "if": { "required": ["reason"] }, "then": { "required": ["wont_do"] } }
+      ],
+      "description": "Evidence-based: done=true needs at least one evidence entry. wont_do=true (a person's decision) is resolved without evidence and excludes done=true."
     },
     "ref": {
       "type": "object",

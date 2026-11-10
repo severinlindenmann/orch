@@ -233,6 +233,58 @@ test('agent bar shows the hold reason as plain text and hides it when absent', (
   assert.doesNotMatch(bare, /Waiting:/);
 });
 
+test("won't-do tasks render resolved, hide activity and reasons, and reopen", async () => {
+  const calls = [], errors = [];
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k,v){this.attrs[k]=v;}});
+  const t = {id:'t_test', checklist:[{id:'c1', text:'Skip this', done:false, wont_do:true, state:'doing', reason:'No longer needed'}]};
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  c.window.orch.toast = (text) => errors.push(text);
+  vm.runInContext(source.slice(source.indexOf('async function toggleTask'), source.indexOf('function localUrl')), c);
+  vm.runInContext(source.slice(source.indexOf('function taskRows'), source.indexOf('// "+ Add task"')), c);
+  const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
+  let all = c.taskRows(t).flatMap(nodes);
+  assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
+  assert.ok(all.some(n => n.attrs.className === 'chip' && n.children.includes("Won't do")));
+  assert.ok(all.some(n => n.tag === 'details' && !n.attrs.open && JSON.stringify(n).includes('No longer needed')));
+  assert.doesNotMatch(JSON.stringify(all), /ticket-spinner|Not started yet|Working on this task/);
+  assert.equal(t.checklist.filter(helpers.resolved).length, 1);
+  assert.equal(helpers.outcome(t.checklist[0]), '');
+  assert.equal(helpers.historyLine({text:"Marked c1 as won't do"}, t.checklist), "Marked as won't do: Skip this");
+  assert.equal(c.ticketHistoryIsTechnical({kind:'check', text:"Marked c1 as won't do"}), false);
+  await all.find(n => n.attrs['data-key'] === 'task-check-c1').onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['check.reopen',{ticket:t.id,check:'c1'}]));
+  await all.find(n => n.tag === 'form').onsubmit({preventDefault(){}});
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['check.reopen',{ticket:t.id,check:'c1'}]));
+  t.checklist[0] = {id:'c1',text:'Try this',done:false};
+  all = c.taskRows(t).flatMap(nodes);
+  const form = all.find(n => n.tag === 'form'), input = all.find(n => n.tag === 'input');
+  assert.equal(form.hidden, true);
+  all.find(n => n.attrs['aria-label'] === 'More').onclick();
+  assert.equal(form.hidden, false);
+  assert.equal(input.attrs.maxlength, 200);
+  input.value = 'Changed plans';
+  await form.onsubmit({preventDefault(){}});
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['check.wont_do',{ticket:t.id,check:'c1',reason:'Changed plans'}]));
+  c.act = async () => ({ok:false,text:'Failed'});
+  await form.onsubmit({preventDefault(){}});
+  assert.deepEqual(errors, ['Failed']);
+  c.snapshot = true;
+  t.checklist[0].wont_do = true;
+  all = c.taskRows(t).flatMap(nodes);
+  assert.ok(!all.some(n => n.tag === 'button' || n.tag === 'form'));
+  assert.ok(all.some(n => n.children.includes('–')));
+});
+
+
+test('shared folder line is one quiet text line from the core, absent when none', () => {
+  const c = context({state:{runs:{t1:{running:true, shared_folder:{line:'"Fix login form" is also changing this folder.'}}, t2:{running:true}}}, clean:v => String(v ?? '')});
+  vm.runInContext(source.slice(source.indexOf('function sharedFolderLine(t)'), source.indexOf('const surface =')), c);
+  const on = JSON.stringify(c.sharedFolderLine({id:'t1'}));
+  assert.match(on, /Fix login form\\" is also changing this folder\./);
+  assert.doesNotMatch(on, /banner|danger|warn/);
+  assert.equal(c.sharedFolderLine({id:'t2'}), null);
+  assert.equal(c.sharedFolderLine({id:'nope'}), null);
+});
 test('plan-first waiting card answers and edits only unstarted steps', async () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
@@ -315,4 +367,21 @@ test('plan step dialogs rename with a revision and add under the parent', async 
   d.children[0].value = 'New step';
   await actions.children[0].onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.new', {title:'New step', parent:'parent'}]));
+});
+
+test('a parent lists its steps in creation order, whatever order the ticket list arrives in (every width)', () => {
+  const parent = {id:'t_p', key:'WS-1', title:'Plan'};
+  const mk = (id, key, title, status) => ({id, key, title, status, parent:'t_p', created_at:'2026-11-09T10:00:00Z'});
+  const zebra = mk('t_z', 'WS-2', 'Zebra', 'done'), alpha = mk('t_a', 'WS-3', 'Alpha', 'active'), middle = mk('t_m', 'WS-4', 'Middle', 'open');
+  const titles = list => helpers.childrenOf(list, parent).map(c => c.title).join(',');
+  // the ticket list is sorted differently at different widths (by title, by status): the steps must not follow it
+  for (const list of [[parent, alpha, zebra, middle], [parent, zebra, middle, alpha], [middle, alpha, parent, zebra]]) {
+    assert.equal(titles(list), 'Zebra,Alpha,Middle');
+  }
+  const c = context({card:(key, title, suffix, kids) => ({kids}), emptyRow:x => x, statusChip:() => null, href:id => '#' + id, clean:v => String(v)});
+  const shown = list => JSON.stringify(c.ticketParts(parent, helpers.childrenOf(list, parent)));
+  const order = json => ['Zebra', 'Alpha', 'Middle'].map(w => json.indexOf(w));
+  assert.deepEqual(order(shown([parent, alpha, zebra, middle])), order(shown([parent, middle, zebra, alpha])));
+  const ordered = order(shown([parent, alpha, zebra, middle]));
+  assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
 });

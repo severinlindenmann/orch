@@ -338,6 +338,26 @@ def _write(root: Path, ticket: dict) -> None:
 NO_WRITE = object()  # an op returns this when it changed nothing
 
 
+def _wont_view(ticket: dict) -> list:
+    """The Won't do state of every step (id, flag, reason, who, when): what only a person may change."""
+    return [
+        (
+            c.get("id"),
+            c.get("wont_do"),
+            c.get("reason"),
+            c.get("by") if c.get("wont_do") else None,
+            c.get("at") if c.get("wont_do") else None,
+        )
+        for c in ticket.get("checklist") or []
+        if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
+    ]
+
+
+def _is_person(by: str) -> bool:
+    """The ONE person check for Won't do: a human actor and no agent tool in the environment."""
+    return by.startswith("human:") and not agent_tool()
+
+
 def apply_op(
     root: Path, tid: str, fn, *, expect: tuple[str, object] | None = None, if_revision: int | None = None
 ):
@@ -354,7 +374,11 @@ def apply_op(
             parent, _, leaf = expect[0].rpartition(".")
             raise _conflict(ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
         was_review = ticket.get("status") == "review"
+        wont_before = _wont_view(ticket)
         result = fn(ticket)
+        if agent_tool() and _wont_view(ticket) != wont_before:
+            # the one structural guard: no write path run by an agent changes a person's Won't do decision
+            raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
         if was_review and ticket.get("status") != "review":
@@ -500,6 +524,8 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
         return "Added a task" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
         return "Finished a task" + task(m.group(1))
+    if m := re.fullmatch(r"Marked (c\d+) as won't do", t):
+        return "Marked as won't do" + task(m.group(1))
     if m := re.fullmatch(r"Set ext\.([a-z][a-z0-9-]*)", t):
         return f"Updated {addon(m.group(1))} settings"
     if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
@@ -606,7 +632,25 @@ def create(
 
 def checks_done(ticket: dict) -> tuple[int, int]:
     c = ticket.get("checklist", [])
-    return sum(1 for x in c if x.get("done")), len(c)
+    return sum(1 for x in c if x.get("done") or x.get("wont_do")), len(c)
+
+
+def checks_split(ticket: dict) -> tuple[int, int, int]:
+    """(done with proof, won't do, total): a ticket's steps, declined ones counted apart."""
+    c = ticket.get("checklist", [])
+    return (
+        sum(1 for x in c if x.get("done")),
+        sum(1 for x in c if x.get("wont_do") and not x.get("done")),
+        len(c),
+    )
+
+
+def progress_text(ticket: dict) -> str:
+    """'2 of 4 done', or '3 done, 1 won't do' when steps were declined: never '4 of 4' for work not done."""
+    done, wont, total = checks_split(ticket)
+    if not total:
+        return ""
+    return f"{done} done, {wont} won't do" if wont else f"{done} of {total} done"
 
 
 def _latest(evs: list[dict], key: str) -> dict | None:
@@ -713,10 +757,10 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
 
 
 def _check_can_finish(ticket: dict) -> None:
-    open_ = [c["id"] for c in ticket["checklist"] if not c.get("done")]
+    open_ = [c["id"] for c in ticket["checklist"] if not c.get("done") and not c.get("wont_do")]
     if open_:
         raise Refused(f"Not done: {', '.join(open_)} is not checked yet.")
-    bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence")]
+    bad = [c["id"] for c in ticket["checklist"] if not c.get("evidence") and not c.get("wont_do")]
     if bad:
         raise Refused(f"Not done: {', '.join(bad)} is checked without evidence.")
 
@@ -1298,6 +1342,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
 
     def op(t):
         item = _item(t, cid)
+        _refuse_if_wont_do(item, tid, cid)
         for ev in evs:
             ev.setdefault("by", by)
             ev.setdefault("at", now())
@@ -1305,6 +1350,67 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
         item["done"] = True
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
+        return item
+
+    return apply_op(root, tid, op)
+
+
+WONT_DO_AGENT = (
+    "Only a person marks a step as won't do. Ask them: orch ask {tid} \"Mark step {cid} as won't do?\" "
+    "--option yes --option no --check {cid}"
+)
+
+
+def _refuse_if_wont_do(item: dict, tid: str, cid: str) -> None:
+    if item.get("wont_do"):
+        raise Refused(f"{cid} was marked won't do by a person. Only a person opens it again.")
+
+
+def _person_only(by: str, item: dict, tid: str, cid: str) -> None:
+    """A step marked Won't do is a person's decision: only a person edits, removes or reopens it."""
+    if item.get("wont_do") and not _is_person(by):
+        _refuse_if_wont_do(item, tid, cid)
+
+
+def _sign_wont(root: Path, tid: str, item: dict) -> None:
+    """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
+    a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
+    step as an agent's, which is the safe side)."""
+    from orch import humanproof
+
+    item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
+    mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
+    if mac:
+        item["wont_mac"] = mac
+    else:
+        item.pop("wont_mac", None)
+        item.pop("wont_nonce", None)  # (no usable key: unsigned, so the sync treats it as an agent's)
+
+
+def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
+    """A person decides a step will not be done. Person only, enforced here like accept_review: `by` must be
+    human: and no agent tool may be in the environment; an agent can only ask (orch ask ...). The step stays
+    done=false (it is not done), counts as resolved and needs no proof. Calling again changes the reason."""
+    if not _is_person(by):
+        raise Refused(WONT_DO_AGENT.format(tid=tid, cid=cid))
+    why = " ".join((reason or "").split())
+    if len(why) > 200 or (why and not why.isprintable()):
+        raise Refused("The reason is one line of at most 200 characters.")
+
+    def op(t):
+        item = _item(t, cid)
+        if item.get("done"):
+            raise Refused(f"{cid} is already done. Open it again first.")
+        item["evidence"] = []
+        _clear_doing(item)
+        item["wont_do"] = True
+        if why:
+            item["reason"] = why
+        else:
+            item.pop("reason", None)
+        item.update({"by": by, "at": now()})
+        _sign_wont(root, tid, item)
+        add_history(t, by, f"Marked {cid} as won't do")
         return item
 
     return apply_op(root, tid, op)
@@ -1370,6 +1476,18 @@ def check_exists(root: Path, tid: str, cid: str) -> None:
     _item(load(root, tid), cid)
 
 
+class NeedsProof(Refused):
+    """A person's decision (undoing a Won't do) was asked for without the person's proof (H1)."""
+
+
+def _undo_guard(by: str, item: dict, tid: str, cid: str, proven: bool) -> None:
+    """Changing a Won't do step (rename, remove, reopen) is a person's decision and needs the person's proof
+    (H1). Called under the ticket lock on the ticket as it is now."""
+    _person_only(by, item, tid, cid)  # an agent is refused with its own words
+    if not proven:
+        raise NeedsProof("Changing a Won't do is a person's decision.")
+
+
 def check_edit(
     root: Path,
     tid: str,
@@ -1379,6 +1497,7 @@ def check_edit(
     if_revision: int | None = None,
     was: str | None = None,
     covers: str | None = None,
+    proven: bool = False,
 ) -> tuple[dict, dict]:
     if text is None and covers is None:
         raise Refused("Say the new text or --covers.")
@@ -1388,6 +1507,10 @@ def check_edit(
 
     def op(t):
         item = _item(t, cid)
+        if item.get("wont_do"):
+            _undo_guard(by, item, tid, cid, proven)
+        else:
+            _person_only(by, item, tid, cid)
         if text is not None:
             item["text"] = text.strip()
             add_history(t, by, f"Renamed {cid}")
@@ -1395,6 +1518,10 @@ def check_edit(
             item["covers"] = covers
             if text is None:
                 add_history(t, by, f"Linked {cid} to Done when")
+        if item.get("wont_do"):
+            _sign_wont(
+                root, tid, item
+            )  # a proven edit of a Won't do step re-signs it for the new text/covers
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
@@ -1416,11 +1543,19 @@ def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dic
     return apply_op(root, tid, op)
 
 
-def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
-    """Always allowed. The history line keeps the step text and its proof."""
+def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
+    """Allowed, except a Won't do step: that is a person's decision and needs the person's proof (decided
+    under the lock). The history line keeps the step text and its proof."""
 
     def op(t):
         item = _item(t, cid)
+        if item.get("wont_do"):
+            _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
+        from orch import humanproof
+
+        humanproof.wont_forget(
+            root, tid, cid
+        )  # tombstone (whatever the file says): no old MAC on a reused id
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
@@ -1432,11 +1567,24 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     return apply_op(root, tid, op)
 
 
-def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
-    """Open again; the old proof stays in the history line."""
+def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
+    """Open again; the old proof stays in the history line. A Won't do step is a person's decision: only a
+    person undoes it, and (H1) only with the person's proof: `proven` is True only when the caller verified a
+    proof for this step. Decided HERE, under the ticket lock, on the ticket as it is now (no check-then-act
+    gap, and a ticket that cannot be read refuses)."""
 
     def op(t):
         item = _item(t, cid)
+        if item.get("wont_do"):
+            _undo_guard(by, item, tid, cid, proven)
+            for k in ("wont_do", "reason"):
+                item.pop(k, None)
+            _clear_doing(item)
+            _sign_wont(
+                root, tid, item
+            )  # the person's undo, signed: a synced copy may drop wont_do only with it
+            add_history(t, by, f"Reopened {cid}")
+            return item
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         item["done"] = False
         item["evidence"] = []
@@ -1454,6 +1602,7 @@ def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         item = _item(t, cid)
         if item.get("done"):
             raise Refused(f"{cid} is already done. Reopen it first: orch check reopen {tid} {cid}")
+        _refuse_if_wont_do(item, tid, cid)
         for c in t["checklist"]:
             _clear_doing(c)
         item.update({"state": "doing", "by": by, "at": now()})

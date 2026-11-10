@@ -78,7 +78,7 @@ function ticketNext(t) {
       if (!result.ok) window.orch.toast(changeError(result), 'error');
     });
   } else if (status === 'active') {
-    const task = array(t.checklist).find(task => !task.done);
+    const task = array(t.checklist).find(task => !window.DashHelpers.resolved(task));
     text = task?.text || task?.title || '';
   }
   return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, 'Next step: ' + clean(text)) : null, action) : null;
@@ -101,7 +101,7 @@ function treeBranch(rows, index) {
     h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), ticketNext(t),
       row.children ? h('p', {className:'meta'}, row.done + ' of ' + row.children + ' steps done') : null,
       row.parentMissing ? parentLine(t) : null),
-    h('div', {className:'row ticket-meta'}, ticketAttentionChip(t), tasks.length ? h('span', {className:'meta'}, tasks.filter(task => task.done).length + '/' + tasks.length) : null,
+    h('div', {className:'row ticket-meta'}, ticketAttentionChip(t), tasks.length ? h('span', {className:'meta'}, tasks.filter(window.DashHelpers.resolved).length + '/' + tasks.length) : null,
       name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null,
       t.due ? h('span', {className:'meta'}, date(t.due)) : null, ticketMenu(t, 'tree')));
   node.style.marginLeft = Math.min(row.depth, 6) * 20 + 'px';
@@ -113,7 +113,7 @@ const boardMore = new Set();
 const viewToggle = () => h('div', {className:'board-tools row', 'data-key':'board-tools'},
   h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 function boardCard(t, nested = false) {
-  const tasks = array(t.checklist), done = tasks.filter(task => task.done).length;
+  const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = boardChildren(tickets(), t);
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
     h('div', {className:'row'}, h('span', {className:'mono key grow'}, typeof t.key === 'string' ? t.key : ''),

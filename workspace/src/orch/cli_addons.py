@@ -41,6 +41,8 @@ def dispatch(args, root: Path) -> bool:
             or "No add-ons are installed. Turn one on with: orch addon add <name>",
         )
     elif sub == "add":
+        if not args.project_only and (addons._is_path(args.name) or args.name not in addons.CORE_ADDONS):
+            addons.tool_env_change_ok()  # first, before any snapshot or hand-off: a click cannot fix this
         if addons._is_path(args.name) and not addons._local_add_ok():
             # code from a folder runs inside orch itself: only a person's click (proof) may allow it (H1)
             # Snapshot the folder NOW (request time): the card shows the path and a short content hash, the
@@ -59,8 +61,8 @@ def dispatch(args, root: Path) -> bool:
                 "addon.add_local",
                 info["hash"],
                 argv=queued,
-                label=f"Add the add-on from {info['path']} (version {info['short']}) "
-                "\u2014 it runs inside orch",
+                parts={"path": humanproof.tail(info["path"]), "short": humanproof.part(info["short"])},
+                exact=info["path"],
             )
             if not who.startswith("human:"):
                 raise Refused(humanproof.AGENT_REFUSED)
@@ -74,6 +76,7 @@ def dispatch(args, root: Path) -> bool:
         addons.remove(root, args.name, args.purge)
         _out(args, {"ok": True}, f"{args.name} is turned off in this workspace.")
     else:
+        addons.tool_env_change_ok()
         addons.uninstall(root, args.name)
         _out(args, {"ok": True}, f"{args.name} is removed from this computer.")
     return True

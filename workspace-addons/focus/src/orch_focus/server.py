@@ -418,7 +418,7 @@ class Tracker:
             "hold": " ".join(str(status["hold"]).split())[:200] if running and isinstance(status.get("hold"), str) else "",
             "board": board,
             "events": for_display(events[-60:]),
-            "done": sum(1 for c in checks if c.get("done")),
+            "done": sum(1 for c in checks if c.get("done") or c.get("wont_do")),
             "total": len(checks),
         }  # fmt: skip
 

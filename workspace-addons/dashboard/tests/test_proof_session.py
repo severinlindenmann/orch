@@ -189,12 +189,12 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer mints
 
 
-def test_one_time_notice_is_shown_once_with_the_core_text_and_only_to_a_session(live):
+def test_a_notice_is_read_not_consumed_and_only_the_ack_of_a_session_clears_it(live):
     root, port = live
+    nid = hp._notice_id("protection_reset", "x", hp.RESET_NOTICE)
     d = hp.key_dir(root)
-    hp._write_private(
-        d / "notices.json", json.dumps([{"kind": "protection_reset", "at": "x", "text": hp.RESET_NOTICE}])
-    )
+    note = {"id": nid, "kind": "protection_reset", "at": "x", "text": hp.RESET_NOTICE}
+    hp._write_private(d / "notices.json", json.dumps([note]))
 
     def get(cookie=None):
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -202,11 +202,14 @@ def test_one_time_notice_is_shown_once_with_the_core_text_and_only_to_a_session(
         c.request("GET", "/api/notices", headers=h)
         return json.loads(c.getresponse().read())
 
-    assert get() == []  # a curl without a session does not consume it
+    assert get() == []  # a curl without a session sees nothing
     ck = session(root, port)
-    first = get(ck)
-    assert first and first[0]["text"] == hp.RESET_NOTICE[:600]
-    assert get(ck) == []  # once
+    assert get(ck)[0]["text"] == hp.RESET_NOTICE[:600] and get(ck)[0]["id"] == nid
+    assert get(ck)  # read twice: still there (the launch reload must not lose it)
+    ack = {"op": "notice.ack", "args": {"id": nid}}
+    assert post(port, "/api/act", ack)[0] == 403 and get(ck)  # no session: the notice stays
+    assert post(port, "/api/act", ack, {"Cookie": ck})[0] == 200
+    assert get(ck) == []  # acknowledged: gone
 
 
 def test_dismiss_needs_a_session(live):
@@ -320,3 +323,57 @@ def test_update_result_is_shown_to_a_session_once(live):
     ck = session(root, port)
     assert get(ck) == {"state": "failed", "reason": "The server said no."}
     assert get(ck) == {}  # once
+
+
+def test_the_listing_sends_structured_parts_and_the_exact_value_never_a_sentence_or_the_command(live):
+    root, port = live
+    hp.request_handoff(
+        root,
+        "ticket.answer",
+        "t_a:q1",
+        "",
+        "Blue {value}",
+        argv=["answer", "t_a", "q1", "--", "Blue {value}"],
+        parts={"title": "T {value}", "question": "Which"},
+    )
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
+    item = json.loads(c.getresponse().read())[0]
+    assert item["parts"] == {"title": "T {value}", "question": "Which"} and item["value"] == "Blue {value}"
+    assert item["exact"] == ""
+    assert "argv" not in item and "label" not in item
+
+
+def test_the_listing_carries_the_full_exact_target_for_a_long_host(live):
+    root, port = live
+    host = ".".join(["a" * 50] * 4) + ".example"
+    hp.request_handoff(
+        root, "relay.connect", host, "", "", argv=["relay", "connect", f"https://{host}", "--workspace", "w"],
+        parts={"host": host}, exact=host,
+    )  # fmt: skip
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/api/handoffs", headers={"Host": f"127.0.0.1:{port}"})
+    item = json.loads(c.getresponse().read())[0]
+    assert item["exact"] == host and item["parts"]["host"] == host and len(host) > 120
+
+
+def test_wont_do_clicks_need_a_proof_on_the_real_server_path():
+    from orch_dashboard import actions as a
+
+    assert a.proof_for("check.wont_do", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do", "t_a:c1")
+    assert a.proof_for("check.reopen", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do_undo", "t_a:c1")
+    assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": False}) == (
+        "check.wont_do_undo",
+        "t_a:c1",
+    )
+    assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": True}) is None
+
+
+def test_check_edit_and_remove_clicks_need_a_proof_on_the_real_server_path():
+    from orch_dashboard import actions as a
+
+    args = {"ticket": "t_abcdef", "check": "c1"}
+    assert a.proof_for("check.edit", {**args, "text": "x"}) == ("check.wont_do_undo", "t_abcdef:c1")
+    assert a.proof_for("check.remove", args) == ("check.wont_do_undo", "t_abcdef:c1")
+    assert a.build_argv("check.remove", args)[:4] == ["check", "remove", "t_abcdef", "c1"]
+    assert a.build_argv("check.edit", {**args, "text": "a -- b"})[-2:] == ["--", "a -- b"]

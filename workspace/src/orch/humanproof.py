@@ -44,6 +44,10 @@ MSG_LINKED_HOME = (
     "orch's folder in your account is a link to somewhere else, so orch won't trust it. "
     "Move the real folder back to {path}."
 )
+MSG_ENV_CHANGE = (
+    "orch is set up to use a different orch folder than your account's, so it will not change its own "
+    "install from here. Start orch normally (without ORCH_HOME) to update it or add things."
+)
 MSG_TEST_WS = "This is a test workspace; start it with its own test orch folder."
 MSG_TEST_INSTALL = "This is a test install of orch; it only works in test folders."
 
@@ -766,6 +770,25 @@ def record_set(root: Path, setting: str, value, by: str) -> None:
     _settings_write(root, setting, value, by)
 
 
+def conn_grants(root: Path) -> dict:
+    """conn.allow grants recorded with a proof, by connection name ("*" or a list of actions). Unreadable
+    record or home = no grants (fail closed)."""
+    try:
+        path, wkey = _settings_path(root)
+        data = _settings_load(root, path)
+    except (Refused, OSError):
+        return {}
+    out = {}
+    for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
+        if not (key.startswith("conn.allow.") and isinstance(rec, dict)):
+            continue
+        val = rec.get("value")
+        # only "*" or a list of action names is a grant; a tombstone (False) or any other type is none
+        if val == "*" or (isinstance(val, list) and all(isinstance(a, str) for a in val)):
+            out[key[len("conn.allow.") :]] = val
+    return out
+
+
 def effective(root: Path, setting: str, file_value: bool) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
@@ -856,7 +879,11 @@ def reset_protection(root: Path, reason: str) -> None:
             except (FileNotFoundError, LooseFile, ValueError):
                 notes = []
             if not any(isinstance(n, dict) and n.get("kind") == "protection_reset" for n in notes):
-                notes.append({"kind": "protection_reset", "at": _now(), "text": RESET_NOTICE})
+                at = _now()
+                notes.append(
+                    {"id": _notice_id("protection_reset", at, RESET_NOTICE), "kind": "protection_reset",
+                     "at": at, "text": RESET_NOTICE}
+                )  # fmt: skip
                 _write_private(nf, json.dumps(notes))
 
 
@@ -899,6 +926,75 @@ def _reset_settings(root: Path, home: Path) -> None:
     _write_private(
         path, json.dumps({"schema": "orch.human-settings/1", "workspaces": out}, indent=2, sort_keys=True)
     )
+
+
+def _notice_id(kind: str, at: str, text: str) -> str:
+    return hashlib.sha256(f"{kind}|{at}|{text}".encode()).hexdigest()[:12]
+
+
+def _notices_load(root: Path) -> tuple[Path, list[dict]]:
+    nf = key_dir(root, create=False) / "notices.json"
+    notes = json.loads(_read_guarded(nf))
+    return nf, [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+
+
+def read_notices(root: Path) -> list[dict]:
+    """The notices for the person (dashboard). Reading NEVER clears them: only the person's "Got it"
+    (ack_notice) does, so a page that is reloaded or left before it showed the notice loses nothing."""
+    try:
+        _, notes = _notices_load(root)
+    except (OSError, ValueError, Refused):
+        return []
+    return [
+        {
+            "id": n.get("id") or _notice_id(str(n.get("kind")), str(n.get("at")), str(n.get("text"))),
+            "kind": str(n.get("kind"))[:40],
+            "text": str(n.get("text"))[:600],
+        }
+        for n in notes
+    ]
+
+
+def ack_notice(root: Path, nid: str) -> bool:
+    """The person pressed "Got it": remove that notice (session-only on the page)."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            nf, notes = _notices_load(root)
+            keep = [
+                n
+                for n in notes
+                if (n.get("id") or _notice_id(str(n.get("kind")), str(n.get("at")), str(n.get("text"))))
+                != nid
+            ]
+            if len(keep) == len(notes):
+                return False
+            if keep:
+                _write_private(nf, json.dumps(keep))
+            else:
+                with contextlib.suppress(OSError):
+                    nf.unlink()
+            return True
+    except (OSError, ValueError, Refused):
+        return False
+
+
+def cli_notices(root: Path) -> list[str]:
+    """The texts of notices the CLI has not shown yet, each marked shown (cli_shown) so a command says it
+    ONCE. The notice itself stays for the page until "Got it"."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            nf, notes = _notices_load(root)
+            fresh = [n for n in notes if not n.get("cli_shown")]
+            if not fresh:
+                return []
+            for n in fresh:
+                n["cli_shown"] = True
+            _write_private(nf, json.dumps(notes))
+            return [str(n.get("text"))[:600] for n in fresh]
+    except (OSError, ValueError, Refused):
+        return []
 
 
 def take_notices(root: Path) -> list[dict]:
@@ -980,14 +1076,150 @@ def unconsume(root: Path, ids: list[str]) -> None:
 # ------------------------------------------------------------------------------------------- won't do
 
 
-def wontdo_mac(key: bytes, workspace: str, item: dict) -> str:
-    return _b64u(hmac.new(key, f"wontdo1.{workspace}.{_canon(item)}".encode(), hashlib.sha256).digest())
+def wontdo_mac(key: bytes, workspace: str, ticket: str, decision: dict) -> str:
+    """wontdo1.<workspace id>.<ticket id>.<canonical decision {check, wont_do, reason, text, covers, nonce}>:
+    binds WHERE the decision belongs (another ticket or step) and WHAT it is about (the step's text and
+    covers); the nonce makes equal decisions differ. An undo is the same record with wont_do false and
+    reason null. FRESHNESS comes from the ledger (see below), not from the MAC."""
+    return _b64u(
+        hmac.new(key, f"wontdo1.{workspace}.{ticket}.{_canon(decision)}".encode(), hashlib.sha256).digest()
+    )
 
 
-def wontdo_is_human(key: bytes, workspace: str, item: dict, mac, relay_authenticated_sender: bool) -> bool:
+def wontdo_is_human(
+    key: bytes, workspace: str, ticket: str, decision: dict, mac, relay_authenticated_sender: bool
+) -> bool:
     if relay_authenticated_sender:
         return True
-    return isinstance(mac, str) and bool(mac) and hmac.compare_digest(mac, wontdo_mac(key, workspace, item))
+    return (
+        isinstance(mac, str)
+        and bool(mac)
+        and hmac.compare_digest(mac, wontdo_mac(key, workspace, ticket, decision))
+    )
+
+
+# The step fields the signed decision record is built from. ONE source of truth: wont_decision() reads exactly
+# these, and the sync merge pins exactly these (+ the MAC itself) while a verified decision is held
+# (orch_sync.merge._SIGNED; a test fails if the two drift apart).
+SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce")
+
+
+def wont_decision(step: dict) -> dict:
+    """The step's decision record, the thing the MAC covers: which step, the decision and its reason, a random
+    `nonce` (equal decisions get different MACs) and, ONLY for an "on" record, WHAT the person decided about
+    (the step's text and `covers`: rewriting the step needs the person again). An undo record carries no text
+    or covers, so a later rename of the reopened step cannot make the undo stop verifying."""
+    on = step.get("wont_do") is True
+    return {
+        "check": step.get("id"),
+        "wont_do": on,
+        "reason": (step.get("reason") if on else None),
+        "text": (step.get("text") if on else None),
+        "covers": (step.get("covers") if on else None),
+        "nonce": step.get("wont_nonce"),
+    }
+
+
+# The LEDGER (guarded home, next to human.key): keys/<ws>/wont.json holds, per "<ticket>:<check>", the CURRENT
+# wontdo1 MAC of that step's decision (null = tombstone, the step was removed). A MAC is accepted only when it
+# IS the current entry, so replaying an older signed "on" or "undo", or reusing the id of a removed step, does
+# not verify. A missing, loose or damaged ledger vouches for nobody (fail closed).
+LEDGER = "wont.json"
+
+
+LEDGER_DAMAGED = (
+    "orch's record of your Won't do decisions is damaged, so this was not saved. Nothing was changed. "
+    "Close orch and start it again; orch then resets its protection and you can decide again."
+)
+
+
+def _ledger_read(root: Path) -> dict | None:
+    """The ledger entries: {} when there is none yet, None when it cannot be trusted (damaged or loose)."""
+    try:
+        d = key_dir(root, create=False)
+        data = _read_json(root, d / LEDGER, {"entries": {}})
+    except (Refused, OSError):
+        return None
+    ent = data.get("entries") if isinstance(data, dict) else None
+    return ent if isinstance(ent, dict) else None
+
+
+def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
+    """Make `mac` the current entry. A damaged ledger is NEVER overwritten (that would wipe every other
+    entry): returns False and keeps the file."""
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            ent = _ledger_read(root)
+            if ent is None:
+                return False
+            ent[f"{ticket}:{check}"] = mac
+            _write_private(d / LEDGER, json.dumps({"schema": "orch.wont-ledger/1", "entries": ent}))
+        return True
+    except (Refused, OSError):
+        return False
+
+
+def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
+    """The receiving core's own wontdo1 MAC for this step's decision, recorded as the CURRENT entry of the
+    ledger (None when there is no usable key or ledger). The step must already carry a fresh `wont_nonce`."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws or not isinstance(step.get("wont_nonce"), str):
+            return None
+        mac = wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
+    except (Refused, OSError):
+        return None
+    if not _ledger_set(root, ticket, str(step.get("id")), mac):
+        raise Refused(LEDGER_DAMAGED)  # visible: the decision is not saved half-signed
+    return mac
+
+
+def wont_forget(root: Path, ticket: str, check: str) -> None:
+    """A step was removed (a proven removal): tombstone its ledger entry (whatever the step file still says),
+    so no old MAC verifies on a new step that reuses the id. Nothing to do when the ledger has no entry for
+    it; a damaged ledger is left as it is (it vouches for nobody anyway)."""
+    ent = _ledger_read(root)
+    if ent and ent.get(f"{ticket}:{check}") is not None:
+        _ledger_set(root, ticket, check, None)
+
+
+def wont_verifier(root: Path, relay_ok=None):
+    """`person(step, ticket_id) -> bool` for the sync merge: True only for a decision whose MAC is valid for
+    the step's content AND is the CURRENT ledger entry for that step (or one the relay client recorded from an
+    authenticated sender: `relay_ok(step, ticket_id, decision)` must compare the FULL decision record against
+    what the relay recorded, never "this step was touched by a relay sender"). The ledger is read at each
+    call, so the sync caller must read, merge and write under the ticket's apply_op lock (the ledger cannot
+    move between the merge and the write). The text `by: human:` is never
+    looked at. Fails closed: no key, no workspace id, no readable ledger = nobody."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        key = human_key(root, create=False)
+    except (Refused, OSError):
+        return lambda step, ticket: False
+    if not ws:
+        return lambda step, ticket: False
+
+    def person(step, ticket) -> bool:
+        if not isinstance(step, dict) or not isinstance(ticket, str):
+            return False
+        decision = wont_decision(step)
+        if relay_ok and relay_ok(step, ticket, decision):
+            return True
+        ledger = _ledger_read(root)  # read at the moment of asking, never a snapshot taken earlier
+        if ledger is None:
+            return False  # damaged / loose: nobody
+        mac = step.get("wont_mac")
+        current = ledger.get(f"{ticket}:{step.get('id')}")
+        if not isinstance(mac, str) or not mac or not isinstance(current, str):
+            return False
+        return hmac.compare_digest(mac, current) and wontdo_is_human(key, ws, ticket, decision, mac, False)
+
+    return person
 
 
 def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:
@@ -1073,6 +1305,8 @@ HANDOFF_HEADS = {
     "update": (("update",),),
     "addon.add_local": (("addon", "add"),),
     "chat.send": (("chat", "say"), ("chat", "send")),
+    "check.wont_do": (("check", "wont-do"),),
+    "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
     "chat.make_ticket": (("chat", "make-ticket"),),
 }
 
@@ -1108,6 +1342,115 @@ def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
         return "a ticket"
 
 
+PART_MAX = 120
+
+
+def part(text) -> str:
+    """One untrusted fragment (a title, a question, a task, a path) for the card: one line, quotes normalised
+    so it cannot fake the quotes around it, at most 120 characters with an ellipsis. The page shows it as
+    plain text in its own element; `{value}` and the like stay literal."""
+    t = " ".join(str(text if text is not None else "").split())
+    t = t.translate({ord(c): "'" for c in '"\u201c\u201d\u201e\u2033\u00ab\u00bb'})
+    return t[:PART_MAX] + "\u2026" if len(t) > PART_MAX else t
+
+
+def tail(text, n: int = 60) -> str:
+    """A long path for the sentence: its END ("\u2026/real/folder"), never its head. The full value is
+    always in the card's exact block."""
+    t = " ".join(str(text if text is not None else "").split())
+    return t if len(t) <= n else "\u2026" + t[-n:]
+
+
+NO_USERINFO = "This address contains a name or password. Use just the server address."
+
+
+def server_address(url: str) -> str:
+    """hostname[:port] of a server URL, built from urlsplit; a URL with userinfo (user@ / user:pass@) is
+    refused, so what the card shows is what is connected to."""
+    from urllib.parse import urlsplit
+
+    try:
+        u = urlsplit(url.strip())
+        host, port = u.hostname, u.port
+    except ValueError:
+        raise Refused("That is not a server address.") from None
+    if u.username is not None or u.password is not None or "@" in u.netloc:
+        raise Refused(NO_USERINFO)
+    if not host:
+        raise Refused("That is not a server address.")
+    return f"{host}:{port}" if port else host
+
+
+def ticket_name(root: Path, tid: str) -> str:
+    """The ticket's title (never its id), as one safe fragment."""
+    from orch import tickets
+
+    try:
+        t = str(tickets.load(root, tid).get("title", ""))
+    except (Refused, OSError, ValueError, AttributeError):
+        t = ""
+    return part(t) or "this ticket"
+
+
+def question_text(root: Path, tid: str, qid: str) -> str:
+    from orch import tickets
+
+    try:
+        q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
+        t = str((q or {}).get("text", ""))
+    except (Refused, OSError, ValueError, AttributeError):
+        t = ""
+    return part(t.rstrip("?! ")) or "the question"
+
+
+def step_text(root: Path, tid: str, cid: str) -> str:
+    """The step's text (never its id) as one safe fragment."""
+    from orch import tickets
+
+    try:
+        t = tickets.load(root, tid)
+        item = next((c for c in t.get("checklist") or [] if c.get("id") == cid), None)
+        text = str((item or {}).get("text", ""))
+    except (Refused, OSError, ValueError, AttributeError):
+        text = ""
+    return part(text) or "this step"
+
+
+def step_number(root: Path, tid: str, cid: str) -> int:
+    """The step's place in the ticket's list (1, 2, 3 ...): shown next to its (agent-written) text."""
+    from orch import tickets
+
+    try:
+        ids = [c.get("id") for c in tickets.load(root, tid).get("checklist") or []]
+        return ids.index(cid) + 1
+    except (Refused, OSError, ValueError, AttributeError):
+        return 0
+
+
+def step_parts(root: Path, tid: str, cid: str, **more) -> dict:
+    return {
+        "title": ticket_name(root, tid),
+        "step": step_text(root, tid, cid),
+        "n": step_number(root, tid, cid),
+        **more,
+    }
+
+
+def status_parts(root: Path, tid: str, data: str) -> dict:
+    """A person's ticket patch as fields: {title, status, also: [other keys]} (never the JSON)."""
+    try:
+        obj = json.loads(data)
+    except ValueError:
+        obj = {}
+    obj = obj if isinstance(obj, dict) else {}
+    st = obj.get("status")
+    return {
+        "title": ticket_name(root, tid),
+        "status": st if st in ("done", "review") else "back",
+        "also": [part(k) for k in list(obj)[:6] if k != "status"],
+    }
+
+
 SECRET_MARK = "@secret"
 
 
@@ -1129,7 +1472,9 @@ def _join_token(argv: list[str], token: str) -> list[str]:
     ]
 
 
-def request_handoff(root: Path, op: str, target: str, label: str = "", value: str = "", argv=None) -> bool:
+def request_handoff(
+    root: Path, op: str, target: str, label: str = "", value: str = "", argv=None, parts=None, exact=None
+) -> bool:
     """A command asked for a human-only action without a proof: leave a pending item on the page ("Requested
     by a command"). At most 3 per op; a NEW request is dropped when full (N18), never evicting an older one.
     The item holds the command to run once the person clicks. Best effort: a failure here only means the item
@@ -1141,6 +1486,9 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
         return False  # never queue what the page could not run
     if len(value) > VALUE_MAX or (value and value not in argv):
         return False
+    exact = str(exact)[:2000] if exact else ""
+    if exact and op in ("relay.connect", "addon.add_local") and exact not in " ".join(argv):
+        return False  # the shown full target must be part of the command that runs
     try:
         d = key_dir(root)
         path = d / "handoffs.json"
@@ -1167,7 +1515,9 @@ def request_handoff(root: Path, op: str, target: str, label: str = "", value: st
                     "id": hid,
                     "op": op,
                     "target": target,
-                    "label": label[:300],
+                    "label": label[:400],
+                    "exact": exact,
+                    "parts": {k: v for k, v in (parts or {}).items() if isinstance(k, str)},
                     "value": value,
                     "argv": argv,
                     "at": now,
@@ -1226,6 +1576,9 @@ def handoff_take(root: Path, hid: str) -> dict | None:
         return None
     if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
         return None
+    if hit.get("exact") and hit.get("op") in ("relay.connect", "addon.add_local"):
+        if hit["exact"] not in " ".join(argv):  # the full target shown must be what runs
+            return None
     return hit
 
 
@@ -1284,7 +1637,17 @@ def _dashboard_note(root: Path, open_ok: bool = True) -> str:
 
 
 def person_by(
-    root: Path, args, op: str, target: str, *, label: str = "", value: str = "", argv=None, no_handoff=None
+    root: Path,
+    args,
+    op: str,
+    target: str,
+    *,
+    label: str = "",
+    value: str = "",
+    argv=None,
+    no_handoff=None,
+    parts=None,
+    exact=None,
 ) -> str:
     """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
     comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
@@ -1304,7 +1667,7 @@ def person_by(
     if no_handoff:
         raise Refused(no_handoff)  # this command cannot be approved on the page as typed
     clean = _clean_argv(CURRENT_ARGV) if argv is None else argv
-    queued = request_handoff(root, op, target, label, value, clean)
+    queued = request_handoff(root, op, target, label, value, clean, parts, exact)
     if not queued:
         raise Refused(HANDOFF)
     raise Refused(_dashboard_note(root, open_ok=queued is True))

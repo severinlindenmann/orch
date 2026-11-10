@@ -184,8 +184,17 @@ extension Array where Element == Question {
     }
 }
 
-/// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction). contracts/message.schema.json, `text`.
+/// The workspace outcome of a ticket proposal answer.
+struct ProposalResult: Codable, Sendable, Equatable {
+    let result: String
+    var key: String? = nil
+    var reason: String? = nil
+}
+
+/// `GET /v1/phone/messages`: a text between this phone and a workspace (either direction).
 struct TextBody: Codable, Sendable, Equatable {
+    var proposalResult: ProposalResult? = nil
+    var isProposalResult: Bool { proposalResult != nil }
     /// Empty when the text only carries attachments, a voice memo, a location or feedback.
     var text: String = ""
     /// Work update about the message's ticket; nil on a plain text.
@@ -217,18 +226,21 @@ struct TextBody: Codable, Sendable, Equatable {
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
          ticketView: TicketSnapshot? = nil,
          group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
-         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil) {
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil) {
+        self.proposalResult = proposalResult
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
         self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
         self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
     private enum CodingKeys: String, CodingKey {
-        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult
         case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
+        proposalResult = try? c.decodeIfPresent(ProposalResult.self, forKey: .proposalResult)
+        if let result = proposalResult, !["made", "refused", "decided"].contains(result.result) { proposalResult = nil }
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
@@ -253,6 +265,7 @@ struct TextBody: Codable, Sendable, Equatable {
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(proposalResult, forKey: .proposalResult)
         if !text.isEmpty { try c.encode(text, forKey: .text) }
         try c.encodeIfPresent(update, forKey: .update); try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encodeIfPresent(general, forKey: .general); try c.encodeIfPresent(speak, forKey: .speak)
@@ -362,12 +375,29 @@ struct TicketUpdate: Codable, Sendable, Equatable, Identifiable {
 struct TicketSnapshot: Codable, Sendable, Equatable {
     struct Task: Codable, Sendable, Equatable {
         let text: String; var done: Bool
-        init(text: String, done: Bool = false) { self.text = text; self.done = done }
+        var wontDo: Bool = false
+        var reason: String? = nil
+        init(text: String, done: Bool = false, wontDo: Bool = false, reason: String? = nil) {
+            self.text = text; self.done = done
+            self.wontDo = wontDo && !done
+            self.reason = self.wontDo ? reason : nil
+        }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
             text = try c.decode(String.self, forKey: .text); done = (try? c.decodeIfPresent(Bool.self, forKey: .done)) ?? false
+            wontDo = !done && ((try? c.decodeIfPresent(Bool.self, forKey: .wontDo)) ?? false)
+            reason = wontDo ? (try? c.decodeIfPresent(String.self, forKey: .reason)) : nil
         }
-        enum CodingKeys: String, CodingKey { case text, done }
+        // JSONCoding converts wontDo to/from the wire key wont_do.
+        enum CodingKeys: String, CodingKey { case text, done, wontDo, reason }
+        func encode(to e: Encoder) throws {
+            var c = e.container(keyedBy: CodingKeys.self)
+            try c.encode(text, forKey: .text); try c.encode(done, forKey: .done)
+            if wontDo {
+                try c.encode(true, forKey: .wontDo)
+                try c.encodeIfPresent(reason, forKey: .reason)
+            }
+        }
     }
     struct Attachment: Codable, Sendable, Equatable, Identifiable {
         var kind: String = "file"      // image | link | file
@@ -436,6 +466,8 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var checklist: [Task] = []
     var done: Int? = nil
     var total: Int? = nil
+    /// Steps a person declined ("Won't do"); optional on the wire, absent = count from the checklist.
+    var wontDo: Int? = nil
     var running: Bool? = nil
     var started: Bool? = nil
     var attachments: [Attachment] = []
@@ -449,6 +481,7 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         self.refs = refs; self.light = light
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
         self.done = checklist.filter(\.done).count; self.total = checklist.count
+        let declined = checklist.filter(\.wontDo).count; self.wontDo = declined > 0 ? declined : nil
         self.running = running; self.started = started; self.attachments = attachments; self.historyTail = historyTail
     }
     init(from d: Decoder) throws {
@@ -460,6 +493,7 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         checklist = (try? c.decodeIfPresent([Task].self, forKey: .checklist)) ?? []
         done = try? c.decodeIfPresent(Int.self, forKey: .done)
         total = try? c.decodeIfPresent(Int.self, forKey: .total)
+        wontDo = (try? c.decodeIfPresent(Int.self, forKey: .wontDo)).flatMap { $0 >= 0 ? $0 : nil }
         running = try? c.decodeIfPresent(Bool.self, forKey: .running)
         started = try? c.decodeIfPresent(Bool.self, forKey: .started)
         attachments = (try? c.decodeIfPresent([Attachment].self, forKey: .attachments)) ?? []
@@ -467,7 +501,7 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         refs = TicketRef.decodeList(c, forKey: .refs)
         light = try? c.decodeIfPresent(Bool.self, forKey: .light)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, running, started, attachments, historyTail, refs, light }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, light }
     /// Quiet light views update only the fields they carry, preserving the full ticket details.
     func overlaid(on base: TicketSnapshot?) -> TicketSnapshot {
         guard light == true, var result = base else { return self }
@@ -485,7 +519,9 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         return result
     }
 
+    /// Steps done with proof (a Won't do step is not counted).
     var doneCount: Int { done ?? checklist.filter(\.done).count }
+    var wontDoCount: Int { wontDo ?? checklist.filter(\.wontDo).count }
     var totalCount: Int { total ?? checklist.count }
 }
 

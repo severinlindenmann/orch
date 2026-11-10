@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from orch import adapters, cli_screen, humanproof, net, runs, runs_live, term, tickets
+from orch import adapters, cli_screen, humanproof, net, runs, runs_live, sharedfolder, term, tickets
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -191,6 +191,8 @@ def _status(args, root: Path) -> None:
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
     if st == "alive" and rec.get("mode") == "live" and runs_live.hold_text(rec):
         data["hold"] = runs_live.hold_text(rec)  # why orch waits; gone when the hold clears
+    if st == "alive" and (others := sharedfolder.others_in_folder(root, tid)):
+        data["shared_folder"] = {"others": others, "line": sharedfolder.line(others)}  # a hint, not a lock
     if st == "dead":
         text = (
             f"The earlier run on {_name(root, tid)} ended without finishing. "
@@ -286,7 +288,7 @@ def _send(args, root: Path, tid: str, by: str) -> None:
             args,
             "run.human_input",
             tid,
-            label="Send a message to " + humanproof.plain_ticket(root, tid),
+            parts={"title": humanproof.ticket_name(root, tid)},
             value=args.text or "",
             # the text a person approves must be the text that runs: no file read behind the card
             no_handoff='Send the text itself: orch run send <ticket> "text"' if args.file else None,

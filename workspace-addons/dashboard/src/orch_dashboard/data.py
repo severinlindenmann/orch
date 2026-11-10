@@ -543,7 +543,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
-    from orch.config import agents_may_finish
+    from orch.config import agents_may_finish, copies_max, copies_mode, copy_setup
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
@@ -556,6 +556,9 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         share = False
     return {
         "agents_may_finish": agents_may_finish(root),
+        "copies": copies_mode(root),
+        "copies_max": copies_max(root),
+        "copy_setup": copy_setup(root) or "",
         "folder": str(root),
         "share": share,
         "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto
@@ -624,6 +627,14 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
                 r["hold"] = " ".join(r["hold"].split())[:200] if isinstance(r["hold"], str) else None
                 if not r["hold"]:
                     r.pop("hold")
+            if (
+                isinstance(r, dict) and "shared_folder" in r
+            ):  # core's quiet line: text only, nothing else passes
+                sf = r.pop("shared_folder")
+                text = sf.get("line") if isinstance(sf, dict) else None
+                text = " ".join(text.split())[:200] if isinstance(text, str) else ""
+                if text:
+                    r["shared_folder"] = {"line": text}
             _RUNS[(str(root), i)] = (now, r if isinstance(r, dict) else None)
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 

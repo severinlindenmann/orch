@@ -349,6 +349,29 @@ def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, m
     assert sorted(asked) == ["t_done0001", "t_open0001"] and set(got) == {"t_done0001", "t_open0001"}
 
 
+def test_the_shared_folder_line_passes_as_short_plain_text_only(tmp_path, monkeypatch):
+    from orch_dashboard import data
+
+    replies = {
+        "t_a000001": {
+            "running": True,
+            "shared_folder": {
+                "line": '  "Fix\n login" is also  changing this folder. ' + "x" * 300,
+                "others": [1],
+            },
+        },
+        "t_b000001": {"running": True, "shared_folder": "junk"},
+        "t_c000001": {"running": True},
+    }
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root: dict(replies[args[2]]))
+    tickets = [{"id": i, "status": "open"} for i in replies]
+    got = data.load_runs(tmp_path, "orch", tickets, fresh=True)
+    assert list(got["t_a000001"]["shared_folder"]) == ["line"]
+    line = got["t_a000001"]["shared_folder"]["line"]
+    assert line.startswith('"Fix login" is also changing') and len(line) <= 200 and "\n" not in line
+    assert "shared_folder" not in got["t_b000001"] and "shared_folder" not in got["t_c000001"]
+
+
 def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     js = webjs.all_js()
     move = js[js.index("function moveTicket") :]

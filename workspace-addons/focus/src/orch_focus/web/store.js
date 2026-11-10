@@ -39,7 +39,7 @@
 
   // Embedded under the dashboard (P = "/addon/focus"): a person's click is sent to the dashboard's own act
   // endpoint, which holds the page session and mints the proof (H1). Focus never trusts forwarded headers.
-  const EMBED_HUMAN = new Set(['answer', 'ticket.done', 'run.send']);
+  const EMBED_HUMAN = new Set(['answer', 'ticket.done', 'run.send', 'check.wont_do', 'check.reopen', 'check.edit', 'check.remove']);
   async function actEmbedded(op, args) {
     const dop = op === 'ticket.done' ? 'ticket.patch' : op;
     const dargs = op === 'ticket.done' ? {ticket: args.ticket, data: {status: 'done'}, if_revision: args.if_revision} : args;

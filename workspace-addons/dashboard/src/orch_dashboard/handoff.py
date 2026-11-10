@@ -15,7 +15,7 @@ except ImportError:  # standalone use without orch: no hand-offs
     run_with_proof = None
     start_detached = None
 
-SHOW = ("id", "op", "target", "label", "value", "at")
+SHOW = ("id", "op", "target", "parts", "value", "exact", "at")
 
 
 def listing(root: Path) -> list[dict]:
@@ -26,13 +26,10 @@ def listing(root: Path) -> list[dict]:
 
 
 def notices(root: Path) -> list[dict]:
-    """One-time notices from the core (e.g. protection was reset), read once: the text is the core's own."""
+    """Notices from the core (e.g. protection was reset): the core's own text, read-only."""
     if humanproof is None:
         return []
-    return [
-        {"kind": str(n.get("kind"))[:40], "text": str(n.get("text"))[:600]}
-        for n in humanproof.take_notices(root)
-    ][:5]
+    return humanproof.read_notices(root)[:5]  # reading never clears: only "Got it" does (ack_notice)
 
 
 def confirm(
@@ -83,6 +80,10 @@ def _record_update(root: Path, pid: int) -> None:
 def update_status(root: Path) -> dict | None:
     """The detached update's state for the page: running, or finished / failed (read once)."""
     return humanproof.take_update_status(root) if humanproof is not None else None
+
+
+def ack_notice(root: Path, nid) -> bool:
+    return humanproof is not None and isinstance(nid, str) and humanproof.ack_notice(root, nid)
 
 
 def dismiss(root: Path, hid) -> None:

@@ -325,11 +325,112 @@ def test_snapshot_in_an_agent_chosen_home_is_skipped(tws, tmp_path, monkeypatch,
     assert addonsnap.home_of(via, snap["hash"]) is None
 
 
-def test_registry_comes_from_the_default_home_on_a_normal_install(rws, tmp_path, monkeypatch):
-    agent = tmp_path / "agenthome"
-    agent.mkdir()
-    monkeypatch.setenv("ORCH_HOME", str(agent))
-    assert addons.registry_path() == tmp_path / "acct" / ".orch-tool" / "addons.json"
+@pytest.fixture
+def throwaway(tmp_path, monkeypatch):
+    """A NORMAL install whose account home is faked and whose ORCH_HOME is a trusted throwaway folder (what an
+    e2e lane's own HOME looks like). Nothing may ever be written under the account's default orch home."""
+    acct = tmp_path / "acct"
+    acct.mkdir()
+    orch_home = acct / "lane-home"
+    orch_home.mkdir()
+    ws = acct / "work" / "ws"
+    (ws / ".orch").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(orch_home))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    return acct, orch_home, ws
+
+
+def test_all_state_lives_in_one_home(throwaway):
+    """Why the unit tests missed the registry split: every path was inside a temp tree, and nothing compared
+    them. State (registry, running.json, update snapshot) must all come from home()."""
+    from orch import services
+
+    acct, orch_home, ws = throwaway
+    assert addons.home() == orch_home
+    assert addons.registry_path() == orch_home / "addons.json"
+    assert services.running_path() == orch_home / "running.json"
+    assert not (acct / ".orch-tool").exists()
+
+
+def test_update_on_a_normal_install_with_another_orch_home_is_refused(throwaway, monkeypatch):
+    acct, orch_home, ws = throwaway
+    addons._save_registry([{"name": "focus", "source": "built-in", "version": "0.1.0"}])
+    ran = []
+    monkeypatch.setattr(addons, "run_uv", lambda a: ran.append(a))
+    monkeypatch.setattr(addons, "reexec", lambda a: ran.append(a))
+    for call in (
+        lambda: addons.update(ws),
+        lambda: addons._reinstall([], save=True, then=[], root=ws, done="x"),
+    ):
+        with pytest.raises(hp.HomeRefused, match="different orch folder than your account's") as e:
+            call()
+        assert "Start orch normally" in str(e.value) and e.value.code == hp.NOT_TOGETHER
+    assert ran == [] and not (acct / ".orch-tool").exists()  # nothing installed, real home untouched
+    assert addons.registry() and addons.home() == orch_home  # read-only ops still see the list
+
+
+def test_a_dev_or_test_install_may_update_from_its_own_orch_home(throwaway, monkeypatch):
+    acct, orch_home, ws = throwaway
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    addons._save_registry([{"name": "focus", "source": "built-in", "version": "0.1.0"}])
+    seen = []
+    monkeypatch.setattr(addons, "_install_tool", lambda e: seen.append(e))
+    monkeypatch.setattr(addons, "reexec", lambda a: None)
+    addons.update(ws)
+    assert [e["name"] for e in seen[0]] == ["focus"]
+    assert not (acct / ".orch-tool").exists()
+
+
+def test_a_crafted_registry_is_filtered(throwaway, capsys):
+    acct, orch_home, ws = throwaway
+    (orch_home / "addons.json").write_text(
+        json.dumps(
+            [
+                {
+                    "name": "focus",
+                    "source": "built-in",
+                    "version": "0.1.0",
+                    "spec": "git+https://evil/x",
+                    "extra": 1,
+                },
+                {
+                    "name": "evil",
+                    "source": "built-in",
+                    "version": "1",
+                },  # a fake built-in: orch does not ship it
+                {"name": "../x", "source": "built-in", "version": "1"},  # bad name
+                {"name": "Bad Name", "source": "/agent/dir", "version": "1"},
+                {"name": "relay", "source": "built-in", "version": "1"},  # reserved/core: not a tool entry
+            ]
+        )
+    )
+    reg = addons.registry()
+    assert reg == [{"name": "focus", "source": "built-in", "version": "0.1.0"}]  # extra fields stripped
+    err = capsys.readouterr().err
+    assert "'evil' was ignored" in err and "not a valid add-on name" in err
+
+
+def test_a_planted_hashless_folder_entry_rides_no_approval(rws, tmp_path, capsys):
+    from orch import addonsnap
+
+    good = _folder_addon(tmp_path)
+    snap = addons.prepare_local_add(rws, good)
+    addonsnap.allow(hp.guarded_home(rws), snap["hash"])
+    planted = {"name": "planted", "source": "/agent/dir", "version": "0.1.0"}
+    mine = {
+        "name": "mine",
+        "source": snap["snapshot"],
+        "version": "0.1.0",
+        "approved": True,
+        "hash": snap["hash"],
+    }
+    with addons.trusted_local_add(snap["hash"]):
+        args = addons._tool_args([planted, mine])
+    assert "/agent/dir" not in args and snap["snapshot"] in args
+    assert "only you can allow" in capsys.readouterr().err
 
 
 def test_install_uses_the_snapshot_not_the_live_folder(tws, tmp_path, monkeypatch):
@@ -378,6 +479,7 @@ def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, capsys):
 
 
 def _old_install(tmp_path, monkeypatch):
+    monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)  # the home rule has its own tests
     env = _prefix(tmp_path, monkeypatch)  # no record
     (env / "bin").mkdir()
     monkeypatch.setattr(hp, "_source_tree", lambda: False)
@@ -583,3 +685,44 @@ def test_windows_is_test_workspace(win, monkeypatch):
     monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
     monkeypatch.setattr(hp, "install_kind", lambda: "dev")
     assert not hp.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))  # test installs only
+
+
+# ---------------------------------------------------------------- plain refusal first (before any hand-off)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["update"],
+        ["addon", "add", "focus", "--yes"],
+        ["addon", "add", "./mine", "--yes"],
+        ["addon", "uninstall", "focus"],
+    ],
+)
+def test_other_orch_home_gets_the_plain_text_first(throwaway, monkeypatch, capsys, argv):
+    from orch import cli
+
+    acct, orch_home, ws = throwaway
+    (ws / "mine").mkdir(exist_ok=True)
+    (ws / "mine" / "pyproject.toml").write_text('[project]\nname = "orch-mine"\nversion = "0.1.0"\n')
+    ran = []
+    monkeypatch.setattr(addons, "run_uv", lambda a: ran.append(a))
+    monkeypatch.setattr(addons, "reexec", lambda a: ran.append(a))
+    queued = []
+    monkeypatch.setattr(hp, "request_handoff", lambda *a, **k: queued.append(a) or True)
+    code = cli.main(argv)
+    cap = capsys.readouterr()
+    text = cap.out + cap.err
+    assert code == 2 and hp.MSG_ENV_CHANGE in text
+    assert "Do this in the dashboard" not in text and "dashboard on this computer" not in text
+    assert queued == [] and ran == []  # nothing queued as a hand-off, nothing installed
+    assert not (acct / ".orch-tool").exists()  # real home untouched
+    assert not (orch_home / "keys").exists()  # and no snapshot / key written for the folder either
+
+
+def test_the_check_does_not_block_list_or_turning_on_in_the_workspace(throwaway, capsys):
+    from orch import cli
+
+    assert cli.main(["addon", "list"]) == 0
+    assert cli.main(["update", "--project-only"]) in (0, 2)
+    assert hp.MSG_ENV_CHANGE not in capsys.readouterr().err
