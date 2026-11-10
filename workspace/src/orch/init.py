@@ -144,6 +144,6 @@ def _other(root: Path) -> str:
     cmd = input("Command (use {prompt} where the task goes): ").strip()
     if not cmd:
         return "No agent chosen; set one later: orch config set workspace.agent <name>"
-    config.add_agent(root, name, cmd)
+    config.add_agent(root, name, cmd, approve=True)  # the person typed it here
     _save(root, name)
     return f"Agent: {name} (starts fresh each run; it cannot continue a conversation)."

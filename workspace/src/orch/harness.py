@@ -441,7 +441,7 @@ def tracked_private(root: Path) -> list[str]:
     return _tracked_private(root) or []
 
 
-def _tracked_private(root: Path) -> list[str] | None:
+def _tracked_private(root: Path, icase: bool = True) -> list[str] | None:
     """The personal orch files that git already tracks in this folder's repo (project-relative, sorted, at most
     2000). [] outside a git repo or when git cannot say (the warning is advice; the trust check is `_tracked`)."""
     try:
@@ -450,7 +450,14 @@ def _tracked_private(root: Path) -> list[str] | None:
     except Refused:
         return None
     rc, raw, _ = _safegit().run_bytes(
-        ["ls-files", "-z", "--", *[f":(icase,literal){rel}" for rel, _ in PRIVATE_FILES]], root, 20
+        [
+            "ls-files",
+            "-z",
+            "--",
+            *[f":({'icase,' if icase else ''}literal){rel}" for rel, _ in PRIVATE_FILES],
+        ],
+        root,
+        20,
     )
     if rc != 0:
         return None
@@ -486,7 +493,7 @@ def move_to_private(root: Path, by: str | None = None) -> list[str]:
     from orch import config
 
     config.require_person(by, "move these files out of the team repo")
-    files = tracked_private(root)
+    files = _tracked_private(root, icase=False) or []  # exactly the names git holds, no case variants
     if not files:
         return []
     protect_local(root)  # the ignore rules first, so the files do not turn into "new files" afterwards
@@ -500,8 +507,13 @@ def move_to_private(root: Path, by: str | None = None) -> list[str]:
             filters=False,
         )
         if rc != 0:
-            raise Refused("git could not remove the files from the team repo. Nothing else was changed.")
-    left = _tracked_private(root)
+            if i:
+                raise Refused(
+                    f"git removed {i} file{'s' if i != 1 else ''} from the team repo, then stopped. "
+                    "Run orch private move again, or look at: git status"
+                )
+            raise Refused("git could not remove the files from the team repo. Nothing was changed.")
+    left = _tracked_private(root, icase=False)
     if left is None:  # git cannot say now: do not claim anything was moved
         raise Refused("git ran, but orch could not check what was removed. Look at: git status")
     still = set(left)

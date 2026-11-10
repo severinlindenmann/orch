@@ -391,13 +391,17 @@ def _private(args, root: Path) -> None:
         if not (config.NAME_RE.fullmatch(args.name) and re.fullmatch(r"[0-9a-f]{64}", args.key)):
             raise Refused("Look at orch private again: that name or key is not one it showed.")
         shown = next((p for p in config.pending_agents(root) if p["name"] == args.name), None)
+        config.require_person(_actor(args), "allow an agent command to run")  # an agent hears the ask text
+        if shown is None or not shown["showable"] or shown["key"] != args.key:
+            raise Refused("That command is not waiting for a yes here (or changed). Look at: orch private")
         _person(
             root,
             args,
             "private.allow",
             f"{args.name}:{args.key}",
             f"allow the command of {args.name} to run on this computer",
-            {"name": args.name, "command": (shown or {}).get("command", "")},
+            {k: shown[k] for k in ("name", "command", "adapter", "interactive", "prompt") if shown.get(k)},
+            exact=humanproof.entry_exact(shown),
         )
         done = config.allow_agent(root, args.name, args.key, _actor(args))
         _out(args, {"allowed": [done]}, f"Allowed on this computer: {done}.")

@@ -143,7 +143,7 @@ ONLY_PERSON_AGENT = (
 def require_person(by: str | None, what: str) -> None:
     """The second lock behind the CLI's proof check (like set_permissions): an agent is refused here too, so
     no caller can save or approve an agent command for an agent. `by` None = the keyboard."""
-    if (by or "").startswith("agent:"):
+    if by is not None and not by.startswith("human:"):  # an allowlist: a person, or nobody named
         raise Refused(ONLY_PERSON_AGENT.format(what=what))
 
 
@@ -566,7 +566,7 @@ def add_agent(
     interactive: str | None = None,
     adapter: str = "generic",
     prompt: str | None = None,
-    approve: bool = True,
+    approve: bool = False,
     by: str | None = None,
 ):
     """Save an agent entry. A person only: an agent (`by` = agent:...) is refused before it writes."""

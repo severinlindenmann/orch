@@ -79,6 +79,7 @@ def _generic_live(proj):
         "fake",
         f"{py} {shlex.quote(str(AGENT))} {{prompt}}",
         f"{py} {shlex.quote(str(AGENT))} --interactive",
+        approve=True,
     )
     config.set_key(proj, "workspace", "agent", "fake")
 
@@ -418,7 +419,7 @@ def test_without_tmux_the_run_is_one_turn_at_a_time(proj, run, lab, monkeypatch)
 @pytest.mark.skipif(os.name == "nt", reason="signals")
 def test_sigterm_to_the_wrapper_ends_the_agent_through_kill_tree(proj, run, lab):
     py = shlex.quote(sys.executable)
-    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}")
+    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}", approve=True)
     config.set_key(proj, "workspace", "agent", "quiet")
     tid = _ticket(run)
     run("run", "start", tid, "--mode", "oneshot")
@@ -444,7 +445,7 @@ def test_sigterm_inside_the_run_lock_still_releases_the_claim(proj, run, lab, mo
 @pytest.mark.skipif(os.name == "nt", reason="signals")
 def test_stop_kills_an_agent_left_behind_by_a_killed_wrapper(proj, run, lab):
     py = shlex.quote(sys.executable)
-    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}")
+    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}", approve=True)
     config.set_key(proj, "workspace", "agent", "quiet")
     tid = _ticket(run)
     run("run", "start", tid, "--mode", "oneshot")

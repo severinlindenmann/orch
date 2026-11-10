@@ -1320,7 +1320,28 @@ def agent_add_target(
     """The proof target of config.agent_add: the name AND a digest of every value that gets saved, so a
     proof for one command (or live command, or prompt mode) can never save another. Same in the dashboard."""
     doc = json.dumps([command, interactive or "", prompt or ""])
-    return f"{name}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()[:32]}"
+    return f"{name}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()}"
+
+
+def entry_exact(entry: dict) -> str:
+    """Every field a private.allow key approves (adapter, command, live command, prompt), one per line."""
+    rows = [
+        ("Adapter", entry.get("adapter")),
+        ("Command", entry.get("command")),
+        ("Live command", entry.get("interactive")),
+        ("Prompt via", entry.get("prompt")),
+    ]
+    return "\n".join(f"{k}: {v}" for k, v in rows if v)
+
+
+def allow_card_is_current(root: Path, target: str) -> bool:
+    """private.allow takes its values from the settings file, not argv: the card's target is name:key, so the
+    card is only good while the entry still hashes to that key."""
+    from orch import config
+
+    name, _, key = str(target).partition(":")
+    e = config._raw_entries(root).get(name)
+    return e is not None and config._entry_key(root, name, e) == key
 
 
 def agent_add_exact(command: str, interactive: str | None = None, prompt: str | None = None) -> str:
@@ -1346,7 +1367,7 @@ def exact_in_argv(op: str, exact: str, argv) -> bool:
     return True
 
 
-EXACT_OPS = ("relay.connect", "addon.add_local", "config.agent_add")
+EXACT_OPS = ("relay.connect", "addon.add_local", "config.agent_add", "private.allow")
 
 
 def _clean_argv(argv) -> list[str] | None:
@@ -1614,6 +1635,8 @@ def handoff_take(root: Path, hid: str) -> dict | None:
         return None
     if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
         return None
+    if hit.get("op") == "private.allow" and not allow_card_is_current(root, hit.get("target")):
+        return None  # the entry changed after the card was made: the person never saw this one
     if hit.get("exact") and hit.get("op") in EXACT_OPS:
         if not exact_in_argv(hit["op"], hit["exact"], argv):  # the full target shown must be what runs
             return None

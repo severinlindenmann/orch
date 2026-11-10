@@ -136,7 +136,7 @@ def _agent_add_target(a):
     """The proof target of config.agent_add: the name and a digest of EVERY saved value (core's
     humanproof.agent_add_target builds the same; the dashboard never offers a live command)."""
     doc = json.dumps([a.get("command"), "", a.get("prompt_via") or ""])
-    return f"{a.get('name')}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()[:32]}"
+    return f"{a.get('name')}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()}"
 
 
 def proof_for(op, args):

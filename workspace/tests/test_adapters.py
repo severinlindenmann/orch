@@ -20,7 +20,9 @@ OLD = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
 
 
 def _agent(root, name, **kw):
-    config.add_agent(root, name, kw.pop("command"), kw.pop("interactive", None), kw.pop("adapter", "generic"))
+    config.add_agent(
+        root, name, kw.pop("command"), kw.pop("interactive", None), kw.pop("adapter", "generic"), approve=True
+    )
 
 
 def test_agents_json_is_the_contract_example_and_valid():
@@ -414,7 +416,7 @@ def test_session_parsing_against_real_recorded_output():
 
 
 def test_user_agent_can_take_the_task_on_stdin(proj):
-    config.add_agent(proj, "reader", "reader-agent -q", prompt="stdin")
+    config.add_agent(proj, "reader", "reader-agent -q", prompt="stdin", approve=True)
     assert adapters.render("reader", "fresh", "oneshot", {"prompt": "hi"}, proj) == ["reader-agent", "-q"]
     assert adapters.prompt_via_stdin("reader", proj)
     assert not adapters.prompt_via_stdin("claude")
