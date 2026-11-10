@@ -263,13 +263,18 @@ def _confirm(args):
     return ask
 
 
-def _as_person(args, root: Path, op: str, target: str, **kw) -> None:
-    """A person's own act in a group (H1): the proof from the page, or a hand-off. Not asked of an agent: an
-    agent session keeps its own (unprivileged) path, where chat_groups refuses to speak as the person."""
+def _as_person(args, root: Path, op: str, target: str, **kw) -> str | None:
+    """A person's own act in a group (H1). Returns the VERIFIED human identity (from a proof; a terminal
+    command is handed off to the page and refused here), or None for a caller that claims to be an agent (an
+    agent session, or --by agent:...). EVERY caller branches on the return value: a person's flags
+    (--dashboard, --click) are honoured only for a verified identity, an agent claim gets the downgraded
+    action. Never "did not raise"."""
     if tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:"):
-        return
-    if not humanproof.person_by(root, args, op, target, **kw).startswith("human:"):
-        raise Refused(humanproof.AGENT_REFUSED)
+        return None
+    who = humanproof.person_by(root, args, op, target, **kw)
+    if not who.startswith("human:"):
+        return None
+    return who
 
 
 def _file_sha(root: Path, path: str) -> str:
@@ -278,7 +283,7 @@ def _file_sha(root: Path, path: str) -> str:
 
     from orch import chat_groups as cg
 
-    return hashlib.sha256(cg.read_shared(root / Path(path), root, confined=False)).hexdigest()
+    return hashlib.sha256(cg.read_shared(Path(path), root, confined=False)).hexdigest()
 
 
 def run_group(args, root: Path, out) -> None:
@@ -293,68 +298,95 @@ def run_group(args, root: Path, out) -> None:
         rows += [f"{g['title']} ({g['host']}/{g['id']}) - invited" for g in v["joined"]]
         out(args, v, "\n".join(rows) or "No groups.")
     elif sub == "say":
-        if args.dashboard:  # writing into the group AS the person
-            _as_person(
+        as_person = None
+        if args.dashboard:  # writing into the group AS the person: only with the person's verified proof
+            as_person = _as_person(
                 args, root, "group.write_as_person", tid,
                 parts={"title": humanproof.ticket_name(root, tid)}, value=args.text,
             )  # fmt: skip
-        r = cg.say(root, tid, args.text, "dashboard" if args.dashboard else "helper", args.to_person, by)
+        r = cg.say(root, tid, args.text, "dashboard" if as_person else "helper", args.to_person, by)
         out(args, r, "Written into the group.")
     elif sub == "add":
         r = cg.add_member(root, tid, ws, by)
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
     elif sub == "remove":
-        _as_person(
+        person = _as_person(
             args, root, "group.remove_member", f"{tid}:{args.workspace}",
             parts={
                 "title": humanproof.ticket_name(root, tid),
                 "workspace": humanproof.part(relay.name_of(root, ws)),
             },
         )  # fmt: skip
-        tickets.require_human("Remove this workspace from the group?", "removing a member")
+        if person is None:  # an agent claim never removes a member (no typed yes, no flag counts)
+            raise Refused(humanproof.AGENT_REFUSED)
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
     elif sub == "ask":
         m = cg.ask(root, tid, ws, args.question, by)
         out(args, m, _sent_line(root, m, "Question sent to {}."))
     elif sub == "share":
-        if args.click:  # a person shares a file with the group: the proof binds the file's content
-            _as_person(
-                args, root, "group.share_file", f"{tid}:{_file_sha(root, args.file)}",
+        click, sha = False, None  # the downgraded action: confined to the workspace, no click
+        if args.click:  # a person shares a file with the group: the proof binds the file's CONTENT
+            sha = _file_sha(root, args.file)
+            if _as_person(
+                args, root, "group.share_file", f"{tid}:{sha}",
                 parts={
                     "title": humanproof.ticket_name(root, tid),
                     "file": humanproof.part(Path(args.file).name),
                 },
-            )  # fmt: skip
-        r = cg.share_file(root, tid, Path(args.file), args.title, None, args.click, by, _confirm(args))
+            ):  # fmt: skip
+                click = True
+        # the bytes that are uploaded are checked against the bytes the proof covers (expect_sha)
+        r = cg.share_file(
+            root,
+            tid,
+            Path(args.file),
+            args.title,
+            None,
+            click,
+            by,
+            _confirm(args),
+            expect_sha=sha if click else None,
+        )
         out(args, r, "Shared with the group.")
     elif sub == "reply":
-        if args.dashboard:
-            _as_person(
+        as_person = None
+        if (
+            args.dashboard
+        ):  # only a verified person speaks as themselves; an agent claim is downgraded to helper
+            as_person = _as_person(
                 args, root, "group.write_as_person", args.group,
                 parts={"title": humanproof.part(args.group)}, value=args.text,
             )  # fmt: skip
-            tickets.require_human("Write into the group as yourself?", "writing as the person")
         m = cg.say_member(
             root,
             relay.resolve(root, args.host),
             args.group,
             args.text,
-            "dashboard" if args.dashboard else "helper",
+            "dashboard" if as_person else "helper",
         )
         out(args, m, "Written into the group.")
     elif sub == "answer":
         m = cg.answer(root, args.message, args.text)
         out(args, m, "Answer sent.")
     elif sub == "send-file":
+        click, sha = False, None  # an agent claim: no click, so share_member refuses in words
+        if args.click:  # the proof binds the file's content, checked against the uploaded bytes
+            sha = _file_sha(root, args.file)
+            if _as_person(
+                args, root, "group.share_file", f"{args.group}:{sha}",
+                parts={"title": humanproof.part(args.group), "file": humanproof.part(Path(args.file).name)},
+            ):  # fmt: skip
+                click = True
         m = cg.share_member(
             root,
             relay.resolve(root, args.host),
             args.group,
             Path(args.file),
             args.title,
-            args.click,
+            click,
             _confirm(args),
+            expect_sha=sha if click else None,
         )
         out(args, m, "Shared with the group.")
     elif sub == "leave":

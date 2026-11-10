@@ -1545,7 +1545,7 @@ def test_the_verifier_reads_the_ledger_when_asked_not_at_creation(ws, run, monke
     tid, cid = _signed_wont(ws, run, monkeypatch)
     person = hp.wont_verifier(ws)  # created BEFORE the next decision
     old = tickets.load(ws, tid)["checklist"][0]
-    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:reopen")
     _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
     assert not person(
         old, tid
@@ -1558,7 +1558,7 @@ def test_a_proven_remove_tombstones_even_when_the_step_file_lost_its_mac(ws, run
     tickets.apply_op(
         ws, tid, lambda t: [t["checklist"][0].pop(k) for k in ("wont_mac", "wont_nonce")]
     )  # stripped
-    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:remove")
     _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
     assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None  # tombstoned from the ledger, not from the step file
     assert not hp.wont_verifier(ws)(on, tid)
@@ -1658,3 +1658,146 @@ def test_group_person_acts_need_the_proof_and_an_agent_keeps_its_own_path(ws, ru
     assert code == 2
     card = [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
     assert card and card[0]["target"].startswith(f"{tid}:") and len(card[0]["target"]) == len(tid) + 1 + 64
+
+
+# ------------------------------------------- group acts: an agent claim is downgraded, bytes are bound
+
+
+def _group_env(ws, monkeypatch):
+    from conftest import turn_on
+
+    from orch import relay
+
+    turn_on(ws, "relay")
+    monkeypatch.setattr(relay, "resolve", lambda root, name: "ws_peer00001")
+    monkeypatch.setattr(relay, "name_of", lambda root, w: "Peer")
+
+
+def test_an_agent_claim_never_reaches_the_person_path_and_gets_the_downgraded_action(ws, run, monkeypatch):
+    from orch import chat_groups as cg
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    seen = []
+    monkeypatch.setattr(cg, "say", lambda root, t, text, via, to, by: seen.append(("say", via)) or {})
+    monkeypatch.setattr(
+        cg,
+        "share_file",
+        lambda root, t, p, title, to, click, by, conf, expect_sha=None: seen.append(("share", click)) or {},
+    )
+    f = ws / "report.txt"
+    f.write_text("x")
+    run("relay", "group", "say", tid, "--dashboard", "hi", "--by", "agent:x", "--json")
+    run("relay", "group", "share", tid, str(f), "--click", "--by", "agent:x", "--json")
+    assert seen == [("say", "helper"), ("share", False)]  # no person path: via helper, confined share
+    assert run("relay", "group", "remove", tid, "peer", "--by", "agent:x", "--json")[0] == 2  # never removes
+    assert hp.handoffs(ws) == []  # an agent claim does not even queue a hand-off
+
+
+def test_the_person_path_runs_only_for_a_verified_proof(ws, run, monkeypatch):
+    from orch import chat_groups as cg
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    seen = []
+    monkeypatch.setattr(cg, "say", lambda root, t, text, via, to, by: seen.append(via) or {})
+    # a terminal flag without a proof: refused and handed off, never "via dashboard"
+    assert run("relay", "group", "say", tid, "--dashboard", "hi", "--by", "human:pat", "--json")[0] == 2
+    assert seen == []
+    proof = _proof(ws, "group.write_as_person", tid)
+    assert _cli(run, monkeypatch, proof, "relay", "group", "say", tid, "--dashboard", "hi", "--json")[0] == 0
+    assert seen == ["dashboard"]
+
+
+def test_a_group_share_proof_covers_exactly_the_uploaded_bytes_and_a_swap_is_refused(ws, run, monkeypatch):
+    from orch import chat_groups as cg
+    from orch import relay
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    f = ws / "report.txt"
+    f.write_text("the approved bytes")
+    sha = hp_sha = __import__("hashlib").sha256(b"the approved bytes").hexdigest()
+    uploaded = []
+    monkeypatch.setattr(
+        relay,
+        "_api",
+        lambda root, m, p, data=None, t=0: (200, uploaded.append(data) or {"sha256": sha, "size": len(data)}),
+    )
+    code, out, err = run("relay", "group", "share", tid, str(f), "--click", "--by", "human:pat", "--json")
+    assert (
+        code == 2 and hp.handoffs(ws)[0]["target"] == f"{tid}:{hp_sha}"
+    )  # the proof target IS the content hash
+    # a swap between the proof and the upload: refused, nothing uploaded
+    real = cg.read_shared
+    calls = []
+
+    def swapping(path, root, confined):
+        calls.append(1)
+        if len(calls) == 2:  # the second read (the upload's) sees other bytes
+            return b"swapped in by an agent"
+        return real(path, root, confined)
+
+    monkeypatch.setattr(cg, "read_shared", swapping)
+    proof = _proof(ws, "group.share_file", f"{tid}:{hp_sha}")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "relay", "group", "share", tid, str(f), "--click", "--json"
+    )
+    assert code == 2 and "changed after you approved" in out + err and uploaded == []
+
+
+def test_no_call_site_ignores_what_as_person_returns():
+    """`_as_person` returns the verified identity or None; a caller that drops the value would run the
+    person's path on a mere 'did not raise'."""
+    import ast
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "orch" / "cli_clients.py").read_text(
+        encoding="utf-8"
+    )
+    bad = [
+        n.lineno
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Expr)
+        and isinstance(n.value, ast.Call)
+        and getattr(n.value.func, "id", "") == "_as_person"
+    ]
+    assert not bad, f"_as_person result ignored at lines {bad}"
+
+
+def test_the_upload_receives_the_very_bytes_that_were_hashed_read_once(ws, run, monkeypatch):
+    """share_file reads the file ONCE, hashes those bytes against the proof and uploads that same object: no
+    second open or read on the way (hash-then-reopen would keep the swap window)."""
+    import hashlib
+
+    from orch import chat_groups as cg
+    from orch import relay
+
+    _group_env(ws, monkeypatch)
+    tid, _ = _ticket_with_step(ws, run)
+    f = ws / "report.txt"
+    f.write_text("the approved bytes")
+    sha = hashlib.sha256(b"the approved bytes").hexdigest()
+    reads, uploads = [], []
+    real = cg.read_shared
+
+    def counting(path, root, confined):
+        data = real(path, root, confined)
+        reads.append(data)
+        return data
+
+    def fake_api(root, method, path, data=None, timeout=0):
+        uploads.append(data)
+        raise Refused("stop here: the upload was captured")  # nothing after the upload matters
+
+    monkeypatch.setattr(cg, "read_shared", counting)
+    monkeypatch.setattr(cg, "ensure_group", lambda root, t, by: "grp_t_abcdef")
+    monkeypatch.setattr(relay, "_api", fake_api)
+    proof = _proof(ws, "group.share_file", f"{tid}:{sha}")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "relay", "group", "share", tid, str(f), "--click", "--json"
+    )
+    assert len(reads) == 2  # the CLI's hash for the proof target + the ONE read inside share_file
+    assert all(isinstance(u, bytes) for u in uploads) and uploads == [
+        b"the approved bytes"
+    ]  # bytes, never a path
+    assert uploads[0] is reads[-1]  # the same in-memory object that was hashed in share_file

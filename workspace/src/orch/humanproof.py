@@ -1316,7 +1316,7 @@ HANDOFF_HEADS = {
     "look.icon": (("look", "set"),),
     "group.write_as_person": (("relay", "group", "say"), ("relay", "group", "reply")),
     "group.remove_member": (("relay", "group", "remove"),),
-    "group.share_file": (("relay", "group", "share"),),
+    "group.share_file": (("relay", "group", "share"), ("relay", "group", "send-file")),
 }
 
 

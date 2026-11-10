@@ -178,15 +178,18 @@ FREE_OPS = frozenset(
 
 
 def _share_sha(root, args) -> str:
+    """The content hash the core computes for the same artifact (a person's click shares a ticket artifact). Read
+    here with the file inside the ticket's artifacts folder only; anything else gives a target no proof matches."""
     import hashlib
     from pathlib import Path
 
-    from orch import chat_groups as cg
-
-    path = Path(root) / ".orch" / "tickets" / str(args.get("ticket")) / "artifacts" / str(args.get("file"))
+    art = (Path(root) / ".orch" / "tickets" / str(args.get("ticket")) / "artifacts").resolve()
     try:
-        return hashlib.sha256(cg.read_shared(path, Path(root), confined=False)).hexdigest()
-    except Exception:  # noqa: BLE001 - an unreadable file: a target no proof can match
+        path = (art / str(args.get("file"))).resolve()
+        if art not in path.parents or not path.is_file() or path.stat().st_size > 25 * 1024 * 1024:
+            return "unreadable"
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
         return "unreadable"
 
 
