@@ -30,6 +30,8 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
+    c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
+    c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
 
 
 def _home_path(p: str) -> str:
@@ -88,6 +90,9 @@ def _services_cmd(args, root: Path) -> None:
 
             if not humanproof.is_test_workspace(root):
                 raise Refused("--print-launch-url works only on a test install, in a test folder.")
+        from orch import worktrees
+
+        worktrees.sweep(root, worktrees.START_SWEEP_BUDGET)  # B12: copies nobody needs (never raises)
         rows = services.start(root)
         launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
@@ -153,7 +158,26 @@ def _services_cmd(args, root: Path) -> None:
         _out(args, done, "\n".join(lines) or "Nothing was stopped.")
 
 
+def _copy_clean(args, root: Path) -> None:
+    from orch import worktrees
+
+    notes = worktrees.sweep(root)
+    u = worktrees.usage(root)
+    lines = [
+        *notes,
+        f"{u['copies']} separate copies are in use." if u["copies"] else "No separate copies left.",
+    ]
+    _out(
+        args,
+        {"copies": u["copies"], "bytes": u["bytes"], "partial": u["partial"], "notes": notes},
+        "\n".join(lines),
+    )
+
+
 def dispatch(args, root: Path) -> bool:
+    if args.cmd == "copy":
+        _copy_clean(args, root)
+        return True
     if args.cmd not in ("start", "stop", "status"):
         return False
     _services_cmd(args, root)

@@ -991,7 +991,12 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         if old != target and target == status:
             add_history(ticket, actor, f"Status {old} -> {target}")
 
-    return apply_op(root, tid, op)[0]
+    result = apply_op(root, tid, op)[0]
+    if result.get("status") == "dropped":  # closed or cancelled: its separate copy goes (never raises)
+        from orch import worktrees
+
+        worktrees.on_closed(root, tid)
+    return result
 
 
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)

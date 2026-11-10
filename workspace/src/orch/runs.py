@@ -1310,8 +1310,9 @@ def start(
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
-    from orch import runs_live
+    from orch import runs_live, worktrees
 
+    worktrees.sweep(root, worktrees.START_SWEEP_BUDGET)  # B12: copies nobody needs; never raises, time-boxed
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)

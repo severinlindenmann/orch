@@ -724,14 +724,21 @@ def run(
     filters: bool = True,
     strip: bool = True,
     root: Path | None = None,
+    identity: bool = False,
 ) -> tuple[int, str, str]:
-    """(exit code, stdout, stderr) of git `args` in `cwd`, hardened as the module says. rc 127: git missing,
+    """(exit code, stdout, stderr) of git `args` in `cwd`, hardened as the module says. `identity`: commits
+    are made as orch <orch@localhost> (user.name/user.email through git's environment configuration, which
+    beats the repository's own; needs filters=True, where the git version is checked). rc 127: git missing,
     124: timeout, 125: refused for a safety reason (a subcommand orch does not run, an interactive mode, or
     the repository's drivers could not be listed). `root`: the workspace root (its folder is never searched
     for the git program)."""
     argv, extra = _prepare(args, cwd, timeout, filters, read_only, root)
     if argv is None:
         return extra[0], "", extra[1]
+    if identity:
+        if not filters:
+            return REFUSED, "", "orch commits only with its drivers switched off (filters=True)"
+        extra = [*(extra or []), ("user.name", "orch"), ("user.email", "orch@localhost")]
     kw = {"config": extra} if extra else {}
     rc, out, err = _raw(argv, cwd, timeout, data, root, **kw)
     return rc, out.strip() if strip else out, err
