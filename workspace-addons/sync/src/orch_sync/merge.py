@@ -209,7 +209,39 @@ def _evidence(*lists):
     return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
 
 
+def _person_wont(x):
+    return x.get("wont_do") is True and str(x.get("by", "")).startswith("human:")
+
+
+def _drop_wont(x):
+    return {k: v for k, v in x.items() if k not in ("wont_do", "reason")}
+
+
 def _check_item(ctx, x0, xa, xb):
+    # Won't do is a person's decision: a side without a human `by` cannot bring it in (the rule of
+    # orch.tickets.check_wont_do), and done vs won't do is one side's item wholesale, never a field mix.
+    x0, xa, xb = ({**x} if not x.get("wont_do") or _person_wont(x) else _drop_wont(x) for x in (x0, xa, xb))
+    if (xa.get("wont_do") and xb.get("done")) or (xb.get("wont_do") and xa.get("done")):
+        return _normalize_check(dict(xa if ctx.a_newer else xb))
+    return _normalize_check(_check_merged(ctx, x0, xa, xb))
+
+
+def _normalize_check(x):
+    """The one rule for every merged step (one-sided, edited, picked or merged): Won't do stays only with a
+    human `by`, then the step is not done and not doing; done needs proof."""
+    if x.get("wont_do") and not _person_wont(x):
+        x = _drop_wont(x)
+    if "reason" in x and not x.get("wont_do"):
+        x = {k: v for k, v in x.items() if k != "reason"}
+    if x.get("wont_do"):
+        x = {k: v for k, v in x.items() if k != "state"}
+        x["done"] = False
+    elif x.get("done") and not x.get("evidence"):
+        x = {**x, "done": False}
+    return x
+
+
+def _check_merged(ctx, x0, xa, xb):
     out = _obj(ctx, x0, xa, xb, skip=("evidence",), top=True, label=f"{xa.get('id')} ")
     out["evidence"] = _evidence(x0.get("evidence", []), xa.get("evidence", []), xb.get("evidence", []))
     if out.get("done") and not out["evidence"]:
@@ -270,8 +302,9 @@ def _merge(base, a, b, now):
 
     cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
                 lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
+    cl = {k: _normalize_check(v) for k, v in cl.items()}
     out["checklist"] = _order(cl, ids(base.get("checklist", [])))
-    if out["status"] == "done" and any(not c.get("done") for c in out["checklist"]):
+    if out["status"] == "done" and any(not (c.get("done") or c.get("wont_do")) for c in out["checklist"]):
         out["status"] = "active"
         ctx.say("reopened, a new checklist item came in")
     qs = _keyed(base.get("questions", []), a["questions"], b["questions"], lambda x: x["id"],

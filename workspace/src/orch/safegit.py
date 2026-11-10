@@ -7,8 +7,8 @@ sandbox and permission mode. So every call here:
 
 * drops every GIT_* variable of the caller (a hook's GIT_DIR must not aim us at another repository; only what
   this module sets is passed), and sets GIT_TERMINAL_PROMPT=0;
-* runs hooks from a path that does not exist (`core.hooksPath` = a fresh name inside the orch home, never
-  created: git runs no hooks), so repo hooks (reference-transaction, post-checkout, ...) never run;
+* hooksPath is a fixed device path or a random never-created name; never derived from a file or folder that
+  exists (/dev/null; //./NUL on Windows), so repo hooks (reference-transaction, post-checkout, ...) never run;
 * turns off `core.fsmonitor` and the untracked cache, `protocol.allow=never` (no network), `core.longpaths`
   (Windows), signing (`commit.gpgSign`, `tag.gpgSign`: no `gpg.program` of the repo runs), `core.sshCommand`,
   `credential.helper`, and `diff.external`; diff-like commands (diff, log, show) get `--no-ext-diff
@@ -37,9 +37,9 @@ import re
 import shlex
 import signal
 import subprocess
+import sys
 import threading
 import time
-import uuid
 from pathlib import Path
 
 from orch import addons
@@ -240,7 +240,6 @@ def git_exe(cwd: Path, root: Path | None = None) -> str | None:
 def _python_trivial(name: str, cwd: Path, root: Path | None) -> str | None:
     """Windows has no true/false programs: the python running orch does it, unless that python is inside the
     folder we work in, the workspace root or a copy (a project's own .venv is not a trusted program)."""
-    import sys
 
     if any(_inside(sys.executable, a) for a in _avoid(cwd, root)):
         return None
@@ -286,14 +285,20 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
     return e
 
 
-def _no_hooks() -> str:
-    """A path that does not exist: as core.hooksPath git runs no hooks. Fresh per call, never created."""
-    return (addons.home() / "no-hooks" / uuid.uuid4().hex).as_posix()
+def _no_hooks(cwd: Path | None = None, root: Path | None = None) -> str:
+    """core.hooksPath for every call. POSIX: /dev/null (a device: it can't be a folder or be redirected).
+    Windows: the absolute device path //./NUL (git for Windows is to accept it; the next Windows run
+    checks it; if it rejects it, use a random 32-hex name below %LOCALAPPDATA%\\orch, never created).
+    Invariant: hooksPath is a fixed device path or a random never-created name; never derived from a file
+    or folder that exists. (cwd and root are accepted for the callers' sake and unused.)"""
+    if os.name != "nt":
+        return "/dev/null"
+    return "//./NUL"
 
 
-def base_args(true: str, read_only: bool = False) -> list[str]:
+def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> list[str]:
     out = [
-        "-c", f"core.hooksPath={_no_hooks()}",
+        "-c", f"core.hooksPath={hooks or _no_hooks()}",
         "-c", "core.fsmonitor=false",
         "-c", "core.untrackedCache=false",
         "-c", "protocol.allow=never",
@@ -522,7 +527,9 @@ def _raw(
 def version(cwd: Path, root: Path | None = None) -> tuple[int, int]:
     exe = git_exe(cwd, root) or ""
     if exe not in _versions:
-        rc, out, _ = _raw(["git", *base_args(_NOOP, True), "--version"], cwd, 10, None, root)
+        rc, out, _ = _raw(
+            ["git", *base_args(_NOOP, True, _no_hooks(cwd, root)), "--version"], cwd, 10, None, root
+        )
         m = re.search(r"(\d+)\.(\d+)", out)
         _versions[exe] = (int(m[1]), int(m[2])) if rc == 0 and m else (0, 0)
     return _versions[exe]
@@ -533,7 +540,11 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
     key = str(cwd)
     if key not in _trees:
         rc, out, _ = _raw(
-            ["git", *base_args(_NOOP, True), "rev-parse", "--show-object-format"], cwd, 10, None, root
+            ["git", *base_args(_NOOP, True, _no_hooks(cwd, root)), "rev-parse", "--show-object-format"],
+            cwd,
+            10,
+            None,
+            root,
         )
         if rc != 0 or out.strip() not in EMPTY_TREE:
             return None
@@ -627,7 +638,8 @@ def driver_args(
     configuration defines; None when that could not be found out (the caller refuses). They travel in the
     environment (GIT_CONFIG_*), not as `-c name=value`: the names are repository-chosen."""
     rc, out, _ = _raw(
-        ["git", *base_args(_NOOP, True), "config", "--includes", "--null", "--get-regexp",
+        ["git", *base_args(_NOOP, True, _no_hooks(cwd, root)), "config", "--includes", "--null",
+         "--get-regexp",
          r"^(filter\..*\.(smudge|clean|process)|merge\..*\.driver)$"],
         cwd, timeout, None, root,
     )  # fmt: skip
@@ -699,7 +711,7 @@ def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
             REFUSED,
             "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
         )
-    return ["git", *top, *base_args(true, read_only), *sub], extra
+    return ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *sub], extra
 
 
 def run(

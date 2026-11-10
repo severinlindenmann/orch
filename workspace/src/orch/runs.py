@@ -398,18 +398,92 @@ def _human_author(by, via, kind, phone=None) -> bool:
     return via == "phone" and isinstance(phone, str) and PHONE_ID_RE.fullmatch(phone) is not None
 
 
+def _pending_proof(root: Path, tid: str):
+    """(human key, workspace id) for the pending MAC, or None when this workspace has no guarded home."""
+    from orch import addons, humanproof
+
+    try:
+        ws = addons.workspace_id(root, create=True)
+        return (humanproof.human_key(root), ws) if ws else None
+    except (Refused, OSError):
+        return None
+
+
+class Unsigned(Refused):
+    """A person's input could not be signed (no usable key folder): nothing was saved."""
+
+
+UNSIGNED = (
+    "Not saved: orch can't check who you are on this computer right now (its protected folder can't be "
+    "used), so your message would never reach the agent. Close orch and start it again; if it keeps "
+    "happening, the protected folder has wrong rights: orch resets its protection on the next start."
+)
+
+
+def require_signing(root: Path) -> None:
+    """Refuse VISIBLY, before anything is saved, when a person's input could not be signed (no usable key
+    folder): otherwise it would be stored without a MAC and silently never start a run."""
+    from orch import humanproof
+
+    if humanproof.ENFORCE_PENDING_MAC and _pending_proof(root, "") is None:
+        raise Unsigned(UNSIGNED)
+
+
+def _mac_line(root: Path, tid: str, item: dict) -> None:
+    """Add the pending1 MAC (humanproof.pending_mac): the core accepted this input from a verified person.
+    No usable key folder = refuse in plain words (never a line without a MAC that silently starts nothing)."""
+    from orch import humanproof
+
+    if item.get("kind") not in humanproof.PENDING_MAC_KINDS:
+        return
+    proof = _pending_proof(root, tid)
+    if proof:
+        item["mac"] = humanproof.pending_mac(proof[0], proof[1], tid, item)
+    elif humanproof.ENFORCE_PENDING_MAC:
+        raise Unsigned(UNSIGNED)
+
+
+def _mac_valid(root: Path, tid: str, item: dict, key_ws) -> bool:
+    from orch import humanproof
+
+    # live_retry is core bookkeeping added after the MAC (runs_live._give_up_locked), not part of the input
+    return key_ws is not None and humanproof.pending_is_human(
+        key_ws[0], key_ws[1], tid, item, ignore=("live_retry",)
+    )
+
+
 def human_waiting(root: Path, tid: str) -> list[dict]:
     """Undelivered input a person wrote (owner, phone, a page), never an agent's (agent:*, or written from
-    inside an agent) and never a run's own start prompt or slot request. Only this may start a run."""
-    out = []
-    for i in undelivered(root, tid):
-        if i.get("via") in ("start", "slots"):
-            continue
-        # the stored flag is never trusted alone: the allowlist is checked again (older lines have no flag)
-        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
-        if rule and i.get("human") in (True, None):
-            out.append(i)
-    return out
+    inside an agent) and never a run's own start prompt or slot request. Only this may start a run.
+    With humanproof.ENFORCE_PENDING_MAC the person is proven by the line's pending1 MAC, verified here on
+    every
+    read (by/via/human are informational), and a consumed id never counts again (delivered.json)."""
+    from orch import humanproof
+
+    items = [i for i in undelivered(root, tid) if i.get("via") not in ("start", "slots")]
+    if not humanproof.ENFORCE_PENDING_MAC:
+        out = []
+        for i in items:
+            # the stored flag is never trusted alone: the allowlist is checked again (older lines have no
+            # flag)
+            rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
+            if rule and i.get("human") in (True, None):
+                out.append(i)
+        return out
+    if not items:
+        return []
+    try:
+        key_ws = (humanproof.human_key(root, create=False), _ws_id(root))
+        done = humanproof.delivered_ids(root)
+    except (Refused, OSError):
+        return []  # no key or an unreadable record: nothing counts as a person's (fail closed)
+    return [i for i in items if i["id"] not in done and _mac_valid(root, tid, i, key_ws)]
+
+
+def _ws_id(root: Path):
+    from orch import addons
+
+    return addons.workspace_id(root, create=False)
 
 
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:
@@ -434,6 +508,7 @@ def _pending_add_locked(
     pid: str | None,
     *,
     phone: str | None = None,
+    proven: bool = False,
 ) -> dict:
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
@@ -460,6 +535,12 @@ def _pending_add_locked(
     item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))
     if via:
         item["via"] = via
+    # The person's proof: a verified page proof (`proven`, slice 1.0a-2) or the relay-authenticated phone
+    # channel
+    # (relay.py passes phone=<ph_ id> with via="phone" only for a message it fetched itself). Anything else
+    # (CLI --by human:, chat, a note) gets no MAC and is agent input once ENFORCE_PENDING_MAC is on.
+    if not tool and (proven or (item.get("phone") and via == "phone")):
+        _mac_line(root, tid, item)
     _pending_write(root, tid, items + [item])
     return item
 
@@ -474,11 +555,12 @@ def pending_add(
     pid: str | None = None,
     *,
     phone: str | None = None,
+    proven: bool = False,
 ) -> dict:
     """Queue input for a ticket (under the ticket's run lock) and flag a running claim. phone: the sender's
-    phone id, passed only by the relay's phone-text path."""
+    phone id, passed only by the relay's phone-text path. proven: the caller verified a human proof."""
     with locked(root, tid):
-        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone)
+        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone, proven=proven)
         rec = read(root, tid)
         if rec and not rec.get("pending"):
             rec["pending"] = True
@@ -499,8 +581,20 @@ def pending_discard(root: Path, tid: str, item_id: str) -> None:
             _write(root, rec)
 
 
+def _consume_human(root: Path, items: list[dict], ids: list[str]) -> None:
+    """Spend the ids of MAC'd lines in <guarded home>/keys/<ws>/delivered.json (delivered_at is display
+    only)."""
+    from orch import humanproof
+
+    mine = [i["id"] for i in items if i["id"] in ids and i.get("mac")]
+    if mine:
+        with contextlib.suppress(Refused, OSError):
+            humanproof.consume(root, mine)
+
+
 def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
     items = _pending_read(root, tid)
+    _consume_human(root, items, ids)
     for i in items:
         if i["id"] in ids and not i.get("delivered_at"):
             i["delivered_at"] = tickets.now()
@@ -518,6 +612,10 @@ def undeliver(root: Path, tid: str, ids: list[str]) -> bool:
         return False
     with locked(root, tid):
         items = _pending_read(root, tid)
+        from orch import humanproof
+
+        with contextlib.suppress(Refused, OSError):
+            humanproof.unconsume(root, [i["id"] for i in items if i["id"] in ids and i.get("mac")])
         for i in items:
             if i["id"] in ids:
                 i.pop("delivered_at", None)
@@ -1028,10 +1126,19 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
     out.extend(_description_plan(ticket))
-    todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
+    todo = [c for c in ticket.get("checklist") or [] if not c.get("done") and not c.get("wont_do")]
     if todo:
         out.append(
             "Still to do:\n" + "\n".join(f"- {c['id']}: {_clip(c.get('text', ''), 200)}" for c in todo[:20])
+        )
+    declined = [c for c in ticket.get("checklist") or [] if c.get("wont_do") and not c.get("done")]
+    if declined:
+        out.append(
+            "Declined by a person (do not do these): "
+            + "; ".join(
+                f"{c['id']} ({_clip(' '.join(str(c.get('reason') or 'no reason given').split()), 200)})"
+                for c in declined[:20]
+            )
         )
     hist = (ticket.get("history") or [])[-5:]
     if hist:

@@ -929,7 +929,7 @@ def event(
     return result
 
 
-def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+def pass_answer(root: Path, tid: str, q: dict, by: str, proven: bool = False) -> dict | None:
     """A person answered. An agent works on the ticket: the answer goes to it like a message (live: pasted
     when it is idle). None works on it: the agent that asked is started again on the ticket (its own session
     resumed when there is one) once no question of it is open any more, so nobody has to press Continue.
@@ -938,7 +938,14 @@ def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
         return None
     rec = runs.read(root, tid)
     if rec and runs.state(rec) == "alive":
-        send(root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer")
+        send(
+            root,
+            tid,
+            by,
+            f"Answer to your question {q['id']} ({q['text']}): {q['answer']}",
+            "answer",
+            proven=proven,
+        )
         return None
     return resume_after_answer(root, tid, q, by)
 
@@ -969,9 +976,9 @@ def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
         return None
 
 
-def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dict:
+def send(root: Path, tid: str, by: str, text: str, kind: str = "message", proven: bool = False) -> dict:
     tickets.load(root, tid)
-    item = runs.pending_add(root, tid, by, kind, text)
+    item = runs.pending_add(root, tid, by, kind, text, proven=proven)
     rec = runs.read(root, tid)
     if not rec or runs.state(rec) != "alive":
         return {"id": item["id"], "delivered": 0, "state": "none"}

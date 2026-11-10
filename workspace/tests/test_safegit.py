@@ -5,6 +5,7 @@ import os
 import re
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -132,16 +133,48 @@ def test_every_call_carries_the_hardening(tmp_path, monkeypatch):
     safegit.run(["status"], tmp_path, read_only=True, filters=False)
     argv = seen[-1][0]
     assert "--no-optional-locks" in argv and "core.fsmonitor=false" in argv and "protocol.allow=never" in argv
-    assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv)
+    assert any(a == "core.hooksPath=/dev/null" for a in argv)
     assert "core.longpaths=true" in argv and "core.untrackedCache=false" in argv
     e = safegit.env(tmp_path, None, "/bin/true")
     assert "GIT_DIR" not in e and e["GIT_TERMINAL_PROMPT"] == "0"
 
 
-def test_hooks_path_is_a_fresh_path_that_does_not_exist():
-    a, b = safegit._no_hooks(), safegit._no_hooks()
-    assert a != b and not Path(a).exists() and not Path(b).exists()
-    assert Path(a).parent == addons.home() / "no-hooks"
+def test_hooks_path_is_a_device_and_planted_symlinks_and_folders_are_never_used(
+    hostile, tmp_path, monkeypatch
+):
+    import ntpath
+
+    assert safegit._no_hooks() == ("/dev/null" if os.name != "nt" else "//./NUL")
+    with monkeypatch.context() as m:
+        m.setattr(safegit.os, "name", "nt")  # simulated Windows: the absolute device path
+        win = safegit._no_hooks()
+    assert win == "//./NUL" and ntpath.isabs(win)
+    r, marker = hostile
+    # hooks planted where earlier versions looked: <tempdir>/orch-no-hooks as a folder AND as a symlink to a
+    # folder of hooks
+    hooks = tmp_path / "evil-hooks"
+    hooks.mkdir()
+    for n in ("post-checkout", "reference-transaction"):
+        sh(hooks / n, f"touch {marker}.{n}")
+    shared = Path(tempfile.gettempdir()) / "orch-no-hooks"
+    planted = []
+    if not shared.exists() and not shared.is_symlink():
+        shared.symlink_to(hooks, target_is_directory=True)
+        planted.append(shared)
+    try:
+        wt = tmp_path / "wt"
+        assert (
+            safegit.run(["worktree", "add", "--no-checkout", "-b", "x", str(wt), "HEAD"], r, filters=False)[0]
+            == 0
+        )
+        assert safegit.run(["read-tree", "HEAD"], wt, filters=False)[0] == 0
+        assert safegit.run(["checkout-index", "-a", "-f", "-u"], wt)[0] == 0
+        assert safegit.run(["worktree", "remove", "--force", str(wt)], r, filters=False)[0] == 0
+        assert safegit.run(["branch", "-D", "x"], r, filters=False)[0] == 0
+        assert marks(marker) == []  # neither the planted links/folders nor the repo's own .git/hooks ran
+    finally:
+        for link in planted:
+            link.unlink()
 
 
 def test_sentinel_empty_driver_values_really_prevent_execution(tmp_path):
@@ -777,7 +810,7 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         for want in ("commit.gpgSign=false", "log.showSignature=false"):
             assert want in argv, (cmd, want)
         assert any(a.startswith("core.editor=/") for a in argv), cmd
-        assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv), cmd
+        assert any(a == "core.hooksPath=/dev/null" for a in argv), cmd
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
 
@@ -1445,3 +1478,16 @@ def test_runs_kill_tree_uses_the_full_path_taskkill_or_does_nothing(monkeypatch,
     monkeypatch.setattr(safegit, "taskkill_exe", lambda: None)
     runs.kill_tree(4321)
     assert calls == [] and "taskkill.exe was not found" in capsys.readouterr().err  # no bare name is run
+
+
+def test_safegit_works_with_an_untrusted_orch_home(proj, monkeypatch, tmp_path):
+    """The hooks path must not need the orch home: with an ORCH_HOME that is not trusted, run_bytes() and run()
+    still work (the test that found this: refreshing with an unpaired home)."""
+    from orch import harness
+
+    monkeypatch.setenv(
+        "ORCH_HOME", str(tmp_path)
+    )  # not under the (faked) real home: untrusted in strict mode
+    assert safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj)[0] in (0, 128)
+    assert safegit.run(["--version"], proj, filters=False)[0] == 0
+    assert harness._in_git_repo(proj) is False

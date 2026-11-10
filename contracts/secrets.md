@@ -35,6 +35,8 @@ What Level 1 does:
 <orch home>/keys/                         0700. <orch home> = the guarded orch home of the workspace (below)
   <workspace local id>/                   0700, one folder per workspace (.orch/.local-id); a copy or clone has none
     keys.json                             0600, $defs/keys_file: {"schema": "orch.keys/1", "keys": {"<name>": {type, source, value|file, added_at}}}
+                                          the keys a person added (source workspace)
+    admin-keys.json                       0600, same shape, source admin: written only by `orch relay refresh`
     files/<name>                          0600, key-file values (≤ 1 MB)
     profiles.toml                         0600, $defs/profiles: names only
 ```
@@ -55,7 +57,7 @@ What Level 1 does:
   symlink to `~` makes nothing a test path). Reference `home_ok`, vectors `home` (human-proof-v1).
   **Rationale.** Tests and e2e keep isolating with `env -i HOME=~/.orch-test/… ORCH_HOME=…` and never read or write the real
   `~/.orch-tool` (owner rule): they run from the source tree or a dev install, and their workspaces and homes are real
-  directories under the prefix; the check reads nothing in the real home. On a pilot user's normal install an agent cannot
+  directories under the prefix; the check reads nothing in the real home. Home pinning always has a test-safe mode that is on in the test environment: on a test install a real workspace never pairs with the account's orch home (guarded ops refused), and the test suite fails on any change under the real orch home. On a pilot user's normal install an agent cannot
   get a second, agent-made human key by moving a workspace under `~/.orch-test`, linking paths, or setting `HOME`/`ORCH_HOME`:
   there is no test path, so a non-default home is simply refused. **It does not stop** editing the install record or files in
   the default orch home directly (outside the boundary above); on a dev or test install, a workspace under the prefix is a
@@ -63,13 +65,14 @@ What Level 1 does:
 - POSIX: folders 0700 and files 0600, checked on every read; looser rights, another owner, or a symlink anywhere on the path
   → refused (`Refused: the key folder has the wrong rights. Fix: orch doctor`). Windows: an ACL with only the user and
   SYSTEM, set at creation, checked the same way.
+  (orch.winacl; the ACL is set before any secret is written). A loose key file is set aside, never trusted.
 - *Implementing slice 1.1 must* bind `.orch/.local-id` to the workspace's real path in the guarded orch home and refuse a
   mismatch (the id file is workspace-writable).
 - Writes: new file + rename, under `keys.lock` (O_EXCL). Read once per command; never cached on disk elsewhere.
 - **Sources.** `workspace` = added by a person on this computer. `admin` = assigned by the relay admin and written by
   `orch relay refresh` straight into this folder (replacing `.orch/secrets/credentials.json`, slice 1.1; an interrupted
-  refresh keeps the old keys: write all into `keys.json.new`, rename once). Admin keys are read-only here ("Managed by your
-  admin"). Same name in both: the workspace key is used and `list` shows the admin one as `shadowed`.
+  refresh keeps the old keys: write all into `admin-keys.json.new`, rename once; workspace keys stay in `keys.json`). Admin keys are read-only here ("Managed by your
+  admin"). Same name in both: both are stored, the workspace key is used and `list` shows the admin one as `shadowed`; removing the workspace key makes the admin one active again.
 
 ## Key types
 

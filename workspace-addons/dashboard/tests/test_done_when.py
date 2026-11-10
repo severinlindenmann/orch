@@ -81,7 +81,9 @@ def test_ticket_details_and_readonly_multiline():
 def test_tickets_carry_the_core_proof_line():
     from orch_dashboard.data import add_proof_state
 
-    t = {"checklist": [{"id": "c1", "text": "a", "done": True, "evidence": [{"type": "command", "ref": "x"}]}]}
+    t = {
+        "checklist": [{"id": "c1", "text": "a", "done": True, "evidence": [{"type": "command", "ref": "x"}]}]
+    }
     add_proof_state([t])
     assert t["proof"]["line"] == "1 check passed" and t["proof"]["per_item"] == {"c1": "passed"}
 
@@ -93,7 +95,12 @@ def test_proof_line_says_changed_since_the_recorded_check(tmp_path):
 
     from orch_dashboard.data import add_proof_state
 
-    run = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=tmp_path, check=True, capture_output=True)
+    run = lambda *a: subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
     run("init", "-q")
     (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
     run("add", ".")
