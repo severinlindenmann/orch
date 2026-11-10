@@ -4436,7 +4436,7 @@
    "name": "a drop that carries the core's current MAC for the undo is a person's undo and is accepted",
    "rule": "wont",
    "ledger": {
-    "t_abc123:c1": "v1-cf36780ff45edb4505a4"
+    "t_abc123:c1": "v1-9ac4f1f28fff44bd049f"
    },
    "base": {
     "schema": "orch.ticket/1",
@@ -4480,7 +4480,7 @@
       "done": false,
       "evidence": [],
       "wont_nonce": "n2",
-      "wont_mac": "v1-cf36780ff45edb4505a4"
+      "wont_mac": "v1-9ac4f1f28fff44bd049f"
      }
     ],
     "refs": [],
@@ -4527,7 +4527,7 @@
       "done": false,
       "id": "c1",
       "text": "Email finance",
-      "wont_mac": "v1-cf36780ff45edb4505a4",
+      "wont_mac": "v1-9ac4f1f28fff44bd049f",
       "wont_nonce": "n2",
       "evidence": []
      }
@@ -4543,7 +4543,7 @@
    "name": "replay: the older signed 'on' over the newer signed 'off' is not the current ledger entry",
    "rule": "wont",
    "ledger": {
-    "t_abc123:c1": "v1-cf36780ff45edb4505a4"
+    "t_abc123:c1": "v1-9ac4f1f28fff44bd049f"
    },
    "base": {
     "schema": "orch.ticket/1",
@@ -4560,7 +4560,7 @@
       "done": false,
       "evidence": [],
       "wont_nonce": "n2",
-      "wont_mac": "v1-cf36780ff45edb4505a4"
+      "wont_mac": "v1-9ac4f1f28fff44bd049f"
      }
     ],
     "refs": [],
@@ -4610,7 +4610,7 @@
       "done": false,
       "evidence": [],
       "wont_nonce": "n2",
-      "wont_mac": "v1-cf36780ff45edb4505a4"
+      "wont_mac": "v1-9ac4f1f28fff44bd049f"
      }
     ],
     "refs": [],
@@ -4632,7 +4632,7 @@
       "done": false,
       "id": "c1",
       "text": "Email finance",
-      "wont_mac": "v1-cf36780ff45edb4505a4",
+      "wont_mac": "v1-9ac4f1f28fff44bd049f",
       "wont_nonce": "n2",
       "evidence": []
      }
@@ -4692,7 +4692,7 @@
       "done": false,
       "evidence": [],
       "wont_nonce": "n2",
-      "wont_mac": "v1-cf36780ff45edb4505a4"
+      "wont_mac": "v1-9ac4f1f28fff44bd049f"
      }
     ],
     "refs": [],
@@ -4939,15 +4939,15 @@
     "checklist": [
      {
       "id": "c1",
-      "text": "Email finance",
       "done": false,
       "evidence": [],
       "by": "human:Ann",
       "at": "2026-11-09T09:00:00Z",
       "wont_do": true,
       "reason": "Not needed",
-      "wont_mac": "v1-2445a7a2b06f82ea36f3",
-      "wont_nonce": "n1"
+      "text": "Email finance",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-2445a7a2b06f82ea36f3"
      }
     ],
     "questions": [],
@@ -4958,7 +4958,7 @@
    }
   },
   {
-   "name": "an agent rewrote the step text under a person's won't-do: the won't-do is dropped",
+   "name": "an agent rewrote ONLY the step text under a person's won't-do: no change from base (won't-do and text stay)",
    "rule": "wont",
    "ledger": {
     "t_abc123:c1": "v1-2445a7a2b06f82ea36f3"
@@ -5057,9 +5057,12 @@
       "by": "human:Ann",
       "done": false,
       "id": "c1",
-      "text": "Email the auditor instead",
-      "evidence": [],
-      "wont_nonce": "n1"
+      "reason": "Not needed",
+      "text": "Email finance",
+      "wont_do": true,
+      "wont_mac": "v1-2445a7a2b06f82ea36f3",
+      "wont_nonce": "n1",
+      "evidence": []
      }
     ],
     "questions": [],
@@ -5070,7 +5073,7 @@
    }
   },
   {
-   "name": "an agent changed covers under a person's won't-do: the won't-do is dropped",
+   "name": "an agent set ONLY covers under a person's won't-do: no change from base",
    "rule": "wont",
    "ledger": {
     "t_abc123:c1": "v1-2445a7a2b06f82ea36f3"
@@ -5168,12 +5171,319 @@
      {
       "at": "2026-11-09T09:00:00Z",
       "by": "human:Ann",
-      "covers": "everything",
+      "done": false,
+      "id": "c1",
+      "reason": "Not needed",
+      "text": "Email finance",
+      "wont_do": true,
+      "wont_mac": "v1-2445a7a2b06f82ea36f3",
+      "wont_nonce": "n1",
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T09:00:00Z"
+   }
+  },
+  {
+   "name": "an agent rewrote text AND dropped the decision under a person's won't-do: all restored from base",
+   "rule": "wont",
+   "ledger": {
+    "t_abc123:c1": "v1-2445a7a2b06f82ea36f3"
+   },
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-2445a7a2b06f82ea36f3"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "skip the security review",
+      "done": false,
+      "evidence": [],
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-2445a7a2b06f82ea36f3"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "done": false,
+      "id": "c1",
+      "reason": "Not needed",
+      "text": "Email finance",
+      "wont_do": true,
+      "wont_mac": "v1-2445a7a2b06f82ea36f3",
+      "wont_nonce": "n1",
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T09:00:00Z"
+   }
+  },
+  {
+   "name": "an undone step renamed by an agent while a stale peer still has the old on: stays undone",
+   "rule": "wont",
+   "ledger": {
+    "t_abc123:c1": "v1-9ac4f1f28fff44bd049f"
+   },
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance, renamed",
+      "done": false,
+      "evidence": [],
+      "wont_nonce": "n2",
+      "wont_mac": "v1-9ac4f1f28fff44bd049f"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-2445a7a2b06f82ea36f3"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance, renamed",
+      "done": false,
+      "evidence": [],
+      "wont_nonce": "n2",
+      "wont_mac": "v1-9ac4f1f28fff44bd049f"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
       "done": false,
       "id": "c1",
       "text": "Email finance",
-      "evidence": [],
-      "wont_nonce": "n1"
+      "wont_mac": "v1-9ac4f1f28fff44bd049f",
+      "wont_nonce": "n2",
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T09:00:00Z"
+   }
+  },
+  {
+   "name": "a rename of a plain (never decided) step is free",
+   "rule": "wont",
+   "ledger": {},
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance and the auditor",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "done": false,
+      "id": "c1",
+      "text": "Email finance and the auditor",
+      "evidence": []
      }
     ],
     "questions": [],
@@ -5373,8 +5683,7 @@
       "done": false,
       "evidence": [],
       "by": "human:Ann",
-      "at": "2026-11-09T09:00:00Z",
-      "wont_nonce": "n1"
+      "at": "2026-11-09T09:00:00Z"
      }
     ],
     "questions": [],

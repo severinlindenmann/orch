@@ -1450,7 +1450,10 @@ def test_sync_merge_with_the_real_verifier_end_to_end(ws, run, monkeypatch):
         "checklist": [{**base["checklist"][0], "text": "skip the security review"}],
     }
     out = merge.merge_ticket(base, rewrite, base, now, person)
-    assert "wont_do" not in out["checklist"][0]  # rewriting the step under a Won't do drops it
+    step0 = base["checklist"][0]
+    assert (
+        out["checklist"][0]["wont_do"] is True and out["checklist"][0]["text"] == step0["text"]
+    )  # no change
     changed = {**base, "updated_at": old, "checklist": [{**base["checklist"][0], "reason": "agent was here"}]}
     out = merge.merge_ticket(base, changed, base, now, person)
     assert out["checklist"][0]["reason"] == "not needed" and out["checklist"][0]["wont_do"] is True
@@ -1479,3 +1482,64 @@ def test_every_caller_of_merge_ticket_passes_a_verifier():
                 if len(node.args) < 5 and not any(k.arg == "person" for k in node.keywords):
                     offenders.append(f"{src.relative_to(root)}:{node.lineno}")
     assert not offenders, "merge_ticket without person= (wont_verifier): " + ", ".join(offenders)
+
+
+def test_the_signed_fields_are_one_source_of_truth_for_the_signer_and_the_merge():
+    """If the decision record starts to cover another step field, or the merge pins another, this fails: the
+    signer (humanproof.wont_decision / SIGNED_STEP_FIELDS) and orch_sync.merge._SIGNED can not drift apart."""
+    merge = _sync_mod()
+    assert tuple(merge._SIGNED) == tuple(hp.SIGNED_STEP_FIELDS) + ("wont_mac",)
+    step = {
+        "id": "c1", "text": "T", "done": False, "evidence": [], "wont_do": True, "reason": "r", "covers": "c",
+        "wont_nonce": "n", "wont_mac": "m", "by": "human:x", "at": "2026-11-10T00:00:00Z", "state": None,
+    }  # fmt: skip
+    base = hp.wont_decision(step)
+    for field in hp.SIGNED_STEP_FIELDS:  # every signed field moves the record ...
+        assert hp.wont_decision({**step, field: "changed" if field != "wont_do" else False}) != base, field
+    for field, value in (
+        ("evidence", [1]),
+        ("done", True),
+        ("by", "agent:x"),
+        ("at", "x"),
+        ("wont_mac", "other"),
+    ):
+        assert hp.wont_decision({**step, field: value}) == base, field  # ... and nothing else does
+    off = hp.wont_decision({**step, "wont_do": False})
+    assert off["text"] is None and off["covers"] is None and off["reason"] is None  # an undo binds no text
+
+
+def test_a_damaged_ledger_is_never_overwritten_and_the_decision_is_refused(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    ledger = hp.key_dir(ws) / hp.LEDGER
+    hp._write_private(ledger, "{not json")
+    # another step's decision is refused visibly; the damaged file is kept as it is (not wiped with {})
+    code, out, err = run("check", "add", tid, "Second", "--json", "--by", "agent:x")
+    c2 = json.loads(out)["id"]
+    proof = _proof(ws, "check.wont_do", f"{tid}:{c2}")
+    code, out, err = _cli(run, monkeypatch, proof, "check", "wont-do", tid, c2, "--json")
+    assert code == 2 and "damaged" in out + err and "start it again" in out + err
+    assert ledger.read_text() == "{not json"
+    assert not tickets.load(ws, tid)["checklist"][1].get("wont_do")  # nothing half done
+
+
+def test_the_verifier_reads_the_ledger_when_asked_not_at_creation(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    person = hp.wont_verifier(ws)  # created BEFORE the next decision
+    old = tickets.load(ws, tid)["checklist"][0]
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "reopen", tid, cid, "--json")
+    assert not person(
+        old, tid
+    )  # the ledger moved on after the verifier was made: the old "on" is not current
+
+
+def test_a_proven_remove_tombstones_even_when_the_step_file_lost_its_mac(ws, run, monkeypatch):
+    tid, cid = _signed_wont(ws, run, monkeypatch)
+    on = tickets.load(ws, tid)["checklist"][0]
+    tickets.apply_op(
+        ws, tid, lambda t: [t["checklist"][0].pop(k) for k in ("wont_mac", "wont_nonce")]
+    )  # stripped
+    proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
+    assert hp._ledger_read(ws)[f"{tid}:{cid}"] is None  # tombstoned from the ledger, not from the step file
+    assert not hp.wont_verifier(ws)(on, tid)
