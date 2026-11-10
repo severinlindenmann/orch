@@ -1427,7 +1427,7 @@ def batch_install(root: Path):
 
     if _BATCH.get() is not None:
         raise RuntimeError("batch_install does not nest")
-    _tool_env_change_ok()
+    tool_env_change_ok()
     if winfinish.needed() and winfinish.pending(home()):
         raise _busy_refusal()
     before = set(active(root))
