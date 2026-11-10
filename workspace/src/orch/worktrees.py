@@ -38,6 +38,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime
@@ -1236,8 +1237,9 @@ def _spawn_clean(root: Path, flag: str) -> None:
         return
     from orch import procs
 
-    home = addons.home(root)
-    neutral = home if home.is_dir() else Path(os.path.abspath(os.sep))
+    # a neutral folder that holds neither the workspace nor ORCH_HOME (orch distrusts an ORCH_HOME inside the
+    # current folder, so the home itself is no place to run from)
+    neutral = Path(os.path.realpath(tempfile.gettempdir()))
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["ORCH_ROOT"] = str(root)
     subprocess.Popen(

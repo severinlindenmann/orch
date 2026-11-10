@@ -1012,3 +1012,5 @@ def test_starts_only_schedule_a_detached_clean_and_only_when_there_is_something(
         "--background",
     ]
     assert Path(kw["cwd"]).resolve() != repo.resolve() and kw["env"]["ORCH_ROOT"] == str(repo)
+    # orch distrusts an ORCH_HOME inside its cwd (e2e G1-CLEAN proves it): not the home
+    assert Path(kw["cwd"]).resolve() != worktrees.addons.home(repo).resolve()
