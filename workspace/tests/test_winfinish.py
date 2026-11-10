@@ -71,7 +71,7 @@ def test_orch_still_running_changes_nothing(tmp_path):
         assert _run_finisher(tmp_path, job).returncode == 1
     finally:
         locked.chmod(0o700)
-    assert "did not exit in time" in (tmp_path / "finish.log").read_text()
+    assert "still in use after 1s" in (tmp_path / "finish.log").read_text()
     assert not (tmp_path / "addons.json").exists()
 
 
@@ -219,3 +219,75 @@ def test_any_start_failure_frees_the_mark(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
     assert not (tmp_path / "finish.pending").exists()
+
+
+def _windows_with_one_finisher(monkeypatch):
+    started = []
+    monkeypatch.setattr(winfinish, "needed", lambda: True)
+    monkeypatch.setattr(addons, "_which_uv", lambda: "uv.exe")
+    monkeypatch.setattr(addons, "_reinstall_plan", lambda: None)
+    monkeypatch.setattr(addons, "_reinstall_anywhere", lambda: True)
+
+    def start(home, uv, then, cwd, done, reg=None, extra=None):
+        # like the real one: a second job is refused while the first is pending
+        if started:
+            raise winfinish.Busy("an add-on install or update is still finishing in the background")
+        started.append((uv, then, reg, done))
+        return home
+
+    monkeypatch.setattr(winfinish, "start", start)
+    return started
+
+
+def test_init_recommended_hands_all_addons_to_ONE_finisher(proj, monkeypatch, uv_calls):
+    """I11b: init --recommended started one finisher per add-on; the second was refused ('still finishing')
+    and every retry only got one more add-on."""
+    from orch import init
+
+    started = _windows_with_one_finisher(monkeypatch)
+    rows = {
+        n: {"name": n, "version": "0.1.0", "description": "d", "background": False}
+        for n in ("automation", "dashboard", "focus")
+    }
+    monkeypatch.setattr(addons, "listing", lambda root: [])
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: rows)
+    monkeypatch.setattr(addons, "discover", lambda: {})
+    monkeypatch.setattr(addons, "_is_local", lambda r: False)
+    monkeypatch.setattr(addons, "preview_builtin", lambda n: rows[n])
+    monkeypatch.setattr(addons, "consent_text", lambda m, x: m["name"])
+    assert init.recommended(proj, yes=True) == ["automation", "dashboard", "focus"]
+    assert len(started) == 1
+    uv, then, reg, done = started[0]
+    assert [e["name"] for e in json.loads(reg[1])] == ["automation", "dashboard", "focus"]
+    assert then == [["addon", "add", n, "--project-only"] for n in ("automation", "dashboard", "focus")]
+    assert "automation, dashboard, focus" in done
+
+
+def test_batch_install_installs_nothing_when_one_add_fails(proj, monkeypatch):
+    started = _windows_with_one_finisher(monkeypatch)
+    with pytest.raises(Refused, match="boom"), addons.batch_install(proj):
+        addons._BATCH.append(({"name": "automation", "source": "built-in", "version": "1"}, []))
+        raise Refused("boom")
+    assert started == [] and addons._BATCH is None
+
+
+def test_batch_install_on_other_systems_is_one_uv_run(proj, monkeypatch, uv_calls):
+    monkeypatch.setattr(winfinish, "needed", lambda: False)
+    reexecs = []
+    monkeypatch.setattr(addons, "reexec", lambda a: reexecs.append(a))
+    monkeypatch.setattr(addons, "record_consent", lambda *a, **k: None)
+    with addons.batch_install(proj):
+        addons._BATCH.append(
+            (
+                {"name": "automation", "source": "built-in", "version": "1"},
+                [["addon", "add", "automation", "--project-only"]],
+            )
+        )
+        addons._BATCH.append(
+            (
+                {"name": "dashboard", "source": "built-in", "version": "1"},
+                [["addon", "add", "dashboard", "--project-only"]],
+            )
+        )
+    assert len(uv_calls) == 1 and len(reexecs) == 2
+    assert [e["name"] for e in addons.registry()] == ["automation", "dashboard"]

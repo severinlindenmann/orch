@@ -1386,6 +1386,40 @@ def reexec(args: list[str]) -> None:
         raise Refused("The project step failed (see above).")
 
 
+_BATCH: list[tuple[dict, list[list[str]]]] | None = None
+
+
+@contextlib.contextmanager
+def batch_install(root: Path):
+    """Several add() calls, ONE reinstall. On Windows each reinstall is a background finisher and a second one
+    is refused while the first runs, so a loop of add() calls only got its first add-on. In this block
+    add() only collects; when the block ends without an error, one reinstall installs them all. Nothing is
+    recorded or installed if the block raises."""
+    global _BATCH
+    if _BATCH is not None:
+        raise RuntimeError("batch_install does not nest")
+    _BATCH = []
+    try:
+        yield
+        collected = _BATCH
+    finally:
+        _BATCH = None
+    if not collected:
+        return
+    taken = {c["name"] for c, _ in collected}
+    final = [e for e in registry() if e["name"] not in taken] + [c for c, _ in collected]
+    for entry, _ in collected:
+        record_consent(root, entry["name"], final)
+    names = ", ".join(sorted(taken))
+    _reinstall(
+        final,
+        save=True,
+        then=[t for _, th in collected for t in th],
+        root=root,
+        done=f"{names} installed and turned on",
+    )
+
+
 def add(root: Path, source: str, yes: bool = False, project_only: bool = False) -> None:
     """Install (if needed) and turn on in this workspace. `source` = built-in name or ./folder."""
     note = ignored_source_note()
@@ -1404,6 +1438,8 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         print(f"{source} is turned on in this workspace.")
         return
     reg = registry()
+    if _BATCH is not None:  # add-ons collected earlier in this batch count as installed
+        reg = [e for e in reg if e["name"] not in {c["name"] for c, _ in _BATCH}] + [c for c, _ in _BATCH]
     if _is_path(source):
         folder = Path(source).expanduser().resolve()
         if not _local_add_ok():
@@ -1462,6 +1498,9 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
     then = [["addon", "add", entry["name"], "--project-only"]]
     if entry not in reg or entry["name"] not in discover():  # new, changed, or its package is gone
         new = [e for e in reg if e["name"] != entry["name"]] + [entry]
+        if _BATCH is not None:  # collected: batch_install records the consents and installs once
+            _BATCH[:] = [(c, t) for c, t in _BATCH if c["name"] != entry["name"]] + [(entry, then)]
+            return
         # before the install: its follow-up step (now, or in the Windows finisher) needs the consent. If the
         # install fails, the record does not match the unchanged registry, so it turns nothing on.
         record_consent(root, entry["name"], new)

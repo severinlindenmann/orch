@@ -78,20 +78,15 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() not in ("y", "yes"):
             raise Refused("Not confirmed. Nothing was changed.")
-    done: list[str] = []
+    names = [r["name"] for r in rows]
     try:
-        for r in rows:
-            with contextlib.redirect_stdout(io.StringIO()):
-                addons.add(root, r["name"], yes=True)
-            done.append(r["name"])
+        # one reinstall for all of them (on Windows a second background install is refused while one runs)
+        with addons.batch_install(root), contextlib.redirect_stdout(io.StringIO()):
+            for n in names:
+                addons.add(root, n, yes=True)
     except Exception as e:
-        for n in reversed(done):
-            with contextlib.suppress(Exception):
-                addons.remove(root, n)
-        raise Refused(
-            f"Could not turn on {', '.join(r['name'] for r in rows)}: {e} Nothing was changed."
-        ) from e
-    return done
+        raise Refused(f"Could not turn on {', '.join(names)}: {e} Nothing was changed.") from e
+    return names
 
 
 def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> str:

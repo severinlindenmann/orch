@@ -328,7 +328,7 @@ def test_recommended_failure_turns_none_on(proj, monkeypatch):
     monkeypatch.setattr(addons, "remove", lambda root, n, purge=False: off.append(n))
     with pytest.raises(skills.Refused, match="Nothing was changed"):
         init.recommended(proj, yes=True)
-    assert on == ["a1"] and off == ["a1"]
+    assert on == ["a1"] and off == []  # the batch installs only when every add worked: nothing to undo
 
 
 def test_recommended_also_turns_on_shipped_addons_that_are_not_installed(proj, monkeypatch):
