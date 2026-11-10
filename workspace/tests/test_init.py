@@ -1241,3 +1241,19 @@ def test_relay_file_in_a_copy_survives_sync(proj, run, monkeypatch):
     (cp / "workspaces.json").write_text("{}", encoding="utf-8")
     assert run("init")[0] == 0
     assert (cp / "workspaces.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_own_junction_accepts_the_resolved_target(proj, monkeypatch):
+    """Old orch made the junction to target.resolve(): a symlinked parent / mapped drive must still match."""
+    import os
+
+    base = proj / ".agents/skills"
+    (base / "orch").mkdir(parents=True)
+    target = proj / ".orch/harness/skills/orch"
+    target.mkdir(parents=True)
+    h = _win448(monkeypatch, {base / "orch"})
+    seen = []
+    monkeypatch.setattr(os, "readlink", lambda p: seen.append(p) or "\\\\?\\" + str(target.resolve()))
+    monkeypatch.setattr(type(target), "absolute", lambda self: proj / "alias" / "x")
+    assert h._own_junction(base / "orch", target)
+    assert seen == [base / "orch"]  # readlink on the junction; resolve() was only called on the target

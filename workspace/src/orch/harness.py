@@ -520,7 +520,14 @@ def _own_junction(dest: Path, target: Path) -> bool:
         got = os.readlink(dest)
     except OSError:
         return False
-    return _norm_win(got) == _norm_win(target.absolute())
+    want = {_norm_win(target.absolute())}
+    try:
+        want.add(
+            _norm_win(target.resolve())
+        )  # old orch made the junction with resolve(); target is never the junction
+    except OSError:
+        pass
+    return _norm_win(got) in want
 
 
 def _norm_win(p: object) -> str:
@@ -555,7 +562,7 @@ def _keep_files(dest: Path) -> dict[str, bytes]:
     out = {}
     for fn in KEEP_IN_COPY.get(dest.name, ()):
         f = dest / fn
-        if f.is_file() and not is_link(f):
+        if not is_link(f) and f.is_file():
             out[fn] = f.read_bytes()
     return out
 
@@ -600,8 +607,7 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
             raise Refused(f"{dest} is not orch's; orch will not replace it. Nothing was changed there.")
     _link_dir(dest, target)
     for fn, data in kept.items():
-        if not (dest / fn).exists():
-            (dest / fn).write_bytes(data)
+        (dest / fn).write_bytes(data)  # same rule as sync_copies: the add-on's file wins
 
 
 def unlink_skill(root: Path, where: str, name: str) -> None:
