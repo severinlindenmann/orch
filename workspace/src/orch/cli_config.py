@@ -230,7 +230,7 @@ def _config(args, root: Path) -> None:
             who = _person(
                 args, root, "config.agents_may_finish", "on", parts={"setting": "agents_may_finish"}
             )
-        value = config.set_agents_may_finish(root, args.value == "on", who)
+        value = config.set_agents_may_finish(root, args.value == "on", who or _actor(args))
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if _actor(args).startswith("agent:"):  # copy_setup is a command orch runs: only a person chooses it

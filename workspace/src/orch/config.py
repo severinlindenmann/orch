@@ -272,11 +272,11 @@ def agents_may_finish(root: Path | None) -> bool:
 
 
 def set_agents_may_finish(root: Path, value: bool, by: str | None = None) -> bool:
-    """`by` = the verified person; only a proven "on" is recorded (the caller has checked the proof)."""
+    """`by` = who sets it (an "on" needs the verified person). The record is written first, on EVERY change:
+    an off is the False tombstone, so a stale "on" cannot return by re-adding the line to config.toml."""
     from orch import humanproof
 
-    if value and by:
-        humanproof.record_set(root, "workflow.agents_may_finish", True, by)
+    humanproof.record_set(root, "workflow.agents_may_finish", bool(value), by or "reset")
     set_key(root, "workflow", "agents_may_finish", value)
     return value
 

@@ -767,7 +767,14 @@ def _settings_write(root: Path, setting: str, value, by: str) -> None:
 
 
 def record_set(root: Path, setting: str, value, by: str) -> None:
-    """A person set the value with a verified proof: the caller also writes the file. Record = the grant."""
+    """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
+    but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
+    an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
+    moment where the file says on and the record is stale."""
+    if setting not in SETTING_DEFAULTS:
+        raise Refused("That is not a setting a person has to allow.")
+    if value is not False and not str(by).startswith("human:"):
+        raise Refused(AGENT_REFUSED)
     _settings_write(root, setting, value, by)
 
 

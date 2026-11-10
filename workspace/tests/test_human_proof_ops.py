@@ -1991,3 +1991,43 @@ def test_joined_group_acts_bind_the_host_not_only_the_group_id(ws, run, monkeypa
     assert _cli(run, monkeypatch, bare, *cmd, "--json")[0] == 2 and not sent
     good = _proof(ws, "group.write_as_person", f"ws_hosta00001:{gid}")
     assert _cli(run, monkeypatch, good, *cmd, "--json")[0] == 0 and len(sent) == 1
+
+
+@pytest.mark.parametrize("setting", sorted(hp.SETTING_DEFAULTS))
+def test_every_widening_setting_off_is_a_tombstone_and_stays_off(ws, setting):
+    """One writer for every key: on needs a person, off writes the False record first, and neither a file that
+    says on again nor a later read brings the grant back."""
+    hp.key_dir(ws)  # the guarded home exists
+    with pytest.raises(Refused):
+        hp.record_set(ws, setting, True, "agent:x")  # an agent never grants
+    hp.record_set(ws, setting, True, "human:pat")
+    assert hp.effective(ws, setting, True) is True
+    hp.record_set(ws, setting, False, "human:pat")  # off: the tombstone is written at once
+    path, wkey = hp._settings_path(ws)
+    rec = json.loads(path.read_text())["workspaces"][wkey][setting]
+    assert rec["value"] is False
+    assert hp.effective(ws, setting, True) is False  # the file edited back to on: still off
+    assert hp.effective(ws, setting, True) is False  # and again after the read
+    from jsonschema import validate
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[2] / "contracts" / "human-proof.schema.json").read_text()
+    )
+    validate(
+        json.loads(path.read_text()),
+        {"$ref": "#/$defs/settings_record", "$defs": schema["$defs"]},
+    )
+
+
+def test_agents_may_finish_off_writes_the_tombstone_before_the_file(ws, run):
+    from orch import config
+
+    config.set_agents_may_finish(ws, True, "human:pat")
+    assert config.agents_may_finish(ws) is True
+    config.set_agents_may_finish(ws, False, "agent:x")
+    path, wkey = hp._settings_path(ws)
+    assert json.loads(path.read_text())["workspaces"][wkey]["workflow.agents_may_finish"]["value"] is False
+    config.set_key(ws, "workflow", "agents_may_finish", True)  # the line is re-added to config.toml
+    assert config.agents_may_finish(ws) is False
+    with pytest.raises(Refused):
+        config.set_agents_may_finish(ws, True, "agent:x")

@@ -66,12 +66,15 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 ## Settings: records and tombstones
 
 Every switch that widens what can happen (`[focus] live_session`, `[focus] session_typing`, `[insights] share_counts`,
-`[insights] share_names`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
+`[insights] share_names`, `[workflow] agents_may_finish`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
 `profiles.toml` / `.orch/mcp.json` as named, and the core also keeps a record in `<guarded orch home>/human-settings.json`,
 keyed by the workspace's real path like `permissions.json` (`$defs/settings_record`).
 - Setting a value **with a proof** writes the file and the record.
 - **Lowering** (turning something off, sharing less) works from the file or the CLI without a proof, and the core writes a
-  **tombstone** record (`value: false`) the first time it sees the lowered value.
+  **tombstone** record (`value: false`) on EVERY lowering, before it touches the file (one writer, `humanproof.record_set`,
+  for every key; a grant through it needs a verified `human:` by). A tombstone's `by` is `human:...`, `agent:...`, `file`
+  (the core saw a lowered file value) or `reset` (a safe reset), see `$defs/settings_record`.
+  Workspace `workflow.agents_may_finish` is one of these keys (default off).
 - **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
   on, `share_counts` on (owner decisions 3C, I5); everything else off.
 For list values (connection allow lists) a narrower file narrows the record (`grant ∩ file`), the list form of a
