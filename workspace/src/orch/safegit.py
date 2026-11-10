@@ -36,6 +36,7 @@ import os
 import re
 import shlex
 import subprocess
+import tempfile
 import threading
 import uuid
 from pathlib import Path
@@ -269,8 +270,10 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
 
 
 def _no_hooks() -> str:
-    """A path that does not exist: as core.hooksPath git runs no hooks. Fresh per call, never created."""
-    return (addons.home() / "no-hooks" / uuid.uuid4().hex).as_posix()
+    """A path that does not exist: as core.hooksPath git runs no hooks. Fresh per call (unguessable), never
+    created. Under the system temp folder, not the orch home: this must work (and never raise) when the
+    orch home is missing or untrusted."""
+    return (Path(tempfile.gettempdir()) / "orch-no-hooks" / uuid.uuid4().hex).as_posix()
 
 
 def base_args(true: str, read_only: bool = False) -> list[str]:

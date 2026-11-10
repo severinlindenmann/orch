@@ -5,6 +5,7 @@ import os
 import re
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -132,7 +133,7 @@ def test_every_call_carries_the_hardening(tmp_path, monkeypatch):
     safegit.run(["status"], tmp_path, read_only=True, filters=False)
     argv = seen[-1][0]
     assert "--no-optional-locks" in argv and "core.fsmonitor=false" in argv and "protocol.allow=never" in argv
-    assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv)
+    assert any(a.startswith("core.hooksPath=") and "/orch-no-hooks/" in a for a in argv)
     assert "core.longpaths=true" in argv and "core.untrackedCache=false" in argv
     e = safegit.env(tmp_path, None, "/bin/true")
     assert "GIT_DIR" not in e and e["GIT_TERMINAL_PROMPT"] == "0"
@@ -141,7 +142,7 @@ def test_every_call_carries_the_hardening(tmp_path, monkeypatch):
 def test_hooks_path_is_a_fresh_path_that_does_not_exist():
     a, b = safegit._no_hooks(), safegit._no_hooks()
     assert a != b and not Path(a).exists() and not Path(b).exists()
-    assert Path(a).parent == addons.home() / "no-hooks"
+    assert Path(a).parent == Path(tempfile.gettempdir()) / "orch-no-hooks"
 
 
 def test_sentinel_empty_driver_values_really_prevent_execution(tmp_path):
@@ -567,7 +568,7 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         for want in ("commit.gpgSign=false", "log.showSignature=false"):
             assert want in argv, (cmd, want)
         assert any(a.startswith("core.editor=/") for a in argv), cmd
-        assert any(a.startswith("core.hooksPath=") and "/no-hooks/" in a for a in argv), cmd
+        assert any(a.startswith("core.hooksPath=") and "/orch-no-hooks/" in a for a in argv), cmd
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
 
@@ -1046,3 +1047,16 @@ def test_git_exe_with_root_home_and_a_planted_git_in_home_is_refused(tmp_path, m
     # ... and any run with that root is refused outright
     rc, _, err = safegit.run(["status"], other, filters=False, root=home)
     assert rc == safegit.REFUSED and "home folder" in err
+
+
+def test_safegit_works_with_an_untrusted_orch_home(proj, monkeypatch, tmp_path):
+    """The hooks path must not need the orch home: with an ORCH_HOME that is not trusted, hardened() and run()
+    still work (the test that found this: refreshing with an unpaired home)."""
+    from orch import harness
+
+    monkeypatch.setenv(
+        "ORCH_HOME", str(tmp_path)
+    )  # not under the (faked) real home: untrusted in strict mode
+    assert safegit.hardened(proj) is not None
+    assert safegit.run(["--version"], proj, filters=False)[0] == 0
+    assert harness._in_git_repo(proj) is False
