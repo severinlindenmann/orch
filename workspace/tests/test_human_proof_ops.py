@@ -1481,7 +1481,11 @@ def test_every_caller_of_merge_ticket_passes_a_verifier():
             ):
                 if len(node.args) < 5 and not any(k.arg == "person" for k in node.keywords):
                     offenders.append(f"{src.relative_to(root)}:{node.lineno}")
-    assert not offenders, "merge_ticket without person= (wont_verifier): " + ", ".join(offenders)
+    assert not offenders, (
+        "merge_ticket without person= (humanproof.wont_verifier(root)); the caller must also read, merge "
+        "and write under the ticket's apply_op lock (the verifier reads the ledger at each call): "
+        + ", ".join(offenders)
+    )
 
 
 def test_the_signed_fields_are_one_source_of_truth_for_the_signer_and_the_merge():
