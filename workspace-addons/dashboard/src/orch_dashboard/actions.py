@@ -21,6 +21,16 @@ from .look import LOOK_OPS
 from .look import forget as look_forget
 from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
+try:
+    from orch.pageproof import SELF, argv0, run_with_proof
+except ImportError:  # standalone use without orch: nothing runs
+    SELF = "orch:self"
+
+    def argv0(orch_bin):
+        return [str(orch_bin)]
+
+    run_with_proof = None
+
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
@@ -97,6 +107,38 @@ class Unavailable(Exception):
     """No orch command to run (HTTP 503)."""
 
 
+class NeedsPerson(Exception):
+    """A human-only click without a proof session (HTTP 403): the page is watch-only here."""
+
+
+# page op -> (core op, target of the proof) for the clicks that are a person's (H1, contracts/human-proof.md).
+# `ticket.patch` is a verdict only when it sets Done ("Looks good"); the core checks the rest.
+PROOF_OPS = {
+    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
+    "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
+    "chat.say": ("chat.send", lambda a: "general"),
+    "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
+    "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
+    "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
+}
+
+
+def proof_for(op, args):
+    """(core op, target) when this click needs a proof, else None."""
+    if op == "ticket.patch" and isinstance(args.get("data"), dict) and "status" in args["data"]:
+        return "ticket.verdict", args.get("ticket")
+    if (
+        op == "check.set" and args.get("done") is False
+    ):  # un-ticking may undo a Won't do (a person's decision)
+        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}"
+    hit = PROOF_OPS.get(op)
+    return (hit[0], hit[1](args)) if hit else None
+
+
 def _tid(v) -> str:
     if not isinstance(v, str) or not TID.fullmatch(v):
         raise BadRequest("That is not a ticket id.")
@@ -153,7 +195,21 @@ def _answer(a):
 
 
 def _ticket_new(a):
-    _only(a, ("title", "parent", "owner", "due", "note", "done_when", "long_text", "files", "title_auto", "plan_first"))
+    _only(
+        a,
+        (
+            "title",
+            "parent",
+            "owner",
+            "due",
+            "note",
+            "done_when",
+            "long_text",
+            "files",
+            "title_auto",
+            "plan_first",
+        ),
+    )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
     if _flag(a.get("title_auto")):  # the title is a placeholder: the agent writes the real one
         flags.append("--title-auto")
@@ -299,6 +355,48 @@ def _check_set(a):
     return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
 
 
+def _check_wont_do(a):
+    _only(a, ("ticket", "check", "reason"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    reason = _text(a.get("reason", ""), "reason", empty=True, limit=200).strip()
+    if "\n" in reason or "\r" in reason:
+        raise BadRequest("The reason must be one line.")
+    return ["check", "wont-do", _tid(a.get("ticket")), cid], [f"--reason={reason}"] if reason else [], []
+
+
+def _check_edit(a):
+    """Rename a step (used by an embedded add-on page): `orch check edit <ticket> <task> [flags] -- <text>`."""
+    _only(a, ("ticket", "check", "text", "if_revision", "was"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    flags = []
+    if (rev := _rev(a.get("if_revision"))) is not None:
+        flags.append(f"--if-revision={rev}")
+    if a.get("was") is not None:
+        flags.append(f"--was={_text(a['was'], 'old text')}")
+    return ["check", "edit", _tid(a.get("ticket")), cid], flags, [_text(a.get("text"))]
+
+
+def _check_remove(a):
+    _only(a, ("ticket", "check"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    return ["check", "remove", _tid(a.get("ticket")), cid], [], []
+
+
+def _check_reopen(a):
+    """Open a step again (also a Won't do step): `orch check reopen <ticket> <task>`."""
+    _only(a, ("ticket", "check"))
+    cid = a.get("check")
+    if not (isinstance(cid, str) and CID.fullmatch(cid)):
+        raise BadRequest("Choose a task.")
+    return ["check", "reopen", _tid(a.get("ticket")), cid], [], []
+
+
 def _ref_add(a):
     _only(a, ("ticket", "target"))
     return ["ref", "add", _tid(a.get("ticket"))], [], [_text(a.get("target"), "reference")]
@@ -362,6 +460,11 @@ def _run_start(a):
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
     return ["run", "start", _tid(a.get("ticket"))], flags, []
+
+
+def _run_send(a):
+    _only(a, ("ticket", "text"))
+    return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
 
 
 def _run_stop(a):
@@ -497,8 +600,13 @@ OPS = {
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
+    "check.wont_do": _check_wont_do,
+    "check.reopen": _check_reopen,
+    "check.edit": _check_edit,
+    "check.remove": _check_remove,
     "run.start": _run_start,
     "run.stop": _run_stop,
+    "run.send": _run_send,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,
@@ -613,7 +721,7 @@ def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, byte
     for hint, raw in files:
         try:
             r = subprocess.run(
-                [orch_bin, "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
+                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
                 check=False,
                 cwd=root,
                 capture_output=True,
@@ -638,12 +746,16 @@ def human_env(root: Path, orch_bin: str) -> dict:
     except ImportError:
         raise Unavailable("The orch tool is not available here.") from None
     env = _without_agent(os.environ)
-    return {**env, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "dashboard"}
+    from orch.pageproof import child_env
+
+    return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
 
 
-def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
-    """Run one op. Returns (http status, plain text, parsed json or None)."""
+def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
+    """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
+    proof for a request that carries a page session; None = watch-only (the click is refused)."""
     argv = build_argv(op, args)
+    need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
     files = attachments(op, args)
     forget_static()  # a change may alter what the cached read-only answers say
     if not orch_bin:
@@ -662,17 +774,24 @@ def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict |
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
+    if need and mint is None:
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
     try:
-        r = subprocess.run(
-            [orch_bin, *argv],
-            check=False,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=75 if op == "config.agent.test" else 60,
-            stdin=subprocess.DEVNULL,
-            env=human_env(root, orch_bin),
-        )
+        if need:
+            r = run_with_proof(
+                argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
+            )
+        else:
+            r = subprocess.run(
+                [*argv0(orch_bin), *argv],
+                check=False,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=75 if op == "config.agent.test" else 60,
+                stdin=subprocess.DEVNULL,
+                env=human_env(root, orch_bin),
+            )
     except subprocess.TimeoutExpired:
         return 504, "That took too long. Please try again.", None
     except OSError:
@@ -725,7 +844,9 @@ def _chat_send_ws(a):
     if retry is not None and (not isinstance(retry, str) or not re.fullmatch(r"m_[a-z0-9]{16}", retry)):
         raise BadRequest("That is not a message.")
     client_id = a.get("client_id")
-    if client_id is not None and (not isinstance(client_id, str) or not re.fullmatch(r"m_[a-z0-9]{16}", client_id)):
+    if client_id is not None and (
+        not isinstance(client_id, str) or not re.fullmatch(r"m_[a-z0-9]{16}", client_id)
+    ):
         raise BadRequest("That is not a message.")
     flags = (["--retry", retry] if retry else []) + (["--client-id", client_id] if client_id else [])
     return ["chat", "send", ws], flags, [text]

@@ -534,7 +534,12 @@ def test_the_move_to_control_is_a_visible_labelled_button():
     src = webjs.all_js()
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
-    assert [w for _, w in node_value("MOVE_CHOICES")] == ["Not started", "Working", "Ready for review", "Done"]
+    assert [w for _, w in node_value("MOVE_CHOICES")] == [
+        "Not started",
+        "Working",
+        "Ready for review",
+        "Done",
+    ]
     assert "Backlog" not in src
 
 
@@ -560,7 +565,9 @@ def test_column_chip_label(label, n, want):
 
 @node
 def test_question_preview_is_one_short_line_of_the_open_question():
-    t = {"questions": [{"answer": "Yes", "text": "old"}, {"answer": None, "text": "Which   date\nfor launch?"}]}
+    t = {
+        "questions": [{"answer": "Yes", "text": "old"}, {"answer": None, "text": "Which   date\nfor launch?"}]
+    }
     assert call("questionPreview", t) == "Which date for launch?"
     assert call("questionPreview", {"questions": [{"answer": "x", "text": "q"}]}) == ""
     assert call("questionPreview", {}) == ""
@@ -570,8 +577,16 @@ def test_question_preview_is_one_short_line_of_the_open_question():
 
 @node
 def test_agent_line_waiting_text_has_no_command():
-    run = {"running": True, "claim": {"agent": "claude", "live": {"state": "attention",
-           "why": "Claude wants a login. Open the live session to finish it: orch run attach PIL-3"}}}
+    run = {
+        "running": True,
+        "claim": {
+            "agent": "claude",
+            "live": {
+                "state": "attention",
+                "why": "Claude wants a login. Open the live session to finish it: orch run attach PIL-3",
+            },
+        },
+    }
     line = call("agentLine", {"id": "t1"}, run, 0, None)
     assert line["status"] == "Claude needs you to sign in" and "orch run" not in line["status"]
 
@@ -581,9 +596,13 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert "No tickets are being worked on." in src and "No agent is working right now" not in src
     assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
-    assert "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]  # one label source
+    assert (
+        "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]
+    )  # one label source
     assert "Ideas to plan" in src and "Finished work" in src
-    assert "hideStatus" not in src and "'Needs you'" in src  # 10A: short board chip; 7A: no chip beside the banner
+    assert (
+        "hideStatus" not in src and "'Needs you'" in src
+    )  # 10A: short board chip; 7A: no chip beside the banner
 
 
 @node
@@ -615,15 +634,26 @@ def test_needs_you_count_words_match_the_phone(n, want):
 def test_groups_follow_the_lifecycle_and_old_phrases_are_gone():
     src = webjs.all_js()
     assert [w for _, w in node_value("STATUS_CHOICES")] == [
-        "Not started", "Working", "Needs you", "Ready for review", "Done"
+        "Not started",
+        "Working",
+        "Needs you",
+        "Ready for review",
+        "Done",
     ]
     assert "question needs you" not in src and "questions need you" not in src
 
 
 def node_value(name):
     out = subprocess.run(
-        ["node", "-e", f"console.log(JSON.stringify(require(process.argv[1]).{name}))", str(WEB / "helpers.js")],
-        capture_output=True, text=True, check=True,
+        [
+            "node",
+            "-e",
+            f"console.log(JSON.stringify(require(process.argv[1]).{name}))",
+            str(WEB / "helpers.js"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return json.loads(out.stdout)
 
@@ -640,7 +670,9 @@ def test_one_label_per_status_single_sourced():
         assert pair not in src.replace(" ", "")
     words = node_value("STATUS_WORD")
     assert words["ready"] == words["open"] == "Not started" and words["waiting"] == "Needs you"
-    assert all(w in src for w in ("DashHelpers.statusWord", "DashHelpers.STATUS_CHOICES", "DashHelpers.MOVE_CHOICES"))
+    assert all(
+        w in src for w in ("DashHelpers.statusWord", "DashHelpers.STATUS_CHOICES", "DashHelpers.MOVE_CHOICES")
+    )
     assert [s for s, _ in node_value("STATUS_CHOICES")] == node_value("STATUS_ORDER")
     assert call("columnOf", "ready") == "open" and call("columnOf", "review") == "review"
 
@@ -672,9 +704,16 @@ def test_ui2_small_bugs_in_markup_and_css():
     # 3: an open-page row is the link alone, not "Focus page | Focus page"
     assert "r.format === 'open-page' ? h('dd', {className:'addon-page'}, v)" in app
     # 2: the sidebar colour and the modal dim layer fill the viewport
-    assert "background:linear-gradient(to right,var(--sidebar)" in css and "body:has(dialog[open]:modal){overflow:hidden}" in css
+    assert (
+        "background:linear-gradient(to right,var(--sidebar)" in css
+        and "body:has(dialog[open]:modal){overflow:hidden}" in css
+    )
     # 4: the end time never wraps off alone at 720; two lines only below 480
-    assert "mm-desc" in mm and ".mm-bar.live{flex-wrap:nowrap}" in css and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
+    assert (
+        "mm-desc" in mm
+        and ".mm-bar.live{flex-wrap:nowrap}" in css
+        and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
+    )
     # 6: a skeleton is in the page before the first data arrives
     assert 'class="loading-home"' in html and 'aria-busy="true"' in html
 
@@ -687,7 +726,9 @@ def test_history_line_shows_names_not_actor_ids():
 
 @node
 def test_plain_names_and_history_dedupe():
-    assert call("plainNames", "agent:claude finished it, human:Mia agreed") == "Claude finished it, Mia agreed"
+    assert (
+        call("plainNames", "agent:claude finished it, human:Mia agreed") == "Claude finished it, Mia agreed"
+    )
     at = "2026-11-08T08:00:00Z"
     entries = [
         {"at": at, "by": "agent:claude", "text": "Check c1 done"},
@@ -698,7 +739,9 @@ def test_plain_names_and_history_dedupe():
     assert [e["at"] for e in kept] == ["2026-11-08T08:00:00Z", "2026-11-08T09:30:00Z"]
     assert len(kept) == 2
     src = webjs.all_js() + (WEB / "blocks.js").read_text()
-    assert "plainNames" in src and "dedupeHistory" in src  # ticket history still uses both; Home no longer repeats it
+    assert (
+        "plainNames" in src and "dedupeHistory" in src
+    )  # ticket history still uses both; Home no longer repeats it
 
 
 @node
@@ -713,11 +756,18 @@ def test_footer_shows_the_relay_connection():
 
 
 @node
-@pytest.mark.parametrize("status,word", [
-    ("open", "Not started"), ("ready", "Not started"), ("active", "Working"),
-    ("waiting", "Needs you"), ("review", "Ready for review"),
-    ("done", "Done"), ("dropped", "Dropped"),
-])
+@pytest.mark.parametrize(
+    "status,word",
+    [
+        ("open", "Not started"),
+        ("ready", "Not started"),
+        ("active", "Working"),
+        ("waiting", "Needs you"),
+        ("review", "Ready for review"),
+        ("done", "Done"),
+        ("dropped", "Dropped"),
+    ],
+)
 @pytest.mark.parametrize("started", [None, False, True, 1])
 def test_status_words_started(status, word, started):
     expected = "Paused" if status in ("open", "ready") and started is True else word
@@ -752,9 +802,9 @@ def test_failed_agent_start_is_plain_with_a_retry():
 @node
 def test_start_reason_never_shows_paths_commands_or_secrets():
     r = lambda ref: call("plainStartReason", ref)
-    assert r("The agent could not be started: [Errno 2] No such file or directory: '/usr/local/bin/claude'") == (
-        "the claude program was not found"
-    )
+    assert r(
+        "The agent could not be started: [Errno 2] No such file or directory: '/usr/local/bin/claude'"
+    ) == ("the claude program was not found")
     assert r("[Errno 2] No such file or directory: '/x/a b; rm -rf /'") == "it did not start"
     for raw in (
         "boom: ghp_abcdefghijklmnopqrstuvwxyz0123 at /Users/me/secret/dir",
@@ -768,7 +818,11 @@ def test_agent_line_shows_the_core_hold_reason_and_drops_it_when_absent():
     """fb18 (hold-why): a held live run's status line is the core's words, as text; nothing without a hold."""
     now = 1_700_000_000_000
     why = "Waiting: the agent's input box isn't visible."
-    run = {"running": True, "state": "alive", "claim": {"agent": "claude", "mode": "live", "live": {"state": "idle"}}}
+    run = {
+        "running": True,
+        "state": "alive",
+        "claim": {"agent": "claude", "mode": "live", "live": {"state": "idle"}},
+    }
     w = call("agentLine", T, {**run, "hold": why}, now, None)
     assert w["status"] == why and w["hold"] == why
     w = call("agentLine", T, run, now, None)

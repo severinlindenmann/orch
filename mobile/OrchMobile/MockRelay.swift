@@ -118,7 +118,8 @@ actor MockRelay: RelayAPI {
                .init(rawKind: "file", path: "docs/board/q3.md", line: 12)])
     static let invoiceView = TicketSnapshot(
         title: "Invoice CSV export", status: "active", agent: "Claude", summary: "Writing the export.",
-        checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true), .init(text: "Write the export", done: false),
+        checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true),
+                    .init(text: "Email the old format", wontDo: true, reason: "Nobody uses it"), .init(text: "Write the export", done: false),
                     .init(text: "Add a test", done: false)],
         running: true,
         attachments: [.init(kind: "link", title: "Fix invoice export #142", url: "https://github.com/pilatus/reports/pull/142", at: "2026-11-05T15:10:00Z",

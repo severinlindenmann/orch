@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
 
-from orch import look, services, term
+from orch import humanproof, look, services, term
 from orch.errors import Refused
 
 
@@ -17,6 +18,11 @@ def _out(args, data, text: str) -> None:
 def add_parsers(sub, common) -> None:
     x = sub.add_parser("start", parents=[common], help="start the add-ons that run in the background here")
     x.add_argument("--no-open", action="store_true", help="do not open the dashboard in the browser")
+    x.add_argument(
+        "--print-launch-url",
+        action="store_true",
+        help=argparse.SUPPRESS,  # test installs only: print a one-time page link (for browser tests)
+    )
     x = sub.add_parser(
         "stop", parents=[common], help="stop them (asks which workspace when you are outside one)"
     )
@@ -65,22 +71,44 @@ def _pick(running: list[dict]) -> list[Path]:
     raise Refused(f"'{ans}' is not on the list. Nothing was stopped.")
 
 
+def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
+
+    out = []
+    for r in rows:
+        base = services.local_url(r.get("url"))
+        if base and r.get("addon") in humanproof.LAUNCH_SERVERS:
+            out.append((r["addon"], humanproof.printable_launch_url(root, r["addon"], base)))
+    return out
+
+
 def _services_cmd(args, root: Path) -> None:
     if args.cmd == "start":
+        if args.print_launch_url:  # refuse before anything starts
+            from orch import humanproof
+
+            if not humanproof.is_test_workspace(root):
+                raise Refused("--print-launch-url works only on a test install, in a test folder.")
         rows = services.start(root)
+        launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
-            print(json.dumps({"workspace": str(root.resolve()), "addons": rows}, indent=2))
+            data = {"workspace": str(root.resolve()), "addons": rows}
+            if args.print_launch_url:
+                data["launch"] = [{"addon": a, "url": u} for a, u in launch]
+            print(json.dumps(data, indent=2))
         elif not rows:
             print("No add-on that is on here runs in the background. Nothing to start.")
         else:
             print(f"Started in {root.name}:")
             print("\n".join(_service_line(r) for r in rows))
             print("Stop: orch stop")
-        url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
-        if url and not args.no_open and not args.json and term.is_terminal(sys.stdout):
-            import webbrowser
-
-            webbrowser.open(url)
+        if launch and not args.json:
+            print("\n".join(f"launch {a}: {u}" for a, u in launch))
+        row = next((r for r in rows if services.local_url(r.get("url"))), None)
+        url = services.local_url(row.get("url")) if row else None
+        opens = not args.no_open and not args.print_launch_url and not args.json
+        if url and opens and term.is_terminal(sys.stdout):
+            # a person opens the page: the launch token (URL fragment) lets it start a proof session (H1)
+            humanproof.open_browser(humanproof.launch_url(root, row.get("addon"), url))
         bad = [r for r in rows if r.get("error")]
         if bad:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")

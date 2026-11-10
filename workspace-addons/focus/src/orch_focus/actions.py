@@ -29,6 +29,40 @@ class Unavailable(Exception):
     """No orch command to run (HTTP 503)."""
 
 
+class NeedsPerson(Exception):
+    """A human-only click without a proof session (HTTP 403): the page is watch-only here."""
+
+
+try:
+    from orch.pageproof import SELF, argv0, child_env, run_with_proof
+except ImportError:  # no orch: nothing runs
+    SELF = "orch:self"
+
+    def argv0(orch_bin):
+        return [str(orch_bin)]
+
+    def child_env(env, orch_bin):
+        return {**env, "ORCH_BIN": orch_bin}
+
+    run_with_proof = None
+
+# page op -> (core op, target): the clicks that are a person's (H1, contracts/human-proof.md)
+PROOF_OPS = {
+    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
+    "ticket.done": ("ticket.verdict", lambda a: a.get("ticket")),
+    "run.send": ("run.human_input", lambda a: a.get("ticket")),
+    "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+}
+
+
+def proof_for(op, args):
+    hit = PROOF_OPS.get(op)
+    return (hit[0], hit[1](args)) if hit else None
+
+
 def _id(rx: re.Pattern, v, what: str) -> str:
     if not isinstance(v, str) or not rx.fullmatch(v):
         raise BadRequest(f"That is not a {what} id.")
@@ -122,6 +156,17 @@ def _check_edit(a):
     return ["check", "edit", t, c], flags, [_text(a.get("text"))]  # the new text goes after `--`
 
 
+def _check_wont_do(a):
+    t, c = _check(a, ("reason",))
+    flags = []
+    if "reason" in a:
+        reason = a["reason"]
+        if not isinstance(reason, str) or len(reason) > 200 or any(ch in reason for ch in "\r\n") or _CONTROL.search(reason):
+            raise BadRequest("The reason must be one line, at most 200 characters.")
+        flags.append(f"--reason={reason}")
+    return ["check", "wont-do", t, c], flags, []
+
+
 def _check_move(a):
     t, c = _check(a, ("after",))
     return ["check", "move", t, c], [f"--after={_id(CID, a.get('after'), 'task')}"], []
@@ -159,6 +204,7 @@ OPS = {
     "run.send": _run_send,
     "check.add": _check_add,
     "check.edit": _check_edit,
+    "check.wont_do": _check_wont_do,
     "check.move": _check_move,
     "check.remove": _check_plain("remove"),
     "check.reopen": _check_plain("reopen"),
@@ -207,17 +253,22 @@ def _without_agent(environ) -> dict:
 def human_env(root: Path, orch_bin: str) -> dict:
     """Page actions are the person's actions, even if an agent launched the server: the agent tools' own
     variables (and ORCH_AGENT/RUN/TICKET) are left out, or orch would count the click as the agent's."""
-    return {**_without_agent(os.environ), "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin, "ORCH_VIA": "focus"}
+    return child_env({**_without_agent(os.environ), "ORCH_ROOT": str(root), "ORCH_VIA": "focus"}, orch_bin)
 
 
-def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -> tuple[int, str, str]:
+def orch(
+    root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60, proof: str | None = None
+) -> tuple[int, str, str]:
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     try:
-        r = subprocess.run(
-            [orch_bin, *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL, env=human_env(root, orch_bin),
-        )  # fmt: skip
+        if proof:
+            r = run_with_proof(argv, proof, orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=timeout)
+        else:
+            r = subprocess.run(
+                [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
+                stdin=subprocess.DEVNULL, env=human_env(root, orch_bin),
+            )  # fmt: skip
     except subprocess.TimeoutExpired:
         return 124, "", "That took too long. Please try again."
     except OSError:
@@ -225,10 +276,13 @@ def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -
     return r.returncode, r.stdout, r.stderr
 
 
-def run_op(root: Path, orch_bin: str | None, op, args) -> tuple[int, str, dict | None]:
+def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
-    code, stdout, stderr = orch(root, orch_bin, argv)
+    need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
+    if need and mint is None:
+        raise NeedsPerson("Open Focus from this computer (orch focus open) to do this.")
+    code, stdout, stderr = orch(root, orch_bin, argv, proof=mint(*need) if need else None)
     if code == 124:
         return 504, stderr, None
     out = None

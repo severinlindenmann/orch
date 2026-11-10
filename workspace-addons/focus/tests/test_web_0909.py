@@ -34,3 +34,18 @@ def test_the_frame_has_no_same_origin_and_page_comes_first():
     assert "allow-same-origin" not in proof
     assert "sandbox: 'allow-scripts'" in proof
     assert proof.index("['Page', showPage]") < proof.index("['Code', showSource]")
+
+
+def test_wont_do_board_emits_no_start_or_evidence():
+    from orch_focus.board import TicketWatcher
+
+    watcher = TicketWatcher("r_abc12345", TID)
+    step = {"id": "c1", "text": "Review", "done": False, "state": "doing", "wont_do": True,
+            "evidence": [{"type": "note", "text": "Old evidence"}]}
+    ticket = {"checklist": [step]}
+    assert watcher.feed(ticket) == []
+    step.pop("wont_do")
+    assert [e["kind"] for e in watcher.feed(ticket)] == ["task.start"]
+    step["wont_do"] = True
+    assert watcher.feed(ticket) == []
+    assert watcher.feed(ticket) == []
