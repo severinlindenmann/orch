@@ -104,7 +104,11 @@ def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
 # choose it.
 
 COPIES_MODES = ("off", "together", "always")
-DEFAULT_COPIES = "together"
+DEFAULT_COPIES = "off"
+# Separate copies are locked Off for this release (cleanup bugs found in e2e, see the B12 follow-up issue).
+# copies_mode() always answers "off" and set_copies_mode() refuses anything else; copies made before are still
+# cleaned up by worktrees.py. Flip COPIES_LOCKED to False when the follow-up lands.
+COPIES_LOCKED = True
 DEFAULT_COPIES_MAX = 3
 MAX_COPIES_MAX = 20
 MAX_COPY_SETUP = 500
@@ -157,6 +161,8 @@ def _copies_set(root: Path, key: str, value) -> None:
 
 def copies_mode(root: Path | None) -> str:
     """off | together (default: a copy when another agent already works in the folder) | always."""
+    if COPIES_LOCKED:
+        return "off"
     v = _copies_get(root, "copies")
     return v if v in COPIES_MODES else DEFAULT_COPIES
 
@@ -179,6 +185,8 @@ def copy_setup(root: Path | None) -> str | None:
 def set_copies_mode(root: Path, value: str) -> str:
     if value not in COPIES_MODES:
         raise Refused(f"'{value}' is not a choice. Pick one of: {', '.join(COPIES_MODES)}.")
+    if COPIES_LOCKED and value != "off":
+        raise Refused("Separate copies are coming soon. For now every agent works in the project folder.")
     _copies_set(root, "copies", value)
     return value
 
