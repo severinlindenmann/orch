@@ -124,6 +124,9 @@ PROOF_OPS = {
     "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:edit"),
     "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:remove"),
     "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
+    "config.permissions": ("config.permissions", lambda a: a.get("mode")),
+    "config.agent.add": ("config.agent_add", lambda a: a.get("name")),
+    "look.set": ("look.icon", lambda a: "look"),
 }
 
 
@@ -135,8 +138,39 @@ def proof_for(op, args):
         op == "check.set" and args.get("done") is False
     ):  # un-ticking may undo a Won't do (a person's decision)
         return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}:reopen"
+    if op == "workflow.set":  # allowing agents to finish tickets (off needs no proof)
+        return ("config.agents_may_finish", "on") if args.get("on") is True else None
+    if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
+        return ("config.share", "on") if args.get("on") is True else None
+    if op == "look.shared":
+        return "look.shared_pages", "on" if args.get("on") is True else "off"
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None
+
+
+# Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
+# itself (a ticket, a task, a note, a reference), nothing that speaks or decides for the person. EVERY other op acts
+# as the person (`--by human:...`): the server refuses it without a page session (watch-only), and an op with a
+# core gate (PROOF_OPS) also needs the person's proof.
+FREE_OPS = frozenset(
+    {
+        "ticket.new",
+        "ticket.paste",
+        "ticket.edit",
+        "ticket.field",
+        "ticket.patch",
+        "log",
+        "check.add",
+        "ref.add",
+        "ref.rm",
+        "look.description",
+        "config.agent.test",
+    }
+)
+
+
+def needs_session(op) -> bool:
+    return isinstance(op, str) and op not in FREE_OPS
 
 
 def _tid(v) -> str:
@@ -774,7 +808,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
-    if need and mint is None:
+    if (need or (orch_bin == SELF and needs_session(op))) and mint is None:
         raise NeedsPerson("Open the dashboard from this computer to do this.")
     try:
         if need:

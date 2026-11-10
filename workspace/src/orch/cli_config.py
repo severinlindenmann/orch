@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, tickets
+from orch import adapters, config, humanproof, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -52,6 +52,14 @@ def _actor(args) -> str:
     environment counts as an agent whatever --by says."""
     who = tickets.current_actor(getattr(args, "by", None))
     return "agent:" + str(tickets.agent_tool()) if tickets.agent_tool() else who
+
+
+def _person(args, root: Path, op: str, target: str, **kw) -> str:
+    """A person's own decision (H1): the proof from the page, or a hand-off. An agent is refused in words."""
+    who = humanproof.person_by(root, args, op, target, **kw)
+    if not who.startswith("human:"):
+        raise Refused(humanproof.AGENT_REFUSED)
+    return who
 
 
 def _out(args, data, text: str) -> None:
@@ -205,11 +213,13 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
-        if args.value == "on" and _actor(args).startswith("agent:"):
-            raise Refused(
-                "Only a person can allow agents to mark tickets Done. Ask them to run: "
-                "orch config set workflow.agents_may_finish on"
-            )
+        if args.value == "on":
+            if _actor(args).startswith("agent:"):
+                raise Refused(
+                    "Only a person can allow agents to mark tickets Done. Ask them to run: "
+                    "orch config set workflow.agents_may_finish on"
+                )
+            _person(args, root, "config.agents_may_finish", "on", parts={"setting": "agents_may_finish"})
         value = config.set_agents_may_finish(root, args.value == "on")
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key == "workspace.code":
@@ -220,7 +230,15 @@ def _config(args, root: Path) -> None:
             f"Saved: workspace.code = {code}. New tickets get {code}-<n>; existing keys stay as they are.",
         )
     elif args.sub == "set" and args.key == "workspace.permissions":
-        mode = config.set_permissions(root, args.value, _actor(args))
+        who = _actor(args)
+        modes = config.PERMISSION_MODES
+        if (
+            args.value in modes
+            and not who.startswith("agent:")
+            and modes.index(args.value) > modes.index(config.permissions(root))
+        ):  # giving agents MORE room is a person's decision (lowering is free for anyone)
+            who = _person(args, root, "config.permissions", args.value, parts={"mode": args.value})
+        mode = config.set_permissions(root, args.value, who)
         _out(
             args,
             {"workspace.permissions": mode},
@@ -249,6 +267,16 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
+            if not _actor(args).startswith("agent:"):
+                # a command orch will run for every task: a person approves it, shown in full
+                _person(
+                    args,
+                    root,
+                    "config.agent_add",
+                    args.name,
+                    parts={"name": humanproof.part(args.name)},
+                    exact=args.command,
+                )
             config.add_agent(root, args.name, args.command, args.interactive, prompt=args.prompt_via)
             tail = (
                 "starts fresh each run; no live steps"
@@ -269,6 +297,8 @@ def _share(args, root: Path) -> None:
     if args.state != "status":
         if tickets.agent_tool():
             raise Refused("Only a person can share the orch entry with the team.")
+        if args.state == "on":  # off needs no proof
+            _person(args, root, "config.share", "on", parts={})
         (harness.share_on if args.state == "on" else harness.share_off)(root)
     on = harness.share_state(root)
     _out(

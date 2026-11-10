@@ -66,7 +66,7 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -1264,6 +1264,12 @@ HANDOFF_HEADS = {
     "check.wont_do": (("check", "wont-do"),),
     "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
     "chat.make_ticket": (("chat", "make-ticket"),),
+    "config.agents_may_finish": (("config", "set"),),
+    "config.permissions": (("config", "set"),),
+    "config.agent_add": (("config", "agent", "add"),),
+    "config.share": (("share", "on"),),
+    "look.shared_pages": (("look", "shared-pages"),),
+    "look.icon": (("look", "set"),),
 }
 
 
