@@ -151,14 +151,12 @@ def test_hooks_path_is_a_device_and_planted_symlinks_and_folders_are_never_used(
     assert win == "//./NUL" and ntpath.isabs(win)
     r, marker = hostile
     # hooks planted where earlier versions looked: <tempdir>/orch-no-hooks as a folder AND as a symlink to a
-    # folder of hooks, and a hooks folder next to the interpreter-style anchor
+    # folder of hooks
     hooks = tmp_path / "evil-hooks"
     hooks.mkdir()
     for n in ("post-checkout", "reference-transaction"):
         sh(hooks / n, f"touch {marker}.{n}")
     shared = Path(tempfile.gettempdir()) / "orch-no-hooks"
-    anchor = tmp_path / "python-like"
-    anchor.write_text("")
     planted = []
     if not shared.exists() and not shared.is_symlink():
         shared.symlink_to(hooks, target_is_directory=True)
