@@ -591,6 +591,42 @@
    "effective": [
     false
    ]
+  },
+  {
+   "name": "agents may finish: on in the file only (agent edit)",
+   "setting": "workflow.agents_may_finish",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  },
+  {
+   "name": "agents may finish: on with a proof, off, then the file says on again",
+   "setting": "workflow.agents_may_finish",
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    },
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    true,
+    false,
+    false
+   ]
   }
  ],
  "concurrent": [

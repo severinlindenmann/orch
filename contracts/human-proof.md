@@ -72,8 +72,8 @@ keyed by the workspace's real path like `permissions.json` (`$defs/settings_reco
 - Setting a value **with a proof** writes the file and the record.
 - **Lowering** (turning something off, sharing less) works from the file or the CLI without a proof, and the core writes a
   **tombstone** record (`value: false`) on EVERY lowering, before it touches the file (one writer, `humanproof.record_set`,
-  for every key; a grant through it needs a verified `human:` by). A tombstone's `by` is `human:...`, `agent:...`, `file`
-  (the core saw a lowered file value) or `reset` (a safe reset), see `$defs/settings_record`.
+  for every key; a grant through it needs a verified `human:` by). A tombstone's `by` is `human:...`, `file`
+  (the core saw a lowered file value) or `reset` (a lowering by anything that is not a verified person, or a safe reset), see `$defs/settings_record`.
   Workspace `workflow.agents_may_finish` is one of these keys (default off).
 - **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
   on, `share_counts` on (owner decisions 3C, I5); everything else off.

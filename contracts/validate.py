@@ -1085,7 +1085,8 @@ def hp_verify(c):
 
 
 SETTING_DEFAULTS = {"focus.live_session": True, "focus.session_typing": False, "insights.share_counts": True,
-                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False}
+                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False,
+                    "workflow.agents_may_finish": False}
 
 
 def hp_settle(c):

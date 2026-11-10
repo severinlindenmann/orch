@@ -775,6 +775,8 @@ def record_set(root: Path, setting: str, value, by: str) -> None:
         raise Refused("That is not a setting a person has to allow.")
     if value is not False and not str(by).startswith("human:"):
         raise Refused(AGENT_REFUSED)
+    if value is False and not str(by).startswith("human:"):
+        by = "reset"  # a lowering by anyone else: the tombstone names no person
     _settings_write(root, setting, value, by)
 
 
