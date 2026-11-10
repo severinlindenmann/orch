@@ -185,6 +185,7 @@ def test_agent_add_with_a_person_proof_succeeds_and_approves_what_was_typed(ws, 
     )
     assert code == 0, out + err
     assert config.agent_entries(ws)["bar"]["command"] == "bar {prompt}"
+    assert config.pending_agents(ws) == []  # the proven add is saved AND approved
 
 
 @pytest.mark.parametrize(
@@ -394,3 +395,32 @@ def test_require_person_is_an_allowlist():
     for bad in ("agent:x", "", "robot", "Human:pat"):
         with pytest.raises(Refused):
             config.require_person(bad, "x")
+
+
+# ------------------------------------------------------------------ orch init "Other" (MEDIUM-2)
+
+
+def _fake_init_tty(monkeypatch, name="mine", cmd="mine {prompt}"):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
+    answers = iter(["2", name, cmd])  # the menu: 1) Claude, 2) Other
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+
+
+def test_init_other_under_an_agent_saves_nothing(ws, run, monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    _fake_init_tty(monkeypatch)
+    code, out, err = run("init")
+    assert code == 2 and "orch ask" in out + err
+    assert "mine" not in (config.read(ws).get("agents") or {})
+    assert config.agent_name(ws) is None and hp.handoffs(ws) == []
+
+
+def test_init_other_by_a_person_leaves_a_hand_off_and_saves_nothing(ws, run, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    _fake_init_tty(monkeypatch)
+    code, out, err = run("init")
+    assert code == 2
+    assert "mine" not in (config.read(ws).get("agents") or {})
+    card = hp.handoffs(ws)[0]
+    assert card["op"] == "config.agent_add" and card["target"] == hp.agent_add_target("mine", "mine {prompt}")
+    assert card["argv"] == ["config", "agent", "add", "mine", "--command", "mine {prompt}"]

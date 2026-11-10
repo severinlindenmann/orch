@@ -144,6 +144,23 @@ def _other(root: Path) -> str:
     cmd = input("Command (use {prompt} where the task goes): ").strip()
     if not cmd:
         return "No agent chosen; set one later: orch config set workspace.agent <name>"
-    config.add_agent(root, name, cmd, approve=True)  # the person typed it here
+    # a command that will run is a human-only step (invariant H1): an agent in the environment is refused, a
+    # person leaves the same config.agent_add hand-off as `orch config agent add` (a click on the page)
+    from types import SimpleNamespace
+
+    from orch import humanproof
+
+    who = humanproof.person_by(
+        root,
+        SimpleNamespace(proof_stdin=False, by=None),
+        "config.agent_add",
+        humanproof.agent_add_target(name, cmd),
+        parts={"name": name, "command": cmd},
+        exact=humanproof.agent_add_exact(cmd),
+        argv=["config", "agent", "add", name, "--command", cmd],
+    )
+    if not who.startswith("human:"):
+        raise Refused(config.ONLY_PERSON_AGENT.format(what="add an agent command"))
+    config.add_agent(root, name, cmd, approve=True, by=who)  # a person: approve ONLY what they typed
     _save(root, name)
     return f"Agent: {name} (starts fresh each run; it cannot continue a conversation)."
