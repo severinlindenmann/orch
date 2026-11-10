@@ -449,3 +449,36 @@ def test_view_carries_the_hold_reason_only_while_the_run_runs(server, ws, fake_o
     status.write_text(json.dumps({"running": False, "hold": why}))
     tracker.status_cache.clear()
     assert tracker.view(TID)["hold"] == ""
+
+
+@pytest.mark.parametrize("reason", [None, "", "Out of scope", "--by=agent", "x" * 200])
+def test_wont_do_argv(reason, monkeypatch):
+    monkeypatch.setattr(actions, "actor", lambda: "human:test")
+    args = {"ticket": TID, "check": "c2"}
+    flags = []
+    if reason is not None:
+        args["reason"] = reason
+        flags = [f"--reason={reason}"]
+    assert actions.build_argv("check.wont_do", args) == [
+        "check", "wont-do", TID, "c2", *flags, "--by", "human:test", "--json"
+    ]
+
+
+@pytest.mark.parametrize("extra", [
+    {"reason": "x" * 201}, {"reason": 1}, {"reason": None}, {"reason": "a\x00b"},
+    {"reason": "a\nb"}, {"reason": "a\rb"}, {"agent": "x"},
+])
+def test_wont_do_bad_args(extra):
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("check.wont_do", {"ticket": TID, "check": "c2", **extra})
+
+
+def test_wont_do_counts_as_resolved(server, ws):
+    p = ws / ".orch" / "tickets" / f"{TID}.json"
+    t = json.loads(p.read_text())
+    t["checklist"][1].update(wont_do=True, reason="Out of scope")
+    p.write_text(json.dumps(t))
+    st, body, _ = req(server, "GET", f"/api/t/{TID}")
+    v = json.loads(body)
+    assert st == 200 and v["done"] == 2 and v["total"] == 2
+    assert v["ticket"]["checklist"][1]["done"] is False

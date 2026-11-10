@@ -16,6 +16,7 @@ Check (-not $admin) "runs without admin rights"
 Check (-not (Get-Command git -ErrorAction SilentlyContinue)) "git is not on PATH"
 
 L "--- install"
+$env:ORCH_INSTALL_KIND = "test"   # a TEST install, like lane C's test network (install.ps1 reads it)
 try { Get-Content $env:ORCH_INSTALL_PS1 -Raw | Invoke-Expression *>&1 | Out-String | % { L $_ } } catch { L "install threw: $_" }
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $v = orch --version 2>&1
@@ -45,8 +46,9 @@ function WaitFinish($out, $what, $since) {
     L "finisher ($what): no RESULT after 10 min"; return $false
 }
 $env:ORCH_AGENT = "claude"  # links .claude\skills (no agent is installed here; CI does the same)
-$p = "$env:USERPROFILE\orch-smoke"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
+$p = "$env:USERPROFILE\.orch-test\orch-smoke"; New-Item -ItemType Directory -Force $p | Out-Null; Set-Location $p
 L "--- init"; O init | Out-String | % { L $_ }
+Remove-Item Env:ORCH_AGENT -ErrorAction SilentlyContinue  # init needed it for the .claude link; dev-mark and update must run as a person's command, not as an agent
 Check (Test-Path "$p\.agents\skills\orch\SKILL.md") "orch init wrote the skill"
 Check (((Get-Item "$p\.claude\skills\orch" -Force -ErrorAction SilentlyContinue).LinkType -eq "Junction") -or (Test-Path "$p\.claude\skills\orch\.orch-copy")) ".claude\skills\orch is a junction (or a copy where links are refused)"
 Check (Test-Path "$p\.claude\skills\orch\SKILL.md") "the skill is found through .claude\skills"
@@ -62,10 +64,20 @@ L "--- addon add dashboard"; $out = O addon add dashboard --yes | Out-String; L 
 Check ($LASTEXITCODE -eq 0) "orch addon add dashboard (installs from the zip, no git)"
 Check (WaitFinish $out "addon add" 0) "dashboard install finished"
 $since = (Results $out).Count
+O dev-mark | Out-Null   # the harness marks the demo workspace dev (test install, under .orch-test), before any key
 L "--- update"; $out = O update | Out-String; L $out
+if ($LASTEXITCODE -ne 0 -and $out -match "dashboard on this computer|Waiting for your click") {
+    # a person's action (H1): the scripted test human proves it in a dev demo workspace
+    $proof = (cmd /c "orch dev-proof update orch 2>NUL" | Out-String).Trim()
+    Check ($proof.StartsWith("hp1.")) "test-human proof for orch update"
+    $out = $proof | cmd /c "orch update --proof-stdin 2>&1" | Out-String; L $out
+}
 Check ($LASTEXITCODE -eq 0) "orch update"
 Check (WaitFinish $out "update" $since) "update finished"
 Check ("$(O --version)" -match "^orch ") "orch still runs after the update"
+$rec = Get-Content "$(uv tool dir)\orch-workspace\orch-install.json" -Raw -ErrorAction SilentlyContinue
+L "install record after update: $rec"
+Check ("$rec" -match '"kind"\s*:\s*"test"') "the install record (kind test) survives the update (M1)"
 $list = O addon list | Out-String; L $list
 Check ($list -match "dashboard") "dashboard still installed after the update"
 Check (Test-Path "$p\.agents\skills\orch-dashboard") "dashboard skill in the workspace"

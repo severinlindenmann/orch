@@ -312,6 +312,9 @@ def _git_argv(root: Path, *args: str) -> list[str]:
     return ["git", "-C", str(root), "-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}", *args]
 
 
+is_tracked = _tracked  # public: other modules ask whether git tracks a file
+
+
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""

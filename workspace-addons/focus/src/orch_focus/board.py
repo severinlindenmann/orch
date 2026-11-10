@@ -41,7 +41,7 @@ class TicketWatcher:
         first = not self._primed
         for c in ticket.get("checklist", []):
             cid = c["id"]
-            now = "done" if c.get("done") else ("doing" if c.get("state") == "doing" else "todo")
+            now = "wont" if c.get("wont_do") else "done" if c.get("done") else ("doing" if c.get("state") == "doing" else "todo")
             old = self._state.get(cid, "todo")
             self._state[cid] = now
             if first and prime:

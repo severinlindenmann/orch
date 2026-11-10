@@ -241,9 +241,10 @@ def test_an_agent_cannot_allow_or_self_approve(proj, run, monkeypatch):
     write_config(proj, EVIL)
     monkeypatch.setenv("CLAUDECODE", "1")
     assert run("private", "allow", "mine", "--key", config.pending_agents(proj)[0]["key"])[0] == 2
-    assert run("config", "agent", "add", "sneaky", "--command", "touch X {prompt}")[0] == 0
+    code, out, err = run("config", "agent", "add", "sneaky", "--command", "touch X {prompt}")
+    assert code == 2 and "orch ask" in out + err  # an agent only asks; nothing is written
     assert "sneaky" not in config.agent_entries(proj)
-    assert any(p["name"] == "sneaky" for p in config.pending_agents(proj))
+    assert not any(p["name"] == "sneaky" for p in config.pending_agents(proj))
 
 
 def test_a_builtin_agent_needs_no_approval(proj):

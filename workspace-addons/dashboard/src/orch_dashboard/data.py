@@ -78,6 +78,22 @@ def forget_static() -> None:
     _STATIC.clear()
 
 
+def _argv0(orch_bin):
+    try:
+        from orch.pageproof import argv0
+    except ImportError:
+        return [orch_bin]
+    return argv0(orch_bin)
+
+
+def _child_env(env, orch_bin):
+    try:
+        from orch.pageproof import child_env
+    except ImportError:
+        return {**env, "ORCH_BIN": orch_bin}
+    return child_env(env, orch_bin)
+
+
 def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float = 5.0):
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
@@ -97,13 +113,13 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
         r = subprocess.run(
-            [orch_bin, *args],
+            [*_argv0(orch_bin), *args],
             check=False,
             cwd=root,
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin},
+            env=_child_env({**os.environ, "ORCH_ROOT": str(root)}, orch_bin),
         )
         return json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -326,6 +342,9 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                     "ticket_fields": tf,
                     "acts": acts,
                     "link_kinds": kinds,
+                    # orch-shipped (an installed package) vs a local folder someone added: the page of the
+                    # latter runs sandboxed, with no way to use the person's session (H1)
+                    "shipped": a.get("source") == "built-in",
                 }
             )
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))
@@ -626,6 +645,14 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
                 r["hold"] = " ".join(r["hold"].split())[:200] if isinstance(r["hold"], str) else None
                 if not r["hold"]:
                     r.pop("hold")
+            if (
+                isinstance(r, dict) and "shared_folder" in r
+            ):  # core's quiet line: text only, nothing else passes
+                sf = r.pop("shared_folder")
+                text = sf.get("line") if isinstance(sf, dict) else None
+                text = " ".join(text.split())[:200] if isinstance(text, str) else ""
+                if text:
+                    r["shared_folder"] = {"line": text}
             _RUNS[(str(root), i)] = (now, r if isinstance(r, dict) else None)
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 

@@ -13,6 +13,8 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .data import _argv0, _child_env
+
 TIMEOUT = 10.0  # a view that starts other orch commands (Focus with live sessions) needs more than 2 s on a busy machine
 MAX_BYTES = 256 * 1024
 TONES = ("neutral", "good", "warn", "needs-you", "bad")
@@ -293,10 +295,10 @@ class ViewPuller:
     def _run(self, name: str):
         if not self.orch_bin:
             return None, "The orch command was not found."
-        env = {**os.environ, "ORCH_ROOT": str(self.root), "ORCH_BIN": self.orch_bin, "ORCH_ADDON": name}
+        env = _child_env({**os.environ, "ORCH_ROOT": str(self.root), "ORCH_ADDON": name}, self.orch_bin)
         try:  # own session: on timeout or too much output the whole process group is killed
             p = subprocess.Popen(
-                [self.orch_bin, name, "view", "--json"],
+                [*_argv0(self.orch_bin), name, "view", "--json"],
                 cwd=self.root,
                 env=env,
                 stdin=subprocess.DEVNULL,

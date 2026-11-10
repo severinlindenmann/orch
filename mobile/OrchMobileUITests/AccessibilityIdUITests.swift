@@ -11,11 +11,17 @@ final class AccessibilityIdUITests: XCTestCase {
             // Reading identifiers from live XCUIElements would query the app repeatedly.
             let snapshot = try app.snapshot()
             var counts: [String: Int] = [:]
-            func visit(_ node: XCUIElementSnapshot) {
+            func visit(_ node: XCUIElementSnapshot, barIds: Set<String>? = nil) {
                 let id = node.identifier
+                // Inside the navigation bar: the ids of the enclosing elements (nil outside the bar).
+                var barIds = node.elementType == .navigationBar ? Set<String>() : barIds
+                // iOS 26 wraps each toolbar item in a host that carries the item's id around the same control: one control,
+                // not a copy. Only inside the navigation bar, so a container id copied onto its children elsewhere still fails.
+                let toolbarHost = barIds?.contains(id) == true
                 // SF Symbol images carry their symbol name ("chevron.right") as identifier: not ours.
-                if !id.isEmpty, !(node.elementType == .image && id.contains(".")) { counts[id, default: 0] += 1 }
-                for child in node.children { visit(child) }
+                if !id.isEmpty, !toolbarHost, !(node.elementType == .image && id.contains(".")) { counts[id, default: 0] += 1 }
+                if !id.isEmpty { barIds?.insert(id) }
+                for child in node.children { visit(child, barIds: barIds) }
             }
             for child in snapshot.children { visit(child) }
 

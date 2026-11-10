@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, tickets
+from orch import adapters, config, humanproof, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -60,6 +61,21 @@ def _actor(args) -> str:
 
 def _out(args, data, text: str) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
+
+
+AGENT_ASKS = (
+    'Only a person can {what}. Ask them with orch ask: orch ask <ticket> "{what}?" --option yes --option no'
+)
+
+
+def _person(root: Path, args, op: str, target: str, what: str, parts: dict) -> str:
+    """The person behind a human-only op (invariant H1, one proof mechanism: humanproof.person_by). With
+    --proof-stdin: the person in a verified proof. An agent is refused and told to use `orch ask`. A person at
+    a terminal without a proof leaves a hand-off on the page and is refused until they click there."""
+    who = humanproof.person_by(root, args, op, target, parts=parts)
+    if not who.startswith("human:"):
+        raise Refused(AGENT_ASKS.format(what=what))
+    return who
 
 
 def _choose(root: Path, name: str) -> str:
@@ -253,13 +269,20 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
-            config.add_agent(
+            if not config.NAME_RE.fullmatch(args.name):
+                raise Refused(
+                    f"'{args.name}' is not a name orch can use. Use lowercase letters, digits and '-'."
+                )
+            _person(
                 root,
+                args,
+                "config.agent_add",
                 args.name,
-                args.command,
-                args.interactive,
-                prompt=args.prompt_via,
-                approve=not tickets.agent_tool(),
+                f"add the agent {args.name}",
+                {"name": args.name, "command": args.command},
+            )
+            config.add_agent(  # a person proved it: approve ONLY what they typed (add_agent checks the file)
+                root, args.name, args.command, args.interactive, prompt=args.prompt_via, approve=True
             )
             tail = (
                 "starts fresh each run; no live steps"
@@ -323,16 +346,24 @@ def _private(args, root: Path) -> None:
     from orch import harness
 
     if args.state == "allow":
-        if tickets.agent_tool():
-            raise Refused("Only a person can allow a command to run on this computer.")
         if not args.name or not args.key:
             raise Refused("Say which one: orch private allow <name> --key <key> (orch private shows both).")
+        if not (config.NAME_RE.fullmatch(args.name) and re.fullmatch(r"[0-9a-f]{64}", args.key)):
+            raise Refused("Look at orch private again: that name or key is not one it showed.")
+        shown = next((p for p in config.pending_agents(root) if p["name"] == args.name), None)
+        _person(
+            root,
+            args,
+            "private.allow",
+            f"{args.name}:{args.key}",
+            f"allow the command of {args.name} to run on this computer",
+            {"name": args.name, "command": (shown or {}).get("command", "")},
+        )
         done = config.allow_agent(root, args.name, args.key)
         _out(args, {"allowed": [done]}, f"Allowed on this computer: {done}.")
         return
     if args.state == "move":
-        if tickets.agent_tool():
-            raise Refused("Only a person can move these files out of the team repo.")
+        _person(root, args, "private.move", "move", "move these files out of the team repo", {})
         moved = harness.move_to_private(root)
         if args.json:
             print(json.dumps({"moved": len(moved)}))
