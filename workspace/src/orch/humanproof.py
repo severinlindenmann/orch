@@ -1079,17 +1079,24 @@ def wontdo_is_human(
     )
 
 
+# The step fields the signed decision record is built from. ONE source of truth: wont_decision() reads exactly
+# these, and the sync merge pins exactly these (+ the MAC itself) while a verified decision is held
+# (orch_sync.merge._SIGNED; a test fails if the two drift apart).
+SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce")
+
+
 def wont_decision(step: dict) -> dict:
-    """The step's decision record, the thing the MAC covers: which step, the decision and its reason, WHAT the
-    person decided about (the step's text and `covers`: rewriting the step drops the Won't do) and a random
-    `nonce` (equal decisions get different MACs). Evidence and merge normalisation are not part of it."""
+    """The step's decision record, the thing the MAC covers: which step, the decision and its reason, a random
+    `nonce` (equal decisions get different MACs) and, ONLY for an "on" record, WHAT the person decided about
+    (the step's text and `covers`: rewriting the step needs the person again). An undo record carries no text
+    or covers, so a later rename of the reopened step cannot make the undo stop verifying."""
     on = step.get("wont_do") is True
     return {
         "check": step.get("id"),
         "wont_do": on,
         "reason": (step.get("reason") if on else None),
-        "text": step.get("text"),
-        "covers": step.get("covers"),
+        "text": (step.get("text") if on else None),
+        "covers": (step.get("covers") if on else None),
         "nonce": step.get("wont_nonce"),
     }
 
@@ -1101,7 +1108,14 @@ def wont_decision(step: dict) -> dict:
 LEDGER = "wont.json"
 
 
+LEDGER_DAMAGED = (
+    "orch's record of your Won't do decisions is damaged, so this was not saved. Nothing was changed. "
+    "Close orch and start it again; orch then resets its protection and you can decide again."
+)
+
+
 def _ledger_read(root: Path) -> dict | None:
+    """The ledger entries: {} when there is none yet, None when it cannot be trusted (damaged or loose)."""
     try:
         d = key_dir(root, create=False)
         data = _read_json(root, d / LEDGER, {"entries": {}})
@@ -1112,12 +1126,14 @@ def _ledger_read(root: Path) -> dict | None:
 
 
 def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
+    """Make `mac` the current entry. A damaged ledger is NEVER overwritten (that would wipe every other
+    entry): returns False and keeps the file."""
     try:
         d = key_dir(root)
         with _key_lock(d):
             ent = _ledger_read(root)
             if ent is None:
-                ent = {}
+                return False
             ent[f"{ticket}:{check}"] = mac
             _write_private(d / LEDGER, json.dumps({"schema": "orch.wont-ledger/1", "entries": ent}))
         return True
@@ -1137,13 +1153,18 @@ def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
         mac = wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
     except (Refused, OSError):
         return None
-    return mac if _ledger_set(root, ticket, str(step.get("id")), mac) else None
+    if not _ledger_set(root, ticket, str(step.get("id")), mac):
+        raise Refused(LEDGER_DAMAGED)  # visible: the decision is not saved half-signed
+    return mac
 
 
 def wont_forget(root: Path, ticket: str, check: str) -> None:
-    """A step was removed (a proven removal): tombstone its ledger entry, so no old MAC verifies on a new step
-    that reuses the id."""
-    _ledger_set(root, ticket, check, None)
+    """A step was removed (a proven removal): tombstone its ledger entry (whatever the step file still says),
+    so no old MAC verifies on a new step that reuses the id. Nothing to do when the ledger has no entry for
+    it; a damaged ledger is left as it is (it vouches for nobody anyway)."""
+    ent = _ledger_read(root)
+    if ent and ent.get(f"{ticket}:{check}") is not None:
+        _ledger_set(root, ticket, check, None)
 
 
 def wont_verifier(root: Path, relay_ok=None):
@@ -1159,8 +1180,7 @@ def wont_verifier(root: Path, relay_ok=None):
         key = human_key(root, create=False)
     except (Refused, OSError):
         return lambda step, ticket: False
-    ledger = _ledger_read(root)
-    if not ws or ledger is None:
+    if not ws:
         return lambda step, ticket: False
 
     def person(step, ticket) -> bool:
@@ -1169,6 +1189,9 @@ def wont_verifier(root: Path, relay_ok=None):
         decision = wont_decision(step)
         if relay_ok and relay_ok(step, ticket, decision):
             return True
+        ledger = _ledger_read(root)  # read at the moment of asking, never a snapshot taken earlier
+        if ledger is None:
+            return False  # damaged / loose: nobody
         mac = step.get("wont_mac")
         current = ledger.get(f"{ticket}:{step.get('id')}")
         if not isinstance(mac, str) or not mac or not isinstance(current, str):

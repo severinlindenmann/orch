@@ -218,34 +218,50 @@ def _evidence(*lists):
     return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
 
 
-_DECISION = ("wont_do", "reason", "wont_mac", "wont_nonce")  # a step's decision fields (they move together)
+# ONE place for what a person's Won't do pins. _SIGNED = every step field the signed decision record is built
+# from (humanproof.SIGNED_STEP_FIELDS, a test fails if the two drift apart) + the MAC itself. While the base
+# holds a verified "on" decision ALL of them change only through a side that verifies; any other change is "no
+# change from base". Without a held "on" the decision fields alone are pinned (text and covers are then free:
+# an undo record does not bind them).
+_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_mac")
+_DECISION = ("wont_do", "reason", "wont_nonce", "wont_mac")
 
 
 def _person_wont(ctx, x):
     """A step's Won't do counts as the person's only when the RECEIVING CORE says so (`person`: its own wontdo1
-    MAC over the decision, the step's text and covers, that is the CURRENT ledger entry; or a relay-
-    authenticated sender it recorded). The text of `by` is never looked at; with no verifier nobody is a person."""
+    MAC over the decision (and, for an "on", the step's text and covers) that is the CURRENT ledger entry; or a
+    relay-authenticated sender it recorded). The text of `by` is never looked at; with no verifier nobody is a
+    person."""
     return x.get("wont_do") is True and ctx.verified(x)
 
 
 def _drop_wont(x):
-    return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac")}
+    return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")}
 
 
-def _same_decision(x, x0):
-    return all(x.get(k) == (x0 or {}).get(k) for k in _DECISION)
+def _fields(x0):
+    """The step fields a side may not change on its own: all signed ones while base holds a verified "on",
+    else the decision fields."""
+    return _SIGNED if x0 and x0.get("wont_do") is True else _DECISION
+
+
+def _same_decision(x, x0, fields=_DECISION):
+    return all(x.get(k) == (x0 or {}).get(k) for k in fields)
 
 
 def _pinned(ctx, x, x0):
-    """A side's (or the merged result's) decision as it counts. INVARIANT: a decision that differs from base's
-    counts only when the core vouches for it (its MAC is valid for the step's text and covers AND is the CURRENT
-    ledger entry, so an older signed decision replayed later does not verify). Otherwise the step is "no change
-    from base" for EVERY decision field, present or missing (a changed reason, a garbage or missing MAC, a
-    dropped wont_do, a replay all come back to base)."""
-    if _same_decision(x, x0) or ctx.verified(x):
+    """A side's (or the merged result's) pinned fields as they count. INVARIANT: with a base that holds a
+    person's decision, a field the signed record covers differs from base's only when the core vouches for the
+    side (its MAC is valid for the decision (and for an "on", the step's text and covers) AND is the CURRENT
+    ledger entry, so a replay does not verify). Otherwise those fields are base's, present or missing: a changed
+    reason, a garbage or missing MAC, a dropped wont_do, a rewritten text or covers, a replay all come back to
+    base."""
+    held = ctx.verified(x0) if x0 else False
+    fields = _fields(x0) if held else _DECISION
+    if _same_decision(x, x0, fields) or ctx.verified(x):
         return x
-    y = {k: v for k, v in x.items() if k not in _DECISION}
-    y.update({k: x0[k] for k in _DECISION if x0 and k in x0})
+    y = {k: v for k, v in x.items() if k not in fields}
+    y.update({k: x0[k] for k in fields if x0 and k in x0})
     if y.get("wont_do"):
         y["done"] = False
     return y

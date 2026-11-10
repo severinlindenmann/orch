@@ -1384,7 +1384,7 @@ def _sign_wont(root: Path, tid: str, item: dict) -> None:
         item["wont_mac"] = mac
     else:
         item.pop("wont_mac", None)
-        item.pop("wont_nonce", None)
+        item.pop("wont_nonce", None)  # (no usable key: unsigned, so the sync treats it as an agent's)
 
 
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
@@ -1551,10 +1551,11 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
-        if item.get("wont_mac"):
-            from orch import humanproof
+        from orch import humanproof
 
-            humanproof.wont_forget(root, tid, cid)  # tombstone: an old MAC never verifies on a reused id
+        humanproof.wont_forget(
+            root, tid, cid
+        )  # tombstone (whatever the file says): no old MAC on a reused id
         t["checklist"].remove(item)
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"

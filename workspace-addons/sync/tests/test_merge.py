@@ -17,10 +17,9 @@ NOW = VEC["now"]
 
 
 def vmac(ticket, step, nonce):
-    on = bool(step.get("wont_do"))
-    reason = (step.get("reason") if on else "") or ""
-    raw = "|".join([ticket, str(step["id"]), str(nonce), str(step["text"]), str(step.get("covers") or ""), str(on), str(reason)])
-    return "v1-" + hashlib.sha256(raw.encode()).hexdigest()[:20]
+    on = bool(step.get("wont_do"))  # an "on" record binds the step's text and covers; an undo record does not
+    parts = [ticket, str(step["id"]), str(nonce), str(step["text"] if on else ""), str((step.get("covers") or "") if on else ""), str(on), str((step.get("reason") if on else "") or "")]
+    return "v1-" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:20]
 
 
 def person_for(ledger):
@@ -668,14 +667,51 @@ def test_no_ledger_entry_means_nobody_even_for_a_valid_looking_mac():
 
 
 @pytest.mark.parametrize("edit", [{"text": "Email the auditor instead"}, {"covers": "everything"}])
-def test_rewriting_text_or_covers_under_a_persons_wont_do_drops_it(edit):
+def test_rewriting_ONLY_text_or_covers_under_a_persons_wont_do_changes_nothing(edit):
+    """RR1: an agent that changes just the text or covers must not drop the decision (no MAC needed to do so)."""
     on = signed(_step(**WONT))
     base = tk(checklist=[on])
     person = person_for(ledger_of(on))
     agent = up(base, T2, checklist=[{**on, **edit}])
     for x, y in ((agent, base), (base, agent)):
         c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
-        assert "wont_do" not in c and all(c[k] == v for k, v in edit.items())
+        assert c == on  # no change from base: the decision AND the text/covers stay
+
+
+def test_rewriting_text_and_dropping_the_decision_is_all_restored():
+    on = signed(_step(**WONT))
+    base = tk(checklist=[on])
+    stripped = {k: v for k, v in on.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")}
+    agent = up(base, T2, checklist=[{**stripped, "text": "skip the security review"}])
+    for x, y in ((agent, base), (base, agent)):
+        c = merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))["checklist"][0]
+        assert c["wont_do"] is True and c["text"] == "Email finance"
+
+
+def test_an_agent_rename_of_a_reopened_step_cannot_bring_the_old_wont_do_back():
+    on1, undo2 = signed(_step(**WONT), "n1"), signed(_step(), "n2")
+    renamed = {**undo2, "text": "Email finance, renamed"}  # an undo record binds no text: still verifies
+    base = tk(checklist=[renamed])
+    person = person_for(ledger_of(undo2))
+    assert person(renamed, TK)
+    stale = up(base, T2, checklist=[on1])  # a stale peer still has the old "on"
+    for x, y in ((stale, base), (base, stale)):
+        c = merge_ticket(base, x, y, NOW, person)["checklist"][0]
+        assert "wont_do" not in c
+
+
+def test_a_rename_of_a_never_decided_step_is_free():
+    base = tk(checklist=[_step()])
+    agent = up(base, T2, checklist=[_step(text="Email finance and the auditor")])
+    for x, y in ((agent, base), (base, agent)):
+        assert merge_ticket(base, x, y, NOW, person_for({}))["checklist"][0]["text"].endswith("auditor")
+
+
+def test_drop_wont_clears_the_nonce_too():
+    on = signed(_step(**WONT))
+    a = up(tk(checklist=[_step()]), T2, checklist=[on])
+    c = merge_ticket(tk(checklist=[_step()]), a, tk(checklist=[_step()]), NOW)["checklist"][0]  # no verifier
+    assert "wont_do" not in c and "wont_nonce" not in c and "wont_mac" not in c
 
 
 def test_a_proven_edit_re_signs_and_keeps_the_wont_do():
