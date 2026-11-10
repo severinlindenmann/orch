@@ -7,8 +7,8 @@ sandbox and permission mode. So every call here:
 
 * drops every GIT_* variable of the caller (a hook's GIT_DIR must not aim us at another repository; only what
   this module sets is passed), and sets GIT_TERMINAL_PROMPT=0;
-* runs hooks from a path that does not exist (`core.hooksPath` = a fresh name inside the orch home, never
-  created: git runs no hooks), so repo hooks (reference-transaction, post-checkout, ...) never run;
+* hooksPath is a fixed device path or a random never-created name; never derived from a file or folder that
+  exists (/dev/null; //./NUL on Windows), so repo hooks (reference-transaction, post-checkout, ...) never run;
 * turns off `core.fsmonitor` and the untracked cache, `protocol.allow=never` (no network), `core.longpaths`
   (Windows), signing (`commit.gpgSign`, `tag.gpgSign`: no `gpg.program` of the repo runs), `core.sshCommand`,
   `credential.helper`, and `diff.external`; diff-like commands (diff, log, show) get `--no-ext-diff
@@ -222,7 +222,6 @@ def git_exe(cwd: Path, root: Path | None = None) -> str | None:
 def _python_trivial(name: str, cwd: Path, root: Path | None) -> str | None:
     """Windows has no true/false programs: the python running orch does it, unless that python is inside the
     folder we work in, the workspace root or a copy (a project's own .venv is not a trusted program)."""
-    import sys
 
     if any(_inside(sys.executable, a) for a in _avoid(cwd, root)):
         return None
@@ -268,23 +267,15 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
     return e
 
 
-def _below_file(file: str) -> str:
-    """An always-absolute path UNDER an existing regular file: any lookup below it fails (ENOTDIR) on every
-    OS, so it can never be a hooks folder. Not os.devnull (on Windows `nul` is read as a relative path)."""
-    return (Path(file).resolve() / "no-hooks").as_posix()
-
-
 def _no_hooks(cwd: Path | None = None, root: Path | None = None) -> str:
-    """core.hooksPath for every call: a path below the python interpreter's file (a regular file outside any
-    repository). If that file lies in a folder we avoid (a project's own venv), the resolved git program is
-    used instead. No predictable shared folder, nothing needed from the orch home."""
-    where = cwd or Path.cwd()
-    avoid = _avoid(where, root)
-    exe = os.path.realpath(sys.executable)
-    if not any(_inside(exe, a) for a in avoid):
-        return _below_file(exe)
-    git = git_exe(where, root)
-    return _below_file(git if git else exe)
+    """core.hooksPath for every call. POSIX: /dev/null (a device: it can't be a folder or be redirected).
+    Windows: the absolute device path //./NUL (git for Windows is to accept it; the next Windows run checks it;
+    if it rejects it, use a random 32-hex name below %LOCALAPPDATA%\\orch, never created).
+    Invariant: hooksPath is a fixed device path or a random never-created name; never derived from a file
+    or folder that exists. (cwd and root are accepted for the callers' sake and unused.)"""
+    if os.name != "nt":
+        return "/dev/null"
+    return "//./NUL"
 
 
 def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> list[str]:
