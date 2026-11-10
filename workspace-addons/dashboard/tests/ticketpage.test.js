@@ -368,3 +368,20 @@ test('plan step dialogs rename with a revision and add under the parent', async 
   await actions.children[0].onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['ticket.new', {title:'New step', parent:'parent'}]));
 });
+
+test('a parent lists its steps in creation order, whatever order the ticket list arrives in (every width)', () => {
+  const parent = {id:'t_p', key:'WS-1', title:'Plan'};
+  const mk = (id, key, title, status) => ({id, key, title, status, parent:'t_p', created_at:'2026-11-09T10:00:00Z'});
+  const zebra = mk('t_z', 'WS-2', 'Zebra', 'done'), alpha = mk('t_a', 'WS-3', 'Alpha', 'active'), middle = mk('t_m', 'WS-4', 'Middle', 'open');
+  const titles = list => helpers.childrenOf(list, parent).map(c => c.title).join(',');
+  // the ticket list is sorted differently at different widths (by title, by status): the steps must not follow it
+  for (const list of [[parent, alpha, zebra, middle], [parent, zebra, middle, alpha], [middle, alpha, parent, zebra]]) {
+    assert.equal(titles(list), 'Zebra,Alpha,Middle');
+  }
+  const c = context({card:(key, title, suffix, kids) => ({kids}), emptyRow:x => x, statusChip:() => null, href:id => '#' + id, clean:v => String(v)});
+  const shown = list => JSON.stringify(c.ticketParts(parent, helpers.childrenOf(list, parent)));
+  const order = json => ['Zebra', 'Alpha', 'Middle'].map(w => json.indexOf(w));
+  assert.deepEqual(order(shown([parent, alpha, zebra, middle])), order(shown([parent, middle, zebra, alpha])));
+  const ordered = order(shown([parent, alpha, zebra, middle]));
+  assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
+});
