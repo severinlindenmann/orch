@@ -1031,6 +1031,23 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
     assert acts(act_orch) == []  # nothing was created
 
 
+def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    for mode in ("off", "together", "always"):
+        assert build_argv("copies.set", {"mode": mode})[:4] == ["config", "set", "workflow.copies", mode]
+    assert build_argv("copies.set", {"max": 5})[:4] == ["config", "set", "workflow.copies_max", "5"]
+    argv = build_argv("copies.set", {"setup": "npm ci"})
+    assert argv[:3] == ["config", "set", "workflow.copy_setup"] and argv[-2:] == ["--", "npm ci"]
+    assert argv[argv.index("--by") + 1].startswith("human:")
+    assert build_argv("copies.set", {"setup": "  "})[-1] == "none"  # empty clears
+    assert build_argv("copies.set", {"setup": "--flag x"})[-2:] == ["--", "--flag x"]  # never an option
+    for bad in ({"mode": "sometimes"}, {"max": 0}, {"max": "3"}, {"max": True}, {"setup": "a\nb"},
+                {"setup": "x" * 501}, {"mode": "off", "max": 2}, {}, {"mode": "off", "extra": 1}):
+        with pytest.raises(BadRequest):
+            build_argv("copies.set", bad)
+
+
 def test_check_wont_do_argv():
     common = ["--by", actions.actor(), "--json"]
     args = {"ticket": "t_abcdef", "check": "c1"}

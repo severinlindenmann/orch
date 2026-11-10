@@ -33,6 +33,14 @@
       "additionalProperties": false,
       "properties": {
         "label": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Shown to people. \"{name}\" = the user's entry name." },
+        "store_args": {
+          "type": "object", "additionalProperties": false, "required": ["after", "args"],
+          "description": "Optional, built-in adapters only (orch ignores it elsewhere). For a tool sandboxed to its working folder: when the agent works in a separate copy of the project, `--add-dir <workspace>/.orch` is inserted into the oneshot argv after the template word `after`, so the workspace's own store stays writable. Nothing else is allowed here: exactly `--add-dir` and `{store}` once.",
+          "properties": {
+            "after": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "args": { "const": ["--add-dir", "{store}"] }
+          }
+        },
         "detect": {
           "oneOf": [
             { "type": "null" },
