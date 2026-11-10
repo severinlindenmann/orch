@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import shutil
@@ -13,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, tickets
+from orch import adapters, config, humanproof, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -55,6 +56,14 @@ def _actor(args) -> str:
     environment counts as an agent whatever --by says."""
     who = tickets.current_actor(getattr(args, "by", None))
     return "agent:" + str(tickets.agent_tool()) if tickets.agent_tool() else who
+
+
+def _person(args, root: Path, op: str, target: str, **kw) -> str:
+    """A person's own decision (H1): the proof from the page, or a hand-off. An agent is refused in words."""
+    who = humanproof.person_by(root, args, op, target, **kw)
+    if not who.startswith("human:"):
+        raise Refused(humanproof.AGENT_REFUSED)
+    return who
 
 
 def _out(args, data, text: str) -> None:
@@ -211,12 +220,17 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
-        if args.value == "on" and _actor(args).startswith("agent:"):
-            raise Refused(
-                "Only a person can allow agents to mark tickets Done. Ask them to run: "
-                "orch config set workflow.agents_may_finish on"
+        who = None
+        if args.value == "on":
+            if _actor(args).startswith("agent:"):
+                raise Refused(
+                    "Only a person can allow agents to mark tickets Done. Ask them to run: "
+                    "orch config set workflow.agents_may_finish on"
+                )
+            who = _person(
+                args, root, "config.agents_may_finish", "on", parts={"setting": "agents_may_finish"}
             )
-        value = config.set_agents_may_finish(root, args.value == "on")
+        value = config.set_agents_may_finish(root, args.value == "on", who or _actor(args))
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
     elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
         if _actor(args).startswith("agent:"):  # copy_setup is a command orch runs: only a person chooses it
@@ -228,6 +242,15 @@ def _config(args, root: Path) -> None:
             v = config.set_copies_max(root, args.value)
             text = f"Saved: at most {v} separate copies at once."
         else:
+            setup = args.value.strip()
+            if setup not in (
+                "",
+                "none",
+            ):  # a command orch runs in every new copy: a person's proof, bound to it
+                _person(
+                    args, root, "config.copy_setup", hashlib.sha256(setup.encode()).hexdigest(),
+                    value=args.value, exact=setup,
+                )  # fmt: skip
             v = config.set_copy_setup(root, args.value)
             text = f"Saved: a new copy is prepared with: {v}." if v else "Saved: nothing runs in a new copy."
         _out(args, {args.key: v}, text)
@@ -239,7 +262,15 @@ def _config(args, root: Path) -> None:
             f"Saved: workspace.code = {code}. New tickets get {code}-<n>; existing keys stay as they are.",
         )
     elif args.sub == "set" and args.key == "workspace.permissions":
-        mode = config.set_permissions(root, args.value, _actor(args))
+        who = _actor(args)
+        modes = config.PERMISSION_MODES
+        if (
+            args.value in modes
+            and not who.startswith("agent:")
+            and modes.index(args.value) > modes.index(config.permissions(root))
+        ):  # giving agents MORE room is a person's decision (lowering is free for anyone)
+            who = _person(args, root, "config.permissions", args.value, parts={"mode": args.value})
+        mode = config.set_permissions(root, args.value, who)
         _out(
             args,
             {"workspace.permissions": mode},
@@ -268,6 +299,20 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
+            # a command orch will run for every task: only a person approves it, shown in full (both the
+            # command and the live-session one). An agent is refused until private allow (#374) gates what
+            # a config.toml command may run (F5): editing config.toml by hand is the same class, Level 2.
+            exact = args.command
+            if args.interactive:
+                exact = f"Command: {args.command}\nLive session command: {args.interactive}"
+            _person(
+                args,
+                root,
+                "config.agent_add",
+                args.name,
+                parts={"name": humanproof.part(args.name)},
+                exact=exact,
+            )
             config.add_agent(root, args.name, args.command, args.interactive, prompt=args.prompt_via)
             tail = (
                 "starts fresh each run; no live steps"
@@ -288,6 +333,8 @@ def _share(args, root: Path) -> None:
     if args.state != "status":
         if tickets.agent_tool():
             raise Refused("Only a person can share the orch entry with the team.")
+        if args.state == "on":  # off needs no proof
+            _person(args, root, "config.share", "on", parts={})
         (harness.share_on if args.state == "on" else harness.share_off)(root)
     on = harness.share_state(root)
     _out(

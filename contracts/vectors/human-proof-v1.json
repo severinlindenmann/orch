@@ -409,7 +409,8 @@
   "insights.share_counts",
   "insights.share_names",
   "secret.allow_get",
-  "conn.allow"
+  "conn.allow",
+  "workflow.agents_may_finish"
  ],
  "settle": [
   {
@@ -588,6 +589,42 @@
     }
    ],
    "effective": [
+    false
+   ]
+  },
+  {
+   "name": "agents may finish: on in the file only (agent edit)",
+   "setting": "workflow.agents_may_finish",
+   "events": [
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    false
+   ]
+  },
+  {
+   "name": "agents may finish: on with a proof, off, then the file says on again",
+   "setting": "workflow.agents_may_finish",
+   "events": [
+    {
+     "by": "proof",
+     "value": true
+    },
+    {
+     "by": "file",
+     "value": false
+    },
+    {
+     "by": "file",
+     "value": true
+    }
+   ],
+   "effective": [
+    true,
+    false,
     false
    ]
   }
