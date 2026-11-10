@@ -284,13 +284,32 @@ def test_closing_a_ticket_removes_its_copy(repo):
     assert not p.exists() and t not in worktrees.registry(repo)
 
 
-def test_done_alone_does_not_remove_the_copy_but_the_sweep_does(repo):
+def test_done_removes_the_copy_and_its_changes_stay_on_the_branch(repo):
     t = repo.tids[0]
     p = make(repo, 0)
+    (p / "w.txt").write_text("work")
     close(repo, t, "done")
-    assert p.is_dir()  # B13 adds the changes first, then calls remove()
-    worktrees.sweep(repo)
-    assert not p.exists()
+    assert not p.exists() and t not in worktrees.registry(repo)
+    assert git(repo, "show", f"orch/{t}:w.txt") == "work"  # B13 will add them to the project first
+
+
+def test_copies_on_two_runs_done_leaves_no_copy_and_no_registry_line(repo):
+    """Lane C D6b: copies on, two runs, Done on both: both copies and both registry lines are gone."""
+    from orch import config
+
+    config.set_copies_mode(repo, "always")
+    a, b = repo.tids[:2]
+    pa, pb = make(repo, 0), make(repo, 1)
+    ra = runs.claim(repo, a, "human:t", "claude", "oneshot", folder=pa, pid=os.getpid())
+    rb = runs.claim(repo, b, "human:t", "claude", "oneshot", folder=pb, pid=os.getpid())
+    close(repo, a, "done")
+    close(repo, b, "done")
+    assert pa.is_dir() and pb.is_dir()  # the agents are still in them: they go when the runs end
+    runs.release(repo, a, ra["run"])
+    runs.release(repo, b, rb["run"])
+    assert not pa.exists() and not pb.exists()
+    assert worktrees.registry(repo) == {} and worktrees.count(repo) == 0
+    assert branches(repo) == []  # nothing on them: merged, deleted
 
 
 def test_sweep_removes_missing_ticket_copies_and_keeps_open_ones(repo):

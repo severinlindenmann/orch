@@ -1172,3 +1172,13 @@ def usage(root: Path, seconds: float = 3.0, max_entries: int = 200_000) -> dict:
         except OSError:
             continue
     return out
+
+
+def on_run_ended(root: Path, tid: str) -> None:
+    """A run of `tid` ended: when its ticket is already closed, its copy goes now (it waited for the run).
+    Never raises; costs one small file read when the ticket has no copy."""
+    try:
+        if tid in registry(root) and _ticket_closed(root, tid):
+            remove(root, tid, wait=SWEEP_WAIT)
+    except Exception:  # noqa: BLE001
+        pass

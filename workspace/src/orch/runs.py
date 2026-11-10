@@ -779,6 +779,9 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
             return {"released": False, "pending": True}
         _release_locked(root, tid, rec)
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
+    from orch import worktrees
+
+    worktrees.on_run_ended(root, tid)  # B12: a closed ticket's copy goes once its last run is over
     return {"released": True, "pending": waiting}
 
 
