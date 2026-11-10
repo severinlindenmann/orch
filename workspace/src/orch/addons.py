@@ -1668,14 +1668,14 @@ def _source_sha() -> str | None:
 
     try:
         if _is_local(repo()):
-            result = subprocess.run(
-                ["git", "-C", repo(), "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=5,
+            from orch import safegit
+
+            rc, out, _ = safegit.run(  # the add-on source folder: same hardening as every git call
+                ["rev-parse", "HEAD"], Path(repo()), 5, read_only=True, filters=False, root=Path(repo())
             )
-            return _sha_or_none(result.stdout)
+            if rc != 0:
+                return None
+            return _sha_or_none(out)
         api = _github_api()
         if api:
             request = Request(

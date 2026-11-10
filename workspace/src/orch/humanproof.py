@@ -770,6 +770,25 @@ def record_set(root: Path, setting: str, value, by: str) -> None:
     _settings_write(root, setting, value, by)
 
 
+def conn_grants(root: Path) -> dict:
+    """conn.allow grants recorded with a proof, by connection name ("*" or a list of actions). Unreadable
+    record or home = no grants (fail closed)."""
+    try:
+        path, wkey = _settings_path(root)
+        data = _settings_load(root, path)
+    except (Refused, OSError):
+        return {}
+    out = {}
+    for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
+        if not (key.startswith("conn.allow.") and isinstance(rec, dict)):
+            continue
+        val = rec.get("value")
+        # only "*" or a list of action names is a grant; a tombstone (False) or any other type is none
+        if val == "*" or (isinstance(val, list) and all(isinstance(a, str) for a in val)):
+            out[key[len("conn.allow.") :]] = val
+    return out
+
+
 def effective(root: Path, setting: str, file_value: bool) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
