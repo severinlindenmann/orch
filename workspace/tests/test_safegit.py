@@ -281,8 +281,8 @@ def test_a_git_in_the_repo_or_in_a_path_entry_inside_it_is_never_used(tmp_path, 
 
 # ---------------------------------------------------------------- lint (AST)
 
-# Modules that still start git themselves. MUST SHRINK TO ZERO. filesig.py (B8) and B9's work-check join it
-# until they migrate onto safegit.
+# Modules that still start git themselves. MUST SHRINK TO ZERO (empty since B11b: filesig, work-check and
+# harness run git through safegit.run / run_bytes).
 ALLOW = set(safegit.LEGACY) | {"safegit.py"}
 _SPAWN = re.compile(
     r"^(subprocess\.\w+|os\.(exec\w+|spawn\w+|posix_spawn\w*|system|popen)|asyncio\.create_subprocess_\w+)$"
@@ -316,15 +316,147 @@ def _mentions_git(node, git_names):
     return False
 
 
+_GIT_NAME = re.compile(r"git(\.exe)?", re.IGNORECASE)
+_JOINERS = {"os.path.join", "pathlib.Path", "Path", "PurePath", "pathlib.PurePath", "shutil.which"}
+_INTERNALS = {"git_exe", "_exes", "hardened"}  # safegit internals nobody else may touch
+
+
+def _fold(node, env) -> set[str] | None:
+    """The strings an expression can be, when they are constants: literals, "a" + "b", f-strings, `x if c
+    else y` (both branches), and names bound (transitively) to such values. None = not constant."""
+    if isinstance(node, ast.Constant):
+        return {node.value} if isinstance(node.value, str) else None
+    if isinstance(node, ast.Name):
+        return env.get(node.id)
+    if isinstance(node, ast.NamedExpr):
+        return _fold(node.value, env)
+    if isinstance(node, ast.IfExp):
+        a, b = _fold(node.body, env), _fold(node.orelse, env)
+        return (a | b) if a is not None and b is not None else (a or b)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        a, b = _fold(node.left, env), _fold(node.right, env)
+        return {x + y for x in a for y in b} if a is not None and b is not None else None
+    if isinstance(node, ast.JoinedStr):
+        out = {""}
+        for v in node.values:
+            part = _fold(v.value if isinstance(v, ast.FormattedValue) else v, env)
+            if part is None:
+                return None
+            out = {x + y for x in out for y in part}
+        return out
+    return None
+
+
+def _assigned(n, env):
+    """(name, value-node) pairs bound by one statement: `x = v`, `x: T = v`, `(x := v)`, `a, b = v1, v2`."""
+    if isinstance(n, ast.Assign):
+        for t in n.targets:
+            if isinstance(t, ast.Name):
+                yield t.id, n.value
+            elif isinstance(t, (ast.Tuple, ast.List)) and isinstance(n.value, (ast.Tuple, ast.List)):
+                for tt, vv in zip(t.elts, n.value.elts, strict=False):
+                    if isinstance(tt, ast.Name):
+                        yield tt.id, vv
+    elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+        yield n.target.id, n.value
+    elif isinstance(n, ast.NamedExpr) and isinstance(n.target, ast.Name):
+        yield n.target.id, n.value
+
+
+def _bindings(tree) -> dict[str, set[str]]:
+    """name -> constant strings of every constant binding in the module (any scope), until stable."""
+    env: dict[str, set[str]] = {}
+    for _ in range(8):
+        changed = False
+        for n in ast.walk(tree):
+            for name, node in _assigned(n, env):
+                val = _fold(node, env)
+                if val is not None and not val <= env.get(name, set()):
+                    env[name] = env.get(name, set()) | val
+                    changed = True
+        if not changed:
+            break
+    return env
+
+
+_GIT_PART = re.compile(r"[/\\]git(\.exe)?$", re.IGNORECASE)  # a path ending in git (a bare "git" is no path)
+
+
+def _git_fstring(node) -> bool:
+    """An f-string that ends in a placeholder + the constant "git"/"git.exe" (f"{d}{os.sep}git")."""
+    return (
+        isinstance(node, ast.JoinedStr)
+        and len(node.values) > 1
+        and isinstance(node.values[-1], ast.Constant)
+        and bool(_GIT_NAME.fullmatch(str(node.values[-1].value)))
+    )
+
+
+def _is_git(node, env) -> bool:
+    vals = _fold(node, env)
+    return bool(vals) and any(_GIT_NAME.fullmatch(v) for v in vals)
+
+
+def git_path_builders(source: str) -> list[int]:
+    """Line numbers where a module OTHER than safegit finds or builds the path of the git program, under any
+    function name (B9's work-check did it with its own PATH loop, then ran the resolved file; the spawn check
+    cannot tie that to git). Flagged: a constant that can be "git"/"git.exe" (a literal, "gi" + "t", an
+    f-string, `"git.exe" if nt else "git"`, or a name bound to one, transitively) used in os.path.join,
+    Path(...), .joinpath, `/` or shutil.which; any use of safegit internals (git_exe, _exes, hardened) as a
+    call, attribute, import, alias or getattr string; and find_exe("git") also through an import alias.
+    Also: any string constant (or f-string part) that ends in `/git`, `\\git` or `/git.exe` (f"{d}/git",
+    "%s/git" % d), `x + "git"` and `sep.join([..., "git"])`.
+    A guardrail, not a boundary. Known false positives: names are tracked per module, not per scope (a global
+    `x = "git"` taints every `x` in the file), and any attribute or call NAMED hardened / *git_exe* is flagged
+    whatever object it belongs to. Known gaps: a path built from data that is not a constant in the file."""
+    tree = ast.parse(source)
+    env = _bindings(tree)
+    find_aliases = {"find_exe"}
+    bad = []
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[-1] == "safegit":
+            for a in n.names:
+                if a.name in _INTERNALS:
+                    bad.append(n.lineno)
+                if a.name == "find_exe":
+                    find_aliases.add(a.asname or a.name)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and _GIT_PART.search(n.value):
+            bad.append(n.lineno)
+        elif _git_fstring(n):
+            bad.append(n.lineno)
+        elif isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Div, ast.Add)) and _is_git(n.right, env):
+            bad.append(n.lineno)
+        elif isinstance(n, ast.Attribute) and n.attr in _INTERNALS:
+            bad.append(n.lineno)
+        elif isinstance(n, ast.Call):
+            name = _dotted(n.func) or (n.func.attr if isinstance(n.func, ast.Attribute) else "")
+            last = name.rsplit(".", 1)[-1]
+            args = [*n.args, *[k.value for k in n.keywords]]
+            if (name in _JOINERS or last == "joinpath") and any(_is_git(a, env) for a in args):
+                bad.append(n.lineno)
+            elif last == "join" and any(
+                isinstance(a, (ast.List, ast.Tuple)) and any(_is_git(e, env) for e in a.elts) for a in args
+            ):
+                bad.append(n.lineno)
+            elif "git_exe" in last or last in _INTERNALS:
+                bad.append(n.lineno)
+            elif last in find_aliases and n.args and _is_git(n.args[0], env):
+                bad.append(n.lineno)
+            elif name == "getattr" and len(n.args) >= 2 and (_fold(n.args[1], env) or set()) & _INTERNALS:
+                bad.append(n.lineno)
+    return sorted(set(bad))
+
+
 def git_spawns(source: str) -> list[int]:
     """Line numbers of process starts whose argv mentions git (a literal, a name bound to one, shutil.which),
-    and of any use of harness._git_env."""
+    and of any use of harness._git_env, and of building git's path (git_path_builders)."""
     tree = ast.parse(source)
     names = set()
     for n in ast.walk(tree):
         if isinstance(n, ast.Assign) and _mentions_git(n.value, set()):
             names.update(t.id for t in n.targets if isinstance(t, ast.Name))
-    bad = []
+    bad = list(git_path_builders(source))
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and _SPAWN.match(_dotted(n.func)):
             if any(_mentions_git(a, names) for a in [*n.args, *[k.value for k in n.keywords]]):
@@ -332,6 +464,84 @@ def git_spawns(source: str) -> list[int]:
         if isinstance(n, ast.Attribute) and n.attr == "_git_env":
             bad.append(n.lineno)
     return sorted(set(bad))
+
+
+# B9's work-check as it was before B11b: its own PATH loop for git, then a subprocess of the resolved file.
+_OLD_WORKCHECK = """
+import os, subprocess
+def _git_exe(root):
+    name = "git.exe" if os.name == "nt" else "git"
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand):
+            return cand
+def _git(root, args):
+    exe = _git_exe(root)
+    return subprocess.run([exe, *args], cwd=root)
+"""
+
+
+_RENAMED = """
+import os, subprocess
+def _find_tool(root):
+    name = "git.exe" if os.name == "nt" else "git"
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand):
+            return cand
+def _run(root, args):
+    tool = _find_tool(root)
+    return subprocess.run([tool, *args], cwd=root)
+"""
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        _RENAMED,  # the old work-check with the function renamed: only the IfExp name reaches the join
+        'import os\nn = "git.exe" if os.name == "nt" else "git"\np = os.path.join(d, n)',
+        'import os\na = "git"\nb = a\nc = b\nos.path.join(d, c)',  # transitive
+        'import os\np = os.path.join(d, "gi" + "t")',  # folded concatenation
+        "import os\np = os.path.join(d, f\"gi{'t'}\")",  # f-string with a constant placeholder
+        'import os\np = os.path.join(d, f"git")',
+        'import shutil\nn = "git"\nx = shutil.which(n)',
+        'from pathlib import Path\nn = "git"\np = Path(d) / n',
+        "from orch.safegit import git_exe as g\ng(cwd)",
+        "from orch.safegit import _exes",
+        "from orch.safegit import hardened",
+        'from orch import safegit\nf = getattr(safegit, "git_exe")',
+        'from orch import safegit\nn = "hard" + "ened"\nf = getattr(safegit, n)',
+        "from orch import safegit\nsafegit._exes.clear()",
+        "from orch import safegit\nsafegit.hardened(cwd)",
+        'from orch.safegit import find_exe as fe\nfe("git", set())',
+        'import os\np = f"{d}/git"',
+        'import os\np = f"{d}{os.sep}git"',
+        'import os\np = f"{d}{os.sep}git.exe"',
+        'import os\np = "%s/git" % d',
+        'import os\np = d + os.sep + "git"',
+        'p = "/".join([d, "git.exe"])',
+        'import os\nn: str = "git"\nos.path.join(d, n)',  # annotated assignment
+        'import os\nos.path.join(d, (n := "git"))',  # walrus
+        'import os\na, b = "git", "x"\nos.path.join(d, a)',  # tuple unpacking
+        'import os\np = "C:\\\\tools\\\\git.exe"',
+    ],
+)
+def test_the_lint_flags_every_way_of_finding_git(src):
+    assert git_path_builders(src)
+
+
+def test_the_old_workcheck_pattern_is_flagged():
+    assert git_spawns(_OLD_WORKCHECK)  # the function name, and the run of the resolved exe
+    # each ingredient alone is enough
+    assert git_path_builders('import os\nname = "git"\np = os.path.join("/usr/bin", "git")')
+    assert git_path_builders('from pathlib import Path\np = Path("/usr/bin") / "git.exe"')
+    assert git_path_builders('from pathlib import Path\np = Path("/usr/bin").joinpath("git")')
+    assert git_path_builders("from orch import safegit\nx = safegit.git_exe(cwd)")
+    assert git_path_builders('from orch import safegit\nsafegit.find_exe("git", set())')
+    assert not git_path_builders('x = os.path.join(a, ".git")')  # the .git folder is no program
+    assert not git_path_builders("from orch import safegit\nsafegit.find_exe(argv[0], safegit.avoid_for(w))")
+    assert not git_path_builders("from orch import safegit\nsafegit.have_git(cwd)")
+    assert not git_path_builders('import os\nn = "gitignore"\nos.path.join(d, n)')
 
 
 @pytest.mark.parametrize(
@@ -829,7 +1039,7 @@ def test_the_legacy_callers_never_run_a_workspace_git_hook_or_fsmonitor(proj, mo
 
 
 def _planted_only(proj, monkeypatch):
-    """The only git on the PATH is one inside the workspace: hardened() finds none it trusts."""
+    """The only git on the PATH is one inside the workspace: have_git() finds none it trusts."""
     (proj / "bin").mkdir(exist_ok=True)
     sh(proj / "bin" / "git", "exit 0")
     monkeypatch.setenv("PATH", str(proj / "bin"))
@@ -843,7 +1053,7 @@ def test_with_no_trusted_git_each_caller_closes_in_its_own_safe_direction(proj, 
     (proj / "a.txt").write_text("x\n")
     (proj / ".orch").mkdir()
     _planted_only(proj, monkeypatch)
-    assert safegit.hardened(proj) is None
+    assert not safegit.have_git(proj)
     assert filesig.files_sig(proj) is None  # no signature
     with pytest.raises(Refused):
         harness._in_git_repo(proj)  # a planted git must not read as "not a repo"
@@ -898,22 +1108,195 @@ def test_env_sets_the_c_locale(monkeypatch):
     assert e["LC_ALL"] == e["LANG"] == "C"
 
 
+# ---------------------------------------------------------------- run_bytes
+
+
+def test_run_bytes_returns_raw_bounded_stdout_with_the_same_allowlist(proj):
+    sh_git = lambda *a: subprocess.run(["git", *a], cwd=proj, check=True, capture_output=True)  # noqa: E731
+    sh_git("init", "-q")
+    (proj / "aé.txt").write_text("x")
+    rc, out, _ = safegit.run_bytes(["ls-files", "-z", "--others", "--exclude-standard"], proj)
+    assert rc == 0 and isinstance(out, bytes) and out == "aé.txt".encode() + b"\0"
+    rc, out, err = safegit.run_bytes(["ls-files", "-z", "--others"], proj, max_bytes=3)
+    assert rc == safegit.TOO_LONG and out == b""
+    for bad in (
+        ["clean", "-fdx"],
+        ["checkout", "x"],
+        ["-c", "core.pager=x", "ls-files"],
+        ["config", "a", "b"],
+    ):
+        assert safegit.run_bytes(bad, proj)[0] == safegit.REFUSED
+
+
+def _fake_exe(tmp_path, body):
+    d = tmp_path.parent / (tmp_path.name + "_fakebin")  # outside the folder git runs in
+    d.mkdir(exist_ok=True)
+    sh(d / "git", body)
+    return d
+
+
+def _gone(pidf, wait=3.0):
+    """The recorded (grand)child is dead: kill(pid, 0) fails. Polls a moment (the kernel reaps it async)."""
+    import time
+
+    pid = int(pidf.read_text())
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="process groups: POSIX")
+
+
+@posix_only
+def test_run_bytes_kills_git_and_its_child_as_soon_as_the_cap_is_passed(proj, tmp_path, monkeypatch):
+    """A git that would print far more than the cap (and then hang) is stopped while it prints, and so is
+    the child it started."""
+    import time
+
+    gpid = tmp_path.parent / (tmp_path.name + "_gpid")
+    d = _fake_exe(tmp_path, f"sleep 30 & echo $! > {gpid}; yes x | head -c 50000000; wait")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(d), "/usr/bin", "/bin"]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    t = time.monotonic()
+    rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 20, max_bytes=100_000)
+    assert rc == safegit.TOO_LONG and out == b"" and time.monotonic() - t < 10
+    assert _gone(gpid)  # the grandchild too
+
+
+@posix_only
+def test_run_bytes_kills_git_and_its_child_on_timeout(proj, tmp_path, monkeypatch):
+    import time
+
+    gpid = tmp_path.parent / (tmp_path.name + "_gpid")
+    d = _fake_exe(tmp_path, f"sleep 30 & echo $! > {gpid}; wait")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(d), "/usr/bin", "/bin"]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    t = time.monotonic()
+    rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 1)
+    assert rc == 124 and time.monotonic() - t < 10
+    assert _gone(gpid)
+
+
+@posix_only
+def test_a_child_left_behind_by_a_finished_git_is_killed_and_the_call_fails_closed(
+    proj, tmp_path, monkeypatch
+):
+    """git exits at once but a background child still holds the pipes: the call ends at the timeout with 124
+    and no data (never a partial result as success), and the child is killed."""
+    import time
+
+    gpid = tmp_path.parent / (tmp_path.name + "_gpid")
+    d = _fake_exe(tmp_path, f"sleep 30 & echo $! > {gpid}; printf hi")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(d), "/usr/bin", "/bin"]))
+    monkeypatch.setattr(safegit, "_exes", {})
+    t = time.monotonic()
+    rc, out, _ = safegit.run_bytes(["ls-files", "-z"], proj, 2)
+    assert rc == 124 and out == b"" and time.monotonic() - t < 10
+    assert _gone(gpid)
+
+
+def test_run_bytes_needs_no_waitid(proj, monkeypatch):
+    """os.waitid is missing on macOS Python < 3.13: nothing may depend on it."""
+    monkeypatch.delattr(os, "waitid", raising=False)
+    plain_git(proj, "init", "-q")
+    rc, out, _ = safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj, 10)
+    assert (rc, out.strip()) == (0, b"true")
+
+
+def test_taskkill_is_found_by_full_path_in_the_system_folder(tmp_path, monkeypatch):
+    import types
+
+    sysdir = tmp_path / "System32"
+    sysdir.mkdir()
+    (sysdir / "taskkill.exe").write_text("x")
+
+    def get_dir(buf, size):
+        buf.value = str(sysdir)
+        return len(buf.value)
+
+    fake = types.SimpleNamespace(kernel32=types.SimpleNamespace(GetSystemDirectoryW=get_dir))
+    monkeypatch.setattr("ctypes.windll", fake, raising=False)
+    monkeypatch.delenv("SystemRoot", raising=False)
+    assert safegit.taskkill_exe() == str(sysdir / "taskkill.exe")
+    (sysdir / "taskkill.exe").unlink()
+    assert safegit.taskkill_exe() is None  # not found: never a bare name
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    (tmp_path / "System32" / "taskkill.exe").write_text("x")
+    assert safegit.taskkill_exe() == str(tmp_path / "System32" / "taskkill.exe")  # the %SystemRoot% route
+
+
+def test_without_a_findable_taskkill_a_windows_kill_fails_closed(monkeypatch):
+    import types
+
+    monkeypatch.setattr(safegit.os, "name", "nt")
+    monkeypatch.setattr(safegit, "taskkill_exe", lambda: None)
+    killed = []
+    p = types.SimpleNamespace(returncode=None, pid=1234, kill=lambda: killed.append(1))
+    assert safegit._kill(p, safegit.threading.Lock()) is False and killed
+
+
+@posix_only
+def test_output_is_never_returned_while_a_reader_is_still_running(proj, monkeypatch):
+    """If a reader outlives its join, the call fails (124) and no partial data is returned as success."""
+    real = safegit.threading.Thread
+
+    class Stuck(real):
+        def join(self, timeout=None):  # pretend the reader never finishes
+            pass
+
+        def is_alive(self):
+            return True
+
+    monkeypatch.setattr(safegit.threading, "Thread", Stuck)
+    plain_git(proj, "init", "-q")
+    rc, out, err = safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj, 10)
+    assert rc == 124 and out == b""  # (a reader past the timeout or past its join: never data)
+
+
+@pytest.mark.parametrize("bad", [["--std"], ["--stdi"], ["-qz"], ["-z"], ["--stdin"], ["-q", "-e"], ["-p"]])
+def test_check_ignore_takes_only_listed_options(proj, bad):
+    assert safegit.run_bytes(["check-ignore", *bad, "--", "x"], proj)[0] == safegit.REFUSED
+
+
+def test_check_ignore_is_allowed_with_paths_only(proj):
+    plain_git(proj, "init", "-q")
+    (proj / ".gitignore").write_text("s.txt\n")
+    assert safegit.run_bytes(["check-ignore", "-q", "--", "s.txt"], proj)[0] == 0
+    assert safegit.run_bytes(["check-ignore", "-q", "--", "o.txt"], proj)[0] == 1
+    assert safegit.run_bytes(["check-ignore", "--stdin"], proj)[0] == safegit.REFUSED
+
+
 @pytest.mark.parametrize("rc", [123, 2, 128, -11])
 def test_tracked_cannot_tell_means_tracked(proj, monkeypatch, rc):
     from orch import harness
 
     plain_git(proj, "init", "-q")
     (proj / "a.txt").write_text("x\n")
-    real = harness.subprocess.run
+    real = safegit.subprocess.Popen
+
+    class Done:  # a finished git process (safegit streams through Popen)
+        returncode = rc
+
+        def __init__(self):
+            import io
+
+            self.stdout, self.stderr = io.BufferedReader(io.BytesIO(b"")), io.BufferedReader(io.BytesIO(b""))
+
+        def wait(self, timeout=None):
+            return rc
 
     def fake(argv, **kw):
-        if "ls-files" in argv:
-            return subprocess.CompletedProcess(argv, rc, b"", b"")
-        return real(argv, **kw)
+        return Done() if "ls-files" in argv else real(argv, **kw)
 
-    monkeypatch.setattr(harness.subprocess, "run", fake)
+    monkeypatch.setattr(safegit.subprocess, "Popen", fake)
     assert harness._tracked(proj, "a.txt") is True  # unexpected exit code: the team's file
-    monkeypatch.setattr(harness.subprocess, "run", real)
+    monkeypatch.setattr(safegit.subprocess, "Popen", real)
     assert harness._tracked(proj, "a.txt") is False  # git's own answer: not tracked
     plain_git(proj, "add", "a.txt")
     assert harness._tracked(proj, "a.txt") is True
@@ -1032,7 +1415,8 @@ def test_a_root_that_is_home_or_a_drive_root_refuses_git(tmp_path, monkeypatch):
     for root in (tmp_path, Path("/")):
         rc, _, err = safegit.run(["status"], tmp_path, filters=False, root=root)
         assert rc == safegit.REFUSED and "whole home folder or a drive root" in err
-        assert safegit.hardened(tmp_path, root) is None
+        assert safegit.run_bytes(["rev-parse", "--show-toplevel"], tmp_path, root=root)[0] == safegit.REFUSED
+        assert safegit.run_bytes(["rev-parse", "--show-toplevel"], root)[0] == safegit.REFUSED  # root = cwd
     assert safegit.unusable_root(tmp_path / "project") is None
     assert safegit.unusable_root(None) is None
 
@@ -1081,14 +1465,29 @@ def test_git_exe_with_root_home_and_a_planted_git_in_home_is_refused(tmp_path, m
     assert rc == safegit.REFUSED and "home folder" in err
 
 
+def test_runs_kill_tree_uses_the_full_path_taskkill_or_does_nothing(monkeypatch, capsys):
+    from orch import runs
+
+    monkeypatch.setattr(runs.os, "name", "nt")
+    calls = []
+    monkeypatch.setattr(runs.subprocess, "run", lambda argv, **k: calls.append(argv))
+    monkeypatch.setattr(safegit, "taskkill_exe", lambda: r"C:\Windows\System32\taskkill.exe")
+    runs.kill_tree(4321)
+    assert calls == [[r"C:\Windows\System32\taskkill.exe", "/PID", "4321", "/T", "/F"]]
+    calls.clear()
+    monkeypatch.setattr(safegit, "taskkill_exe", lambda: None)
+    runs.kill_tree(4321)
+    assert calls == [] and "taskkill.exe was not found" in capsys.readouterr().err  # no bare name is run
+
+
 def test_safegit_works_with_an_untrusted_orch_home(proj, monkeypatch, tmp_path):
-    """The hooks path must not need the orch home: with an ORCH_HOME that is not trusted, hardened() and run()
-    still work (the test that found this: refreshing with an unpaired home)."""
+    """The hooks path must not need the orch home: with an ORCH_HOME that is not trusted, run_bytes() and
+    run() still work (the test that found this: refreshing with an unpaired home)."""
     from orch import harness
 
     monkeypatch.setenv(
         "ORCH_HOME", str(tmp_path)
     )  # not under the (faked) real home: untrusted in strict mode
-    assert safegit.hardened(proj) is not None
+    assert safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj)[0] in (0, 128)
     assert safegit.run(["--version"], proj, filters=False)[0] == 0
     assert harness._in_git_repo(proj) is False

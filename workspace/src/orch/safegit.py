@@ -35,15 +35,16 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from orch import addons
 
-# Modules that still start git themselves. MUST SHRINK TO ZERO: each moves onto safegit. filesig.py (B8) and
-# B9's work-check join this list until they migrate.
+# Modules that still start git themselves. MUST SHRINK TO ZERO: each moves onto safegit. (Empty since B11b.)
 LEGACY = ()
 
 IDENTITY = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits orch makes (bring-back)
@@ -52,6 +53,8 @@ EMPTY_TREE = {  # by `rev-parse --show-object-format`
     "sha256": "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
 }
 TIMEOUT = 60
+CANNOT_START = 126  # rc: git was found but the operating system could not start it
+TOO_LONG = 123  # rc: git's output was longer than the caller's cap
 REFUSED = (
     125  # rc: orch refused to run this git call for a safety reason (not allowed, interactive, no drivers)
 )
@@ -202,6 +205,21 @@ def find_exe(name: str, avoid) -> str | None:
     return None
 
 
+def have_git(cwd: Path, root: Path | None = None) -> bool:
+    """A git that orch trusts exists here (found by the avoid rules). A yes/no only, never a path: no other
+    module gets the program (the lint in tests/test_safegit.py forbids git_exe(), hardened() and any git
+    path outside this module)."""
+    return git_exe(cwd, root) is not None
+
+
+def git_on_path() -> bool:
+    """Is there SOME git program on the PATH (find_exe with nothing avoided)? A yes/no, never a path. Narrower
+    than the old per-caller lookup: only ABSOLUTE PATH entries count, so a git planted only in a relative or
+    empty entry no longer says "a git exists but is untrusted" (the callers still refuse in a folder that
+    has a .git). Lets a caller tell "git is not installed" from "only a git orch does not trust is here"."""
+    return find_exe("git", frozenset()) is not None
+
+
 def avoid_for(cwd: Path, root: Path | None = None) -> frozenset:
     return _avoid(cwd, root)
 
@@ -297,6 +315,203 @@ def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> l
     return ["--no-optional-locks", *out] if read_only else out
 
 
+def _spawn(*a, **k):
+    """The one process start of the streaming path."""
+    return subprocess.Popen(*a, **k)
+
+
+STDERR_KEEP = 64 * 1024
+
+
+def _system_directory() -> str | None:
+    """Windows' system folder (GetSystemDirectoryW); None elsewhere or on failure."""
+    try:
+        import ctypes
+
+        buf = ctypes.create_unicode_buffer(260)
+        n = ctypes.windll.kernel32.GetSystemDirectoryW(buf, 260)
+        return buf.value if 0 < n < 260 else None
+    except (AttributeError, OSError, ImportError):
+        return None
+
+
+def taskkill_exe() -> str | None:
+    """taskkill.exe by its FULL path in the system folder, never by bare name (a bare name is looked up in the
+    folder of python.exe (maybe a project .venv\\Scripts) and the current folder first). None = not found."""
+    cands = []
+    d = _system_directory()
+    if d:
+        cands.append(os.path.join(d, "taskkill.exe"))
+    root = os.environ.get("SystemRoot")
+    if root and os.path.isabs(root):
+        cands.append(os.path.join(root, "System32", "taskkill.exe"))
+    return next((c for c in cands if os.path.isfile(c)), None)
+
+
+def _kill(p, lock) -> bool:
+    """Kill git and everything it started. POSIX: SIGKILL to its process group (git has its own session; its
+    children would keep the pipes open), only while git is not yet reaped: an unreaped git (even a zombie)
+    keeps its group id reserved, so no reused id is ever hit. Windows: `taskkill /T /F` by full path. True =
+    the whole tree was reached (always on POSIX); False = Windows without a findable taskkill (the caller
+    fails closed)."""
+    ok = True
+    with lock:
+        if p.returncode is not None:
+            return True
+        pid = getattr(p, "pid", None)
+        try:
+            if os.name != "nt":
+                if isinstance(pid, int) and pid > 1:
+                    os.killpg(pid, signal.SIGKILL)
+            else:
+                exe = taskkill_exe()
+                if exe is None:
+                    ok = False
+                else:
+                    subprocess.run(
+                        [exe, "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=5, check=False
+                    )
+        except (OSError, subprocess.SubprocessError):  # ESRCH: the group is already gone
+            pass
+        try:
+            p.kill()
+        except OSError:
+            pass
+    return ok
+
+
+def _stream(argv, cwd, env_, timeout, data, max_bytes):
+    """(rc, stdout, stderr) reading stdout WHILE git runs: past `max_bytes` the child is killed at once
+    (rc TOO_LONG); on timeout it is killed and subprocess.TimeoutExpired is raised. stderr is drained on a
+    thread and only its first STDERR_KEEP bytes are kept, so a chatty git cannot fill the pipe or memory.
+    Order (portable, nothing platform-specific to wait with): wait for both readers to reach EOF, bounded
+    by the timeout; then ALWAYS kill git's whole process group before git is reaped; then reap. If a reader
+    is still running after that, the call FAILS (124) with no output: data is only returned once every
+    reader is finished. Windows: no Job object; the tree goes with `taskkill /T /F` (full path); without a
+    findable taskkill the call fails closed (124)."""
+    p = _spawn(
+        argv,
+        cwd=cwd,
+        env=env_,
+        stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=os.name != "nt",  # own process group: a kill also reaches git's children
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
+    )
+    lock = threading.Lock()
+    out = bytearray()
+    err = bytearray()
+    over = threading.Event()
+
+    def pump_out():
+        while True:
+            chunk = p.stdout.read1(65536)
+            if not chunk:
+                return
+            out.extend(chunk)
+            if max_bytes is not None and len(out) > max_bytes:
+                over.set()
+                _kill(p, lock)
+                return
+
+    def pump_err():
+        while True:
+            chunk = p.stderr.read1(65536)
+            if not chunk:
+                return
+            if len(err) < STDERR_KEEP:
+                err.extend(chunk[: STDERR_KEEP - len(err)])
+
+    def feed():
+        try:
+            p.stdin.write(data)
+            p.stdin.close()
+        except OSError:
+            pass
+
+    readers = [threading.Thread(target=f, daemon=True) for f in (pump_out, pump_err)]
+    threads = list(readers)
+    if data is not None:
+        threads.append(threading.Thread(target=feed, daemon=True))
+    for t in threads:
+        t.start()
+    timed_out = False
+    killed = True
+    try:
+        end = time.monotonic() + timeout
+        for t in readers:
+            t.join(max(0.0, end - time.monotonic()))
+            if t.is_alive():
+                timed_out = True
+                break
+    finally:
+        killed = _kill(p, lock)  # always: also after a normal end, while git is still unreaped
+        with lock:
+            p.wait()
+        for t in threads:
+            t.join(5)
+        stuck = any(t.is_alive() for t in threads)
+        if not stuck:  # (close would block behind a reader still waiting)
+            for f in (p.stdout, p.stderr):
+                try:
+                    f.close()
+                except OSError:
+                    pass
+    if timed_out:
+        raise subprocess.TimeoutExpired(argv, timeout)
+    if stuck or not killed:
+        return 124, b"", "git's output did not end: orch dropped it"
+    if over.is_set():
+        return TOO_LONG, b"", f"git printed more than {max_bytes} bytes"
+    return p.returncode, bytes(out), bytes(err).decode("utf-8", "replace").strip()
+
+
+def _raw_bytes(
+    argv: list[str],
+    cwd: Path,
+    timeout: float,
+    data: bytes | None = None,
+    root: Path | None = None,
+    config: list[tuple[str, str]] | None = None,
+    max_bytes: int | None = None,
+):
+    """(rc, stdout bytes, stderr text). The ONE subprocess call. With `max_bytes` stdout is read while git
+    runs and git is killed once it passes the cap (rc 123, nothing returned)."""
+    true = trivial("true", cwd, root)
+    if true is None:
+        return (
+            REFUSED,
+            b"",
+            "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
+        )
+    exe = git_exe(cwd, root)
+    if exe is None:
+        return 127, b"", "git is not installed (or only found inside the project, which orch does not run)"
+    argv = [exe, *argv[1:]]
+    environ = env(cwd, root, true, config)
+    try:
+        if max_bytes is not None:
+            return _stream(argv, cwd, environ, timeout, data, max_bytes)
+        p = subprocess.run(
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            input=data,
+            stdin=None if data is not None else subprocess.DEVNULL,  # never waits for a terminal
+            env=environ,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        return 127, b"", "git is not installed"
+    except subprocess.TimeoutExpired:
+        return 124, b"", f"git {argv[-1] if argv else ''} took longer than {int(timeout)} s"
+    except OSError as e:  # the program exists but could not be started: not "git is not installed"
+        return CANNOT_START, b"", str(e)
+    return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace").strip()
+
+
 def _raw(
     argv: list[str],
     cwd: Path,
@@ -305,39 +520,8 @@ def _raw(
     root: Path | None = None,
     config: list[tuple[str, str]] | None = None,
 ):
-    true = trivial("true", cwd, root)
-    if true is None:
-        return (
-            REFUSED,
-            "",
-            "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
-        )
-    exe = git_exe(cwd, root)
-    if exe is None:
-        return 127, "", "git is not installed (or only found inside the project, which orch does not run)"
-    argv = [exe, *argv[1:]]
-    try:
-        p = subprocess.run(
-            argv,
-            cwd=cwd,
-            capture_output=True,
-            input=data,
-            stdin=None if data is not None else subprocess.DEVNULL,  # never waits for a terminal
-            env=env(cwd, root, true, config),
-            timeout=timeout,
-            check=False,
-        )
-    except FileNotFoundError:
-        return 127, "", "git is not installed"
-    except subprocess.TimeoutExpired:
-        return 124, "", f"git {argv[-1] if argv else ''} took longer than {int(timeout)} s"
-    except OSError as e:
-        return 127, "", str(e)
-    return (
-        p.returncode,
-        p.stdout.decode("utf-8", "surrogateescape"),
-        p.stderr.decode("utf-8", "replace").strip(),
-    )
+    rc, out, err = _raw_bytes(argv, cwd, timeout, data, root, config)
+    return rc, out.decode("utf-8", "surrogateescape"), err
 
 
 def version(cwd: Path, root: Path | None = None) -> tuple[int, int]:
@@ -374,8 +558,10 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
 ALLOWED = {
     "worktree", "read-tree", "update-index", "checkout-index", "ls-files", "rev-parse", "config", "branch",
     "symbolic-ref", "cat-file", "merge-base", "show-ref", "for-each-ref", "status", "diff", "log", "show",
-    "merge", "commit", "add", "rm", "reset", "stash",
+    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore",
 }  # fmt: skip
+# (check-ignore reads ignore rules only: no content, no filters; --stdin is refused below)
+_CHECK_IGNORE_OK = {"-q", "--quiet", "-v", "--verbose", "-n", "--non-matching", "--no-index"}
 _WORKTREE_OK = {"add", "remove", "prune", "list"}
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
@@ -417,6 +603,10 @@ def refusal(args: list[str]) -> str | None:
         return "git worktree: only add, remove, prune and list are run"
     if cmd == "stash" and not (rest and rest[0] in ("list", "show")):
         return "git stash: only list and show are run"
+    if cmd == "check-ignore" and not (
+        set(flags) <= _CHECK_IGNORE_OK
+    ):  # exact names: no abbreviations, bundles
+        return "git check-ignore: only -q, -v, -n, --no-index and paths from the argument list are run"
     if cmd == "config" and not any(a in _CONFIG_READ for a in flags):
         return "git config: orch only reads the configuration"
     if cmd in _NO_MODES or cmd == "add":
@@ -480,19 +670,48 @@ def driver_args(
     return pairs
 
 
-def hardened(cwd: Path, root: Path | None = None) -> tuple[list[str], dict[str, str]] | None:
-    """For the few read-only callers that still start git themselves and need bytes or a plain return code
-    (harness.py, filesig.py): (argv prefix, environment) with the same hardening as run(): absolute git found
-    by the avoid rules, no hooks, no fsmonitor, no untracked cache, no network, no editor, no optional locks,
-    sanitized PATH, no GIT_* variable. Use only for rev-parse, ls-files, check-ignore (they run no filters).
-    None = no trusted git: treat as "git is not installed". They move onto run() in B11b."""
-    if unusable_root(root if root is not None else cwd):
-        return None
+def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
+    """(argv, config) for git `args`, or (None, (rc, reason)) when orch refuses to run it."""
+    why = refusal(args) or unusable_root(guard if guard is not None else root)
+    if why:
+        return None, (REFUSED, why)
+    top: list[str] = []  # options before the subcommand
+    extra: list[tuple[str, str]] = []
+    if filters:
+        found = driver_args(cwd, timeout, root)
+        if found is None:
+            return None, (
+                REFUSED,
+                "orch could not check this repository's filters, so it did not run git here",
+            )
+        extra = found
+        if version(cwd, root) < (2, 31):  # older git ignores GIT_CONFIG_COUNT: the overrides would not apply
+            return None, (
+                REFUSED,
+                "this git is older than 2.31: orch cannot switch off the repository's drivers",
+            )
+        if version(cwd, root) >= (2, 40):
+            tree = empty_tree(cwd, root)
+            if tree is None:
+                return None, (
+                    REFUSED,
+                    "orch could not tell this repository's hash algorithm, so it did not run git",
+                )
+            top = [f"--attr-source={tree}"]  # the branch's .gitattributes is not read at all
+    sub = list(args)
+    k = subcommand_index(sub)
+    if k + 1 < len(sub) and sub[k] == "stash" and sub[k + 1] == "show":
+        k += 1  # the subcommand pair `stash show`
+        sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"]
+    elif k < len(sub) and sub[k] in _DIFFLIKE:
+        sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"] if sub[k] != "grep" else ["--no-textconv"]
     true = trivial("true", cwd, root)
-    exe = git_exe(cwd, root)
-    if true is None or exe is None:
-        return None
-    return [exe, *base_args(true, True, _no_hooks(cwd, root))], env(cwd, root, true)
+    if true is None:
+        return None, (
+            REFUSED,
+            "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
+        )
+    return ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *sub], extra
 
 
 def run(
@@ -508,45 +727,32 @@ def run(
 ) -> tuple[int, str, str]:
     """(exit code, stdout, stderr) of git `args` in `cwd`, hardened as the module says. rc 127: git missing,
     124: timeout, 125: refused for a safety reason (a subcommand orch does not run, an interactive mode, or
-        repository's drivers could not be listed). `root`: the workspace root (its
-    folder is never searched for the git program)."""
-    why = refusal(args) or unusable_root(root)
-    if why:
-        return REFUSED, "", why
-    top: list[str] = []  # options before the subcommand
-    extra: list[tuple[str, str]] = []
-    if filters:
-        found = driver_args(cwd, timeout, root)
-        if found is None:
-            return REFUSED, "", "orch could not check this repository's filters, so it did not run git here"
-        extra = found
-        if version(cwd, root) < (2, 31):  # older git ignores GIT_CONFIG_COUNT: the overrides would not apply
-            return REFUSED, "", "this git is older than 2.31: orch cannot switch off the repository's drivers"
-        if version(cwd, root) >= (2, 40):
-            tree = empty_tree(cwd, root)
-            if tree is None:
-                return (
-                    REFUSED,
-                    "",
-                    "orch could not tell this repository's hash algorithm, so it did not run git",
-                )
-            top = [f"--attr-source={tree}"]  # the branch's .gitattributes is not read at all
-    sub = list(args)
-    k = subcommand_index(sub)
-    if k + 1 < len(sub) and sub[k] == "stash" and sub[k + 1] == "show":
-        k += 1  # the subcommand pair `stash show`
-        sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"]
-    elif k < len(sub) and sub[k] in _DIFFLIKE:
-        sub[k + 1 : k + 1] = ["--no-ext-diff", "--no-textconv"] if sub[k] != "grep" else ["--no-textconv"]
-    true = trivial("true", cwd, root)
-    if true is None:
-        return (
-            REFUSED,
-            "",
-            "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
-        )
+    the repository's drivers could not be listed). `root`: the workspace root (its folder is never searched
+    for the git program)."""
+    argv, extra = _prepare(args, cwd, timeout, filters, read_only, root)
+    if argv is None:
+        return extra[0], "", extra[1]
     kw = {"config": extra} if extra else {}
-    rc, out, err = _raw(
-        ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *sub], cwd, timeout, data, root, **kw
-    )
+    rc, out, err = _raw(argv, cwd, timeout, data, root, **kw)
     return rc, out.strip() if strip else out, err
+
+
+def run_bytes(
+    args: list[str],
+    cwd: Path,
+    timeout: float = TIMEOUT,
+    *,
+    max_bytes: int = 16 * 1024 * 1024,
+    read_only: bool = True,
+    filters: bool = False,
+    root: Path | None = None,
+) -> tuple[int, bytes, str]:
+    """Like run(), but stdout stays raw bytes (for `-z` listings) and is bounded: rc 123 (TOO_LONG, empty
+    stdout) when git printed more than `max_bytes`. Same allowlist, hardening and environment. Defaults are
+    for read-only listings (ls-files, rev-parse), which run no filter: pass filters=True for anything that
+    reads file content."""
+    # the folder git runs in counts as the root when none is given (home / a drive root: refused, rc 125)
+    argv, extra = _prepare(args, cwd, timeout, filters, read_only, root, root if root is not None else cwd)
+    if argv is None:
+        return extra[0], b"", extra[1]
+    return _raw_bytes(argv, cwd, timeout, None, root, extra or None, max_bytes)
