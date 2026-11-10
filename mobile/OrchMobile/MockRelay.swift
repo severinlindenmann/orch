@@ -276,8 +276,23 @@ actor MockRelay: RelayAPI {
         counter += 1
         let id = String(format: "m_an5wer%010d", counter)
         clientIds[r.clientId] = id
+        if r.questionMessageId == "m_maketicket00001", r.answer == "make" {
+            let refused = UserDefaults.standard.bool(forKey: "mockMakeTicketRefuse")
+            Task {
+                try? await Task.sleep(for: .milliseconds(1500))
+                self.deliverMakeTicketResult(refused: refused)
+            }
+        }
         return SendReceipt(id: id, clientId: r.clientId)
     }
+    private func deliverMakeTicketResult(refused: Bool) {
+        let result = refused ? ProposalResult(result: "refused", reason: "unavailable") : ProposalResult(result: "made", key: "PIL-15")
+        received.append(PhoneMessage(message: TextMessage(id: "m_maketicketres01", from: Self.pilatus,
+            to: refused ? "ph_iphone0001" : "phones", type: "text", createdAt: Self.now(), ticket: nil,
+            body: TextBody(text: refused ? "Couldn't make the ticket" : "Ticket made: PIL-15", proposalResult: result),
+            replyTo: "m_maketicket00001"), workspaceName: "Pilatus Workspace"))
+    }
+
     func send(_ r: SendRequest) async throws -> SendReceipt {
         try await check()
         if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }

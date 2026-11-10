@@ -5,6 +5,7 @@ struct MakeTicketCard: View {
     let answer: String?
     @Environment(AppModel.self) private var model
     @State private var tapped: String?
+    @State private var answeredAt = Date()
 
     private var pending: String? {
         tapped ?? model.pendingAnswers[question.id] ?? model.queuedAnswers[question.id]
@@ -12,11 +13,30 @@ struct MakeTicketCard: View {
     private var busy: Bool { pending != nil || model.sendingAnswers.contains(question.id) }
 
     var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { context in
+            content(state(at: context.date))
+        }
+    }
+
+    private func state(at now: Date) -> MakeTicketRules.CardState {
+        let results = model.messages.filter {
+            $0.message.from == question.message.from && $0.message.replyTo == question.id && $0.message.body.isProposalResult
+        }.sorted { $0.message.createdAt < $1.message.createdAt }.compactMap { $0.message.body.proposalResult }
+        return MakeTicketRules.state(answer: answer ?? model.answers[question.id] ?? pending,
+                                    answeredAt: model.answerTime(for: question.id) ?? answeredAt,
+                                    results: results, now: now,
+                                    workspaceLive: model.presence(of: question.message.from, now: now) == .online)
+    }
+
+    private func content(_ state: MakeTicketRules.CardState) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let answer = answer ?? model.answers[question.id] {
-                Text(answer == "make" ? "Ticket made" : "Not now")
-                    .themeFont(13).foregroundStyle(Theme.muted)
-            } else {
+            switch state {
+            case .making: status("Making ticket…", spinning: true)
+            case .waiting: status("Waiting for \(question.workspaceName)…", spinning: true)
+            case .made(let key): status("Ticket made" + (key.map { " · \($0)" } ?? ""))
+            case .failed: status("Couldn't make the ticket")
+            case .closed(let notNow): status(notNow ? "Not now" : "Already decided")
+            case .open:
                 Text(question.message.body.text).themeFont(15)
                 Text(question.message.body.title ?? "").themeFont(17, .semibold)
                 if let date = Self.dateLabel(question.message.body.when) {
@@ -36,9 +56,17 @@ struct MakeTicketCard: View {
         .accessibilityElement(children: .contain).accessibilityIdentifier("make-ticket-card")
     }
 
+    private func status(_ text: String, spinning: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            if spinning { ProgressView().controlSize(.small).tint(Theme.muted) }
+            Text(text).themeFont(13)
+        }.foregroundStyle(Theme.muted)
+    }
+
     private func option(_ value: String, title: String, primary: Bool, id: String) -> some View {
         Button {
             guard !busy else { return }
+            answeredAt = Date()
             tapped = value
             Task {
                 await model.answer(question, with: value)
