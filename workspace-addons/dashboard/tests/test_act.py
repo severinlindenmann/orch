@@ -1126,3 +1126,12 @@ def test_copies_remove_orphaned_takes_one_folder_name_only():
     for bad in ({}, {"ws8": "../x"}, {"ws8": "AAAAAAAA"}, {"ws8": "aaaaaaaa", "discard": True}, {"ws8": 5}):
         with pytest.raises(BadRequest):
             build_argv("copies.remove_orphaned", bad)
+
+
+def test_copies_retry_takes_one_ticket_id_only():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("copies.retry", {"ticket": "t_abc123"})[:4] == ["copy", "retry", "t_abc123", "--json"]
+    for bad in ({}, {"ticket": "../x"}, {"ticket": "t_abc123", "force": True}, {"ticket": 5}):
+        with pytest.raises(BadRequest):
+            build_argv("copies.retry", bad)

@@ -33,6 +33,9 @@ def add_parsers(sub, common) -> None:
     c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     cc = c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
     cc.add_argument("--trash", action="store_true", help=argparse.SUPPRESS)  # empty the trash (detached run)
+    cc.add_argument("--background", action="store_true", help=argparse.SUPPRESS)  # sweep + trash, silent
+    rt = c.add_parser("retry", parents=[common], help="try again where git was interrupted (a person's call)")
+    rt.add_argument("ticket")
     ro = c.add_parser(
         "remove-orphaned",
         parents=[common],
@@ -100,7 +103,7 @@ def _services_cmd(args, root: Path) -> None:
                 raise Refused("--print-launch-url works only on a test install, in a test folder.")
         from orch import worktrees
 
-        worktrees.sweep(root, worktrees.START_SWEEP_BUDGET)  # B12: copies nobody needs (never raises)
+        worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run (never raises)
         rows = services.start(root)
         launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
@@ -173,7 +176,15 @@ def _copy_clean(args, root: Path) -> None:
         notes = worktrees.remove_orphaned(root, args.ws8, args.discard)
         _out(args, {"notes": notes}, "\n".join(notes) or "Removed.")
         return
+    if args.sub == "retry":
+        notes = worktrees.retry(root, args.ticket)
+        _out(args, {"notes": notes}, "\n".join(notes) or "Done.")
+        return
     if args.trash:
+        worktrees.empty_trash(root)
+        return
+    if args.background:
+        worktrees.sweep(root)
         worktrees.empty_trash(root)
         return
     notes = worktrees.sweep(root)
@@ -188,7 +199,7 @@ def _copy_clean(args, root: Path) -> None:
         )
     _out(
         args,
-        {k: u[k] for k in ("copies", "bytes", "partial", "orphaned")} | {"notes": notes},
+        {k: u[k] for k in ("copies", "bytes", "partial", "orphaned", "changed", "stuck")} | {"notes": notes},
         "\n".join(lines),
     )
 

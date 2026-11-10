@@ -1161,7 +1161,7 @@ def g1_clean(e):
     os.kill(claim["agent_pid"], signal.SIGKILL)  # the PID the claim recorded: nothing else
     w.wait_done(c)
     (w.root / ".orch" / "tickets" / f"{c}.json").unlink()
-    w.o("start", "--no-open", by=None)
-    check(listed() == [] and not folder.exists(), f"the next start left the copy: {listed()} {folder.exists()}")
+    w.o("start", "--no-open", by=None)  # a start only schedules the (detached) sweep: give it a moment
+    check(wait_for(lambda: listed() == [] and not folder.exists(), 40), f"the next start left the copy: {listed()}")
     rc, out, _ = w.o("copy", "clean", "--json", by=None)
     check(json.loads(out)["copies"] == 0, f"copies left: {out}")

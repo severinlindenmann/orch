@@ -488,6 +488,10 @@ main.addEventListener('click', async event => {
     (async () => { for (const o of array(state.settings?.copies_disk?.orphaned)) await settingsSend('copies.remove_orphaned', {ws8:o.ws8}, 'copies-clean'); })();
     return;
   }
+  if (action === 'copies-retry') {
+    (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
+    return;
+  }
   if (action === 'copies-clean') { settingsSend('copies.clean', {}, 'copies-clean'); return; }
   if (action === 'copies-setup') { settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies'); return; }
   if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }

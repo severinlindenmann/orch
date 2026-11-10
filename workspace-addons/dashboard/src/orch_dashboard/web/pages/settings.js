@@ -66,7 +66,9 @@ function copiesDiskText(d) {
   const size = b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b >= 1e6 ? Math.round(b / 1e6) + ' MB' : b > 0 ? 'under 1 MB' : '0 MB';
   const gone = array(d.orphaned).reduce((sum, o) => sum + (Number(o.copies) || 0), 0);
   return n + (n === 1 ? ' copy' : ' copies') + ' · ' + (d.partial ? 'more than ' : '') + size + ' · removed by themselves when a ticket is done'
-    + (gone ? ' · ' + gone + (gone === 1 ? ' copy' : ' copies') + ' from a moved or deleted project' : '');
+    + (gone ? ' · ' + gone + (gone === 1 ? ' copy' : ' copies') + ' from a moved or deleted project' : '')
+    + (d.changed ? ' · ' + d.changed + (d.changed === 1 ? ' removed copy' : ' removed copies') + ' changed after being saved, kept for you to look at' : '')
+    + array(d.stuck).map(s => ' · a copy could not be cleaned: git was interrupted').join('');
 }
 function copiesCard(settings) {
   const mode = COPY_CHOICES.some(c => c[0] === settings.copies) ? settings.copies : 'together', busy = settingsBusy.has('copies');
@@ -85,6 +87,7 @@ function copiesCard(settings) {
       h('div', {className:'card-row', 'data-key':'settings-copies-disk'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Copies on this computer'),
         settingsText('p', {className:'meta'}, copiesDiskText(settings.copies_disk))),
         h('div', {className:'row', style:'gap:8px;flex-wrap:wrap'},
+          array(settings.copies_disk?.stuck).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-retry', 'data-action':'copies-retry', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Try again') : null,
           array(settings.copies_disk?.orphaned).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-orphaned', 'data-action':'copies-orphaned', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Remove the moved ones') : null,
           h('button', {type:'button', className:'btn sm outline', 'data-key':'settings-copies-clean', 'data-action':'copies-clean', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Clean up now'))),
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Prepare a copy with'),

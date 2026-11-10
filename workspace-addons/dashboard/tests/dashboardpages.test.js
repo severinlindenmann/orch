@@ -119,10 +119,13 @@ test('Copies on this computer line: count, size, "..." while counting, Clean up 
   assert.equal(text({copies:2, bytes:1.4e9, partial:false}), '2 copies · 1.4 GB · removed by themselves when a ticket is done');
   assert.match(text({copies:1, bytes:5e6, partial:true}), /^1 copy · more than 5 MB/);
   assert.match(text({copies:1, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}]}), /2 copies from a moved or deleted project/);
-  const card = vm.runInContext('copiesCard', c)({copies_disk:{copies:0, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}]}});
+  assert.match(text({copies:1, bytes:0, changed:1}), /1 removed copy changed after being saved/);
+  assert.match(text({copies:1, bytes:0, stuck:[{ticket:'t_abc123'}]}), /git was interrupted/);
+  const card = vm.runInContext('copiesCard', c)({copies_disk:{copies:0, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}], stuck:[{ticket:'t_abc123'}]}});
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const btn = all(card, n => n.attrs?.['data-action'] === 'copies-clean')[0];
   assert.equal(btn.children[0], 'Clean up now');
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-orphaned').length, 1);
+  assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-retry').length, 1);
   assert.match(JSON.stringify(card), /files git ignores/);
 });

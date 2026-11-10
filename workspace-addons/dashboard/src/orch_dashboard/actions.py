@@ -459,6 +459,16 @@ def _copies_remove_orphaned(a):
     return ["copy", "remove-orphaned", v, "--json"], [], []
 
 
+def _copies_retry(a):
+    """Try again (settings), for a copy kept because git was interrupted: `orch copy retry <ticket>` (core
+    removes the stale lock file of that copy and cleans it; a person's click only)."""
+    _only(a, ("ticket",))
+    v = a.get("ticket")
+    if not isinstance(v, str) or not TID.fullmatch(v):
+        raise BadRequest("That is not a ticket.")
+    return ["copy", "retry", v, "--json"], [], []
+
+
 def _ticket_field(a):
     """One add-on field: `orch ticket set <id> <addon>.<field> -- <value>` (core types and checks it; empty clears).
     The add-on must be on here (checked in run_op)."""
@@ -665,6 +675,7 @@ OPS = {
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,
+    "copies.retry": _copies_retry,
     "ticket.field": _ticket_field,
 }
 
@@ -866,10 +877,11 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "copies.set",
             "copies.clean",
             "copies.remove_orphaned",
+            "copies.retry",
             "share.set",
         ):
             _audit(root, op, args)
-        if op in ("copies.clean", "copies.remove_orphaned"):
+        if op in ("copies.clean", "copies.remove_orphaned", "copies.retry"):
             from . import data as _data
 
             _data.copies_disk_forget(root)

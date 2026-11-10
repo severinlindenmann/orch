@@ -625,6 +625,8 @@ SWEEP_BUDGET = 25.0  # seconds of git time for one sweep (orch copy clean, Clean
 START_SWEEP_BUDGET = 8.0  # the same when a start triggers it: a start never waits longer
 SWEEP_WAIT = 2.0  # how long a sweep waits for the copies lock; busy = skip, the next one does it
 TRASH = ".trash"
+TRASH_GRACE_HOURS = 24  # a removed copy waits this long in the trash (by orch's own note of the rename)
+LOCK_STALE_SECONDS = 600  # an index.lock older than this, in a copy, is a git that was interrupted
 _TRASH_NAME = re.compile(r"t_[a-z0-9]{6,16}-[0-9a-f]{8}")
 _DONE = ("done", "dropped")
 
@@ -715,8 +717,10 @@ def rmtree_nofollow(top: Path) -> bool:
             # chmod through an open descriptor of a thing that is NOT a link (O_NOFOLLOW): a link inside a
             # copy can never make orch change the mode of its target
             if isinstance(exc, PermissionError):
-                with contextlib.suppress(OSError):
-                    _chmod_nofollow(os.path.dirname(path) or ".", True)
+                parent = os.path.dirname(path) or "."
+                if os.path.realpath(parent) == os.path.abspath(parent):  # no link anywhere in the path
+                    with contextlib.suppress(OSError):
+                        _chmod_nofollow(parent, True)
                 with contextlib.suppress(OSError):  # a link refuses here: it is removed without any chmod
                     _chmod_nofollow(path, os.path.isdir(path) and not os.path.islink(path))
                 with contextlib.suppress(OSError):
@@ -775,8 +779,8 @@ def _pending(root: Path) -> dict:
     except (OSError, ValueError):
         doc = {}
     doc = doc if isinstance(doc, dict) else {}
-    out: dict = {"kept": [], "branches": []}
-    for k, key in (("kept", "reason"), ("branches", "branch")):
+    out: dict = {"kept": [], "branches": [], "trash": []}
+    for k, key in (("kept", "reason"), ("branches", "branch"), ("trash", "name")):
         for it in doc.get(k) or []:
             if (
                 isinstance(it, dict)
@@ -792,7 +796,12 @@ def _save_pending(root: Path, doc: dict) -> None:
     runs._atomic(
         root / REGISTRY_PENDING,
         json.dumps(
-            {"schema": "orch.worktrees-pending/2", "kept": doc["kept"], "branches": doc["branches"]},
+            {
+                "schema": "orch.worktrees-pending/3",
+                "kept": doc["kept"],
+                "branches": doc["branches"],
+                "trash": doc["trash"],
+            },
             indent=2,
             ensure_ascii=False,
         )
@@ -807,6 +816,16 @@ def _mark(root: Path, kind: str, ticket: str, **fields) -> None:
         doc[kind] = [i for i in doc[kind] if i["ticket"] != ticket]
         if fields:
             doc[kind].append({"ticket": ticket, "at": tickets.now(), **fields})
+        _save_pending(root, doc)
+
+
+def _trash_note(root: Path, ticket: str, name: str) -> None:
+    """orch's own record of WHEN a copy went into the trash (the grace period counts from it, never from
+    mtimes an agent can set)."""
+    with contextlib.suppress(OSError, Refused):
+        doc = _pending(root)
+        doc["trash"] = [i for i in doc["trash"] if i["name"] != name]
+        doc["trash"].append({"ticket": ticket, "name": name, "at": tickets.now()})
         _save_pending(root, doc)
 
 
@@ -856,6 +875,46 @@ def _is_our_worktree(top: Path, want: Path) -> bool:
         return False
 
 
+def _gitdir_of(want: Path) -> Path | None:
+    """The copy's own git folder, from its `.git` file ("gitdir: <path>")."""
+    try:
+        f = want / ".git"
+        if f.is_symlink() or not f.is_file():
+            return None
+        line = f.read_text(encoding="utf-8").strip()
+        if not line.startswith("gitdir:"):
+            return None
+        g = Path(line.split(":", 1)[1].strip())
+        return (g if g.is_absolute() else want / g).resolve()
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def _stale_index_lock(want: Path) -> Path | None:
+    """<copy's git folder>/index.lock when it is a plain file older than LOCK_STALE_SECONDS: a git that was
+    killed in the middle (no git runs that long)."""
+    g = _gitdir_of(want)
+    if g is None:
+        return None
+    lock = g / "index.lock"
+    try:
+        st = os.lstat(lock)
+        if not stat_is_file(st) or time.time() - st.st_mtime < LOCK_STALE_SECONDS:
+            return None
+        return lock
+    except OSError:
+        return None
+
+
+def stat_is_file(st) -> bool:
+    import stat
+
+    return stat.S_ISREG(st.st_mode)
+
+
+INTERRUPTED = "git was interrupted"
+
+
 def _clean_status(want: Path) -> bool | None:
     rc, out, _ = _git(["status", "--porcelain", "-z"], want, read_only=True, strip=False)
     return None if rc != 0 else not out
@@ -880,16 +939,21 @@ def _save_leftovers(want: Path, ticket: str) -> tuple[bool, str]:
         rc, _, _ = _git(["symbolic-ref", "HEAD", ref], want, filters=False)
         if rc != 0:
             return False, "the copy could not be put back on its branch"
+    interrupted = f"{INTERRUPTED} (a stale index.lock): use Try again"
     clean = _clean_status(want)
     if clean is None:
-        return False, "git could not read the copy's state"
+        return False, interrupted if _stale_index_lock(want) else "git could not read the copy's state"
     if not clean:
         rc, _, err = _git(["add", "-A"], want, GIT_ADD_TIMEOUT)
         if rc != 0:
+            if _stale_index_lock(want):
+                return False, interrupted
             return False, f"git could not add the copy's files ({err.splitlines()[-1] if err else rc})"
         msg = f"orch: {ticket} (saved when the copy was removed)"
         rc, _, err = _git(["commit", "-q", "--no-verify", "-m", msg], want, GIT_ADD_TIMEOUT, identity=True)
         if rc != 0:
+            if _stale_index_lock(want):
+                return False, interrupted
             return False, f"git could not save the copy's changes ({err.splitlines()[-1] if err else rc})"
     rc1, head, _ = _git(["rev-parse", "--verify", "-q", "HEAD"], want, read_only=True, filters=False)
     rc2, tip, _ = _git(["rev-parse", "--verify", "-q", ref], want, read_only=True, filters=False)
@@ -953,7 +1017,7 @@ def _delete_copy(root: Path, ticket: str, reason: str, top: Path | None, entry: 
         _mark(root, "kept", ticket)
         _log(root, f"{ticket}: removed ({reason})")
     else:
-        _mark(root, "kept", ticket, reason=res.removeprefix("kept: "))
+        _mark(root, "kept", ticket, reason=res.removeprefix("kept: "), stale_lock=INTERRUPTED in res)
         _log(root, f"{ticket}: {res} ({reason})")
     return res
 
@@ -976,8 +1040,10 @@ def _delete_copy_inner(root: Path, ticket: str, top: Path | None, entry: dict) -
         ok, why = _save_leftovers(want, ticket)  # (4)
         if not ok:
             return f"kept: {why}"
-        if _to_trash(want, ticket) is None:
+        moved = _to_trash(want, ticket)
+        if moved is None:
             return "kept: it could not be moved away (a file is in use?)"
+        _trash_note(root, ticket, moved.name)
     if top is not None:
         _git(["worktree", "prune"], top, filters=False)  # its folder is gone from where git knew it
     if not _delete_branch(top, ticket):
@@ -1069,10 +1135,42 @@ def on_run_ended(root: Path, tid: str) -> None:
 # ---------------------------------------------------------------- the trash (saved work only)
 
 
-def _empty_trash_in(wsdir: Path, deadline: float) -> bool:
+def _parse_at(stamp: str) -> float | None:
+    try:
+        return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _changed_since(top: Path, since: float, cap: int = 100_000) -> bool:
+    """Some file or folder below `top` was modified after `since` (a capped walk of lstat times, no links
+    followed). Too big to tell counts as changed: nothing is deleted on a guess."""
+    seen = 0
+    stack = [str(top)]
+    while stack:
+        cur = stack.pop()
+        try:
+            for e in os.scandir(cur):
+                seen += 1
+                if seen > cap:
+                    return True
+                if e.stat(follow_symlinks=False).st_mtime > since + 2:
+                    return True
+                if e.is_dir(follow_symlinks=False):
+                    stack.append(e.path)
+        except OSError:
+            return True
+    return False
+
+
+def _empty_trash_in(root: Path, wsdir: Path, deadline: float, grace: bool = True) -> bool:
     """Delete what is in <wsdir>/.trash (renamed copies whose work is saved on its branch). Only direct
-    children
-    named <ticket>-<8 hex>, never a link. True when the trash is empty."""
+    children named <ticket>-<8 hex>, never a link. With `grace` (every automatic run): an entry is
+    deleted only TRASH_GRACE_HOURS after the rename recorded in orch's own note (an entry without a
+    note starts its grace now), and never when anything in it changed after the rename (a process orch
+    did not know, such as a dev server, wrote into it): that one stays, flagged for a person. Without
+    `grace` (a person chose to remove copies of a project that is gone) it is deleted at once. True
+    when the trash is empty."""
     trash = wsdir / TRASH
     if not trash.exists():
         return True
@@ -1083,13 +1181,40 @@ def _empty_trash_in(wsdir: Path, deadline: float) -> bool:
         names = sorted(e.name for e in os.scandir(trash))
     except OSError:
         return False
+    doc = _pending(root) if grace else None
+    notes = {i["name"]: i for i in doc["trash"]} if doc else {}
+    dirty = False
     for name in names:
         c = trash / name
         if not _TRASH_NAME.fullmatch(name) or _is_link(c) or not c.is_dir():
             left = True
             continue
+        if grace:
+            n = notes.get(name)
+            at = _parse_at(n["at"]) if n else None
+            if n is None or at is None:
+                doc["trash"] = [i for i in doc["trash"] if i["name"] != name] + [
+                    {"ticket": name.split("-")[0], "name": name, "at": tickets.now()}
+                ]
+                dirty = left = True
+                continue
+            if time.time() - at < TRASH_GRACE_HOURS * 3600:
+                left = True
+                continue
+            if _changed_since(c, at):
+                if not n.get("changed"):
+                    n["changed"] = True
+                    dirty = True
+                left = True
+                continue
         if time.monotonic() > deadline or not rmtree_nofollow(c):
             left = True
+        elif grace:
+            doc["trash"] = [i for i in doc["trash"] if i["name"] != name]
+            dirty = True
+    if dirty:
+        with contextlib.suppress(OSError, Refused):
+            _save_pending(root, doc)
     return not left
 
 
@@ -1099,36 +1224,52 @@ def empty_trash(root: Path, budget: float = 300.0) -> bool:
         d = copies_dir(root)
         if d is None or not d.is_dir() or _is_link(d) or not _owned(root, d / "t_x000000"):
             return False
-        return _empty_trash_in(d, time.monotonic() + budget)
+        return _empty_trash_in(root, d, time.monotonic() + budget)
     except Exception:  # noqa: BLE001
         return False
+
+
+def _spawn_clean(root: Path, flag: str) -> None:
+    """Run `orch copy clean <flag>` detached, from a neutral folder, with -I -P (nothing planted in the
+    workspace is imported) and the workspace named by ORCH_ROOT."""
+    if os.environ.get("ORCH_NO_DETACHED_CLEAN"):
+        return
+    from orch import procs
+
+    home = addons.home(root)
+    neutral = home if home.is_dir() else Path(os.path.abspath(os.sep))
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["ORCH_ROOT"] = str(root)
+    subprocess.Popen(
+        procs.orch_python_argv("copy", "clean", flag),
+        cwd=neutral,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=os.name != "nt",
+    )
 
 
 def spawn_trash_clean(root: Path) -> None:
     """Empty the trash in a detached process, so a big folder never delays the person's command."""
     try:
         d = copies_dir(root)
-        if d is None or not (d / TRASH).is_dir():
-            return
-        if os.environ.get("ORCH_NO_DETACHED_CLEAN"):
-            return
-        from orch import procs
+        if d is not None and (d / TRASH).is_dir():
+            _spawn_clean(root, "--trash")
+    except Exception:  # noqa: BLE001
+        pass
 
-        home = addons.home(root)
-        neutral = home if home.is_dir() else Path(os.path.abspath(os.sep))
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env["ORCH_ROOT"] = str(root)  # the workspace is named, not the current folder (a neutral one)
-        subprocess.Popen(
-            procs.orch_python_argv(
-                "copy", "clean", "--trash"
-            ),  # -I -P: nothing planted in the workspace runs
-            cwd=neutral,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=os.name != "nt",
-        )
+
+def schedule_sweep(root: Path) -> None:
+    """What a START does: never the sweep itself (its saves must not run under a start's patience), only a
+    detached `orch copy clean --background`, and only when there is anything that could need cleaning."""
+    try:
+        d = copies_dir(root)
+        if (d is not None and d.is_dir() and any(True for _ in os.scandir(d))) or (
+            root / REGISTRY_PENDING
+        ).exists():
+            _spawn_clean(root, "--background")
     except Exception:  # noqa: BLE001
         pass
 
@@ -1307,7 +1448,7 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
                     _log(root, f"{ws8}/{name}: removed by a person ({'saved' if saved else 'discarded'})")
             else:
                 notes.append(f"{name}: kept: {why}")
-        if _empty_trash_in(d, time.monotonic() + 300) and not any(
+        if _empty_trash_in(root, d, time.monotonic() + 300, grace=False) and not any(
             _TID.fullmatch(e.name) for e in os.scandir(d)
         ):
             with contextlib.suppress(OSError):
@@ -1315,6 +1456,36 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
                 (d / ".owner").unlink()
                 d.rmdir()
     return notes
+
+
+def retry(root: Path, ticket: str) -> list[str]:
+    """A PERSON's "Try again" for a copy kept because git was interrupted: remove the stale index.lock of THIS
+    copy (exactly <the project's .git>/worktrees/<name>/index.lock, a plain file older than
+    LOCK_STALE_SECONDS;
+    safegit runs no such operation, so it is a plain unlink with these checks), then remove the copy through
+    the normal path. Refused for an agent."""
+    if tickets.agent_tool():
+        raise Refused("Only a person can do this.")
+    if not isinstance(ticket, str) or not _TID.fullmatch(ticket):
+        raise Refused(f"'{ticket}' is not a ticket id.")
+    with _scoped(root):
+        want = _want(root, ticket)
+        ent = registry(root).get(ticket)
+        if want is None or not ent or not any(_same(Path(e["path"]), want) for e in ent["paths"]):
+            raise Refused("That copy is not in the list.")
+        if _owned(root, want) and os.path.lexists(want) and not _is_link(want):
+            lock = _stale_index_lock(want)
+            top = _top_of(root)
+            if lock is not None and top is not None:
+                try:
+                    common = top / ".git"
+                    wt = lock.parent
+                    if wt.parent.resolve() == (common / "worktrees").resolve() and not lock.is_symlink():
+                        lock.unlink()
+                        _log(root, f"{ticket}: removed a stale index.lock at a person's request")
+                except OSError as e:
+                    raise Refused(f"The old lock file could not be removed: {e}") from None
+    return remove(root, ticket)
 
 
 def sweep(root: Path, budget: float = SWEEP_BUDGET) -> list[str]:
@@ -1359,9 +1530,14 @@ def usage(root: Path, seconds: float = 3.0, max_entries: int = 200_000) -> dict:
     workspace on disk and their size (a capped walk, no links followed; `partial` when the cap stopped it),
     and the copies of projects that are gone. Never on a request path."""
     d = copies_dir(root)
-    out = {"copies": 0, "bytes": 0, "partial": False, "orphaned": []}
+    out = {"copies": 0, "bytes": 0, "partial": False, "orphaned": [], "changed": 0, "stuck": []}
     with contextlib.suppress(Exception):
         out["orphaned"] = orphaned(root)
+        doc = _pending(root)
+        out["changed"] = sum(1 for i in doc["trash"] if i.get("changed"))
+        out["stuck"] = [
+            {"ticket": i["ticket"], "reason": i["reason"]} for i in doc["kept"] if i.get("stale_lock")
+        ]
     if d is None or not d.is_dir() or _is_link(d):
         return out
     end = time.monotonic() + seconds

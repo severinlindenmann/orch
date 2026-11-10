@@ -67,6 +67,25 @@ def pending(repo):
     return worktrees._pending(repo)
 
 
+def age_trash(repo, hours=25):
+    """Make every trash note `hours` old (the grace period counts from orch's own note)."""
+    doc = pending(repo)
+    old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - hours * 3600))
+    for i in doc["trash"]:
+        i["at"] = old
+    worktrees._save_pending(repo, doc)
+    tr = worktrees.copies_dir(repo) / ".trash"
+    when = time.time() - (hours + 1) * 3600  # what was in it is older than the rename
+    for dp, dns, fns in os.walk(tr):
+        for n in [*dns, *fns]:
+            os.utime(os.path.join(dp, n), (when, when), follow_symlinks=False)
+
+
+def empty(repo, hours=25):
+    age_trash(repo, hours)
+    return worktrees.empty_trash(repo)
+
+
 def trash(repo):
     d = worktrees.copies_dir(repo) / ".trash"
     return sorted(d.iterdir()) if d.is_dir() else []
@@ -216,7 +235,8 @@ def test_clean_copy_is_removed_with_registry_and_merged_branch_and_the_folder_go
     assert f"orch/{t}" not in branches(repo)  # nothing on it: merged into HEAD, `branch -d` succeeds
     assert str(p) not in git(repo, "worktree", "list")  # git forgot it
     assert len(trash(repo)) == 1
-    assert worktrees.empty_trash(repo) and trash(repo) == []
+    assert not worktrees.empty_trash(repo) and len(trash(repo)) == 1  # inside the grace period
+    assert empty(repo) and trash(repo) == []
 
 
 def test_dirty_copy_is_committed_to_its_branch_first_and_reachable(repo):
@@ -637,6 +657,7 @@ def test_the_trash_only_empties_its_own_children(repo, tmp_path):
     (target / "keep").write_text("keep")
     (tr / "t_abcdef13-0123abcd").symlink_to(target)
     assert not worktrees.empty_trash(repo)
+    assert empty(repo) is False
     assert not ok.exists() and odd.is_dir() and (target / "keep").is_file()
 
 
@@ -828,14 +849,15 @@ def test_run_start_and_orch_start_sweep_first(repo, monkeypatch):
     from orch import cli_status, services
 
     calls = []
-    monkeypatch.setattr(worktrees, "sweep", lambda root, budget=0: calls.append(("sweep", budget)) or [])
+    monkeypatch.setattr(worktrees, "schedule_sweep", lambda root: calls.append("scheduled"))
+    monkeypatch.setattr(worktrees, "sweep", lambda *a, **k: calls.append("RAN IN THE START") or [])
     with pytest.raises(Refused):
         runs.start(repo, repo.tids[0], "human:t", agent="no-such-agent")
-    assert calls == [("sweep", worktrees.START_SWEEP_BUDGET)]
+    assert calls == ["scheduled"]  # a start only schedules; the saves never run under its patience
     monkeypatch.setattr(services, "start", lambda root: [])
     args = type("A", (), {"cmd": "start", "print_launch_url": False, "json": True, "no_open": True})()
     cli_status._services_cmd(args, repo)
-    assert len(calls) == 2
+    assert calls == ["scheduled", "scheduled"]
 
 
 # ---------------------------------------------------------------- the detached trash clean
@@ -890,7 +912,103 @@ def test_a_link_inside_a_copy_never_makes_orch_chmod_its_target(repo, tmp_path):
     d.mkdir()
     moved = d / "t_abcdef12-0123abcd"
     os.rename(p, moved)
-    assert worktrees.empty_trash(repo)
+    assert worktrees.empty_trash(repo) is False  # no note yet: its grace starts now
+    assert empty(repo)
     assert not moved.exists()
     assert decoy.read_text() == "keep" and decoy.stat().st_mode & 0o777 == 0o640
     assert decoydir.stat().st_mode & 0o777 == 0o750
+
+
+# ------------------------------------------------ review 2: grace period, stale lock, schedule
+
+
+def test_a_removed_copy_that_changed_after_it_was_saved_is_kept_and_flagged(repo):
+    """F1: a process orch does not know (a dev server) wrote into the renamed folder: nothing is deleted."""
+    t = repo.tids[0]
+    make(repo, 0)
+    close(repo, t, "done")
+    age_trash(repo)
+    (entry,) = trash(repo)
+    (entry / "late.log").write_text("written by a background process")
+    assert worktrees.empty_trash(repo) is False
+    assert (entry / "late.log").is_file()
+    assert worktrees.usage(repo)["changed"] == 1
+    assert pending(repo)["trash"][0]["changed"] is True
+
+
+def test_the_trash_grace_counts_from_orchs_note_not_from_mtimes(repo):
+    t = repo.tids[0]
+    make(repo, 0)
+    close(repo, t, "done")
+    (entry,) = trash(repo)
+    old = time.time() - 90 * 86400
+    for p in [entry, *entry.rglob("*")]:
+        os.utime(p, (old, old), follow_symlinks=False)  # an agent backdating everything changes nothing
+    assert worktrees.empty_trash(repo) is False and entry.is_dir()
+    age_trash(repo)
+    assert worktrees.empty_trash(repo) is True and not entry.exists()
+
+
+def _stale_lock(p, minutes):
+    lock = worktrees._gitdir_of(p) / "index.lock"
+    lock.write_text("")
+    when = time.time() - minutes * 60
+    os.utime(lock, (when, when))
+    return lock
+
+
+def test_a_stale_index_lock_keeps_the_copy_with_a_note_and_try_again_clears_it(repo, monkeypatch):
+    t = repo.tids[0]
+    p = make(repo, 0)
+    (p / "w.txt").write_text("work")
+    lock = _stale_lock(p, 30)
+    close(repo, t, "done")
+    assert (p / "w.txt").is_file() and t in worktrees.registry(repo)
+    u = worktrees.usage(repo)
+    assert [s["ticket"] for s in u["stuck"]] == [t] and "interrupted" in u["stuck"][0]["reason"]
+    monkeypatch.setenv("CLAUDECODE", "1")
+    with pytest.raises(Refused):
+        worktrees.retry(repo, t)  # a person's call only
+    assert lock.exists()
+    monkeypatch.delenv("CLAUDECODE")
+    worktrees.retry(repo, t)
+    assert not lock.exists() and not p.exists()
+    assert git(repo, "show", f"orch/{t}:w.txt") == "work"
+    assert worktrees.usage(repo)["stuck"] == []
+
+
+def test_a_fresh_index_lock_is_not_called_stale_and_is_never_removed(repo):
+    t = repo.tids[0]
+    p = make(repo, 0)
+    (p / "w.txt").write_text("work")
+    lock = _stale_lock(p, 1)  # a git may be running right now
+    close(repo, t, "done")
+    assert p.is_dir() and worktrees.usage(repo)["stuck"] == []
+    worktrees.retry(repo, t)  # nothing stale: it only tries the normal path again
+    assert lock.exists() and p.is_dir()
+
+
+def test_starts_only_schedule_a_detached_clean_and_only_when_there_is_something(repo, monkeypatch):
+    import sys
+
+    monkeypatch.delenv("ORCH_NO_DETACHED_CLEAN")
+    seen = []
+
+    def fake_popen(argv, **kw):
+        seen.append((argv, kw))
+
+    with monkeypatch.context() as m:
+        m.setattr(worktrees.subprocess, "Popen", fake_popen)
+        worktrees.schedule_sweep(repo)
+    assert seen == []  # no copies folder, no notes: nothing to do
+    make(repo, 0)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees.subprocess, "Popen", fake_popen)
+        worktrees.schedule_sweep(repo)
+    argv, kw = seen[0]
+    assert argv[:5] == [sys.executable, "-I", "-P", "-m", "orch"] and argv[5:] == [
+        "copy",
+        "clean",
+        "--background",
+    ]
+    assert Path(kw["cwd"]).resolve() != repo.resolve() and kw["env"]["ORCH_ROOT"] == str(repo)
