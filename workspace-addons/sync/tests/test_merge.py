@@ -33,6 +33,19 @@ def person_for(ledger):
 
     return person
 
+def verdict_for(ledger, own):
+    """The vectors' stand-in for the receiving core (humanproof.verdict_verifier): "current" = the entry's MAC
+    is the ledger's current one, "stale" = it is one of the core's own MACs but not current, else None."""
+
+    def verdict(entry, ticket):
+        m = entry.get("mac")
+        if ledger.get(ticket["id"]) == m:
+            return "current"
+        return "stale" if m in own else None
+
+    return verdict
+
+
 T1, T2, T3 = "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z", "2026-11-09T10:00:00Z"
 
 
@@ -61,8 +74,9 @@ def texts(t):
 def test_vector_ticket(c):
     before = deepcopy((c["base"], c["a"], c["b"]))
     person = person_for(c.get("ledger", {}))
-    assert merge_ticket(c["base"], c["a"], c["b"], NOW, person) == c["expect"]
-    assert merge_ticket(c["base"], c["b"], c["a"], NOW, person) == c["expect"]  # symmetric: two machines converge
+    verdict = verdict_for(c.get("ledger", {}), c.get("own", []))
+    assert merge_ticket(c["base"], c["a"], c["b"], NOW, person, verdict) == c["expect"]
+    assert merge_ticket(c["base"], c["b"], c["a"], NOW, person, verdict) == c["expect"]  # symmetric: two machines converge
     assert (c["base"], c["a"], c["b"]) == before  # pure
     if c["expect"] is not None:
         assert list(SCHEMA.iter_errors(c["expect"])) == []
@@ -85,7 +99,7 @@ def test_vector_key_clash(c):
 
 def test_every_rule_has_a_vector():
     rules = {c["rule"] for c in VEC["tickets"]}
-    assert {"2", "3", "4", "5", "6", "7", "8", "9", "10", "D8", "add"} <= rules
+    assert {"2", "3", "4", "5", "6", "7", "8", "9", "10", "D8", "add", "wont", "verdict"} <= rules
 
 
 # ---- hand-written expectations (so the vectors are not only the code's own output) -------------------------
@@ -856,3 +870,45 @@ def test_without_a_vouched_item_updated_at_still_decides_the_clash():
     for x, y in ((old, new), (new, old)):
         out = merge_ticket(base, x, y, NOW, person_for({}))
         assert _by_id(out, "c2")["text"] == "First"  # the older keeps the id (as before)
+
+
+# ---- signed verdicts (human-proof.md "Done needs a signed verdict") -------------------------------------------
+
+def test_merge_verdict_fields_and_shape():
+    from orch_sync import merge
+
+    assert merge._VERDICT_FIELDS == ("kind", "nonce", "mac")
+    good = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
+    assert merge._verdict_shape(good)
+    for bad in (None, {}, {**good, "extra": 1}, {**good, "kind": "bot"}, {**good, "nonce": "XYZ"},
+                {**good, "mac": "short"}, {k: v for k, v in good.items() if k != "mac"}):
+        assert not merge._verdict_shape(bad)
+
+
+def test_a_verdict_is_never_dropped_for_being_ours_without_a_verifier():
+    A = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
+    base = tk(status="done", verdicts=[A])
+    peer = up(base, T3, note="y")
+    for x, y in ((base, peer), (peer, base)):
+        assert merge_ticket(base, x, y, NOW)["verdicts"] == [A]  # verdict=None: nobody verifies, nothing is "stale"
+
+
+def test_a_verdict_verifier_that_fails_vouches_for_nobody():
+    A = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
+    base = tk(status="done", verdicts=[A])
+
+    def boom(entry, ticket):
+        raise RuntimeError("no")
+
+    out = merge_ticket(base, up(base, T2, note="x"), up(base, T3, note="y"), NOW, None, boom)
+    assert out["verdicts"] == [A] and out["status"] == "done"
+
+
+def test_the_merge_output_validates_against_the_schema_with_verdicts():
+    A = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
+    base = tk(status="done", verdicts=[A])
+    out = merge_ticket(base, up(base, T2, note="x"), up(base, T3, note="y"), NOW, None,
+                       verdict_for({"t_abc123": "A" * 43}, ["A" * 43]))
+    assert list(SCHEMA.iter_errors(out)) == []
+    assert list(SCHEMA.iter_errors({**out, "verdicts": [{**A, "mac": "bad"}]})) != []
+    assert list(SCHEMA.iter_errors({**out, "verdicts": [A] * 9})) != []

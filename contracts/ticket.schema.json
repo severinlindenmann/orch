@@ -98,10 +98,26 @@
       "maxItems": 32,
       "items": { "$ref": "#/$defs/session" },
       "description": "Optional. Agent sessions that worked on this ticket, one entry per agent and machine (host). A new run resumes the entry whose agent and host match; otherwise it starts fresh. No age limit. The gitignored run record (run.schema.json) holds only the claim."
+    },
+    "verdicts": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/verdict" },
+      "description": "Optional. The signed verdicts that make this ticket Done (human-proof.md 'Done needs a signed verdict'): a list because a MAC can be checked only by the machine whose key made it, so two machines that both accepted keep both entries. A ticket with status done counts as Done on a machine only when one entry is that machine's own verdict1 MAC over the ticket's checklist AND the current entry of its verdict ledger; every other raw done is Review there. Written only by the core when a person's proven verdict (or an agent finish under the recorded agents_may_finish grant) makes the ticket Done."
     }
   },
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "RFC 3339, UTC, ends with Z." },
+    "verdict": {
+      "type": "object",
+      "required": ["kind", "nonce", "mac"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["person", "agent"], "description": "person = a proven verdict (page or terminal proof, the phone through the relay channel, the dev test human); agent = an agent finished while agents_may_finish was effective." },
+        "nonce": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "Random, fresh for every signing, so equal decisions get different MACs." },
+        "mac": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "base64url HMAC-SHA256(human.key, \"verdict1.\" + workspace id + \".\" + ticket id + \".\" + canonical JSON of {status: \"done\", kind, checks, nonce}); checks = sha256 hex of canonical JSON [[step id, text, done is true, wont_do is true], ...]." }
+      }
+    },
     "who": { "type": "string", "pattern": "^(agent|human):[A-Za-z0-9_.@ -]{1,64}$", "description": "agent:<adapter name> (e.g. agent:my-agent) or human:<name>. Add-ons that write log as agent:<add-on name>." },
     "evidence": {
       "type": "object",

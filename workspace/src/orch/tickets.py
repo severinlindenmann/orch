@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, procs, saferead, syncgate, term
+from orch import config, humanproof, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -180,11 +180,51 @@ def next_key(root: Path) -> str:
     return f"{code}-{n}"
 
 
-def load(root: Path, tid: str) -> dict:
+def _load_raw(root: Path, tid: str) -> dict:
+    """The ticket file as it is (no signed-verdict view): for the writers, which must see and keep what a
+    peer or an agent wrote."""
     p = ticket_path(root, tid)
     if not p.exists():
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return _read_ticket(p, tid)
+
+
+def load(root: Path, tid: str) -> dict:
+    """The ticket as every reader sees it: a raw `done` without this core's current verdict is Review."""
+    return _effective(root, _load_raw(root, tid))
+
+
+def _effective(root: Path, t, checker=None, ledger=None):
+    """THE one read path of the signed verdict (human-proof.md "Done needs a signed verdict", invariant V1).
+    A raw `done` that does not carry a verdict entry this core vouches for (its own MAC over the ticket's
+    checklist AND the current ledger entry) is returned as `review` with a computed `verdict_needed: true`
+    (never stored). A raw ticket that is NOT done tombstones its ledger entry now, so an old entry cannot come
+    back by editing the file to active and back to done. The file is never rewritten by a reader."""
+    if not isinstance(t, dict):
+        return t
+    if t.get("status") == "done":
+        chk = checker or humanproof.VerdictChecker(root)
+        if chk.ok(t):
+            return t
+        return {**t, "status": "review", "verdict_needed": True}
+    if isinstance(t.get("id"), str):
+        _replay_tombstone(root, t["id"], ledger)
+    return t
+
+
+def _replay_tombstone(root: Path, tid: str, ledger=None) -> None:
+    """The ledger entry of a ticket whose file is not done: tombstone it (under the ticket lock, taken without
+    waiting: a writer that holds it signs or tombstones itself, and a sync step in progress is left alone)."""
+    try:
+        led = humanproof.verdict_ledger(root) if ledger is None else ledger
+        if not led or led.get(tid) is None or syncgate.live_holder(root) is not None:
+            return
+        with _locked(root, tid, wait=0.0):
+            raw = json.loads(ticket_path(root, tid).read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and raw.get("status") != "done":
+                humanproof.verdict_forget(root, tid)
+    except (Refused, OSError, ValueError):
+        pass  # best effort: the reader still shows the truth (a non-done ticket), the next read tries again
 
 
 def _read_ticket(p: Path, tid: str) -> dict:
@@ -319,9 +359,26 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+def _disk_status(p: Path):
+    try:
+        t = json.loads(p.read_text(encoding="utf-8"))
+        return t.get("status") if isinstance(t, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
 def _write(root: Path, ticket: dict) -> None:
-    """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
+    """Lock-free atomic write (tmp + os.replace). Callers hold the lock. THE one write guard of the signed
+    verdict: a new raw `done` needs a verdict entry this core vouches for (the file already holding `done` is
+    left as it is: an unrelated op never rewrites a peer's Done); any other status tombstones this ticket's
+    ledger entry first (leaving Done needs no proof)."""
     p = ticket_path(root, ticket["id"])
+    ticket = {k: v for k, v in ticket.items() if k != "verdict_needed"}  # computed for readers, never stored
+    if ticket.get("status") == "done":
+        if _disk_status(p) != "done" and not humanproof.verdict_ok(root, ticket):
+            raise Refused(humanproof.VERDICT_NEEDED)
+    else:
+        humanproof.verdict_forget(root, ticket["id"])
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
     try:
@@ -367,7 +424,11 @@ def apply_op(
     it is refused (Conflict, exit 2) when that changed. Returns (ticket, result)."""
     ticket_path(root, tid)  # id shape check, same friendly refusal
     with _locked(root, tid):
-        ticket = load(root, tid)
+        ticket = _load_raw(root, tid)
+        raw_status = ticket.get("status")
+        eff_status = _effective(root, ticket)["status"] if raw_status == "done" else raw_status
+        if raw_status == "done":
+            ticket["status"] = eff_status  # ops see what readers see: an unsigned Done is Review
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
         if expect is not None and _get(ticket, expect[0]) != expect[1]:
@@ -381,6 +442,10 @@ def apply_op(
             raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
+        if ticket.get("status") == eff_status and raw_status == "done":
+            ticket["status"] = "done"  # an unrelated op never rewrites a peer's Done into Review
+        elif ticket.get("status") == "done" and eff_status != "done" and not humanproof.verdict_ok(root, ticket):
+            raise Refused(humanproof.VERDICT_NEEDED)  # no op makes a ticket Done without signing it
         if was_review and ticket.get("status") != "review":
             # leaving Review closes the phones' review round in the same lock (fb8): an old "accept"
             # can never apply to work that came back to Review later
@@ -417,6 +482,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
+    checker = humanproof.VerdictChecker(root, snapshot=True)  # key and ledger read once for the listing
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
@@ -426,7 +492,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
             except (OSError, ValueError):
                 continue
             if include_general or not (isinstance(t, dict) and t.get("general") is True):
-                out.append(t)
+                out.append(_effective(root, t, checker, checker.ledger()))
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
 
@@ -813,16 +879,39 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
     return status, by
 
 
+AGENT_FINISH_TEXT = "finished by the agent (agents may finish is on)"
+
+
+def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
+    """The ticket is becoming Done (it was not Done for the reader): sign it, inside the ticket lock, with the
+    checklist as it is now. Signers: an agent while the recorded grant `agents_may_finish` is effective (kind
+    "agent"), or a person with a verified proof (kind "person"). Anyone else: refused, never an unsigned Done."""
+    if actor.startswith("agent:"):
+        if not config.agents_may_finish(root):
+            raise Refused(humanproof.VERDICT_NEEDED)
+        kind = "agent"
+        add_history(ticket, actor, AGENT_FINISH_TEXT)
+    elif proven and _is_person(actor):
+        kind = "person"
+    else:
+        raise Refused(humanproof.VERDICT_NEEDED)
+    old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
+    entry = humanproof.verdict_sign(root, ticket, kind)
+    kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
+    ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
+
+
 def note_history(root: Path, tid: str, by: str, text: str, via: str | None = None) -> None:
     """One history line, nothing else changes (e.g. a phone answer that was too late)."""
     apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via))
 
 
-def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
+def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: bool = False) -> dict:
     """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
     (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
     second accept is refused. The relay's phone path calls it only for a phone-verified answer to the
-    current review question (relay._apply_review_answer)."""
+    current review question (relay._apply_review_answer), which passes proven=True (the relay channel is the
+    phone's proof). The accept signs the verdict: without `proven` nothing becomes Done."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can accept.")
 
@@ -834,6 +923,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
         ticket["status"] = "done"
         ticket["waiting_on"] = None
         add_history(ticket, by, "Status review -> done", via)
+        _sign_done(root, ticket, by, proven)
 
     return apply_op(root, tid, op)[0]
 
@@ -974,7 +1064,7 @@ def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
             raise
 
 
-def set_status(root: Path, tid: str, status: str, by: str) -> dict:
+def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
@@ -990,6 +1080,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         ticket["status"] = target
         if old != target and target == status:
             add_history(ticket, actor, f"Status {old} -> {target}")
+        if target == "done" and old != "done":
+            _sign_done(root, ticket, actor, proven)
 
     return apply_op(root, tid, op)[0]
 
@@ -2095,7 +2187,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     return apply_op(root, tid, op2)[0]
 
 
-def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bool = False) -> dict:
     """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
@@ -2147,6 +2239,8 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         old, ticket["status"] = ticket["status"], status
         note = f" (status {old} -> {status})" if old != status else ""
         add_history(ticket, actor, "Patched " + ", ".join(sorted(obj)) + note)
+        if status == "done" and old != "done":
+            _sign_done(root, ticket, actor, proven)
 
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 

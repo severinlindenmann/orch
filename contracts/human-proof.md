@@ -10,7 +10,7 @@ orch-home files directly, or traces processes; such findings go to "Level 2 late
 an agent can pass any flag, scrub its environment (`env -i`) and run inside a terminal (its own tmux pane).
 
 Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Vectors: `vectors/human-proof-v1.json`
-(forged flags, missing, expired, wrong ticket, wrong action, replay, bad signature, valid; widening settings). Reference:
+(forged flags, missing, expired, wrong ticket, wrong action, replay, bad signature, valid; widening settings; `verdict` MACs). Reference:
 `hp_verify` / `hp_effective` in validate.py. T0: `… contracts/validate.py human`.
 
 ## What v2 has today, and why it is not enough
@@ -187,7 +187,7 @@ rows add a named case.
 | `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get` | key / profile | page, terminal | `verify` key profile, `settle` allow_get |
 | `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
 | `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<hash>` (proposal.md) / id | page | proposal `steps` |
-| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict |
+| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict; `verdict` (what makes it Done) |
 | `ticket.answer` | answering a Needs-you question | `<ticket>:<question>` | page, phone | `verify` ticket answer |
 | `relay.connect` | `orch relay connect`, changing the relay address | relay host | page, terminal | `verify` relay connect |
 | `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` | page, terminal | `verify` private allow |
@@ -251,6 +251,42 @@ side dropped the decision, changed it, rewrote only the text or covers, garbled 
 deletion carries no proof; a person's removal is proven where it is made). Anything else is an agent's (reference
 `wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
 
+**Done needs a signed verdict** (`ticket.verdict` that makes a ticket Done, and the agent finish under the recorded `agents_may_finish` grant).
+**Invariant V1:** on a machine a ticket counts as Done only when it carries a verdict entry whose MAC is THIS core's own `verdict1` MAC over the
+ticket's current state AND is the CURRENT entry of this core's verdict ledger; every other raw `done` (an agent wrote it into the file, a peer
+brought it in through sync) is **Review** there. It is decided in one function (`humanproof.verdict_ok`, reference `verdict_is_human`, vectors
+`verdict`), applied in ONE read path (`tickets._effective`, called by `load` and `list_all`) and ONE write guard (`tickets._write`). The record
+is HMAC-SHA256(`human.key`, `"verdict1." + workspace id + "." + ticket id + "." + canonical JSON of {status, kind, checks, nonce}`), base64url:
+`status` is always `"done"`; `kind` is `"person"` (a proven verdict: page or terminal proof, the phone through the relay channel, the dev test
+human) or `"agent"` (an agent finished while the recorded grant was effective); `checks` is the sha256 hex of canonical JSON
+`[[step id, text, done is true, wont_do is true], ...]`, WHAT was accepted (a new, reworded or reopened step makes the verdict stop verifying, so
+the ticket is Review again; title, note, summary, outcome, history and evidence are not bound); `nonce` is 16 random hex, fresh per signing. A
+different prefix from `pending1` and `wontdo1`, so the MACs can never be confused. The ticket stores `verdicts`: a list of at most 8
+`{kind, nonce, mac}` (a list, because a MAC can be checked only by the machine whose key made it: two machines that both accepted keep both
+entries, and one machine's signing never erases another's). **Freshness is the ledger's job:** `keys/<ws>/verdict.json` in the guarded home
+(`{"schema": "orch.verdict-ledger/1", "entries": {"<ticket id>": "<current mac>" | null}}`, 0600, written under the key lock, separate from
+`wont.json`) holds the CURRENT MAC per ticket; a MAC is accepted only when it IS the current entry, so replaying an older signed verdict, or the
+same file content after a reopen, does not verify. A missing, loose or damaged ledger vouches for nobody (fail closed); signing into a damaged
+ledger is refused with a plain message and nothing is half written. **Leaving Done needs no proof** (more work, never less): whenever the core
+writes a ticket whose status is not `done`, and whenever it reads a ticket whose file is not `done` (an agent edited it to active or review),
+it tombstones that ticket's entry (null) at that moment, so "edit to active, then back to done with the old verdict" is Review.
+Readers never rewrite the file: a raw `done` without a current verdict is shown as `review` with a computed `verdict_needed: true` (never stored);
+the writers keep a peer's raw `done` as it is while an unrelated op runs. Who signs: a person with a verified proof (the CLI `_verdict_who`
+returns `(who, proven)`; the phone through `relay._apply_review_answer`, the relay channel being the phone's proof), or an agent only while
+`agents_may_finish` is effective as a recorded grant (kind `agent`; revoking the grant later does not undo earlier agent Done tickets, new agent
+finishes go to Review); everyone else is refused, never an unsigned Done. **Sync:** `merge_ticket(..., verdict)` (`verdict(entry, ticket)` =
+`humanproof.verdict_verifier`: `"current"`, `"stale"` for the core's own MAC that is no longer current, else none; no verifier = nobody) never
+decides Done. `status` keeps the plain rule (both changed: FINAL wins; done with an open step: active); a peer's reopen wins by the normal
+three-way rule (lowering needs no proof, and the write that applies it tombstones the ledger entry). `verdicts`: every entry the core vouches for
+is the authority and is always kept, never changed or dropped, whatever a side did; the core's own stale entries are dropped; every other entry
+(another machine's, or one that cannot be checked here) is merged three-way by `mac`, deduplicated, sorted by `mac`, and capped so the total is
+at most 8, so the output is byte-identical with the sides swapped (vectors `ticket-merge-v1.json` rule `verdict`; a test fails if
+`orch_sync.merge` keeps a different field list than `humanproof.VERDICT_FIELDS`). A Done made on another machine is Review here until a person
+here clicks Looks good (its MAC cannot be checked here: the same limit as a synced Won't do). A verified Won't do counts as resolved in `checks`;
+a Won't do the merge drops reopens its step, so the ticket is active and the verdict stops verifying. A peer agent's `kind: "agent"` entry never
+verifies here (the grant is ours). No migration: a raw `done` from before this core has no entry and shows as Review once; the person's Looks good
+signs it.
+
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).
 
@@ -264,6 +300,9 @@ proof is **W2b slice 1.0a** (tracked follow-up); this contract is its spec.
 - Patching the orch install, its Python environment, or tracing orch processes.
 - An agent scripting HTTP against the local page with a token it read from the orch home.
 - Phone verdicts signed with a device key enrolled at pairing and pinned in the orch home (today the relay channel proves them).
+- Verdicts verifiable on other machines: per-person or per-device signing keys, public keys pinned in each guarded home (for example Ed25519 enrolled at pairing). Today a Done made elsewhere is Review here until a person here clicks Looks good.
+- An agent reading `human.key` or editing `verdict.json` directly (same OS user, the Level 1 honest limit).
+- `dropped` is not gated: an agent can still drop a ticket (hides it as closed). It is not a Done; the same signed gate for `dropped` is a Level 1 follow-up.
 - An OS sandbox for agents (Level 2 epic, owner decision R1).
 
 ## Honest limit (Level 1, owner decision R1)

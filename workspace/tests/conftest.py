@@ -240,7 +240,28 @@ def rel(proj, run):
     srv.stop()
 
 
-REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof")
+REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_verdict_mac")
+
+
+def ensure_signing(root):
+    """TEST HELPER: the workspace's local id and human key exist (a real proof needs both anyway)."""
+    from orch import humanproof
+    from orch.errors import Refused
+
+    try:
+        addons.workspace_id(root, create=True)
+        humanproof.human_key(root, create=True)
+    except Refused:  # a folder a test install may not use (not under ~/.orch-test): nothing can be signed there
+        pass
+
+
+def sign_done(root, tid, by="human:tester"):
+    """TEST HELPER: a ticket becomes Done the proven way (a person's verdict, signed and recorded in the
+    ledger). Fixtures never write "done" into a ticket file or call _write with it: that is Review."""
+    from orch import tickets
+
+    ensure_signing(root)
+    return tickets.set_status(root, tid, "done", by, proven=True)
 
 
 @pytest.fixture(autouse=True)
@@ -255,7 +276,10 @@ def _legacy_trust(request, monkeypatch):
     def legacy(root, args, op, target, **kw):
         if tickets.agent_tool():
             return "agent:" + str(tickets.agent_tool())
-        return tickets.current_actor(getattr(args, "by", None))
+        who = tickets.current_actor(getattr(args, "by", None))
+        if who.startswith("human:"):
+            ensure_signing(root)  # a person's Done is signed: the key and the local id exist, as after a real proof
+        return who
 
     monkeypatch.setattr(humanproof, "person_by", legacy)
     monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
