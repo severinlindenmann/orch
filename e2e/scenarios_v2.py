@@ -23,7 +23,7 @@ from lib import Fail, check, free_port, http, scenario, wait_http
 
 AGENT = Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"
 NEEDS_FIXTURE = Path(__file__).parent / "fixtures" / "needs-addon"
-ESSENTIALS = ("uv", "node", "git", "python3", "ps", "sh", "env", "sleep", "cat", "date", "ls", "head", "tail", "kill", "mkdir", "rm", "cp", "tr", "grep")
+ESSENTIALS = ("uv", "node", "git", "python3", "ps", "sh", "env", "sleep", "cat", "date", "ls", "head", "tail", "kill", "mkdir", "rm", "cp", "tr", "grep", "true")
 
 
 def wait_for(fn, secs: float = 30, step: float = 0.1):
@@ -39,9 +39,10 @@ def wait_for(fn, secs: float = 30, step: float = 0.1):
 class W:
     """One workspace folder for one scenario, and the way to run orch in it."""
 
-    def __init__(self, e, sid: str, tmux: bool = False, extra_bin: Path | None = None, env: dict | None = None):
+    def __init__(self, e, sid: str, tmux: bool = False, extra_bin: Path | None = None, env: dict | None = None,
+                 root: Path | None = None):
         self.e = e
-        self.root = e.tmp / "v2" / sid.lower()
+        self.root = root or e.tmp / "v2" / sid.lower()
         self.root.mkdir(parents=True)
         self.log = e.tmp / f"{sid.lower()}-agent.log"
         self.bindir = e.tmp / "v2bin" / sid.lower()
@@ -1061,15 +1062,17 @@ def u1_upgrade_from_old_orch(e):
         from lib import Skip
         raise Skip(f"commit {OLD_REF} is not in this clone (git fetch)")
     real = os.environ.get("E2E_REAL_HOME") or str(Path.home())
-    ohome = Path(real) / f".orch-e2e-u1-{os.getpid()}"  # ORCH_HOME is only trusted under the real home, outside any git folder
-    ohome.mkdir()
+    # a TEST install: workspace + ORCH_HOME under <real home>/.orch-test (like lane C's test network), outside any git folder
+    ubase = Path(real) / ".orch-test" / f"e2e-u1-{os.getpid()}"
+    ohome = ubase / "home"
+    ohome.mkdir(parents=True)
     import shutil as _sh
-    e.cleanup.append(lambda: _sh.rmtree(ohome, ignore_errors=True))
+    e.cleanup.append(lambda: _sh.rmtree(ubase, ignore_errors=True))
     tools, ubin = e.tmp / "u1-uvtools", e.tmp / "u1-bin"
     ubin.mkdir()
     old_env = {"UV_TOOL_DIR": str(tools), "UV_TOOL_BIN_DIR": str(ubin), "ORCH_HOME": str(ohome),
                "ORCH_REPO": "file://" + str(e.repo), "ORCH_REF": OLD_REF}
-    w = W(e, "V2-U1", extra_bin=ubin, env=old_env)
+    w = W(e, "V2-U1", extra_bin=ubin, env=old_env, root=ubase / "ws")
     w.env["PATH"] += os.pathsep + "/usr/bin" + os.pathsep + "/bin"  # git's submodule scripts and install.sh need uname, sed, curl ...
     # 1) the old install.sh does exactly this: uv tool install --reinstall git+<repo>@<ref>#subdirectory=workspace
     rc, out, err = w.sh(["uv", "tool", "install", "--reinstall", f"git+file://{e.repo}@{OLD_REF}#subdirectory=workspace"], timeout=900)
@@ -1080,7 +1083,7 @@ def u1_upgrade_from_old_orch(e):
         rc, out, err = w.sh(["orch", "addon", "add", name, "--yes"], timeout=900)
         check(rc == 0, f"old orch: addon add {name}: {(err or out)[-300:]}")
     # 2) the current installer, from this checkout (the way a user upgrades), same machine folders
-    new_env = {"ORCH_REPO": str(e.repo)}
+    new_env = {"ORCH_REPO": str(e.repo), "ORCH_INSTALL_KIND": "test"}
     new_env_all = {**new_env, "ORCH_REF": ""}
     rc, out, err = w.sh(["sh", str(e.repo / "install.sh")], env=new_env_all, timeout=900)
     check(rc == 0, f"current install.sh: {(err or out)[-400:]}")
@@ -1091,7 +1094,14 @@ def u1_upgrade_from_old_orch(e):
     check(rc == 0, f"orch start after the upgrade: {(err or out)[-300:]}")
     dbase = w.j("dashboard", "status", by=None, env=new_env_all)["url"].rstrip("/")
     check(wait_http(dbase + "/"), "the dashboard add-on did not start after the upgrade")
+    rc, out, err = w.sh(["orch", "dev-mark"], env=new_env_all)  # the harness marks the demo workspace dev
+    check(rc == 0, f"orch dev-mark: {(err or out)[-200:]}")
     rc, out, err = w.sh(["orch", "update"], env=new_env_all, timeout=900)
+    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
+        # `orch update` is a person's action (H1): in a dev demo workspace the scripted test human proves it
+        prc, proof, perr = w.sh(["orch", "dev-proof", "update", "orch"], env=new_env_all)
+        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
+        rc, out, err = w.sh(["orch", "update", "--proof-stdin"], env=new_env_all, timeout=900, input=proof.strip() + "\n")
     check(rc == 0 and "Traceback" not in out + err, f"orch update: {(err or out)[-400:]}")
     rc, out, err = w.sh(["orch", "addon", "add", "focus", "--yes"], env=new_env_all, timeout=900)
     check(rc == 0, f"addon add focus after the upgrade: {(err or out)[-300:]}")
@@ -1101,3 +1111,57 @@ def u1_upgrade_from_old_orch(e):
     on = {r["name"] for r in rows if r.get("active")}
     check({"dashboard", "focus", "automation"} <= on, f"active add-ons after the upgrade: {sorted(on)}")
     check("scheduler" not in on, f"the old scheduler is still listed as on: {sorted(on)}")
+
+
+# ------------------------------------------------------------------------------------------------ copies cleanup (B12)
+
+
+@scenario("G1-CLEAN")
+def g1_clean(e):
+    """Separate copies are always taken back: two runs -> two copies -> Done -> count 0, folders and branches gone;
+    a run killed and its ticket deleted -> the next `orch start` removes the copy."""
+    w = W(e, "G1-CLEAN").init()
+    w.sh(["git", "config", "user.email", "e2e@localhost"], check_rc=True)
+    w.sh(["git", "config", "user.name", "e2e"], check_rc=True)
+    w.sh(["git", "add", "-A"], check_rc=True)
+    w.sh(["git", "commit", "-qm", "init"], check_rc=True)
+    w.agent("--silent 4")
+    w.o("config", "set", "workflow.copies", "always", by=None)
+    reg = w.root / ".orch" / "run" / "worktrees.json"
+
+    def listed() -> list[str]:
+        try:
+            return sorted(json.loads(reg.read_text())["tickets"])
+        except (OSError, ValueError, KeyError):
+            return []
+
+    def branches() -> list[str]:
+        return w.sh(["git", "branch", "--list", "orch/*", "--format=%(refname:short)"])[1].split()
+
+    a, b = w.ticket("First change"), w.ticket("Second change")
+    for t in (a, b):
+        w.j("run", "start", t)
+    check(listed() == sorted([a, b]), f"two copies expected in the registry, got {listed()}")
+    folders = [Path(w.claim(t)["folder"]) for t in (a, b)]
+    check(all(f.is_dir() and f != w.root for f in folders), f"copy folders: {folders}")
+    check(len(branches()) == 2, f"branches {branches()}")
+    for t in (a, b):
+        w.wait_done(t)
+        w.o("ticket", "status", t, "done")
+    check(listed() == [], f"registry after Done: {listed()}")
+    check(not any(f.exists() for f in folders), "a copy folder is still there after Done")
+    check(branches() == [], f"branches after Done: {branches()}")
+    # crash case: the agent is killed, the ticket is deleted, the next `orch start` takes the copy back
+    c = w.ticket("Crashing change")
+    w.agent("--silent 60", name="slow")
+    w.j("run", "start", c)
+    claim = w.wait_claim(c)
+    folder = Path(w.claim(c)["folder"])
+    check(folder.is_dir() and listed() == [c], f"copy of the crashing ticket: {folder} {listed()}")
+    os.kill(claim["agent_pid"], signal.SIGKILL)  # the PID the claim recorded: nothing else
+    w.wait_done(c)
+    (w.root / ".orch" / "tickets" / f"{c}.json").unlink()
+    w.o("start", "--no-open", by=None)  # a start only schedules the (detached) sweep: give it a moment
+    check(wait_for(lambda: listed() == [] and not folder.exists(), 40), f"the next start left the copy: {listed()}")
+    rc, out, _ = w.o("copy", "clean", "--json", by=None)
+    check(json.loads(out)["copies"] == 0, f"copies left: {out}")

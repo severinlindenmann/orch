@@ -21,9 +21,14 @@ HUMAN_ONLY = {
     *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
+    "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
+    "copy clean",  # a person's call (the dashboard's "Clean up now"); `orch copy` is hidden from help
+    "copy retry",  # a person's "Try again" (agents are refused)
+    "copy remove-orphaned",  # a person decides about copies of a moved project
     "init",
     "share",
+    "private",  # a person's approvals and Move to private (agents are refused)
     "update",
     "start",
     "stop",
@@ -40,6 +45,8 @@ HUMAN_ONLY = {
     "run event",
     "run _wrap",
     "publish view",  # feeds the dashboard's Shared tab
+    "dev-mark",  # test installs only: the e2e harness marks a demo workspace (never in an agent skill)
+    "dev-proof",  # test installs only: the e2e harness's scripted test human (never in an agent skill)
 }
 
 

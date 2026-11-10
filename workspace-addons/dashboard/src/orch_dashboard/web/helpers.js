@@ -54,6 +54,7 @@
     const task = id => { const c = (Array.isArray(checklist) ? checklist : []).find(x => x && x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = key => key.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
     if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
+    if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
     if ((m = /^Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?$/.exec(text))) return 'Removed ' + addon(m[1]) + ' settings';
@@ -221,9 +222,12 @@
     return capital(noPrefix(claim.label || match?.label || claim.agent || chosen?.label || chosen?.name || agents[0]?.label || agents[0]?.name || 'Agent'));
   }
   const matchesTicket = (ref, t) => !!ref && (ref === t.id || (!!t.key && String(ref).toLowerCase() === String(t.key).toLowerCase()));
+  // Creation order (the plan order): the key number counts up with every new ticket; created_at only breaks ties.
+  const keyNumber = c => Number(String(c && c.key || '').split('-').pop()) || 0;
+  const creationOrder = (x, y) => keyNumber(x) - keyNumber(y) || (Date.parse(x.created_at) || 0) - (Date.parse(y.created_at) || 0) || String(x.id).localeCompare(String(y.id));
   function childrenOf(all, t) {
     const seen = new Set();
-    return arr(all).filter(c => c && c.id !== t.id && (matchesTicket(c.parent, t) || arr(t.children).includes(c.id)) && !seen.has(c.id) && seen.add(c.id));
+    return arr(all).filter(c => c && c.id !== t.id && (matchesTicket(c.parent, t) || arr(t.children).includes(c.id)) && !seen.has(c.id) && seen.add(c.id)).sort(creationOrder);
   }
   function parentOf(all, t) {
     return arr(all).find(p => p && p.id !== t.id && matchesTicket(t.parent, p)) ||
@@ -231,7 +235,9 @@
   }
   const plainFileName = value => String(value || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/^./, c => c.toUpperCase());
   const cleanOutcome = value => String(value || '').replace(/\b\d+(?:\.\d+)?\s*(?:[KMGT]?i?B|bytes?)\b/gi, '').replace(/(?:[\w-]+\/)*[\w-]+\.(?:md|txt|html?|csv|json|pdf|png|jpe?g|webp)\b/gi, name => plainFileName(name)).replace(/^[\s✓✔·—,:;-]+|[\s·—,:;-]+$/g, '').replace(/\s+/g, ' ').trim();
+  const resolved = task => !!(task.done || task.wont_do);
   function outcome(task) {
+    if (task.wont_do) return "";
     const said = arr(task.evidence).slice().reverse().map(ev => cleanOutcome(ev.summary) || cleanOutcome(ev.text) || (ev.type === 'note' ? cleanOutcome(ev.ref) : '')).find(Boolean);
     return said || (task.done ? 'Completed.' : task.state === 'doing' ? 'Working on this task.' : 'Not started yet.');
   }
@@ -455,5 +461,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {agentLabel, childrenOf, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

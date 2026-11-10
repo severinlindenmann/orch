@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -28,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, procs, runhooks, services, tickets
+from orch import adapters, addons, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -169,7 +170,7 @@ _terminating = False  # the SIGTERM handler is running: it interrupted whatever 
 
 
 @contextlib.contextmanager
-def locked(root: Path, tid: str):
+def locked(root: Path, tid: str, wait: float = 10.0):
     """The per-ticket run lock. Free when its holder is verifiably dead, or old with no holder named."""
     lock = run_dir(root) / "tickets" / f"{tid}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +180,7 @@ def locked(root: Path, tid: str):
         # out and leave the claim behind.
         yield
         return
-    end = time.monotonic() + 10
+    end = time.monotonic() + wait
     while True:
         try:
             _create_lock(lock)
@@ -282,7 +283,16 @@ def state(rec: dict, at: float | None = None) -> str:
 def kill_tree(pid: int, grace: float = 2.0) -> None:
     """SIGTERM, then SIGKILL, a process and (when it leads its own group) the group. Windows: taskkill /T."""
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        from orch import safegit  # late: safegit needs addons
+
+        exe = safegit.taskkill_exe()  # full path in the system folder, never a bare name (project .venv, cwd)
+        if exe is None:
+            print(
+                "orch: taskkill.exe was not found in the system folder; the process was not stopped.",
+                file=sys.stderr,
+            )
+            return
+        subprocess.run([exe, "/PID", str(pid), "/T", "/F"], capture_output=True)
         return
     import signal
 
@@ -318,7 +328,9 @@ def new_run_id() -> str:
     return "r_" + "".join(secrets.choice(_ALPHA) for _ in range(8))
 
 
-def _new_record(tid: str, by: str, agent: str, mode: str, ticket: dict, reason: str | None) -> dict:
+def _new_record(
+    tid: str, by: str, agent: str, mode: str, ticket: dict, reason: str | None, root: Path | None = None
+) -> dict:
     t = tickets.now()
     rec = {
         "schema": "orch.run/1",
@@ -327,9 +339,11 @@ def _new_record(tid: str, by: str, agent: str, mode: str, ticket: dict, reason: 
         "by": by,
         "agent": agent,
         "mode": mode,
+        "folder": str(Path(root).resolve()) if root else None,
         "tmux": None,
         "pid": None,
         "pid_started": None,
+        "host": host(),
         "started_at": t,
         "renewed_at": t,
         "pending": False,
@@ -384,18 +398,92 @@ def _human_author(by, via, kind, phone=None) -> bool:
     return via == "phone" and isinstance(phone, str) and PHONE_ID_RE.fullmatch(phone) is not None
 
 
+def _pending_proof(root: Path, tid: str):
+    """(human key, workspace id) for the pending MAC, or None when this workspace has no guarded home."""
+    from orch import addons, humanproof
+
+    try:
+        ws = addons.workspace_id(root, create=True)
+        return (humanproof.human_key(root), ws) if ws else None
+    except (Refused, OSError):
+        return None
+
+
+class Unsigned(Refused):
+    """A person's input could not be signed (no usable key folder): nothing was saved."""
+
+
+UNSIGNED = (
+    "Not saved: orch can't check who you are on this computer right now (its protected folder can't be "
+    "used), so your message would never reach the agent. Close orch and start it again; if it keeps "
+    "happening, the protected folder has wrong rights: orch resets its protection on the next start."
+)
+
+
+def require_signing(root: Path) -> None:
+    """Refuse VISIBLY, before anything is saved, when a person's input could not be signed (no usable key
+    folder): otherwise it would be stored without a MAC and silently never start a run."""
+    from orch import humanproof
+
+    if humanproof.ENFORCE_PENDING_MAC and _pending_proof(root, "") is None:
+        raise Unsigned(UNSIGNED)
+
+
+def _mac_line(root: Path, tid: str, item: dict) -> None:
+    """Add the pending1 MAC (humanproof.pending_mac): the core accepted this input from a verified person.
+    No usable key folder = refuse in plain words (never a line without a MAC that silently starts nothing)."""
+    from orch import humanproof
+
+    if item.get("kind") not in humanproof.PENDING_MAC_KINDS:
+        return
+    proof = _pending_proof(root, tid)
+    if proof:
+        item["mac"] = humanproof.pending_mac(proof[0], proof[1], tid, item)
+    elif humanproof.ENFORCE_PENDING_MAC:
+        raise Unsigned(UNSIGNED)
+
+
+def _mac_valid(root: Path, tid: str, item: dict, key_ws) -> bool:
+    from orch import humanproof
+
+    # live_retry is core bookkeeping added after the MAC (runs_live._give_up_locked), not part of the input
+    return key_ws is not None and humanproof.pending_is_human(
+        key_ws[0], key_ws[1], tid, item, ignore=("live_retry",)
+    )
+
+
 def human_waiting(root: Path, tid: str) -> list[dict]:
     """Undelivered input a person wrote (owner, phone, a page), never an agent's (agent:*, or written from
-    inside an agent) and never a run's own start prompt or slot request. Only this may start a run."""
-    out = []
-    for i in undelivered(root, tid):
-        if i.get("via") in ("start", "slots"):
-            continue
-        # the stored flag is never trusted alone: the allowlist is checked again (older lines have no flag)
-        rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
-        if rule and i.get("human") in (True, None):
-            out.append(i)
-    return out
+    inside an agent) and never a run's own start prompt or slot request. Only this may start a run.
+    With humanproof.ENFORCE_PENDING_MAC the person is proven by the line's pending1 MAC, verified here on
+    every
+    read (by/via/human are informational), and a consumed id never counts again (delivered.json)."""
+    from orch import humanproof
+
+    items = [i for i in undelivered(root, tid) if i.get("via") not in ("start", "slots")]
+    if not humanproof.ENFORCE_PENDING_MAC:
+        out = []
+        for i in items:
+            # the stored flag is never trusted alone: the allowlist is checked again (older lines have no
+            # flag)
+            rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
+            if rule and i.get("human") in (True, None):
+                out.append(i)
+        return out
+    if not items:
+        return []
+    try:
+        key_ws = (humanproof.human_key(root, create=False), _ws_id(root))
+        done = humanproof.delivered_ids(root)
+    except (Refused, OSError):
+        return []  # no key or an unreadable record: nothing counts as a person's (fail closed)
+    return [i for i in items if i["id"] not in done and _mac_valid(root, tid, i, key_ws)]
+
+
+def _ws_id(root: Path):
+    from orch import addons
+
+    return addons.workspace_id(root, create=False)
 
 
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:
@@ -420,6 +508,7 @@ def _pending_add_locked(
     pid: str | None,
     *,
     phone: str | None = None,
+    proven: bool = False,
 ) -> dict:
     if kind not in PENDING_KINDS:
         raise Refused(f"Input kind must be one of: {', '.join(PENDING_KINDS)}.")
@@ -446,6 +535,12 @@ def _pending_add_locked(
     item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))
     if via:
         item["via"] = via
+    # The person's proof: a verified page proof (`proven`, slice 1.0a-2) or the relay-authenticated phone
+    # channel
+    # (relay.py passes phone=<ph_ id> with via="phone" only for a message it fetched itself). Anything else
+    # (CLI --by human:, chat, a note) gets no MAC and is agent input once ENFORCE_PENDING_MAC is on.
+    if not tool and (proven or (item.get("phone") and via == "phone")):
+        _mac_line(root, tid, item)
     _pending_write(root, tid, items + [item])
     return item
 
@@ -460,11 +555,12 @@ def pending_add(
     pid: str | None = None,
     *,
     phone: str | None = None,
+    proven: bool = False,
 ) -> dict:
     """Queue input for a ticket (under the ticket's run lock) and flag a running claim. phone: the sender's
-    phone id, passed only by the relay's phone-text path."""
+    phone id, passed only by the relay's phone-text path. proven: the caller verified a human proof."""
     with locked(root, tid):
-        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone)
+        item = _pending_add_locked(root, tid, by, kind, text, via, pid, phone=phone, proven=proven)
         rec = read(root, tid)
         if rec and not rec.get("pending"):
             rec["pending"] = True
@@ -485,8 +581,20 @@ def pending_discard(root: Path, tid: str, item_id: str) -> None:
             _write(root, rec)
 
 
+def _consume_human(root: Path, items: list[dict], ids: list[str]) -> None:
+    """Spend the ids of MAC'd lines in <guarded home>/keys/<ws>/delivered.json (delivered_at is display
+    only)."""
+    from orch import humanproof
+
+    mine = [i["id"] for i in items if i["id"] in ids and i.get("mac")]
+    if mine:
+        with contextlib.suppress(Refused, OSError):
+            humanproof.consume(root, mine)
+
+
 def mark_delivered_locked(root: Path, tid: str, ids: list[str]) -> None:
     items = _pending_read(root, tid)
+    _consume_human(root, items, ids)
     for i in items:
         if i["id"] in ids and not i.get("delivered_at"):
             i["delivered_at"] = tickets.now()
@@ -504,6 +612,10 @@ def undeliver(root: Path, tid: str, ids: list[str]) -> bool:
         return False
     with locked(root, tid):
         items = _pending_read(root, tid)
+        from orch import humanproof
+
+        with contextlib.suppress(Refused, OSError):
+            humanproof.unconsume(root, [i["id"] for i in items if i["id"] in ids and i.get("mac")])
         for i in items:
             if i["id"] in ids:
                 i.pop("delivered_at", None)
@@ -560,8 +672,11 @@ def claim(
     take_over: bool = False,
     reason: str | None = None,
     busy_text: str | None = None,
+    folder: Path | None = None,
 ) -> dict:
-    """Take the claim on a ticket, or raise Busy. A busy ticket queues `busy_text` as input (same lock)."""
+    """Take the claim on a ticket, or raise Busy. A busy ticket queues `busy_text` as input (same lock).
+    folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
+    record."""
     ticket = tickets.load(root, tid)
     with locked(root, tid):
         cur = read(root, tid)
@@ -582,7 +697,7 @@ def claim(
                 raise _busy(cur, why, queued)
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
         _drop_start_prompts_locked(root, tid)
-        rec = _new_record(tid, by, agent, mode, ticket, reason)
+        rec = _new_record(tid, by, agent, mode, ticket, reason, Path(folder) if folder else root)
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
@@ -596,6 +711,27 @@ def claim(
     tickets.mark_working(root, tid, by, label)
     notify_working(root)
     return rec
+
+
+def claim_routed(root: Path, tid: str, by: str, agent: str, mode: str, **kw) -> tuple[dict, list[str]]:
+    """claim() after deciding where the agent works (worktrees.route): (record, notes for the person). The
+    decision, the copy and the claim happen under ONE workspace lock (worktrees.start_lock), so two starts
+    at the same moment cannot both find the folder free. A copy that cannot be made is never an error: the
+    run works in the workspace folder (and shows the "also changing this folder" line)."""
+    from orch import worktrees
+
+    with worktrees.start_lock(root):
+        try:
+            folder, notes, after = worktrees.route(root, tid)
+        except Exception:  # noqa: BLE001 - copies are an extra; a start never fails because of them
+            folder, notes, after = root, [], []
+        rec = claim(root, tid, by, agent, mode, folder=folder, **kw)
+    for step in after:  # the slow steps (harness files, setup command) run without the workspace lock
+        try:
+            notes = notes + step()
+        except Exception:  # noqa: BLE001
+            pass
+    return rec, notes
 
 
 def set_process(root: Path, tid: str, run: str, pid: int, **fields) -> bool:
@@ -624,20 +760,28 @@ def renew(root: Path, tid: str, run: str, ticket: dict | None = None, seen: bool
         return rec
 
 
+def _release_locked(root: Path, tid: str, rec: dict) -> None:
+    """Delete the claim and the files made for this run (the caller holds the run lock)."""
+    _drop_start_prompts_locked(root, tid)
+    _delete(root, tid)
+    for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
+        (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
+
+
 def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool = False) -> dict:
     """End a claim. With keep_if_pending the claim stays while input waits (the wrapper runs once more)."""
     with locked(root, tid):
         rec = read(root, tid)
         if not rec or (run and rec["run"] != run):
             return {"released": False, "pending": bool(undelivered(root, tid))}
-        _drop_start_prompts_locked(root, tid)
         waiting = bool(undelivered(root, tid))
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
-        _delete(root, tid)
-        for leftover in (f"env-{rec['run']}.json", f"prompt-{rec['run']}.txt", f"hooks-{rec['run']}.json"):
-            (run_dir(root) / leftover).unlink(missing_ok=True)  # files made for this run only
+        _release_locked(root, tid, rec)
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
+    from orch import worktrees
+
+    worktrees.on_run_ended(root, tid)  # B12: a closed ticket's copy goes once its last run is over
     return {"released": True, "pending": waiting}
 
 
@@ -693,6 +837,181 @@ def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
         return False
 
 
+# ---------------------------------------------------------------- a start that never got an agent
+
+START_TIMEOUT_SECONDS = 60  # a started run has this long to get its agent going, then it is said not to have
+
+
+def start_timeout_seconds() -> float:
+    """START_TIMEOUT_SECONDS; ORCH_RUN_START_TIMEOUT_SECONDS changes it (tests)."""
+    try:
+        return float(os.environ.get("ORCH_RUN_START_TIMEOUT_SECONDS", START_TIMEOUT_SECONDS))
+    except ValueError:
+        return START_TIMEOUT_SECONDS
+
+
+def agent_up(rec: dict) -> bool:
+    """The agent of this claim is going: its process exists (one turn at a time) or the live tool is up."""
+    if rec.get("agent_pid") or rec.get("up"):
+        return True
+    if rec.get("mode") == "live":
+        return (rec.get("live") or {"state": "starting"}).get("state") != "starting"
+    return False
+
+
+_NO_LOGIN = re.compile(r"not logged in|log ?in|sign ?in|authenticat|api key|unauthori[sz]ed|credential", re.I)
+
+
+def start_failure_reason(root: Path, rec: dict) -> str:
+    """Why no agent appeared, as ONE OF A FIXED SET of plain messages. Never text copied from the agent's log
+    (it can hold keys, tokens or credential URLs, and this goes to ticket history, Chat, the phone, hooks)."""
+    name = str(rec.get("agent") or "")
+    with contextlib.suppress(Exception):
+        binary = (adapters.load(name, root).get("detect") or {}).get("binary")
+        if binary and not shutil.which(binary):
+            return "agent command not found"
+    tail = ""
+    log = rec.get("log")
+    if log:
+        with contextlib.suppress(OSError):
+            data = (root / log).read_bytes()[-2000:].decode("utf-8", "replace")
+            lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+            tail = lines[-1] if lines else ""
+    if tail and _NO_LOGIN.search(tail):
+        return "no login"
+    if rec.get("mode") == "live":
+        from orch import runs_live
+
+        if not shutil.which("tmux"):
+            return "tmux is not installed"
+        with contextlib.suppress(Exception):
+            if not runs_live.session_exists(root, rec["ticket"]):
+                return "couldn't open the terminal session"
+    with contextlib.suppress(Exception):
+        from orch import syncgate
+
+        if syncgate.live_holder(root) is not None:
+            return "orch is syncing"
+    return "no agent session appeared"
+
+
+def _log_detail(root: Path, rec: dict) -> str:
+    from orch.phone_view import redact
+
+    with contextlib.suppress(OSError):
+        data = (root / rec["log"]).read_bytes()[-2000:].decode("utf-8", "replace")
+        lines = [ln.strip() for ln in data.splitlines() if ln.strip()]
+        return _clip(redact(lines[-1]), 200) if lines else ""
+    return ""
+
+
+PANE_ALIVE_SECONDS = 60  # a live terminal counts as starting up while what it shows keeps changing
+
+
+def _live_pane_has_output(root: Path, tid: str, rec: dict | None = None, at: float | None = None) -> bool:
+    """A live session that shows output which CHANGED within PANE_ALIVE_SECONDS is starting up, not missing.
+    The first sight of a screen counts as a change; a screen that then stays the same (an error with an open
+    shell) stops counting after PANE_ALIVE_SECONDS, so it still times out. The hash and time of the last
+    change are kept in the run record."""
+    import hashlib
+
+    from orch import runs_live
+
+    at = time.time() if at is None else at
+    with contextlib.suppress(Exception):
+        if not runs_live.session_exists(root, tid):
+            return False
+        pane = runs_live.tmux(root, "capture-pane", "-p", "-t", runs_live.target(tid))
+        text = pane.stdout.strip() if pane is not None and pane.returncode == 0 else ""
+        if not text:
+            return False
+        digest = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+        with locked(root, tid):
+            cur = read(root, tid)
+            if not cur or (rec and cur["run"] != rec["run"]):
+                return False
+            if cur.get("pane_hash") != digest:
+                cur["pane_hash"], cur["pane_changed_at"] = digest, _iso(at)
+                _write(root, cur)
+                return True
+            return at - _parse(cur["pane_changed_at"]) < PANE_ALIVE_SECONDS
+    return False
+
+
+def _stuck(rec: dict, at: float) -> bool:
+    """No agent after the limit (a live tool gets three times as long: it is a whole terminal start-up)."""
+    limit = start_timeout_seconds() * (3 if rec.get("mode") == "live" else 1)
+    try:
+        return not agent_up(rec) and at - _parse(rec["started_at"]) >= limit
+    except (KeyError, ValueError):
+        return False
+
+
+def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | None:
+    """`orch run status` and Chat (polled): a run that had START_TIMEOUT_SECONDS and still has no agent
+    is ended, and a person is told why (the ticket waits with the reason; in Chat a message from the workspace
+    replaces "is thinking"). Returns the text said, else None. Never raises."""
+    at = time.time() if at is None else at
+    try:
+        rec = read(root, tid)
+        # only this machine's own runs (a claim file that arrived by sync is not ours to judge)
+        if not rec or rec.get("host") != host() or not _stuck(rec, at):
+            return None
+        if rec.get("mode") == "live" and _live_pane_has_output(root, tid, rec, at):
+            return None
+        text = f"Couldn't start the agent: {start_failure_reason(root, rec)}"
+        with locked(root, tid):  # decide and release in one step: a run that got its agent meanwhile stays
+            cur = read(root, tid)
+            if not cur or cur["run"] != rec["run"] or not _stuck(cur, at):
+                return None
+            _release_locked(root, tid, cur)
+        runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])
+        _stop_leftovers(root, tid, rec)  # only after the claim is really gone
+        _say_start_failed(root, tid, rec, text)
+        return text
+    except Exception as e:  # noqa: BLE001 - never fails the status call that asks, but is never silent
+        print(
+            f"orch: could not check whether {tid} got its agent: {e.__class__.__name__}: {e}", file=sys.stderr
+        )
+        return None
+
+
+def _stop_leftovers(root: Path, tid: str, rec: dict) -> None:
+    """What is left of the start: its wrapper (only when the pid is the one recorded with its start time: a
+    reused pid is never killed) and a live run's terminal session (exact name)."""
+    pid = rec.get("pid")
+    if isinstance(pid, int) and rec.get("pid_started") and _running(pid, rec["pid_started"]):
+        with contextlib.suppress(Exception):
+            kill_tree(pid)
+    if rec.get("mode") == "live":
+        from orch import runs_live
+
+        with contextlib.suppress(Exception):
+            runs_live.tmux(root, "kill-session", "-t", runs_live.target(tid))  # "=name:" matches exactly
+
+
+def _say_start_failed(root: Path, tid: str, rec: dict, text: str) -> None:
+    """Where a person looks: the run line (ticket waits with the reason), Chat, ticket history, the log."""
+    by = f"agent:{rec.get('agent')}"
+    if rec.get("log"):
+        detail = _log_detail(root, rec)  # read BEFORE orch's own line goes in: it is the agent's last line
+        with contextlib.suppress(OSError), open_log(root / rec["log"]) as f:
+            f.write((text + "\n").encode("utf-8"))
+            if detail:  # the agent's own last line, for the person who opens this log: redacted
+                f.write(("orch: the agent's last line was: " + detail + "\n").encode("utf-8"))
+    with contextlib.suppress(Exception):
+        tickets.log(root, tid, text, "orch")
+    if tickets.is_general(root, tid):  # Chat: an answer from the workspace instead of "is thinking" for ever
+        from orch import chat, relay
+
+        with contextlib.suppress(Exception):
+            chat.record(root, relay.new_id(), addons.workspace_id(root) or "workspace", "orch", text)
+    else:
+        with contextlib.suppress(Exception):
+            tickets.wait_for_start(root, tid, text, by)
+    runhooks.fire("run_state", root=root, tid=tid, run=rec["run"], state="start_failed", reason=text)
+
+
 # ---------------------------------------------------------------- what the agent is told
 
 
@@ -715,6 +1034,11 @@ def _description_plan(ticket: dict) -> list[str]:
 def _done_when_plan(ticket: dict) -> list[str]:
     if not ticket.get("done_when"):
         return []
+    if _plan_open(ticket):  # the plan comes first: no "then start"
+        return [
+            "The person described what should be true when it is done: "
+            f"{_clip(ticket['done_when'], 2000)}. Use it for the done-when of the steps in the plan."
+        ]
     covers = 'Give each task `--covers "<the part of Done when it covers, quoted>"` so every part has a task.'
     if ticket.get("checklist"):
         if any(c.get("covers") for c in ticket["checklist"]):
@@ -729,6 +1053,40 @@ def _done_when_plan(ticket: dict) -> list[str]:
         "The person described what should be true when it is done: "
         f"{_clip(ticket['done_when'], 2000)}. Turn this into checks with `orch check add` "
         f"(one check per thing that must be true). {covers} Then start."
+    ]
+
+
+PLAN_READY = "Plan ready"  # the one question of a "Show plan first" ticket (dashboard keys on it)
+PLAN_START = "Start work"
+PLAN_CHANGE = "Which step, and what should change?"
+
+
+def _plan_open(ticket: dict) -> bool:
+    """A plan_first ticket whose plan the person has not yet approved: no "Plan ready" question was answered
+    "Start work". (Open question, or answered with a change: the plan is still being made.)"""
+    if not ticket.get("plan_first"):
+        return False
+    return not any(
+        str(q.get("text", "")).startswith(PLAN_READY) and q.get("answer") == PLAN_START
+        for q in ticket.get("questions") or []
+    )
+
+
+def _plan_first_plan(ticket: dict) -> list[str]:
+    """Show plan first: plan, ask once, stop. The rule stays until "Plan ready" is answered "Start work"."""
+    if not _plan_open(ticket):
+        return []
+    tid = ticket["id"]
+    return [
+        "The person chose to see the plan first. Do NOT change any project file yet. Make the plan as in the "
+        "skill section 'Plan big work': this ticket is the parent, one sub-ticket per step with its own "
+        f"done-when (`orch ticket new --parent {tid}`), in order. Write the goal and what is not included: "
+        f'orch ticket plan {tid} --goal "<goal>" --not-included "<what is not part of it>". '
+        f'Then ask exactly ONE question: orch ask {tid} "{PLAN_READY}" --option "Start work" '
+        '--option "Change a step" --recommend "Start work", and stop. Start the steps only after the '
+        'answer is "Start work". If the answer is "Change a step" (or asks for any change), ask one more '
+        f'question without options: orch ask {tid} "{PLAN_CHANGE}", change the steps as told, then ask '
+        f'"{PLAN_READY}" again and stop. Do not start before "{PLAN_START}".'
     ]
 
 
@@ -759,7 +1117,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
-    out[1:1] = _done_when_plan(ticket)
+    out[1:1] = _plan_first_plan(ticket) + _done_when_plan(ticket)  # the plan instruction comes first
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("description"):  # written by an agent, from the person's text: not the person's words
@@ -771,10 +1129,19 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     if ticket.get("summary"):
         out.append(f"Where things stand: {_clip(ticket['summary'], 1500)}")
     out.extend(_description_plan(ticket))
-    todo = [c for c in ticket.get("checklist") or [] if not c.get("done")]
+    todo = [c for c in ticket.get("checklist") or [] if not c.get("done") and not c.get("wont_do")]
     if todo:
         out.append(
             "Still to do:\n" + "\n".join(f"- {c['id']}: {_clip(c.get('text', ''), 200)}" for c in todo[:20])
+        )
+    declined = [c for c in ticket.get("checklist") or [] if c.get("wont_do") and not c.get("done")]
+    if declined:
+        out.append(
+            "Declined by a person (do not do these): "
+            + "; ".join(
+                f"{c['id']} ({_clip(' '.join(str(c.get('reason') or 'no reason given').split()), 200)})"
+                for c in declined[:20]
+            )
         )
     hist = (ticket.get("history") or [])[-5:]
     if hist:
@@ -805,6 +1172,7 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
         parts.append("New input:\n" + _items_text(items))
     if not parts:
         parts.append(f"Continue orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.")
+    parts[:0] = _plan_first_plan(ticket)
     parts.extend(_done_when_plan(ticket))
     return "\n\n".join(parts)[:12000]
 
@@ -831,9 +1199,15 @@ def plan(
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
+    person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
+    adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
-    if sid and adapters.transcript_exists(name, sid, root) is False:
+    if (
+        sid
+        and adapters.transcript_exists(name, sid, root, folder=workdir_for(root, read(root, tid), tid))
+        is False
+    ):
         sid = None  # the tool never saved that conversation: resuming it can only fail, start fresh
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
     v = {
@@ -841,6 +1215,7 @@ def plan(
         "session": sid,
         "orch_hooks_file": hooks_file,
         "stream": mode == "oneshot",
+        "person": person,
     }
     argv = None
     resumed = False
@@ -878,6 +1253,7 @@ def plan(
         argv = adapters.render(name, "fresh", mode, v, root)
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
+    argv = store_access(argv, name, root, workdir_for(root, read(root, tid), tid))
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -889,7 +1265,39 @@ def plan(
         "stdin": v["prompt"] if a["prompt_via"] == "stdin" and mode == "oneshot" else None,
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
+        "note": adapters.permission_note(name, root, None, person),
     }
+
+
+def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> list[str] | None:
+    """A tool sandboxed to its working folder (a built-in adapter's `store_args`) cannot reach the workspace's
+    store from a separate copy, so every `orch` write of the agent would fail: `--add-dir <root>/.orch` goes
+    into the argv, nothing else (never the whole workspace, never the orch home). Only when `work` is a copy
+    orch made; the store must be a real folder inside the root (a link would hand out its target); the word
+    it follows is looked for only in the leading words (before `--`, where the prompt starts)."""
+    from orch import worktrees
+
+    if not argv:
+        return argv
+    a = adapters.load(name, root)
+    sa = a.get("store_args")
+    if not sa or a["adapter"] not in adapters.builtin_names() or sa.get("args") != ["--add-dir", "{store}"]:
+        return argv
+    try:
+        if not worktrees.is_orch_copy(Path(work)):
+            return argv
+        store = Path(root) / ".orch"
+        real = store.resolve(strict=True)
+        if store.is_symlink() or not real.is_dir():
+            return argv
+        real.relative_to(Path(root).resolve())
+    except (OSError, ValueError):
+        return argv
+    head = argv[: argv.index("--")] if "--" in argv else argv
+    if sa["after"] not in head[:4]:
+        return argv
+    i = head.index(sa["after"]) + 1
+    return [*argv[:i], "--add-dir", str(real), *argv[i:]]
 
 
 # ---------------------------------------------------------------- start
@@ -909,11 +1317,13 @@ def start(
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
-    from orch import runs_live
+    from orch import runs_live, worktrees
 
+    worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)
+    adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
     notes = []
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
@@ -941,7 +1351,7 @@ def start(
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
         )
-        r["notes"] = notes + ([notice] if notice else [])
+        r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
     notice = adapters.command_notice(name, mode, root)
     if notice:
@@ -950,7 +1360,7 @@ def start(
     if allow and not a["capabilities"]["permission_retry"]:
         notes.append(f"{a['label']} cannot be told which tools to allow; --allow was ignored.")
         allow = []
-    rec = claim(
+    rec, copy_notes = claim_routed(
         root,
         tid,
         by,
@@ -959,8 +1369,11 @@ def start(
         take_over=take_over,
         busy_text=text or f"{by} asked for more work on this ticket.",
     )
+    notes += copy_notes
     try:
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
+        if p.get("note"):
+            notes.append(p["note"])
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)
@@ -1005,6 +1418,15 @@ def start(
 
 
 # ---------------------------------------------------------------- the wrapper (runs detached)
+
+
+def workdir_for(root: Path, rec: dict | None, tid: str | None = None) -> Path:
+    """The folder this run's agent works in: the record's `folder` when it is a separate copy of this
+    workspace
+    (worktrees.workdir_for checks that), else the workspace folder."""
+    from orch import worktrees
+
+    return worktrees.workdir_for(root, rec, tid)
 
 
 def _agent_environ(root: Path) -> dict:
@@ -1154,6 +1576,7 @@ def wrap(
         return 1
     set_process(root, tid, run, os.getpid())
     env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    work = workdir_for(root, rec, tid)  # a separate copy of the folder, or the workspace itself
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
     current: dict = {}
@@ -1173,7 +1596,7 @@ def wrap(
         flags: dict = {}
         rc, out = _run_turn(
             argv,
-            root,
+            work,
             stdin,
             log,
             env,
@@ -1189,20 +1612,20 @@ def wrap(
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags.clear()
-            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             flags.clear()
-            rc, out = _run_turn(argv, root, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
         if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
             again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
             if undeliver(root, tid, again):
                 with contextlib.suppress(Exception):
                     tickets.log(root, tid, HANG_AGAIN, "orch")
         sid = new_session or adapters.parse_session(name, out, root)
-        unsaved = flags.get("hung") or adapters.transcript_exists(name, sid or "", root) is False
+        unsaved = flags.get("hung") or adapters.transcript_exists(name, sid or "", root, folder=work) is False
         if sid and new_session and unsaved:
             sid = None  # orch chose the id, but the tool never saved that conversation: never resume it
         if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
@@ -1251,7 +1674,7 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
 
         signal.signal(signal.SIGINT, signal.SIG_IGN)  # Escape/^C belong to the agent, not to this wrapper
     try:
-        proc = subprocess.Popen(argv, cwd=root, env=env)
+        proc = subprocess.Popen(argv, cwd=workdir_for(root, rec, tid), env=env)
     except OSError as e:
         print(f"orch could not start the agent: {e}", file=sys.stderr)
         with contextlib.suppress(Exception):

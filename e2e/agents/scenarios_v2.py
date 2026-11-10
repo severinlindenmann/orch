@@ -342,8 +342,7 @@ def _adh_run(e, agent: str, mode: str, pid: str, kind: str, text: str, rep: int,
     t0 = time.time()
     try:
         w = real_w(e, name, agent)
-        if agent == "codex":  # orch starts `codex exec` with no flags: without a config the sandbox is read-only (a person's ~/.codex sets it)
-            (Path(codex_home(e)) / "config.toml").write_text('sandbox_mode = "workspace-write"\n')
+        # codex: no config.toml on purpose: the sandbox must come from orch's own argv (B2b), not from the person's config
         for rel, txt in ADH_FILES.items():
             (w.root / rel).parent.mkdir(parents=True, exist_ok=True)
             (w.root / rel).write_text(txt)

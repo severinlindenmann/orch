@@ -60,12 +60,12 @@ function startFailedRow(t, sf) {
     })), parentLine(t));
 }
 function workingRow(t) {
-  const tasks = array(t.checklist), done = tasks.filter(task => task.done).length;
-  const claim = state.runs?.[t.id]?.claim, task = tasks.find(task => !task.done);
+  const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
+  const claim = state.runs?.[t.id]?.claim, task = tasks.find(task => !window.DashHelpers.resolved(task));
   return h('div', {className:'card-row home-work', 'data-key':'ticket-' + t.id}, ticketTitle(t),
     task ? h('p', {}, clean(task.text || task.title)) : null,
     h('p', {className:'meta'}, [window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, claim) : capitalise(name(claim?.label || claim?.agent || t.owner)), age(claim?.started_at)].filter(Boolean).join(' · ')),
-    tasks.length ? h('div', {className:'segments', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, tasks.map(task => h('span', {className:task.done ? 'complete' : ''}))) : null,
+    tasks.length ? h('div', {className:'segments', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, tasks.map(task => h('span', {className:window.DashHelpers.resolved(task) ? 'complete' : ''}))) : null,
     h('div', {className:'row'}, h('span', {className:'meta grow'}, done + ' of ' + tasks.length + ' tasks done'), h('a', {className:'btn ghost sm', href:href(t.id)}, 'Watch →')));
 }
 function resultRow(t) {

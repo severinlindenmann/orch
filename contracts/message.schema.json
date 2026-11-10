@@ -13,7 +13,7 @@
     "type": { "enum": ["text", "file", "question", "answer", "delegate", "start", "allow", "refresh-hint", "webhook", "control"] },
     "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" },
     "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Ticket in the workspace that owns the thread: question and answer = the asking workspace (the relay copies it from reply_to); text/file/delegate/start = the sender's; phone send and webhook = the receiving workspace's." },
-    "key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$", "description": "Optional display key of `ticket` (ticket.schema.json key, e.g. DM1-12), set by the workspace that owns that ticket on text/file/question/delegate/start. The relay copies it with `ticket` onto answers and shows it to phones next to `ticket`. For people only; `ticket` stays the reference." },
+    "key": { "$ref": "#/$defs/display_key", "description": "Optional display key of `ticket` (ticket.schema.json key, e.g. DM1-12), set by the workspace that owns that ticket on text/file/question/delegate/start. The relay copies it with `ticket` onto answers and shows it to phones next to `ticket`. For people only; `ticket` stays the reference." },
     "reply_to": { "type": "string", "pattern": "^m_[a-z0-9]{16}$" },
     "body": { "type": "object" }
   },
@@ -23,6 +23,13 @@
     { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["update", "general"], "properties": { "general": { "const": true } } } } }, "then": { "required": ["reply_to"], "properties": { "body": { "not": { "required": ["ticket_view"] }, "properties": { "update": { "properties": { "kind": { "enum": ["ack", "working"] } } } } } } } },
     { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["general"], "properties": { "general": { "const": true } } } } }, "then": { "not": { "required": ["ticket"] } } },
     { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["feedback"] } } }, "then": { "required": ["ticket"] } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["proposal_result"] } } }, "then": { "required": ["reply_to"], "properties": { "type": { "const": "text" }, "body": { "additionalProperties": false, "required": ["text"], "properties": { "text": {}, "proposal_result": {} } } }, "not": { "anyOf": [{ "required": ["ticket"] }, { "required": ["key"] }] },
+      "allOf": [
+        { "if": { "required": ["body"], "properties": { "body": { "required": ["proposal_result"], "properties": { "proposal_result": { "required": ["result", "key"], "properties": { "result": { "enum": ["made", "decided"] } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "pattern": "^Ticket made: [A-Z0-9]{2,4}-[1-9][0-9]{0,8}$" } } } } } },
+        { "if": { "required": ["body"], "properties": { "body": { "required": ["proposal_result"], "properties": { "proposal_result": { "required": ["result"], "properties": { "result": { "const": "refused" } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Couldn't make the ticket" } } } } } },
+        { "if": { "required": ["body"], "properties": { "body": { "required": ["proposal_result"], "properties": { "proposal_result": { "required": ["result"], "properties": { "result": { "const": "decided" } }, "not": { "required": ["key"] } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Already decided" } } } } } },
+        { "if": { "required": ["body"], "properties": { "body": { "properties": { "proposal_result": { "properties": { "result": { "const": "made" } } } } } } }, "then": { "properties": { "to": { "const": "phones" } } }, "else": { "properties": { "to": { "pattern": "^ph_[a-z0-9]{10}$" } } } }
+      ] } },
     { "if": { "properties": { "type": { "const": "control" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/control" } } } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
     { "if": { "properties": { "type": { "const": "question" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/question" } }, "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["proposal"] } } }, "then": { "not": { "required": ["ticket"] } }, "else": { "required": ["ticket"] } } },
@@ -94,8 +101,8 @@
     },
     "text": {
       "type": "object",
-      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }],
-      "description": "A text needs at least one of text, attachments, voice, location, feedback. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
+      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }, { "required": ["proposal_result"] }],
+      "description": "A text needs at least one of text, attachments, voice, location, feedback, proposal_result. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
       "properties": {
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
@@ -144,6 +151,7 @@
           }
         },
         "feedback": { "$ref": "#/$defs/feedback" },
+        "proposal_result": { "$ref": "#/$defs/proposal_result" },
         "update": {
           "type": "object", "required": ["kind"], "additionalProperties": false,
           "properties": {
@@ -160,6 +168,21 @@
         "ticket_view": { "$ref": "#/$defs/ticket_view" }
       },
       "if": { "required": ["ticket_view"] }, "then": { "required": ["update"] }
+    },
+    "display_key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$", "description": "<code>-<n>, n from 1, e.g. DM1-12 (the same rule as ticket.schema.json key)." },
+    "proposal_result": {
+      "description": "Not chat. The workspace's result for a phone's `make` answer to a ticket proposal (relay-api.md, Ticket proposal result): one text with reply_to = the proposal question's id, body.text = the fixed canonical line for the result (made/decided with key: Ticket made: <key>; refused: Couldn't make the ticket; decided: Already decided; the relay checks the key too), no ticket, no general, no update, no ticket_view, no attribution. made goes to `phones`; refused and decided go only to the answering `ph_…`. The phone never shows it as a bubble; it only updates the proposal card. `reason` is a fixed code, never exception text, and no code is added without a contract change.",
+      "type": "object", "additionalProperties": false, "required": ["result"],
+      "properties": {
+        "result": { "enum": ["made", "refused", "decided"] },
+        "key": { "$ref": "#/$defs/display_key", "description": "Display key of the ticket. Required with made; optional with decided (the proposal had become a ticket, by the dashboard or an earlier answer); never with refused." },
+        "reason": { "enum": ["needs_person", "unavailable"], "description": "Only with refused, then required. needs_person = the action needs a person's proof the phone answer did not carry; unavailable = any other refusal (nothing more is told)." }
+      },
+      "allOf": [
+        { "if": { "properties": { "result": { "const": "made" } } }, "then": { "required": ["key"], "not": { "required": ["reason"] } } },
+        { "if": { "properties": { "result": { "const": "refused" } } }, "then": { "required": ["reason"], "not": { "required": ["key"] } } },
+        { "if": { "properties": { "result": { "const": "decided" } } }, "then": { "not": { "required": ["reason"] } } }
+      ]
     },
     "ticket_view": {
       "type": "object", "additionalProperties": false,
@@ -180,10 +203,20 @@
           "type": "array", "maxItems": 200,
           "items": {
             "type": "object", "additionalProperties": false, "required": ["text", "done"],
-            "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 500 }, "done": { "type": "boolean" } }
+            "properties": {
+              "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+              "done": { "type": "boolean", "description": "true only for a step done with proof; a Won't do step is done=false with wont_do=true." },
+              "wont_do": { "const": true, "description": "Optional. A person decided this step will not be done (\"Won't do\"); the phone shows it struck through with the words Won't do. It is counted in ticket_view.wont_do, not in done." },
+              "reason": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional, only with wont_do: one plain line, why." }
+            },
+            "allOf": [
+              { "if": { "required": ["wont_do"] }, "then": { "properties": { "done": { "const": false } } } },
+              { "if": { "required": ["reason"] }, "then": { "required": ["wont_do"] } }
+            ]
           }
         },
-        "done": { "type": "integer", "minimum": 0 },
+        "done": { "type": "integer", "minimum": 0, "description": "Steps done with proof (a Won't do step is not counted here)." },
+        "wont_do": { "type": "integer", "minimum": 0, "description": "Optional. Steps a person declined (Won't do); absent = 0. The phone shows \"N done, M won't do\", never \"3 of 3\" for work that was not done. done + wont_do <= total." },
         "total": { "type": "integer", "minimum": 0 },
         "history_tail": {
           "type": "array", "maxItems": 30, "description": "The ticket's last history lines (at most 30), oldest first, in plain words.",

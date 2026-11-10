@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from orch import net, publish, relay, templates, term, tickets
+from orch import humanproof, net, publish, relay, templates, term, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -262,6 +263,64 @@ def _confirm(args):
     return ask
 
 
+def _as_person(args, root: Path, op: str, target: str, **kw) -> str | None:
+    """A person's own act in a group (H1). Returns the VERIFIED human identity (from a proof; a terminal
+    command is handed off to the page and refused here), or None for a caller that claims to be an agent (an
+    agent session, or --by agent:...). EVERY caller branches on the return value: a person's flags
+    (--dashboard, --click) are honoured only for a verified identity, an agent claim gets the downgraded
+    action. Never "did not raise"."""
+    if tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:"):
+        return None
+    who = humanproof.person_by(root, args, op, target, **kw)
+    if not who.startswith("human:"):
+        return None
+    return who
+
+
+def _file_sha(root: Path, path: str) -> str:
+    """The content hash of a file a person is about to share (the proof's target binds the content)."""
+    import hashlib
+
+    from orch import chat_groups as cg
+
+    return hashlib.sha256(cg.read_shared(Path(path), root, confined=False)).hexdigest()
+
+
+def _group_title(root: Path, group: str, host: str | None = None) -> str:
+    """The group's name for a card (never its raw id); an unknown group is "a group chat". A joined group
+    matches on host AND id (an id is only unique per host)."""
+    from orch import chat_groups as cg
+
+    try:
+        v = cg.view(root)
+        for g in v["joined"] if host else v["hosted"]:
+            if g.get("id") == group and (not host or g.get("host") == host) and g.get("title"):
+                return str(g["title"])
+    except (Refused, OSError, KeyError):
+        pass
+    return "a group chat"
+
+
+def _member_parts(root: Path, host: str, group: str) -> dict:
+    """Card parts for an act in a joined group: its title (matched on host AND id) and the host's name."""
+    from orch import relay
+
+    return {
+        "title": humanproof.part(_group_title(root, group, host)),
+        "host": humanproof.part(relay.name_of(root, host)),
+    }
+
+
+def _share_card(args) -> dict:
+    """What the share card must show and what the page will run (F4): the full resolved path of the file (the
+    card shows it in an "Exact file:" block) and a command with that absolute path, so the page's folder can
+    never turn a relative name into another file."""
+    full = str(Path(args.file).resolve())
+    argv = humanproof._clean_argv(humanproof.CURRENT_ARGV) or []
+    argv = [full if a == args.file else a for a in argv]
+    return {"exact": full, "argv": argv}
+
+
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -274,44 +333,102 @@ def run_group(args, root: Path, out) -> None:
         rows += [f"{g['title']} ({g['host']}/{g['id']}) - invited" for g in v["joined"]]
         out(args, v, "\n".join(rows) or "No groups.")
     elif sub == "say":
-        r = cg.say(root, tid, args.text, "dashboard" if args.dashboard else "helper", args.to_person, by)
+        as_person = None
+        if args.dashboard:  # writing into the group AS the person: only with the person's verified proof
+            as_person = _as_person(
+                args, root, "group.write_as_person", tid,
+                parts={"title": humanproof.ticket_name(root, tid)}, value=args.text,
+            )  # fmt: skip
+        r = cg.say(root, tid, args.text, "dashboard" if as_person else "helper", args.to_person, by)
         out(args, r, "Written into the group.")
     elif sub == "add":
         r = cg.add_member(root, tid, ws, by)
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
     elif sub == "remove":
-        tickets.require_human("Remove this workspace from the group?", "removing a member")
+        person = _as_person(
+            args, root, "group.remove_member", f"{tid}:{args.workspace}",
+            parts={
+                "title": humanproof.ticket_name(root, tid),
+                "workspace": humanproof.part(relay.name_of(root, ws)),
+            },
+        )  # fmt: skip
+        if person is None:  # an agent claim never removes a member (no typed yes, no flag counts)
+            raise Refused(humanproof.AGENT_REFUSED)
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
     elif sub == "ask":
         m = cg.ask(root, tid, ws, args.question, by)
         out(args, m, _sent_line(root, m, "Question sent to {}."))
     elif sub == "share":
-        r = cg.share_file(root, tid, Path(args.file), args.title, None, args.click, by, _confirm(args))
+        click, sha = False, None  # the downgraded action: confined to the workspace, no click
+        if args.click:  # a person shares a file with the group: the proof binds the file's CONTENT
+            sha = _file_sha(root, args.file)
+            if _as_person(
+                args, root, "group.share_file", f"{tid}:{sha}",
+                parts={
+                    "title": humanproof.ticket_name(root, tid),
+                    "file": humanproof.part(Path(args.file).name),
+                },
+                **_share_card(args),
+            ):  # fmt: skip
+                click = True
+        # the bytes that are uploaded are checked against the bytes the proof covers (expect_sha)
+        r = cg.share_file(
+            root,
+            tid,
+            Path(args.file),
+            args.title,
+            None,
+            click,
+            by,
+            _confirm(args),
+            expect_sha=sha if click else None,
+        )
         out(args, r, "Shared with the group.")
     elif sub == "reply":
-        if args.dashboard:
-            tickets.require_human("Write into the group as yourself?", "writing as the person")
+        as_person = None
+        if (
+            args.dashboard
+        ):  # only a verified person speaks as themselves; an agent claim is downgraded to helper
+            host = relay.resolve(root, args.host)
+            as_person = _as_person(
+                args, root, "group.write_as_person", humanproof.group_target(root, host, args.group),
+                parts=_member_parts(root, host, args.group), value=args.text,
+            )  # fmt: skip
         m = cg.say_member(
             root,
             relay.resolve(root, args.host),
             args.group,
             args.text,
-            "dashboard" if args.dashboard else "helper",
+            "dashboard" if as_person else "helper",
         )
         out(args, m, "Written into the group.")
     elif sub == "answer":
         m = cg.answer(root, args.message, args.text)
         out(args, m, "Answer sent.")
     elif sub == "send-file":
+        click, sha = False, None  # an agent claim: no click, so share_member refuses in words
+        if args.click:  # the proof binds the file's content, checked against the uploaded bytes
+            sha = _file_sha(root, args.file)
+            host = relay.resolve(root, args.host)
+            if _as_person(
+                args, root, "group.share_file", f"{humanproof.group_target(root, host, args.group)}:{sha}",
+                parts={
+                    **_member_parts(root, host, args.group),
+                    "file": humanproof.part(Path(args.file).name),
+                },
+                **_share_card(args),
+            ):  # fmt: skip
+                click = True
         m = cg.share_member(
             root,
             relay.resolve(root, args.host),
             args.group,
             Path(args.file),
             args.title,
-            args.click,
+            click,
             _confirm(args),
+            expect_sha=sha if click else None,
         )
         out(args, m, "Shared with the group.")
     elif sub == "leave":
@@ -464,6 +581,17 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "group":
         return run_group(args, root, out)
     if sub == "connect":
+        # connecting (or changing the relay address) is a person's action (H1): proof for this relay host
+        address = humanproof.server_address(args.url)  # refuses a URL with a name or password in it
+        if not humanproof.person_by(
+            root,
+            args,
+            "relay.connect",
+            address,
+            parts={"host": address, "scheme": urlsplit(args.url.strip()).scheme},
+            exact=address,
+        ).startswith("human:"):
+            raise Refused(humanproof.AGENT_REFUSED)
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
             args,
@@ -584,9 +712,18 @@ def run_relay(args, root: Path, out) -> None:
         b = msg.get("body", {})
         task = b.get("title") or b.get("key") or args.id
         mode = "once" if args.once else "permanent"
-        tickets.require_human(
-            f"Allow {msg.get('from')} to {msg.get('type')} {task}?", f"allowing {msg.get('from')} ({mode})"
-        )
+        if not humanproof.person_by(
+            root,
+            args,
+            "relay.allow",
+            f"{args.id}:{mode}",
+            parts={
+                "peer": humanproof.part(relay.name_of(root, msg.get("from"))),
+                "task": humanproof.part(task),
+                "mode": mode,
+            },
+        ).startswith("human:"):
+            raise Refused(humanproof.AGENT_REFUSED)
         m = relay.give_allow(root, args.id, mode)
         out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":

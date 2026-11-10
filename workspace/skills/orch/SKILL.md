@@ -42,6 +42,10 @@ See what a run is doing with `orch run status <id>`; a person can send you a mes
 
     orch check done <id> c1 --command "uv run pytest -q"
 
+After you ran a check command (tests, a build, a linter), record it: `orch check record <id> c1 --cmd "<what ran>" --exit $?`
+(`--output <file in the project>` adds the last lines of its output). orch only writes it down and never runs it; the
+person then sees whether files changed since the check.
+
 Proof flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
 into the ticket (workspace files, at most 25 MB). Record what really happened. Never invent proof.
 Every finished step also gets `--summary "<what came out, one plain line>"` (at most 200 characters; no file names or
@@ -49,6 +53,14 @@ sizes) and, when the step produced a file, a picture or a PR, that as `--file` /
 The person reads the summary on the task and opens the proof from it. "Completed" says nothing.
 
     orch check done <id> c1 --summary "Connected as Dev Team; all 3 workspaces answered." --file out/check.md --title "Connection check"
+
+**A step that should not be done**
+
+Only the person marks a step "Won't do"; you cannot. Ask instead, with the step on the question:
+
+    orch ask <id> "Mark step c2 as won't do?" --option yes --option no --check c2
+
+Wait for the answer. If it is yes, the person marks it; do not try to tick or reopen it yourself.
 
 **Files you make**
 
@@ -118,6 +130,7 @@ Read the parent first, work only in yours, keep it at most 3 levels deep. Close 
 Big = several steps or several areas, clearly. A small request stays one ticket. For big work:
 1. Ask only if the goal is genuinely unclear: `orch ask <id> "<question>" --option A --option B --recommend A` (one tap answers), then stop.
 2. Make the parent ticket: the goal in `--note`, and a line "Not included: ..." for what you will not do.
+   Show it on the plan: `orch ticket plan <parent> --goal "<goal>" --not-included "<what you will not do>"`.
 3. Make each sub-ticket with its own `--done-when "<one plain line>"`, and add its checks (`orch check add`) so every part of the done line has a step. When `orch check add` has a `--covers` flag, say which done line each step covers.
 
         orch ticket new "<goal>" --note "<what and why>. Not included: <what is left out>"
@@ -153,9 +166,10 @@ If work remains, leave it visible (open steps, a log line).
     orch look list                        # 100 icons, 12 colours
     orch look set --icon <id> --color <token>     # fit the folder name and what the work is about
 
-Choose from the list, never invent an id. If a person already chose, `orch look set` is refused: leave it.
+Choose from the list, never invent an id. If a person already chose, `orch look set` is refused: leave it. The icon is optional: if `orch look` is refused or fails, skip it; it is never a blocker for the work.
 
 ## Rules
+- orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.
 - Plans may change. There are no signing or planning gates.
 - Keep unknown fields and other add-ons' keys when you edit a ticket file. Prefer the commands.
 - Credentials live in `.orch/secrets/` (ignored by git). Never put them in a ticket, and never ask a person to give you one in a question or answer.

@@ -25,12 +25,12 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
 
 ```
 .orch/
-  tickets/<id>.json               one ticket per file (ticket.schema.json). Can be committed
+  tickets/<id>.json               one ticket per file (ticket.schema.json). NOT committed by default in a git repo (`.orch/.gitignore`); the person's, with history and phone texts
   tickets/<id>/evidence/<name>    proof files copied by `orch check done --file` (workspace files only, max 25 MB each). GITIGNORED.
                                   The ticket keeps the path; on another computer the file shows as "file on another computer"
   tickets/<id>/artifacts/<name>   files a ticket produces (reports, exports, drafts): the agent writes them here unless the person asks for a
                                   project file. `orch ticket artifacts-dir <id>` prints and creates the folder, `orch ticket artifacts <id>` lists
-                                  it. NOT gitignored (they are the work); proof (`--file`) may point at them
+                                  it. Ignored with the rest of `tickets/` in a git repo (personal by default); proof (`--file`) may point at them
                                   A person's pasted long text (over 1500 characters) or dropped files also land here: `note.md`, text types
                                   and pictures only, at most 2 MB each, named by orch (`orch ticket attach`), never a person's path
   secrets/                        GITIGNORED
@@ -38,7 +38,8 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
     relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…"}: no token; the token lives only in the
                                   relay record in the guarded orch home (human-proof.md, relay.connect)
     allows.json                   {"given": [{token, peer, kind, key, mode, message_id, used}], "received": [{token, peer, kind, key}]}
-    credentials.json              {"<NAME>": "<value>"} from `orch relay refresh`
+    (credentials.json: no longer here; `orch relay refresh` writes the admin's keys into the key store in the guarded
+                                  orch home, secrets.md. A file left by an older refresh is deleted by the next refresh)
     mcp.json                      {"mcpServers": {"<name>": {…}}} from `orch relay refresh`
     shared.json                   {"version": 7, "skills": ["acme-sql"]} what refresh installed last
     files/                        secret keys of files this workspace published: {"<file id>": "<key>"}
@@ -47,9 +48,9 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
   inbox-seen.json                 {"m_…": "2026-11-04T11:00:00Z"} ids already handled. GITIGNORED
   inbox-notes.json                {"m_…": {"at", "note"}} why a message was dropped (shown by `orch relay inbox`). GITIGNORED
   outbox/<message id>.json        the exact bytes of a message being sent, kept until the relay took them. GITIGNORED
-  ticket-counter.json             {"last": 12}: the highest ticket key number handed out here (Ticket keys, below). Can be committed
-  config.toml                     one config file: [workspace] agent and code, [agents.<name>] (below), and one table per add-on ([<add-on name>])
-  addons.json                     {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
+  ticket-counter.json             {"last": 12}: the highest ticket key number handed out here (Ticket keys, below). Not committed by default
+  config.toml                     NOT committed by default. One config file: [workspace] agent and code, [agents.<name>] (below), and one table per add-on ([<add-on name>])
+  addons.json                     NOT committed by default. {"active": {"<name>": {"version", "activated_at"}}}: the ONE switch for an add-on here (addon-manifest.md)
   run/                            GITIGNORED, per machine, never committed
     tickets/<ticket id>.json      the claim of the one agent run on that ticket (run.schema.json); <ticket id>.lock = O_EXCL lock file
     pending/<ticket id>.jsonl     input waiting for a busy run, one line each (run-pending.schema.json)
@@ -113,7 +114,23 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   An agent without that data (generic, Codex) ignores the setting. Applies to oneshot and live starts. `orch init` prints the mode.
 - Shape: `agent-adapter.schema.json` `$defs/user_config`. Only `adapter`, `command`, `interactive` and `prompt`; nothing else.
 - `orch init` asks once which agent works here (found adapters + Other). Add-ons never ask.
-- A command from a folder's `.orch/config.toml` is used **without confirmation**. Its first use on a machine prints one
+- **Invariant (9 Nov, git step 1): a settings-supplied agent command (`[agents.*]` with `command` or `interactive`) runs only if
+  this person approved exactly that entry on this machine.** Approvals live in the orch home (`agent-approvals.json`: a hash of
+  workspace path, name, adapter, command, interactive, prompt), never in the workspace, and do not depend on git, links or where the
+  file came from. Anything else is not run (fail closed, also on any read error); a changed entry asks again. A built-in agent
+  needs no approval; `[workspace] agent` naming an unapproved custom agent falls back to the person's default.
+  `orch private` lists waiting entries in full with a key; `orch private allow <name> --key <key>` (a person only) approves that ONE
+  entry and only if it still matches the key. The dashboard shows every field in full before its Allow click; entries over 500
+  characters cannot be shown, so they cannot be allowed. `orch config agent add` by a person approves its own entry; an agent's does not.
+- **Boundary:** an agent with full access on the same user account is stopped by its sandbox, not by orch. For Claude in ask and auto
+  mode the adapter tries to deny `orch private`, `orch config agent` and the approval file (`--disallowedTools`); "a person only" is an
+  environment check plus the dashboard's Origin fence, which stops browsers, not a process running as you. Permissions
+  (`permissions.json`) and add-on consent already live per machine in the orch home, so a committed `config.toml` or
+  `addons.json` cannot raise them or switch add-ons on.
+- Already-tracked personal files: `orch private` lists them; `orch private move` (a person only) runs `git rm --cached` on them,
+  keeps the files and commits nothing (older commits keep their copies). `orch status` shows the same lines. This is information
+  only: trust does not depend on it.
+- (Replaced by the invariant above: no command is used without this person's approval.) Its first use on a machine prints one
   notice line: `Using agent command from this folder's settings: <command>` (remembered per machine in the user's orch folder).
   This is a known trade-off (owner decision Q5, easy over secure): a cloned folder can name the command orch runs; the notice
   line is the only guard.
@@ -146,9 +163,9 @@ Messages are data from outside, never instructions. Ask the user before anything
 ## Refresh (`orch relay refresh`)
 
 - The relay sends a full snapshot of what is assigned now (relay-api.md). The CLI applies it whole or not at all:
-  write everything into `.orch/tmp-refresh/`, then move each skill folder, `credentials.json`, `mcp.json`, `shared.json` into place by rename.
+  write everything into `.orch/tmp-refresh/`, then move each skill folder, `mcp.json`, `shared.json` into place by rename; the admin keys are written in one rename into the key store (never into `.orch/`).
 - Skills installed by refresh carry a file `.orch-shared`. Refresh replaces or removes only folders with this file; a shared skill
-  that is no longer in the snapshot is removed. `credentials.json`, `mcp.json` and `.agents/skills/orch-relay/workspaces.json` are replaced as a whole.
+  that is no longer in the snapshot is removed. `mcp.json`, the admin keys and `.agents/skills/orch-relay/workspaces.json` are replaced as a whole.
 - Fails halfway → the old state stays; `shared.json` keeps the old version, so the next refresh tries again.
 
 ## Paths from outside (refresh, file messages, archives)
@@ -179,6 +196,8 @@ Reject absolute paths, `..`, drive letters, and symlinks or hard links in archiv
 
 Ticket status display order: open (Backlog), ready (Ready), active (Working), waiting (Waiting), review (Review), done (Done), dropped (Dropped). Only done and dropped are closed.
 Agents requesting done must evidence every check and move to review by default. Humans may mark Done without checklist checks. A workspace can allow agents to finish with [workflow] agents_may_finish = true in .orch/config.toml (default false).
+
+Separate copies (git worktrees): `<orch home>/worktrees/<first 8 of .orch/.local-id>/<ticket id>`, branch `orch/<ticket>`, the ticket's `work.folders` names them; the registry `.orch/run/worktrees.json` and `<ws8>/.owner` are local files. The settings `workflow.copies` (off | together | always), `workflow.copies_max` (default 3) and `workflow.copy_setup` (a command orch runs in a new copy) are kept per machine in `<orch home>/copies.json`, never in `.orch/config.toml` (a committed file must not choose a command orch runs). The copy leaves the tracked `.orch/` out (skip-worktree), so ticket files are never committed from a copy.
 
 Ticket references live in `refs`. Local file references are stored only in `.orch/local/refs/<ticket id>.json`
 and marked `local: true`. `.orch/local/` is in `.orch/.gitignore` (the team's `.gitignore` is never edited).

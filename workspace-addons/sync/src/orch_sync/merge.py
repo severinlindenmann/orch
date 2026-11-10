@@ -7,6 +7,7 @@ Shared vectors: contracts/vectors/ticket-merge-v1.json.
 import json
 import re
 from copy import deepcopy
+from datetime import datetime
 
 FINAL = ("done", "dropped")
 LOSER_FIELDS = ("title", "note", "summary", "owner", "due", "key", "text")  # a replaced value goes to history
@@ -59,11 +60,20 @@ def _num(i):
 class _Ctx:
     """One merge: which side is newer (symmetric: updated_at, then canonical json) and the history lines."""
 
-    def __init__(self, a, b, now):
+    def __init__(self, a, b, now, person=None):
         self.now = now
+        self.ticket = a.get("id")
+        self._person = person  # person(step, ticket id) -> bool, from the receiving core; None = nobody
         self.a_newer = (a.get("updated_at", ""), _canon(a)) >= (b.get("updated_at", ""), _canon(b))
         self.lines = {}  # (text, canonical lost) -> lost: the full replaced value, so nothing is ever cut
         self.old_keys = set()
+
+    def verified(self, step):
+        """The receiving core vouches for this step's decision (Won't do or its undo). Never raises."""
+        try:
+            return bool(self._person and self._person(step, self.ticket))
+        except Exception:  # noqa: BLE001 - a verifier that fails vouches for nobody
+            return False
 
     def say(self, text, lost=_MISSING):
         self.lines[("sync: " + text, "" if lost is _MISSING else _canon(lost))] = lost
@@ -115,18 +125,32 @@ def _deep(ctx, base, a, b, path=()):
     return _three(ctx, base, a, b)
 
 
-def _renumber_clashes(ctx, base, a, b, same, prefix):
+class _Pause(Exception):
+    """Two items the core vouches for claim one id: cannot be merged, the caller pauses (merge_ticket -> None)."""
+
+
+def _renumber_clashes(ctx, base, a, b, same, prefix, vouched=False):
     """Both sides added an item with the same id but different content: the older side keeps the id, the newer
-    side's item gets the next free one. Returns the renames per side."""
+    side's item gets the next free one. `vouched` (the checklist): an item the core verifies (a person's signed
+    Won't do) NEVER moves, whatever updated_at says (peer-controlled): the other side's item is renumbered; two
+    verifying items cannot be merged (pause); updated_at only decides between unverified items. Returns the
+    renames per side."""
     bids = {x["id"] for x in base}
     clash = [x["id"] for x in a if x["id"] not in bids and any(y["id"] == x["id"] and not same(x, y) for y in b)]
     used = {x["id"] for x in base + a + b}
     ren = {"a": {}, "b": {}}
     newer = "a" if ctx.a_newer else "b"
     for i in sorted(clash, key=lambda s: (_num(s), s)):
+        mover = newer
+        if vouched:
+            va = any(ctx.verified(x) for x in a if x["id"] == i)
+            vb = any(ctx.verified(x) for x in b if x["id"] == i)
+            if va and vb:
+                raise _Pause(i)
+            mover = "b" if va else "a" if vb else newer
         new = f"{prefix}{max(_num(u) for u in used) + 1}"
         used.add(new)
-        ren[newer][i] = new
+        ren[mover][i] = new
         ctx.say(f"{i} renumbered to {new} (both sides added one)")
     for side, lst in (("a", a), ("b", b)):
         for x in lst:
@@ -158,16 +182,134 @@ def _order(items, base_ids, key=None):
     return [items[i] for i in first + rest]
 
 
+RUNS_PER_REF = 5  # the rule below is the core's tickets.trim_runs (parity-tested), so replicas converge
+RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes the runs
+_RAN_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+def _ran_at_ok(v) -> bool:
+    if not isinstance(v, str) or not _RAN_AT.fullmatch(v):
+        return False
+    try:
+        datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
+
+
+def _is_run(e) -> bool:
+    return isinstance(e, dict) and e.get("type") == "command" and _ran_at_ok(e.get("ran_at"))
+
+
+def trim_runs(evidence: list) -> list:
+    """Same as orch.tickets.trim_runs: newest 5 runs per command text and at most 45 runs per check (oldest
+    runs first); notes and other proof are never dropped; run order (ran_at, canonical JSON)."""
+    key = lambda i: (evidence[i]["ran_at"], _canon(evidence[i]))
+    by_ref = {}
+    for i, e in enumerate(evidence):
+        if _is_run(e):
+            by_ref.setdefault(str(e.get("ref")), []).append(i)
+    drop = set()
+    for idx in by_ref.values():
+        idx.sort(key=key)
+        drop.update(idx[:-RUNS_PER_REF])
+    live = sorted((i for idx in by_ref.values() for i in idx if i not in drop), key=key)
+    drop.update(live[:-RUNS_PER_CHECK])  # over the cap only the oldest runs go; other proof is never touched
+    return [e for i, e in enumerate(evidence) if i not in drop]
+
+
 def _evidence(*lists):
     seen = {}
     for e in (e for lst in lists for e in lst):
-        k = (e.get("type"), e.get("ref"))
+        if not isinstance(e, dict):
+            continue
+        ran = e.get("ran_at")
+        # a recorded run is one entry per run (two replicas in the same second still collapse to one); the key is
+        # always hashable, whatever hostile JSON put in these fields
+        k = (str(e.get("type")), str(e.get("ref")), ran if isinstance(ran, str) else "")
         if k not in seen or _canon(e) > _canon(seen[k]):
             seen[k] = e
-    return sorted(seen.values(), key=lambda e: (e.get("at", ""), _canon(e)))
+    return trim_runs(sorted(seen.values(), key=lambda e: (str(e.get("at", "")), _canon(e))))
+
+
+# ONE place for what a person's Won't do decides. The receiving core's ledger holds ONE current entry per step, so
+# at most one of base / a / b can verify: that item is the step's AUTHORITY (not the base: a stale base proves
+# nothing). _SIGNED = every step field the signed decision record is built from (humanproof.SIGNED_STEP_FIELDS, a
+# test fails if the two drift apart) + the MAC itself.
+#   - authority is an "on": EVERY input and the merged result take ALL _SIGNED fields from it (text and covers
+#     change only through a proven, re-signed edit);
+#   - authority is an undo: they take the decision fields (_DECISION); text and covers are then free (an undo
+#     record does not bind them);
+#   - no authority (nothing verifies, or no verifier): no Won't do at all.
+_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_mac")
+_DECISION = ("wont_do", "reason", "wont_nonce", "wont_mac")
+
+
+def _person_wont(ctx, x):
+    """A step's Won't do counts as the person's only when the RECEIVING CORE says so (`person`: its own wontdo1
+    MAC over the decision (and, for an "on", the step's text and covers) that is the CURRENT ledger entry; or a
+    relay-authenticated sender it recorded). The text of `by` is never looked at; with no verifier nobody is a
+    person."""
+    return x.get("wont_do") is True and ctx.verified(x)
+
+
+def _drop_wont(x):
+    return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")}
+
+
+def _authority(ctx, *items):
+    """The one item among `items` the core vouches for (a decision: on, or an undo), else None. Two different
+    verifying decisions cannot exist with one current ledger entry per step; if a verifier ever vouched for two
+    (it must not), nobody is the authority: fail closed."""
+    found = [x for x in items if x and ctx.verified(x)]
+    if not found:
+        return None
+    first = _canon({k: found[0].get(k) for k in _SIGNED})
+    if any(_canon({k: x.get(k) for k in _SIGNED}) != first for x in found[1:]):
+        return None
+    return found[0]
+
+
+def _impose(x, auth):
+    """`x` with the authority's say: all signed fields from an "on" authority, the decision fields from an undo,
+    no Won't do at all without an authority."""
+    if auth is None:
+        return _drop_wont(x)
+    fields = _SIGNED if auth.get("wont_do") is True else _DECISION
+    y = {k: v for k, v in x.items() if k not in fields}
+    y.update({k: auth[k] for k in fields if k in auth})
+    if y.get("wont_do"):
+        y["done"] = False
+    return y
 
 
 def _check_item(ctx, x0, xa, xb):
+    # Won't do is a person's decision (human-proof.md "Synced won't do"): only the authority (the input the core
+    # vouches for) says what a Won't do is; every other input takes its fields, so an unverified side cannot bring
+    # one in, change it or take it away, and an older signed decision cannot be replayed over a newer one.
+    auth = _authority(ctx, x0, xa, xb)
+    x0, xa, xb = (_impose(x, auth) if x else x for x in (x0, xa, xb))
+    if (xa.get("wont_do") and xb.get("done")) or (xb.get("wont_do") and xa.get("done")):
+        return _normalize_check(ctx, dict(xa if ctx.a_newer else xb))
+    return _normalize_check(ctx, _check_merged(ctx, x0, xa, xb))
+
+
+def _normalize_check(ctx, x):
+    """The one rule for every merged step (one-sided, edited, picked or merged): Won't do stays only with the
+    core's say-so, then the step is not done and not doing; done needs proof."""
+    if x.get("wont_do") and not _person_wont(ctx, x):
+        x = _drop_wont(x)
+    if "reason" in x and not x.get("wont_do"):
+        x = {k: v for k, v in x.items() if k != "reason"}
+    if x.get("wont_do"):
+        x = {k: v for k, v in x.items() if k != "state"}
+        x["done"] = False
+    elif x.get("done") and not x.get("evidence"):
+        x = {**x, "done": False}
+    return x
+
+
+def _check_merged(ctx, x0, xa, xb):
     out = _obj(ctx, x0, xa, xb, skip=("evidence",), top=True, label=f"{xa.get('id')} ")
     out["evidence"] = _evidence(x0.get("evidence", []), xa.get("evidence", []), xb.get("evidence", []))
     if out.get("done") and not out["evidence"]:
@@ -199,11 +341,12 @@ def _ref_id(r):
     return _canon([r.get(k) for k in ("kind", "url", "ticket", "name", "path")])
 
 
-def _merge(base, a, b, now):
-    ctx = _Ctx(a, b, now)
+def _merge(base, a, b, now, person=None):
+    ctx = _Ctx(a, b, now, person)
     # the same id added on both sides with different content: the newer side's item is renumbered
     ren = _renumber_clashes(ctx, base.get("checklist", []), a.setdefault("checklist", []),
-                            b.setdefault("checklist", []), lambda x, y: x.get("text") == y.get("text"), "c")
+                            b.setdefault("checklist", []), lambda x, y: x.get("text") == y.get("text"), "c",
+                            vouched=True)
     for side, t in (("a", a), ("b", b)):
         for q in t.get("questions", []):
             if q.get("check") in ren[side]:
@@ -228,8 +371,21 @@ def _merge(base, a, b, now):
 
     cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
                 lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
+    seen = {}
+    for side, t in (("0", base), ("a", a), ("b", b)):
+        for x in t.get("checklist", []):
+            if isinstance(x, dict):
+                seen.setdefault(x.get("id"), {})[side] = x
+    for k, v in list(cl.items()):  # the same authority decides the merged result (also the one-sided paths)
+        cl[k] = _normalize_check(ctx, _impose(v, _authority(ctx, *seen.get(k, {}).values())))
+    # a person's Won't do step that ONE side deleted outright comes back: a deletion carries no proof (removing
+    # one needs the person's proof, which is only checked where it is made). Both sides deleting it is final.
+    still = {x.get("id") for t in (a, b) for x in t.get("checklist", []) if isinstance(x, dict)}
+    for x0 in base.get("checklist", []):
+        if isinstance(x0, dict) and x0.get("id") not in cl and x0.get("id") in still and _person_wont(ctx, x0):
+            cl[x0["id"]] = _normalize_check(ctx, dict(x0))
     out["checklist"] = _order(cl, ids(base.get("checklist", [])))
-    if out["status"] == "done" and any(not c.get("done") for c in out["checklist"]):
+    if out["status"] == "done" and any(not (c.get("done") or c.get("wont_do")) for c in out["checklist"]):
         out["status"] = "active"
         ctx.say("reopened, a new checklist item came in")
     qs = _keyed(base.get("questions", []), a["questions"], b["questions"], lambda x: x["id"],
@@ -295,14 +451,18 @@ def _valid(base, a, b):
     return True
 
 
-def merge_ticket(base, upstream, mine, now):
+def merge_ticket(base, upstream, mine, now, person=None):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
-    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified."""
+    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified.
+    `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
+    wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so. The
+    verdict reads the core's ledger when asked: the sync caller must read, merge and write under the ticket's
+    apply_op lock, so the ledger cannot move between the merge and the write."""
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
-        return _merge({} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now)
+        return _merge({} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person)
     except Exception:  # noqa: BLE001 - a crafted ticket must never crash the sync loop
         return None
 

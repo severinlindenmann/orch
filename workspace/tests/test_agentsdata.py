@@ -10,14 +10,33 @@ from orch import agentsdata
 def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     base = json.loads((agentsdata.agents_dir() / "base.json").read_bytes())
     for name in agentsdata.FRAGMENTS:
-        assert json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes()) == {}
-    assert agentsdata.load() == base
+        if name == "reminder":  # B9: the work-check hooks (not empty)
+            continue
+        got = json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes())
+        if name == "connections":  # W2b 1.10: only the settings locations (inventory.md)
+            assert {a: set(v) for a, v in got["adapters"].items()} == {
+                "claude": {"mcp_settings"},
+                "codex": {"mcp_settings"},
+            }
+        else:
+            assert got == {}
+    merged = agentsdata.load()
+    rem = json.loads((agentsdata.agents_dir() / "reminder.json").read_bytes())["adapters"]["claude"]
+    assert merged["adapters"]["claude"]["reminder_hooks"] == rem["reminder_hooks"]
+    assert merged["adapters"]["claude"]["oneshot"]["settings_args"] == rem["oneshot"]["settings_args"]
+    for adapter in merged["adapters"].values():
+        adapter.pop("mcp_settings", None)
+    for key in ("reminder_hooks", "reminder"):
+        merged["adapters"]["claude"].pop(key)
+    merged["adapters"]["claude"]["oneshot"].pop("settings_args")
+    assert merged == base
     assert {p.name for p in agentsdata.agents_dir().iterdir()} == {
         "base.json",
         "deny.json",
         "capabilities.json",
         "connections.json",
         "readonly.json",
+        "reminder.json",
     }
 
 
@@ -36,9 +55,10 @@ def test_merge(data):
         fragment = {"adapters": {"example": {"nested": {name: i}, "list": [i], "scalar": i}}}
         (data / f"{name}.json").write_text(json.dumps(fragment))
     adapter = agentsdata.load(data)["adapters"]["example"]
-    assert adapter["nested"] == {"a": 1, "deny": 0, "capabilities": 1, "connections": 2, "readonly": 3}
-    assert adapter["list"] == [3]
-    assert adapter["scalar"] == 3
+    last = len(agentsdata.FRAGMENTS) - 1
+    assert adapter["nested"] == {"a": 1, **{n: i for i, n in enumerate(agentsdata.FRAGMENTS)}}
+    assert adapter["list"] == [last]
+    assert adapter["scalar"] == last
 
 
 @pytest.mark.parametrize("fragment", [[], None, 1, {"adapters": {"new": {}}}, {"adapters": []}])

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
 
-from orch import look, services, term
+from orch import humanproof, look, services, term
 from orch.errors import Refused
 
 
@@ -17,6 +18,11 @@ def _out(args, data, text: str) -> None:
 def add_parsers(sub, common) -> None:
     x = sub.add_parser("start", parents=[common], help="start the add-ons that run in the background here")
     x.add_argument("--no-open", action="store_true", help="do not open the dashboard in the browser")
+    x.add_argument(
+        "--print-launch-url",
+        action="store_true",
+        help=argparse.SUPPRESS,  # test installs only: print a one-time page link (for browser tests)
+    )
     x = sub.add_parser(
         "stop", parents=[common], help="stop them (asks which workspace when you are outside one)"
     )
@@ -24,6 +30,19 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
+    c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
+    cc = c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
+    cc.add_argument("--trash", action="store_true", help=argparse.SUPPRESS)  # empty the trash (detached run)
+    cc.add_argument("--background", action="store_true", help=argparse.SUPPRESS)  # sweep + trash, silent
+    rt = c.add_parser("retry", parents=[common], help="try again where git was interrupted (a person's call)")
+    rt.add_argument("ticket")
+    ro = c.add_parser(
+        "remove-orphaned",
+        parents=[common],
+        help="remove the copies of a project that is gone (a person's call)",
+    )
+    ro.add_argument("ws8", help="the copies folder (8 characters), as `orch copy clean` lists it")
+    ro.add_argument("--discard", action="store_true", help="also remove copies whose changes cannot be saved")
 
 
 def _home_path(p: str) -> str:
@@ -65,22 +84,47 @@ def _pick(running: list[dict]) -> list[Path]:
     raise Refused(f"'{ans}' is not on the list. Nothing was stopped.")
 
 
+def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
+
+    out = []
+    for r in rows:
+        base = services.local_url(r.get("url"))
+        if base and r.get("addon") in humanproof.LAUNCH_SERVERS:
+            out.append((r["addon"], humanproof.printable_launch_url(root, r["addon"], base)))
+    return out
+
+
 def _services_cmd(args, root: Path) -> None:
     if args.cmd == "start":
+        if args.print_launch_url:  # refuse before anything starts
+            from orch import humanproof
+
+            if not humanproof.is_test_workspace(root):
+                raise Refused("--print-launch-url works only on a test install, in a test folder.")
+        from orch import worktrees
+
+        worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run (never raises)
         rows = services.start(root)
+        launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
-            print(json.dumps({"workspace": str(root.resolve()), "addons": rows}, indent=2))
+            data = {"workspace": str(root.resolve()), "addons": rows}
+            if args.print_launch_url:
+                data["launch"] = [{"addon": a, "url": u} for a, u in launch]
+            print(json.dumps(data, indent=2))
         elif not rows:
             print("No add-on that is on here runs in the background. Nothing to start.")
         else:
             print(f"Started in {root.name}:")
             print("\n".join(_service_line(r) for r in rows))
             print("Stop: orch stop")
-        url = next((services.local_url(r.get("url")) for r in rows if services.local_url(r.get("url"))), None)
-        if url and not args.no_open and not args.json and term.is_terminal(sys.stdout):
-            import webbrowser
-
-            webbrowser.open(url)
+        if launch and not args.json:
+            print("\n".join(f"launch {a}: {u}" for a, u in launch))
+        row = next((r for r in rows if services.local_url(r.get("url"))), None)
+        url = services.local_url(row.get("url")) if row else None
+        opens = not args.no_open and not args.print_launch_url and not args.json
+        if url and opens and term.is_terminal(sys.stdout):
+            # a person opens the page: the launch token (URL fragment) lets it start a proof session (H1)
+            humanproof.open_browser(humanproof.launch_url(root, row.get("addon"), url))
         bad = [r for r in rows if r.get("error")]
         if bad:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")
@@ -101,6 +145,10 @@ def _services_cmd(args, root: Path) -> None:
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
             lines += [_service_line(a) for a in w["addons"]]
+        if (root / ".orch").is_dir() and not args.json:  # git notes for this workspace (a plain line each)
+            from orch import cli_config
+
+            lines += cli_config.private_lines(root)
         _out(
             args,
             ws,
@@ -125,7 +173,45 @@ def _services_cmd(args, root: Path) -> None:
         _out(args, done, "\n".join(lines) or "Nothing was stopped.")
 
 
+def _copy_clean(args, root: Path) -> None:
+    from orch import worktrees
+
+    if args.sub == "remove-orphaned":
+        notes = worktrees.remove_orphaned(root, args.ws8, args.discard)
+        _out(args, {"notes": notes}, "\n".join(notes) or "Removed.")
+        return
+    if args.sub == "retry":
+        notes = worktrees.retry(root, args.ticket)
+        _out(args, {"notes": notes}, "\n".join(notes) or "Done.")
+        return
+    if args.trash:
+        worktrees.empty_trash(root)
+        return
+    if args.background:
+        worktrees.sweep(root)
+        worktrees.empty_trash(root)
+        return
+    notes = worktrees.sweep(root)
+    u = worktrees.usage(root)
+    lines = [
+        *notes,
+        f"{u['copies']} separate copies are in use." if u["copies"] else "No separate copies left.",
+    ]
+    for o in u["orphaned"]:
+        lines.append(
+            f"{o['copies']} copies of a project that is gone or moved: orch copy remove-orphaned {o['ws8']}"
+        )
+    _out(
+        args,
+        {k: u[k] for k in ("copies", "bytes", "partial", "orphaned", "changed", "stuck")} | {"notes": notes},
+        "\n".join(lines),
+    )
+
+
 def dispatch(args, root: Path) -> bool:
+    if args.cmd == "copy":
+        _copy_clean(args, root)
+        return True
     if args.cmd not in ("start", "stop", "status"):
         return False
     _services_cmd(args, root)

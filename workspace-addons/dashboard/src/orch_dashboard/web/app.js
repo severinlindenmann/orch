@@ -224,7 +224,7 @@ function render(arrived = new Set()) {
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
-      if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, title:q.text, text:'', options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
+      if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, title:q.text, text:'', oneTap:true, kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
     }
   });
   if (r.kind === 'addon') {
@@ -370,6 +370,8 @@ main.addEventListener('drop', event => {
   moveTicket(id, col.dataset.status);
 });
 main.addEventListener('change', async event => {
+  const cap = event.target.closest('[data-key="settings-copies-max"]');
+  if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const perm = event.target.closest('[data-settings-permissions]');
   if (perm) {
     if (snapshot || settingsBusy.has('permissions')) return;
@@ -450,6 +452,28 @@ main.addEventListener('click', async event => {
     if (result.ok) window.orch.toast(on ? 'Shared. Your team can now see this workspace.' : 'Not shared any more.', 'ok');
     return;
   }
+  if (action === 'private-allow') {
+    if (settingsBusy.has('private')) return;
+    const p = array(state.settings?.git_private?.pending).find(x => x.name === control.dataset.name);
+    if (!p || !p.showable) return;
+    const send = async () => {
+      const result = await settingsSend('private.allow', {name:p.name, key:p.key}, 'private');
+      if (result.ok) window.orch.toast('Allowed on this computer.', 'ok');
+      return result;
+    };
+    settingsConfirm('Allow this command?', pendingText(p), 'preserve-lines scroll-all', 'Allow', send);  // in full, never behind Details
+    return;
+  }
+  if (action === 'private-move') {
+    if (settingsBusy.has('private')) return;
+    const send = async () => {
+      const result = await settingsSend('private.move', {}, 'private');
+      if (result.ok) window.orch.toast('Moved. Your files stay here.', 'ok');
+      return result;
+    };
+    settingsConfirm('Move to private?', 'Removes them from the team repo and keeps your files.', '', 'Move to private', send);
+    return;
+  }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
@@ -481,6 +505,17 @@ main.addEventListener('click', async event => {
   if (action === 'new') ticketForm();
   if (action === 'inline') startInline(control);
   if (action === 'ref-preview') { previewReference(control); return; }
+  if (action === 'copies-mode') { settingsSend('copies.set', {mode:control.dataset.mode}, 'copies'); return; }
+  if (action === 'copies-orphaned') {
+    (async () => { for (const o of array(state.settings?.copies_disk?.orphaned)) await settingsSend('copies.remove_orphaned', {ws8:o.ws8}, 'copies-clean'); })();
+    return;
+  }
+  if (action === 'copies-retry') {
+    (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
+    return;
+  }
+  if (action === 'copies-clean') { settingsSend('copies.clean', {}, 'copies-clean'); return; }
+  if (action === 'copies-setup') { settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies'); return; }
   if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }
   if (action === 'link-add') startLinkAdd(control);
   if (action === 'link-remove') { event.preventDefault(); removeLink(control); return; }

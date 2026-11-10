@@ -1,25 +1,34 @@
 """Settings contracts shared with delegated shell handlers and the API lane."""
+
 from tests import webjs
 
 
 def test_settings_navigation_and_cards():
     src = webjs.all_js()
     for text in (
-        "role:'tablist'", "'data-action':'settings-tab'", "'data-key':'settings-switch-'",
-        "a.dashboard?.panel === 'phone'", "href:'#addon/' + phoneAddon.name",
-        "OrchMobileMode?.settingsSection(h)", "OrchLook?.settingsSection()",
-        "agent-card", "role:'status', className:'meta test-note'",
-        "'data-action':'agent-test'", "'data-action':'settings-addon'",
+        "role:'tablist'",
+        "'data-action':'settings-tab'",
+        "'data-key':'settings-switch-'",
+        "a.dashboard?.panel === 'phone'",
+        "href:'#addon/' + phoneAddon.name",
+        "OrchMobileMode?.settingsSection(h)",
+        "OrchLook?.settingsSection()",
+        "agent-card",
+        "role:'status', className:'meta test-note'",
+        "'data-action':'agent-test'",
+        "'data-action':'settings-addon'",
         "settingsText('p', {className:'meta'}, addon.description)",
-        "panelOf(id) === 'repeats'", "panelOf(id) === 'links'", "a?.dashboard?.label",
+        "panelOf(id) === 'repeats'",
+        "panelOf(id) === 'links'",
+        "a?.dashboard?.label",
     ):
         assert text in src
     assert "className:'settings-details'" not in src  # fb11: the folder is shown directly
     assert "h('span', {className:'set-label'}, 'Folder')" in src
-    css = (webjs.WEB / 'pages/settings.css').read_text()
-    assert '@media(max-width:760px)' in css
-    assert 'overflow-x:auto' in css
-    assert 'min-height:44px' in css
+    css = (webjs.WEB / "pages/settings.css").read_text()
+    assert "@media(max-width:760px)" in css
+    assert "overflow-x:auto" in css
+    assert "min-height:44px" in css
 
 
 def test_repeat_uses_only_presets_and_open_tickets():
@@ -37,19 +46,27 @@ def test_shared_links_are_optional_and_use_plain_actions():
     for text in (
         "fetch('/api/links', {cache:'no-store'})",
         "if (res.status !== 200) { sharedLinks = null; return; }",
-        "Array.isArray(data.links)", "catch (_) { sharedLinks = null; }",
-        "sharedLinks !== null", "No shared links yet.", "Link valid until ",
-        "No end date", "'Expired'", "if (!link.copy) return;",
+        "Array.isArray(data.links)",
+        "catch (_) { sharedLinks = null; }",
+        "sharedLinks !== null",
+        "No shared links yet.",
+        "Link valid until ",
+        "No end date",
+        "'Expired'",
+        "if (!link.copy) return;",
         "navigator.clipboard.writeText(link.link)",
-        "act('link.extend', {id:link.id, days:7})", "act('link.stop', {id:link.id})",
-        "'The link stops working.'", "'Stop sharing', send", "bindAddonControls(host)",
+        "act('link.extend', {id:link.id, days:7})",
+        "act('link.stop', {id:link.id})",
+        "'The link stops working.'",
+        "'Stop sharing', send",
+        "bindAddonControls(host)",
     ):
         assert text in src
 
 
 def test_message_button_opens_chat():
     src = webjs.all_js()
-    part = src[src.index('function messageSend('):src.index('async function copyText(')]
+    part = src[src.index("function messageSend(") : src.index("async function copyText(")]
     assert "location.hash = '#chat/' + peer" in part
     assert "dialog(" not in part
 
@@ -60,8 +77,8 @@ def test_actions_and_feature_detection_in_node():
 
     import pytest
 
-    if not shutil.which('node'):
-        pytest.skip('node not installed')
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
     script = r"""
 const fs = require('fs'), vm = require('vm'), assert = require('assert/strict');
 const source = fs.readFileSync(process.argv[1], 'utf8');
@@ -113,8 +130,10 @@ loadAddon = async () => {};
 })().catch(err => { console.error(err); process.exitCode = 1; });
 """
     subprocess.run(
-        ['node', '-e', script, str(webjs.WEB / 'pages/settings.js')],
-        check=True, capture_output=True, text=True,
+        ["node", "-e", script, str(webjs.WEB / "pages/settings.js")],
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -126,3 +145,35 @@ def test_load_addons_passes_only_known_panels():
 
     rows = load_addons(None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None)])
     assert {r["name"]: r["dashboard"]["panel"] for r in rows} == {"aaa": "links", "bbb": None, "ccc": None}
+
+
+def test_settings_git_private(ws, monkeypatch):
+    from orch_dashboard import data
+
+    default = {"count": 0, "lines": [], "agent_command_ignored": False, "pending": []}
+    assert data.load_settings(ws, None)["git_private"] == default
+    replies = [None, [], {}, {"count": "3", "lines": "bad", "agent_command_ignored": "yes"}]
+    replies.append({"count": 3, "lines": [None, "x" * 350, 1, "two", "three", "ignored", "five"],
+                    "agent_command_ignored": True})
+    for reply in replies:
+        calls = []
+        def run(binary, args, root, calls=calls, reply=reply):
+            calls.append((binary, args, root))
+            return reply if args == ["private", "--json"] else None
+        monkeypatch.setattr(data, "run_orch", run)
+        result = data.load_settings(ws, "orch")["git_private"]
+        assert ("orch", ["private", "--json"], ws) in calls
+        assert result == (default if reply is not replies[-1] else {
+            "count": 3, "lines": ["x" * 300, "two", "three", "ignored"], "agent_command_ignored": True,
+            "pending": []})
+
+
+def test_settings_pending_carries_every_hashed_field_in_full(ws, monkeypatch):
+    from orch_dashboard import data
+
+    row = {"name": "mine", "key": "a" * 64, "showable": True, "adapter": "generic",
+           "command": "c" * 450, "interactive": "live", "prompt": "stdin"}
+    bad = {"name": "Bad Name", "key": "a" * 64, "command": "x"}
+    monkeypatch.setattr(data, "run_orch", lambda b, a, r: {"count": 0, "lines": [], "pending_agents": [row, bad]}
+                        if a == ["private", "--json"] else None)
+    assert data.load_settings(ws, "orch")["git_private"]["pending"] == [row]

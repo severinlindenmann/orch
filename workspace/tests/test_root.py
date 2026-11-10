@@ -135,7 +135,7 @@ def test_tmux_start_passes_orch_root_to_the_session_and_the_agent(proj, run, mon
     monkeypatch.setattr(runs_live, "tmux", fake_tmux)
     monkeypatch.setattr(runs_live, "session_exists", lambda *a: False)
     py = shlex.quote(sys.executable)
-    config.add_agent(proj, "fake", f"{py} -c pass {{prompt}}", f"{py} -c pass")
+    config.add_agent(proj, "fake", f"{py} -c pass {{prompt}}", f"{py} -c pass", approve=True)
     config.set_key(proj, "workspace", "agent", "fake")
     tid = json.loads(run("ticket", "new", "T", "--json", "--by", "human:t")[1])["id"]
     monkeypatch.setenv("ORCH_ROOT", "/stale/other")  # whatever the starter had is replaced, not passed on
@@ -157,7 +157,7 @@ def test_runs_start_overwrites_a_stale_orch_root_in_the_agent_environment(
         "import os,sys\nopen(sys.argv[1],'w').write(os.environ.get('ORCH_ROOT',''))\n", encoding="utf-8"
     )
     py, q = shlex.quote(sys.executable), shlex.quote
-    config.add_agent(proj, "fake", f"{py} {q(str(stub))} {q(str(out))} {{prompt}}")
+    config.add_agent(proj, "fake", f"{py} {q(str(stub))} {q(str(out))} {{prompt}}", approve=True)
     config.set_key(proj, "workspace", "agent", "fake")
     tid = json.loads(run("ticket", "new", "T", "--json", "--by", "human:t")[1])["id"]
     monkeypatch.setenv("ORCH_ROOT", str(other))
