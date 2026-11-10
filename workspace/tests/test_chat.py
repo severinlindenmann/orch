@@ -887,6 +887,7 @@ def test_proposal_kept_and_clipped(proj):
 
 def test_make_ticket_convo_across_days_idempotent(proj, monkeypatch):
     monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    monkeypatch.setattr(chat.tickets, "now", lambda: "2026-11-09T12:00:00Z")  # record() uses the real clock
     chat.record(proj, "old", "you", "dashboard", "Unrelated", at="2026-11-07T12:00:00Z")
     chat.record(
         proj, "start", "you", "dashboard", "Build fish page", at="2026-11-08T12:00:00Z", convo_start=True
@@ -1058,6 +1059,7 @@ def test_record_empty_latest_day(proj, monkeypatch):
 
 def test_make_ticket_lookback_is_four_days(proj, monkeypatch):
     monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    monkeypatch.setattr(chat.tickets, "now", lambda: "2026-11-09T12:00:00Z")  # record() uses the real clock
     chat.record(proj, "old", "you", "phone", "Private old text", at="2026-11-05T12:00:00Z", convo_start=True)
     _proposal(proj)
     original = chat._read_day
@@ -1075,6 +1077,7 @@ def test_make_ticket_lookback_is_four_days(proj, monkeypatch):
 
 def test_make_ticket_recovers_between_day_writes(proj, monkeypatch):
     monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    monkeypatch.setattr(chat.tickets, "now", lambda: "2026-11-09T12:00:00Z")  # record() uses the real clock
     chat.record(proj, "person", "you", "phone", "Build fish", at="2026-11-08T12:00:00Z")
     _proposal(proj)
     original = chat.net.write_json
