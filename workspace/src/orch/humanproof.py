@@ -66,7 +66,7 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -75,6 +75,7 @@ SETTING_DEFAULTS = {
     "insights.share_names": False,
     "secret.allow_get": False,
     "conn.allow": False,
+    "workflow.agents_may_finish": False,
 }
 _TARGET_RE = re.compile(r"[A-Za-z0-9_.:@-]+")
 _BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
@@ -765,8 +766,27 @@ def _settings_write(root: Path, setting: str, value, by: str) -> None:
         _write_private(path, json.dumps(data, indent=2, sort_keys=True))
 
 
+_CONN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # same shape as inventory.NAME_RE
+
+
+def is_conn_grant_key(setting) -> bool:
+    """Exactly `conn.allow.<connection name>` with a well-formed name (no arbitrary suffix)."""
+    if not isinstance(setting, str) or not setting.startswith("conn.allow."):
+        return False
+    return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
+
+
 def record_set(root: Path, setting: str, value, by: str) -> None:
-    """A person set the value with a verified proof: the caller also writes the file. Record = the grant."""
+    """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
+    but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
+    an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
+    moment where the file says on and the record is stale."""
+    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting):
+        raise Refused("That is not a setting a person has to allow.")
+    if value is not False and not str(by).startswith("human:"):
+        raise Refused(AGENT_REFUSED)
+    if value is False and not str(by).startswith("human:"):
+        by = "reset"  # a lowering by anyone else: the tombstone names no person
     _settings_write(root, setting, value, by)
 
 
@@ -1281,6 +1301,13 @@ def mint_dev(root: Path, op: str, target: str, life: int = 30) -> str:
 # ------------------------------------------------------------------------------------------- CLI gate
 
 HANDOFF = "Do this in the dashboard on this computer."
+
+
+class HandOffPending(Refused):
+    """Raised ONLY where person_by has written (or found) the hand-off card: the person is to click on the
+    page. A Refused for anything else (an agent, a bad value, no card) is not this."""
+
+
 AGENT_REFUSED = "Only a human can do this. Ask the human to run it themselves."
 HANDOFF_PER_OP = 3
 
@@ -1299,7 +1326,7 @@ CURRENT_ARGV: list[str] | None = None
 HANDOFF_HEADS = {
     "ticket.answer": (("answer",),),
     "run.human_input": (("run", "send"),),
-    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch")),
+    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch"), ("ticket", "status")),
     "relay.allow": (("relay", "allow"),),
     "relay.connect": (("relay", "connect"),),
     "update": (("update",),),
@@ -1308,7 +1335,75 @@ HANDOFF_HEADS = {
     "check.wont_do": (("check", "wont-do"),),
     "check.wont_do_undo": (("check", "reopen"), ("check", "edit"), ("check", "remove")),
     "chat.make_ticket": (("chat", "make-ticket"),),
+    "config.agents_may_finish": (("config", "set"),),
+    "config.copy_setup": (("config", "set"),),
+    "config.permissions": (("config", "set"),),
+    "config.agent_add": (("config", "agent", "add"),),
+    "private.allow": (("private", "allow"),),
+    "private.move": (("private", "move"),),
+    "config.share": (("share", "on"),),
+    "look.shared_pages": (("look", "shared-pages"),),
+    "look.icon": (("look", "set"),),
+    "group.write_as_person": (("relay", "group", "say"), ("relay", "group", "reply")),
+    "group.remove_member": (("relay", "group", "remove"),),
+    "group.share_file": (("relay", "group", "share"), ("relay", "group", "send-file")),
 }
+
+
+def agent_add_target(
+    name: str, command: str, interactive: str | None = None, prompt: str | None = None
+) -> str:
+    """The proof target of config.agent_add: the name AND a digest of every value that gets saved, so a
+    proof for one command (or live command, or prompt mode) can never save another. Same in the dashboard."""
+    doc = json.dumps([command, interactive or "", prompt or ""])
+    return f"{name}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()}"
+
+
+def entry_exact(entry: dict) -> str:
+    """Every field a private.allow key approves (adapter, command, live command, prompt), one per line."""
+    rows = [
+        ("Adapter", entry.get("adapter")),
+        ("Command", entry.get("command")),
+        ("Live command", entry.get("interactive")),
+        ("Prompt via", entry.get("prompt")),
+    ]
+    return "\n".join(f"{k}: {v}" for k, v in rows if v)
+
+
+def allow_card_is_current(root: Path, target: str) -> bool:
+    """private.allow takes its values from the settings file, not argv: the card's target is name:key, so the
+    card is only good while the entry still hashes to that key."""
+    from orch import config
+
+    name, _, key = str(target).partition(":")
+    e = config._raw_entries(root).get(name)
+    return e is not None and config._entry_key(root, name, e) == key
+
+
+def agent_add_exact(command: str, interactive: str | None = None, prompt: str | None = None) -> str:
+    """Every value config.agent_add saves, one per line, for the card's exact block."""
+    rows = [("Command", command), ("Live command", interactive), ("Prompt via", prompt)]
+    return "\n".join(f"{k}: {v}" for k, v in rows if v)
+
+
+def exact_in_argv(op: str, exact: str, argv) -> bool:
+    """The full value(s) shown in the card's exact block must be part of the command that runs."""
+    if op in ("relay.connect", "addon.add_local", "group.share_file"):
+        return exact in " ".join(argv)
+    if op == "config.agent_add":
+        words = list(argv)
+        vals = [ln.split(": ", 1)[1] for ln in exact.splitlines() if ": " in ln]
+        return (
+            bool(vals)
+            and len(vals) == len(exact.splitlines())
+            and all(
+                v in words or any(w.startswith("--") and w.endswith("=" + v) for w in words) for v in vals
+            )
+        )
+    return True
+
+
+EXACT_OPS = ("relay.connect", "addon.add_local", "group.share_file", "config.agent_add", "private.allow")
 
 
 def _clean_argv(argv) -> list[str] | None:
@@ -1320,13 +1415,26 @@ def _clean_argv(argv) -> list[str] | None:
         if a == "--by":
             skip = True
             continue
-        if a.startswith("--by=") or a == "--proof-stdin":
-            continue
+        if a.startswith("--by=") or a in ("--proof-stdin", "--unchecked-ok"):
+            continue  # --unchecked-ok skips the password check: a hand-off refuses in words, the page asks
         out.append(a)
     return out if all(isinstance(x, str) and len(x) <= 4000 for x in out) and len(out) <= 20 else None
 
 
 VALUE_MAX = 4000  # the exact text a person approves is shown whole; longer is not queued
+
+
+def group_target(root: Path, host: str, group: str) -> str:
+    """The proof target for an act in a joined group: `<host workspace id>:<group id>`. A group id
+    is only unique per host, so the host is part of what the person approves. The CLI and the dashboard both
+    build it here (one place), so a proof for host A is never good for host B."""
+    from orch import relay
+
+    try:
+        host = relay.resolve(root, host) if root is not None else host
+    except Refused:
+        pass  # the command itself refuses an unknown host in words
+    return f"{host}:{group}"
 
 
 def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
@@ -1487,7 +1595,7 @@ def request_handoff(
     if len(value) > VALUE_MAX or (value and value not in argv):
         return False
     exact = str(exact)[:2000] if exact else ""
-    if exact and op in ("relay.connect", "addon.add_local") and exact not in " ".join(argv):
+    if exact and op in EXACT_OPS and not exact_in_argv(op, exact, argv):
         return False  # the shown full target must be part of the command that runs
     try:
         d = key_dir(root)
@@ -1576,8 +1684,10 @@ def handoff_take(root: Path, hid: str) -> dict | None:
         return None
     if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
         return None
-    if hit.get("exact") and hit.get("op") in ("relay.connect", "addon.add_local"):
-        if hit["exact"] not in " ".join(argv):  # the full target shown must be what runs
+    if hit.get("op") == "private.allow" and not allow_card_is_current(root, hit.get("target")):
+        return None  # the entry changed after the card was made: the person never saw this one
+    if hit.get("exact") and hit.get("op") in EXACT_OPS:
+        if not exact_in_argv(hit["op"], hit["exact"], argv):  # the full target shown must be what runs
             return None
     return hit
 
@@ -1670,7 +1780,7 @@ def person_by(
     queued = request_handoff(root, op, target, label, value, clean, parts, exact)
     if not queued:
         raise Refused(HANDOFF)
-    raise Refused(_dashboard_note(root, open_ok=queued is True))
+    raise HandOffPending(_dashboard_note(root, open_ok=queued is True))
 
 
 # ------------------------------------------------------------------------------------------- launch token

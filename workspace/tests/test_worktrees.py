@@ -289,6 +289,10 @@ def test_settings_validate_and_live_per_machine_not_in_the_workspace(repo):
     assert config.copy_setup(repo) is None
 
 
+@pytest.mark.skipif(
+    __import__("orch.config", fromlist=["x"]).COPIES_LOCKED,
+    reason="runs orch in a child process, where copies are locked Off; re-enable with the B12 follow-up",
+)
 def test_two_starts_at_the_same_moment_make_exactly_one_copy(repo, subprocess_home):
     """Two orch processes start two tickets together: decide + create + claim run under one workspace lock,
     so the second one sees the first one's claim. (The lock is per process: threads would not show it.)"""
@@ -451,7 +455,9 @@ def test_a_oneshot_run_in_a_copy_starts_there_with_orch_root_and_records_the_fol
         "subprocess.run([sys.executable, '-P', '-m', 'orch', 'ticket', 'new', 'Made by the agent',\n"
         "                '--by', 'agent:fake'])\n"
     )
-    config.add_agent(repo, "fake", f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {{prompt}}")
+    config.add_agent(
+        repo, "fake", f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {{prompt}}", approve=True
+    )
     config.set_key(repo, "workspace", "agent", "fake")
     config.set_copies_mode(repo, "always")
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
@@ -487,7 +493,11 @@ def test_live_start_puts_tmux_in_the_copy_and_trusts_it(repo, monkeypatch):
     trusted = []
     monkeypatch.setattr(adapters, "trust_folder", lambda name, p, *a, **k: trusted.append(Path(p)) or "set")
     config.add_agent(
-        repo, "fake", f"{shlex.quote(sys.executable)} -c pass {{prompt}}", f"{shlex.quote(sys.executable)}"
+        repo,
+        "fake",
+        f"{shlex.quote(sys.executable)} -c pass {{prompt}}",
+        f"{shlex.quote(sys.executable)}",
+        approve=True,
     )
     config.set_key(repo, "workspace", "agent", "fake")
     r = runs_live.start_live(repo, a, "human:t", "fake", fresh=False, take_over=False, busy_text="x")

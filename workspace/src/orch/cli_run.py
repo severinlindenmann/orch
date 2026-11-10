@@ -210,6 +210,8 @@ def _status(args, root: Path) -> None:
         )
         if rec.get("mode") == "live":
             text += " " + runs_live.line(rec, root)
+    if shared := (data.get("shared_folder") or {}).get("line"):
+        text += "\n" + shared  # one quiet line, as `orch ticket show` has it
     _out(args, data, text)
 
 

@@ -47,6 +47,7 @@ def acts(act_orch):
             ["look", "show"],
             ["chat", "status"],
         )
+        and c[:2] != ["private", "--json"]
         and c[:2] != ["look", "shared-pages"]
         and not (c[1:2] == ["profile"] and c[-1] == "--json")
     ]
@@ -173,6 +174,24 @@ def test_argv_snapshot_per_op(act_server, act_orch):
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
         ({"op": "share.set", "args": {"on": True}}, ["share", "on", *common]),
         ({"op": "share.set", "args": {"on": False}}, ["share", "off", *common]),
+        ({"op": "private.move", "args": {}}, ["private", "move", *common]),
+        (
+            {
+                "op": "private.allow",
+                "args": {
+                    "name": "mine",
+                    "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                },
+            },
+            [
+                "private",
+                "allow",
+                "mine",
+                "--key",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                *common,
+            ],
+        ),
         (
             {"op": "check.add", "args": {"ticket": "t_abcdef", "text": "--draft the page"}},
             ["check", "add", "t_abcdef", *common, "--", "--draft the page"],
@@ -425,6 +444,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 and c[:2] not in (["config", "get"], ["chat", "status"])
                 and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
                 and c[0] != "look"
+                and c[:2] != ["private", "--json"]
             ][-1]
             assert last == want, body
         n = len(calls(act_orch))
@@ -602,6 +622,22 @@ def test_check_add_and_permissions_are_checked(act_server, act_orch):
         ("config.permissions", {"mode": "full", "confirm": "yes"}),
         ("config.permissions", {}),
         ("config.permissions", {"mode": "ask", "x": 1}),
+        ("private.move", {"force": True}),
+        ("private.allow", {}),
+        ("private.allow", {"name": "x"}),
+        ("private.allow", {"name": "x", "key": "zz"}),
+        (
+            "private.allow",
+            {"name": "Bad Name", "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        ),
+        (
+            "private.allow",
+            {
+                "name": "x",
+                "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "all": True,
+            },
+        ),
         ("share.set", {}),
         ("share.set", {"on": "yes"}),
         ("share.set", {"on": True, "x": 1}),
@@ -736,13 +772,20 @@ def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypat
     assert env["ORCH_VIA"] == "dashboard"
 
 
-def test_workflow_state_defaults_off_and_reads_core_config(ws):
-    from orch import config
+def test_workflow_state_defaults_off_and_reads_core_config(tmp_path, monkeypatch):
+    from orch import addons, config
 
     from orch_dashboard.data import load_settings
 
+    # agents_may_finish is a recorded grant: a test workspace pairs only with a test home
+    acct = tmp_path / "acct"
+    (acct / ".orch-test" / "home").mkdir(parents=True)
+    monkeypatch.setattr(addons, "real_home", lambda: acct)
+    monkeypatch.setenv("ORCH_HOME", str(acct / ".orch-test" / "home"))
+    ws = acct / ".orch-test" / "ws"
+    (ws / ".orch").mkdir(parents=True)
     assert load_settings(ws, None)["agents_may_finish"] is False
-    config.set_agents_may_finish(ws, True)
+    config.set_agents_may_finish(ws, True, "human:tester")
     assert load_settings(ws, None)["agents_may_finish"] is True
 
 
@@ -1031,6 +1074,25 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
     assert acts(act_orch) == []  # nothing was created
 
 
+def test_approval_ops_sit_behind_the_origin_fence(act_server, act_orch):
+    """private.allow and config.agent.add are the approval paths: a foreign page, a missing Origin or a
+    cross-site request never reaches orch. (Same-user processes are out of scope: the sandbox stops an agent.)"""
+    port = act_server.rsplit(":", 1)[1]
+    bodies = (
+        {"op": "private.allow", "args": {"name": "mine", "key": "a" * 64}},
+        {"op": "config.agent.add", "args": {"name": "mine", "command": "x {prompt}"}},
+    )
+    for body in bodies:
+        for h in (
+            {"Origin": "https://evil.example"},
+            {"Origin": None},
+            {"Origin": "http://evil.example:" + port, "Host": "evil.example:" + port},
+            {"Sec-Fetch-Site": "cross-site"},
+        ):
+            assert post(act_server, body, h)[0] in (403, 421, 400), (body["op"], h)
+    assert acts(act_orch) == []
+
+
 def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
     from orch_dashboard.actions import BadRequest, build_argv
 
@@ -1042,8 +1104,17 @@ def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
     assert argv[argv.index("--by") + 1].startswith("human:")
     assert build_argv("copies.set", {"setup": "  "})[-1] == "none"  # empty clears
     assert build_argv("copies.set", {"setup": "--flag x"})[-2:] == ["--", "--flag x"]  # never an option
-    for bad in ({"mode": "sometimes"}, {"max": 0}, {"max": "3"}, {"max": True}, {"setup": "a\nb"},
-                {"setup": "x" * 501}, {"mode": "off", "max": 2}, {}, {"mode": "off", "extra": 1}):
+    for bad in (
+        {"mode": "sometimes"},
+        {"max": 0},
+        {"max": "3"},
+        {"max": True},
+        {"setup": "a\nb"},
+        {"setup": "x" * 501},
+        {"mode": "off", "max": 2},
+        {},
+        {"mode": "off", "extra": 1},
+    ):
         with pytest.raises(BadRequest):
             build_argv("copies.set", bad)
 
@@ -1104,3 +1175,34 @@ def test_ticket_new_plan_first(value):
 def test_ticket_new_plan_first_requires_boolean(value):
     with pytest.raises(actions.BadRequest):
         actions._ticket_new({"title": "Plan", "plan_first": value})
+
+
+def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("copies.clean", {})[:3] == ["copy", "clean", "--json"]
+    with pytest.raises(BadRequest):
+        build_argv("copies.clean", {"path": "/"})
+
+
+def test_copies_remove_orphaned_takes_one_folder_name_only():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("copies.remove_orphaned", {"ws8": "aaaaaaaa"})[:4] == [
+        "copy",
+        "remove-orphaned",
+        "aaaaaaaa",
+        "--json",
+    ]
+    for bad in ({}, {"ws8": "../x"}, {"ws8": "AAAAAAAA"}, {"ws8": "aaaaaaaa", "discard": True}, {"ws8": 5}):
+        with pytest.raises(BadRequest):
+            build_argv("copies.remove_orphaned", bad)
+
+
+def test_copies_retry_takes_one_ticket_id_only():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("copies.retry", {"ticket": "t_abc123"})[:4] == ["copy", "retry", "t_abc123", "--json"]
+    for bad in ({}, {"ticket": "../x"}, {"ticket": "t_abc123", "force": True}, {"ticket": 5}):
+        with pytest.raises(BadRequest):
+            build_argv("copies.retry", bad)

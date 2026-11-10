@@ -363,10 +363,13 @@ def test_wont_do_clicks_need_a_proof_on_the_real_server_path():
     from orch_dashboard import actions as a
 
     assert a.proof_for("check.wont_do", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do", "t_a:c1")
-    assert a.proof_for("check.reopen", {"ticket": "t_a", "check": "c1"}) == ("check.wont_do_undo", "t_a:c1")
+    assert a.proof_for("check.reopen", {"ticket": "t_a", "check": "c1"}) == (
+        "check.wont_do_undo",
+        "t_a:c1:reopen",
+    )
     assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": False}) == (
         "check.wont_do_undo",
-        "t_a:c1",
+        "t_a:c1:reopen",
     )
     assert a.proof_for("check.set", {"ticket": "t_a", "check": "c1", "done": True}) is None
 
@@ -375,7 +378,225 @@ def test_check_edit_and_remove_clicks_need_a_proof_on_the_real_server_path():
     from orch_dashboard import actions as a
 
     args = {"ticket": "t_abcdef", "check": "c1"}
-    assert a.proof_for("check.edit", {**args, "text": "x"}) == ("check.wont_do_undo", "t_abcdef:c1")
-    assert a.proof_for("check.remove", args) == ("check.wont_do_undo", "t_abcdef:c1")
+    assert a.proof_for("check.edit", {**args, "text": "x"}) == ("check.wont_do_undo", "t_abcdef:c1:edit")
+    assert a.proof_for("check.remove", args) == ("check.wont_do_undo", "t_abcdef:c1:remove")
     assert a.build_argv("check.remove", args)[:4] == ["check", "remove", "t_abcdef", "c1"]
     assert a.build_argv("check.edit", {**args, "text": "a -- b"})[-2:] == ["--", "a -- b"]
+
+
+GIT_CLICKS = (
+    ("private.move", {}, ("private.move", "move"), ["private", "move"]),
+    (
+        "private.allow",
+        {"name": "mine", "key": "a" * 64},
+        ("private.allow", "mine:" + "a" * 64),
+        ["private", "allow", "mine", "--key", "a" * 64],
+    ),
+    (
+        "config.agent.add",
+        {"name": "mine", "command": "x {prompt}"},
+        ("config.agent_add", hp.agent_add_target("mine", "x {prompt}")),
+        ["config", "agent", "add", "mine"],
+    ),
+)
+
+
+@pytest.mark.parametrize(("op", "args", "need", "head"), GIT_CLICKS)
+def test_git_clicks_take_the_page_proof_with_their_own_op_and_target(op, args, need, head):
+    assert actions.proof_for(op, args) == need
+    assert actions.build_argv(op, args)[: len(head)] == head
+
+
+@pytest.mark.parametrize(("op", "args", "need", "head"), GIT_CLICKS)
+def test_git_click_without_a_session_is_watch_only(live, monkeypatch, op, args, need, head):
+    _root, port = live
+    ran = []
+    monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(actions, "_agent_exists", lambda *a: False)
+    assert post(port, "/api/act", {"op": op, "args": args})[0] == 403 and ran == []
+
+
+@pytest.mark.parametrize(("op", "args", "need", "head"), GIT_CLICKS)
+def test_git_click_with_a_session_is_one_step_with_a_proof(live, monkeypatch, op, args, need, head):
+    root, port = live
+    ck = session(root, port)
+    seen = []
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(
+        actions, "run_with_proof", lambda argv, proof, **kw: seen.append((argv, proof)) or R()
+    )
+    monkeypatch.setattr(actions, "_agent_exists", lambda *a: False)
+    st, _, _ = post(port, "/api/act", {"op": op, "args": args}, {"Cookie": ck})
+    assert st == 200 and len(seen) == 1  # one click, one command, one proof
+    payload = json.loads(__import__("base64").urlsafe_b64decode(seen[0][1].split(".")[1] + "=="))
+    assert (payload["op"], payload["target"]) == need
+    assert seen[0][0][: len(head)] == head
+
+
+# ---- 1.0a-3: every op that acts as the person needs the page session (watch-only without one) ---------------
+
+TID = "t_abcdef"
+ACT_ARGS = {
+    "link.extend": {"id": "f_abc", "days": 3},
+    "link.stop": {"id": "f_abc"},
+    "answer": {"ticket": TID, "question": "q1", "answer": "x"},
+    "ticket.changes": {"ticket": TID, "text": "more"},
+    "chat.say": {"text": "hi"},
+    "chat.make_ticket": {"id": "m_abcdefghijkl"},
+    "check.set": {"ticket": TID, "check": "c1", "done": True},
+    "check.wont_do": {"ticket": TID, "check": "c1"},
+    "check.reopen": {"ticket": TID, "check": "c1"},
+    "check.edit": {"ticket": TID, "check": "c1", "text": "x"},
+    "check.remove": {"ticket": TID, "check": "c1"},
+    "run.start": {"ticket": TID},
+    "run.stop": {"ticket": TID},
+    "run.send": {"ticket": TID, "text": "x"},
+    "addon.start": {},
+    "addon.act": {"addon": "scheduler", "verb": "pause", "target": TID},
+    "config.agent": {"name": "claude"},
+    "config.agent.add": {"name": "mine", "command": "mine {prompt}"},
+    "config.permissions": {"mode": "auto"},
+    "private.move": {},
+    "private.allow": {"name": "mine", "key": "a" * 64},
+    "addon.set": {"name": "scheduler", "on": True},
+    "share.set": {"on": True},
+    "workflow.set": {"on": True},
+    "copies.set": {"mode": "off"},
+    "copies.clean": {},
+    "copies.remove_orphaned": {"ws8": "abcd1234"},
+    "copies.retry": {"ticket": TID},
+    "look.set": {"icon": "bolt", "color": "auto"},
+    "look.shared": {"on": False},
+    "mobile.set": {"on": True},
+    "mobile.ack": {},
+    "chat.send_ws": {"workspace": "ws_abcdefghij", "text": "hi"},
+    "chat.sync_ws": {},
+    "mobile.hours": {"hours": 8},
+    "group.say": {"ticket": TID, "text": "hi"},
+    "group.share": {"ticket": TID, "file": "report.txt"},
+    "group.add": {"ticket": TID, "workspace": "peer"},
+    "group.remove": {"ticket": TID, "workspace": "peer"},
+    "relay.reply": {"to": "peer", "message": "m_abcdefghijklmnop", "text": "ok"},
+    "relay.topic": {"message": "m_abcdefghijklmnop", "title": "A topic"},
+    "message.send": {"workspace": "peer", "text": "hi"},
+}
+
+
+def test_every_person_op_is_refused_without_a_session_and_starts_no_child(live, monkeypatch):
+    import subprocess
+
+    from orch_dashboard import actions as acts
+
+    _root, port = live
+    calls = []
+    from orch_dashboard import data as dash_data
+
+    monkeypatch.setattr(acts, "_run", lambda *a, **k: calls.append(a))  # module-local, never subprocess.run
+    monkeypatch.setattr(dash_data, "_run", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: calls.append(a))
+    missing = [op for op in acts.OPS if acts.needs_session(op) and op not in ACT_ARGS]
+    assert not missing, f"add valid args for: {missing}"
+    for op, args in ACT_ARGS.items():
+        assert acts.needs_session(op), op
+        st, _, body = post(port, "/api/act", {"op": op, "args": args})
+        assert st == 403, (op, st, body)
+    assert calls == []  # nothing was run for any of them
+
+
+def test_the_free_ops_stay_free(live):
+    from orch_dashboard import actions as acts
+
+    for op in (
+        "ticket.new",
+        "ticket.paste",
+        "ticket.edit",
+        "ticket.field",
+        "log",
+        "check.add",
+        "ref.add",
+        "ref.rm",
+    ):
+        assert not acts.needs_session(op), op
+    assert acts.proof_for("ticket.patch", {"ticket": TID, "data": {"note": "x"}}) is None
+
+
+def test_the_core_gated_config_ops_mint_for_the_right_target():
+    from orch_dashboard import actions as acts
+
+    assert acts.proof_for("workflow.set", {"on": True}) == ("config.agents_may_finish", "on")
+    assert acts.proof_for("workflow.set", {"on": False}) is None  # off needs no proof
+    assert acts.proof_for("share.set", {"on": True}) == ("config.share", "on")
+    assert acts.proof_for("share.set", {"on": False}) is None
+    assert acts.proof_for("config.permissions", {"mode": "full"}) == ("config.permissions", "full")
+    assert acts.proof_for("config.agent.add", {"name": "mine", "command": "mine {prompt}"}) == (
+        "config.agent_add",
+        hp.agent_add_target("mine", "mine {prompt}"),  # core's own function, not the dashboard's
+    )
+    assert acts.proof_for("look.shared", {"on": True}) == ("look.shared_pages", "on")
+    assert acts.proof_for("look.shared", {"on": False}) == ("look.shared_pages", "off")
+    assert acts.proof_for("look.set", {"icon": "bolt"}) == ("look.icon", "look")
+
+
+def test_group_clicks_mint_for_the_right_target_and_a_share_binds_the_files_content(tmp_path):
+    from orch_dashboard import actions as acts
+
+    assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)
+    assert acts.proof_for("group.say", {"group": "grp_t_abcdef", "host": "peer", "text": "x"}) == (
+        "group.write_as_person",
+        "peer:grp_t_abcdef",  # host:group (the host is part of what is approved)
+    )
+    assert acts.proof_for("group.remove", {"ticket": TID, "workspace": "peer"}) == (
+        "group.remove_member",
+        f"{TID}:peer",
+    )
+    art = tmp_path / ".orch" / "tickets" / TID / "artifacts"
+    art.mkdir(parents=True)
+    (art / "report.txt").write_text("one")
+    a = acts.proof_for("group.share", {"ticket": TID, "file": "report.txt"}, tmp_path)
+    (art / "report.txt").write_text("two")
+    b = acts.proof_for("group.share", {"ticket": TID, "file": "report.txt"}, tmp_path)
+    assert a[0] == b[0] == "group.share_file" and a[1] != b[1] and a[1].startswith(f"{TID}:")  # content-bound
+
+
+def test_copy_setup_click_mints_for_the_hash_of_the_command_only():
+    import hashlib
+
+    from orch_dashboard import actions as acts
+
+    got = acts.proof_for("copies.set", {"setup": "  make prepare "})
+    assert got == ("config.copy_setup", hashlib.sha256(b"make prepare").hexdigest())
+    assert acts.proof_for("copies.set", {"setup": ""}) is None  # clearing needs none
+    assert acts.proof_for("copies.set", {"setup": "none"}) is None
+    assert acts.proof_for("copies.set", {"mode": "off"}) is None
+
+
+def test_no_session_means_no_file_read_before_the_refusal(monkeypatch, tmp_path):
+    """F8: a request without a page session is refused before the artifact is hashed."""
+    from orch_dashboard import actions as acts
+
+    def boom(*a, **k):
+        raise AssertionError("the artifact was read before the session check")
+
+    monkeypatch.setattr(acts, "_share_sha", boom)
+    with pytest.raises(acts.NeedsPerson):
+        acts.run_op(tmp_path, acts.SELF, "group.share", {"ticket": TID, "file": "a.txt"}, mint=None)
+
+
+def test_group_say_target_is_host_and_group_like_the_cli(tmp_path, monkeypatch):
+    """The dashboard's proof target for a joined group is <host>:<group>, the same string the CLI builds
+    (humanproof.group_target); a host-side group (by ticket) stays the ticket id."""
+    from orch import relay
+
+    from orch_dashboard import actions as acts
+
+    monkeypatch.setattr(relay, "resolve", lambda root, name: {"Alpha": "ws_hosta00001"}.get(name, name))
+    gid = "grp_t_abcdef12"
+    want = ("group.write_as_person", f"ws_hosta00001:{gid}")
+    assert acts.proof_for("group.say", {"group": gid, "host": "Alpha"}, tmp_path) == want
+    assert acts.proof_for("group.say", {"group": gid, "host": "ws_hosta00001"}, tmp_path) == want
+    assert hp.group_target(tmp_path, "Alpha", gid) == want[1]
+    assert acts.proof_for("group.say", {"group": gid, "host": "ws_hostb00002"}, tmp_path) != want
+    assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)

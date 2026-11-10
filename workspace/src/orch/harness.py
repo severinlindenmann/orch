@@ -218,7 +218,9 @@ def exclude_set(root: Path, tag: str, lines: list[str]) -> bool:
 
 # Local paths relative to .orch/: orch's own .gitignore keeps them out of git with or without git info
 # exclude, written before anything else and independent of linking. It lists itself.
-ORCH_IGNORE = [
+# The contract list (contracts/local-files.md, "Local-only lines"): ONE constant, and a test parses the contract
+# and checks it is the same, so the two cannot drift.
+CONTRACT_IGNORE = [
     ".gitignore",
     ".local-id",
     "secrets/",
@@ -228,12 +230,23 @@ ORCH_IGNORE = [
     "outbox/",
     "addons/",
     "run/",
-    "tmp-refresh/",
     "harness/",
+    "tickets/*/evidence/",
+    "record/",
+    ".usage-salt",
+]
+ORCH_IGNORE = [
+    *CONTRACT_IGNORE,
+    "tmp-refresh/",
     "local/",
     "chat/",
-    "tickets/*/evidence/",
     "tickets/.lock-*",  # per-ticket write locks
+    # Personal by default (9 Nov): tickets (history, phone texts, artifacts, the Chat ticket), the counter and the
+    # per-person settings stay out of a team repo. Fixed patterns only, never derived from data.
+    "tickets/",
+    "ticket-counter.json",
+    "config.toml",
+    "addons.json",
 ]
 
 
@@ -422,6 +435,98 @@ def glob_escape(text: str) -> str:
 SKILL_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
+# What `orch private` looks at: the personal files a team repo should not hold (paths relative to the project).
+PRIVATE_FILES = (
+    (".orch/tickets", "tickets"),
+    (".orch/ticket-counter.json", "ticket-counter.json"),
+    (".orch/config.toml", "config.toml"),
+    (".orch/addons.json", "addons.json"),
+)
+
+
+def tracked_private(root: Path) -> list[str]:
+    return _tracked_private(root) or []
+
+
+def _tracked_private(root: Path, icase: bool = True) -> list[str] | None:
+    """The personal orch files that git already tracks in this folder's repo (project-relative, sorted, at most
+    2000). [] outside a git repo or when git cannot say (the warning is advice; the trust check is `_tracked`)."""
+    try:
+        if not _in_git_repo(root):
+            return []
+    except Refused:
+        return None
+    rc, raw, _ = _safegit().run_bytes(
+        [
+            "ls-files",
+            "-z",
+            "--",
+            *[f":({'icase,' if icase else ''}literal){rel}" for rel, _ in PRIVATE_FILES],
+        ],
+        root,
+        20,
+    )
+    if rc != 0:
+        return None
+    names = sorted({os.fsdecode(n) for n in raw.split(b"\0") if n})
+    return names[:2000]
+
+
+def private_summary(root: Path) -> dict:
+    """{"files": [...], "counts": {"tickets": 3, "config.toml": 1}, "config_tracked": bool}: what the team repo holds."""
+    files = tracked_private(root)
+    counts: dict[str, int] = {}
+    for f in files:
+        low = f.lower()
+        for rel, label in PRIVATE_FILES:
+            if low == rel or low.startswith(rel + "/"):
+                counts[label] = counts.get(label, 0) + 1
+                break
+    return {"files": files, "counts": counts, "config_tracked": _tracked(root, ".orch/config.toml")}
+
+
+def private_words(summary: dict) -> str:
+    """One plain line: what is committed."""
+    parts = []
+    for label, n in summary["counts"].items():
+        parts.append(f"{n} ticket file{'s' if n != 1 else ''}" if label == "tickets" else label)
+    return "Committed in your team repo: " + ", ".join(parts) + "."
+
+
+def move_to_private(root: Path, by: str | None = None) -> list[str]:
+    """A person's click: `git rm --cached` for the tracked personal files. The files stay on disk; nothing is
+    committed (the removal is the person's to commit); older commits keep their copies. Returns the paths.
+    An agent (`by` = agent:...) is refused here too, behind the CLI's proof check."""
+    from orch import config
+
+    config.require_person(by, "move these files out of the team repo")
+    files = _tracked_private(root, icase=False) or []  # exactly the names git holds, no case variants
+    if not files:
+        return []
+    protect_local(root)  # the ignore rules first, so the files do not turn into "new files" afterwards
+    for i in range(0, len(files), 200):
+        chunk = files[i : i + 200]
+        rc, _, _ = _safegit().run(
+            ["rm", "--cached", "-f", "-q", "--", *[f":(literal){f}" for f in chunk]],
+            root,
+            60,
+            read_only=False,
+            filters=False,
+        )
+        if rc != 0:
+            if i:
+                raise Refused(
+                    f"git removed {i} file{'s' if i != 1 else ''} from the team repo, then stopped. "
+                    "Run orch private move again, or look at: git status"
+                )
+            raise Refused("git could not remove the files from the team repo. Nothing was changed.")
+    left = _tracked_private(root, icase=False)
+    if left is None:  # git cannot say now: do not claim anything was moved
+        raise Refused("git ran, but orch could not check what was removed. Look at: git status")
+    still = set(left)
+    return [f for f in files if f not in still]  # what really left the index
+
+
 def safe_skill_name(name: str) -> bool:
     return bool(SKILL_NAME.fullmatch(name)) and name not in {".", ".."}
 
@@ -466,6 +571,13 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
     """Keep secrets and other local files out of git. Fails closed: when neither .orch/.gitignore nor
     .git/info/exclude can be written, it refuses (so no secret is stored unprotected). `lines` are the
     extra root-relative patterns for the exclude block (links, local instruction files)."""
+    if lines is None:  # a rewrite keeps every orch-owned exclude line (skill links, local instruction files)
+        try:
+            from orch import skills
+
+            lines = skills._exclude_lines(root)
+        except (Refused, OSError, ValueError, KeyError):
+            lines = None
     ignore = [*ORCH_IGNORE, *_general_lines(root)]
     text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ignore) + "\n"
     ok = False

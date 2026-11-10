@@ -42,6 +42,16 @@
       var verb = {edit: "Rename ", remove: "Remove "}[p.action] || "Open ";
       return [verb, stepName(p), " on ", q(p.title), p.action === "edit" || p.action === "remove" ? "?" : " again?"];
     },
+    "config.agents_may_finish": function () { return ["Let agents mark tickets Done?"]; },
+    "config.permissions": function (p) { return ["Let agents do more without asking (mode ", plain(p.mode), ")?"]; },
+    "config.copy_setup": function () { return ["Run a command whenever a separate copy is made?"]; },
+    "config.agent_add": function (p) { return ["Add the agent ", plain(p.name), "? orch will run this command for every task."]; },
+    "config.share": function () { return ["Share the orch entry with your team (AGENTS.md)?"]; },
+    "look.shared_pages": function (p) { return [p.on ? "Show the workspace name and icon on shared file pages?" : "Stop showing the workspace name and icon on shared file pages?"]; },
+    "look.icon": function (p) { return ["Change the workspace icon to ", plain(p.icon), " and colour to ", plain(p.color), "?"]; },
+    "group.write_as_person": function (p) { return ["Write into the group ", q(p.title), p.host ? " (host " + p.host + ")" : "", " as yourself?"]; },
+    "group.remove_member": function (p) { return ["Remove ", q(p.workspace), " from the group ", q(p.title), "?"]; },
+    "group.share_file": function (p) { return ["Share ", q(p.file), " with the group ", q(p.title), p.host ? " (host " + p.host + ")" : "", "?"]; },
     "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
     "update": function (p) { return ["Update orch from ", full(p.source), "?"]; },
     "relay.connect": function (p) {
@@ -49,6 +59,9 @@
       return ["Connect to ", full(s + p.host), "?" + (p.scheme === "http" ? " This address is not encrypted." : "")];
     },
     "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
+    "private.allow": function (p) { return ["Allow ", q(p.name), " to run ", full(p.command), p.interactive ? " (and, live: " : "", p.interactive ? full(p.interactive) : "", p.interactive ? ")" : "", " on this computer?"]; },
+    "private.move": function () { return ["Move the personal files out of the team repo?"]; },
+    "config.agent_add": function (p) { return ["Add the agent ", q(p.name), " that runs ", full(p.command)].concat(p.interactive ? [" (live: ", full(p.interactive), ")"] : [], ["?"]); },
     "addon.add_local": function (p) { return ["Add the add-on from ", full(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
   };
   function sentence(i) {
@@ -56,7 +69,7 @@
     var f = TEMPLATES[i.op];
     return say(f ? f(p) : ["Do something on this computer?"]);
   }
-  var EXACT_LABEL = {"relay.connect": "Exact address:", "update": "Exact source:", "addon.add_local": "Exact folder:"};
+  var EXACT_LABEL = {"config.agent_add": "Exact values:", "private.allow": "Exact values:", "relay.connect": "Exact address:", "update": "Exact source:", "addon.add_local": "Exact folder:", "group.share_file": "Exact file:", "config.copy_setup": "Exact command:"};
   function block(label, text) {
     var d = el("div"); d.className = "ho-exact"; d.style.cssText = "flex-basis:100%;margin-top:4px";
     var l = el("div", label, "meta"); l.style.cssText = "font-size:12px;opacity:.75";
