@@ -1490,6 +1490,7 @@ def share_file(
     by_click: bool = False,
     by: str = "agent:relay",
     confirm=None,
+    expect_sha: str | None = None,
 ) -> dict:
     """Share one file with the group (members as `file` messages + a blob each, phones as a text with the
     file in
@@ -1498,6 +1499,10 @@ def share_file(
 
     path = Path(path)
     data = read_shared(path, root, confined=not by_click)
+    if expect_sha is not None and hashlib.sha256(data).hexdigest() != expect_sha:
+        raise Refused(
+            "The file changed after you approved it. Nothing was sent. Ask again."
+        )  # the proof's bytes
     if not by_click and (sniff(data, path.name) or "").startswith("image/"):
         raise Refused("A person has to click to share a picture.")
     mime = _checked(data, path.name, by_click, confirm)
@@ -2647,6 +2652,7 @@ def share_member(
     title: str | None = None,
     by_click: bool = False,
     confirm=None,
+    expect_sha: str | None = None,
 ) -> dict:
     """Member: share a file with the group (to the host only). Only after its person's click."""
     from orch import relay
@@ -2656,6 +2662,10 @@ def share_member(
     tickets.require_human("Share this file with the group?", "sharing a file")
     path = Path(path)
     data = read_shared(path, root, confined=False)  # the person's click chose it
+    if expect_sha is not None and hashlib.sha256(data).hexdigest() != expect_sha:
+        raise Refused(
+            "The file changed after you approved it. Nothing was sent. Ask again."
+        )  # the proof's bytes
     mime = _checked(data, path.name, True, confirm)
     with _state(root) as st:
         j = st["joined"].get(_jkey(host, gid))

@@ -146,10 +146,12 @@ function ticketForm(t) {
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
   reload.hidden = true;
   const submit = el('button', 'btn primary', t ? 'Save changes' : 'Create & Start'); submit.type = 'submit';
-  let startAfter = !t;
+  let startAfter = !t, planFirst = false;
   const plain = t ? null : el('button', 'btn outline', 'Create');
-  if (plain) { plain.type = 'button'; plain.addEventListener('click', () => { startAfter = false; form.requestSubmit(); }); submit.addEventListener('click', () => { startAfter = true; }); }
-  actions.append(...(plain ? [plain, submit] : [submit]));
+  if (plain) { plain.type = 'button'; plain.addEventListener('click', () => { startAfter = false; planFirst = false; form.requestSubmit(); }); submit.addEventListener('click', () => { startAfter = true; planFirst = false; }); }
+  const plan = t ? null : button('Show plan first', 'outline', () => { startAfter = true; planFirst = true; form.requestSubmit(); });
+  actions.append(...(plain ? [plain, submit, plan] : [submit]));
+  if (plan) fields.append(el('p', 'meta', '"Show plan first" waits for you before work starts.'));
   const startNow = async () => {
     if (t || !startAfter || !created) return;
     const run = await act('run.start', {ticket:created.id});
@@ -179,7 +181,7 @@ function ticketForm(t) {
       values.note = shortText.length <= 1500 && (/[\r\n]/.test(shortText) || shortText.trim() !== values.title) ? shortText : '';
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
-        const args = {title:values.title, title_auto:Boolean(longText || files.length || fullText.trim().split(/\r?\n/).filter(l => l.trim()).length > 1 || values.title.length >= 80), ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
+        const args = {title:values.title, ...(planFirst ? {plan_first:true} : {}), title_auto:Boolean(longText || files.length || fullText.trim().split(/\r?\n/).filter(l => l.trim()).length > 1 || values.title.length >= 80), ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
         if (new Blob([JSON.stringify({op:'ticket.new', args})]).size > 4900000) {  // the server takes 5 MB per request
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
           submit.disabled = false; return;
@@ -205,7 +207,7 @@ function ticketForm(t) {
     if (!result.ok) {
       error.textContent = window.DashHelpers.scrubText(result.text);
       reload.hidden = !(t && result.status === 409);
-      if (created) { inputs.text.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
+      if (created) { inputs.text.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; if (plan) plan.hidden = true; }
       return;
     }
     window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');

@@ -1,4 +1,5 @@
-"""Every spawn of Python with -m must pass -P to prevent current-folder imports."""
+"""Every spawn of Python with -m must pass -P to prevent current-folder imports; a spawn of orch itself
+(-m orch...) also -I (no PYTHON* variables, no user site)."""
 
 import ast
 from pathlib import Path
@@ -48,7 +49,10 @@ def missing_dash_P(source):
         if "-m" not in strs:
             continue
         m = strs.index("-m")
+        nxt = strs[m + 1] if m + 1 < len(strs) else None
         if "-P" in strs[:m]:
+            if isinstance(nxt, str) and (nxt == "orch" or nxt.startswith("orch.")) and "-I" not in strs[:m]:
+                bad.append(node.lineno)  # orch's own spawn: -I as well
             continue
         first = strs[0]
         if (
@@ -65,7 +69,10 @@ def missing_dash_P(source):
     [
         ('argv = [\n    sys.executable,\n    "-m",\n    "orch",\n]', [1]),
         ('argv = (python, "-m", "orch")\npython = sys.executable', [1]),
-        ('python = sys.executable\nargv = [python, "-P", "-m", "orch"]', []),
+        ('python = sys.executable\nargv = [python, "-I", "-P", "-m", "orch"]', []),
+        ('python = sys.executable\nargv = [python, "-P", "-m", "orch"]', [2]),
+        ('argv = [sys.executable, "-P", "-m", "orch.pageproof"]', [1]),
+        ('argv = [sys.executable, "-P", "-m", "some_addon"]', []),
         ('argv = (sys.executable, "-m", "orch", "-P")', [1]),
         ('argv = [sys.executable] + ["-m", "orch"]', [1]),
         ('cmd += ["-m", "orch"]', [1]),
@@ -87,4 +94,4 @@ def test_no_sys_executable_dash_m_without_dash_P():
             bad.extend(
                 f"{f.relative_to(ROOT)}:{line}" for line in missing_dash_P(f.read_text(encoding="utf-8"))
             )
-    assert not bad, f"python -m without -P (use procs.orch_python_argv or add -P): {bad}"
+    assert not bad, f"python -m without -P, or -m orch without -I (use procs.orch_python_argv): {bad}"

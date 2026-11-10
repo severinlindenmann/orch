@@ -32,3 +32,7 @@ test('the hold reason is plain text while the run runs and gone when absent', ()
   assert.equal(H.holdText({run:{running:true}}), '');
   assert.equal(H.holdText({run:{running:false}, hold:why}), '');
 });
+test('wont do outcome hides evidence and never describes active work', () => {
+  assert.equal(H.outcome({wont_do:true, done:false, state:'doing', reason:'Later', evidence:[{text:'Old proof'}]}), "Won't do");
+  assert.equal(H.outcome({wont_do:true, done:false}), "Won't do");
+});

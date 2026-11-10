@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from urllib.parse import urlsplit
 
 from . import look, mobile, phone_delivery
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
 def _me() -> str:
     from .actions import actor  # actions imports this module
@@ -78,6 +80,22 @@ def forget_static() -> None:
     _STATIC.clear()
 
 
+def _argv0(orch_bin):
+    try:
+        from orch.pageproof import argv0
+    except ImportError:
+        return [orch_bin]
+    return argv0(orch_bin)
+
+
+def _child_env(env, orch_bin):
+    try:
+        from orch.pageproof import child_env
+    except ImportError:
+        return {**env, "ORCH_BIN": orch_bin}
+    return child_env(env, orch_bin)
+
+
 def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float = 5.0):
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
@@ -96,14 +114,14 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
 
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
     try:
-        r = subprocess.run(
-            [orch_bin, *args],
+        r = _run(
+            [*_argv0(orch_bin), *args],
             check=False,
             cwd=root,
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={**os.environ, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin},
+            env=_child_env({**os.environ, "ORCH_ROOT": str(root)}, orch_bin),
         )
         return json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -326,6 +344,9 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                     "ticket_fields": tf,
                     "acts": acts,
                     "link_kinds": kinds,
+                    # orch-shipped (an installed package) vs a local folder someone added: the page of the
+                    # latter runs sandboxed, with no way to use the person's session (H1)
+                    "shipped": a.get("source") == "built-in",
                 }
             )
     out.sort(key=lambda a: (a["dashboard"] or {}).get("order", 50))
@@ -515,16 +536,72 @@ def _addon_detail(root: Path, name: str) -> dict | None:
     return out
 
 
+_DISK: dict = {}  # root -> {"at": monotonic, "val": dict | None, "busy": bool}
+_DISK_LOCK = threading.Lock()
+DISK_TTL = 20.0
+
+
+def _disk_count(root: Path, key: str) -> None:
+    try:
+        from orch import worktrees
+
+        val = worktrees.usage(root, seconds=3.0)
+    except Exception:  # noqa: BLE001 - the line just stays at "..."
+        val = None
+    with _DISK_LOCK:
+        _DISK[key] = {"at": time.monotonic(), "val": val, "busy": False}
+
+
+def copies_disk(root: Path) -> dict | None:
+    """{copies, bytes, partial} for the settings line "Copies on this computer", or None while it is being
+    counted (the page shows "..."). The walk runs on a thread (capped by core), never on the request."""
+    key = str(root)
+    with _DISK_LOCK:
+        e = _DISK.get(key)
+        fresh = e is not None and time.monotonic() - e["at"] < DISK_TTL
+        if e is not None and (fresh or e["busy"]):
+            return e["val"]
+        _DISK[key] = {"at": e["at"] if e else 0.0, "val": e["val"] if e else None, "busy": True}
+        old = e["val"] if e else None
+    threading.Thread(target=_disk_count, args=(root, key), daemon=True).start()
+    return old
+
+
+def copies_disk_forget(root: Path) -> None:
+    with _DISK_LOCK:
+        _DISK.pop(str(root), None)
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = (
         run_orch(orch_bin, ["agents", "--json"], root),
         run_orch(orch_bin, ["addon", "list", "--json"], root),
     )
+    private = run_orch(orch_bin, ["private", "--json"], root)
+    private = private if isinstance(private, dict) else {}
+    private_lines = private.get("lines")
+    git_private = {
+        "count": private.get("count") if type(private.get("count")) is int else 0,
+        "lines": [line[:300] for line in private_lines if isinstance(line, str)][:4]
+        if isinstance(private_lines, list) else [],
+        "agent_command_ignored": private.get("agent_command_ignored") is True,
+        "pending": [
+            {
+                "name": str(x.get("name")),
+                "key": str(x.get("key")),
+                "showable": x.get("showable") is True,
+                **{k: x[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(x.get(k), str)},
+            }
+            for x in (private.get("pending_agents") if isinstance(private.get("pending_agents"), list) else [])[:5]
+            if isinstance(x, dict) and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", str(x.get("name")))
+            and re.fullmatch(r"[0-9a-f]{64}", str(x.get("key")))
+        ],
+    }
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
-    from orch.config import agents_may_finish
+    from orch.config import agents_may_finish, copies_max, copies_mode, copy_setup
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
@@ -537,8 +614,13 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         share = False
     return {
         "agents_may_finish": agents_may_finish(root),
+        "copies": copies_mode(root),
+        "copies_max": copies_max(root),
+        "copy_setup": copy_setup(root) or "",
+        "copies_disk": copies_disk(root),
         "folder": str(root),
         "share": share,
+        "git_private": git_private,
         "permissions": perm if perm in ("ask", "auto", "full") else "auto",  # core's default is Auto
         "agents": [
             {k: a.get(k) for k in keep}
@@ -605,6 +687,14 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
                 r["hold"] = " ".join(r["hold"].split())[:200] if isinstance(r["hold"], str) else None
                 if not r["hold"]:
                     r.pop("hold")
+            if (
+                isinstance(r, dict) and "shared_folder" in r
+            ):  # core's quiet line: text only, nothing else passes
+                sf = r.pop("shared_folder")
+                text = sf.get("line") if isinstance(sf, dict) else None
+                text = " ".join(text.split())[:200] if isinstance(text, str) else ""
+                if text:
+                    r["shared_folder"] = {"line": text}
             _RUNS[(str(root), i)] = (now, r if isinstance(r, dict) else None)
     return {i: _RUNS[(str(root), i)][1] for i in ids if _RUNS[(str(root), i)][1]}
 

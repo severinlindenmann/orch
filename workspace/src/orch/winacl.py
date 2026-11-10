@@ -1,0 +1,418 @@
+"""Windows rights for the guarded orch home (issue #405, contracts/secrets.md "Windows").
+
+POSIX has 0700/0600 and an lstat link check. Windows has neither, so this module does the same job there:
+
+- set_private(path, is_dir): only this user and SYSTEM may reach it, inheritance removed.
+- check_private(path): read the rights back and refuse unless the list is exactly this user and/or SYSTEM,
+  allow-only, protected (no inheritance), and the path has no link or junction.
+- no_reparse(path): no symlink, junction or other reparse point on any part of the path.
+
+No child process is ever started (a planted icacls.exe or whoami.exe in the current folder or on PATH can
+not fake the answer): everything goes through the Win32 API with ctypes (advapi32). Rights are compared by
+SID, so it works in every language. FAIL CLOSED: any API error or anything unexpected is a refusal.
+
+On POSIX all three are no-ops: the existing mode and lstat checks stay there. Errors are plain words.
+Level 1 (R1): the owner of the folder (this user) can still change rights; a hostile process of the same user
+is outside the promise.
+"""
+
+from __future__ import annotations
+
+import ntpath
+import os
+import struct
+from pathlib import Path
+
+from orch.errors import Refused
+
+REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+TAG_SYMLINK = 0xA000000C  # IO_REPARSE_TAG_SYMLINK
+TAG_MOUNT_POINT = 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT (a junction)
+SYSTEM_SID = "S-1-5-18"
+FILE_ALL_ACCESS = 0x1F01FF
+ACE_ALLOWED = 0
+ACE_INHERIT_FLAGS = 0x03  # OBJECT_INHERIT (1) | CONTAINER_INHERIT (2): allowed on a folder's own entries
+ACE_INHERITED = 0x10  # INHERITED_ACE: a copy from the parent
+
+
+def link_reparse(attrs: int, tag: int) -> bool:
+    """A symlink or junction? Other reparse points (OneDrive/cloud placeholders, dedup, WSL...) are ordinary
+    files for us. A reparse point whose tag is unknown (0) counts as a link: fail closed."""
+    return bool(attrs & REPARSE) and (tag in (TAG_SYMLINK, TAG_MOUNT_POINT) or tag == 0)
+
+
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+class Unknown(Refused):
+    """Windows could not tell (an API error, a long path, a virus scanner holding the file): refuse this call,
+    but it is NOT a finding. Callers must not reset or quarantine anything because of it."""
+
+
+def _cant(why: str) -> Unknown:
+    return Unknown(f"Refused: this orch folder is not private to you ({why}).")
+
+
+def _no(why: str) -> Refused:
+    return Refused(f"Refused: this orch folder is not private to you ({why}).")
+
+
+# ------------------------------------------------------------------------------ Win32 (ctypes), Windows only
+
+
+def _api():
+    import ctypes
+    from ctypes import wintypes
+
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    V, W, D = ctypes.c_void_p, ctypes.c_wchar_p, wintypes.DWORD
+    k32.GetCurrentProcess.restype = V
+    k32.LocalFree.argtypes = [V]
+    k32.LocalFree.restype = V
+    k32.CloseHandle.argtypes = [V]
+    adv.OpenProcessToken.argtypes = [V, D, ctypes.POINTER(V)]
+    adv.GetTokenInformation.argtypes = [V, ctypes.c_int, V, D, ctypes.POINTER(D)]
+    adv.ConvertSidToStringSidW.argtypes = [V, ctypes.POINTER(ctypes.c_void_p)]
+    adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        W,
+        D,
+        ctypes.POINTER(V),
+        V,
+    ]
+    adv.GetSecurityDescriptorDacl.argtypes = [
+        V,
+        ctypes.POINTER(wintypes.BOOL),
+        ctypes.POINTER(V),
+        ctypes.POINTER(wintypes.BOOL),
+    ]
+    adv.SetNamedSecurityInfoW.argtypes = [W, ctypes.c_int, D, V, V, V, V]
+    adv.SetNamedSecurityInfoW.restype = D
+    adv.GetNamedSecurityInfoW.argtypes = [
+        W,
+        ctypes.c_int,
+        D,
+        V,
+        V,
+        ctypes.POINTER(V),
+        V,
+        ctypes.POINTER(V),
+    ]
+    adv.GetNamedSecurityInfoW.restype = D
+    adv.GetSecurityDescriptorControl.argtypes = [V, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(D)]
+    adv.GetAclInformation.argtypes = [V, V, D, ctypes.c_int]
+    adv.GetAce.argtypes = [V, D, ctypes.POINTER(V)]
+    return ctypes, wintypes, adv, k32
+
+
+def _sid_string(ctypes, adv, k32, sid_ptr) -> str:
+    out = ctypes.c_void_p()
+    if not adv.ConvertSidToStringSidW(sid_ptr, ctypes.byref(out)):
+        raise _cant("an account name could not be read")
+    try:
+        return ctypes.wstring_at(out.value)
+    finally:
+        k32.LocalFree(out)
+
+
+_sid_cache: str | None = None
+
+
+def user_sid() -> str:
+    """The SID of the account this process runs as (from its token; not from a program, a name or env)."""
+    global _sid_cache
+    if _sid_cache is None:
+        try:
+            ctypes, wintypes, adv, k32 = _api()
+            tok = ctypes.c_void_p()
+            if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x8, ctypes.byref(tok)):  # TOKEN_QUERY
+                raise _cant("your account could not be found")
+            try:
+                n = wintypes.DWORD(0)
+                adv.GetTokenInformation(tok, 1, None, 0, ctypes.byref(n))  # TokenUser: ask the size
+                buf = ctypes.create_string_buffer(n.value)
+                if not adv.GetTokenInformation(tok, 1, buf, n, ctypes.byref(n)):
+                    raise _cant("your account could not be found")
+                sid_ptr = ctypes.c_void_p.from_buffer(buf).value  # TOKEN_USER starts with the SID pointer
+                _sid_cache = _sid_string(ctypes, adv, k32, sid_ptr)
+            finally:
+                k32.CloseHandle(tok)
+        except Refused:
+            raise
+        except Exception as e:  # noqa: BLE001 - fail closed on any API surprise
+            raise _cant("your account could not be found") from e
+    return _sid_cache
+
+
+def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
+    """Replace the DACL by: this user and SYSTEM, full control; protected (inheritance removed)."""
+    ctypes, wintypes, adv, k32 = _api()
+    inh = "OICI" if is_dir else ""
+    sddl = f"D:P(A;{inh};FA;;;{SYSTEM_SID})(A;{inh};FA;;;{sid})"
+    sd = ctypes.c_void_p()
+    if not adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(sd), None):
+        raise _no("Windows would not set its rights")
+    try:
+        present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+        dacl = ctypes.c_void_p()
+        if not adv.GetSecurityDescriptorDacl(
+            sd, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)
+        ) or not (present.value and dacl.value):
+            raise _no("Windows would not set its rights")
+        # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION; SE_FILE_OBJECT = 1
+        rc = adv.SetNamedSecurityInfoW(str(path), 1, 0x4 | 0x80000000, None, None, dacl, None)
+        if rc != 0:
+            raise _no("Windows would not set its rights")
+    finally:
+        k32.LocalFree(sd)
+
+
+def _read_dacl(path: Path) -> tuple[bool, list[tuple[int, int, int, str]]]:
+    """(protected, [(ace type, ace flags, access mask, SID string)]). Raises Refused when it cannot tell."""
+    ctypes, wintypes, adv, k32 = _api()
+    dacl, sd = ctypes.c_void_p(), ctypes.c_void_p()
+    rc = adv.GetNamedSecurityInfoW(str(path), 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    if rc != 0:
+        raise _cant("Windows would not tell its rights")
+    try:
+        if not dacl.value:  # a NULL DACL gives everyone access
+            raise _no("everyone can reach it")
+        ctl, rev = wintypes.WORD(), wintypes.DWORD()
+        if not adv.GetSecurityDescriptorControl(sd, ctypes.byref(ctl), ctypes.byref(rev)):
+            raise _cant("Windows would not tell its rights")
+        protected = bool(ctl.value & 0x1000)  # SE_DACL_PROTECTED
+
+        class _Size(ctypes.Structure):
+            _fields_ = [("AceCount", wintypes.DWORD), ("Used", wintypes.DWORD), ("Free", wintypes.DWORD)]
+
+        info = _Size()
+        if not adv.GetAclInformation(dacl, ctypes.byref(info), ctypes.sizeof(info), 2):  # AclSizeInformation
+            raise _cant("Windows would not tell its rights")
+        aces = []
+        for i in range(info.AceCount):
+            p = ctypes.c_void_p()
+            if not adv.GetAce(dacl, i, ctypes.byref(p)):
+                raise _cant("Windows would not tell its rights")
+            typ, flags, _size, mask = struct.unpack("<BBHI", ctypes.string_at(p.value, 8))
+            if typ != ACE_ALLOWED:
+                aces.append((typ, flags, mask, "?"))  # parse_aces refuses it; no SID layout assumed
+                continue
+            aces.append((typ, flags, mask, _sid_string(ctypes, adv, k32, p.value + 8)))
+        return protected, aces
+    finally:
+        k32.LocalFree(sd)
+
+
+def _owner_sid(path: Path) -> str:
+    """The SID that owns the file or folder. Raises Refused when it cannot tell."""
+    ctypes, wintypes, adv, k32 = _api()
+    owner, sd = ctypes.c_void_p(), ctypes.c_void_p()
+    rc = adv.GetNamedSecurityInfoW(  # OWNER_SECURITY_INFORMATION = 1
+        str(path), 1, 0x1, ctypes.byref(owner), None, None, None, ctypes.byref(sd)
+    )
+    if rc != 0 or not owner.value:
+        raise _cant("Windows would not tell who owns it")
+    try:
+        return _sid_string(ctypes, adv, k32, owner.value)
+    finally:
+        k32.LocalFree(sd)
+
+
+def _attrs(path: Path) -> int:
+    """st_file_attributes of the path itself (a link is not followed). Tests replace this."""
+    st = os.lstat(path)
+    if not hasattr(st, "st_file_attributes"):
+        raise _cant("a part of its path could not be checked")
+    return st.st_file_attributes
+
+
+def _tag(path: Path) -> int:
+    """st_reparse_tag of the path itself (not followed); 0 when unknown. Tests replace this."""
+    return getattr(os.lstat(path), "st_reparse_tag", 0)
+
+
+def _is_link(path: Path) -> bool:
+    return link_reparse(_attrs(path), _tag(path)) if _attrs(path) & REPARSE else False
+
+
+# ---------------------------------------------------------------------- the account's profile folder (B1)
+
+_profile_cache: str | None = None
+
+
+def _profile_raw() -> str | None:
+    """GetUserProfileDirectoryW of this process's token (userenv), never %USERPROFILE%. Tests replace this."""
+    ctypes, wintypes, adv, k32 = _api()
+    ue = ctypes.WinDLL("userenv", use_last_error=True)
+    ue.GetUserProfileDirectoryW.argtypes = [ctypes.c_void_p, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    tok = ctypes.c_void_p()
+    if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x8, ctypes.byref(tok)):
+        return None
+    try:
+        n = wintypes.DWORD(0)
+        ue.GetUserProfileDirectoryW(tok, None, ctypes.byref(n))  # asks for the size
+        if n.value == 0 or n.value > 32768:
+            return None
+        buf = ctypes.create_unicode_buffer(n.value)
+        if not ue.GetUserProfileDirectoryW(tok, buf, ctypes.byref(n)):
+            return None
+        return buf.value
+    finally:
+        k32.CloseHandle(tok)
+
+
+def profile_dir() -> str:
+    """This account's profile folder from the process token, never from the environment (an agent can set
+    USERPROFILE, HOMEDRIVE and HOMEPATH). Fail closed."""
+    global _profile_cache
+    if _profile_cache is None:
+        try:
+            got = _profile_raw()
+        except Exception as e:  # noqa: BLE001 - fail closed
+            raise _cant("your profile folder could not be found") from e
+        if not got or not ntpath.isabs(got):
+            raise _cant("your profile folder could not be found")
+        _profile_cache = got
+    return _profile_cache
+
+
+def _floor() -> str | None:
+    """Where the link walk starts: the profile folder (what is above it is not ours to guard, and a profile
+    moved by junction must keep working). None = walk everything. Tests replace this."""
+    try:
+        return profile_dir()
+    except Refused:
+        return None
+
+
+# ------------------------------------------------------------------------------------------- the checks
+
+
+def no_reparse(path: str | os.PathLike) -> None:
+    """Refuse a symlink or junction on the path, from the profile folder downward (the folder itself and what
+    is above it are not checked: an agent can not replace those, and a profile moved by junction works).
+    A path outside the profile folder is walked up to the drive root. Other reparse points are allowed."""
+    if not _windows():
+        return
+    p = Path(path)
+    floor = _floor()
+    fl = ntpath.normcase(ntpath.normpath(floor)) if floor else None
+    for c in [p, *p.parents]:
+        if c == c.parent:  # the drive root
+            continue
+        if fl is not None:
+            cn = ntpath.normcase(ntpath.normpath(str(c)))
+            if cn == fl:
+                break  # the profile folder and everything above it
+        try:
+            if _is_link(c):
+                raise _no("part of its path is a link or junction")
+        except FileNotFoundError:
+            continue
+        except Refused:
+            raise
+        except OSError as e:
+            raise _cant("a part of its path could not be checked") from e
+
+
+def parse_aces(protected: bool, aces: list[tuple[int, int, int, str]], sid: str) -> None:
+    """Raise Refused unless the DACL is protected and allows only `sid` and SYSTEM (both with full control,
+    at least `sid` present). Anything else, or anything odd, is a refusal."""
+    if not protected:
+        raise _no("it takes rights from its parent folder")
+    seen_user = False
+    for typ, flags, mask, who in aces:
+        if typ != ACE_ALLOWED:
+            raise _no("its rights list is not understood")
+        if flags & ACE_INHERITED:
+            raise _no("it takes rights from its parent folder")
+        if flags & ~ACE_INHERIT_FLAGS:
+            raise _no("its rights list is not understood")
+        if who not in (SYSTEM_SID, sid):
+            raise _no("another account can reach it")
+        if mask & FILE_ALL_ACCESS != FILE_ALL_ACCESS:
+            raise _no("a right is missing")
+        if who == sid:
+            seen_user = True
+    if not seen_user:
+        raise _no("your account is not on its rights list")
+
+
+def set_private(path: str | os.PathLike, is_dir: bool) -> None:
+    """Only this user and SYSTEM, inheritance removed; then read back and verified."""
+    if not _windows():
+        return
+    p = Path(path)
+    no_reparse(p)
+    try:
+        _write_dacl(p, is_dir, user_sid())
+    except Refused:
+        raise
+    except Exception as e:  # noqa: BLE001 - fail closed
+        raise _no("Windows would not set its rights") from e
+    check_private(p)
+
+
+def check_private(path: str | os.PathLike) -> None:
+    """Refuse unless `path` (file or folder) is private to this user: see the module text. A missing path
+    raises FileNotFoundError, like lstat does on POSIX."""
+    if not _windows():
+        return
+    p = Path(path)
+    _attrs(p)  # FileNotFoundError passes through: "not there" is not "wrong rights"
+    no_reparse(p)
+    sid = user_sid()
+    try:
+        protected, aces = _read_dacl(p)
+    except Refused:
+        raise
+    except Exception as e:  # noqa: BLE001 - fail closed
+        raise _cant("Windows would not tell its rights") from e
+    parse_aces(protected, aces, sid)
+
+
+def ensure_private(path: str | os.PathLike) -> None:
+    """check_private, but a FOLDER that is OWNED by this user and too open (made before this check
+    existed, or by an older version) is tightened to user+SYSTEM and verified, so nobody is locked out. That
+    only narrows access. Refused: another owner, a link or junction, or when tightening or verifying fails."""
+    if not _windows():
+        return
+    p = Path(path)
+    try:
+        check_private(p)
+        return
+    except FileNotFoundError:
+        raise
+    except Refused:
+        pass
+    no_reparse(p)  # a link or junction is never tightened
+    try:
+        owner = _owner_sid(p)
+    except Refused:
+        raise
+    except Exception as e:  # noqa: BLE001 - fail closed
+        raise _cant("Windows would not tell who owns it") from e
+    if owner != user_sid():
+        raise _no("it belongs to another account")
+    set_private(p, True)
+
+
+def file_check(path: str | os.PathLike) -> str | None:
+    """The hook for humanproof.FILE_CHECKS: a secret or integrity file is never tightened and trusted.
+    "acl" = a real finding (loose, a link in its place): the caller resets the protection. "unknown" = Windows
+    could not tell (API error): the caller refuses this call only, with no reset. None = private. A missing
+    file raises FileNotFoundError, like lstat."""
+    if not _windows():
+        return None
+    try:
+        check_private(path)
+    except FileNotFoundError:
+        raise
+    except Unknown:
+        return "unknown"
+    except Refused:
+        return "acl"
+    except Exception:  # noqa: BLE001 - not a finding, just not known
+        return "unknown"
+    return None

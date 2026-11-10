@@ -177,11 +177,14 @@ def start_live(
         )
     if not mine and session_exists(root, tid):
         tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone
-    rec = runs.claim(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)
+    rec, copy_notes = runs.claim_routed(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)
     run = rec["run"]
+    work = runs.workdir_for(root, rec, tid)  # a separate copy of the folder, or the workspace itself
     # never blocks a start: a screen the tool still shows is explained by check_starting
     with contextlib.suppress(Exception):
         adapters.trust_folder(name, root)
+        if work != root:
+            adapters.trust_folder(name, work)
     hooks_path = runs.run_dir(root) / f"hooks-{run}.json"
     try:
         hooks = adapters.hooks_doc(name, run, root)
@@ -202,7 +205,7 @@ def start_live(
         cmd += ["--env-file", str(env_file), "--"] + p["argv"]
         r = tmux(
             root, "new-session", "-d", "-P", "-F", "#{pane_pid}", "-x", "200", "-y", "50",
-            "-s", tid, "-c", str(root), "-e", f"ORCH_ROOT={root}", "--", *cmd,
+            "-s", tid, "-c", str(work), "-e", f"ORCH_ROOT={root}", "--", *cmd,
         )  # fmt: skip
         if r.returncode != 0:
             raise Refused(f"tmux could not start the session: {r.stderr.strip() or 'unknown error'}")
@@ -223,6 +226,7 @@ def start_live(
         "tmux": {"socket": socket_name(root), "session": tid},
         "run": run,
         "log": None,
+        "notes": copy_notes,
     }
 
 
@@ -925,7 +929,7 @@ def event(
     return result
 
 
-def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+def pass_answer(root: Path, tid: str, q: dict, by: str, proven: bool = False) -> dict | None:
     """A person answered. An agent works on the ticket: the answer goes to it like a message (live: pasted
     when it is idle). None works on it: the agent that asked is started again on the ticket (its own session
     resumed when there is one) once no question of it is open any more, so nobody has to press Continue.
@@ -934,7 +938,14 @@ def pass_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
         return None
     rec = runs.read(root, tid)
     if rec and runs.state(rec) == "alive":
-        send(root, tid, by, f"Answer to your question {q['id']} ({q['text']}): {q['answer']}", "answer")
+        send(
+            root,
+            tid,
+            by,
+            f"Answer to your question {q['id']} ({q['text']}): {q['answer']}",
+            "answer",
+            proven=proven,
+        )
         return None
     return resume_after_answer(root, tid, q, by)
 
@@ -965,9 +976,9 @@ def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
         return None
 
 
-def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dict:
+def send(root: Path, tid: str, by: str, text: str, kind: str = "message", proven: bool = False) -> dict:
     tickets.load(root, tid)
-    item = runs.pending_add(root, tid, by, kind, text)
+    item = runs.pending_add(root, tid, by, kind, text, proven=proven)
     rec = runs.read(root, tid)
     if not rec or runs.state(rec) != "alive":
         return {"id": item["id"], "delivered": 0, "state": "none"}
@@ -1152,7 +1163,9 @@ def check_starting(
     if scr and scr.get("answer"):
         if answered is None or scr["what"] in answered:
             scr = None  # the wrapper answers it (or already did: the tool is still redrawing)
-        elif not scr.get("folder") or _names_own_folder(root, pane.stdout):
+        elif not scr.get("folder") or _names_own_folder(
+            root, pane.stdout, runs.workdir_for(root, rec, rec.get("ticket"))
+        ):
             for i, k in enumerate(scr["answer"]):
                 if i:
                     time.sleep(PASTE_DELAY)
@@ -1185,12 +1198,13 @@ def check_starting(
     return note
 
 
-def _names_own_folder(root: Path, text: str) -> bool:
+def _names_own_folder(root: Path, text: str, work: Path | None = None) -> bool:
     if not adapters.orch_folder(root):
         return False
+    work = work or root
     lines = [ln.strip() for ln in text.splitlines()]
     joined = lines + [a + b for a, b in zip(lines, lines[1:], strict=False)]  # a long path may wrap
-    return bool({str(root), str(root.resolve())} & set(joined))  # the whole line, not a part of a path
+    return bool({str(work), str(work.resolve())} & set(joined))  # the whole line, not a part of a path
 
 
 def watch_start(root: Path, tid: str, run: str, name: str, proc: subprocess.Popen) -> list[str]:

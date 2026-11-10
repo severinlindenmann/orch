@@ -26,7 +26,7 @@ def gen(proj, monkeypatch, subprocess_home):
 
     def _set(extra=""):
         cmd = f"{shlex.quote(sys.executable)} {shlex.quote(str(AGENT))} {extra} {{prompt}}"
-        config.add_agent(proj, "fake", cmd)
+        config.add_agent(proj, "fake", cmd, approve=True)
         config.set_key(proj, "workspace", "agent", "fake")
         return log
 

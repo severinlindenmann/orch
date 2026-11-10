@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from orch import filesig, saferead, tickets
+from orch import filesig, safegit, saferead, tickets
 
 
 def read(proj, tid):
@@ -226,9 +226,9 @@ def test_files_sig_without_git_or_on_timeout(proj, repo, monkeypatch):
     def slow(*a, **k):
         raise subprocess.TimeoutExpired("git", 3)
 
-    monkeypatch.setattr(filesig.subprocess, "run", slow)
-    assert filesig.files_sig(repo) is None
-    monkeypatch.undo()
+    with monkeypatch.context() as m:  # (undo() would also drop the autouse isolated ORCH_HOME)
+        m.setattr(safegit.subprocess, "Popen", slow)
+        assert filesig.files_sig(repo) is None
     monkeypatch.setattr(filesig, "MAX_FILES", 2)
     (repo / "u1").write_text("1")
     (repo / "u2").write_text("2")
@@ -239,7 +239,7 @@ def test_files_sig_without_git_binary(repo, monkeypatch):
     def nogit(*a, **k):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(filesig.subprocess, "run", nogit)
+    monkeypatch.setattr(safegit.subprocess, "Popen", nogit)
     assert filesig.files_sig(repo) is None
 
 
@@ -303,7 +303,9 @@ def test_record_and_proof_state_never_execute(repo, run, new_ticket, monkeypatch
     seen = []
 
     def only_git(argv, *a, **k):
-        assert isinstance(argv, list) and argv[0] == "git" and not k.get("shell"), argv
+        assert (
+            isinstance(argv, list) and os.path.basename(argv[0]) in ("git", "git.exe") and not k.get("shell")
+        ), argv
         assert not any("PWNED" in x or "rm -rf" in x for x in argv), argv
         seen.append(argv)
         return real_popen(argv, *a, **k)
@@ -396,6 +398,14 @@ def test_files_sig_special_files_never_block_or_read(repo, tmp_path):
         filesig.MAX_READ = monkey
 
 
+OURS = {
+    "GIT_TERMINAL_PROMPT",
+    "GIT_EDITOR",
+    "GIT_SEQUENCE_EDITOR",
+    "GIT_ASKPASS",
+}  # set by safegit, not inherited
+
+
 def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     repo = proj
     _git(repo, "init", "-q")
@@ -416,10 +426,10 @@ def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):
     assert filesig.files_sig(repo) == good and good
     assert not marker.exists()
     seen = []
-    real = subprocess.run
-    monkeypatch.setattr(filesig.subprocess, "run", lambda a, **k: seen.append(k["env"]) or real(a, **k))
+    real = subprocess.Popen
+    monkeypatch.setattr(safegit.subprocess, "Popen", lambda a, **k: seen.append(k["env"]) or real(a, **k))
     filesig.files_sig(repo)
-    assert seen and all(not any(k.startswith("GIT_") and k != "GIT_OPTIONAL_LOCKS" for k in e) for e in seen)
+    assert seen and all(not any(k.startswith("GIT_") and k not in OURS for k in e) for e in seen)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="st_ctime is the creation time on Windows")
@@ -575,3 +585,176 @@ def test_open_checked_closes_the_fd_when_a_stat_fails(proj, monkeypatch):
     with pytest.raises(ValueError):
         saferead._open_checked(str(f), {})
     assert opened and closed == opened
+
+
+def test_saferead_opens_files_in_binary_mode(proj):
+    """Windows os.open defaults to text mode (CRLF -> LF, Ctrl-Z ends the read).
+
+    The safe reader must ask for O_BINARY, so tails and hashes are byte-exact (meaningful on Windows CI)."""
+    import hashlib
+
+    binary = getattr(saferead.os, "O_BINARY", 0)
+    assert saferead._FLAGS & binary == binary
+    raw = b"line one\r\nline two\r\n\x1aafter ctrl-z\r\n"
+    (proj / "out.log").write_bytes(raw)
+    # byte-exact: no CRLF folding, no Ctrl-Z stop
+    assert saferead.safe_read_tail(proj.resolve(), "out.log", 4096) == raw
+    state = saferead.file_state(proj.resolve(), "out.log", 1 << 20, [1 << 20])
+    assert hashlib.sha256(raw).hexdigest() in state
+
+
+# ---- Won't do (a person's decision; an agent can only ask)
+
+
+def test_wont_do_by_person_counts_as_resolved_and_undo(proj, run, validate, new_ticket):
+    tid = with_checks(proj, run, new_ticket)
+    code, out, _ = run("check", "wont-do", tid, "c2", "--reason", "Finance pulls it", "--by", "human:tester")
+    assert code == 0 and "Won't do" in out
+    t = read(proj, tid)
+    validate(t)
+    c2 = t["checklist"][1]
+    assert c2["wont_do"] is True and c2["done"] is False and c2["reason"] == "Finance pulls it"
+    assert t["history"][-1]["by"] == "human:tester" and t["history"][-1]["text"] == "Marked c2 as won't do"
+    assert tickets.history_line(t["history"][-1]["text"], t["checklist"]) == "Marked as won't do: step 2"
+    assert tickets.checks_done(t) == (1, 3)  # only c2 resolved
+    code, out, _ = run("ticket", "show", tid)
+    assert "Won't do: Finance pulls it" in out
+    # undo by the person
+    assert run("check", "reopen", tid, "c2", "--by", "human:tester")[0] == 0
+    c2 = read(proj, tid)["checklist"][1]
+    assert "wont_do" not in c2 and "reason" not in c2 and c2["done"] is False
+
+
+def test_wont_do_counts_for_finishing_the_ticket(proj, run, new_ticket, monkeypatch):
+    tid = with_checks(proj, run, new_ticket, n=2)
+    run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    with_open = tickets.load(proj, tid)
+    try:
+        tickets._check_can_finish(with_open)
+        raise AssertionError("open step must block")
+    except tickets.Refused:
+        pass
+    run("check", "wont-do", tid, "c2", "--by", "human:tester")
+    tickets._check_can_finish(tickets.load(proj, tid))  # resolved without proof: no refusal
+
+
+def test_agent_can_never_set_or_undo_wont_do(proj, run, new_ticket, monkeypatch):
+    tid = with_checks(proj, run, new_ticket)
+    # an explicit agent actor
+    code, _, err = run("check", "wont-do", tid, "c1", "--by", "agent:claude")
+    assert code == 2 and "orch ask" in err
+    # a person's name given from inside an agent session (environment wins)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    code, _, err = run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    assert code == 2
+    assert "wont_do" not in read(proj, tid)["checklist"][0]
+    monkeypatch.delenv("CLAUDECODE")
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    # an agent can neither reopen it, tick it, start it nor patch it in
+    for argv in (
+        ("check", "reopen", tid, "c1", "--by", "human:tester"),
+        ("check", "reopen", tid, "c1"),
+        ("check", "done", tid, "c1", "--note", "x"),
+        ("check", "start", tid, "c1"),
+    ):
+        assert run(*argv)[0] == 2, argv
+    assert run("ticket", "patch", tid, "--if-revision", "1", '{"checklist": []}')[0] == 2
+    assert read(proj, tid)["checklist"][0]["wont_do"] is True
+
+
+def test_wont_do_reason_and_done_step(proj, run, new_ticket):
+    tid = with_checks(proj, run, new_ticket)
+    assert run("check", "wont-do", tid, "c1", "--reason", "x" * 201, "--by", "human:tester")[0] == 2
+    run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
+    assert run("check", "wont-do", tid, "c1", "--by", "human:tester")[0] == 2  # done: reopen first
+    assert run("check", "wont-do", tid, "c9", "--by", "human:tester")[0] == 2  # unknown step
+
+
+def test_agent_cannot_remove_a_wont_do_step(proj, run, new_ticket, monkeypatch):
+    tid = with_checks(proj, run, new_ticket)
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    assert run("check", "remove", tid, "c1", "--by", "agent:claude")[0] == 2
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert run("check", "remove", tid, "c1")[0] == 2
+    monkeypatch.delenv("CLAUDECODE")
+    assert run("check", "remove", tid, "c1", "--by", "human:tester")[0] == 0
+
+
+def test_run_prompt_skips_wont_do_steps(proj, run, new_ticket):
+    from orch import runs
+
+    tid = with_checks(proj, run, new_ticket, n=2)
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    text = runs.fresh_prompt(tickets.load(proj, tid), [])
+    assert "c2: step 2" in text and "c1: step 1" not in text
+
+
+def _decided(proj, run, new_ticket, n=2):
+    tid = with_checks(proj, run, new_ticket, n=n)
+    run("check", "wont-do", tid, "c1", "--reason", "Not needed", "--by", "human:tester")
+    return tid
+
+
+def test_agent_cannot_edit_a_wont_do_step(proj, run, new_ticket, monkeypatch):
+    tid = _decided(proj, run, new_ticket)
+    assert run("check", "edit", tid, "c1", "Run the security tests", "--by", "agent:claude")[0] == 2
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert run("check", "edit", tid, "c1", "Run the security tests", "--by", "human:tester")[0] == 2
+    assert read(proj, tid)["checklist"][0]["text"] == "step 1"
+    monkeypatch.delenv("CLAUDECODE")
+    assert run("check", "edit", tid, "c1", "Rename by person", "--by", "human:tester")[0] == 0
+
+
+def test_generic_writes_by_an_agent_cannot_change_wont_do(proj, run, new_ticket, monkeypatch):
+    """Every generic write path (apply_op callers, patch, edit) under an agent keeps the decision intact."""
+    tid = _decided(proj, run, new_ticket)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    # apply_op itself: setting, clearing, changing the reason, who/when, adding a new wont_do step
+    for change in (
+        lambda t: t["checklist"][1].update(wont_do=True),
+        lambda t: t["checklist"][0].pop("wont_do"),
+        lambda t: t["checklist"][0].update(reason="other"),
+        lambda t: t["checklist"][0].update(by="agent:claude"),
+        lambda t: t["checklist"].append(
+            {"id": "c9", "text": "x", "done": False, "evidence": [], "wont_do": True}
+        ),
+        lambda t: t["checklist"].pop(0),
+    ):
+        with pytest.raises(tickets.Refused):
+            tickets.apply_op(proj, tid, change)
+    # patch / edit cannot reach the checklist at all
+    assert run("ticket", "patch", tid, "--if-revision", "99", '{"checklist": []}')[0] == 2
+    assert run("ticket", "edit", tid, "--title", "New title")[0] == 0
+    t = read(proj, tid)
+    assert t["checklist"][0]["wont_do"] is True and t["checklist"][0]["reason"] == "Not needed"
+    assert "wont_do" not in t["checklist"][1]
+    # an unrelated agent write still works
+    assert tickets.apply_op(proj, tid, lambda t: t["checklist"][1].update(text="renamed"))[0]
+
+
+def test_progress_says_done_and_wont_do_apart(proj, run, new_ticket):
+    tid = with_checks(proj, run, new_ticket, n=3)
+    run("check", "done", tid, "c1", "--note", "ok", "--by", "human:tester")
+    assert tickets.progress_text(tickets.load(proj, tid)) == "1 of 3 done"
+    run("check", "wont-do", tid, "c2", "--by", "human:tester")
+    run("check", "wont-do", tid, "c3", "--by", "human:tester")
+    t = tickets.load(proj, tid)
+    assert tickets.progress_text(t) == "1 done, 2 won't do" and tickets.checks_split(t) == (1, 2, 3)
+    code, out, _ = run("ticket", "show", tid)
+    assert "1 done, 2 won't do" in out and "All resolved" in out and "3 of 3" not in out
+
+
+def test_prompt_names_declined_steps_and_cli_strips_control_chars(proj, run, new_ticket):
+    from orch import runs
+
+    tid = with_checks(proj, run, new_ticket, n=2)
+    run("check", "wont-do", tid, "c1", "--by", "human:tester")
+    tickets.apply_op(  # a synced or hand-edited reason can carry control characters
+        proj, tid, lambda t: t["checklist"][0].update(reason="Skip \x1b[31mred\x07")
+    )
+    text = runs.fresh_prompt(tickets.load(proj, tid), [])
+    assert "Declined by a person" in text and "c1 (" in text and "c1: step 1" not in text
+    _, out, _ = run("ticket", "show", tid)
+    assert "\x1b" not in out and "\x07" not in out

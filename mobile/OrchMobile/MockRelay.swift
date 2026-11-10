@@ -118,7 +118,8 @@ actor MockRelay: RelayAPI {
                .init(rawKind: "file", path: "docs/board/q3.md", line: 12)])
     static let invoiceView = TicketSnapshot(
         title: "Invoice CSV export", status: "active", agent: "Claude", summary: "Writing the export.",
-        checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true), .init(text: "Write the export", done: false),
+        checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true),
+                    .init(text: "Email the old format", wontDo: true, reason: "Nobody uses it"), .init(text: "Write the export", done: false),
                     .init(text: "Add a test", done: false)],
         running: true,
         attachments: [.init(kind: "link", title: "Fix invoice export #142", url: "https://github.com/pilatus/reports/pull/142", at: "2026-11-05T15:10:00Z",
@@ -275,8 +276,23 @@ actor MockRelay: RelayAPI {
         counter += 1
         let id = String(format: "m_an5wer%010d", counter)
         clientIds[r.clientId] = id
+        if r.questionMessageId == "m_maketicket00001", r.answer == "make" {
+            let refused = UserDefaults.standard.bool(forKey: "mockMakeTicketRefuse")
+            Task {
+                try? await Task.sleep(for: .milliseconds(1500))
+                self.deliverMakeTicketResult(refused: refused)
+            }
+        }
         return SendReceipt(id: id, clientId: r.clientId)
     }
+    private func deliverMakeTicketResult(refused: Bool) {
+        let result = refused ? ProposalResult(result: "refused", reason: "unavailable") : ProposalResult(result: "made", key: "PIL-15")
+        received.append(PhoneMessage(message: TextMessage(id: "m_maketicketres01", from: Self.pilatus,
+            to: refused ? "ph_iphone0001" : "phones", type: "text", createdAt: Self.now(), ticket: nil,
+            body: TextBody(text: refused ? "Couldn't make the ticket" : "Ticket made: PIL-15", proposalResult: result),
+            replyTo: "m_maketicket00001"), workspaceName: "Pilatus Workspace"))
+    }
+
     func send(_ r: SendRequest) async throws -> SendReceipt {
         try await check()
         if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }

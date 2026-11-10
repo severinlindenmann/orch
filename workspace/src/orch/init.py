@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orch import adapters, skills
+from orch import adapters, reminder_settings, skills
 from orch.errors import Refused
 
 
@@ -23,11 +23,16 @@ def init(root: Path, code: str | None = None) -> list[str]:
     skills.install_skill(root, "orch", src)
     skills.set_block(root, "orch", skills.read_block(src, "orch"))
     linked = skills.apply_agent_files(root)
+    # the reminder hooks, merged into the agent tool's local settings (only for a tool that has them)
+    reminders = reminder_settings.ensure_each(root)
     lines = [
         "Skill       .agents/skills/orch/SKILL.md (local; not part of your team's files)",
     ]
     if linked:
         lines.append("Linked for: " + ", ".join(linked))
+    for name, rel, warn in reminders:
+        label = adapters.load(name)["label"]
+        lines.append(warn or f"Reminder    {rel} (local; {label} is reminded of work with no ticket)")
     lines += [
         "Local only  orch files stay out of git (.git/info/exclude)",
         "Tickets     .orch/tickets/",
@@ -73,20 +78,35 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() not in ("y", "yes"):
             raise Refused("Not confirmed. Nothing was changed.")
-    done: list[str] = []
+    names = [r["name"] for r in rows]
+    before = set(addons.active(root))  # whatever is on already stays on, whatever fails
+    now: list[str] = []  # turned on at once (already installed); the rest wait for the one reinstall
+    out = io.StringIO()
     try:
-        for r in rows:
-            with contextlib.redirect_stdout(io.StringIO()):
-                addons.add(root, r["name"], yes=True)
-            done.append(r["name"])
+        # one reinstall for all of them (on Windows a second background install is refused while one runs)
+        with contextlib.redirect_stdout(out), addons.batch_install(root):
+            for n in names:
+                addons.add(root, n, yes=True)
+                if n not in addons.batched(root) and n not in before:
+                    now.append(n)
     except Exception as e:
-        for n in reversed(done):
+        undone = list(getattr(e, "undone", []))
+        for n in reversed(now):
             with contextlib.suppress(Exception):
                 addons.remove(root, n)
-        raise Refused(
-            f"Could not turn on {', '.join(r['name'] for r in rows)}: {e} Nothing was changed."
-        ) from e
-    return done
+                undone.append(n)
+        left = [n for n in names if n in addons.active(root) and n not in before]
+        if left:
+            tail = f"Still on: {', '.join(left)}."
+        elif undone:
+            tail = f"Turned off again: {', '.join(undone)}."
+        else:
+            tail = "Nothing was changed."
+        raise Refused(f"Could not turn on {', '.join(names)}: {e} {tail}") from e
+    notice = out.getvalue().strip()
+    if notice:  # e.g. "finishes in the background": to stderr, so init --json stays clean
+        sys.stderr.write(notice + "\n")
+    return names
 
 
 def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> str:
@@ -139,6 +159,33 @@ def _other(root: Path) -> str:
     cmd = input("Command (use {prompt} where the task goes): ").strip()
     if not cmd:
         return "No agent chosen; set one later: orch config set workspace.agent <name>"
-    config.add_agent(root, name, cmd)
+    # a command that will run is a human-only step (invariant H1): an agent in the environment is refused, a
+    # person leaves the same config.agent_add hand-off as `orch config agent add` (a click on the page)
+    from types import SimpleNamespace
+
+    from orch import humanproof
+
+    if not (1 <= len(cmd) <= 500 and "\n" not in cmd and "\r" not in cmd):
+        raise Refused("The command must be one line of at most 500 characters.")
+    target = humanproof.agent_add_target(name, cmd)  # computed first: a bad value refuses here (exit 2)
+    exact = humanproof.agent_add_exact(cmd)
+    try:
+        who = humanproof.person_by(
+            root,
+            SimpleNamespace(proof_stdin=False, by=None),
+            "config.agent_add",
+            target,
+            parts={"name": name, "command": cmd},
+            exact=exact,
+            argv=["config", "agent", "add", name, "--command", cmd],
+        )
+    except humanproof.HandOffPending as e:  # a person: the card is on the page; init goes on
+        return (
+            f"Agent: not set yet. {e} Confirm '{name}' on the page, "
+            f"then run: orch config set workspace.agent {name}"
+        )
+    if not who.startswith("human:"):
+        raise Refused(config.ONLY_PERSON_AGENT.format(what="add an agent command"))
+    config.add_agent(root, name, cmd, approve=True, by=who)  # a person: approve ONLY what they typed
     _save(root, name)
     return f"Agent: {name} (starts fresh each run; it cannot continue a conversation)."

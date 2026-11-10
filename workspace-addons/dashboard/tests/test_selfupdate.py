@@ -93,7 +93,19 @@ def test_stamp_is_cached_and_changes_with_the_files(tmp_path, monkeypatch):
 
 
 def test_new_argv_is_rebuilt_isolated_and_keeps_the_port():
-    argv = ["python", "-m", PKG, "--dir", "/w", "serve", "--ready-file", "/r.json", "--port", "8420", "--auto-port"]
+    argv = [
+        "python",
+        "-m",
+        PKG,
+        "--dir",
+        "/w",
+        "serve",
+        "--ready-file",
+        "/r.json",
+        "--port",
+        "8420",
+        "--auto-port",
+    ]
     want = [sys.executable, "-P", "-m", PKG, "--dir", "/w", "serve", "--port", "8431"]
     assert selfupdate.new_argv(argv, 8431) == want  # -P added even when the old process had none
     assert selfupdate.new_argv([*argv[:-3], "--port=1"], 9) == [*want[:-1], "9"]
@@ -130,10 +142,12 @@ def test_import_check_uses_the_same_isolation(monkeypatch):
     class R:
         returncode = 0
 
-    monkeypatch.setattr(selfupdate.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)) or R())
+    monkeypatch.setattr(selfupdate, "_run", lambda cmd, **kw: calls.append((cmd, kw)) or R())
     assert selfupdate._runs_new_code()
     cmd, kw = calls[0]
-    assert cmd[:2] == [sys.executable, "-P"] and kw["cwd"] == SRC.parent and "env" not in kw  # same env as the exec
+    assert (
+        cmd[:2] == [sys.executable, "-P"] and kw["cwd"] == SRC.parent and "env" not in kw
+    )  # same env as the exec
 
 
 def test_broken_new_build_is_checked_once_and_the_normal_page_is_served(monkeypatch):

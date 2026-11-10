@@ -47,7 +47,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -71,6 +71,8 @@ class Tracker:
         self.root, self.orch_bin = root, orch_bin
         self.lock = threading.Lock()
         self.plock = threading.Lock()  # started + pins: handler threads change them together
+        self.stop = threading.Event()  # set when the server closes: pin threads end instead of polling on
+        self.pin_threads: list[threading.Thread] = []
         self.seen_sig = ""
         self.tickets: dict[str, dict] = {}
         self.status_cache: dict[str, tuple[float, dict]] = {}
@@ -193,10 +195,26 @@ class Tracker:
                 return claim[k]
         return None
 
+    def start_pin(self, tid: str, run: str) -> None:
+        t = threading.Thread(target=self.pin_started, args=(tid, run), daemon=True, name="focus-pin")
+        with self.plock:
+            self.pin_threads = [x for x in self.pin_threads if x.is_alive()] + [t]
+        t.start()
+
+    def close(self) -> None:
+        """End the pin threads and wait for them, so none outlives the server (or the test that started it)."""
+        self.stop.set()
+        with self.plock:
+            threads = list(self.pin_threads)
+        for t in threads:
+            t.join(timeout=5)
+
     def pin_started(self, tid: str, run: str) -> bool:
         """Right after Focus started a run: record {run, pid, start} of its process. Only a run with this pin
         is ever listed or stopped (nothing is pinned later, on first sight, from a claim someone else could write)."""
         for _ in range(60):  # a live session writes its pid a moment after the start (up to 30 s)
+            if self.stop.is_set():
+                return False
             self.status_cache.pop(tid, None)
             claim = self.run_status(tid).get("claim") or {}
             pid = self._claim_pid(claim)
@@ -208,7 +226,8 @@ class Tracker:
                     self.pins[tid] = {"run": run, "pid": pid, "start": start}
                     self._save_pins()
                 return True
-            time.sleep(0.5)
+            if self.stop.wait(0.5):
+                return False
         import sys
 
         print(f"focus: no process id for run {run} on {tid} after 30 s; it stays out of Running now", file=sys.stderr)
@@ -418,7 +437,7 @@ class Tracker:
             "hold": " ".join(str(status["hold"]).split())[:200] if running and isinstance(status.get("hold"), str) else "",
             "board": board,
             "events": for_display(events[-60:]),
-            "done": sum(1 for c in checks if c.get("done")),
+            "done": sum(1 for c in checks if c.get("done") or c.get("wont_do")),
             "total": len(checks),
         }  # fmt: skip
 
@@ -490,11 +509,19 @@ class Tracker:
         return out[:200]
 
 
+def _link_msg(session, name: str) -> bytes:
+    from orch.pageproof import REVOKED_MSG
+
+    if session.revoked:
+        return REVOKED_MSG.encode()
+    return f"This link was already used. Open {name} again from orch.".encode()
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 10
 
-    def __init__(self, *a, root: Path, orch_bin: str | None, tracker: Tracker, **kw):
-        self.root, self.orch_bin, self.tracker = root, orch_bin, tracker
+    def __init__(self, *a, root: Path, orch_bin: str | None, tracker: Tracker, session=None, **kw):
+        self.root, self.orch_bin, self.tracker, self.session = root, orch_bin, tracker, session
         self.nonce = os.environ.get("ORCH_FOCUS_NONCE", "")
         super().__init__(*a, **kw)
 
@@ -643,8 +670,31 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = _refuse
 
+    def _session_post(self):
+        """POST /session: the page hands over the one-time launch token from its URL fragment; the server spends
+        it and sets the session cookie (H1). Loopback Host, no proxy headers, same fence as an action."""
+        why = self._fence("POST", True)
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        from orch.pageproof import COOKIE, forwarded, host_ok
+
+        if self.session is None or forwarded(self.headers) or not host_ok(self.headers, self.server.server_address[1]):
+            return self._send(403, b"forbidden", "text/plain")
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
+        except (ValueError, AttributeError, OSError):
+            token = None
+        cookie = self.session.launch(token)
+        if not cookie:
+            return self._send(403, _link_msg(self.session, "Focus"), "text/plain; charset=utf-8")
+        self._send(204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"})
+
     def do_POST(self):
-        if self.path.split("?", 1)[0] != "/api/act":
+        path = self.path.split("?", 1)[0]
+        if path == "/session":
+            return self._session_post()
+        if path != "/api/act":
             return self._refuse()
         why = self._fence("POST", True)
         if why:
@@ -666,7 +716,15 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("op") in ("proc.stop", "proc.stop_all"):
             return self._proc_op(body["op"], args)
         try:
-            code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args)
+            mint = None
+            if self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1]):
+                mint = self.session.mint
+            code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args, mint=mint)
+        except actions.NeedsPerson as e:
+            from orch.pageproof import REVOKED_MSG
+
+            msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
+            return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
         except actions.Unavailable as e:
@@ -677,7 +735,7 @@ class Handler(BaseHTTPRequestHandler):
         if code == 200 and body.get("op") == "run.start":
             self.tracker.note_started(args["ticket"], (extra or {}).get("run"))
             if isinstance((extra or {}).get("run"), str) and RUN_ID.fullmatch(extra["run"]):
-                threading.Thread(target=self.tracker.pin_started, args=(args["ticket"], extra["run"]), daemon=True).start()
+                self.tracker.start_pin(args["ticket"], extra["run"])
             self.tracker.mark_page(args["ticket"])
         elif code == 200 and body.get("op") == "run.stop":
             self.tracker.forget_started(args["ticket"])
@@ -719,16 +777,25 @@ class _Server(ThreadingHTTPServer):
     def server_close(self):
         if hasattr(self, "ticker_stop"):
             self.ticker_stop.set()
+        if hasattr(self, "tracker"):
+            self.tracker.close()
         if hasattr(self, "revisions"):  # not yet set when the bind failed
             self.revisions.close()
         super().server_close()
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
-    orch_bin = orch_bin if orch_bin is not None else os.environ.get("ORCH_BIN") or None
+    # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
+    # test harness passes a fake path. None = no orch.
+    session = None
+    if orch_bin == actions.SELF:
+        from orch.pageproof import PageSession
+
+        session = PageSession(root, "focus")
     tracker = Tracker(root, orch_bin)
-    srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker))
+    srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=session))
     srv.revisions = Revisions(root)
+    srv.tracker = tracker
     srv.ticker_stop = stop = threading.Event()
 
     def ticker():  # the clock of a working ticket moves without anyone watching

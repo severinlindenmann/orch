@@ -1085,7 +1085,8 @@ def hp_verify(c):
 
 
 SETTING_DEFAULTS = {"focus.live_session": True, "focus.session_typing": False, "insights.share_counts": True,
-                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False}
+                    "insights.share_names": False, "secret.allow_get": False, "conn.allow": False,
+                    "workflow.agents_may_finish": False}
 
 
 def hp_settle(c):
@@ -1125,9 +1126,12 @@ def pending_deliver(c):
     return c["line"]["id"] not in c["delivered_ids"]
 
 
-def _wontdo_mac(key, workspace, item):
-    canon = json.dumps(item, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{canon}".encode(), hashlib.sha256).digest())
+def _wontdo_mac(key, workspace, ticket, decision):
+    """wontdo1.<workspace id>.<ticket id>.<canonical decision {check, wont_do, reason, text, covers, nonce}>: binds
+    WHERE the decision belongs (ticket, step) and WHAT it is about (the step's text and covers); the nonce makes
+    equal decisions differ. Freshness (replays, reused step ids) is the ledger's job, not the MAC's."""
+    canon = json.dumps(decision, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return _b64u(hmac.new(bytes.fromhex(key), f"wontdo1.{workspace}.{ticket}.{canon}".encode(), hashlib.sha256).digest())
 
 
 def wontdo_is_human(c):
@@ -1135,7 +1139,7 @@ def wontdo_is_human(c):
     if c.get("relay_authenticated_sender"):
         return True
     m = c.get("mac")
-    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["item"]))
+    return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["ticket"], c["decision"]))
 
 
 def relay_conn(c):
@@ -1688,6 +1692,93 @@ for v in pqvec["invalid"]:
 for case in pqvec["cases"]:
     if case["do"] not in ("make", "not_now", "nothing") or (case["do"] != "nothing" and not case.get("by")):
         fails.append(f"proposal-question vector {case['name']}: bad outcome")
+
+# Ticket proposal result (relay-api.md, Ticket proposal result).
+prvec = json.loads((HERE / "vectors" / "proposal-result-v1.json").read_text())
+
+
+def _pr_text(r):
+    """The one text a proposal result may carry (relay-api.md): derived from the result, never free."""
+    if r["result"] == "made" or (r["result"] == "decided" and r.get("key")):
+        return "Ticket made: " + r["key"]
+    return "Couldn't make the ticket" if r["result"] == "refused" else "Already decided"
+
+
+_ms = json.loads((HERE / "message.schema.json").read_text())
+_key_pat = _ms["$defs"]["display_key"]["pattern"]
+_text_rule = json.dumps(_ms["allOf"])
+if "^Ticket made: " + _key_pat[1:] not in _text_rule.replace("\\\\", "\\"):
+    fails.append("proposal-result: the canonical-text pattern must copy display_key's pattern exactly")
+for _s in ("Ticket made: DM1-12", "Couldn't make the ticket", "Already decided"):
+    if not _s.isascii() or _s.endswith(".") or "  " in _s:
+        fails.append(f"proposal-result: canonical string {_s!r} must be plain ASCII, no period, single spaces")
+for v in prvec["valid"]:
+    if v["message"]["body"]["text"] != _pr_text(v["message"]["body"]["proposal_result"]):
+        fails.append(f"proposal-result vector valid {v['name']}: body.text is not the canonical line")
+for v in prvec["valid"]:
+    check("message", v["message"], True, f"proposal-result vector valid {v['name']}")
+for v in prvec["invalid"]:
+    check("message", v["message"], False, f"proposal-result vector invalid {v['name']}")
+for v in prvec["relay"]:
+    if "message" in v:  # relay rules (reply_to, routing, one result per proposal) are replayed by the relay's own tests
+        check("message", v["message"], True, f"proposal-result vector relay (schema-valid) {v['name']}")
+    if "message" in v and v["name"] != "text-names-another-key" and v["message"]["body"]["text"] != _pr_text(v["message"]["body"]["proposal_result"]):
+        fails.append(f"proposal-result vector relay {v['name']}: body.text is not the canonical line")
+    if v["name"] == "text-names-another-key" and v["message"]["body"]["text"] == _pr_text(v["message"]["body"]["proposal_result"]):
+        fails.append("proposal-result vector relay text-names-another-key: text must differ from the canonical line")
+    if "request" in v and (phone_errors("send_request", v["request"]) or "proposal_result" not in v["request"] or v.get("stored_body_lacks") != "proposal_result"):
+        fails.append(f"proposal-result vector relay {v['name']}: the request must be a valid send_request that names the field the relay ignores")
+    if v["expect"] not in (200, 201, 403, 404, 409, 422) or ("message" not in v and "request" not in v):
+        fails.append(f"proposal-result vector relay {v['name']}: bad expect or entry")
+_pr_to = {"made": "phones"}
+for case in prvec["cases"]:
+    n, snd, st = f"proposal-result vector case {case['name']}", case["send"], case["state"]
+    if st not in ("open", "made", "gone", "answered_make", "answered_not_now", "result_recorded"):
+        fails.append(f"{n}: bad state")
+    should_send = case["authorised"] and case["answer"].strip().casefold() == "make" and not case.get("skipped")
+    if (snd is not None) != should_send or (snd is None) != (case["to"] is None):
+        fails.append(f"{n}: a result is sent exactly for an authorised make answer (and then has a `to`)")
+    if snd is None:
+        continue
+    check("message", {"schema": "orch.msg/1", "id": "m_pres000000000099", "from": "ws_pilatus001", "to": case["to"], "type": "text",
+                      "reply_to": "m_pr00000000000001", "created_at": "2026-11-09T10:42:00Z", "body": {"text": _pr_text(snd), "proposal_result": snd}},
+          True, f"{n}: send body and routing")
+    if case["to"] != _pr_to.get(snd["result"], case["from"]):
+        fails.append(f"{n}: made goes to phones, refused/decided to the answering phone")
+    if st in ("made", "gone", "answered_make", "answered_not_now") and snd["result"] != "decided":
+        fails.append(f"{n}: a proposal that is not open gets decided")
+    if st in ("made", "answered_make") and snd.get("key") != case.get("key"):
+        fails.append(f"{n}: the decided result carries the key of the ticket the proposal became")
+    if st in ("gone", "answered_not_now") and "key" in snd:
+        fails.append(f"{n}: no ticket, no key")
+    if st == "open":
+        want = {"ok": {"result": "made", "key": case.get("key")}, "refused:human_proof": {"result": "refused", "reason": "needs_person"},
+                "refused:other": {"result": "refused", "reason": "unavailable"}}.get(case.get("make"))
+        if snd != want:
+            fails.append(f"{n}: make outcome {case.get('make')} maps to {want}")
+    if st == "made" and case.get("got_it_ack") is not False:
+        fails.append(f"{n}: decided replaces the Got it ack")
+
+
+def _proposal_card(events):
+    card, final = "idle", False
+    for e in events:
+        if e == "answer_make":
+            card = "making"
+        elif e == "answer_not_now":
+            card = "closed"
+        elif e in ("2_min", "workspace_not_live"):
+            card = "waiting" if card == "making" else card
+        elif isinstance(e, dict) and e.get("reply_to") != "unknown" and not final:
+            r = e["result"]
+            card = "made" if r == "made" or (r == "decided" and e.get("key")) else "failed" if r == "refused" else "closed"
+            final = card == "made" and r == "made"
+    return card
+
+
+for case in prvec["phone"]:
+    if _proposal_card(case["events"]) != case["card"]:
+        fails.append(f"proposal-result vector phone {case['name']}: card should be {case['card']}")
 
 # Mobile mode (relay-api.md, Mobile mode).
 mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())

@@ -66,12 +66,15 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 ## Settings: records and tombstones
 
 Every switch that widens what can happen (`[focus] live_session`, `[focus] session_typing`, `[insights] share_counts`,
-`[insights] share_names`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
+`[insights] share_names`, `[workflow] agents_may_finish`, `allow_get` of a key profile, connection allow lists) lives in `.orch/config.toml` /
 `profiles.toml` / `.orch/mcp.json` as named, and the core also keeps a record in `<guarded orch home>/human-settings.json`,
 keyed by the workspace's real path like `permissions.json` (`$defs/settings_record`).
 - Setting a value **with a proof** writes the file and the record.
 - **Lowering** (turning something off, sharing less) works from the file or the CLI without a proof, and the core writes a
-  **tombstone** record (`value: false`) the first time it sees the lowered value.
+  **tombstone** record (`value: false`) on EVERY lowering, before it touches the file (one writer, `humanproof.record_set`,
+  for every key; a grant through it needs a verified `human:` by). A tombstone's `by` is `human:...`, `file`
+  (the core saw a lowered file value) or `reset` (a lowering by anything that is not a verified person, or a safe reset), see `$defs/settings_record`.
+  Workspace `workflow.agents_may_finish` is one of these keys (default off).
 - **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
   on, `share_counts` on (owner decisions 3C, I5); everything else off.
 For list values (connection allow lists) a narrower file narrows the record (`grant ∩ file`), the list form of a
@@ -129,6 +132,42 @@ The hand-off page says **"Requested by a command"**, shows the full action, targ
 allowed, the key profile, the update version), never puts focus on the confirm button, and hand-offs are rate-limited per op
 (at most 3 pending per op, a new one replaces the oldest). No typed confirm words (owner rule). A confirmation on `/dev/tty`
 is not used: a live agent runs in its own tmux pane with a terminal too, so a tty proves nothing.
+**Test-only exception (launch link).** `orch start --no-open --print-launch-url` prints each page server's
+`http://127.0.0.1:<port>/#launch=<token>` (and writes the one-time token as in step 3), so the browser-test lane can open a
+page session on the test network. It is honoured **only** when `install_kind() == "test"` (the installer's record, or a
+source-tree run) **and** the workspace's realpath is under the literal `<account home>/.orch-test/`; on a normal or dev
+install, or for any other folder, it is refused before anything starts ("only on a test install"). It is never offered on a
+person's own install, and a dev kit does not get it.
+
+**Windows.** The account home is the profile folder from the process token (winacl `profile_dir`), the test prefix is
+`<profile folder>\\.orch-test`, and paths compare component by component, case-insensitively, with both separators; the
+prefix must `lstat` as a real folder with no reparse point (junction or symlink).
+
+**Folder add-on snapshots.** A person-allowed folder add-on lives only at exactly `<account home>/.orch-tool/keys/<ws>/addon-snapshots/<content hash>`
+(on a test install also under the test home), with no link on the path, and its hash must be on the person-allowed list
+`<home>/addons-allowed.json` (written only inside the hand-off). The add-on list is `home()/addons.json` like all other state (a trusted `ORCH_HOME` included). A crafted file cannot steer an
+install: `registry()` drops entries with a bad name, built-ins orch does not ship (name not in `SHIPPED_ADDONS`, or on a
+dev/test install not inside the local source's `workspace-addons`), and unknown fields; a folder entry installs only from a
+snapshot at the exact guarded location AND with a hash on that home's allowed list, which only the hand-off writes. A
+folder entry without a hash is installed only on a dev or test install, never because a hand-off is running (a hand-off
+allows exactly its one hash). On a **normal** install with an `ORCH_HOME` other than the account's default orch home, every
+op that reinstalls the tool environment (update, add-on add/remove) is refused with plain words; list/status still run.
+The account's default orch home is READ for trust decisions and is not written by a run that uses another `ORCH_HOME`.
+**The one exception:** a person's proven approval (`addon.add_local`) writes the snapshot, `addons-allowed.json` and the
+keys (`human.key`, settings, nonces) into the guarded home itself (`<account>/.orch-tool`). An install from before the
+record existed counts as `normal` and `orch update` writes that record (never an elevation); the Windows finisher writes
+it back and pins `UV_TOOL_DIR` too.
+
+**Install record.** `<sys.prefix>/orch-install.json` = `{"schema": "orch.install/1", "kind": "normal|dev|test", "root": "<real path of the tool environment>"}`; it counts only
+when it sits in the running interpreter's environment and `root` equals that environment's real path (no `uv`, no
+`UV_TOOL_DIR` / `XDG_DATA_HOME` decides; a reinstall by orch pins `UV_TOOL_DIR` to the dirname of `root`); written
+by `install.sh` / `install.ps1` straight into the tool environment after `uv tool install` (default `normal`; `test` or `dev`
+only through the installer option the person running it gives: `ORCH_INSTALL_KIND=test sh install.sh`, `-InstallKind test`),
+never by an orch command. `orch update` carries the existing kind over a reinstall. No record: a source-tree run is `test`,
+any other install is `normal`. `ORCH_REPO` / `ORCH_REF` are honoured only on a dev or test install; on a normal
+install they are never honoured (the person is told), and a person's `orch update` uses the official source shown on its card
+(repo@ref bound into the proof).
+
 What Level 1 promises: an agent cannot finish a human-only action with flags, environment, a tty or a forged workspace file;
 it can ask for a hand-off, which the person sees as a request from a command and has to click.
 
@@ -148,12 +187,12 @@ rows add a named case.
 | `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get` | key / profile | page, terminal | `verify` key profile, `settle` allow_get |
 | `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
 | `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<hash>` (proposal.md) / id | page | proposal `steps` |
-| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review | ticket | page, phone | `verify` ticket verdict |
+| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict |
 | `ticket.answer` | answering a Needs-you question | `<ticket>:<question>` | page, phone | `verify` ticket answer |
 | `relay.connect` | `orch relay connect`, changing the relay address | relay host | page, terminal | `verify` relay connect |
-| `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` | page, terminal | `verify` private allow |
-| `private.move` | `orch private move` | name | page, terminal | – (same class) |
-| `config.agent_add` | `orch config agent add` by a person (an agent's entry needs a person's OK) | agent name | page, terminal | – |
+| `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` (the key covers adapter, command, live command, prompt; the card's exact block shows all four, and a hand-off is refused at take time if the entry no longer hashes to the key) | page, terminal | `verify` private allow |
+| `private.move` | `orch private move` | `move` | page, terminal | – (same class) |
+| `config.agent_add` | `orch config agent add` by a person (an agent's entry needs a person's OK) | `<name>:<sha256 (64 hex) of JSON [command, interactive or "", prompt or ""])>` (every saved value; the card's exact block shows them all) | page, terminal | – |
 | `check.wont_do`, `check.wont_do_undo` | `orch check wont-do <id> <c> [--reason]` and undo | `<ticket>:<check>` | page, terminal | – |
 | `chat.make_ticket` | `orch chat make-ticket <id>` | chat id | page, terminal | – |
 | `chat.send`, `chat.sync`, `chat.contacts`, `chat.thread_sync` | `orch chat send/sync/contacts`, `thread --sync`; dashboard `chat.send_ws`, `chat.sync_ws` | chat / workspace | page, terminal | – |
@@ -161,14 +200,18 @@ rows add a named case.
 | `run.stop` | Focus Stop / Stop all (today `by=focus`) | ticket or `all` | page | – (an agent may still stop its own run, `ORCH_RUN` = that run) |
 | `relay.allow` | `orch relay allow <id> --once\|--permanent` (cli_clients.py 587): lets another workspace delegate or start work here | `<message id>:<once\|permanent>` | page, terminal | `verify` relay allow |
 | `group.remove_member` | remove a workspace from a group chat (cli_clients.py 283) | `<group>:<workspace>` | page, terminal | – |
-| `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | group | page, terminal | – |
-| `group.share_file` | share a file with a group, checked or not checkable (cli_clients.py 250/252, chat_groups.py 1505, 2656) | `<group>:<file sha256>` | page, terminal | – |
+| `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | host-side group: the ticket id; joined group: `<host ws id>:<group id>` (an id is only unique per host) | page, terminal | – |
+| `group.share_file` | share a file with a group, checked or not checkable (cli_clients.py 250/252, chat_groups.py 1505, 2656) | host side: `<ticket>:<file sha256>`; joined: `<host ws id>:<group id>:<file sha256>` | page, terminal | – |
 | `group.readd_member` | re-add a removed member (chat_groups.py 1049) | `<group>:<workspace>` | page, terminal | – |
 | `config.share` | `orch config share on\|off` (cli_config.py 270): the marked block in the team's AGENTS.md | `on` / `off` (off needs no proof) | page, terminal | – |
 | `config.agents_may_finish` | `orch config set workflow.agents_may_finish on` (cli_config.py 210) | setting (off needs no proof) | page, terminal | `settle` class |
+| `config.permissions` | `orch config set workspace.permissions <mode>`, raising only (lowering is free for anyone) | the new `mode` | page, terminal | – |
+| `look.icon` | `orch look set` (icon and colour of the workspace, shown to peers and on shared pages) | `look` | page, terminal | – |
+| `config.copy_setup` | `orch config set workflow.copy_setup <command>`: a command orch runs in every new separate copy (clearing it needs no proof; an agent is refused) | sha256 of the command (the card shows it in full) | page, terminal | – |
 | `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
 | `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
 | `run.human_input` | input that counts as a person's and may start a run (runs.py 375-397 `human_waiting`: today any `human:` by or phone line in the agent-writable `.orch/run/pending/<tid>.jsonl`) | ticket | page, phone | `pending` |
+| `addon.add_local` | `orch addon add ./folder`: code from a folder runs inside orch's tool environment (normal installs only through this hand-off; dev/test installs may add directly) | content hash of a snapshot of the folder (card shows the path and a short hash); the add installs from that snapshot, never the live folder | page, terminal | – |
 | `addon.act` (`who: people`) | an add-on button the manifest marks for people only (addons.py 599, 1051) | `<add-on>:<verb>:<ticket>` | page | – |
 | relay admin switch / lock | `/admin/api/policy`, `PATCH /admin/api/workspaces/<id>` | – | the relay's own admin auth (`X-Orch-Admin`, private network), never a workspace token | – |
 
@@ -187,11 +230,26 @@ agent input. Binding ticket and workspace means a valid line copied into another
 `<guarded orch home>/keys/<ws>/delivered.json`, checked and written atomically on consume, so deleting `delivered_at` or
 re-appending a consumed line never delivers it again (reference `pending_is_human`,
 `pending_deliver`, vectors `pending`, `deliver`).
-**Synced "won't do"** (`check.wont_do` arriving through a sync merge): another machine's human key cannot be checked here, so it
-counts as a person's only when the receiving core's relay client recorded it from a relay-authenticated sender (a phone, or a
-person-attributed message the relay authenticated), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`, `"wontdo1." + workspace id + "." + canonical JSON
-of the item`), a different prefix from the pending MAC so the two can never be confused. Anything else is an agent's
-(reference `wontdo_is_human`, vectors `wont_do`).
+**Synced "won't do"** (`check.wont_do` arriving through a sync merge, and its undo): another machine's human key cannot be checked
+here, so a step's decision counts as a person's only when the receiving core's relay client recorded it from a
+relay-authenticated sender (a phone, or a person-attributed message the relay authenticated; the hook compares the FULL decision
+record, never "this step was touched by a relay sender"), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`,
+`"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of {check, wont_do, reason, text, covers, nonce}`) (an undo is
+the same record with `wont_do` false and `reason`, `text` and `covers` null, so a later rename of the reopened step cannot make the undo stop verifying; the nonce is random and fresh for every signing, so equal decisions get
+different MACs), a different prefix from the pending MAC so the two can never be confused, stored on the step as `wont_mac` (+
+`wont_nonce`). The MAC binds WHERE the decision belongs (a valid decision copied onto another ticket or step is not the person's) and
+WHAT an "on" decision is about (the step's text and covers: only a proven `check edit` of a Won't do step, which re-signs it, changes them). **Freshness is the ledger's job, not the MAC's:** the guarded home keeps
+`keys/<ws>/wont.json`, per `<ticket>:<check>` the CURRENT MAC (null = tombstone, written by a proven removal); the verifier accepts a
+MAC only when it IS the current entry, so replaying an older signed "on" or "undo" or reusing the id of a removed step does not
+verify. A missing, loose or damaged ledger vouches for nobody (fail closed). The text of `by` (`human:...`) is **never** looked at.
+The sync merge (`merge_ticket(..., person)`, `person` = the receiving core's verdict, `humanproof.wont_verifier`; no verifier =
+nobody is a person) holds ONE invariant: **with a base that holds a person's decision, every step field the signed record covers (`wont_do`, `reason`,
+`wont_nonce`, `wont_mac`, and, for an "on", `text` and `covers`: `humanproof.SIGNED_STEP_FIELDS` + the MAC, the same list the signer
+uses, a test fails if they drift) differs from the base's only when that side verifies; otherwise it is the base's**, whether the
+side dropped the decision, changed it, rewrote only the text or covers, garbled its MAC or replayed an old one, and before any
+"newer side wins" pick. A renumbering (both sides added a different step with the same id) never moves an item the core vouches for, whatever `updated_at` says (a peer controls it): the other side's step is renumbered; two vouched items with one id cannot be merged and the caller pauses. A step one side deleted outright comes back (a
+deletion carries no proof; a person's removal is proven where it is made). Anything else is an agent's (reference
+`wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
 
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).

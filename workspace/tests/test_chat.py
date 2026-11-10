@@ -887,6 +887,7 @@ def test_proposal_kept_and_clipped(proj):
 
 def test_make_ticket_convo_across_days_idempotent(proj, monkeypatch):
     monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    monkeypatch.setattr(chat.tickets, "now", lambda: "2026-11-09T12:00:00Z")  # record() uses the real clock
     chat.record(proj, "old", "you", "dashboard", "Unrelated", at="2026-11-07T12:00:00Z")
     chat.record(
         proj, "start", "you", "dashboard", "Build fish page", at="2026-11-08T12:00:00Z", convo_start=True
@@ -1058,6 +1059,7 @@ def test_record_empty_latest_day(proj, monkeypatch):
 
 def test_make_ticket_lookback_is_four_days(proj, monkeypatch):
     monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    monkeypatch.setattr(chat.tickets, "now", lambda: "2026-11-09T12:00:00Z")  # record() uses the real clock
     chat.record(proj, "old", "you", "phone", "Private old text", at="2026-11-05T12:00:00Z", convo_start=True)
     _proposal(proj)
     original = chat._read_day
@@ -1075,6 +1077,7 @@ def test_make_ticket_lookback_is_four_days(proj, monkeypatch):
 
 def test_make_ticket_recovers_between_day_writes(proj, monkeypatch):
     monkeypatch.setattr(chat, "day_key", lambda root, at=None: str(at)[:10] if at else "2026-11-09")
+    monkeypatch.setattr(chat.tickets, "now", lambda: "2026-11-09T12:00:00Z")  # record() uses the real clock
     chat.record(proj, "person", "you", "phone", "Build fish", at="2026-11-08T12:00:00Z")
     _proposal(proj)
     original = chat.net.write_json
@@ -1181,3 +1184,21 @@ def test_last_moved_title_is_one_line_and_helper_may_log_to_the_moved_ticket(pro
     chat.guard(proj, SimpleNamespace(cmd="log", sub=None, id=made["ticket"], text="more"))
     with pytest.raises(Refused):
         chat.guard(proj, SimpleNamespace(cmd="log", sub=None, id=tickets.general_id(proj), text="x"))
+
+
+def test_make_ticket_across_midnight_local(proj, monkeypatch):
+    """A request at 23:59 local and Make ticket at 00:01 (and after the 04:00 cut) still finds the proposal."""
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch" / "config.toml").write_text('[workspace]\ntz = "Europe/Zurich"\n')
+    clock = ["2026-11-09T22:59:00Z"]  # 23:59 CET
+    parse = chat._parse
+    monkeypatch.setattr(chat.tickets, "now", lambda: clock[0])
+    monkeypatch.setattr(chat, "_parse", lambda at=None: parse(at or clock[0]))
+    chat.record(proj, "person", "you", "phone", "Build fish", convo_start=True)
+    _proposal(proj)
+    clock[0] = "2026-11-09T23:01:00Z"  # 00:01 CET, the next calendar day
+    assert chat.proposal_state(proj, "proposal") == "open"
+    clock[0] = "2026-11-10T03:01:00Z"  # 04:01 CET: past the day cut, a new Chat day
+    result = chat.make_ticket(proj, "proposal", by="human:me")
+    assert len(tickets.list_all(proj)) == 1
+    assert chat.read_day(proj, "2026-11-09")["messages"][0]["moved_to"]["id"] == result["ticket"]

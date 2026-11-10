@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -172,19 +171,15 @@ def start_text(root: Path) -> str:
 
 def _git_exclude(root: Path) -> tuple[Path, str] | None:
     """(.git/info/exclude, path of the project below the git top folder) or None when this is no git repo."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=10,
-            check=True,
-        ).stdout.splitlines()
-    except (OSError, subprocess.SubprocessError):
+    sg = _safegit()
+    if not sg.have_git(root):
+        if sg.git_on_path():
+            print("orch: git excludes skipped: no git that orch trusts was found.", file=sys.stderr)
         return None
+    rc, raw, _ = sg.run_bytes(["rev-parse", "--show-toplevel", "--git-path", "info/exclude"], root, 10)
+    if rc != 0:
+        return None
+    out = raw.decode("utf-8", "surrogateescape").splitlines()
     if len(out) != 2:
         return None
     top, ex = Path(out[0]), Path(out[1])
@@ -239,6 +234,12 @@ ORCH_IGNORE = [
     "chat/",
     "tickets/*/evidence/",
     "tickets/.lock-*",  # per-ticket write locks
+    # Personal by default (9 Nov): tickets (history, phone texts, artifacts, the Chat ticket), the counter and the
+    # per-person settings stay out of a team repo. Fixed patterns only, never derived from data.
+    "tickets/",
+    "ticket-counter.json",
+    "config.toml",
+    "addons.json",
 ]
 
 
@@ -276,46 +277,52 @@ def _tracked(root: Path, rel: str) -> bool:
             return False  # plain folder (or no git program there): nothing can be tracked
     except Refused:
         return True  # cannot tell: treat the file as the team's
-    env = _git_env()
-    try:
-        return (
-            subprocess.run(
-                [
-                    "git",
-                    "ls-files",
-                    "--error-unmatch",
-                    "--",
-                    f":(icase){rel}",
-                ],  # .ORCH/... tracked is this file too
-                cwd=root,
-                capture_output=True,
-                env=env,
-                timeout=10,
-            ).returncode
-            == 0
-        )
-    except (OSError, subprocess.SubprocessError):
-        return True  # cannot tell: treat the file as the team's
+    # .ORCH/... tracked is this file too (icase)
+    rc, _, _ = _safegit().run_bytes(["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10)
+    if rc not in (0, 1):  # 0 = tracked, 1 = not tracked; anything else (123, no git, a crash) = cannot tell
+        return True  # ... and that means "the team's file": the safe direction
+    return rc == 0
 
 
-def _git_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["LC_ALL"] = "C"
-    return env
+def _refusal_text(root: Path, default: str) -> str:
+    """What the person reads when git is not asked: the plain reason when the root is their home folder or a
+    drive root (safegit.unusable_root), else `default`."""
+    from orch import safegit
+
+    why = safegit.unusable_root(root)
+    return f"{why[0].upper()}{why[1:]}. Nothing was stored." if why else default
+
+
+# What "closed" means when orch finds no git it trusts (no trusted git: safegit.have_git is False), per caller:
+#   _in_git_repo / check_private_path / _ignored -> refuse (nothing private is stored);
+#   _tracked -> "tracked" (the team's file: not touched); _git_exclude -> skipped with a note;
+#   filesig.files_sig -> None (no signature).
+def _safegit():
+    """The safegit module (imported late: safegit needs addons, addons needs this module)."""
+    from orch import safegit
+
+    return safegit
+
+
+is_tracked = _tracked  # public: other modules ask whether git tracks a file
 
 
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""
-    try:
-        r = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=root,
-            capture_output=True,
-            env=_git_env(),
-            timeout=10,
-        )
-    except FileNotFoundError:
+    sg = _safegit()
+    rc, out, err = 127, b"", ""
+    why = sg.unusable_root(root)
+    if why:
+        raise Refused(f"{why[0].upper()}{why[1:]}. Nothing was stored.")
+    if not sg.have_git(root):
+        if sg.git_on_path():  # a git exists but none is trusted (a planted one?): never "not a repo"
+            raise Refused(
+                "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
+            )
+    else:
+        rc, out, err = sg.run_bytes(["rev-parse", "--is-inside-work-tree"], root, 10)
+    if rc == 127:
         # no git program: fine in a plain folder, but a folder that has .git cannot be checked, so refuse
         for d in (root.absolute(), *root.absolute().parents):
             if os.path.lexists(d / ".git"):
@@ -323,30 +330,23 @@ def _in_git_repo(root: Path) -> bool:
                     "git is not installed, so orch cannot tell what is ignored here. Nothing was stored."
                 ) from None
         return False
-    except (OSError, subprocess.SubprocessError):
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
-    if r.returncode == 0:
-        return r.stdout.strip() == b"true"
-    if b"not a git repository" in r.stderr.lower():
+    if rc == 0:
+        return out.strip() == b"true"
+    if rc not in (124, 125, 126) and "not a git repository" in err.lower():
         return False
+    if rc in (124, 125, 126):
+        raise Refused("orch cannot ask git about this folder. Nothing was stored.")
     raise Refused("git cannot be read in this folder (is it owned by someone else?). Nothing was stored.")
 
 
 def _ignored(root: Path, rel: str) -> bool:
-    try:
-        r = subprocess.run(
-            ["git", "check-ignore", "-q", "--", rel],
-            cwd=root,
-            capture_output=True,
-            env=_git_env(),
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
-    if r.returncode == 0:
+    rc, _, _ = _safegit().run_bytes(["check-ignore", "-q", "--", rel], root, 10)
+    if rc == 0:
         return True
-    if r.returncode == 1:
+    if rc == 1:
         return False
+    if rc in (124, 125, 126, 127):
+        raise Refused(_refusal_text(root, "orch cannot ask git about this folder. Nothing was stored."))
     raise Refused("git could not say whether private files are ignored here. Nothing was stored.")
 
 
@@ -404,25 +404,16 @@ def check_private_path(root: Path, path: Path) -> None:
     if not _in_git_repo(root):
         return
     rel = path.absolute().relative_to(root.absolute()).as_posix()
-    try:
-        t = subprocess.run(
-            [
-                "git",
-                "ls-files",
-                "--error-unmatch",
-                "--",
-                f":(icase){rel}",
-            ],  # .ORCH/... tracked is this file too
-            cwd=root,
-            capture_output=True,
-            env=_git_env(),
-            timeout=10,
+    rc, _, _ = _safegit().run_bytes(  # .ORCH/... tracked is this file too (icase)
+        ["ls-files", "--error-unmatch", "--", f":(icase){rel}"], root, 10
+    )
+    if rc not in (0, 1):
+        raise Refused(
+            _refusal_text(
+                root, "git could not say whether private files are tracked here. Nothing was stored."
+            )
         )
-    except (OSError, subprocess.SubprocessError):
-        raise Refused("orch cannot ask git about this folder. Nothing was stored.") from None
-    if t.returncode not in (0, 1):
-        raise Refused("git could not say whether private files are tracked here. Nothing was stored.")
-    if not _ignored(root, rel) or t.returncode == 0:
+    if not _ignored(root, rel) or rc == 0:
         raise Refused(
             f"git would not leave {rel} alone (a .gitignore of the project shows it, or it is tracked). "
             "Nothing was stored."
@@ -435,6 +426,98 @@ def glob_escape(text: str) -> str:
 
 
 SKILL_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+# What `orch private` looks at: the personal files a team repo should not hold (paths relative to the project).
+PRIVATE_FILES = (
+    (".orch/tickets", "tickets"),
+    (".orch/ticket-counter.json", "ticket-counter.json"),
+    (".orch/config.toml", "config.toml"),
+    (".orch/addons.json", "addons.json"),
+)
+
+
+def tracked_private(root: Path) -> list[str]:
+    return _tracked_private(root) or []
+
+
+def _tracked_private(root: Path, icase: bool = True) -> list[str] | None:
+    """The personal orch files that git already tracks in this folder's repo (project-relative, sorted, at most
+    2000). [] outside a git repo or when git cannot say (the warning is advice; the trust check is `_tracked`)."""
+    try:
+        if not _in_git_repo(root):
+            return []
+    except Refused:
+        return None
+    rc, raw, _ = _safegit().run_bytes(
+        [
+            "ls-files",
+            "-z",
+            "--",
+            *[f":({'icase,' if icase else ''}literal){rel}" for rel, _ in PRIVATE_FILES],
+        ],
+        root,
+        20,
+    )
+    if rc != 0:
+        return None
+    names = sorted({os.fsdecode(n) for n in raw.split(b"\0") if n})
+    return names[:2000]
+
+
+def private_summary(root: Path) -> dict:
+    """{"files": [...], "counts": {"tickets": 3, "config.toml": 1}, "config_tracked": bool}: what the team repo holds."""
+    files = tracked_private(root)
+    counts: dict[str, int] = {}
+    for f in files:
+        low = f.lower()
+        for rel, label in PRIVATE_FILES:
+            if low == rel or low.startswith(rel + "/"):
+                counts[label] = counts.get(label, 0) + 1
+                break
+    return {"files": files, "counts": counts, "config_tracked": _tracked(root, ".orch/config.toml")}
+
+
+def private_words(summary: dict) -> str:
+    """One plain line: what is committed."""
+    parts = []
+    for label, n in summary["counts"].items():
+        parts.append(f"{n} ticket file{'s' if n != 1 else ''}" if label == "tickets" else label)
+    return "Committed in your team repo: " + ", ".join(parts) + "."
+
+
+def move_to_private(root: Path, by: str | None = None) -> list[str]:
+    """A person's click: `git rm --cached` for the tracked personal files. The files stay on disk; nothing is
+    committed (the removal is the person's to commit); older commits keep their copies. Returns the paths.
+    An agent (`by` = agent:...) is refused here too, behind the CLI's proof check."""
+    from orch import config
+
+    config.require_person(by, "move these files out of the team repo")
+    files = _tracked_private(root, icase=False) or []  # exactly the names git holds, no case variants
+    if not files:
+        return []
+    protect_local(root)  # the ignore rules first, so the files do not turn into "new files" afterwards
+    for i in range(0, len(files), 200):
+        chunk = files[i : i + 200]
+        rc, _, _ = _safegit().run(
+            ["rm", "--cached", "-f", "-q", "--", *[f":(literal){f}" for f in chunk]],
+            root,
+            60,
+            read_only=False,
+            filters=False,
+        )
+        if rc != 0:
+            if i:
+                raise Refused(
+                    f"git removed {i} file{'s' if i != 1 else ''} from the team repo, then stopped. "
+                    "Run orch private move again, or look at: git status"
+                )
+            raise Refused("git could not remove the files from the team repo. Nothing was changed.")
+    left = _tracked_private(root, icase=False)
+    if left is None:  # git cannot say now: do not claim anything was moved
+        raise Refused("git ran, but orch could not check what was removed. Look at: git status")
+    still = set(left)
+    return [f for f in files if f not in still]  # what really left the index
 
 
 def safe_skill_name(name: str) -> bool:
@@ -627,7 +710,7 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
 # ------------------------------------------------------------------ local instruction file
 
 
-def write_local_file(root: Path, fn: str, line: str | None) -> bool:
+def write_local_file(root: Path, fn: str, line: str | None, harness_root: Path | None = None) -> bool:
     """The local-only instruction file: our marked block imports AGENTS.md (when the team has no shared sibling file of
     the same name without ".local" and an AGENTS.md) and the orch block. Other text in the file is kept. Returns False when skipped."""
     path = root / fn
@@ -643,8 +726,10 @@ def write_local_file(root: Path, fn: str, line: str | None) -> bool:
     )  # the team's own file: the tool reads it already
     if line and (root / "AGENTS.md").is_file() and not team_file:
         lines.append(line)
-    if combined(root):
-        lines.append(f"@{(HARNESS / 'AGENTS.orch.md').as_posix()}")
+    if combined(harness_root or root):
+        # a separate copy has no .orch/harness of its own: it imports the workspace's, by full path
+        imp = (harness_root / HARNESS / "AGENTS.orch.md") if harness_root else (HARNESS / "AGENTS.orch.md")
+        lines.append(f"@{imp.as_posix()}")
     if not lines and LOCAL_MARK[0] not in text:
         return path.exists()  # nothing to say yet: do not make the file
     block = "\n".join([LOCAL_MARK[0], *lines, LOCAL_MARK[1]]) + "\n"
