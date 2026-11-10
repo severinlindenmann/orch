@@ -73,6 +73,26 @@
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
     "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
+    "work": {
+      "type": "object",
+      "description": "Optional. The ticket works in a separate copy of the project (a git worktree made by orch, branch orch/<ticket>), kept for the life of the ticket. A record for people and other machines: it holds NO local path (those stay in the machine-local registry .orch/run/worktrees.json) and no code resolves a path from it. A single-repo workspace has one entry per machine; more repositories add entries.",
+      "properties": {
+        "folders": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["branch"],
+            "properties": {
+              "branch": { "type": "string", "minLength": 1, "maxLength": 200, "description": "The branch the copy works on, orch/<ticket>." },
+              "base": { "type": "string", "pattern": "^[0-9a-f]{40,64}$", "description": "The commit the copy was made from." },
+              "sub": { "type": "string", "maxLength": 1000, "description": "The workspace folder below the git top folder ('' when the workspace is the top)." },
+              "host": { "type": "string", "maxLength": 100, "description": "The machine that made the copy (same value as a session's host)." }
+            }
+          }
+        }
+      }
+    },
     "sessions": {
       "type": "array",
       "maxItems": 32,

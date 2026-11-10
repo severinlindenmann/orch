@@ -172,14 +172,18 @@ def start_text(root: Path) -> str:
 
 def _git_exclude(root: Path) -> tuple[Path, str] | None:
     """(.git/info/exclude, path of the project below the git top folder) or None when this is no git repo."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    h = _hardened(root)
+    if h is None:
+        if _git_on_path():
+            print("orch: git excludes skipped: no git that orch trusts was found.", file=sys.stderr)
+        return None
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
+            [*h[0], "rev-parse", "--show-toplevel", "--git-path", "info/exclude"],
             cwd=root,
             capture_output=True,
             text=True,
-            env=env,
+            env=h[1],
             timeout=10,
             check=True,
         ).stdout.splitlines()
@@ -276,32 +280,56 @@ def _tracked(root: Path, rel: str) -> bool:
             return False  # plain folder (or no git program there): nothing can be tracked
     except Refused:
         return True  # cannot tell: treat the file as the team's
-    env = _git_env()
+    h = _hardened(root)
+    if h is None:
+        return True  # no trusted git: cannot tell, treat the file as the team's
+    env = h[1]
     try:
-        return (
-            subprocess.run(
-                [
-                    "git",
-                    "ls-files",
-                    "--error-unmatch",
-                    "--",
-                    f":(icase){rel}",
-                ],  # .ORCH/... tracked is this file too
-                cwd=root,
-                capture_output=True,
-                env=env,
-                timeout=10,
-            ).returncode
-            == 0
-        )
+        rc = subprocess.run(
+            [
+                *h[0],
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                f":(icase){rel}",
+            ],  # .ORCH/... tracked is this file too
+            cwd=root,
+            capture_output=True,
+            env=env,
+            timeout=10,
+        ).returncode
     except (OSError, subprocess.SubprocessError):
         return True  # cannot tell: treat the file as the team's
+    if rc not in (0, 1):  # 0 = tracked, 1 = not tracked; anything else (123, a crash) = cannot tell
+        return True  # ... and that means "the team's file": the safe direction
+    return rc == 0
 
 
-def _git_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["LC_ALL"] = "C"
-    return env
+def _root_message(root: Path) -> str | None:
+    """The plain reason safegit refuses this root (it is the home folder or a drive root), or None."""
+    from orch import safegit
+
+    return safegit.unusable_root(root)
+
+
+def _git_on_path() -> bool:
+    """Is there SOME git program on the PATH (the hardened lookup may still refuse it: a planted one)?"""
+    name = "git.exe" if os.name == "nt" else "git"
+    return any(
+        d and os.path.isfile(os.path.join(d, name)) and os.access(os.path.join(d, name), os.X_OK)
+        for d in os.environ.get("PATH", "").split(os.pathsep)
+    )
+
+
+# What "closed" means when orch finds no git it trusts (hardened() is None), per caller:
+#   _in_git_repo / check_private_path / _ignored -> refuse (nothing private is stored);
+#   _tracked -> "tracked" (the team's file: not touched); _git_exclude -> skipped with a note;
+#   filesig.files_sig -> None (no signature).
+def _hardened(cwd: Path):
+    """safegit.hardened (imported late: safegit needs addons, addons needs this module)."""
+    from orch import safegit
+
+    return safegit.hardened(cwd)
 
 
 is_tracked = _tracked  # public: other modules ask whether git tracks a file
@@ -310,12 +338,22 @@ is_tracked = _tracked  # public: other modules ask whether git tracks a file
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""
+    h = _hardened(root)
     try:
+        if h is None:
+            why = _root_message(root)
+            if why:
+                raise Refused(f"{why[0].upper()}{why[1:]}. Nothing was stored.")
+            if _git_on_path():  # a git exists but none is trusted (a planted one?): never "not a repo"
+                raise Refused(
+                    "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
+                )
+            raise FileNotFoundError("git")  # no git program at all
         r = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            [*h[0], "rev-parse", "--is-inside-work-tree"],
             cwd=root,
             capture_output=True,
-            env=_git_env(),
+            env=h[1],
             timeout=10,
         )
     except FileNotFoundError:
@@ -336,12 +374,20 @@ def _in_git_repo(root: Path) -> bool:
 
 
 def _ignored(root: Path, rel: str) -> bool:
+    h = _hardened(root)
+    if h is None:
+        why = _root_message(root)
+        raise Refused(
+            f"{why[0].upper()}{why[1:]}. Nothing was stored."
+            if why
+            else "orch cannot ask git about this folder. Nothing was stored."
+        )
     try:
         r = subprocess.run(
-            ["git", "check-ignore", "-q", "--", rel],
+            [*h[0], "check-ignore", "-q", "--", rel],
             cwd=root,
             capture_output=True,
-            env=_git_env(),
+            env=h[1],
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -407,10 +453,18 @@ def check_private_path(root: Path, path: Path) -> None:
     if not _in_git_repo(root):
         return
     rel = path.absolute().relative_to(root.absolute()).as_posix()
+    h = _hardened(root)
+    if h is None:
+        why = _root_message(root)
+        raise Refused(
+            f"{why[0].upper()}{why[1:]}. Nothing was stored."
+            if why
+            else "orch cannot ask git about this folder. Nothing was stored."
+        )
     try:
         t = subprocess.run(
             [
-                "git",
+                *h[0],
                 "ls-files",
                 "--error-unmatch",
                 "--",
@@ -418,7 +472,7 @@ def check_private_path(root: Path, path: Path) -> None:
             ],  # .ORCH/... tracked is this file too
             cwd=root,
             capture_output=True,
-            env=_git_env(),
+            env=h[1],
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -630,7 +684,7 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
 # ------------------------------------------------------------------ local instruction file
 
 
-def write_local_file(root: Path, fn: str, line: str | None) -> bool:
+def write_local_file(root: Path, fn: str, line: str | None, harness_root: Path | None = None) -> bool:
     """The local-only instruction file: our marked block imports AGENTS.md (when the team has no shared sibling file of
     the same name without ".local" and an AGENTS.md) and the orch block. Other text in the file is kept. Returns False when skipped."""
     path = root / fn
@@ -646,8 +700,10 @@ def write_local_file(root: Path, fn: str, line: str | None) -> bool:
     )  # the team's own file: the tool reads it already
     if line and (root / "AGENTS.md").is_file() and not team_file:
         lines.append(line)
-    if combined(root):
-        lines.append(f"@{(HARNESS / 'AGENTS.orch.md').as_posix()}")
+    if combined(harness_root or root):
+        # a separate copy has no .orch/harness of its own: it imports the workspace's, by full path
+        imp = (harness_root / HARNESS / "AGENTS.orch.md") if harness_root else (HARNESS / "AGENTS.orch.md")
+        lines.append(f"@{imp.as_posix()}")
     if not lines and LOCAL_MARK[0] not in text:
         return path.exists()  # nothing to say yet: do not make the file
     block = "\n".join([LOCAL_MARK[0], *lines, LOCAL_MARK[1]]) + "\n"

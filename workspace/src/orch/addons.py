@@ -1668,12 +1668,18 @@ def _source_sha() -> str | None:
 
     try:
         if _is_local(repo()):
+            from orch import safegit
+
+            h = safegit.hardened(Path(repo()))  # the add-on source folder: same hardening as every git call
+            if h is None:
+                return None
             result = subprocess.run(
-                ["git", "-C", repo(), "rev-parse", "HEAD"],
+                [*h[0], "-C", repo(), "rev-parse", "HEAD"],
                 capture_output=True,
                 text=True,
                 check=True,
                 timeout=5,
+                env=h[1],
             )
             return _sha_or_none(result.stdout)
         api = _github_api()

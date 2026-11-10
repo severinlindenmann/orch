@@ -24,7 +24,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from orch import saferead
+from orch import safegit, saferead
 
 TIMEOUT = 3.0
 MAX_LIST = 16 * 1024 * 1024
@@ -33,19 +33,7 @@ MAX_READ = 64 * 1024 * 1024
 HASH_LIMIT = 1024 * 1024
 SKIP_DIRS = (".orch", "node_modules", ".venv", "__pycache__", "dist", "build")
 _EXCLUDE = [f":(exclude,glob)**/{d}/**" for d in SKIP_DIRS]
-_GIT = [
-    "git",
-    "--no-pager",
-    "--no-optional-locks",
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "core.untrackedCache=false",
-    "-c",
-    "core.quotepath=off",
-]
+_QUOTEPATH = ["-c", "core.quotepath=off"]
 _HASHES: dict[tuple, str] = {}
 _CACHE: dict[str, tuple[float, str | None]] = {}
 CACHE_TTL = 10.0
@@ -55,11 +43,17 @@ def _git(root: Path, args: list[str], deadline: float) -> bytes | None:
     left = deadline - time.monotonic()
     if left <= 0:
         return None
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["GIT_OPTIONAL_LOCKS"] = "0"
+    h = safegit.hardened(root)  # absolute git, no hooks/fsmonitor/network, sanitized PATH and env
+    if h is None:
+        return None
     try:
         r = subprocess.run(  # fixed argv list, no shell
-            _GIT + args, cwd=root, capture_output=True, timeout=left, env=env, check=False
+            [*h[0], "--no-pager", *_QUOTEPATH, *args],
+            cwd=root,
+            capture_output=True,
+            timeout=left,
+            env=h[1],
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
