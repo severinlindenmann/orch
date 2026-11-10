@@ -2031,3 +2031,27 @@ def test_agents_may_finish_off_writes_the_tombstone_before_the_file(ws, run):
     assert config.agents_may_finish(ws) is False
     with pytest.raises(Refused):
         config.set_agents_may_finish(ws, True, "agent:x")
+
+
+def test_conn_grant_keys_are_exact_and_need_a_person(ws):
+    """Connection grants are widening settings: only `conn.allow.<valid name>`, a grant needs a person, an off
+    is a tombstone. No arbitrary suffix an agent controls reaches the record."""
+    hp.key_dir(ws)
+    for bad in (
+        "conn.allow.",
+        "conn.allow.a/b",
+        "conn.allow..x",
+        "conn.allow.x y",
+        "conn.allow." + "a" * 65,
+        "conn.allowx",
+    ):
+        with pytest.raises(Refused):
+            hp.record_set(ws, bad, ["read"], "human:pat")
+    with pytest.raises(Refused):
+        hp.record_set(ws, "conn.allow.s", ["read"], "agent:x")
+    hp.record_set(ws, "conn.allow.s", ["read"], "human:pat")
+    assert hp.conn_grants(ws) == {"s": ["read"]}
+    hp.record_set(ws, "conn.allow.s", False, "agent:x")  # lowering is free, names no person
+    path, wkey = hp._settings_path(ws)
+    assert json.loads(path.read_text())["workspaces"][wkey]["conn.allow.s"]["by"] == "reset"
+    assert hp.conn_grants(ws) == {}

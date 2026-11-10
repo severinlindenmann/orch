@@ -766,12 +766,22 @@ def _settings_write(root: Path, setting: str, value, by: str) -> None:
         _write_private(path, json.dumps(data, indent=2, sort_keys=True))
 
 
+_CONN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")  # same shape as inventory.NAME_RE
+
+
+def is_conn_grant_key(setting) -> bool:
+    """Exactly `conn.allow.<connection name>` with a well-formed name (no arbitrary suffix)."""
+    if not isinstance(setting, str) or not setting.startswith("conn.allow."):
+        return False
+    return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
+
+
 def record_set(root: Path, setting: str, value, by: str) -> None:
     """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
     but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
     an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
     moment where the file says on and the record is stale."""
-    if setting not in SETTING_DEFAULTS:
+    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting):
         raise Refused("That is not a setting a person has to allow.")
     if value is not False and not str(by).startswith("human:"):
         raise Refused(AGENT_REFUSED)

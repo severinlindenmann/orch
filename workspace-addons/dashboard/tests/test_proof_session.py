@@ -435,7 +435,10 @@ def test_every_person_op_is_refused_without_a_session_and_starts_no_child(live, 
 
     _root, port = live
     calls = []
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    from orch_dashboard import data as dash_data
+
+    monkeypatch.setattr(acts, "_run", lambda *a, **k: calls.append(a))  # module-local, never subprocess.run
+    monkeypatch.setattr(dash_data, "_run", lambda *a, **k: calls.append(a))
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: calls.append(a))
     missing = [op for op in acts.OPS if acts.needs_session(op) and op not in ACT_ARGS]
     assert not missing, f"add valid args for: {missing}"
