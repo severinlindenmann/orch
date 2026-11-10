@@ -554,7 +554,7 @@ def _is_ours_copy_checked(dest: Path, root: Path, mark: Path) -> bool:
             for fn in fns:
                 p = Path(dp) / fn
                 rel_f = p.relative_to(dest).as_posix()
-                if rel_f == COPY_MARK:
+                if rel_f == COPY_MARK or rel_f in KEEP_IN_COPY.get(dest.name, ()):
                     continue
                 if rel_f not in listed or p.lstat().st_mtime > mt:  # a file orch did not copy is the user's
                     return False
@@ -614,18 +614,36 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
 def _link_dir(link: Path, target: Path) -> None:
     link.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform == "win32":
-        try:
-            import _winapi
-
-            _winapi.CreateJunction(str(target.resolve()), str(link))
-            return
-        except OSError:
-            _copy_dir(target, link)
-            return
+        # No junction: Windows refuses to traverse one made by an unprivileged process (WinError 448,
+        # "untrusted mount point", #438), and orch's own reparse-point refusals would reject it as well.
+        _copy_dir(target, link)
+        return
     try:
         os.symlink(os.path.relpath(target, link.parent), link, target_is_directory=True)
     except OSError:
         _copy_dir(target, link)
+
+
+def _own_junction(dest: Path, target: Path) -> bool:
+    """Windows: `dest` is a junction that an older orch made to `target`. Read with readlink, never traversed."""
+    if sys.platform != "win32" or dest.is_symlink() or not is_link(dest):
+        return False
+    try:
+        got = os.readlink(dest)
+    except OSError:
+        return False
+    want = {_norm_win(target.absolute())}
+    try:
+        want.add(
+            _norm_win(target.resolve())
+        )  # old orch made the junction with resolve(); target is never the junction
+    except OSError:
+        pass
+    return _norm_win(got) in want
+
+
+def _norm_win(p: object) -> str:
+    return os.path.normcase(os.path.normpath(str(p).removeprefix("\\\\?\\")))
 
 
 def _copy_dir(src: Path, dst: Path) -> None:
@@ -649,6 +667,18 @@ def _copy_dir(src: Path, dst: Path) -> None:
     )
 
 
+KEEP_IN_COPY = {"orch-relay": ("workspaces.json",)}  # files an add-on writes into its skill folder
+
+
+def _keep_files(dest: Path) -> dict[str, bytes]:
+    out = {}
+    for fn in KEEP_IN_COPY.get(dest.name, ()):
+        f = dest / fn
+        if not is_link(f) and f.is_file():
+            out[fn] = f.read_bytes()
+    return out
+
+
 def _same(a: Path, b: Path) -> bool:
     try:
         return a.resolve() == b.resolve()
@@ -665,12 +695,16 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
     if is_link(parent):
         return  # the team links the whole folder (to .agents/skills or elsewhere): nothing of ours goes into it
     dest = parent / name
-    if is_link(dest):
+    kept: dict[str, bytes] = {}
+    if _own_junction(dest, target):
+        os.rmdir(dest)  # removes the junction itself, never its target; a copy replaces it just below
+    elif is_link(dest):
         if _same(dest, target):
             return
         raise Refused(f"{dest} is a link to somewhere else; orch will not replace it.")
     if dest.exists():
         if (dest / COPY_MARK).is_file() and _is_ours_copy(dest, root):
+            kept = _keep_files(dest)
             shutil.rmtree(dest)
         elif name == "orch-relay" and dest.is_dir() and not (dest / "SKILL.md").exists():
             # only the directory the relay wrote before its skill came: move that one file into the harness
@@ -684,6 +718,8 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
         else:
             raise Refused(f"{dest} is not orch's; orch will not replace it. Nothing was changed there.")
     _link_dir(dest, target)
+    for fn, data in kept.items():
+        (dest / fn).write_bytes(data)  # same rule as sync_copies: the add-on's file wins
 
 
 def unlink_skill(root: Path, where: str, name: str) -> None:
@@ -713,12 +749,20 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
             dest = root / where / s.name
             if is_link(root / where) or not _inside(root, root / where):
                 continue
-            if dest.is_dir() and not is_link(dest) and (dest / COPY_MARK).is_file():
+            if is_link(dest):
+                if _own_junction(dest, s):
+                    os.rmdir(dest)
+                    _copy_dir(s, dest)
+                continue  # a link is never traversed (WinError 448 on a junction, #438)
+            if dest.is_dir() and (dest / COPY_MARK).is_file():
                 if not _is_ours_copy(dest, root):
                     skip_note(f"{dest} (it has files of yours)")
                     continue
+                keep = _keep_files(dest)
                 shutil.rmtree(dest)  # rebuilt whole: deleted files go, a planted link inside is gone
                 _copy_dir(s, dest)
+                for fn, data in keep.items():
+                    (dest / fn).write_bytes(data)
 
 
 # ------------------------------------------------------------------ local instruction file
