@@ -91,6 +91,7 @@
 .ref-pick .key{color:var(--text-muted);font-size:12px}
 .ref-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+.ticket-page .shared-folder{margin:6px 2px 0;font-size:13px}
 .ticket-plan-steps { padding-left: 24px; }
 .ticket-plan-steps li { padding: 10px 0; overflow-wrap: anywhere; }
 .ticket-plan-steps p { margin: 0; }

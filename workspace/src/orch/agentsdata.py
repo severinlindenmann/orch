@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-FRAGMENTS = ("deny", "capabilities", "connections", "readonly")
+FRAGMENTS = ("deny", "capabilities", "connections", "readonly", "reminder")
 
 
 def agents_dir() -> Path:

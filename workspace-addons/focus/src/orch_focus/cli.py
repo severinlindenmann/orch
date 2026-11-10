@@ -21,6 +21,39 @@ def find_workspace(start: Path) -> Path | None:
     return None
 
 
+def _orch_bin() -> str | None:
+    """This Python's own orch (`-I -m orch`), never ORCH_BIN or PATH (H1). Without an importable orch the old
+    ORCH_BIN is all there is, and there is no key to protect either."""
+    import importlib.util
+    import os
+
+    from .actions import SELF
+
+    return SELF if importlib.util.find_spec("orch") else os.environ.get("ORCH_BIN") or None
+
+
+def _open(root: Path, page: str) -> None:
+    """Open the page; the launch token (URL fragment) goes only to an absolute-path opener (H1)."""
+    try:
+        from orch import humanproof
+
+        if humanproof.open_browser(humanproof.launch_url(root, "focus", page)):
+            return
+    except ImportError:
+        pass
+    webbrowser.open(page)  # no token in this URL
+
+
+def _launch(root: Path, page: str) -> str:
+    """The page address with a one-time launch token in the fragment (a person opens it: H1)."""
+    try:
+        from orch import humanproof
+
+        return humanproof.launch_url(root, "focus", page)
+    except ImportError:
+        return page
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="orch focus", description="A live page for one ticket.")
     ap.add_argument(
@@ -75,11 +108,11 @@ def _data(args, root: Path) -> int:
 def _serve(args, root: Path) -> int:
     port = getattr(args, "port", DEFAULT_PORT)
     try:
-        srv = make_server(root, port)
+        srv = make_server(root, port, orch_bin=_orch_bin())
     except OSError:
         if not getattr(args, "auto_port", False):
             raise
-        srv = make_server(root, 0)
+        srv = make_server(root, 0, orch_bin=_orch_bin())
     if getattr(args, "ready_file", None):
         service.write_ready(Path(args.ready_file), srv.server_address[1])
     print(f"orch focus for {root.name}: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C to stop)")
@@ -141,7 +174,7 @@ def _service(args, root: Path) -> int:
             page = f"{u}/t/{args.ticket}"
             out({"running": True, "pid": cur["pid"], "url": page}, page, as_json)
             if not args.no_open:
-                webbrowser.open(page)
+                _open(root, page)
         else:
             out(
                 {"running": True, "pid": cur["pid"], "url": u},

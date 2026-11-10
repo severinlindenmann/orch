@@ -139,6 +139,25 @@ def test_discovery_never_imports_addon_code(tmp_path, monkeypatch):
     assert "orch_hello" not in sys.modules
 
 
+def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
+    """Regression (9 Nov): the registry a discovery test writes lands in the faked home, never in the
+    account's real ~/.orch-tool (the harness fakes real_home, ORCH_HOME, HOME and sets ORCH_HOME_STRICT)."""
+    import conftest
+
+    assert addons.real_home is not conftest._REAL_HOME_FN
+    fake = addons.real_home()
+    assert os.environ["ORCH_HOME_STRICT"] == "1" and Path(os.environ["HOME"]) == fake
+    assert Path(os.environ["ORCH_HOME"]).resolve().is_relative_to(fake.resolve())
+    folder = make_addon(tmp_path / "a")
+    monkeypatch.syspath_prepend(str(folder / "src"))
+    monkeypatch.setattr(addons, "_entry_points", lambda: {"hello": "orch_hello"})
+    addons._save_registry([{"name": "hello", "source": str(folder), "version": "0.1.0"}])
+    reg = Path(os.environ["ORCH_HOME"]) / "addons.json"
+    assert reg.is_file() and addons.registry_path() == reg.resolve()
+    assert list(third_party()) == ["hello"]
+    assert addons.registry_path().resolve() != (conftest._REAL_HOME_FN() / ".orch-tool" / "addons.json")
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
