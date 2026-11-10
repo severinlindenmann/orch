@@ -320,6 +320,12 @@ def hooks_doc(name: str, run_id: str, root: Path | None = None) -> dict | None:
     return doc
 
 
+def _is_orch_copy(p: Path) -> bool:
+    from orch import worktrees
+
+    return worktrees.is_orch_copy(p)
+
+
 def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None) -> str:
     """Before a live start: tell the tool this folder is trusted, when its adapter declares how (live.trust).
     Returns "set", "already", "none" (nothing declared) or "skipped" (file missing, unreadable or changing).
@@ -329,8 +335,9 @@ def trust_folder(name: str, root: Path, environ: Mapping[str, str] | None = None
     t = ((load(name, root).get("live") or {}).get("trust")) if name else None
     if not t:
         return "none"
-    # only the workspace the person set up with `orch init` (its consent), never any other folder
-    if not orch_folder(root):
+    # only the workspace the person set up with `orch init` (its consent), or a separate copy of it that orch
+    # made (it has no .orch/tickets of its own: the copy leaves the tracked .orch out), never any other folder
+    if not (orch_folder(root) or _is_orch_copy(root)):
         return "skipped"
     env = os.environ if environ is None else environ
     base = Path(env.get(t.get("dir_env") or "", "") or env.get("HOME") or Path.home())
@@ -400,7 +407,7 @@ def session_mode(name: str, root: Path | None = None) -> str:
 
 
 def transcript_exists(
-    name: str, sid: str, root: Path, environ: Mapping[str, str] | None = None
+    name: str, sid: str, root: Path, environ: Mapping[str, str] | None = None, folder: Path | None = None
 ) -> bool | None:
     """Has the tool saved the conversation of session `sid` for this folder (adapter session.transcript)?
     None = cannot tell (nothing declared, or the tool has no folder for this workspace at all, e.g. a path it
@@ -411,7 +418,9 @@ def transcript_exists(
         return None
     env = os.environ if environ is None else environ
     base = Path(env.get(t.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / t["home"])
-    folder = re.sub(r"[^A-Za-z0-9]", "-", str(root.resolve()))
+    # the tool files a conversation under the folder it STARTED in: a separate copy's path, not the
+    # workspace's
+    folder = re.sub(r"[^A-Za-z0-9]", "-", str((folder or root).resolve()))
     parts = [folder if k == "{folder}" else k.replace("{session}", sid) for k in t["path"]]
     f = base.joinpath(*parts)
     if not f.parent.is_dir():
