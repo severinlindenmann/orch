@@ -153,11 +153,8 @@ def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
         assert st == 403, (op, body)
     from orch_focus import actions
 
-    assert actions.proof_for("check.edit", {"ticket": "t_a", "check": "c1"}) == (
-        "check.wont_do_undo",
-        "t_a:c1:reopen",
-    )
-    assert actions.proof_for("check.remove", {"ticket": "t_a", "check": "c1"}) == (
-        "check.wont_do_undo",
-        "t_a:c1:reopen",
-    )
+    for action in ("edit", "remove", "reopen"):  # the ACTION is part of the proof target
+        assert actions.proof_for(f"check.{action}", {"ticket": "t_a", "check": "c1"}) == (
+            "check.wont_do_undo",
+            f"t_a:c1:{action}",
+        )
