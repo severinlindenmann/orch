@@ -715,6 +715,8 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "work-check":
         workcheck.run(root, args.json)
     elif cmd == "update":
+        if not args.project_only:  # first: with another ORCH_HOME there is nothing a click could approve
+            addons.tool_env_change_ok()
         if not args.project_only and not args.after_install:  # reinstalling orch is a person's action (H1)
             # The SOURCE is resolved first (a normal install ignores ORCH_REPO / ORCH_REF: the official
             # channel or the one the install came from). It is part of what the person approves AND of the

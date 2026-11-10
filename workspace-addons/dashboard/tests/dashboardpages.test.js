@@ -114,3 +114,20 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   settings.git_private.count = 0;
   assert.equal(nodes(c.privateCard(settings), n => n.tag === 'h3').length, 1);
 });
+
+test('Separate copies card: three choices, the saved one is selected, setup and cap are controls', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  vm.runInContext(src.slice(start, end), c);
+  const card = vm.runInContext('copiesCard', c)({copies:'always', copies_max:5, copy_setup:'npm ci'});
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const choices = all(card, n => n.attrs?.['data-action'] === 'copies-mode');
+  assert.deepEqual(choices.map(n => n.attrs['data-mode']), ['off', 'together', 'always']);
+  assert.deepEqual(choices.map(n => n.attrs['aria-checked']), [false, false, true]);
+  assert.equal(all(card, n => n.attrs?.['data-key'] === 'settings-copy-setup')[0].attrs.value, 'npm ci');
+  assert.equal(all(card, n => n.tag === 'select')[0].value, '5');
+  const dflt = vm.runInContext('copiesCard', c)({});
+  assert.deepEqual(all(dflt, n => n.attrs?.['data-action'] === 'copies-mode').map(n => n.attrs['aria-checked']), [false, true, false]);
+});

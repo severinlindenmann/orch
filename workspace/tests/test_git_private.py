@@ -359,7 +359,7 @@ def test_agent_add_approves_exactly_what_was_typed(proj, run):
     assert config.pending_agents(proj) == []
 
 
-def test_git_calls_are_hardened(proj, monkeypatch):
+def test_git_calls_go_through_safegit_and_ignore_a_poisoned_env(proj, monkeypatch):
     for k in (
         "GIT_DIR",
         "GIT_WORK_TREE",
@@ -370,12 +370,6 @@ def test_git_calls_are_hardened(proj, monkeypatch):
         "GIT_CONFIG_GLOBAL",
     ):
         monkeypatch.setenv(k, "/nonexistent-x")
-    env = harness._git_env()
-    assert not [k for k in env if k.startswith("GIT_") and k != "GIT_CONFIG_NOSYSTEM"]
-    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
-    argv = harness._git_argv(proj, "ls-files")
-    assert argv[:3] == ["git", "-C", str(proj)] and "core.fsmonitor=false" in argv
-    assert any(a.startswith("core.hooksPath=") for a in argv)
     repo(proj)
     (proj / ".orch" / "tickets").mkdir(parents=True)
     (proj / ".orch" / "tickets" / "a.json").write_text("{}")

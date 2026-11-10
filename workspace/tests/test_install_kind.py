@@ -479,7 +479,7 @@ def test_tampered_snapshot_is_refused_on_reinstall(tws, tmp_path, capsys):
 
 
 def _old_install(tmp_path, monkeypatch):
-    monkeypatch.setattr(addons, "_tool_env_change_ok", lambda: None)  # the home rule has its own tests
+    monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)  # the home rule has its own tests
     env = _prefix(tmp_path, monkeypatch)  # no record
     (env / "bin").mkdir()
     monkeypatch.setattr(hp, "_source_tree", lambda: False)
@@ -685,3 +685,44 @@ def test_windows_is_test_workspace(win, monkeypatch):
     monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
     monkeypatch.setattr(hp, "install_kind", lambda: "dev")
     assert not hp.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))  # test installs only
+
+
+# ---------------------------------------------------------------- plain refusal first (before any hand-off)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["update"],
+        ["addon", "add", "focus", "--yes"],
+        ["addon", "add", "./mine", "--yes"],
+        ["addon", "uninstall", "focus"],
+    ],
+)
+def test_other_orch_home_gets_the_plain_text_first(throwaway, monkeypatch, capsys, argv):
+    from orch import cli
+
+    acct, orch_home, ws = throwaway
+    (ws / "mine").mkdir(exist_ok=True)
+    (ws / "mine" / "pyproject.toml").write_text('[project]\nname = "orch-mine"\nversion = "0.1.0"\n')
+    ran = []
+    monkeypatch.setattr(addons, "run_uv", lambda a: ran.append(a))
+    monkeypatch.setattr(addons, "reexec", lambda a: ran.append(a))
+    queued = []
+    monkeypatch.setattr(hp, "request_handoff", lambda *a, **k: queued.append(a) or True)
+    code = cli.main(argv)
+    cap = capsys.readouterr()
+    text = cap.out + cap.err
+    assert code == 2 and hp.MSG_ENV_CHANGE in text
+    assert "Do this in the dashboard" not in text and "dashboard on this computer" not in text
+    assert queued == [] and ran == []  # nothing queued as a hand-off, nothing installed
+    assert not (acct / ".orch-tool").exists()  # real home untouched
+    assert not (orch_home / "keys").exists()  # and no snapshot / key written for the folder either
+
+
+def test_the_check_does_not_block_list_or_turning_on_in_the_workspace(throwaway, capsys):
+    from orch import cli
+
+    assert cli.main(["addon", "list"]) == 0
+    assert cli.main(["update", "--project-only"]) in (0, 2)
+    assert hp.MSG_ENV_CHANGE not in capsys.readouterr().err

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import adapters, skills
+from orch import adapters, safegit, skills
 
 
 @pytest.fixture(autouse=True)
@@ -692,20 +692,37 @@ def test_private_write_refuses_a_linked_secrets_folder_in_a_repo(proj, tmp_path_
     assert not (outside / "x.json").exists()
 
 
+class _FakeProc:
+    """A finished git process (safegit streams through subprocess.Popen): exit code and stderr only."""
+
+    def __init__(self, rc, err=b""):
+        import io
+
+        self.returncode = rc
+        self.stdout, self.stderr = io.BufferedReader(io.BytesIO(b"")), io.BufferedReader(io.BytesIO(err))
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def kill(self):
+        pass
+
+
 def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypatch):
     import subprocess
 
-    from orch import harness, net
+    from orch import net
 
     _tracked_orch_gitignore(proj)
-    real = subprocess.run
+
+    real = subprocess.Popen
 
     def broken(cmd, *a, **k):
-        if "check-ignore" in cmd[:8]:
-            return subprocess.CompletedProcess(cmd, 128, b"", b"fatal: detected dubious ownership")
+        if "check-ignore" in cmd and os.path.basename(cmd[0]) == "git":
+            return _FakeProc(128, b"fatal: detected dubious ownership")
         return real(cmd, *a, **k)
 
-    monkeypatch.setattr(harness.subprocess, "run", broken)
+    monkeypatch.setattr(safegit.subprocess, "Popen", broken)
     with pytest.raises(skills.Refused):
         net.write_json(proj / ".orch/secrets/x.json", {"t": 1}, True)
     monkeypatch.undo()
@@ -713,14 +730,13 @@ def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypat
 
 
 def test_rev_parse_failure_that_is_not_no_repo_refuses(proj, monkeypatch):
-    import subprocess
 
     from orch import harness
 
     def broken(cmd, *a, **k):
-        return subprocess.CompletedProcess(cmd, 128, b"", b"fatal: detected dubious ownership")
+        return _FakeProc(128, b"fatal: detected dubious ownership")
 
-    monkeypatch.setattr(harness.subprocess, "run", broken)
+    monkeypatch.setattr(safegit.subprocess, "Popen", broken)
     with pytest.raises(skills.Refused):
         harness._in_git_repo(proj)
 
@@ -740,7 +756,7 @@ def test_no_git_program_in_a_repo_refuses_and_in_a_plain_folder_is_fine(proj, mo
     def nogit(*a, **k):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(harness.subprocess, "run", nogit)
+    monkeypatch.setattr(safegit.subprocess, "Popen", nogit)
     assert harness._in_git_repo(proj) is False  # plain folder (the test folder has no .git above it)
     (proj / ".git").mkdir()
     with pytest.raises(skills.Refused):
@@ -754,7 +770,7 @@ def test_tracked_returns_true_when_git_cannot_be_run(proj, monkeypatch):
     def boom(*a, **k):
         raise OSError("x")
 
-    monkeypatch.setattr(harness.subprocess, "run", boom)
+    monkeypatch.setattr(safegit.subprocess, "Popen", boom)
     assert harness._tracked(proj, "a") is True
 
 

@@ -222,9 +222,12 @@
     return capital(noPrefix(claim.label || match?.label || claim.agent || chosen?.label || chosen?.name || agents[0]?.label || agents[0]?.name || 'Agent'));
   }
   const matchesTicket = (ref, t) => !!ref && (ref === t.id || (!!t.key && String(ref).toLowerCase() === String(t.key).toLowerCase()));
+  // Creation order (the plan order): the key number counts up with every new ticket; created_at only breaks ties.
+  const keyNumber = c => Number(String(c && c.key || '').split('-').pop()) || 0;
+  const creationOrder = (x, y) => keyNumber(x) - keyNumber(y) || (Date.parse(x.created_at) || 0) - (Date.parse(y.created_at) || 0) || String(x.id).localeCompare(String(y.id));
   function childrenOf(all, t) {
     const seen = new Set();
-    return arr(all).filter(c => c && c.id !== t.id && (matchesTicket(c.parent, t) || arr(t.children).includes(c.id)) && !seen.has(c.id) && seen.add(c.id));
+    return arr(all).filter(c => c && c.id !== t.id && (matchesTicket(c.parent, t) || arr(t.children).includes(c.id)) && !seen.has(c.id) && seen.add(c.id)).sort(creationOrder);
   }
   function parentOf(all, t) {
     return arr(all).find(p => p && p.id !== t.id && matchesTicket(t.parent, p)) ||
@@ -458,5 +461,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {resolved, agentLabel, childrenOf, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

@@ -236,6 +236,7 @@ enum ConversationBuilder {
 
     /// The conversation a stored message belongs to; nil for a receipt (shown as ticks, not as a bubble).
     static func conversation(of pm: PhoneMessage, _ ix: Index? = nil, _ d: ConversationInputs) -> ConversationID? {
+        guard !pm.message.body.isProposalResult else { return nil }
         let ix = ix ?? index(d)
         let m = pm.message, ws = pm.workspaceId
         if pm.fromPhone {
@@ -311,7 +312,7 @@ enum ConversationBuilder {
         let ix = index(d)
         var out: [ConvItem] = []
         var listed = Set<String>()
-        for pm in d.messages where pm.workspaceId == id.workspace {
+        for pm in d.messages where pm.workspaceId == id.workspace && !pm.message.body.isProposalResult {
             if let c = pm.clientId ?? pm.message.body.clientId { listed.insert(c) }
             if conversation(of: pm, ix, d) == id {
                 let chat: Bool = if case .general = id { true } else { false }

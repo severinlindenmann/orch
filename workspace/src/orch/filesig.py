@@ -20,11 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-import subprocess
 import time
 from pathlib import Path
 
-from orch import saferead
+from orch import safegit, saferead
 
 TIMEOUT = 3.0
 MAX_LIST = 16 * 1024 * 1024
@@ -33,19 +32,6 @@ MAX_READ = 64 * 1024 * 1024
 HASH_LIMIT = 1024 * 1024
 SKIP_DIRS = (".orch", "node_modules", ".venv", "__pycache__", "dist", "build")
 _EXCLUDE = [f":(exclude,glob)**/{d}/**" for d in SKIP_DIRS]
-_GIT = [
-    "git",
-    "--no-pager",
-    "--no-optional-locks",
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "core.untrackedCache=false",
-    "-c",
-    "core.quotepath=off",
-]
 _HASHES: dict[tuple, str] = {}
 _CACHE: dict[str, tuple[float, str | None]] = {}
 CACHE_TTL = 10.0
@@ -55,17 +41,9 @@ def _git(root: Path, args: list[str], deadline: float) -> bytes | None:
     left = deadline - time.monotonic()
     if left <= 0:
         return None
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    env["GIT_OPTIONAL_LOCKS"] = "0"
-    try:
-        r = subprocess.run(  # fixed argv list, no shell
-            _GIT + args, cwd=root, capture_output=True, timeout=left, env=env, check=False
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if r.returncode != 0 or len(r.stdout) > MAX_LIST:
-        return None
-    return r.stdout
+    # safegit: absolute trusted git, allowlist, no hooks/fsmonitor/network, sanitized PATH and env, no filters
+    rc, out, _ = safegit.run_bytes(args, root, left, max_bytes=MAX_LIST, read_only=True, filters=False)
+    return out if rc == 0 else None
 
 
 def _listed(root: Path, deadline: float) -> list[bytes] | None:

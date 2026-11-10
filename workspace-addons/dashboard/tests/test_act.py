@@ -910,7 +910,7 @@ def test_link_actions_are_audited(ws, monkeypatch):
     monkeypatch.setattr(actions, "publish_connected", lambda *a: True)
     monkeypatch.setattr(actions, "human_env", lambda *a: {})
     monkeypatch.setattr(
-        actions.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "{}", "")
+        actions, "_run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "{}", "")
     )
     for op, args in [("link.extend", {"id": "f_a", "days": 7}), ("link.stop", {"id": "f_a"})]:
         assert actions.run_op(ws, "orch", op, args)[0] == 200
@@ -1084,6 +1084,23 @@ def test_approval_ops_sit_behind_the_origin_fence(act_server, act_orch):
         ):
             assert post(act_server, body, h)[0] in (403, 421, 400), (body["op"], h)
     assert acts(act_orch) == []
+
+
+def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    for mode in ("off", "together", "always"):
+        assert build_argv("copies.set", {"mode": mode})[:4] == ["config", "set", "workflow.copies", mode]
+    assert build_argv("copies.set", {"max": 5})[:4] == ["config", "set", "workflow.copies_max", "5"]
+    argv = build_argv("copies.set", {"setup": "npm ci"})
+    assert argv[:3] == ["config", "set", "workflow.copy_setup"] and argv[-2:] == ["--", "npm ci"]
+    assert argv[argv.index("--by") + 1].startswith("human:")
+    assert build_argv("copies.set", {"setup": "  "})[-1] == "none"  # empty clears
+    assert build_argv("copies.set", {"setup": "--flag x"})[-2:] == ["--", "--flag x"]  # never an option
+    for bad in ({"mode": "sometimes"}, {"max": 0}, {"max": "3"}, {"max": True}, {"setup": "a\nb"},
+                {"setup": "x" * 501}, {"mode": "off", "max": 2}, {}, {"mode": "off", "extra": 1}):
+        with pytest.raises(BadRequest):
+            build_argv("copies.set", bad)
 
 
 def test_check_wont_do_argv():

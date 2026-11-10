@@ -448,7 +448,7 @@ def registry(ships_check: bool = True) -> list[dict]:
     return out
 
 
-def _tool_env_change_ok() -> None:
+def tool_env_change_ok() -> None:
     """Anything that reinstalls orch's own tool environment (update, add-on add/remove) is a person's op on
     the account's own orch folder: on a NORMAL install with another ORCH_HOME it is refused, never run from
     that folder's add-on list."""
@@ -630,7 +630,7 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
     """
     from orch import winfinish
 
-    _tool_env_change_ok()
+    tool_env_change_ok()
     if not winfinish.needed():
         _install_tool(entries)
         if save:
@@ -1668,14 +1668,14 @@ def _source_sha() -> str | None:
 
     try:
         if _is_local(repo()):
-            result = subprocess.run(
-                ["git", "-C", repo(), "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=5,
+            from orch import safegit
+
+            rc, out, _ = safegit.run(  # the add-on source folder: same hardening as every git call
+                ["rev-parse", "HEAD"], Path(repo()), 5, read_only=True, filters=False, root=Path(repo())
             )
-            return _sha_or_none(result.stdout)
+            if rc != 0:
+                return None
+            return _sha_or_none(out)
         api = _github_api()
         if api:
             request = Request(

@@ -103,14 +103,16 @@ def test_phone_delivery_bad_log_and_symlink(ws, tmp_path):
 
 def test_phone_delivery_no_network_or_command(ws, monkeypatch):
     import socket
-    import subprocess
+
+    from orch_dashboard import actions, data
 
     def forbidden(*args, **kwargs):
         pytest.fail("Reading delivery must use local files only")
 
     sent(ws, AT)
     monkeypatch.setattr(socket, "socket", forbidden)
-    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(actions, "_run", forbidden)
+    monkeypatch.setattr(data, "_run", forbidden)
     assert question(ws)["delivered"] == AT
 
 

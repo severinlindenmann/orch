@@ -770,6 +770,25 @@ def record_set(root: Path, setting: str, value, by: str) -> None:
     _settings_write(root, setting, value, by)
 
 
+def conn_grants(root: Path) -> dict:
+    """conn.allow grants recorded with a proof, by connection name ("*" or a list of actions). Unreadable
+    record or home = no grants (fail closed)."""
+    try:
+        path, wkey = _settings_path(root)
+        data = _settings_load(root, path)
+    except (Refused, OSError):
+        return {}
+    out = {}
+    for key, rec in ((data or {}).get("workspaces", {}).get(wkey) or {}).items():
+        if not (key.startswith("conn.allow.") and isinstance(rec, dict)):
+            continue
+        val = rec.get("value")
+        # only "*" or a list of action names is a grant; a tombstone (False) or any other type is none
+        if val == "*" or (isinstance(val, list) and all(isinstance(a, str) for a in val)):
+            out[key[len("conn.allow.") :]] = val
+    return out
+
+
 def effective(root: Path, setting: str, file_value: bool) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
@@ -1057,14 +1076,150 @@ def unconsume(root: Path, ids: list[str]) -> None:
 # ------------------------------------------------------------------------------------------- won't do
 
 
-def wontdo_mac(key: bytes, workspace: str, item: dict) -> str:
-    return _b64u(hmac.new(key, f"wontdo1.{workspace}.{_canon(item)}".encode(), hashlib.sha256).digest())
+def wontdo_mac(key: bytes, workspace: str, ticket: str, decision: dict) -> str:
+    """wontdo1.<workspace id>.<ticket id>.<canonical decision {check, wont_do, reason, text, covers, nonce}>:
+    binds WHERE the decision belongs (another ticket or step) and WHAT it is about (the step's text and
+    covers); the nonce makes equal decisions differ. An undo is the same record with wont_do false and
+    reason null. FRESHNESS comes from the ledger (see below), not from the MAC."""
+    return _b64u(
+        hmac.new(key, f"wontdo1.{workspace}.{ticket}.{_canon(decision)}".encode(), hashlib.sha256).digest()
+    )
 
 
-def wontdo_is_human(key: bytes, workspace: str, item: dict, mac, relay_authenticated_sender: bool) -> bool:
+def wontdo_is_human(
+    key: bytes, workspace: str, ticket: str, decision: dict, mac, relay_authenticated_sender: bool
+) -> bool:
     if relay_authenticated_sender:
         return True
-    return isinstance(mac, str) and bool(mac) and hmac.compare_digest(mac, wontdo_mac(key, workspace, item))
+    return (
+        isinstance(mac, str)
+        and bool(mac)
+        and hmac.compare_digest(mac, wontdo_mac(key, workspace, ticket, decision))
+    )
+
+
+# The step fields the signed decision record is built from. ONE source of truth: wont_decision() reads exactly
+# these, and the sync merge pins exactly these (+ the MAC itself) while a verified decision is held
+# (orch_sync.merge._SIGNED; a test fails if the two drift apart).
+SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce")
+
+
+def wont_decision(step: dict) -> dict:
+    """The step's decision record, the thing the MAC covers: which step, the decision and its reason, a random
+    `nonce` (equal decisions get different MACs) and, ONLY for an "on" record, WHAT the person decided about
+    (the step's text and `covers`: rewriting the step needs the person again). An undo record carries no text
+    or covers, so a later rename of the reopened step cannot make the undo stop verifying."""
+    on = step.get("wont_do") is True
+    return {
+        "check": step.get("id"),
+        "wont_do": on,
+        "reason": (step.get("reason") if on else None),
+        "text": (step.get("text") if on else None),
+        "covers": (step.get("covers") if on else None),
+        "nonce": step.get("wont_nonce"),
+    }
+
+
+# The LEDGER (guarded home, next to human.key): keys/<ws>/wont.json holds, per "<ticket>:<check>", the CURRENT
+# wontdo1 MAC of that step's decision (null = tombstone, the step was removed). A MAC is accepted only when it
+# IS the current entry, so replaying an older signed "on" or "undo", or reusing the id of a removed step, does
+# not verify. A missing, loose or damaged ledger vouches for nobody (fail closed).
+LEDGER = "wont.json"
+
+
+LEDGER_DAMAGED = (
+    "orch's record of your Won't do decisions is damaged, so this was not saved. Nothing was changed. "
+    "Close orch and start it again; orch then resets its protection and you can decide again."
+)
+
+
+def _ledger_read(root: Path) -> dict | None:
+    """The ledger entries: {} when there is none yet, None when it cannot be trusted (damaged or loose)."""
+    try:
+        d = key_dir(root, create=False)
+        data = _read_json(root, d / LEDGER, {"entries": {}})
+    except (Refused, OSError):
+        return None
+    ent = data.get("entries") if isinstance(data, dict) else None
+    return ent if isinstance(ent, dict) else None
+
+
+def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
+    """Make `mac` the current entry. A damaged ledger is NEVER overwritten (that would wipe every other
+    entry): returns False and keeps the file."""
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            ent = _ledger_read(root)
+            if ent is None:
+                return False
+            ent[f"{ticket}:{check}"] = mac
+            _write_private(d / LEDGER, json.dumps({"schema": "orch.wont-ledger/1", "entries": ent}))
+        return True
+    except (Refused, OSError):
+        return False
+
+
+def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
+    """The receiving core's own wontdo1 MAC for this step's decision, recorded as the CURRENT entry of the
+    ledger (None when there is no usable key or ledger). The step must already carry a fresh `wont_nonce`."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws or not isinstance(step.get("wont_nonce"), str):
+            return None
+        mac = wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
+    except (Refused, OSError):
+        return None
+    if not _ledger_set(root, ticket, str(step.get("id")), mac):
+        raise Refused(LEDGER_DAMAGED)  # visible: the decision is not saved half-signed
+    return mac
+
+
+def wont_forget(root: Path, ticket: str, check: str) -> None:
+    """A step was removed (a proven removal): tombstone its ledger entry (whatever the step file still says),
+    so no old MAC verifies on a new step that reuses the id. Nothing to do when the ledger has no entry for
+    it; a damaged ledger is left as it is (it vouches for nobody anyway)."""
+    ent = _ledger_read(root)
+    if ent and ent.get(f"{ticket}:{check}") is not None:
+        _ledger_set(root, ticket, check, None)
+
+
+def wont_verifier(root: Path, relay_ok=None):
+    """`person(step, ticket_id) -> bool` for the sync merge: True only for a decision whose MAC is valid for
+    the step's content AND is the CURRENT ledger entry for that step (or one the relay client recorded from an
+    authenticated sender: `relay_ok(step, ticket_id, decision)` must compare the FULL decision record against
+    what the relay recorded, never "this step was touched by a relay sender"). The ledger is read at each
+    call, so the sync caller must read, merge and write under the ticket's apply_op lock (the ledger cannot
+    move between the merge and the write). The text `by: human:` is never
+    looked at. Fails closed: no key, no workspace id, no readable ledger = nobody."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        key = human_key(root, create=False)
+    except (Refused, OSError):
+        return lambda step, ticket: False
+    if not ws:
+        return lambda step, ticket: False
+
+    def person(step, ticket) -> bool:
+        if not isinstance(step, dict) or not isinstance(ticket, str):
+            return False
+        decision = wont_decision(step)
+        if relay_ok and relay_ok(step, ticket, decision):
+            return True
+        ledger = _ledger_read(root)  # read at the moment of asking, never a snapshot taken earlier
+        if ledger is None:
+            return False  # damaged / loose: nobody
+        mac = step.get("wont_mac")
+        current = ledger.get(f"{ticket}:{step.get('id')}")
+        if not isinstance(mac, str) or not mac or not isinstance(current, str):
+            return False
+        return hmac.compare_digest(mac, current) and wontdo_is_human(key, ws, ticket, decision, mac, False)
+
+    return person
 
 
 def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:
@@ -1157,6 +1312,41 @@ HANDOFF_HEADS = {
     "private.move": (("private", "move"),),
     "config.agent_add": (("config", "agent", "add"),),
 }
+
+
+def agent_add_target(
+    name: str, command: str, interactive: str | None = None, prompt: str | None = None
+) -> str:
+    """The proof target of config.agent_add: the name AND a digest of every value that gets saved, so a
+    proof for one command (or live command, or prompt mode) can never save another. Same in the dashboard."""
+    doc = json.dumps([command, interactive or "", prompt or ""])
+    return f"{name}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()[:32]}"
+
+
+def agent_add_exact(command: str, interactive: str | None = None, prompt: str | None = None) -> str:
+    """Every value config.agent_add saves, one per line, for the card's exact block."""
+    rows = [("Command", command), ("Live command", interactive), ("Prompt via", prompt)]
+    return "\n".join(f"{k}: {v}" for k, v in rows if v)
+
+
+def exact_in_argv(op: str, exact: str, argv) -> bool:
+    """The full value(s) shown in the card's exact block must be part of the command that runs."""
+    if op in ("relay.connect", "addon.add_local"):
+        return exact in " ".join(argv)
+    if op == "config.agent_add":
+        words = list(argv)
+        vals = [ln.split(": ", 1)[1] for ln in exact.splitlines() if ": " in ln]
+        return (
+            bool(vals)
+            and len(vals) == len(exact.splitlines())
+            and all(
+                v in words or any(w.startswith("--") and w.endswith("=" + v) for w in words) for v in vals
+            )
+        )
+    return True
+
+
+EXACT_OPS = ("relay.connect", "addon.add_local", "config.agent_add")
 
 
 def _clean_argv(argv) -> list[str] | None:
@@ -1335,7 +1525,7 @@ def request_handoff(
     if len(value) > VALUE_MAX or (value and value not in argv):
         return False
     exact = str(exact)[:2000] if exact else ""
-    if exact and op in ("relay.connect", "addon.add_local") and exact not in " ".join(argv):
+    if exact and op in EXACT_OPS and not exact_in_argv(op, exact, argv):
         return False  # the shown full target must be part of the command that runs
     try:
         d = key_dir(root)
@@ -1424,8 +1614,8 @@ def handoff_take(root: Path, hid: str) -> dict | None:
         return None
     if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
         return None
-    if hit.get("exact") and hit.get("op") in ("relay.connect", "addon.add_local"):
-        if hit["exact"] not in " ".join(argv):  # the full target shown must be what runs
+    if hit.get("exact") and hit.get("op") in EXACT_OPS:
+        if not exact_in_argv(hit["op"], hit["exact"], argv):  # the full target shown must be what runs
             return None
     return hit
 

@@ -5,6 +5,7 @@ refused, and a person at a terminal without a proof leaves ONE hand-off on the p
 import io
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -178,7 +179,7 @@ def test_agent_add_agent_is_refused_with_the_ask_text(ws, run, monkeypatch):
 
 
 def test_agent_add_with_a_person_proof_succeeds_and_approves_what_was_typed(ws, run, monkeypatch):
-    proof = _proof(ws, "config.agent_add", "bar")
+    proof = _proof(ws, "config.agent_add", hp.agent_add_target("bar", "bar {prompt}"))
     code, out, err = _cli(
         run, monkeypatch, proof, "config", "agent", "add", "bar", "--command", "bar {prompt}"
     )
@@ -187,7 +188,13 @@ def test_agent_add_with_a_person_proof_succeeds_and_approves_what_was_typed(ws, 
 
 
 @pytest.mark.parametrize(
-    "mk", [lambda ws: "", lambda ws: "hp1.e30.AAAA", lambda ws: _proof(ws, "config.agent_add", "other")]
+    "mk",
+    [
+        lambda ws: "",
+        lambda ws: "hp1.e30.AAAA",
+        lambda ws: _proof(ws, "config.agent_add", "other"),
+        lambda ws: _proof(ws, "config.agent_add", hp.agent_add_target("bar", "other {prompt}")),
+    ],
 )
 def test_agent_add_bad_proofs_are_refused(ws, run, monkeypatch, mk):
     code, *_ = _cli(run, monkeypatch, mk(ws), "config", "agent", "add", "bar", "--command", "bar {prompt}")
@@ -198,6 +205,146 @@ def test_agent_add_without_a_proof_leaves_a_hand_off_with_the_command(ws, run):
     code, out, err = run("config", "agent", "add", "bar", "--command", "bar {prompt}")
     assert code == 2 and "dashboard" in (out + err)
     card = hp.handoffs(ws)[0]
-    assert card["op"] == "config.agent_add" and card["target"] == "bar"
+    assert card["op"] == "config.agent_add" and card["target"] == hp.agent_add_target("bar", "bar {prompt}")
     assert card["parts"] == {"name": "bar", "command": "bar {prompt}"}
     assert "bar" not in (config.read(ws).get("agents") or {})
+
+
+# ------------------------------------------------------------------ security fixes (#374 review)
+
+
+def test_agent_is_refused_at_a_direct_add_agent_call(ws):
+    from orch.errors import Refused
+
+    with pytest.raises(Refused, match="Only a person can add an agent command"):
+        config.add_agent(ws, "sneaky", "touch X {prompt}", by="agent:claude")
+    assert "sneaky" not in (config.read(ws).get("agents") or {})
+    with pytest.raises(Refused, match="Only a person"):
+        config.allow_agent(ws, "sneaky", "a" * 64, by="agent:claude")
+    with pytest.raises(Refused, match="Only a person"):
+        config.select_agent(ws, "claude", by="agent:claude")
+    from orch import harness
+
+    with pytest.raises(Refused, match="Only a person"):
+        harness.move_to_private(ws, by="agent:claude")
+    config.add_agent(ws, "fine", "fine {prompt}", by="human:pat")  # a person (or no `by`) still can
+    assert config.agent_entries(ws)["fine"]["command"] == "fine {prompt}"
+
+
+def test_agent_by_flag_alone_is_refused_even_with_a_valid_proof(ws, run, monkeypatch):
+    proof = _proof(ws, "config.agent_add", hp.agent_add_target("bar", "bar {prompt}"))
+    code, out, err = _cli(
+        run,
+        monkeypatch,
+        proof,
+        "config",
+        "agent",
+        "add",
+        "bar",
+        "--command",
+        "bar {prompt}",
+        "--by",
+        "agent:x",
+    )
+    assert code == 2 and "orch ask" in out + err and "Only a person can add an agent command" in out + err
+    assert "bar" not in (config.read(ws).get("agents") or {})
+
+
+def test_agent_cannot_choose_the_agent(ws, run, monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    code, out, err = run("config", "set", "workspace.agent", "claude")
+    assert code == 2 and "orch ask" in out + err
+    code, out, err = run("config", "agent", "claude")
+    assert code == 2 and "orch ask" in out + err
+    assert config.agent_name(ws) != "claude"
+
+
+def test_a_proof_for_one_value_cannot_save_another(ws, run, monkeypatch):
+    base = hp.agent_add_target("bar", "bar {prompt}")
+    # same name and command, but a different live command / prompt mode: the target differs
+    assert hp.agent_add_target("bar", "bar {prompt}", "evil --live") != base
+    assert hp.agent_add_target("bar", "bar {prompt}", None, "stdin") != base
+    proof = _proof(ws, "config.agent_add", base)
+    code, *_ = _cli(
+        run,
+        monkeypatch,
+        proof,
+        "config",
+        "agent",
+        "add",
+        "bar",
+        "--command",
+        "bar {prompt}",
+        "--interactive",
+        "evil --live",
+    )
+    assert code == 2 and "bar" not in (config.read(ws).get("agents") or {})
+    proof = _proof(ws, "config.agent_add", hp.agent_add_target("bar", "bar {prompt}", "ok --live", "stdin"))
+    code, out, err = _cli(
+        run,
+        monkeypatch,
+        proof,
+        "config",
+        "agent",
+        "add",
+        "bar",
+        "--command",
+        "bar {prompt}",
+        "--interactive",
+        "ok --live",
+        "--prompt-via",
+        "stdin",
+    )
+    assert code == 0, out + err
+    assert config.agent_entries(ws)["bar"]["interactive"] == "ok --live"
+
+
+def test_hand_off_shows_every_saved_value_and_each_is_in_the_argv(ws, run):
+    code, out, err = run(
+        "config",
+        "agent",
+        "add",
+        "bar",
+        "--command",
+        "bar {prompt}",
+        "--interactive",
+        "bar --live",
+        "--prompt-via",
+        "stdin",
+    )
+    assert code == 2
+    card = hp.handoffs(ws)[0]
+    assert card["exact"] == "Command: bar {prompt}\nLive command: bar --live\nPrompt via: stdin"
+    assert card["parts"] == {
+        "name": "bar",
+        "command": "bar {prompt}",
+        "interactive": "bar --live",
+        "prompt": "stdin",
+    }
+    assert card["target"] == hp.agent_add_target("bar", "bar {prompt}", "bar --live", "stdin")
+
+
+def test_exact_in_argv_covers_config_agent_add():
+    argv = ["config", "agent", "add", "bar", "--command", "bar {prompt}", "--interactive=bar --live"]
+    ok = "Command: bar {prompt}\nLive command: bar --live"
+    assert hp.exact_in_argv("config.agent_add", ok, argv)
+    assert not hp.exact_in_argv("config.agent_add", "Command: bar {prompt}\nLive command: other", argv)
+    assert not hp.exact_in_argv("config.agent_add", "", argv)
+    assert not hp.exact_in_argv(
+        "config.agent_add", ok + "\nPrompt via: stdin", argv
+    )  # a value that does not run
+    assert not hp.request_handoff(
+        Path("/nonexistent"), "config.agent_add", "t", argv=argv, exact="Command: not-in-argv"
+    )
+
+
+def test_private_allow_and_move_refuse_an_agent_and_need_a_proof(ws, run, monkeypatch):
+    _tracked_repo(ws)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    for argv in (("private", "move"), ("private", "allow", "mine", "--key", "a" * 64)):
+        code, out, err = run(*argv)
+        assert code == 2 and "orch ask" in out + err, argv
+    monkeypatch.delenv("CLAUDECODE")
+    assert _git(ws, "ls-files", ".orch").stdout.strip()  # nothing moved
+    code, out, err = _cli(run, monkeypatch, "", "private", "move")
+    assert code == 2 and _git(ws, "ls-files", ".orch").stdout.strip()

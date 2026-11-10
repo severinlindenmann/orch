@@ -51,6 +51,7 @@
         "resume": ["codex", "exec", "resume", "--json", "{session}", "--", "{prompt}"]
       },
       "live": null,
+      "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id" },
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },

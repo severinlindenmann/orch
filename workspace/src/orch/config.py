@@ -135,9 +135,22 @@ def pending_agents(root: Path) -> list[dict]:
     return out
 
 
-def allow_agent(root: Path, name: str, key: str) -> str:
+ONLY_PERSON_AGENT = (
+    'Only a person can {what}. Ask them with orch ask: orch ask <ticket> "{what}?" --option yes --option no'
+)
+
+
+def require_person(by: str | None, what: str) -> None:
+    """The second lock behind the CLI's proof check (like set_permissions): an agent is refused here too, so
+    no caller can save or approve an agent command for an agent. `by` None = the keyboard."""
+    if (by or "").startswith("agent:"):
+        raise Refused(ONLY_PERSON_AGENT.format(what=what))
+
+
+def allow_agent(root: Path, name: str, key: str, by: str | None = None) -> str:
     """Approve exactly ONE entry, and only if it is still what was shown (its key matches now). A person only
-    (the caller checks). Never approves several entries."""
+    (refused for an agent here too). Never approves several entries."""
+    require_person(by, "allow an agent command to run")
     e = _raw_entries(root).get(name) if isinstance(name, str) else None
     if e is None:
         raise Refused("That agent is not in this workspace's settings (any more). Please look again.")
@@ -233,6 +246,114 @@ def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
     finally:
         tmp.unlink(missing_ok=True)
     return value
+
+
+# ------------------------------------------------------------------ separate copies (per machine)
+#
+# `workflow.copies`, `workflow.copies_max` and `workflow.copy_setup` are kept like the permission mode: per
+# machine in the orch home, keyed by the workspace's real path, never in the workspace. copy_setup is a
+# command
+# orch RUNS: a committed .orch/config.toml (a cloned repo, or an agent editing it) must not be able to
+# choose it.
+
+COPIES_MODES = ("off", "together", "always")
+DEFAULT_COPIES = "together"
+DEFAULT_COPIES_MAX = 3
+MAX_COPIES_MAX = 20
+MAX_COPY_SETUP = 500
+
+
+def _copies_file() -> Path:
+    from orch import addons
+
+    return addons.home() / "copies.json"
+
+
+def _copies_doc() -> dict:
+    try:
+        doc = json.loads(_copies_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError, Refused):  # no usable orch home: the defaults
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _copies_get(root: Path | None, key: str):
+    if root is None:
+        return None
+    try:
+        mine = _copies_doc().get(_perm_key(root))
+    except Refused:
+        return None
+    return mine.get(key) if isinstance(mine, dict) else None
+
+
+def _copies_set(root: Path, key: str, value) -> None:
+    doc = _copies_doc()
+    mine = doc.get(_perm_key(root))
+    mine = dict(mine) if isinstance(mine, dict) else {}
+    if value is None:
+        mine.pop(key, None)
+    else:
+        mine[key] = value
+    doc[_perm_key(root)] = mine
+    p = _copies_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f"{p.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(json.dumps(doc, indent=1).encode("utf-8"))
+        os.replace(tmp, p)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def copies_mode(root: Path | None) -> str:
+    """off | together (default: a copy when another agent already works in the folder) | always."""
+    v = _copies_get(root, "copies")
+    return v if v in COPIES_MODES else DEFAULT_COPIES
+
+
+def copies_max(root: Path | None) -> int:
+    v = _copies_get(root, "copies_max")
+    return (
+        v
+        if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= MAX_COPIES_MAX
+        else DEFAULT_COPIES_MAX
+    )
+
+
+def copy_setup(root: Path | None) -> str | None:
+    """The command the person chose to prepare a new copy (e.g. "npm ci"), or None."""
+    v = _copies_get(root, "copy_setup")
+    return v if isinstance(v, str) and v.strip() and len(v) <= MAX_COPY_SETUP and "\n" not in v else None
+
+
+def set_copies_mode(root: Path, value: str) -> str:
+    if value not in COPIES_MODES:
+        raise Refused(f"'{value}' is not a choice. Pick one of: {', '.join(COPIES_MODES)}.")
+    _copies_set(root, "copies", value)
+    return value
+
+
+def set_copies_max(root: Path, value: str) -> int:
+    if not value.isdigit() or not 1 <= int(value) <= MAX_COPIES_MAX:
+        raise Refused(f"Give a whole number of copies, from 1 to {MAX_COPIES_MAX}.")
+    _copies_set(root, "copies_max", int(value))
+    return int(value)
+
+
+def set_copy_setup(root: Path, value: str) -> str | None:
+    """ "" or "none" clears it. One line, at most MAX_COPY_SETUP characters; it is split into words, never run
+    through a shell."""
+    v = value.strip()
+    if v in ("", "none"):
+        _copies_set(root, "copy_setup", None)
+        return None
+    if "\n" in v or "\r" in v or "\x00" in v or len(v) > MAX_COPY_SETUP:
+        raise Refused(f"Give one line of at most {MAX_COPY_SETUP} characters.")
+    _copies_set(root, "copy_setup", v)
+    return v
 
 
 def live_idle_minutes(root: Path | None) -> int:
@@ -446,7 +567,10 @@ def add_agent(
     adapter: str = "generic",
     prompt: str | None = None,
     approve: bool = True,
+    by: str | None = None,
 ):
+    """Save an agent entry. A person only: an agent (`by` = agent:...) is refused before it writes."""
+    require_person(by, "add an agent command")
     if not NAME_RE.fullmatch(name):
         raise Refused(f"'{name}' is not a name orch can use. Use lowercase letters, digits and '-'.")
     for k, v in (("command", command), ("interactive", interactive)):
@@ -480,6 +604,12 @@ def add_agent(
 
 
 # ---- the one notice for a command that comes from a folder's settings
+
+
+def select_agent(root: Path, name: str, by: str | None = None) -> None:
+    """Make `name` the workspace's default agent. A person only (an agent is refused)."""
+    require_person(by, "choose the agent for this workspace")
+    set_key(root, "workspace", "agent", name)
 
 
 def _seen_path() -> Path:

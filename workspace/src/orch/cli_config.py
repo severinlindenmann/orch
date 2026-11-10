@@ -23,6 +23,9 @@ KEYS = (
     "workspace.permissions",
     "workspace.live_idle_minutes",
     "workflow.agents_may_finish",
+    "workflow.copies",
+    "workflow.copies_max",
+    "workflow.copy_setup",
 )
 TEST_PROMPT = "Reply with the word ok"
 TEST_TIMEOUT = 60  # seconds
@@ -68,19 +71,22 @@ AGENT_ASKS = (
 )
 
 
-def _person(root: Path, args, op: str, target: str, what: str, parts: dict) -> str:
+def _person(root: Path, args, op: str, target: str, what: str, parts: dict, exact: str | None = None) -> str:
     """The person behind a human-only op (invariant H1, one proof mechanism: humanproof.person_by). With
     --proof-stdin: the person in a verified proof. An agent is refused and told to use `orch ask`. A person at
     a terminal without a proof leaves a hand-off on the page and is refused until they click there."""
-    who = humanproof.person_by(root, args, op, target, parts=parts)
+    who = humanproof.person_by(root, args, op, target, parts=parts, exact=exact)
     if not who.startswith("human:"):
         raise Refused(AGENT_ASKS.format(what=what))
     return who
 
 
-def _choose(root: Path, name: str) -> str:
+def _choose(root: Path, name: str, args) -> str:
+    """workspace.agent: a person's choice (an agent is refused here and again in config.select_agent)."""
+    by = _actor(args)
+    config.require_person(by, "choose the agent for this workspace")
     adapters.load(name, root)  # refuses a name nobody knows
-    config.set_key(root, "workspace", "agent", name)
+    config.select_agent(root, name, by)
     return name
 
 
@@ -209,6 +215,9 @@ def _config(args, root: Path) -> None:
             "workspace.permissions": config.permissions(root),
             "workspace.live_idle_minutes": config.live_idle_minutes(root),
             "workflow.agents_may_finish": config.agents_may_finish(root),
+            "workflow.copies": config.copies_mode(root),
+            "workflow.copies_max": config.copies_max(root),
+            "workflow.copy_setup": config.copy_setup(root),
         }
         if args.key:
             _out(
@@ -232,6 +241,19 @@ def _config(args, root: Path) -> None:
             )
         value = config.set_agents_may_finish(root, args.value == "on")
         _out(args, {"workflow.agents_may_finish": value}, f"Agents may mark tickets Done: {args.value}.")
+    elif args.sub == "set" and args.key in ("workflow.copies", "workflow.copies_max", "workflow.copy_setup"):
+        if _actor(args).startswith("agent:"):  # copy_setup is a command orch runs: only a person chooses it
+            raise Refused(f"Only a person can change this. Ask them to run: orch config set {args.key} ...")
+        if args.key == "workflow.copies":
+            v = config.set_copies_mode(root, args.value)
+            text = f"Saved: separate copies = {v}."
+        elif args.key == "workflow.copies_max":
+            v = config.set_copies_max(root, args.value)
+            text = f"Saved: at most {v} separate copies at once."
+        else:
+            v = config.set_copy_setup(root, args.value)
+            text = f"Saved: a new copy is prepared with: {v}." if v else "Saved: nothing runs in a new copy."
+        _out(args, {args.key: v}, text)
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)
         _out(
@@ -255,7 +277,7 @@ def _config(args, root: Path) -> None:
             "Continue picks the conversation up again.",
         )
     elif args.sub == "set":
-        name = _choose(root, args.value)
+        name = _choose(root, args.value, args)
         _out(
             args,
             {"workspace.agent": name},
@@ -269,20 +291,38 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
+            by = _actor(args)
+            config.require_person(by, "add an agent command")  # an agent is refused before anything else
             if not config.NAME_RE.fullmatch(args.name):
                 raise Refused(
                     f"'{args.name}' is not a name orch can use. Use lowercase letters, digits and '-'."
                 )
+            for what, v in (("command", args.command), ("live command", args.interactive)):
+                if v is not None and not (1 <= len(v) <= 500 and "\n" not in v and "\r" not in v):
+                    raise Refused(f"The {what} must be one line of at most 500 characters.")
+            # the person approves ALL saved values: they are all in the exact block and in the proof target
+            parts = {"name": args.name, "command": args.command}
+            if args.interactive:
+                parts["interactive"] = args.interactive
+            if args.prompt_via:
+                parts["prompt"] = args.prompt_via
             _person(
                 root,
                 args,
                 "config.agent_add",
-                args.name,
+                humanproof.agent_add_target(args.name, args.command, args.interactive, args.prompt_via),
                 f"add the agent {args.name}",
-                {"name": args.name, "command": args.command},
+                parts,
+                exact=humanproof.agent_add_exact(args.command, args.interactive, args.prompt_via),
             )
             config.add_agent(  # a person proved it: approve ONLY what they typed (add_agent checks the file)
-                root, args.name, args.command, args.interactive, prompt=args.prompt_via, approve=True
+                root,
+                args.name,
+                args.command,
+                args.interactive,
+                prompt=args.prompt_via,
+                approve=True,
+                by=by,
             )
             tail = (
                 "starts fresh each run; no live steps"
@@ -291,7 +331,7 @@ def _config(args, root: Path) -> None:
             )
             _out(args, {"agent": args.name}, f"Added {args.name} ({tail}).")
         else:
-            name = _choose(root, args.name_or_add)
+            name = _choose(root, args.name_or_add, args)
             _out(args, {"workspace.agent": name}, f"Saved: workspace.agent = {name}.")
 
 
@@ -359,12 +399,12 @@ def _private(args, root: Path) -> None:
             f"allow the command of {args.name} to run on this computer",
             {"name": args.name, "command": (shown or {}).get("command", "")},
         )
-        done = config.allow_agent(root, args.name, args.key)
+        done = config.allow_agent(root, args.name, args.key, _actor(args))
         _out(args, {"allowed": [done]}, f"Allowed on this computer: {done}.")
         return
     if args.state == "move":
-        _person(root, args, "private.move", "move", "move these files out of the team repo", {})
-        moved = harness.move_to_private(root)
+        who = _person(root, args, "private.move", "move", "move these files out of the team repo", {})
+        moved = harness.move_to_private(root, who)
         if args.json:
             print(json.dumps({"moved": len(moved)}))
         else:
