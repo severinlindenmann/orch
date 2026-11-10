@@ -50,7 +50,8 @@ def required_forms(value):
             first_bit = offset * 8
             last_bit = first_bit + len(value.encode()) * 8
             part = "".join(
-                char for index, char in enumerate(blob)
+                char
+                for index, char in enumerate(blob)
                 if index * 6 >= first_bit and (index + 1) * 6 <= last_bit
             )
             for source in (blob, part):
@@ -65,7 +66,12 @@ def _reference():
     """The reference functions of contracts/validate.py, extracted without running that script."""
     tree = ast.parse((CONTRACTS / "validate.py").read_text())
     wanted = {
-        "SEC_MIN_LEN", "sec_b64_forms", "sec_forms", "sec_needles", "_hide_upto", "sec_hide",
+        "SEC_MIN_LEN",
+        "sec_b64_forms",
+        "sec_forms",
+        "sec_needles",
+        "_hide_upto",
+        "sec_hide",
         "sec_hide_stream",
     }
     body = []
@@ -148,7 +154,7 @@ def test_forms_and_all_splits(form):
             stream = HidingStream(hider, binary=binary)
             assert stream.feed(source[:offset]) + stream.feed(source[offset:]) + stream.close() == want
         stream = HidingStream(hider, binary=binary)
-        assert empty.join(stream.feed(source[i:i + 1]) for i in range(len(source))) + stream.close() == want
+        assert empty.join(stream.feed(source[i : i + 1]) for i in range(len(source))) + stream.close() == want
 
 
 def test_quote_base64_variants():
@@ -190,7 +196,8 @@ def test_json():
     result = hider.hide_json(original)
     assert result == {
         "ordinary": [MARKER, (MARKER, "[hidden: digits]9", "[hidden: digits].25")],
-        "safe": {"x": 7}, "bool": True,
+        "safe": {"x": 7},
+        "bool": True,
     }
     assert result is not original and result["safe"] is not original["safe"]
     assert original["ordinary"][0] == TOKEN
@@ -251,14 +258,20 @@ def test_no_leaks():
     stream = HidingStream(hider)
     stream.close()
     operations = [
-        lambda: pickle.dumps(hider), lambda: copy.deepcopy(hider), lambda: copy.copy(hider),
-        lambda: hider.__getstate__(), lambda: hider.hide_cut(TOKEN, -1),
+        lambda: pickle.dumps(hider),
+        lambda: copy.deepcopy(hider),
+        lambda: copy.copy(hider),
+        lambda: hider.__getstate__(),
+        lambda: hider.hide_cut(TOKEN, -1),
         lambda: hider.hide_cut_bytes(TOKEN.encode(), -1),
         lambda: hider.hide_json(TOKEN, on_identifier=TOKEN),
         lambda: hider.hide_json({TOKEN: 1}, on_identifier="refuse"),
         lambda: hider.hide_json({"command": TOKEN}, identifier_fields={"command"}, on_identifier="refuse"),
-        lambda: stream.feed(TOKEN), current_hider, lambda: register_hider(TOKEN),
-        lambda: Hider({"token": object()}), lambda: HidingStream(hider).feed(TOKEN.encode()),
+        lambda: stream.feed(TOKEN),
+        current_hider,
+        lambda: register_hider(TOKEN),
+        lambda: Hider({"token": object()}),
+        lambda: HidingStream(hider).feed(TOKEN.encode()),
     ]
     for operation in operations:
         with pytest.raises((TypeError, ValueError, HidingRefused, NoHiderError)) as caught:
@@ -322,7 +335,8 @@ def test_json_rejects_and_hides_non_json_values():
             return TOKEN
 
     assert hider.hide_json({"b": TOKEN.encode(), "ba": bytearray(b"x" + TOKEN.encode())}) == {
-        "b": MARKER.encode(), "ba": b"x" + MARKER.encode(),
+        "b": MARKER.encode(),
+        "ba": b"x" + MARKER.encode(),
     }
     plain = {1: None, 2.5: True, None: 0, False: [1]}
     assert hider.hide_json(plain) == plain
@@ -357,7 +371,7 @@ def test_stream_one_byte_feeds_are_fast_and_equal():
         parts = []
         start = time.perf_counter()
         for i in range(len(source)):
-            parts.append(stream.feed(source[i:i + 1]))
+            parts.append(stream.feed(source[i : i + 1]))
         parts.append(stream.close())
         elapsed = time.perf_counter() - start
         assert source[:0].join(parts) == (expected.encode() if binary else expected)

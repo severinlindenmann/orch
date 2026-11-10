@@ -64,7 +64,7 @@ def _forms_one(value: str) -> set[str]:
     b64 = []
     for offset in range(3):
         encoded = base64.b64encode(b"\0" * offset + raw).decode("ascii").rstrip("=")
-        part = encoded[(8 * offset + 5) // 6:8 * (offset + len(raw)) // 6]
+        part = encoded[(8 * offset + 5) // 6 : 8 * (offset + len(raw)) // 6]
         b64.extend((part, part.translate(str.maketrans("+/", "-_"))))
     forms = {value, raw.hex(), raw.hex().upper(), *b64}
     for ascii_only in (False, True):
@@ -75,7 +75,10 @@ def _forms_one(value: str) -> set[str]:
                 forms.update((variant, _upper_u(variant)))
     for source in (value, *b64):
         quoted = (
-            quote(source, safe=""), quote(source), quote_plus(source, safe=""), quote_plus(source, safe="/"),
+            quote(source, safe=""),
+            quote(source),
+            quote_plus(source, safe=""),
+            quote_plus(source, safe="/"),
         )
         for escaped in quoted:
             forms.update((escaped, _lower_pct(escaped)))
@@ -156,10 +159,12 @@ class Hider:
                 (form, f"[hidden: {name}]")
                 for form, name in sorted(forms.items(), key=lambda item: (-len(item[0]), item[0]))
             )
-            self._binary = tuple(sorted(
-                ((form.encode("utf-8"), marker.encode("utf-8")) for form, marker in self._text),
-                key=lambda item: (-len(item[0]), item[0]),
-            ))
+            self._binary = tuple(
+                sorted(
+                    ((form.encode("utf-8"), marker.encode("utf-8")) for form, marker in self._text),
+                    key=lambda item: (-len(item[0]), item[0]),
+                )
+            )
             self._salt = secrets.token_bytes(32) if salt is None else salt
         except (TypeError, ValueError, RecursionError):
             raise ValueError("Invalid hiding configuration") from None
