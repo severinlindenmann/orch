@@ -36,6 +36,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -267,16 +268,28 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
     return e
 
 
-def _no_hooks() -> str:
-    """core.hooksPath for every call: os.devnull (/dev/null, NUL on Windows). It can never be a folder holding
-    hooks, it needs nothing from the orch home, and there is no predictable shared path an other user could
-    plant files in (a /tmp/orch-no-hooks folder would be). Git looks for <hooksPath>/<hook> and finds none."""
-    return Path(os.devnull).as_posix() if os.name != "nt" else os.devnull
+def _below_file(file: str) -> str:
+    """An always-absolute path UNDER an existing regular file: any lookup below it fails (ENOTDIR) on every
+    OS, so it can never be a hooks folder. Not os.devnull (on Windows `nul` is read as a relative path)."""
+    return (Path(file).resolve() / "no-hooks").as_posix()
 
 
-def base_args(true: str, read_only: bool = False) -> list[str]:
+def _no_hooks(cwd: Path | None = None, root: Path | None = None) -> str:
+    """core.hooksPath for every call: a path below the python interpreter's file (a regular file outside any
+    repository). If that file lies in a folder we avoid (a project's own venv), the resolved git program is
+    used instead. No predictable shared folder, nothing needed from the orch home."""
+    where = cwd or Path.cwd()
+    avoid = _avoid(where, root)
+    exe = os.path.realpath(sys.executable)
+    if not any(_inside(exe, a) for a in avoid):
+        return _below_file(exe)
+    git = git_exe(where, root)
+    return _below_file(git if git else exe)
+
+
+def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> list[str]:
     out = [
-        "-c", f"core.hooksPath={_no_hooks()}",
+        "-c", f"core.hooksPath={hooks or _no_hooks()}",
         "-c", "core.fsmonitor=false",
         "-c", "core.untrackedCache=false",
         "-c", "protocol.allow=never",
@@ -339,7 +352,9 @@ def _raw(
 def version(cwd: Path, root: Path | None = None) -> tuple[int, int]:
     exe = git_exe(cwd, root) or ""
     if exe not in _versions:
-        rc, out, _ = _raw(["git", *base_args(_NOOP, True), "--version"], cwd, 10, None, root)
+        rc, out, _ = _raw(
+            ["git", *base_args(_NOOP, True, _no_hooks(cwd, root)), "--version"], cwd, 10, None, root
+        )
         m = re.search(r"(\d+)\.(\d+)", out)
         _versions[exe] = (int(m[1]), int(m[2])) if rc == 0 and m else (0, 0)
     return _versions[exe]
@@ -350,7 +365,11 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
     key = str(cwd)
     if key not in _trees:
         rc, out, _ = _raw(
-            ["git", *base_args(_NOOP, True), "rev-parse", "--show-object-format"], cwd, 10, None, root
+            ["git", *base_args(_NOOP, True, _no_hooks(cwd, root)), "rev-parse", "--show-object-format"],
+            cwd,
+            10,
+            None,
+            root,
         )
         if rc != 0 or out.strip() not in EMPTY_TREE:
             return None
@@ -438,7 +457,8 @@ def driver_args(
     configuration defines; None when that could not be found out (the caller refuses). They travel in the
     environment (GIT_CONFIG_*), not as `-c name=value`: the names are repository-chosen."""
     rc, out, _ = _raw(
-        ["git", *base_args(_NOOP, True), "config", "--includes", "--null", "--get-regexp",
+        ["git", *base_args(_NOOP, True, _no_hooks(cwd, root)), "config", "--includes", "--null",
+         "--get-regexp",
          r"^(filter\..*\.(smudge|clean|process)|merge\..*\.driver)$"],
         cwd, timeout, None, root,
     )  # fmt: skip
@@ -481,7 +501,7 @@ def hardened(cwd: Path, root: Path | None = None) -> tuple[list[str], dict[str, 
     exe = git_exe(cwd, root)
     if true is None or exe is None:
         return None
-    return [exe, *base_args(true, True)], env(cwd, root, true)
+    return [exe, *base_args(true, True, _no_hooks(cwd, root))], env(cwd, root, true)
 
 
 def run(
@@ -535,5 +555,7 @@ def run(
             "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
         )
     kw = {"config": extra} if extra else {}
-    rc, out, err = _raw(["git", *top, *base_args(true, read_only), *sub], cwd, timeout, data, root, **kw)
+    rc, out, err = _raw(
+        ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *sub], cwd, timeout, data, root, **kw
+    )
     return rc, out.strip() if strip else out, err

@@ -133,14 +133,23 @@ def test_every_call_carries_the_hardening(tmp_path, monkeypatch):
     safegit.run(["status"], tmp_path, read_only=True, filters=False)
     argv = seen[-1][0]
     assert "--no-optional-locks" in argv and "core.fsmonitor=false" in argv and "protocol.allow=never" in argv
-    assert any(a.startswith("core.hooksPath=") and a == "core.hooksPath=" + os.devnull for a in argv)
+    assert any(a.startswith("core.hooksPath=/") and a.endswith("/no-hooks") for a in argv)
     assert "core.longpaths=true" in argv and "core.untrackedCache=false" in argv
     e = safegit.env(tmp_path, None, "/bin/true")
     assert "GIT_DIR" not in e and e["GIT_TERMINAL_PROMPT"] == "0"
 
 
-def test_hooks_path_is_os_devnull_and_a_planted_shared_folder_is_never_used(hostile, tmp_path):
-    assert safegit._no_hooks() == os.devnull
+def test_hooks_path_is_absolute_below_a_regular_file_and_a_planted_folder_is_never_used(hostile, tmp_path):
+    import ntpath
+
+    v = safegit._no_hooks()
+    assert os.path.isabs(v) and v.endswith("/no-hooks") and os.path.isfile(v[: -len("/no-hooks")])
+    assert not os.path.exists(v)  # below a FILE: nothing can be there (ENOTDIR)
+    # on Windows (simulated with the Windows path flavour): `<drive>:/.../python.exe/no-hooks` is absolute
+    from pathlib import PureWindowsPath
+
+    win = (PureWindowsPath("C:/Python/python.exe") / "no-hooks").as_posix()
+    assert ntpath.isabs(win) and win == "C:/Python/python.exe/no-hooks"
     r, marker = hostile
     shared = Path(tempfile.gettempdir()) / "orch-no-hooks"  # the predictable folder another user could plant
     created = not shared.exists()
@@ -589,7 +598,7 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         for want in ("commit.gpgSign=false", "log.showSignature=false"):
             assert want in argv, (cmd, want)
         assert any(a.startswith("core.editor=/") for a in argv), cmd
-        assert any(a.startswith("core.hooksPath=") and a == "core.hooksPath=" + os.devnull for a in argv), cmd
+        assert any(a.startswith("core.hooksPath=/") and a.endswith("/no-hooks") for a in argv), cmd
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
 
@@ -1081,3 +1090,16 @@ def test_safegit_works_with_an_untrusted_orch_home(proj, monkeypatch, tmp_path):
     assert safegit.hardened(proj) is not None
     assert safegit.run(["--version"], proj, filters=False)[0] == 0
     assert harness._in_git_repo(proj) is False
+
+
+def test_a_venv_python_inside_the_avoided_folder_is_not_used_for_the_hooks_path(tmp_path, monkeypatch):
+    real = _exe(tmp_path)
+    fake_py = tmp_path / "proj" / ".venv" / "bin" / "python"
+    fake_py.parent.mkdir(parents=True)
+    fake_py.write_text("")
+    monkeypatch.setattr(safegit.sys, "executable", str(fake_py))
+    proj = tmp_path / "proj"
+    monkeypatch.chdir(tmp_path)
+    v = safegit._no_hooks(proj, proj)
+    assert v == Path(os.path.realpath(real)).as_posix() + "/no-hooks"
+    assert str(proj) not in v
