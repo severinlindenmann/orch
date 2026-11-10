@@ -145,7 +145,7 @@ add it to the ticket (it contains its token). Each call becomes a `webhook` mess
 
     orch relay refresh   # installs what the admin assigned and rewrites workspaces.json and this skill
 
-Credentials land in `.orch/secrets/` (gitignored). An inbox hint alone installs nothing.
+Credentials go into orch's own key store outside this folder, never into the workspace. An inbox hint alone installs nothing.
 
 **Describe this workspace (once, after connecting)**
 

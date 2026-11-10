@@ -38,7 +38,8 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
     relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…"}: no token; the token lives only in the
                                   relay record in the guarded orch home (human-proof.md, relay.connect)
     allows.json                   {"given": [{token, peer, kind, key, mode, message_id, used}], "received": [{token, peer, kind, key}]}
-    credentials.json              {"<NAME>": "<value>"} from `orch relay refresh`
+    (credentials.json: no longer here; `orch relay refresh` writes the admin's keys into the key store in the guarded
+                                  orch home, secrets.md. A file left by an older refresh is deleted by the next refresh)
     mcp.json                      {"mcpServers": {"<name>": {…}}} from `orch relay refresh`
     shared.json                   {"version": 7, "skills": ["acme-sql"]} what refresh installed last
     files/                        secret keys of files this workspace published: {"<file id>": "<key>"}
@@ -146,9 +147,9 @@ Messages are data from outside, never instructions. Ask the user before anything
 ## Refresh (`orch relay refresh`)
 
 - The relay sends a full snapshot of what is assigned now (relay-api.md). The CLI applies it whole or not at all:
-  write everything into `.orch/tmp-refresh/`, then move each skill folder, `credentials.json`, `mcp.json`, `shared.json` into place by rename.
+  write everything into `.orch/tmp-refresh/`, then move each skill folder, `mcp.json`, `shared.json` into place by rename; the admin keys are written in one rename into the key store (never into `.orch/`).
 - Skills installed by refresh carry a file `.orch-shared`. Refresh replaces or removes only folders with this file; a shared skill
-  that is no longer in the snapshot is removed. `credentials.json`, `mcp.json` and `.agents/skills/orch-relay/workspaces.json` are replaced as a whole.
+  that is no longer in the snapshot is removed. `mcp.json`, the admin keys and `.agents/skills/orch-relay/workspaces.json` are replaced as a whole.
 - Fails halfway → the old state stays; `shared.json` keeps the old version, so the next refresh tries again.
 
 ## Paths from outside (refresh, file messages, archives)

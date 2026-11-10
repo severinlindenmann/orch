@@ -21,6 +21,8 @@ def test_human_env_without_orch_is_unavailable(monkeypatch, tmp_path):
 def test_human_env_with_a_broken_adapter_list_is_unavailable(monkeypatch, tmp_path):
     import orch.adapters
 
-    monkeypatch.setattr(orch.adapters, "human_environ", lambda environ: (_ for _ in ()).throw(RuntimeError("bad")))
+    monkeypatch.setattr(
+        orch.adapters, "human_environ", lambda environ: (_ for _ in ()).throw(RuntimeError("bad"))
+    )
     with pytest.raises(actions.Unavailable):
         actions.human_env(tmp_path, "orch")
