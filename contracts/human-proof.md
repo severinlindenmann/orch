@@ -197,8 +197,8 @@ rows add a named case.
 | `run.stop` | Focus Stop / Stop all (today `by=focus`) | ticket or `all` | page | – (an agent may still stop its own run, `ORCH_RUN` = that run) |
 | `relay.allow` | `orch relay allow <id> --once\|--permanent` (cli_clients.py 587): lets another workspace delegate or start work here | `<message id>:<once\|permanent>` | page, terminal | `verify` relay allow |
 | `group.remove_member` | remove a workspace from a group chat (cli_clients.py 283) | `<group>:<workspace>` | page, terminal | – |
-| `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | group | page, terminal | – |
-| `group.share_file` | share a file with a group, checked or not checkable (cli_clients.py 250/252, chat_groups.py 1505, 2656) | `<group>:<file sha256>` | page, terminal | – |
+| `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | host-side group: the ticket id; joined group: `<host ws id>:<group id>` (an id is only unique per host) | page, terminal | – |
+| `group.share_file` | share a file with a group, checked or not checkable (cli_clients.py 250/252, chat_groups.py 1505, 2656) | host side: `<ticket>:<file sha256>`; joined: `<host ws id>:<group id>:<file sha256>` | page, terminal | – |
 | `group.readd_member` | re-add a removed member (chat_groups.py 1049) | `<group>:<workspace>` | page, terminal | – |
 | `config.share` | `orch config share on\|off` (cli_config.py 270): the marked block in the team's AGENTS.md | `on` / `off` (off needs no proof) | page, terminal | – |
 | `config.agents_may_finish` | `orch config set workflow.agents_may_finish on` (cli_config.py 210) | setting (off needs no proof) | page, terminal | `settle` class |

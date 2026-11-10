@@ -140,7 +140,11 @@ def proof_for(op, args, root=None):
     ):  # un-ticking may undo a Won't do (a person's decision)
         return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}:reopen"
     if op == "group.say":  # writing into a group as the person (host: by ticket; invited: by group)
-        return "group.write_as_person", str(args.get("ticket") or args.get("group"))
+        if args.get("ticket"):
+            return "group.write_as_person", str(args["ticket"])
+        from orch import humanproof as _hp
+
+        return "group.write_as_person", _hp.group_target(root, str(args.get("host")), str(args.get("group")))
     if op == "group.remove":
         return "group.remove_member", f"{args.get('ticket')}:{args.get('workspace')}"
     if (

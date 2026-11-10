@@ -1949,3 +1949,45 @@ def test_the_proof_op_tables_agree():
     md = (root / "human-proof.md").read_text()
     missing = [op for op in hp.OPS if f"`{op}`" not in md]
     assert not missing, missing
+
+
+def test_joined_group_acts_bind_the_host_not_only_the_group_id(ws, run, monkeypatch):
+    """Two hosts can use the same group id: the proof target is <host>:<group>, the card names the right group
+    and host, and a proof for host A is refused for host B. The dashboard builds the very same target."""
+    from conftest import turn_on
+
+    from orch import chat_groups as cg
+    from orch import relay
+
+    turn_on(ws, "relay")
+    gid = "grp_t_abcdef12"
+    names = {"ws_hosta00001": "Alpha", "ws_hostb00002": "Beta"}
+    monkeypatch.setattr(relay, "resolve", lambda root, name: name)
+    monkeypatch.setattr(relay, "name_of", lambda root, w: names[w])
+    monkeypatch.setattr(
+        cg,
+        "view",
+        lambda root: {
+            "hosted": [],
+            "joined": [
+                {"host": "ws_hosta00001", "id": gid, "title": "Alpha plan"},
+                {"host": "ws_hostb00002", "id": gid, "title": "Beta plan"},
+            ],
+        },
+    )
+    sent = []
+    monkeypatch.setattr(cg, "say_member", lambda *a, **k: sent.append(a) or {"id": "m"})
+    cmd = ("relay", "group", "reply", "ws_hosta00001", gid, "hello", "--dashboard")
+    code, *_ = run(*cmd, "--by", "human:pat", "--json")
+    assert code == 2 and not sent
+    card = [h for h in hp.handoffs(ws) if h["op"] == "group.write_as_person"][0]
+    assert card["target"] == f"ws_hosta00001:{gid}"
+    assert card["parts"] == {"title": "Alpha plan", "host": "Alpha"}
+    other = _proof(ws, "group.write_as_person", f"ws_hostb00002:{gid}")
+    assert (
+        _cli(run, monkeypatch, other, *cmd, "--json")[0] == 2 and not sent
+    )  # host B's proof, host A's group
+    bare = _proof(ws, "group.write_as_person", gid)  # the old group-only target no longer works
+    assert _cli(run, monkeypatch, bare, *cmd, "--json")[0] == 2 and not sent
+    good = _proof(ws, "group.write_as_person", f"ws_hosta00001:{gid}")
+    assert _cli(run, monkeypatch, good, *cmd, "--json")[0] == 0 and len(sent) == 1

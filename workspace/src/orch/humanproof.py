@@ -1340,6 +1340,19 @@ def _clean_argv(argv) -> list[str] | None:
 VALUE_MAX = 4000  # the exact text a person approves is shown whole; longer is not queued
 
 
+def group_target(root: Path, host: str, group: str) -> str:
+    """The proof target for an act in a joined group: `<host workspace id>:<group id>`. A group id
+    is only unique per host, so the host is part of what the person approves. The CLI and the dashboard both
+    build it here (one place), so a proof for host A is never good for host B."""
+    from orch import relay
+
+    try:
+        host = relay.resolve(root, host) if root is not None else host
+    except Refused:
+        pass  # the command itself refuses an unknown host in words
+    return f"{host}:{group}"
+
+
 def plain_ticket(root: Path, tid: str, qid: str | None = None) -> str:
     """The ticket (and question) in plain words for the hand-off card: title, never a raw id."""
     from orch import tickets

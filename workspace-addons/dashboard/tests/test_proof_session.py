@@ -481,7 +481,7 @@ def test_group_clicks_mint_for_the_right_target_and_a_share_binds_the_files_cont
     assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)
     assert acts.proof_for("group.say", {"group": "grp_t_abcdef", "host": "peer", "text": "x"}) == (
         "group.write_as_person",
-        "grp_t_abcdef",
+        "peer:grp_t_abcdef",  # host:group (the host is part of what is approved)
     )
     assert acts.proof_for("group.remove", {"ticket": TID, "workspace": "peer"}) == (
         "group.remove_member",
@@ -518,3 +518,20 @@ def test_no_session_means_no_file_read_before_the_refusal(monkeypatch, tmp_path)
     monkeypatch.setattr(acts, "_share_sha", boom)
     with pytest.raises(acts.NeedsPerson):
         acts.run_op(tmp_path, acts.SELF, "group.share", {"ticket": TID, "file": "a.txt"}, mint=None)
+
+
+def test_group_say_target_is_host_and_group_like_the_cli(tmp_path, monkeypatch):
+    """The dashboard's proof target for a joined group is <host>:<group>, the same string the CLI builds
+    (humanproof.group_target); a host-side group (by ticket) stays the ticket id."""
+    from orch import relay
+
+    from orch_dashboard import actions as acts
+
+    monkeypatch.setattr(relay, "resolve", lambda root, name: {"Alpha": "ws_hosta00001"}.get(name, name))
+    gid = "grp_t_abcdef12"
+    want = ("group.write_as_person", f"ws_hosta00001:{gid}")
+    assert acts.proof_for("group.say", {"group": gid, "host": "Alpha"}, tmp_path) == want
+    assert acts.proof_for("group.say", {"group": gid, "host": "ws_hosta00001"}, tmp_path) == want
+    assert hp.group_target(tmp_path, "Alpha", gid) == want[1]
+    assert acts.proof_for("group.say", {"group": gid, "host": "ws_hostb00002"}, tmp_path) != want
+    assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)

@@ -286,18 +286,29 @@ def _file_sha(root: Path, path: str) -> str:
     return hashlib.sha256(cg.read_shared(Path(path), root, confined=False)).hexdigest()
 
 
-def _group_title(root: Path, group: str) -> str:
-    """The group's name for a card (never its raw id); an unknown group is "a group chat"."""
+def _group_title(root: Path, group: str, host: str | None = None) -> str:
+    """The group's name for a card (never its raw id); an unknown group is "a group chat". A joined group
+    matches on host AND id (an id is only unique per host)."""
     from orch import chat_groups as cg
 
     try:
         v = cg.view(root)
-        for g in [*v["hosted"], *v["joined"]]:
-            if g.get("id") == group and g.get("title"):
+        for g in v["joined"] if host else v["hosted"]:
+            if g.get("id") == group and (not host or g.get("host") == host) and g.get("title"):
                 return str(g["title"])
     except (Refused, OSError, KeyError):
         pass
     return "a group chat"
+
+
+def _member_parts(root: Path, host: str, group: str) -> dict:
+    """Card parts for an act in a joined group: its title (matched on host AND id) and the host's name."""
+    from orch import relay
+
+    return {
+        "title": humanproof.part(_group_title(root, group, host)),
+        "host": humanproof.part(relay.name_of(root, host)),
+    }
 
 
 def _share_card(args) -> dict:
@@ -379,9 +390,10 @@ def run_group(args, root: Path, out) -> None:
         if (
             args.dashboard
         ):  # only a verified person speaks as themselves; an agent claim is downgraded to helper
+            host = relay.resolve(root, args.host)
             as_person = _as_person(
-                args, root, "group.write_as_person", args.group,
-                parts={"title": humanproof.part(_group_title(root, args.group))}, value=args.text,
+                args, root, "group.write_as_person", humanproof.group_target(root, host, args.group),
+                parts=_member_parts(root, host, args.group), value=args.text,
             )  # fmt: skip
         m = cg.say_member(
             root,
@@ -398,10 +410,11 @@ def run_group(args, root: Path, out) -> None:
         click, sha = False, None  # an agent claim: no click, so share_member refuses in words
         if args.click:  # the proof binds the file's content, checked against the uploaded bytes
             sha = _file_sha(root, args.file)
+            host = relay.resolve(root, args.host)
             if _as_person(
-                args, root, "group.share_file", f"{args.group}:{sha}",
+                args, root, "group.share_file", f"{humanproof.group_target(root, host, args.group)}:{sha}",
                 parts={
-                    "title": humanproof.part(_group_title(root, args.group)),
+                    **_member_parts(root, host, args.group),
                     "file": humanproof.part(Path(args.file).name),
                 },
                 **_share_card(args),
