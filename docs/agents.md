@@ -40,6 +40,11 @@ $ orch config set workspace.permissions ask
 `ask`: the agent asks before it edits files or runs commands. `auto`: it works on its own and the tool checks risky
 steps. `full`: it never asks. An agent orch has no setting for ignores this. It applies the next time an agent starts.
 
+Codex has no way to ask while orch runs it, so every mode starts it with write access to this folder only (no network,
+no other folders), never wider; if your own Codex config says read-only, that stays and orch says so at the start.
+orch refuses to start an agent when its home folder (`ORCH_HOME`, `~/.orch-tool`) is inside the start folder or under
+the temp folder: the agent could then change orch's own settings.
+
 Live sessions close by themselves after an hour of waiting (or an hour after the ticket is Done); Continue picks the
 conversation up again. Change the hour: `orch config set workspace.live_idle_minutes 120`.
 

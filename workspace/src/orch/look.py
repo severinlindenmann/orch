@@ -91,7 +91,13 @@ def _save_set_by(root: Path, value: str) -> None:
     doc = net.read_json(_by_file(), {})
     doc = doc if isinstance(doc, dict) else {}
     doc[config._perm_key(root)] = value
-    net.write_json(_by_file(), doc, private=False)
+    try:
+        net.write_json(_by_file(), doc, private=False)
+    except OSError as x:  # e.g. an agent whose sandbox only lets it write in the workspace
+        raise Refused(
+            "orch could not save the icon here (this tool may only write in the workspace). "
+            "The icon is optional: skip it and carry on with the task."
+        ) from x
 
 
 def _check(kind: str, value, allowed: list[str]) -> None:
