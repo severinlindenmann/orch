@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -37,6 +38,10 @@ def add_parsers(sub, common) -> None:
     t.add_argument("name")
     sh = sub.add_parser("share", parents=[common], help=argparse.SUPPRESS)
     sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
+    pv = sub.add_parser("private", parents=[common], help=argparse.SUPPRESS)
+    pv.add_argument("state", nargs="?", choices=("status", "move", "allow"), default="status")
+    pv.add_argument("name", nargs="?", help="allow: the agent name shown by orch private")
+    pv.add_argument("--key", help="allow: the key shown by orch private (binds the yes to what you saw)")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
     g.add_argument("key", nargs="?", choices=KEYS)
@@ -70,9 +75,27 @@ def _out(args, data, text: str) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
-def _choose(root: Path, name: str) -> str:
+AGENT_ASKS = (
+    'Only a person can {what}. Ask them with orch ask: orch ask <ticket> "{what}?" --option yes --option no'
+)
+
+
+def _proven(root: Path, args, op: str, target: str, what: str, parts: dict, exact: str | None = None) -> str:
+    """The person behind a human-only op (invariant H1, one proof mechanism: humanproof.person_by). With
+    --proof-stdin: the person in a verified proof. An agent is refused and told to use `orch ask`. A person at
+    a terminal without a proof leaves a hand-off on the page and is refused until they click there."""
+    who = humanproof.person_by(root, args, op, target, parts=parts, exact=exact)
+    if not who.startswith("human:"):
+        raise Refused(AGENT_ASKS.format(what=what))
+    return who
+
+
+def _choose(root: Path, name: str, args) -> str:
+    """workspace.agent: a person's choice (an agent is refused here and again in config.select_agent)."""
+    by = _actor(args)
+    config.require_person(by, "choose the agent for this workspace")
     adapters.load(name, root)  # refuses a name nobody knows
-    config.set_key(root, "workspace", "agent", name)
+    config.select_agent(root, name, by)
     return name
 
 
@@ -285,7 +308,7 @@ def _config(args, root: Path) -> None:
             "Continue picks the conversation up again.",
         )
     elif args.sub == "set":
-        name = _choose(root, args.value)
+        name = _choose(root, args.value, args)
         _out(
             args,
             {"workspace.agent": name},
@@ -299,21 +322,39 @@ def _config(args, root: Path) -> None:
                 )
             if args.name in adapters.builtin_names():
                 raise Refused(f"'{args.name}' is a built-in agent; pick another name.")
-            # a command orch will run for every task: only a person approves it, shown in full (both the
-            # command and the live-session one). An agent is refused until private allow (#374) gates what
-            # a config.toml command may run (F5): editing config.toml by hand is the same class, Level 2.
-            exact = args.command
+            by = _actor(args)
+            config.require_person(by, "add an agent command")  # an agent is refused before anything else
+            if not config.NAME_RE.fullmatch(args.name):
+                raise Refused(
+                    f"'{args.name}' is not a name orch can use. Use lowercase letters, digits and '-'."
+                )
+            for what, v in (("command", args.command), ("live command", args.interactive)):
+                if v is not None and not (1 <= len(v) <= 500 and "\n" not in v and "\r" not in v):
+                    raise Refused(f"The {what} must be one line of at most 500 characters.")
+            # the person approves ALL saved values: they are all in the exact block and in the proof target
+            parts = {"name": args.name, "command": args.command}
             if args.interactive:
-                exact = f"Command: {args.command}\nLive session command: {args.interactive}"
-            _person(
-                args,
+                parts["interactive"] = args.interactive
+            if args.prompt_via:
+                parts["prompt"] = args.prompt_via
+            _proven(
                 root,
+                args,
                 "config.agent_add",
-                args.name,
-                parts={"name": humanproof.part(args.name)},
-                exact=exact,
+                humanproof.agent_add_target(args.name, args.command, args.interactive, args.prompt_via),
+                f"add the agent {args.name}",
+                parts,
+                exact=humanproof.agent_add_exact(args.command, args.interactive, args.prompt_via),
             )
-            config.add_agent(root, args.name, args.command, args.interactive, prompt=args.prompt_via)
+            config.add_agent(  # a person proved it: approve ONLY what they typed (add_agent checks the file)
+                root,
+                args.name,
+                args.command,
+                args.interactive,
+                prompt=args.prompt_via,
+                approve=True,
+                by=by,
+            )
             tail = (
                 "starts fresh each run; no live steps"
                 if not args.interactive
@@ -321,7 +362,7 @@ def _config(args, root: Path) -> None:
             )
             _out(args, {"agent": args.name}, f"Added {args.name} ({tail}).")
         else:
-            name = _choose(root, args.name_or_add)
+            name = _choose(root, args.name_or_add, args)
             _out(args, {"workspace.agent": name}, f"Saved: workspace.agent = {name}.")
 
 
@@ -346,7 +387,88 @@ def _share(args, root: Path) -> None:
     )
 
 
+def private_lines(root: Path) -> list[str]:
+    """The git notes for `orch status` / `orch private`: what the team repo holds, the next step, a committed
+    agent command that is ignored. [] when there is nothing to say."""
+    from orch import harness
+
+    s = harness.private_summary(root)
+    out = []
+    if s["files"]:
+        out += [
+            harness.private_words(s),
+            "Move to private: removes them from the team repo, keeps your files (orch private move).",
+        ]
+    for p in config.pending_agents(root):
+        shown = "; ".join(f"{k}: {p[k]}" for k in ("adapter", "command", "interactive", "prompt") if p[k])
+        if p["showable"]:
+            out.append(
+                f"This workspace asks to run an agent '{p['name']}' ({shown}). "
+                f"Allow on this machine: orch private allow {p['name']} --key {p['key']}"
+            )
+        else:
+            out.append(
+                "This workspace asks to run a command orch can't show safely. Not allowed; it is not run."
+            )
+    return out
+
+
+def _private(args, root: Path) -> None:
+    """`orch private [status|move]`: personal files that the team repo already tracks. `move` is a person's
+    action (git rm --cached; nothing is committed, the files stay)."""
+    from orch import harness
+
+    if args.state == "allow":
+        if not args.name or not args.key:
+            raise Refused("Say which one: orch private allow <name> --key <key> (orch private shows both).")
+        if not (config.NAME_RE.fullmatch(args.name) and re.fullmatch(r"[0-9a-f]{64}", args.key)):
+            raise Refused("Look at orch private again: that name or key is not one it showed.")
+        shown = next((p for p in config.pending_agents(root) if p["name"] == args.name), None)
+        config.require_person(_actor(args), "allow an agent command to run")  # an agent hears the ask text
+        if shown is None or not shown["showable"] or shown["key"] != args.key:
+            raise Refused("That command is not waiting for a yes here (or changed). Look at: orch private")
+        _proven(
+            root,
+            args,
+            "private.allow",
+            f"{args.name}:{args.key}",
+            f"allow the command of {args.name} to run on this computer",
+            {k: shown[k] for k in ("name", "command", "adapter", "interactive", "prompt") if shown.get(k)},
+            exact=humanproof.entry_exact(shown),
+        )
+        done = config.allow_agent(root, args.name, args.key, _actor(args))
+        _out(args, {"allowed": [done]}, f"Allowed on this computer: {done}.")
+        return
+    if args.state == "move":
+        who = _proven(root, args, "private.move", "move", "move these files out of the team repo", {})
+        moved = harness.move_to_private(root, who)
+        if args.json:
+            print(json.dumps({"moved": len(moved)}))
+        else:
+            print(
+                f"Moved {len(moved)} file{'s' if len(moved) != 1 else ''} out of the team repo. "
+                "Your files stay here. "
+                "Commit the removal when you are ready; older commits keep their copies."
+                if moved
+                else "Nothing to move."
+            )
+        return
+    s = harness.private_summary(root)
+    data = {
+        "committed": s["counts"],
+        "count": len(s["files"]),
+        "config_tracked": s["config_tracked"],
+        "pending_agents": config.pending_agents(root),
+        "agent_command_ignored": bool(config.pending_agents(root)),
+        "lines": private_lines(root),
+    }
+    _out(args, data, "\n".join(data["lines"]) or "Nothing personal is committed in the team repo.")
+
+
 def dispatch(args, root: Path) -> bool:
+    if args.cmd == "private":
+        _private(args, root)
+        return True
     if args.cmd == "agents":
         if getattr(args, "sub", None) == "test":
             raise SystemExit(_test(args, root))

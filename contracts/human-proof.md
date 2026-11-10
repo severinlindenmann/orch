@@ -190,9 +190,9 @@ rows add a named case.
 | `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict |
 | `ticket.answer` | answering a Needs-you question | `<ticket>:<question>` | page, phone | `verify` ticket answer |
 | `relay.connect` | `orch relay connect`, changing the relay address | relay host | page, terminal | `verify` relay connect |
-| `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` | page, terminal | `verify` private allow |
-| `private.move` | `orch private move` | name | page, terminal | – (same class) |
-| `config.agent_add` | `orch config agent add` by a person (an agent's entry needs a person's OK) | agent name | page, terminal | – |
+| `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` (the key covers adapter, command, live command, prompt; the card's exact block shows all four, and a hand-off is refused at take time if the entry no longer hashes to the key) | page, terminal | `verify` private allow |
+| `private.move` | `orch private move` | `move` | page, terminal | – (same class) |
+| `config.agent_add` | `orch config agent add` by a person (an agent's entry needs a person's OK) | `<name>:<sha256 (64 hex) of JSON [command, interactive or "", prompt or ""])>` (every saved value; the card's exact block shows them all) | page, terminal | – |
 | `check.wont_do`, `check.wont_do_undo` | `orch check wont-do <id> <c> [--reason]` and undo | `<ticket>:<check>` | page, terminal | – |
 | `chat.make_ticket` | `orch chat make-ticket <id>` | chat id | page, terminal | – |
 | `chat.send`, `chat.sync`, `chat.contacts`, `chat.thread_sync` | `orch chat send/sync/contacts`, `thread --sync`; dashboard `chat.send_ws`, `chat.sync_ws` | chat / workspace | page, terminal | – |

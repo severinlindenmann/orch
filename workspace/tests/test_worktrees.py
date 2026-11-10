@@ -451,7 +451,9 @@ def test_a_oneshot_run_in_a_copy_starts_there_with_orch_root_and_records_the_fol
         "subprocess.run([sys.executable, '-P', '-m', 'orch', 'ticket', 'new', 'Made by the agent',\n"
         "                '--by', 'agent:fake'])\n"
     )
-    config.add_agent(repo, "fake", f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {{prompt}}")
+    config.add_agent(
+        repo, "fake", f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {{prompt}}", approve=True
+    )
     config.set_key(repo, "workspace", "agent", "fake")
     config.set_copies_mode(repo, "always")
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
@@ -487,7 +489,11 @@ def test_live_start_puts_tmux_in_the_copy_and_trusts_it(repo, monkeypatch):
     trusted = []
     monkeypatch.setattr(adapters, "trust_folder", lambda name, p, *a, **k: trusted.append(Path(p)) or "set")
     config.add_agent(
-        repo, "fake", f"{shlex.quote(sys.executable)} -c pass {{prompt}}", f"{shlex.quote(sys.executable)}"
+        repo,
+        "fake",
+        f"{shlex.quote(sys.executable)} -c pass {{prompt}}",
+        f"{shlex.quote(sys.executable)}",
+        approve=True,
     )
     config.set_key(repo, "workspace", "agent", "fake")
     r = runs_live.start_live(repo, a, "human:t", "fake", fresh=False, take_over=False, busy_text="x")

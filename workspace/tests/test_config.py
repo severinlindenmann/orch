@@ -162,7 +162,7 @@ def test_array_lines_are_not_tables_and_del_is_escaped(proj):
 
 
 def test_init_other_asks_a_name_and_keeps_existing(proj, run, fake_path, monkeypatch):
-    config.add_agent(proj, "my-agent", "old {prompt}")
+    config.add_agent(proj, "my-agent", "old {prompt}", approve=True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
     answers = iter(["", "new {prompt}"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))

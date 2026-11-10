@@ -103,6 +103,7 @@
 .settings .card-row{flex-wrap:nowrap}
 .settings form.card-row{border-top:1px solid var(--border)}
 dialog.dialog pre.preserve-lines{overflow-wrap:anywhere;margin-top:16px}
+dialog.dialog pre.scroll-all{max-height:50vh;overflow:auto}
 @media(max-width:720px){.settings{gap:16px}.settings .card-row .grow{flex-basis:auto}.settings .card-row.name-row{flex-wrap:wrap}.settings .card-row.name-row .set-ctl{flex-basis:100%}.settings .set-label{width:auto}.settings .agent-opt .def{margin-left:auto}.settings .set-ctl .input{min-height:44px}}
 @media(max-width:720px){.agent-bar{flex-wrap:wrap;padding:8px 12px}.agent-bar .ab-text{white-space:normal;flex:1 1 140px}.ab-actions{margin-left:auto}.menu-item{min-height:44px}.ticket-columns .tabs{flex-wrap:wrap}.ticket-row.child>.grow{flex-basis:calc(100% - 60px)}}
 /* v4 */

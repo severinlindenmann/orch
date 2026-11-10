@@ -145,6 +145,10 @@ def _services_cmd(args, root: Path) -> None:
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
             lines += [_service_line(a) for a in w["addons"]]
+        if (root / ".orch").is_dir() and not args.json:  # git notes for this workspace (a plain line each)
+            from orch import cli_config
+
+            lines += cli_config.private_lines(root)
         _out(
             args,
             ws,

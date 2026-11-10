@@ -59,7 +59,7 @@ def test_F1b_agent_env_SHOULD_not_answer_a_phone_question_as_human(proj, run, mo
 def test_F2_resume_SHOULD_start_the_agent_that_asked(proj, run, gen, one_step):
     gen()  # 'fake' is the workspace agent
     cmd = f"{shlex.quote(sys.executable)} {shlex.quote(str(test_run_wrap.AGENT))} {{prompt}}"
-    config.add_agent(proj, "other", cmd)
+    config.add_agent(proj, "other", cmd, approve=True)
     tid = L._new(run)
     assert run("run", "start", tid, "--agent", "other")[0] == 0
     _wait(proj, tid)
