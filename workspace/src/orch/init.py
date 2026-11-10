@@ -78,20 +78,35 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
         sys.stderr.flush()
         if sys.stdin.readline().strip().lower() not in ("y", "yes"):
             raise Refused("Not confirmed. Nothing was changed.")
-    done: list[str] = []
+    names = [r["name"] for r in rows]
+    before = set(addons.active(root))  # whatever is on already stays on, whatever fails
+    now: list[str] = []  # turned on at once (already installed); the rest wait for the one reinstall
+    out = io.StringIO()
     try:
-        for r in rows:
-            with contextlib.redirect_stdout(io.StringIO()):
-                addons.add(root, r["name"], yes=True)
-            done.append(r["name"])
+        # one reinstall for all of them (on Windows a second background install is refused while one runs)
+        with contextlib.redirect_stdout(out), addons.batch_install(root):
+            for n in names:
+                addons.add(root, n, yes=True)
+                if n not in addons.batched(root) and n not in before:
+                    now.append(n)
     except Exception as e:
-        for n in reversed(done):
+        undone = list(getattr(e, "undone", []))
+        for n in reversed(now):
             with contextlib.suppress(Exception):
                 addons.remove(root, n)
-        raise Refused(
-            f"Could not turn on {', '.join(r['name'] for r in rows)}: {e} Nothing was changed."
-        ) from e
-    return done
+                undone.append(n)
+        left = [n for n in names if n in addons.active(root) and n not in before]
+        if left:
+            tail = f"Still on: {', '.join(left)}."
+        elif undone:
+            tail = f"Turned off again: {', '.join(undone)}."
+        else:
+            tail = "Nothing was changed."
+        raise Refused(f"Could not turn on {', '.join(names)}: {e} {tail}") from e
+    notice = out.getvalue().strip()
+    if notice:  # e.g. "finishes in the background": to stderr, so init --json stays clean
+        sys.stderr.write(notice + "\n")
+    return names
 
 
 def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> str:

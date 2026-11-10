@@ -2,6 +2,7 @@
 no-dir_fd path that read_private, file_state and safe_read_tail share: saferead._DIRFD is False, the reparse
 seam is replaced and os.open must never get a dir_fd."""
 
+import ctypes
 import hashlib
 import os
 import stat
@@ -37,6 +38,7 @@ def win(monkeypatch, tmp_path):
     monkeypatch.setattr(saferead, "_DIRFD", False)
     monkeypatch.setattr(winacl, "_windows", lambda: True)
     monkeypatch.setattr(saferead, "_win_open_raw", raw)
+    monkeypatch.setattr(saferead, "_win_resolve", lambda p: p)  # no subst, no mapped drive, no 8.3 here
     monkeypatch.setattr(saferead, "_reparse", lambda p: str(p) in state["reparse"])
     real_open = os.open
 
@@ -132,7 +134,8 @@ def test_junction_swapped_in_after_the_folder_check_is_refused(win):
     assert tail(r, "d/a.log") is None
 
 
-def test_final_path_compare_ignores_case_prefix_and_slashes():
+def test_final_path_compare_ignores_case_prefix_and_slashes(monkeypatch):
+    monkeypatch.setattr(saferead, "_win_resolve", lambda p: p)
     same = saferead._same_path
     assert same("\\\\?\\C:\\Users\\X\\f.json", "c:/users/x/f.json")
     assert same("\\\\?\\UNC\\srv\\share\\f", "\\\\SRV\\share\\f")
@@ -268,3 +271,119 @@ def test_a_final_path_as_long_as_the_buffer_is_a_failure():
     import inspect
 
     assert "< 32768" in inspect.getsource(saferead._win_open_raw)
+
+
+# ---------------------------------------------------------------- #414: UNC, mapped drives, 8.3, subst
+
+SHORT = "C:\\USERS\\USER~1.WIN\\WORK\\F.LOG"
+LONG = "C:\\Users\\user.WINDEV\\work\\f.log"
+
+
+def resolver(table, calls=None):
+    """_win_resolve with a table: path (no prefix) -> long real path; anything else is unknown (None)."""
+
+    def r(p):
+        if calls is not None:
+            calls.append(p)
+        return table.get(p)
+
+    return r
+
+
+@pytest.mark.parametrize(
+    "final, expected",
+    [
+        ("\\\\?\\UNC\\host\\share\\d\\f.log", "\\\\host\\share\\d\\f.log"),  # UNC root
+        ("\\\\?\\UNC\\HOST\\Share\\d\\f.log", "//host/share/d/f.log"),  # case, slashes
+        ("\\\\?\\UNC\\host\\share\\d\\f.log", "Z:\\d\\f.log"),  # mapped drive Z: = \\host\share
+        ("\\\\?\\C:\\work\\d\\f.log", "Q:\\d\\f.log"),  # subst Q: = C:\work
+        ("\\\\?\\" + LONG, SHORT),  # 8.3 root
+    ],
+)
+def test_canonical_form_makes_these_the_same_place(final, expected, monkeypatch):
+    table = {
+        "\\\\host\\share\\d\\f.log": "\\\\host\\share\\d\\f.log",
+        "//host/share/d/f.log": "\\\\host\\share\\d\\f.log",
+        "Z:\\d\\f.log": "\\\\host\\share\\d\\f.log",
+        "Q:\\d\\f.log": "C:\\work\\d\\f.log",
+        "C:\\work\\d\\f.log": "C:\\work\\d\\f.log",
+        "\\\\HOST\\Share\\d\\f.log": "\\\\host\\share\\d\\f.log",
+        SHORT: LONG,
+        LONG: LONG,
+    }
+    monkeypatch.setattr(saferead, "_win_resolve", resolver(table))
+    assert saferead._same_path(final, expected)
+
+
+def test_other_places_and_unknowns_are_never_the_same(monkeypatch):
+    table = {
+        "\\\\host\\share\\f": "\\\\host\\share\\f",
+        "\\\\host\\other\\f": "\\\\host\\other\\f",
+        "\\\\evil\\share\\f": "\\\\evil\\share\\f",
+    }
+    monkeypatch.setattr(saferead, "_win_resolve", resolver(table))
+    assert saferead._same_path("\\\\?\\UNC\\host\\share\\f", "\\\\host\\share\\f")
+    assert not saferead._same_path("\\\\?\\UNC\\host\\share\\f", "\\\\host\\other\\f")  # other share
+    assert not saferead._same_path("\\\\?\\UNC\\host\\share\\f", "\\\\evil\\share\\f")  # other host
+    assert not saferead._same_path("\\\\?\\UNC\\host\\share\\f", "Z:\\unmapped\\f")  # can not resolve
+    assert not saferead._same_path("Z:\\unmapped\\f", "Z:\\unmapped\\f")  # unknown on both sides: refuse
+    monkeypatch.setattr(saferead, "_win_resolve", lambda p: (_ for _ in ()).throw(OSError("x")))
+    assert not saferead._same_path("C:\\a", "C:\\a")
+    monkeypatch.setattr(saferead, "_win_resolve", lambda p: (_ for _ in ()).throw(ctypes.ArgumentError("x")))
+    assert not saferead._same_path("C:\\a", "C:\\a")
+
+
+def test_dos_device_results_become_plain_paths():
+    t = saferead._dos_target
+    assert t("\\??\\C:\\work") == "C:\\work"  # subst
+    assert t("\\??\\UNC\\host\\share\\dir") == "\\\\host\\share\\dir"  # subst of a UNC path
+    assert t("\\Device\\HarddiskVolume3") is None  # a real disk
+    assert saferead._is_network_dev("\\Device\\LanmanRedirector\\;Z:0000000000012345\\host\\share")
+    assert saferead._is_network_dev("\\Device\\Mup\\;LanmanRedirector\\;Z:0\\host\\share")
+    assert not saferead._is_network_dev("\\Device\\HarddiskVolume3")
+    assert not saferead._is_network_dev("\\??\\C:\\work")
+
+
+def test_mapped_unc_and_short_roots_read_through_all_three_readers(win, monkeypatch):
+    """The expected path is spelled one way (Z:, 8.3), the handle reports another (UNC): same place, read."""
+    r = win["root"]
+    mk(r, "d/app.log", CRLF)
+    real_raw = saferead._win_open_raw
+
+    def spelled_otherwise(path):
+        got = real_raw(path)
+        return got and (got[0], got[1], got[2], "\\\\?\\UNC\\host\\share\\" + Path_tail(path))
+
+    def Path_tail(path):
+        return str(path)[len(str(r)) :].lstrip("/").replace("/", "\\")
+
+    monkeypatch.setattr(saferead, "_win_open_raw", spelled_otherwise)
+
+    def resolve(p):  # Z: and the handle's UNC name are one share; the root spelled with 8.3 too
+        p = p.replace("/", "\\")
+        if p.startswith("\\\\host\\share\\"):
+            return p
+        return (
+            "\\\\host\\share\\" + Path_tail(p.replace("\\", "/")) if str(r) in p.replace("\\", "/") else None
+        )
+
+    monkeypatch.setattr(saferead, "_win_resolve", resolve)
+    assert rp(r, "d/app.log") == CRLF
+    assert fs(r, "d/app.log").startswith("F:")
+    assert tail(r, "d/app.log") == CRLF
+
+
+def test_junction_swap_is_still_refused_when_both_sides_are_canonical(win, monkeypatch):
+    r = win["root"]
+    mk(r, "d/a.log")
+    mk(r, "elsewhere/a.log")
+    monkeypatch.setattr(saferead, "_win_resolve", lambda p: p)  # canonical: just normalised
+    win["redirect"] = {str(r / "d" / "a.log"): "\\\\?\\UNC\\host\\share\\elsewhere\\a.log"}
+    assert rp(r, "d/a.log") is None and fs(r, "d/a.log") == "?" and tail(r, "d/a.log") is None
+
+
+def test_hard_link_device_and_stream_refusals_are_unchanged_on_a_network_root(win, monkeypatch):
+    r = win["root"]
+    mk(r, "real.log")
+    os.link(r / "real.log", r / "hard.log")
+    assert rp(r, "hard.log") is None and rp(r, "CON") is None and rp(r, "real.log:x") is None
