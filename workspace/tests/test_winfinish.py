@@ -263,12 +263,22 @@ def test_init_recommended_hands_all_addons_to_ONE_finisher(proj, monkeypatch, uv
     assert "automation, dashboard, focus" in done
 
 
+def _entry(name):
+    return {"name": name, "source": "built-in", "version": "1"}
+
+
+def _collect(root, name):
+    """What add() does for a new add-on inside a batch."""
+    addons._batch_for(root).items.append((_entry(name), [["addon", "add", name, "--project-only"]]))
+
+
 def test_batch_install_installs_nothing_when_one_add_fails(proj, monkeypatch):
     started = _windows_with_one_finisher(monkeypatch)
     with pytest.raises(Refused, match="boom"), addons.batch_install(proj):
-        addons._BATCH.append(({"name": "automation", "source": "built-in", "version": "1"}, []))
+        _collect(proj, "automation")
         raise Refused("boom")
-    assert started == [] and addons._BATCH is None
+    assert started == [] and addons._BATCH.get() is None
+    assert addons.consented(proj, "automation") is False
 
 
 def test_batch_install_on_other_systems_is_one_uv_run(proj, monkeypatch, uv_calls):
@@ -277,17 +287,92 @@ def test_batch_install_on_other_systems_is_one_uv_run(proj, monkeypatch, uv_call
     monkeypatch.setattr(addons, "reexec", lambda a: reexecs.append(a))
     monkeypatch.setattr(addons, "record_consent", lambda *a, **k: None)
     with addons.batch_install(proj):
-        addons._BATCH.append(
-            (
-                {"name": "automation", "source": "built-in", "version": "1"},
-                [["addon", "add", "automation", "--project-only"]],
-            )
-        )
-        addons._BATCH.append(
-            (
-                {"name": "dashboard", "source": "built-in", "version": "1"},
-                [["addon", "add", "dashboard", "--project-only"]],
-            )
-        )
+        _collect(proj, "automation")
+        _collect(proj, "dashboard")
     assert len(uv_calls) == 1 and len(reexecs) == 2
     assert [e["name"] for e in addons.registry()] == ["automation", "dashboard"]
+
+
+def test_a_refused_batch_leaves_no_consent(proj, monkeypatch):
+    """A finisher is still running: refused before anything is confirmed or recorded (M1)."""
+    _windows_with_one_finisher(monkeypatch)
+    addons.home().mkdir(parents=True, exist_ok=True)
+    (addons.home() / "finish.pending").write_text("starting")
+    with pytest.raises(Refused, match="still finishing"), addons.batch_install(proj):
+        raise AssertionError("the body must not run")
+    # and a refusal inside _reinstall drops the consents the batch wrote
+    (addons.home() / "finish.pending").unlink()
+    monkeypatch.setattr(addons, "_which_uv", lambda: None)
+    with pytest.raises(Refused, match="uv is not installed"), addons.batch_install(proj):
+        _collect(proj, "automation")
+    assert addons.consented(proj, "automation") is False
+
+
+def test_partial_failure_undoes_only_this_batchs_items_and_says_so(proj, monkeypatch, uv_calls):
+    """POSIX: the project step of the 2nd add-on fails after the 1st one is on (H1). A pre-existing
+    active add-on is never touched (L1)."""
+    from orch import init
+
+    monkeypatch.setattr(winfinish, "needed", lambda: False)
+    on = {"focus": True}  # was on before the batch
+    removed = []
+    monkeypatch.setattr(addons, "active", lambda root: {k: {} for k, v in on.items() if v})
+    monkeypatch.setattr(addons, "remove", lambda root, n, purge=False: removed.append(n) or on.pop(n))
+    monkeypatch.setattr(addons, "record_consent", lambda *a, **k: None)
+    dropped = []
+    monkeypatch.setattr(addons, "drop_consent", lambda root, n: dropped.append(n))
+
+    def reexec(args):
+        if args[2] == "dashboard":
+            raise Refused("The project step failed (see above).")
+        on[args[2]] = True
+
+    monkeypatch.setattr(addons, "reexec", reexec)
+    monkeypatch.setattr(addons, "listing", lambda root: [])
+    rows = {
+        n: {"name": n, "version": "1", "description": "d", "background": False}
+        for n in ("automation", "dashboard")
+    }
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: rows)
+    monkeypatch.setattr(addons, "discover", lambda: {})
+    monkeypatch.setattr(addons, "consent_text", lambda m, x: m["name"])
+
+    def add(root, n, yes=False):
+        addons._batch_for(root).items.append((_entry(n), [["addon", "add", n, "--project-only"]]))
+
+    monkeypatch.setattr(addons, "add", add)
+    with pytest.raises(Refused) as e:
+        init.recommended(proj, yes=True)
+    assert removed == ["automation"] and "focus" in on  # only this batch's, focus stays on
+    assert sorted(dropped) == ["automation", "dashboard"]
+    assert "Turned off again: automation" in str(e.value) and "Nothing was changed" not in str(e.value)
+
+
+def test_a_failed_batch_with_nothing_on_says_nothing_was_changed(proj, monkeypatch):
+    from orch import init
+
+    _windows_with_one_finisher(monkeypatch)
+    monkeypatch.setattr(addons, "_which_uv", lambda: None)
+    rows = {"automation": {"name": "automation", "version": "1", "description": "d", "background": False}}
+    monkeypatch.setattr(addons, "listing", lambda root: [])
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: rows)
+    monkeypatch.setattr(addons, "discover", lambda: {})
+    monkeypatch.setattr(addons, "consent_text", lambda m, x: m["name"])
+    monkeypatch.setattr(addons, "add", lambda root, n, yes=False: _collect(root, n))
+    with pytest.raises(Refused, match="Nothing was changed"):
+        init.recommended(proj, yes=True)
+
+
+def test_a_concurrent_caller_is_not_collected(proj, tmp_path):
+    """Another thread's add() (e.g. a dashboard hand-off) never joins a running batch (M2); another folder
+    does not either."""
+    import threading
+
+    seen = {}
+    with addons.batch_install(proj):
+        t = threading.Thread(target=lambda: seen.update(thread=addons._batch_for(proj)))
+        t.start()
+        t.join()
+        seen["other"] = addons._batch_for(tmp_path / "elsewhere")
+        seen["own"] = addons._batch_for(proj)
+    assert seen["thread"] is None and seen["other"] is None and seen["own"] is not None

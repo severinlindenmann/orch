@@ -12,6 +12,7 @@ AGENTS block, tab and background process. Leftover files or ext data never activ
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import fnmatch
 import hashlib
 import importlib.util
@@ -1386,43 +1387,87 @@ def reexec(args: list[str]) -> None:
         raise Refused("The project step failed (see above).")
 
 
-_BATCH: list[tuple[dict, list[list[str]]]] | None = None
+class _Batch:
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+        self.items: list[tuple[dict, list[list[str]]]] = []
+
+
+# A ContextVar, not a module global: another thread (e.g. a dashboard hand-off) never joins this batch.
+_BATCH: contextvars.ContextVar[_Batch | None] = contextvars.ContextVar("orch_addon_batch", default=None)
+
+
+def _batch_for(root: Path) -> _Batch | None:
+    b = _BATCH.get()
+    return b if b is not None and b.root == root.resolve() else None
+
+
+def _busy_refusal() -> Refused:
+    return Refused(
+        "An add-on install or update is still finishing in the background. "
+        f"Try again in a minute. Log: {winfinish_log()}"
+    )
+
+
+def winfinish_log() -> Path:
+    from orch import winfinish
+
+    return winfinish.log_path(home())
 
 
 @contextlib.contextmanager
 def batch_install(root: Path):
     """Several add() calls, ONE reinstall. On Windows each reinstall is a background finisher and a second one
     is refused while the first runs, so a loop of add() calls only got its first add-on. In this block
-    add() only collects; when the block ends without an error, one reinstall installs them all. Nothing is
-    recorded or installed if the block raises."""
-    global _BATCH
-    if _BATCH is not None:
+    add() only collects; when the block ends without an error, one reinstall installs them all.
+    The refusals that do not depend on the add-ons (tool folder change, a finisher still running) come first,
+    before anything is confirmed or recorded. If the install fails, the consents of this batch are dropped and
+    whatever it already turned on is turned off again (never anything that was on before)."""
+    from orch import winfinish
+
+    if _BATCH.get() is not None:
         raise RuntimeError("batch_install does not nest")
-    _BATCH = []
+    _tool_env_change_ok()
+    if winfinish.needed() and winfinish.pending(home()):
+        raise _busy_refusal()
+    before = set(active(root))
+    batch = _Batch(root)
+    token = _BATCH.set(batch)
     try:
         yield
-        collected = _BATCH
     finally:
-        _BATCH = None
-    if not collected:
+        _BATCH.reset(token)
+    if not batch.items:
         return
-    taken = {c["name"] for c, _ in collected}
-    final = [e for e in registry() if e["name"] not in taken] + [c for c, _ in collected]
-    for entry, _ in collected:
-        record_consent(root, entry["name"], final)
-    names = ", ".join(sorted(taken))
-    _reinstall(
-        final,
-        save=True,
-        then=[t for _, th in collected for t in th],
-        root=root,
-        done=f"{names} installed and turned on",
-    )
+    taken = {c["name"] for c, _ in batch.items}
+    final = [e for e in registry() if e["name"] not in taken] + [c for c, _ in batch.items]
+    try:
+        for name in sorted(taken):
+            record_consent(root, name, final)
+        _reinstall(
+            final,
+            save=True,
+            then=[t for _, th in batch.items for t in th],
+            root=root,
+            done=f"{', '.join(sorted(taken))} installed and turned on",
+        )
+    except Exception as e:
+        undone = []
+        for name in sorted(taken - before):
+            with contextlib.suppress(Exception):
+                if name in active(root):  # its project step ran before the failure
+                    remove(root, name)
+                    undone.append(name)
+            with contextlib.suppress(Exception):
+                drop_consent(root, name)
+        e.undone = undone  # type: ignore[attr-defined]  # init tells the person what was turned off again
+        raise
 
 
-def batched() -> set[str]:
-    """Names collected by the running batch_install (installed together when it ends)."""
-    return {c["name"] for c, _ in _BATCH or []}
+def batched(root: Path) -> set[str]:
+    """Names collected by this root's running batch_install (installed together when it ends)."""
+    b = _batch_for(root)
+    return {c["name"] for c, _ in b.items} if b else set()
 
 
 def add(root: Path, source: str, yes: bool = False, project_only: bool = False) -> None:
@@ -1443,8 +1488,10 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         print(f"{source} is turned on in this workspace.")
         return
     reg = registry()
-    if _BATCH is not None:  # add-ons collected earlier in this batch count as installed
-        reg = [e for e in reg if e["name"] not in {c["name"] for c, _ in _BATCH}] + [c for c, _ in _BATCH]
+    batch = _batch_for(root)
+    if batch is not None:  # add-ons collected earlier in this batch count as installed
+        got = {c["name"] for c, _ in batch.items}
+        reg = [e for e in reg if e["name"] not in got] + [c for c, _ in batch.items]
     if _is_path(source):
         folder = Path(source).expanduser().resolve()
         if not _local_add_ok():
@@ -1503,8 +1550,8 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
     then = [["addon", "add", entry["name"], "--project-only"]]
     if entry not in reg or entry["name"] not in discover():  # new, changed, or its package is gone
         new = [e for e in reg if e["name"] != entry["name"]] + [entry]
-        if _BATCH is not None:  # collected: batch_install records the consents and installs once
-            _BATCH[:] = [(c, t) for c, t in _BATCH if c["name"] != entry["name"]] + [(entry, then)]
+        if batch is not None:  # collected: batch_install records the consents and installs once
+            batch.items[:] = [(c, t) for c, t in batch.items if c["name"] != entry["name"]] + [(entry, then)]
             return
         # before the install: its follow-up step (now, or in the Windows finisher) needs the consent. If the
         # install fails, the record does not match the unchanged registry, so it turns nothing on.
