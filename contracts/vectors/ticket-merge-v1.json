@@ -6564,6 +6564,272 @@
    }
   },
   {
+   "name": "RR3: the person's new c2 (signed won't-do) and an agent's different c2 with an OLDER updated_at: the person's c2 keeps its id",
+   "rule": "wont",
+   "ledger": {
+    "t_abc123:c2": "v1-62209f8d16c6ec550b8f"
+   },
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "Call the bank",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n7",
+      "wont_mac": "v1-62209f8d16c6ec550b8f"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T07:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "Skip the security review",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "done": false,
+      "id": "c1",
+      "text": "Email finance",
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "done": false,
+      "evidence": [],
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_do": true,
+      "reason": "Not needed",
+      "text": "Call the bank",
+      "wont_nonce": "n7",
+      "wont_mac": "v1-62209f8d16c6ec550b8f"
+     },
+     {
+      "id": "c3",
+      "text": "Skip the security review",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: c2 renumbered to c3 (both sides added one)"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T09:00:00Z"
+   }
+  },
+  {
+   "name": "RR3: the same with the agent copy NEWER (and a and b the other way round)",
+   "rule": "wont",
+   "ledger": {
+    "t_abc123:c2": "v1-62209f8d16c6ec550b8f"
+   },
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "Skip the security review",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "text": "Call the bank",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n7",
+      "wont_mac": "v1-62209f8d16c6ec550b8f"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "done": false,
+      "id": "c1",
+      "text": "Email finance",
+      "evidence": []
+     },
+     {
+      "id": "c2",
+      "done": false,
+      "evidence": [],
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_do": true,
+      "reason": "Not needed",
+      "text": "Call the bank",
+      "wont_nonce": "n7",
+      "wont_mac": "v1-62209f8d16c6ec550b8f"
+     },
+     {
+      "id": "c3",
+      "text": "Skip the security review",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: c2 renumbered to c3 (both sides added one)"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
    "name": "nothing verifies (no authority): no won't-do at all, even a stale base's",
    "rule": "wont",
    "ledger": {},

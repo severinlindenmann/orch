@@ -125,18 +125,32 @@ def _deep(ctx, base, a, b, path=()):
     return _three(ctx, base, a, b)
 
 
-def _renumber_clashes(ctx, base, a, b, same, prefix):
+class _Pause(Exception):
+    """Two items the core vouches for claim one id: cannot be merged, the caller pauses (merge_ticket -> None)."""
+
+
+def _renumber_clashes(ctx, base, a, b, same, prefix, vouched=False):
     """Both sides added an item with the same id but different content: the older side keeps the id, the newer
-    side's item gets the next free one. Returns the renames per side."""
+    side's item gets the next free one. `vouched` (the checklist): an item the core verifies (a person's signed
+    Won't do) NEVER moves, whatever updated_at says (peer-controlled): the other side's item is renumbered; two
+    verifying items cannot be merged (pause); updated_at only decides between unverified items. Returns the
+    renames per side."""
     bids = {x["id"] for x in base}
     clash = [x["id"] for x in a if x["id"] not in bids and any(y["id"] == x["id"] and not same(x, y) for y in b)]
     used = {x["id"] for x in base + a + b}
     ren = {"a": {}, "b": {}}
     newer = "a" if ctx.a_newer else "b"
     for i in sorted(clash, key=lambda s: (_num(s), s)):
+        mover = newer
+        if vouched:
+            va = any(ctx.verified(x) for x in a if x["id"] == i)
+            vb = any(ctx.verified(x) for x in b if x["id"] == i)
+            if va and vb:
+                raise _Pause(i)
+            mover = "b" if va else "a" if vb else newer
         new = f"{prefix}{max(_num(u) for u in used) + 1}"
         used.add(new)
-        ren[newer][i] = new
+        ren[mover][i] = new
         ctx.say(f"{i} renumbered to {new} (both sides added one)")
     for side, lst in (("a", a), ("b", b)):
         for x in lst:
@@ -331,7 +345,8 @@ def _merge(base, a, b, now, person=None):
     ctx = _Ctx(a, b, now, person)
     # the same id added on both sides with different content: the newer side's item is renumbered
     ren = _renumber_clashes(ctx, base.get("checklist", []), a.setdefault("checklist", []),
-                            b.setdefault("checklist", []), lambda x, y: x.get("text") == y.get("text"), "c")
+                            b.setdefault("checklist", []), lambda x, y: x.get("text") == y.get("text"), "c",
+                            vouched=True)
     for side, t in (("a", a), ("b", b)):
         for q in t.get("questions", []):
             if q.get("check") in ren[side]:
