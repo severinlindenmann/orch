@@ -874,7 +874,7 @@ def test_link_actions_are_audited(ws, monkeypatch):
     monkeypatch.setattr(actions, "publish_connected", lambda *a: True)
     monkeypatch.setattr(actions, "human_env", lambda *a: {})
     monkeypatch.setattr(
-        actions.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "{}", "")
+        actions, "_run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "{}", "")
     )
     for op, args in [("link.extend", {"id": "f_a", "days": 7}), ("link.stop", {"id": "f_a"})]:
         assert actions.run_op(ws, "orch", op, args)[0] == 200

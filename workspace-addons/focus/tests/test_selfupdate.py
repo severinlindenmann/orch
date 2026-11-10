@@ -132,7 +132,7 @@ def test_import_check_uses_the_same_isolation(monkeypatch):
     class R:
         returncode = 0
 
-    monkeypatch.setattr(selfupdate.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)) or R())
+    monkeypatch.setattr(selfupdate, "_run", lambda cmd, **kw: calls.append((cmd, kw)) or R())
     assert selfupdate._runs_new_code()
     cmd, kw = calls[0]
     assert cmd[:2] == [sys.executable, "-P"] and kw["cwd"] == SRC.parent and "env" not in kw  # same env as the exec

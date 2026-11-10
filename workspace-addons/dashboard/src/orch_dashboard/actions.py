@@ -21,6 +21,7 @@ from .look import LOOK_OPS
 from .look import forget as look_forget
 from .mobile import MOBILE_OPS, MOBILE_REQUIRED_ADDONS
 
+_run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 try:
     from orch.pageproof import SELF, argv0, run_with_proof
 except ImportError:  # standalone use without orch: nothing runs
@@ -747,7 +748,7 @@ def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, byte
     saved, failed = [], []
     for hint, raw in files:
         try:
-            r = subprocess.run(
+            r = _run(
                 [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
                 check=False,
                 cwd=root,
@@ -809,7 +810,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
                 argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
             )
         else:
-            r = subprocess.run(
+            r = _run(
                 [*argv0(orch_bin), *argv],
                 check=False,
                 cwd=root,
