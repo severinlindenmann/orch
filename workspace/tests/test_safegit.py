@@ -1481,8 +1481,8 @@ def test_runs_kill_tree_uses_the_full_path_taskkill_or_does_nothing(monkeypatch,
 
 
 def test_safegit_works_with_an_untrusted_orch_home(proj, monkeypatch, tmp_path):
-    """The hooks path must not need the orch home: with an ORCH_HOME that is not trusted, run_bytes() and run()
-    still work (the test that found this: refreshing with an unpaired home)."""
+    """The hooks path must not need the orch home: with an ORCH_HOME that is not trusted, run_bytes() and
+    run() still work (the test that found this: refreshing with an unpaired home)."""
     from orch import harness
 
     monkeypatch.setenv(

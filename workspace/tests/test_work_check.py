@@ -225,7 +225,9 @@ def test_git_runs_through_safegit_with_the_hardened_flags(ws, monkeypatch):
         assert argv[1] == "--no-optional-locks"
         for want in ("core.fsmonitor=false", "core.untrackedCache=false", "protocol.allow=never"):
             assert want in argv
-        assert any(a.startswith("core.hooksPath=") and a != "core.hooksPath=/dev/null" for a in argv)
+        assert (
+            "core.hooksPath=/dev/null" if os.name != "nt" else "core.hooksPath=//./NUL"
+        ) in argv  # from safegit
         assert not any(k.startswith("GIT_DIR") for k in env)
         assert not {"diff", "status", "log", "show", "add", "commit"} & set(argv)
 
