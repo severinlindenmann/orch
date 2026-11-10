@@ -427,3 +427,24 @@ def test_init_other_by_a_person_leaves_a_hand_off_and_saves_nothing(ws, run, mon
     card = hp.handoffs(ws)[0]
     assert card["op"] == "config.agent_add" and card["target"] == hp.agent_add_target("mine", "mine {prompt}")
     assert card["argv"] == ["config", "agent", "add", "mine", "--command", "mine {prompt}"]
+
+
+def test_init_other_agent_exits_2_without_the_page_message(ws, run, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    _fake_init_tty(monkeypatch)
+    code, out, err = run("init")
+    assert code == 2 and "Confirm" not in out + err and "on the page" not in out + err
+    assert "mine" not in (config.read(ws).get("agents") or {}) and hp.handoffs(ws) == []
+    # the init-side check too: person_by gives back a non-person identity instead of raising
+    monkeypatch.setattr(hp, "person_by", lambda *a, **k: "agent:claude")
+    _fake_init_tty(monkeypatch)
+    code, out, err = run("init")
+    assert code == 2 and "orch ask" in out + err and "Confirm" not in out + err
+
+
+def test_init_other_with_a_bad_command_exits_2_without_a_hand_off(ws, run, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    _fake_init_tty(monkeypatch, cmd="x" * 600)
+    code, out, err = run("init")
+    assert code == 2 and "Confirm" not in out + err
+    assert hp.handoffs(ws) == [] and "mine" not in (config.read(ws).get("agents") or {})

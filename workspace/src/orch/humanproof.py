@@ -1281,6 +1281,13 @@ def mint_dev(root: Path, op: str, target: str, life: int = 30) -> str:
 # ------------------------------------------------------------------------------------------- CLI gate
 
 HANDOFF = "Do this in the dashboard on this computer."
+
+
+class HandOffPending(Refused):
+    """Raised ONLY where person_by has written (or found) the hand-off card: the person is to click on the
+    page. A Refused for anything else (an agent, a bad value, no card) is not this."""
+
+
 AGENT_REFUSED = "Only a human can do this. Ask the human to run it themselves."
 HANDOFF_PER_OP = 3
 
@@ -1731,7 +1738,7 @@ def person_by(
     queued = request_handoff(root, op, target, label, value, clean, parts, exact)
     if not queued:
         raise Refused(HANDOFF)
-    raise Refused(_dashboard_note(root, open_ok=queued is True))
+    raise HandOffPending(_dashboard_note(root, open_ok=queued is True))
 
 
 # ------------------------------------------------------------------------------------------- launch token

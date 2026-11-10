@@ -150,17 +150,21 @@ def _other(root: Path) -> str:
 
     from orch import humanproof
 
+    if not (1 <= len(cmd) <= 500 and "\n" not in cmd and "\r" not in cmd):
+        raise Refused("The command must be one line of at most 500 characters.")
+    target = humanproof.agent_add_target(name, cmd)  # computed first: a bad value refuses here (exit 2)
+    exact = humanproof.agent_add_exact(cmd)
     try:
         who = humanproof.person_by(
             root,
             SimpleNamespace(proof_stdin=False, by=None),
             "config.agent_add",
-            humanproof.agent_add_target(name, cmd),
+            target,
             parts={"name": name, "command": cmd},
-            exact=humanproof.agent_add_exact(cmd),
+            exact=exact,
             argv=["config", "agent", "add", name, "--command", cmd],
         )
-    except Refused as e:  # a person: the hand-off is on the page; init goes on with everything else
+    except humanproof.HandOffPending as e:  # a person: the card is on the page; init goes on
         return (
             f"Agent: not set yet. {e} Confirm '{name}' on the page, "
             f"then run: orch config set workspace.agent {name}"
