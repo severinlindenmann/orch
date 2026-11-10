@@ -6,6 +6,9 @@ POSIX has 0700/0600 and an lstat link check. Windows has neither, so this module
 - check_private(path): read the rights back and refuse unless the list is exactly this user and/or SYSTEM,
   allow-only, protected (no inheritance), and the path has no link or junction.
 - no_reparse(path): no symlink, junction or other reparse point on any part of the path.
+- allow_home(path) / check_scope(path): rights are only ever WRITTEN inside a guarded orch home that
+  humanproof.guarded_home resolved in this process (its real path, so a junction can not lead out). Never the
+  current folder, a workspace, the Public folder, the profile folder or anything above it. Fail closed.
 
 No child process is ever started (a planted icacls.exe or whoami.exe in the current folder or on PATH can
 not fake the answer): everything goes through the Win32 API with ctypes (advapi32). Rights are compared by
@@ -147,6 +150,7 @@ def user_sid() -> str:
 
 def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
     """Replace the DACL by: this user and SYSTEM, full control; protected (inheritance removed)."""
+    check_scope(path)  # the only DACL writer: the scope guard holds here too, whoever calls it
     ctypes, wintypes, adv, k32 = _api()
     inh = "OICI" if is_dir else ""
     sddl = f"D:P(A;{inh};FA;;;{SYSTEM_SID})(A;{inh};FA;;;{sid})"
@@ -339,11 +343,86 @@ def parse_aces(protected: bool, aces: list[tuple[int, int, int, str]], sid: str)
         raise _no("your account is not on its rights list")
 
 
+# ------------------------------------------------------------------------- where rights may be written
+
+_homes: set[str] = set()  # real paths (normcase) of the guarded homes this process resolved
+
+
+def _real(path: str | os.PathLike) -> str:
+    return os.path.normcase(os.path.realpath(os.fspath(path)))
+
+
+def _inside(child: str, parent: str) -> bool:
+    """child is parent or below it (both real, normcased)."""
+    if child == parent:
+        return True
+    if os.path.splitdrive(child)[0] != os.path.splitdrive(parent)[0]:
+        return False
+    rel = os.path.relpath(child, parent)
+    return rel != os.pardir and not rel.startswith(os.pardir + os.sep) and not os.path.isabs(rel)
+
+
+def _guard_profile() -> str:
+    """The profile folder (from the token) for the scope guard. Unknown = refused. Tests replace this."""
+    return profile_dir()
+
+
+def _forbidden(rp: str) -> str | None:
+    """Why `rp` (real, normcased) may never get its rights changed by orch, or None."""
+    if rp == os.path.dirname(rp):
+        return "it is a drive root"
+    try:
+        prof = _real(_guard_profile())
+    except Refused:
+        return "your profile folder could not be found"
+    if _inside(prof, rp):
+        return "it is your profile folder or above it"
+    public = _real(os.path.join(os.path.dirname(prof), "Public"))
+    if _inside(rp, public):
+        return "it is in the shared Public folder"
+    if not _inside(rp, prof):
+        return "it is outside your profile folder"
+    try:
+        cwd = _real(os.getcwd())
+    except OSError:
+        return "the current folder could not be found"
+    if _inside(cwd, rp):
+        return "it is the current folder or above it"
+    return None
+
+
+def allow_home(path: str | os.PathLike) -> None:
+    """Record a guarded home (humanproof.guarded_home calls this). Windows only; a home in a forbidden place
+    (Public, the profile folder itself, a drive root) is refused."""
+    if not _windows():
+        return
+    rp = _real(path)
+    why = _forbidden(rp)
+    if why:
+        raise _no(f"orch would change rights outside its own folder: {why}")
+    _homes.add(rp)
+
+
+def check_scope(path: str | os.PathLike) -> None:
+    """Refuse unless `path` (real path: links and junctions resolved) is inside a guarded home recorded by
+    allow_home, and is not a forbidden place. Called before EVERY rights write. No home recorded = refused."""
+    if not _windows():
+        return
+    rp = _real(path)
+    why = _forbidden(rp)
+    if why is None and not any(_inside(rp, h) for h in _homes):
+        why = "it is not inside orch's own folder"
+    if why:
+        raise _no(f"orch will not change the rights of {path}: {why}")
+
+
 def set_private(path: str | os.PathLike, is_dir: bool) -> None:
-    """Only this user and SYSTEM, inheritance removed; then read back and verified."""
+    """Only this user and SYSTEM, inheritance removed; then read back and verified. Only inside a guarded home
+    (check_scope runs before any write)."""
     if not _windows():
         return
     p = Path(path)
+    check_scope(p)
     no_reparse(p)
     try:
         _write_dacl(p, is_dir, user_sid())

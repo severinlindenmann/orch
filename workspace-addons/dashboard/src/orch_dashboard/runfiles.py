@@ -119,6 +119,7 @@ def grant_user(d: Path) -> None:
     sid = user_sid()
     if not sid:
         return
+    check_orch_area(d)  # rights change only inside a workspace's .orch folder
     try:  # right before the grant: only a plain folder, never a link someone swapped in after mkdir
         st = os.lstat(d)
     except OSError:
@@ -137,8 +138,25 @@ def grant_user(d: Path) -> None:
         pass
 
 
+def in_orch_area(p: Path) -> bool:
+    """True when p's real path (links and junctions resolved) is a workspace's .orch folder or below it."""
+    r = Path(os.path.realpath(p))
+    return any(c.name.casefold() == ".orch" for c in (r, *r.parents))
+
+
+def check_orch_area(p: Path) -> None:
+    """The add-on makes private folders and grants rights ONLY inside a workspace's .orch folder: never the
+    current folder, the workspace root, the Public folder or a profile folder. Refused otherwise (no fallback)."""
+    if not in_orch_area(p):
+        raise RuntimeError(
+            f"{p} is not inside the workspace's .orch folder; orch will not change its rights."
+        )
+
+
 def mkdir_private(p: Path) -> bool:
-    """Create p as 0700 when it is missing; True only when this call created it (an existing folder is not touched)."""
+    """Create p as 0700 when it is missing; True only when this call created it (an existing folder is not touched).
+    Only inside a workspace's .orch folder (checked before the folder is made)."""
+    check_orch_area(p)
     try:
         p.mkdir(mode=0o700)
     except FileExistsError:

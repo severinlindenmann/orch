@@ -116,9 +116,10 @@ def test_a_link_swapped_in_after_mkdir_is_never_granted(tmp_path, win, monkeypat
 
 
 def test_junction_swapped_between_mkdir_and_grant_is_refused(tmp_path, win, monkeypatch):
+    (tmp_path / ".orch" / "run").mkdir(parents=True)
     monkeypatch.setattr(runfiles, "reparse", lambda p: True)
     with pytest.raises(RuntimeError, match="not a plain folder"):
-        runfiles.mkdir_private(tmp_path / "new")
+        runfiles.mkdir_private(tmp_path / ".orch" / "run" / "new")
     assert win == []
 
 
@@ -147,3 +148,39 @@ def test_runs_dir_refuses_a_junction_and_reports_an_admin_made_folder(tmp_path, 
     monkeypatch.setattr(runfiles.os, "scandir", deny)
     with pytest.raises(RuntimeError, match="made by orch running as administrator"):
         events.runs_dir(tmp_path)
+
+
+# ---- scope guard (I11b): rights change only inside the workspace's .orch folder
+
+
+def test_never_outside_the_orch_folder(tmp_path, win, monkeypatch):
+    shared = tmp_path / "Public" / "i11b"  # a shared helper folder, also the current folder
+    shared.mkdir(parents=True)
+    monkeypatch.chdir(shared)
+    for target in (shared, shared / "new", tmp_path, tmp_path / "Public" / "new"):
+        with pytest.raises(RuntimeError, match=r"\.orch folder"):
+            runfiles.mkdir_private(target)
+        with pytest.raises(RuntimeError, match=r"\.orch folder"):
+            runfiles.grant_user(target)
+    assert not (shared / "new").exists() and not (tmp_path / "Public" / "new").exists()
+    assert win == []  # no icacls call at all
+
+
+def test_junction_escape_from_orch_is_refused(tmp_path, win):
+    outside = tmp_path / "Public" / "i11b"
+    outside.mkdir(parents=True)
+    (tmp_path / ".orch").mkdir()
+    (tmp_path / ".orch" / "esc").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(RuntimeError, match=r"\.orch folder"):
+        runfiles.mkdir_private(tmp_path / ".orch" / "esc" / "new")  # real path is outside .orch
+    with pytest.raises(RuntimeError, match=r"\.orch folder"):
+        runfiles.grant_user(tmp_path / ".orch" / "esc")
+    assert win == [] and not (outside / "new").exists()
+
+
+def test_run_dir_from_a_public_like_cwd_touches_only_orch(tmp_path, win, monkeypatch):
+    ws = tmp_path / "Public" / "i11b"
+    (ws / ".orch").mkdir(parents=True)
+    monkeypatch.chdir(ws)  # orch start run from inside the shared folder (its root is the workspace)
+    runfiles.run_dir(ws, "x")
+    assert [c[1] for c in win] == [str(ws / ".orch" / "run"), str(ws / ".orch" / "run" / "x")]

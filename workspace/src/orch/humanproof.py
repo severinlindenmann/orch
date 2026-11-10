@@ -252,6 +252,7 @@ def guarded_home(root: Path) -> Path:
             raise HomeRefused(MSG_LINKED_HOME.format(path=cand))
     if not home_ok(acct, install, real_dir, ws_real, home_real):
         raise HomeRefused(MSG_TEST_WS if ws_test else MSG_OTHER_HOME)
+    winacl.allow_home(cand)  # Windows: rights are written only inside this home (not cwd, Public)
     return cand
 
 

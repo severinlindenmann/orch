@@ -43,7 +43,7 @@ BAD = {
 
 
 @pytest.fixture
-def win(monkeypatch):
+def win(monkeypatch, tmp_path):
     calls = []
     state = {"dacl": FILE_OK, "attrs": 0, "err": None, "set_err": None, "owner": SID, "loose": set()}
 
@@ -84,6 +84,10 @@ def win(monkeypatch):
     monkeypatch.setattr(subprocess, "run", no_process)
     monkeypatch.setattr(subprocess, "Popen", no_process)
     monkeypatch.setattr(os, "system", no_process)
+    # the scope guard: a fake profile folder holding this test's folders; tmp_path counts as a guarded home
+    monkeypatch.setattr(winacl, "_guard_profile", lambda: str(tmp_path.parent))
+    monkeypatch.setattr(winacl, "_homes", set())
+    winacl.allow_home(tmp_path)
     state["calls"] = calls
     return state
 
@@ -426,3 +430,123 @@ def test_posix_read_none_is_still_a_loose_file(tws, monkeypatch):
     key = hp.human_key(tws)
     _read_fails_once(monkeypatch)
     assert hp.human_key(tws) != key  # POSIX behaviour unchanged: reset
+
+
+# ------------------------------------------------- scope guard (I11b: rights only inside the home)
+
+
+@pytest.fixture
+def users(win, tmp_path, monkeypatch):
+    """A fake C:\\Users: Users/user = the profile, Users/Public = the shared folder, .orch-tool = the home."""
+    root = tmp_path / "Users"
+    prof, public, home = root / "user", root / "Public", root / "user" / ".orch-tool"
+    for d in (home, public / "i11b"):
+        d.mkdir(parents=True)
+    monkeypatch.setattr(winacl, "_guard_profile", lambda: str(prof))
+    monkeypatch.setattr(winacl, "_homes", set())
+    winacl.allow_home(home)
+    return {"root": root, "prof": prof, "public": public, "home": home, "shared": public / "i11b"}
+
+
+def _writes(win):
+    return [c for c in win["calls"] if c[0] == "write"]
+
+
+def test_scope_refuses_a_target_outside_the_home_before_any_write(win, users):
+    outside = users["prof"] / "Documents"
+    outside.mkdir()
+    for target, is_dir in ((outside, True), (outside / "f", False), (users["shared"], True)):
+        with pytest.raises(Refused):
+            winacl.set_private(target, is_dir)
+    assert _writes(win) == []
+    winacl.set_private(users["home"] / "keys", True)  # inside the home: allowed
+    assert len(_writes(win)) == 1
+
+
+def test_scope_ensure_private_never_tightens_outside_the_home(win, users):
+    win["dacl"] = INHERITED  # too open: ensure_private would tighten it if it were ours
+    for target in (users["prof"] / "Documents", users["shared"]):
+        target.mkdir(exist_ok=True)
+        with pytest.raises(Refused):
+            winacl.ensure_private(target)
+    assert _writes(win) == []
+
+
+def test_scope_guard_holds_in_the_dacl_writer_itself(monkeypatch, tmp_path):
+    """_write_dacl (the only real writer) checks the scope before it touches the Win32 API."""
+    monkeypatch.setattr(winacl, "_windows", lambda: True)
+    monkeypatch.setattr(winacl, "_guard_profile", lambda: str(tmp_path))
+    monkeypatch.setattr(winacl, "_homes", set())
+    monkeypatch.setattr(winacl, "_api", lambda: pytest.fail("the DACL API was reached"))
+    with pytest.raises(Refused):
+        winacl._write_dacl(tmp_path / "x", True, SID)
+
+
+def test_scope_refuses_when_no_home_was_recorded(win, users, monkeypatch):
+    monkeypatch.setattr(winacl, "_homes", set())
+    with pytest.raises(Refused, match="not inside orch's own folder"):
+        winacl.set_private(users["home"], True)
+    assert _writes(win) == []
+
+
+def test_scope_refuses_when_the_profile_is_unknown(win, users, monkeypatch):
+    def gone():
+        raise winacl._cant("no profile")
+
+    monkeypatch.setattr(winacl, "_guard_profile", gone)
+    with pytest.raises(Refused, match="profile folder could not be found"):
+        winacl.set_private(users["home"], True)
+    assert _writes(win) == []
+
+
+def test_scope_refuses_a_junction_escape(win, users):
+    esc = users["home"] / "esc"
+    esc.symlink_to(users["shared"], target_is_directory=True)  # a junction from the home to the outside
+    with pytest.raises(Refused, match="Public"):
+        winacl.set_private(esc, True)
+    win["dacl"] = INHERITED  # too open: only the scope guard stops it (the link check is faked off)
+    with pytest.raises(Refused, match="Public"):
+        winacl.ensure_private(esc)
+    assert _writes(win) == []
+
+
+def test_scope_refuses_a_home_in_public_the_profile_or_above(win, users):
+    for bad in (users["public"] / "orch", users["shared"], users["prof"], users["root"],
+                Path(os.path.abspath(os.sep))):  # fmt: skip
+        with pytest.raises(Refused):
+            winacl.allow_home(bad)
+    link = users["prof"] / "home-link"
+    link.symlink_to(users["shared"], target_is_directory=True)
+    with pytest.raises(Refused, match="Public"):
+        winacl.allow_home(link)  # a home that is a junction into Public is judged by its real path
+
+
+def test_scope_never_the_current_folder_or_above(win, users, monkeypatch):
+    sub = users["home"] / "keys"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+    for target in (sub, users["home"]):
+        with pytest.raises(Refused, match="current folder"):
+            winacl.set_private(target, True)
+    assert _writes(win) == []
+
+
+def test_public_like_cwd_stays_untouched_through_keys(win, tws, tmp_path, monkeypatch):
+    """I11b: orch run from a shared helper folder (the cwd) writes rights only inside the guarded home, never
+    on the cwd, the workspace root or a parent."""
+    shared = tmp_path / "Public" / "i11b"
+    shared.mkdir(parents=True)
+    monkeypatch.chdir(shared)
+    hp.human_key(tws)
+    home = os.path.realpath(hp.guarded_home(tws))
+    writes = [os.path.realpath(c[1]) for c in _writes(win)]
+    assert writes, "the home must have been set private"
+    assert all(w == home or w.startswith(home + os.sep) for w in writes), writes
+    assert os.path.realpath(shared) not in writes and os.path.realpath(tws) not in writes
+
+
+def test_scope_is_a_no_op_on_posix(tmp_path, monkeypatch):
+    monkeypatch.setattr(winacl, "_homes", set())
+    winacl.check_scope(tmp_path)  # POSIX: modes and lstat do the job; nothing to refuse here
+    winacl.allow_home(tmp_path)
+    assert winacl._homes == set()
