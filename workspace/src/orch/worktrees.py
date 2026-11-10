@@ -689,6 +689,16 @@ def _long(p: str) -> str:
     return p
 
 
+def _chmod_nofollow(path: str, is_dir: bool) -> None:
+    """chmod 0700 of `path` itself through an open descriptor; refuses (OSError) when it is a link."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | (getattr(os, "O_DIRECTORY", 0) if is_dir else 0)
+    fd = os.open(path, flags)
+    try:
+        os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
+
+
 def rmtree_nofollow(top: Path) -> bool:
     """Delete the folder `top` and everything in it; True when it is gone. NEVER follows a link: a link
     inside
@@ -701,10 +711,15 @@ def rmtree_nofollow(top: Path) -> bool:
     if os.name != "nt" and shutil.rmtree.avoids_symlink_attacks:
 
         def fix(func, path, exc):
+            # a read-only file or folder: make exactly it (and the folder it is in) writable and try again.
+            # chmod through an open descriptor of a thing that is NOT a link (O_NOFOLLOW): a link inside a
+            # copy can never make orch change the mode of its target
             if isinstance(exc, PermissionError):
                 with contextlib.suppress(OSError):
-                    os.chmod(os.path.dirname(path) or ".", 0o700)
-                    os.chmod(path, 0o700)
+                    _chmod_nofollow(os.path.dirname(path) or ".", True)
+                with contextlib.suppress(OSError):  # a link refuses here: it is removed without any chmod
+                    _chmod_nofollow(path, os.path.isdir(path) and not os.path.islink(path))
+                with contextlib.suppress(OSError):
                     func(path)
 
         with contextlib.suppress(OSError):
@@ -1097,9 +1112,18 @@ def spawn_trash_clean(root: Path) -> None:
             return
         if os.environ.get("ORCH_NO_DETACHED_CLEAN"):
             return
+        from orch import procs
+
+        home = addons.home(root)
+        neutral = home if home.is_dir() else Path(os.path.abspath(os.sep))
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env["ORCH_ROOT"] = str(root)  # the workspace is named, not the current folder (a neutral one)
         subprocess.Popen(
-            [sys.executable, "-m", "orch", "copy", "clean", "--trash"],
-            cwd=root,
+            procs.orch_python_argv(
+                "copy", "clean", "--trash"
+            ),  # -I -P: nothing planted in the workspace runs
+            cwd=neutral,
+            env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

@@ -313,7 +313,7 @@ def test_keeper_argv_has_dash_P(on_state, monkeypatch):
     monkeypatch.setattr(mm.subprocess, "Popen", lambda argv, **kw: spawned.append((argv, kw)))
     REAL_SPAWN(on_state)
     argv, kw = spawned[-1]
-    assert argv[:4] == [sys.executable, "-P", "-m", "orch"] and argv[4:] == ["relay", "mobile", "keeper"]
+    assert argv[:5] == [sys.executable, "-I", "-P", "-m", "orch"] and argv[5:] == ["relay", "mobile", "keeper"]
     assert kw["cwd"] == str(on_state)
 
 

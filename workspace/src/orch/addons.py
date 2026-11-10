@@ -1380,7 +1380,7 @@ def preview_builtin(name: str) -> dict:
 def reexec(args: list[str]) -> None:
     """Run the freshly installed orch for the project step (this process still runs the old code).
     Tests replace this with an in-process call."""
-    r = subprocess.run([sys.executable, "-P", "-m", "orch", *args], text=True, stdout=subprocess.PIPE)
+    r = subprocess.run([sys.executable, "-I", "-P", "-m", "orch", *args], text=True, stdout=subprocess.PIPE)
     sys.stdout.write(r.stdout)  # through our stdout, so a caller that redirects it (init --json) stays clean
     if r.returncode != 0:
         raise Refused("The project step failed (see above).")

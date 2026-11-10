@@ -836,3 +836,61 @@ def test_run_start_and_orch_start_sweep_first(repo, monkeypatch):
     args = type("A", (), {"cmd": "start", "print_launch_url": False, "json": True, "no_open": True})()
     cli_status._services_cmd(args, repo)
     assert len(calls) == 2
+
+
+# ---------------------------------------------------------------- the detached trash clean
+
+
+def test_the_detached_clean_never_imports_anything_planted_in_the_workspace(repo, monkeypatch):
+    import sys
+
+    p = make(repo, 0)
+    (p.parent / ".trash").mkdir()
+    marker = repo.parent / "planted-ran"
+    (repo / "orch.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n")
+    (repo / "orch").mkdir()
+    (repo / "orch" / "__init__.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n")
+    monkeypatch.delenv("ORCH_NO_DETACHED_CLEAN")
+    seen = {}
+
+    def fake_popen(argv, **kw):
+        seen.update(argv=argv, **kw)
+
+        class P:
+            pass
+
+        return P()
+
+    with monkeypatch.context() as m:
+        m.setattr(worktrees.subprocess, "Popen", fake_popen)
+        worktrees.spawn_trash_clean(repo)
+    argv = seen["argv"]
+    assert argv[:5] == [sys.executable, "-I", "-P", "-m", "orch"]
+    assert Path(seen["cwd"]).resolve() != repo.resolve() and seen["env"]["ORCH_ROOT"] == str(repo)
+    done = subprocess.run(argv, cwd=seen["cwd"], env=seen["env"], capture_output=True, text=True, timeout=60)
+    assert not marker.exists(), done.stderr
+    assert done.returncode == 0, done.stderr
+
+
+def test_a_link_inside_a_copy_never_makes_orch_chmod_its_target(repo, tmp_path):
+    decoy = tmp_path / "decoy.txt"
+    decoy.write_text("keep")
+    decoy.chmod(0o640)
+    decoydir = tmp_path / "decoydir"
+    decoydir.mkdir()
+    decoydir.chmod(0o750)
+    p = make(repo, 0)
+    ro = p / "readonly"
+    ro.mkdir()
+    (ro / "f").write_text("x")
+    (ro / "link").symlink_to(decoy)
+    (ro / "dlink").symlink_to(decoydir)
+    ro.chmod(0o500)  # a read-only folder: the delete must fix it, and only it
+    d = p.parent / ".trash"
+    d.mkdir()
+    moved = d / "t_abcdef12-0123abcd"
+    os.rename(p, moved)
+    assert worktrees.empty_trash(repo)
+    assert not moved.exists()
+    assert decoy.read_text() == "keep" and decoy.stat().st_mode & 0o777 == 0o640
+    assert decoydir.stat().st_mode & 0o777 == 0o750
