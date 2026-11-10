@@ -1148,7 +1148,7 @@ def test_undoing_a_wont_do_needs_a_proof_but_reopening_a_done_step_stays_free(ws
     code, *_ = _cli(
         run,
         monkeypatch,
-        _proof(ws, "check.wont_do_undo", f"{tid}:{cid}"),
+        _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:reopen"),
         "check",
         "reopen",
         tid,
@@ -1225,10 +1225,15 @@ def test_remove_and_rename_of_a_wont_do_need_the_proof_and_hand_off(ws, run, mon
     assert cards["remove"]["parts"] == {"title": "Plan", "step": "Write the file", "n": 1, "action": "remove"}
     # with the proof: it works, and by comes from the proof
     target = f"{tid}:{cid}"
+    # the ACTION is part of the target: a proof for one action does not do another
+    for wrong_action, argv in (("reopen", ("check", "edit", tid, cid, "Renamed")), ("edit", ("check", "remove", tid, cid))):
+        proof = _proof(ws, "check.wont_do_undo", f"{target}:{wrong_action}")
+        assert _cli(run, monkeypatch, proof, *argv, "--json")[0] == 2
+    assert tickets.load(ws, tid)["checklist"][0]["text"] == "Write the file"
     code, *_ = _cli(
         run,
         monkeypatch,
-        _proof(ws, "check.wont_do_undo", target),
+        _proof(ws, "check.wont_do_undo", target + ":edit"),
         "check",
         "edit",
         tid,
@@ -1238,7 +1243,7 @@ def test_remove_and_rename_of_a_wont_do_need_the_proof_and_hand_off(ws, run, mon
     )
     assert code == 0 and tickets.load(ws, tid)["checklist"][0]["text"] == "Renamed"
     code, *_ = _cli(
-        run, monkeypatch, _proof(ws, "check.wont_do_undo", target), "check", "remove", tid, cid, "--json"
+        run, monkeypatch, _proof(ws, "check.wont_do_undo", target + ":remove"), "check", "remove", tid, cid, "--json"
     )
     assert code == 0 and tickets.load(ws, tid)["checklist"] == []
 
@@ -1247,7 +1252,7 @@ def test_an_agent_cannot_remove_or_rename_a_wont_do_even_with_a_forged_flag(ws, 
     tid, cid = _wont_do_step(ws, run, monkeypatch)
     for argv in (("check", "remove", tid, cid), ("check", "edit", tid, cid, "X")):
         assert run(*argv, "--by", "agent:x", "--json")[0] == 2
-    wrong = _proof(ws, "check.wont_do_undo", f"{tid}:c9")
+    wrong = _proof(ws, "check.wont_do_undo", f"{tid}:c9:remove")
     assert _cli(run, monkeypatch, wrong, "check", "remove", tid, cid, "--json")[0] == 2
     assert tickets.load(ws, tid)["checklist"][0]["wont_do"] is True
 
@@ -1371,7 +1376,7 @@ def test_wont_do_and_its_undo_are_signed_and_the_sync_verifier_accepts_only_them
     agent["checklist"][0].pop("wont_mac", None)
     merged = merge_ticket(base, agent, base, "2099-01-02T00:00:00Z", person)
     assert merged["checklist"][0]["wont_do"] is True
-    undo_proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}")
+    undo_proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:reopen")
     _cli(run, monkeypatch, undo_proof, "check", "reopen", tid, cid, "--json")
     t2 = tickets.load(ws, tid)
     undone = t2["checklist"][0]

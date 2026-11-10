@@ -643,7 +643,8 @@ def _undo_gated(root: Path, args, who: str, action: str, call, value: str = ""):
     """check reopen / edit / remove on a step that may be a Won't do: the requirement is decided UNDER THE
     TICKET LOCK (tickets.NeedsProof), so there is no check-then-act gap and a ticket that cannot be read
     refuses. `call(who, proven)` runs the locked operation."""
-    target = f"{args.id}:{args.check}"
+    # the ACTION is part of the proof's target: a proof for "reopen" does not rename or remove the step
+    target = f"{args.id}:{args.check}:{action}"
     if getattr(args, "proof_stdin", False):
         return call(humanproof.person_by(root, args, "check.wont_do_undo", target), True)
     try:

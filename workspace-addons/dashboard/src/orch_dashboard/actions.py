@@ -120,9 +120,9 @@ PROOF_OPS = {
     "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
     "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
     "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
+    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:reopen"),
+    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:edit"),
+    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:remove"),
     "chat.send_ws": ("chat.send", lambda a: a.get("workspace")),
 }
 
@@ -134,7 +134,7 @@ def proof_for(op, args):
     if (
         op == "check.set" and args.get("done") is False
     ):  # un-ticking may undo a Won't do (a person's decision)
-        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}"
+        return "check.wont_do_undo", f"{args.get('ticket')}:{args.get('check')}:reopen"
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None
 
