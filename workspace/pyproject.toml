@@ -32,4 +32,8 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["slow: starts a local server", "real_start_guard: keep the real adapters.check_start_folder (see conftest)"]
+markers = [
+    "slow: starts a local server",
+    "real_start_guard: keep the real adapters.check_start_folder (see conftest)",
+    "copies_locked: checks the copies lock itself (not lifted by the test fixture)",
+]
