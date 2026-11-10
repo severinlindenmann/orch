@@ -26,6 +26,8 @@ final class AppModel {
     private(set) var updates: [TicketUpdate] = []
     /// question message id -> the answer this phone sent
     private(set) var answers: [String: String] = [:]
+    /// question message id -> when this phone's answer was sent (this run only; the Make ticket card's 2-min wait)
+    private(set) var answerSentAt: [String: Date] = [:]
     /// questions someone else answered first (409): `answers` then holds their answer
     private(set) var answeredElsewhere: Set<String> = []
     private(set) var isLoading = false
@@ -254,8 +256,9 @@ final class AppModel {
     /// 10 s; nothing runs against the in-process mock unless `-watchLoop YES` (UI tests must see an idle app).
     func watchWhileOpen(every interval: Duration = .seconds(10)) async {
         if useMock && !UserDefaults.standard.bool(forKey: "watchLoop") && !watchInMock { return }
+        let pollInterval: Duration = useMock && UserDefaults.standard.bool(forKey: "mockMakeTicket") ? .seconds(2) : interval
         while !Task.isCancelled {
-            try? await Task.sleep(for: interval)
+            try? await Task.sleep(for: pollInterval)
             if Task.isCancelled { break }
             await refresh(retry: false, quiet: true)
         }
@@ -387,11 +390,18 @@ final class AppModel {
         Dictionary(outbox.items.compactMap { i in i.kind == .answer ? i.questionMessageId.map { ($0, i.answer ?? "") } : nil }, uniquingKeysWith: { a, _ in a })
     }
 
+    func answerTime(for questionId: String) -> Date? {
+        if let sent = answerSentAt[questionId] { return sent }
+        return outbox.items.first { $0.kind == .answer && $0.questionMessageId == questionId }
+            .flatMap { ISO8601DateFormatter().date(from: $0.createdAt) }
+    }
+
     /// Acts on what the outbox did: answers recorded, refusals announced, sign-out handled.
     private func handle(_ events: [Outbox.Event]) async {
         for e in events {
             switch e {
             case .answered(_, let qid, let opt):
+                answerSentAt[qid] = Date()
                 answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(opt)"
             case .answerTaken(_, let qid, let text):
                 answers[qid] = text; answeredElsewhere.insert(qid); message = nil
@@ -671,7 +681,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
-        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answeredElsewhere = []; hasLoaded = false
+        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
     }
 
