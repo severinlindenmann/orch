@@ -689,7 +689,7 @@ def test_delete_detail_unreadable_record_deletes_nothing(ws, rec, run, monkeypat
 def test_delete_detail_needs_json(ws, rec, run):
     code, out, err = run("record", "delete-detail", rec[0])
     assert code == 2 and "Use --json" in err
-    assert cli_record.SUBCOMMANDS == ("tail", "query", "counts", "settings", "delete-detail")
+    assert cli_record.SUBCOMMANDS == ("tail", "query", "counts", "settings", "delete-detail", "hook")
 
 
 def test_proof_request_parts_for_the_hand_off_cards(monkeypatch):
