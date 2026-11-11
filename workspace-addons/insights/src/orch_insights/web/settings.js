@@ -146,7 +146,8 @@
     try {
       const result = await act('record.delete_detail', {ticket});
       const n = Number(result.deleted) || 0;
-      say(`Deleted detail of ${n} ${n === 1 ? 'run' : 'runs'}`);
+      const left = (Number(result.kept) || 0) + (Number(result.unreadable) || 0) + (Number(result.skipped) || 0);
+      say(`Deleted detail of ${n} ${n === 1 ? 'run' : 'runs'}.` + (left ? ' Some files could not be deleted and were left.' : ''));
     } catch (error) {
       await load();
       say(error.message);

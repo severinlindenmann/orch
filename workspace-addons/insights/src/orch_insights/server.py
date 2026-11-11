@@ -201,8 +201,6 @@ class Handler(BaseHTTPRequestHandler):
         why = self._session_refusal()
         if why:
             return self._send(403, why.encode())
-        from orch.pageproof import COOKIE
-
         try:
             n = int(self.headers.get("Content-Length") or "")
             token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
@@ -215,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, RELINK.encode())
         secret = self.server.new_page_secret()
         body = json.dumps({"secret": secret}).encode()
-        cookie_header = f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"
+        cookie_header = self.session.set_cookie(self.server.server_address[1], cookie)
         self._send(200, body, "application/json", extra={"Set-Cookie": cookie_header})
 
     def _body(self):

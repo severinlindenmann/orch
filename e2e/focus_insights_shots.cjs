@@ -87,6 +87,12 @@ const SCREENS = [
     await p.click('#rows .row:not(.head)');
     await settle(p, 500);
   } },
+  { name: 'insights-settings', url: '/', ...INS, wait: '#rows .row:not(.head)', async setup(p) {
+    await settle(p, 800);
+    await p.click('#settings-link');
+    await p.waitForSelector('#settings-body *', { timeout: 20000 });
+    await settle(p, 800);
+  } },
 ];
 
 (async () => {

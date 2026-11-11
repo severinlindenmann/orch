@@ -190,7 +190,7 @@ def _clean_success(out) -> dict | None:
             or key in ("changed", "widened")
             and isinstance(value, bool)
             or (
-                key == "deleted"
+                key in ("deleted", "kept", "unreadable", "skipped")
                 and isinstance(value, int)
                 and not isinstance(value, bool)
                 and 0 <= value < 10**6

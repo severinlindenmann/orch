@@ -199,21 +199,25 @@ class FakeSession:
         self.revoked = False
         self.folder = folder  # the fake orch's folder: minted proofs are what its core accepts
 
-    def authed(self, headers):
-        """Like PageSession.authed: SimpleCookie parsing, the exact cookie name (no substring match)."""
-        from orch.pageproof import COOKIE
+    def cookie_name(self, port):
+        return f"orch_page_insights_{port}"  # the core's per-server, per-port name (pageproof.cookie_name)
 
+    def set_cookie(self, port, value):
+        return f"{self.cookie_name(port)}={value}; HttpOnly; SameSite=Strict; Path=/"
+
+    def authed(self, headers, port):
+        """Like PageSession.authed: SimpleCookie parsing, the exact cookie name (no substring match)."""
         try:
             jar = SimpleCookie(headers.get("Cookie") or "")
         except Exception:  # noqa: BLE001 - a broken cookie header is no session
             return False
-        c = jar.get(COOKIE)
+        c = jar.get(self.cookie_name(port))
         return bool(c and hmac.compare_digest(c.value, self.cookie))
 
     def can_mint(self, headers, port):
         from orch.pageproof import forwarded, host_ok
 
-        return host_ok(headers, port) and not forwarded(headers) and self.authed(headers)
+        return host_ok(headers, port) and not forwarded(headers) and self.authed(headers, port)
 
     def mint(self, op, target):
         self.minted.append((op, target))

@@ -37,7 +37,7 @@ def post(server, body, headers=None, cookie=False, path="/api/act", secret=None)
         "Content-Length": str(len(raw)),
     }
     if cookie:
-        base["Cookie"] = "orch_page=good-cookie-value"
+        base["Cookie"] = f"orch_page_insights_{port}=good-cookie-value"
     if secret is not None:
         base["X-Orch-Page"] = secret
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -589,7 +589,7 @@ def test_get_settings_view(start_server, fake_orch, fake_session):
     assert code == 200 and headers["Content-Type"] == "application/json"
     assert view["can_act"] is False and view["share_counts"]["locked"] is False
     assert view["tickets"]["rows"][1]["title"] == "<img src=x onerror=alert(1)>"
-    cookie = {"Cookie": "orch_page=good-cookie-value"}
+    cookie = {"Cookie": f"orch_page_insights_{srv.server_address[1]}=good-cookie-value"}
     assert json.loads(request(srv, "/api/settings", headers=cookie)[2])["can_act"] is False  # cookie alone
     view = json.loads(request(srv, "/api/settings", headers={**cookie, "X-Orch-Page": link(srv)})[2])
     assert view["can_act"] is True
@@ -614,7 +614,9 @@ def test_session_post(start_server, fake_session):
     assert srv.page_secret is None  # no secret before a launch token was spent
     code, headers, body = post(srv, token, path="/session", headers=SAME_SITE)
     assert code == 200 and headers["Content-Type"] == "application/json"
-    assert headers["Set-Cookie"] == "orch_page=good-cookie-value; HttpOnly; SameSite=Strict; Path=/"
+    assert headers["Set-Cookie"] == (
+        f"orch_page_insights_{srv.server_address[1]}=good-cookie-value; HttpOnly; SameSite=Strict; Path=/"
+    )
     secret = json.loads(body)["secret"]
     assert secret == srv.page_secret and len(secret) >= 40
     assert post(srv, token, path="/session", headers={"Sec-Fetch-Site": "none"})[0] == 200
@@ -759,20 +761,23 @@ def cookie_headers(port, cookie, **extra):
 def test_cookie_parsing_matches_the_core(real_session, session_kind):
     session = real_session if session_kind == "real" else FakeSession()
     value = session.cookie
-    good = [f"orch_page={value}", f"a=b; orch_page={value}", f'orch_page="{value}"; x=y']
+    name = session.cookie_name(8431)
+    good = [f"{name}={value}", f"a=b; {name}={value}", f'{name}="{value}"; x=y']
     bad = [
-        f"xorch_page={value}",
-        f"orch_page_x={value}",
-        f"a=orch_page={value}",
-        f"orch_page={value}x",
-        "orch_page=wrong",
+        f"x{name}={value}",
+        f"{name}_x={value}",
+        f"a={name}={value}",
+        f"{name}={value}x",
+        f"orch_page={value}",  # the old shared name is no session any more
+        f"{session.cookie_name(8432)}={value}",  # another port's cookie
+        f"{name}=wrong",
         "",
     ]
     for cookie in good:
         assert session.can_mint(cookie_headers(8431, cookie), 8431), cookie
     for cookie in bad:
         assert not session.can_mint(cookie_headers(8431, cookie), 8431), cookie
-    good_cookie = f"orch_page={value}"
+    good_cookie = f"{name}={value}"
     assert not session.can_mint(cookie_headers(8432, good_cookie), 8431)  # wrong Host port
     assert not session.can_mint({"Host": "evil.example:8431", "Cookie": good_cookie}, 8431)
     for proxy in ({"X-Forwarded-For": "10.0.0.1"}, {"X-Forwarded-Host": "x"}, {"Forwarded": "for=x"}):
@@ -782,7 +787,7 @@ def test_cookie_parsing_matches_the_core(real_session, session_kind):
 def test_real_session_cookie_alone_cannot_mint(start_server, fake_orch, real_session):
     srv = start_server(session=real_session)
     srv.page_secret = "s" * 43  # as if /session succeeded; the request below does not send it
-    cookie = {"Cookie": f"orch_page={real_session.cookie}"}
+    cookie = {"Cookie": f"{real_session.cookie_name(srv.server_address[1])}={real_session.cookie}"}
     for body in (setting("insights.keep_days", "365"), delete()):
         code, _, text = post(srv, body, headers=cookie)
         assert code == 403 and text.decode() == actions.PERSON
