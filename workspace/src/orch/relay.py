@@ -703,7 +703,27 @@ def send_text(
             if isinstance(view, dict) or _unreachable(e) or getattr(e, "status", None) is None:
                 raise  # a light update without its view says nothing: refused means refused
             try:
-                msg = _message(root, to, "text", body, ticket, reply_to, mid)
+                if tv.get(
+                    "results"
+                ):  # an older relay does not know results: the same update once without them
+                    try:
+                        msg = _message(
+                            root,
+                            to,
+                            "text",
+                            {**body, "ticket_view": {k: v for k, v in tv.items() if k != "results"}},
+                            ticket,
+                            reply_to,
+                            mid,
+                        )
+                    except Refused as e1:
+                        if _unreachable(e1) or getattr(e1, "status", None) is None:
+                            raise
+                        if getattr(e1, "status", None) == 409:
+                            raise
+                        msg = _message(root, to, "text", body, ticket, reply_to, mid)
+                else:
+                    msg = _message(root, to, "text", body, ticket, reply_to, mid)
             except Refused as e2:
                 if getattr(e2, "status", None) != 409:
                     raise

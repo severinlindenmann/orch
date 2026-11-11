@@ -23,7 +23,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import net, refs, runs, safefile, tickets
+from orch import net, phone_results, refs, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -256,6 +256,42 @@ def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     except safefile.TooLarge:
         return None
     return (parts[4], data) if data is not None else None
+
+
+def result_candidates(root: Path, ticket: dict) -> list[dict]:
+    """The block documents the ticket holds today, as phone_results candidates: the agent's proof (a copied
+    evidence file `<name>.json` holding an orch.blocks/1 document, role result or check). `from` is set here
+    to agent (the core overwrites a producer's own value), `checked` only for a step that is done with proof.
+    Job results (j_ ids) and results computed by orch have no store yet: nothing to add for them."""
+    tid = ticket["id"]
+    at0 = ticket["updated_at"] if _TIME.fullmatch(str(ticket.get("updated_at"))) else tickets.now()
+    out: list[dict] = []
+    for step in ticket.get("checklist") or []:
+        for ev in step.get("evidence") or []:
+            if ev.get("role") not in PHONE_ROLES or ev.get("type") != "file":
+                continue
+            f = _proof_file(root, tid, ev)
+            if not f or not f[0].lower().endswith(".json"):
+                continue
+            try:
+                doc = json.loads(f[1].decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if not isinstance(doc, dict) or doc.get("schema") != "orch.blocks/1":
+                continue
+            doc["from"] = "agent"
+            r = {
+                "id": artifact_id("file", str(ev.get("ref", ""))),
+                "from": "agent",
+                "at": ev["at"] if _TIME.fullmatch(str(ev.get("at"))) else at0,
+                "doc": doc,
+            }
+            if title := _clip(str(ev.get("title") or doc.get("title") or ""), 200):
+                r["title"] = title
+            if step.get("done") and step.get("evidence"):
+                r["checked"] = True
+            out.append(r)
+    return out
 
 
 def _state_path(root: Path) -> Path:
@@ -700,6 +736,8 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         view["agent"] = agent
     if summary := shown_summary(ticket):
         view["summary"] = summary
+    if results := phone_results.prepare(root, result_candidates(root, ticket)):
+        view["results"] = results  # full snapshots only: light_view never has them
     return fit(view)
 
 
@@ -715,6 +753,8 @@ def fit(view: dict) -> dict:
         if size_of(view) > BUDGET:
             for c in view["checklist"]:
                 c["text"] = c["text"] if len(c["text"]) <= n else c["text"][: n - 1] + "…"
+    while size_of(view) > BUDGET and len(view.get("results") or []) > 1:
+        view["results"].pop()  # the oldest first; the newest is never dropped
     while size_of(view) > BUDGET and view["checklist"]:
         view["checklist"].pop()
     return view
