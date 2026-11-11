@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from orch import humanproof as hp
-from orch import keystore, secretrun, tickets
+from orch import keystore, secretrun, term, tickets
 from orch.errors import Refused
 
 SUBCOMMANDS = ("env", "file", "exec", "list", "get", "add", "remove", "profile")
@@ -144,7 +144,7 @@ def dispatch(args, root: Path) -> bool:
             root,
             args.profile,
             args.key,
-            stdout_is_tty=sys.stdout.isatty(),
+            stdout_is_tty=term.is_terminal(sys.stdout),
             out=sys.stdout.buffer,
             agent=_agent(args),
         )

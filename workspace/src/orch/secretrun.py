@@ -22,7 +22,7 @@ import threading
 import time
 from pathlib import Path
 
-from orch import hider, keystore, launchenv
+from orch import hider, keystore, launchenv, term
 from orch import humanproof as hp
 from orch.errors import Refused
 
@@ -415,10 +415,7 @@ def _child(command, env, h, stdout, stderr):
     sigs = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP", "SIGQUIT") if hasattr(signal, n)]
     old = {s: signal.getsignal(s) for s in sigs} if main else {}
     state = {"spawning": False, "sig": None}
-    try:
-        interactive = sys.stdin is not None and sys.stdin.isatty()
-    except (ValueError, OSError):
-        interactive = False
+    interactive = term.is_terminal(sys.stdin)
     # Own session when no terminal input is needed, so a hangup of ours does not leave it running with a key
     # (a child can still open /dev/tty: known limit).
     own_session = not interactive and os.name == "posix"
