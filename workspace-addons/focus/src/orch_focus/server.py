@@ -21,8 +21,8 @@ from .board import Board, TicketWatcher
 from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
 from .permissions import Permissions
+from .record import RecordFeed
 from .revisions import Revisions
-from .tail import Tail
 
 
 def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
@@ -204,6 +204,10 @@ class Tracker:
     def close(self) -> None:
         """End the pin threads and wait for them, so none outlives the server (or the test that started it)."""
         self.stop.set()
+        with self.lock:
+            for tr in self.tickets.values():
+                if tr.get("feed") is not None:
+                    tr["feed"].close()
         with self.plock:
             threads = list(self.pin_threads)
         for t in threads:
@@ -347,6 +351,8 @@ class Tracker:
         with self.lock:
             tr = self.tickets.get(tid)
             if run and (tr is None or tr["run"] != run):
+                if tr and tr.get("feed") is not None:
+                    tr["feed"].close()  # a new run of this ticket: the old followed command ends
                 log = EventLog(self.root, run)
                 tr = {"run": run, "log": log, "offset": 0, "board": Board(), "events": [],
                       "watcher": TicketWatcher(run, tid)}  # fmt: skip
@@ -357,12 +363,9 @@ class Tracker:
                 mode, agent = claim.get("mode"), claim.get("agent")
                 if isinstance(mode, str) and isinstance(agent, str):
                     self.last_agent[tid] = (agent, mode)
-                    if tr.get("tail") is None:
-                        tr["tail"] = Tail(
-                            self.root, tid, run, agent, mode, session=lambda: self.session(tid, agent)
-                        )
-                if tr.get("tail") is not None:
-                    tr["tail"].poll()
+                if tr.get("feed") is None:
+                    tr["feed"] = RecordFeed(self.root, self.orch_bin, run, tid)
+                steps = tr["feed"].poll()
                 new = tr["watcher"].feed(ticket)
                 if new:
                     try:
@@ -371,6 +374,9 @@ class Tracker:
                         pass
                 got, tr["offset"] = tr["log"].read(tr["offset"])
                 for e in got:
+                    tr["board"].apply(e)
+                got = got + steps
+                for e in steps:
                     tr["board"].apply(e)
                 tr["events"] = (tr["events"] + got)[-80:]
                 tr["board"].resolve_asks(ticket)
