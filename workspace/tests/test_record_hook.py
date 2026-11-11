@@ -440,7 +440,8 @@ def test_unproven_callers_cannot_write_traces_under_a_run(live, monkeypatch, whi
 
 def test_the_lost_trace_trims_loudly_never_silently(live):
     root, run, _ = live
-    base = datetime.now(UTC)
+    # all within one day's file (the cap is per run and day): from now, 140 minutes could cross midnight UTC
+    base = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     for n in range(record._LOST_RUN_LINES + 20):
         record.note_lost(root, run, "invalid", now=base + timedelta(minutes=2 * n))
     rows = [json.loads(x) for x in lost_notes(root).splitlines()]
@@ -1677,6 +1678,56 @@ def test_the_installed_orch_script_never_fails_a_hook(tmp_path, case):
         assert r.stderr.startswith("orch: "), r.stderr
     else:
         assert time.monotonic() - t0 < 30  # the watchdog, not the 60 s import
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no process-tree proof on Windows yet (TODO W2b 1.7: VM proof)")
+def test_the_installed_orch_script_records_a_tool_call(proj, subprocess_home, tmp_path, monkeypatch):
+    """T2: the installed `orch` script, as the wiring runs it, really writes. A tool's Pre- and PostToolUse
+    payloads from inside a live run land in the run record: exit 0, nothing on stdout, nothing on stderr (not
+    the guard's "nothing was recorded"). The other console tests pass whether the hook records or not. A child
+    builds its hider from the workspace's key store (one key = key hiding ready), so the workspace is a test
+    one under ~/.orch-test with the test home from subprocess_home (both removed by exact path)."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    from conftest import _REAL_HOME_FN
+
+    from orch import keystore
+
+    script = _installed_script()
+    base = _REAL_HOME_FN() / ".orch-test"
+    root = Path(tempfile.mkdtemp(prefix="pytest-hook-", dir=base))
+    try:
+        keystore.add(root, "deploy-key", "token", SECRET)
+        t = tickets.create(root, "Hook me", "human:t")
+        rec = runs.claim(root, t["id"], "agent:x", "claude", pid=os.getpid())  # the child's ancestor
+        home = tmp_path / "account"
+        home.mkdir()
+        env = _hook_env(
+            ORCH_ROOT=str(root), ORCH_RUN=rec["run"], ORCH_TICKET=t["id"], ORCH_AGENT="claude",
+            HOME=str(home), USERPROFILE=str(home),
+        )  # fmt: skip
+        inp = {"file_path": "notes.txt", "note": SECRET}
+        for event in ("PreToolUse", "PostToolUse"):
+            r = subprocess.run(
+                [script, "record", "hook"], cwd=root, input=tool_hook(event, inp=inp) + "\n",
+                capture_output=True, text=True, env=env, timeout=60,
+            )  # fmt: skip
+            assert (r.returncode, r.stdout) == (0, ""), r.stderr
+            assert "nothing was recorded" not in r.stderr and r.stderr == "", (event, r.stderr)
+        seen = events(root, rec["run"])
+        assert [(e["id"], e["via"], e["outcome"] is not None) for e in seen] == [
+            (TOOL_ID, "hook", False),
+            (TOOL_ID, "hook", True),
+        ]
+        detail = record.read_detail(root, rec["run"], seen[1]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+        assert detail["input"] == {"file_path": "notes.txt", "note": "[hidden: deploy-key]"}  # store's hider
+        kept = "".join(p.read_text() for p in (root / ".orch/record").rglob("*") if p.is_file())
+        assert SECRET not in kept and not lost_text(root)  # nothing raw, nothing set aside
+    finally:
+        if root.name.startswith("pytest-hook-") and root.parent == base:  # only our own temp folder
+            shutil.rmtree(root, ignore_errors=True)
 
 
 def test_every_lost_reason_is_named_in_the_contract():

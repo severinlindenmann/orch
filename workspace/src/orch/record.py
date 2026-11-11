@@ -1346,9 +1346,11 @@ class RecordWriter:
             # a log line without a detail of its own (lost, or none) replaced hook lines: the hook's detail
             # file (the same name) goes when no line the reader keeps points to it, so the agent's payload
             # never stays behind without a line. The line is already written: a failure is only reported.
-            file = f"{detail_name(run, event['kind'], event['id'])}.json"
+            name = detail_name(run, event["kind"], event["id"], event["ticket"])  # None: no ticket, no detail
+            file = f"{name}.json"
             if (
-                event["detail"] is None
+                name is not None
+                and event["detail"] is None
                 and any(old.get("detail") == f"detail/{run}/{file}" for old in replaced)
                 and not any(old.get("detail") == f"detail/{run}/{file}" for old in _shown([*previous, event]))
             ):
