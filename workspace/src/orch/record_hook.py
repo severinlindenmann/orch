@@ -1,8 +1,8 @@
 """Hook entry of the record (contracts/activity.md, "The hook entry is narrow"): `orch record hook`.
 
 A live agent session calls it from its tool hooks (before and after every tool call) with ONE event as a JSON
-line on stdin. It must be fast and must never get in the agent's way, so by default it ends with exit 0 and says
-in one plain stderr line why nothing was recorded. What it never does:
+line on stdin. It must be fast and must never get in the agent's way, so by default it ends with exit 0 and
+says in one plain stderr line why nothing was recorded. What it never does:
 - write a kind the hook may not write (record.hook_entry_filter: no run.state, ask, task.*, key.use, job,
   session.input) or any `via` but "hook";
 - trust the caller for the run or the ticket: both come from ORCH_RUN / ORCH_TICKET and must name a live
