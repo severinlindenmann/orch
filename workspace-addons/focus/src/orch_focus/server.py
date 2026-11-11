@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, adapterdata, chat, proofs, runfiles, selfupdate
+from . import actions, adapterdata, chat, livecards, proofs, runfiles, selfupdate
 from .board import Board, TicketWatcher
 from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
@@ -47,7 +47,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "live-now.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -578,6 +578,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if path == "/api/tickets":
             return self._json(200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()})
+        if path == "/api/live":
+            return self._json(200, {"cards": livecards.cards(self.tracker)})
         if path == "/api/procs":
             return self._json(200, {"procs": self.tracker.procs()})
         if path == "/api/mobile":

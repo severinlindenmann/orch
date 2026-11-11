@@ -381,3 +381,44 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-live[data-hold]{flex:0 1 auto;min-width:0;max-width:100%}
 .fx-live[data-hold] [role=status]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .fx-live[data-hold] .t{display:none}
+
+/* ---- Start screen: Live now cards ---- */
+.fx-pick.fx-pick-live{max-width:960px}
+.fx-livenow{margin-top:32px;min-width:0}
+.fx-livenow[hidden]{display:none}
+.fx-livenow h2{font-size:15px;margin:0 0 12px}
+.fx-livenow h2 .meta{font-weight:400;color:var(--text-muted)}
+.fx-ln-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+.fx-ln-card{min-width:0;border:1px solid var(--border);border-radius:12px;background:var(--surface);overflow:hidden;display:flex;flex-direction:column;overflow-wrap:anywhere}
+.fx-ln-card.asking{border-color:var(--warning)}
+.fx-ln-head{padding:11px 14px 9px;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.fx-ln-title{flex:1 1 180px;min-width:0}
+.fx-ln-key{font:11px var(--font-mono,monospace);color:var(--text-faint)}
+.fx-pick .fx-livenow a{display:inline;min-height:0;padding:0;border:0;border-radius:0;background:none;color:inherit;text-decoration:none}
+.fx-pick .fx-livenow a:hover{text-decoration:underline}
+.fx-pick .fx-ln-title a{font-weight:600}
+.fx-ln-agent{margin-left:auto;font-size:11.5px;color:var(--text-muted);max-width:100%}
+.fx-ln-now{padding:10px 14px;background:var(--surface-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.fx-ln-label{display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-faint)}
+.fx-ln-dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--text-faint)}
+.fx-ln-dot.working{background:var(--brand)}
+.fx-ln-current{font-size:14.5px;font-weight:600;margin-top:2px}
+.fx-ln-why{font-size:12px;color:var(--text-muted);margin-top:3px}
+.fx-ln-card.asking .fx-ln-now{background:var(--warning-soft)}
+.fx-ln-card.asking .fx-ln-label{color:var(--warning)}
+.fx-ln-progress{height:3px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:9px}
+.fx-ln-progress>span{display:block;height:100%;background:var(--brand)}
+.fx-ln-options{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px}
+.fx-ln-options .btn{max-width:100%;white-space:normal;overflow-wrap:anywhere;height:auto}
+.fx-pick .fx-ln-options a{font-size:12px;padding:6px}
+.fx-ln-steps{list-style:none;padding:10px 14px;margin:0;display:grid;gap:7px;font-size:12px}
+.fx-ln-steps li{display:grid;grid-template-columns:38px 14px minmax(0,1fr);gap:6px;align-items:start}
+.fx-ln-steps time{font:11px/1.6 var(--font-mono,monospace);color:var(--text-faint)}
+.fx-ln-icon{color:var(--text-muted);text-align:center}
+.fx-ln-icon.ok{color:var(--success)}
+.fx-ln-foot{display:flex;justify-content:flex-end;padding:8px 14px;margin-top:auto;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)}
+.fx-ln-grid.compact .fx-ln-steps{display:none}
+.fx-ln-grid.compact .fx-ln-foot{border-top:0}
+@media(max-width:520px){.fx-ln-grid{grid-template-columns:minmax(0,1fr)}}
+/* The live indicator is static, including with prefers-reduced-motion. */
+.fx-pick a[hidden],.fx-pick-group[hidden]{display:none}
