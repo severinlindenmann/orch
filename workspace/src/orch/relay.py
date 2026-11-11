@@ -1720,8 +1720,8 @@ def frm_of(root: Path, mid: str, who: str) -> str:
     return "phones"
 
 
-def _chat_record(root: Path, mid: str, body: dict, frm: str | None = None) -> None:
-    """Keep Chat before completing intake; a failed write must be retried."""
+def _chat_record(root: Path, mid: str, body: dict, frm: str | None = None, final: bool = False) -> None:
+    """Keep Chat before completing intake; retry temporary failures until the last attempt."""
     from orch import chat
 
     spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
@@ -1735,7 +1735,10 @@ def _chat_record(root: Path, mid: str, body: dict, frm: str | None = None) -> No
         elif re.fullmatch(r"ws_[a-z0-9]{10}", frm):  # never "you": only a paired phone speaks as the person
             chat.record(root, mid, frm, "workspace", text)
     except (Refused, OSError, ValueError) as exc:
-        raise Transient("The Chat message could not be saved.") from exc
+        busy = isinstance(exc, Refused) and str(exc).startswith("Ticket chat is busy (")
+        if not final and (isinstance(exc, OSError) or busy):
+            raise Transient("The Chat message could not be saved.") from exc
+        log_send_failure(root, f"Chat message {mid} could not be saved", exc)
 
 
 def _continue(
@@ -1765,7 +1768,7 @@ def _continue(
             "You are this workspace's helper: you may make tickets, notes and answers, never sign, approve, "
             "close or delete anything.)"
         )
-        _chat_record(root, mid, body, frm)
+        _chat_record(root, mid, body, frm, final=final)
     runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:], phone=frm)
 
     def op(t):

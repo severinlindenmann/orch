@@ -1218,18 +1218,69 @@ def test_general_ticket_addressed_phone_text_is_chat(proj, run, conn):
     assert chat.status(proj)["messages"][0]["via"] == "phone"
 
 
-def test_failed_chat_write_retries_phone_intake(proj, run, conn, monkeypatch):
+@pytest.mark.parametrize(
+    "error", [OSError("disk busy"), Refused("Ticket chat is busy (retried for 5 s). Try again.")]
+)
+def test_failed_chat_write_retries_phone_intake(proj, run, conn, monkeypatch, error):
     from orch import relay
 
     original = chat.record
-    monkeypatch.setattr(chat, "record", lambda *a, **kw: (_ for _ in ()).throw(OSError("disk busy")))
+    monkeypatch.setattr(chat, "record", lambda *a, **kw: (_ for _ in ()).throw(error))
     conn.inbox.append(pv3.msg(pv3.GEN, {"text": "What is still open this week?", "general": True}))
     run("relay", "inbox")
     assert pv3.GEN not in relay.seen(proj)
+    gid = tickets.general_id(proj)
+    assert not runs.undelivered(proj, gid)
     monkeypatch.setattr(chat, "record", original)
     run("relay", "inbox")
     assert pv3.GEN in relay.seen(proj)
+    conn.acked.clear()
+    run("relay", "inbox")
     assert [m["text"] for m in chat.status(proj)["messages"]] == ["What is still open this week?"]
+    assert len(runs.undelivered(proj, gid)) == 1
+    assert sum("What is still open this week?" in h["text"] for h in tickets.load(proj, gid)["history"]) == 1
+
+
+@pytest.mark.parametrize(
+    "error,retry",
+    [
+        (OSError("disk busy"), True),
+        (Refused("Ticket chat is busy (retried for 5 s). Try again."), True),
+        (Refused("Chat storage must not be a link."), False),
+        (ValueError("invalid Chat data"), False),
+    ],
+)
+def test_persistent_chat_write_failure_finishes_phone_intake(proj, run, conn, monkeypatch, error, retry):
+    from orch import relay
+
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append(args[1])
+        raise error
+
+    monkeypatch.setattr(chat, "record", fail)
+    monkeypatch.setattr(relay, "PHONE_RETRY_SECONDS", 0)
+    conn.inbox.append(pv3.msg(pv3.GEN, {"text": "Keep this message", "general": True}))
+    if retry:
+        for _ in range(relay.PHONE_TRIES):
+            assert run("relay", "inbox")[0] == 0
+            assert pv3.GEN not in relay.seen(proj)
+            assert not runs.undelivered(proj, tickets.general_id(proj))
+    assert run("relay", "inbox")[0] == 0
+    assert pv3.GEN in relay.seen(proj)
+    assert len(calls) == (relay.PHONE_TRIES + 1 if retry else 1)
+    conn.acked.clear()
+    assert run("relay", "inbox")[0] == 0
+    assert len(calls) == (relay.PHONE_TRIES + 1 if retry else 1), "seen messages must not retry"
+    gid = tickets.general_id(proj)
+    pending = runs.undelivered(proj, gid)
+    assert len(pending) == 1 and "Keep this message" in pending[0]["text"]
+    assert sum("Keep this message" in h["text"] for h in tickets.load(proj, gid)["history"]) == 1
+    assert len(pv3.acks(conn)) == 1
+    assert not chat.status(proj)["messages"]
+    log = (proj / ".orch/run/relay-errors.log").read_text()
+    assert f"Chat message {pv3.GEN} could not be saved" in log and str(error) in log
 
 
 def test_legacy_wakeup_is_absent_from_chat_and_phone(proj, run, conn):
