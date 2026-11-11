@@ -49,6 +49,7 @@ struct ChatsListView: View {
                     case .info(let ws, let ticket):
                         ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))
                     case .group(let host, let id): GroupRoomView(key: GroupKey(host: host, id: id))
+                    case .groupHistory: GroupHistoryView()
                     case .newChat: NewTopicScreen(workspaceId: nil)
                     case .newTopic(let ws): NewTopicScreen(workspaceId: ws)
                     }

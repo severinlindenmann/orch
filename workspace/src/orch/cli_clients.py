@@ -303,8 +303,6 @@ def _group_title(root: Path, group: str, host: str | None = None) -> str:
 
 def _member_parts(root: Path, host: str, group: str) -> dict:
     """Card parts for an act in a joined group: its title (matched on host AND id) and the host's name."""
-    from orch import relay
-
     return {
         "title": humanproof.part(_group_title(root, group, host)),
         "host": humanproof.part(relay.name_of(root, host)),

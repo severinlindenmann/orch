@@ -24,6 +24,7 @@ import stat
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from orch import saferead, term, winacl, winfinish
@@ -102,8 +103,6 @@ def account_home() -> Path:
 
     if _is_windows():  # the profile folder from the process token (winacl), never the environment
         try:
-            from orch import winacl
-
             return Path(winacl.profile_dir())
         except (ImportError, AttributeError, OSError, Refused):
             pass
@@ -1147,7 +1146,9 @@ def wontdo_is_human(
 # The step fields the signed decision record is built from. ONE source of truth: wont_decision() reads exactly
 # these, and the sync merge pins exactly these (+ the MAC itself) while a verified decision is held
 # (orch_sync.merge._SIGNED; a test fails if the two drift apart).
-SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce")
+# wont_by / wont_at (NEW decisions only, optional): who decided and when, so a synced history line can be tied
+# to the decision; legacy decisions lack them and authorise no history line.
+SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_by", "wont_at", "wont_line")
 
 
 def wont_decision(step: dict) -> dict:
@@ -1163,6 +1164,9 @@ def wont_decision(step: dict) -> dict:
         "text": (step.get("text") if on else None),
         "covers": (step.get("covers") if on else None),
         "nonce": step.get("wont_nonce"),
+        **({"person": step["wont_by"]} if on and "wont_by" in step else {}),
+        **({"at": step["wont_at"]} if on and "wont_at" in step else {}),
+        **({"line": step["wont_line"]} if on and "wont_line" in step else {}),
     }
 
 
@@ -1294,6 +1298,36 @@ VERDICT_LEDGER = "verdict.json"
 VERDICT_MAX = 8  # verdict entries kept on one ticket
 # What a stored entry holds. ONE source of truth: the sync merge imports it (a test fails if it keeps a copy).
 VERDICT_FIELDS = ("kind", "nonce", "mac")
+# Optional, MAC-bound when present (new person verdicts): who signed and when. Legacy entries lack them and
+# cannot authorise a synced person history line (contracts/human-proof.md "Person history lines over sync").
+VERDICT_OPTIONAL = ("person", "at", "line")
+# The actor label a decision may bind (the sync merge keeps a copy, drift-tested): human:<name>, <= 64 chars.
+ACTOR_PATTERN = r"human:[A-Za-z0-9_.@ -]{1,58}"
+
+
+def history_digest(text, via) -> str:
+    """sha256 hex of the exact history line a decision's writer adds ({text, via}); bound into the MAC so only
+    THAT line can be attributed to the person over sync (the sync merge keeps a copy, drift-tested)."""
+    return hashlib.sha256(_canon({"text": text, "via": via}).encode()).hexdigest()
+
+
+def _fresh_line(line, person) -> bool:
+    """The history line the signing operation just wrote: by the signer, a text, made within seconds."""
+    try:
+        at = datetime.fromisoformat(line["at"]).timestamp()
+    except (TypeError, KeyError, ValueError):
+        return False
+    return (
+        line.get("by") == person
+        and isinstance(line.get("text"), str)
+        and abs(datetime.now(UTC).timestamp() - at) <= 5
+    )
+
+
+def bindable_actor(by) -> bool:
+    return isinstance(by, str) and re.fullmatch(ACTOR_PATTERN, by) is not None
+
+
 VERDICT_KINDS = ("person", "agent")
 
 VERDICT_LEDGER_DAMAGED = (
@@ -1322,6 +1356,7 @@ def verdict_record(ticket: dict, entry: dict) -> dict:
         "kind": entry.get("kind"),
         "checks": verdict_checks(ticket),
         "nonce": entry.get("nonce"),
+        **{k: entry[k] for k in VERDICT_OPTIONAL if k in entry},
     }
 
 
@@ -1366,7 +1401,9 @@ def _verdict_ledger_put(root: Path, tid: str, mac: str | None) -> bool:
     return _ledger_put(root, VERDICT_LEDGER, "orch.verdict-ledger/1", tid, mac)
 
 
-def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
+def verdict_sign(
+    root: Path, ticket: dict, kind: str, person: str | None = None, line: dict | None = None
+) -> dict:
     """A fresh verdict entry for the ticket as it is NOW (its checklist must be final), recorded as the
     CURRENT ledger entry. No key, no workspace id or a damaged ledger = Refused: never a half-signed Done."""
     from orch import addons
@@ -1382,6 +1419,10 @@ def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
     if not ws or not isinstance(tid, str):
         raise Refused(VERDICT_LEDGER_DAMAGED)
     entry = {"kind": kind, "nonce": secrets.token_hex(8)}
+    if kind == "person" and bindable_actor(person) and _fresh_line(line, person):
+        entry["person"] = person
+        entry["at"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        entry["line"] = history_digest(line["text"], line.get("via"))
     entry["mac"] = verdict_mac(key, ws, tid, verdict_record(ticket, entry))
     if not _verdict_ledger_put(root, tid, entry["mac"]):
         raise Refused(VERDICT_LEDGER_DAMAGED)

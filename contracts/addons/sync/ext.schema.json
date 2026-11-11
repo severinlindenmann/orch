@@ -4,6 +4,7 @@
   "title": "orch sync ticket data: ext.sync",
   "description": "Owned by the sync merge (git step 2, design D8). Inert data: it starts nothing. old_keys = display keys this ticket had before a key clash renumbered it, so the old key still finds the ticket (answer: \"DM1-13 moved to DM1-15\").",
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "old_keys": {
       "type": "array",
