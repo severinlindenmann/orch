@@ -194,10 +194,32 @@ def set_ticket(root: Path, ticket, area_ref) -> dict:
         return a
 
 
+def covers(path: str, file: str) -> bool:
+    """Does an area path hold a file? A folder (`offsite/`) holds what is under it; a file area holds that file."""
+    return file.startswith(path) if path.endswith("/") else file == path
+
+
+def in_area(area: dict, card: dict) -> bool:
+    """A live ticket is in an area when it was set there, or when it touched a file the area holds (display only)."""
+    return card["ticket"] in area["tickets"] or any(
+        covers(area["path"], f["path"]) for f in card.get("files") or []
+    )
+
+
 def strip(root: Path, live: list[dict]) -> list[dict]:
-    """The areas for the page. `who` = the agents of live cards whose ticket is in the area; `quiet` = none."""
+    """The areas for the page. `who` = the agents of live tickets in the area; `quiet` = none; `tickets` = the live
+    tickets (ids, used by the page to put an area chip on the ticket). Display only."""
     out = []
     for a in load(root):
-        who = sorted({c["agent"] for c in live if c["ticket"] in a["tickets"]})
-        out.append({**{k: a[k] for k in ("id", "name", "path", "state")}, "who": who, "quiet": not who})
+        here = [c for c in live if in_area(a, c)]
+        who = sorted({c["agent"] for c in here})
+        out.append({**{k: a[k] for k in ("id", "name", "path", "state")}, "who": who, "quiet": not who,
+                    "tickets": [c["ticket"] for c in here]})  # fmt: skip
     return out
+
+
+def label(root: Path, live: list[dict]) -> None:
+    """Put `area` (the name of the first accepted area the ticket is in, else None) on every live card."""
+    accepted = [a for a in load(root) if a["state"] == "accepted"]
+    for c in live:
+        c["area"] = next((a["name"] for a in accepted if in_area(a, c)), None)
