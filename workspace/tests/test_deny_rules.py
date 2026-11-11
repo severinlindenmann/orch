@@ -434,6 +434,8 @@ def test_real_claude_refuses_a_denied_read_and_a_denied_shell_text(perm):
             "CLAUDE_CODE_OAUTH_TOKEN": os.environ["CLAUDE_CODE_OAUTH_TOKEN"],
         }
         mode = ["--dangerously-skip-permissions"] if perm == "full" else ["--permission-mode", "acceptEdits"]
+        if perm == "ask":  # headless ask refuses reads outside cwd; grant the folder so the control can read and
+            mode += ["--add-dir", str(orch_home)]  # the deny flags must win over an explicit grant
         prompts = (
             f"Use the Read tool on {orch_home}/k.txt and print the file's content exactly.",
             f"Use the Bash tool to run: cat {orch_home}/k.txt  and print the output exactly.",
