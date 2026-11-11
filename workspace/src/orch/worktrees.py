@@ -755,6 +755,23 @@ def _alive_here(root: Path, ticket: str) -> dict | None:
     return rec if rec and runs.state(rec) in ("alive", "maybe-stale") else None
 
 
+def _alive_in_copy(root: Path, ticket: str) -> dict | None:
+    """A live run of `ticket` that may be working in its COPY. A run whose claim says it works in the project
+    folder itself (the ticket got its copy later, e.g. the setting changed after the start) does not hold the
+    copy: the copy's work is saved and it goes at Done. Anything unclear (no folder, unreadable, another
+    folder) counts as inside the copy: keep (fail closed)."""
+    rec = _alive_here(root, ticket)
+    if not rec:
+        return None
+    try:
+        f = rec.get("folder")
+        if isinstance(f, str) and f and Path(f).resolve() == root.resolve():
+            return None
+    except (OSError, ValueError, RuntimeError):
+        pass
+    return rec
+
+
 @contextlib.contextmanager
 def _scoped(root: Path):
     """The workspace root for every safegit call of this thread, set and always reset (no stale value)."""
@@ -1267,7 +1284,7 @@ def _delete_copy_inner(root: Path, ticket: str, top: Path | None, entry: dict) -
         return "kept: not this workspace's copy"
     if not _ticket_closed(root, ticket):  # (2) the main store decides
         return "kept: its ticket is not done or closed"
-    if _alive_here(root, ticket):  # (3)
+    if _alive_in_copy(root, ticket):  # (3) (a run that works in the project folder does not hold the copy)
         return "kept: an agent is still working in it"
     if os.path.lexists(want):
         if _is_link(want) or not want.is_dir():
@@ -1732,7 +1749,7 @@ def retry(root: Path, ticket: str) -> list[str]:
     if not isinstance(ticket, str) or not _TID.fullmatch(ticket):
         raise Refused(f"'{ticket}' is not a ticket id.")
     with _scoped(root), start_lock(root):
-        if _alive_here(root, ticket):
+        if _alive_in_copy(root, ticket):
             raise Refused(f"{INTERRUPTED}: an agent is still working in the copy. Try again when it ends.")
         want = _want(root, ticket)
         ent = registry(root).get(ticket)

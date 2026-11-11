@@ -1577,3 +1577,24 @@ def test_main_folder_run_then_copy_then_done_releases_the_copy(repo, monkeypatch
     assert t not in worktrees.registry(repo)
     assert not copy.exists()
     assert str(copy) not in git(repo, "worktree", "list", "--porcelain")
+
+
+def test_a_live_claim_in_the_project_folder_does_not_hold_the_tickets_copy(repo):
+    """Lane C D6b: the ticket's (stand-in) claim says it works in the project folder, and its copy came later
+    (the mode was switched). Done releases the copy, keyed on the ticket; a claim INSIDE the copy holds it."""
+    t = repo.tids[0]
+    p = make(repo)  # the copy
+    runs.claim(repo, t, "human:t", "claude", "oneshot", folder=repo, pid=os.getpid())
+    assert runs.state(runs.read(repo, t)) == "alive"
+    close(repo, t, "done")
+    assert t not in worktrees.registry(repo)
+    assert not p.exists()
+    assert str(p) not in git(repo, "worktree", "list", "--porcelain")
+
+
+def test_a_live_claim_inside_the_copy_still_holds_it(repo):
+    t = repo.tids[0]
+    p = make(repo)
+    runs.claim(repo, t, "human:t", "claude", "oneshot", folder=p, pid=os.getpid())
+    close(repo, t, "done")
+    assert t in worktrees.registry(repo) and p.is_dir()
