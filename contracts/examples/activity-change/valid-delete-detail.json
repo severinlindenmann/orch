@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "schema": "orch.record-change/1",
+  "at": "2026-11-16T09:30:00.123456Z",
+  "change": "record.delete_detail",
+  "by": "human:pat",
+  "ticket": "t_inv7c2",
+  "deleted": 2
+}
