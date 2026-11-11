@@ -15,6 +15,12 @@ class Problem:
     message: str
 
 
+@dataclass(frozen=True)
+class Result:
+    commit: str | None
+    problems: list[Problem]
+
+
 def strict_load(data):
     def pairs(items):
         out = {}
@@ -47,8 +53,10 @@ def tree(root, ref):
              entry.split(b'\t', 1)[1].decode('utf-8')) for entry in raw.split(b'\0') if entry]
 
 
-def check(root, ref='origin/orch-state') -> list[Problem]:
+def check(root, ref='origin/orch-state') -> Result:
+    """PR 4 must merge result.commit only after accepting result.problems."""
     problems = []
+    tip = None
     try:
         repo.check(root)
         if ref.startswith('-') or not ref or any(c.isspace() for c in ref):
@@ -58,7 +66,7 @@ def check(root, ref='origin/orch-state') -> list[Problem]:
         head = repo.git(root, 'rev-parse', '--verify', 'HEAD^{commit}').stdout.decode().strip()
         entries, old = tree(root, tip), tree(root, head)
         if len(entries) > 5000:
-            return [Problem('', 'size', 'Too many files')]
+            return Result(tip, [Problem('', 'size', 'Too many files')])
         seen = {}
         for mode, kind, oid, path in entries:
             if not paths.allowed(path) or mode != '100644' or kind != 'blob':
@@ -71,7 +79,7 @@ def check(root, ref='origin/orch-state') -> list[Problem]:
                     problems.append(Problem(path, 'path', 'Case-fold collision'))
                 seen[key] = prefix
         if problems:
-            return problems
+            return Result(tip, problems)
         sizes = repo.git(root, 'cat-file', '--batch-check',
                          input=''.join(f'{e[2]}\n' for e in entries).encode()).stdout.splitlines()
         total = 0
@@ -89,7 +97,7 @@ def check(root, ref='origin/orch-state') -> list[Problem]:
         if total > 500 * MB:
             problems.append(Problem('', 'size', 'Tree exceeds sync limit'))
         if problems:
-            return problems
+            return Result(tip, problems)
         diff = repo.git(root, 'diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z',
                         '--no-renames', f'{head}..{tip}', '--').stdout.split(b'\0')
         deleted = []
@@ -98,6 +106,8 @@ def check(root, ref='origin/orch-state') -> list[Problem]:
             if status == b'D':
                 if paths.TICKET.fullmatch(path):
                     problems.append(Problem(path, 'ticket-deletion', 'Incoming ticket deletion refused'))
+                elif path == 'ticket-counter.json':
+                    problems.append(Problem(path, 'counter-deletion', 'Incoming ticket counter deletion refused'))
                 elif paths.ARTIFACT.fullmatch(path):
                     deleted.append(path)
         count = sum(bool(paths.ARTIFACT.fullmatch(e[3])) for e in old)
@@ -119,4 +129,4 @@ def check(root, ref='origin/orch-state') -> list[Problem]:
                     problems.append(Problem(path, 'held-ext', 'Extension changes need local approval'))
     except (repo.Refused, ValueError, OSError, RecursionError) as e:
         problems.append(Problem('', 'invalid', 'Incoming state could not be validated: ' + type(e).__name__))
-    return problems
+    return Result(tip, problems)

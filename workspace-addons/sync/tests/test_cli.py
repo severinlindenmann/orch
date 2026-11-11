@@ -77,3 +77,17 @@ def test_unimplemented_loop_refuses(root):
     assert run(root, 'start') == 2
     assert run(root, 'stop') == 0
     assert run(root, 'needs') == 0
+
+
+def test_local_remote_requires_preview(root, monkeypatch, capsys):
+    assert run(root, 'set', '--mode', 'local', '--remote', 'https://host/repo') == 2
+    assert not (root / '.orch/.git').exists()
+    monkeypatch.setenv('ORCH_SYNC_REMOTE_PREVIEW', '1')
+    assert run(root, 'set', '--mode', 'remote', '--remote', 'https://host/repo') == 0
+    capsys.readouterr()
+    assert run(root, 'status') == 0
+    assert json.loads(capsys.readouterr().out)['remote_allowed'] is True
+    monkeypatch.delenv('ORCH_SYNC_REMOTE_PREVIEW')
+    assert cli.remote_allowed() is False
+    assert run(root, 'status') == 0
+    assert json.loads(capsys.readouterr().out)['remote_allowed'] is False

@@ -11,6 +11,11 @@ from . import repo
 DEFAULTS = {'mode': 'off', 'interval': 15, 'kind': 'private'}
 
 
+def remote_allowed():
+    """PR 4's sync step must call this on every run, before remote operations."""
+    return os.environ.get('ORCH_SYNC_REMOTE_PREVIEW') == '1'
+
+
 def read(root, name):
     p = repo.safe(root, f'run/sync/{name}.json')
     data = json.loads(p.read_text()) if p.exists() else {}
@@ -41,7 +46,7 @@ def main(argv=None):
         if args.cmd == 'set':
             if args.kind != 'private':
                 raise repo.Refused('Team sync is not available yet')
-            if args.mode == 'remote' and os.environ.get('ORCH_SYNC_REMOTE_PREVIEW') != '1':
+            if (args.mode == 'remote' or args.remote is not None) and not remote_allowed():
                 raise repo.Refused('Remote sync is preview-only')
             if args.remote:
                 repo.validate_url(args.remote)
@@ -66,7 +71,8 @@ def main(argv=None):
                 Path(f.name).unlink(missing_ok=True)
             result = settings
         elif args.cmd == 'status':
-            result = {'state': read(root, 'state'), **settings, 'running': False}
+            result = {'state': read(root, 'state'), **settings, 'running': False,
+                      'remote_allowed': remote_allowed()}
         elif args.cmd == 'start':
             raise repo.Refused('The sync loop is not available yet')
         else:

@@ -111,11 +111,12 @@ def test_wrapper_env(ready, monkeypatch):
     assert 'SSH_ASKPASS' not in kw['env']
     assert calls[1][1]['env']['GIT_INDEX_FILE'] == str(ready / 'index')
     assert all(opt in cmd for opt in repo.OPTIONS)
+    assert cmd.index('--no-replace-objects') < cmd.index('status')
 
 
 def test_old_git(root, monkeypatch):
     monkeypatch.setattr(repo, 'version_ok', lambda root: False)
-    with pytest.raises(repo.Refused, match='Update git'):
+    with pytest.raises(repo.Refused, match='Update git to 2.45.1 or newer'):
         repo.ensure(root)
 
 
@@ -150,3 +151,112 @@ def test_remote_and_attributes(ready, tmp_path):
 
 def test_version_without_root():
     assert repo.version_ok()
+
+
+@pytest.mark.parametrize('name', ['commondir', 'gitdir', 'config.worktree',
+                                 'objects/info/alternates', 'info/grafts', 'refs/replace/replacement'])
+@pytest.mark.parametrize('link', [False, True])
+def test_alternate_metadata(ready, name, link):
+    path = ready / '.orch/.git' / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if link:
+        path.symlink_to(ready / 'missing')
+    else:
+        path.write_text('evil')
+    with pytest.raises(repo.Refused, match='unexpected git settings'):
+        repo.check(ready)
+
+
+def test_evil_commondir(ready, tmp_path):
+    bare = tmp_path / 'evil.git'
+    canary = tmp_path / 'PWNED'
+    subprocess.run(['git', 'init', '--bare', str(bare)], check=True, capture_output=True)
+    subprocess.run(['git', '--git-dir', str(bare), 'config', 'core.sshCommand',
+                    f'touch "{canary}"'], check=True)
+    (ready / '.orch/.git/commondir').write_text(str(bare))
+    with pytest.raises(repo.Refused, match='unexpected git settings'):
+        repo.check(ready)
+    assert not canary.exists()
+
+
+def test_worktree_config(ready):
+    repo.git(ready, 'config', 'extensions.worktreeConfig', 'true')
+    (ready / '.orch/.git/config.worktree').write_text('[core]\nsshCommand = touch PWNED\n')
+    with pytest.raises(repo.Refused, match='unexpected git settings'):
+        repo.check(ready)
+
+
+@pytest.mark.parametrize('version,ok', [('2.38.0', False), ('2.45.0', False), ('2.45.1', True),
+                                      ('2.46.0', True), ('3.0.0', True)])
+def test_minimum_git(root, monkeypatch, version, ok):
+    monkeypatch.setattr(repo, 'git', lambda *a: subprocess.CompletedProcess(
+        a, 0, f'git version {version}\n'.encode()))
+    assert repo.version_ok(root) is ok
+
+
+@pytest.mark.parametrize('url', ['https://user@host/repo', 'https://ghp_x@host/repo',
+                                'https://@host/repo', 'http://user@host/repo'])
+def test_http_userinfo(url):
+    with pytest.raises(repo.Refused):
+        repo.validate_url(url)
+
+
+@pytest.mark.parametrize('scope,origin', [(b'local', b'file:/evil'),
+                                        (b'worktree', b'file:.git/config')])
+def test_config_origin_scope(ready, monkeypatch, scope, origin):
+    original = repo.git
+    def fake(root, *args, **kwargs):
+        result = original(root, *args, **kwargs)
+        if args[:2] == ('config', '--list'):
+            result.stdout += scope + b'\0' + origin + b'\0user.name\nEvil\0'
+        return result
+    monkeypatch.setattr(repo, 'git', fake)
+    with pytest.raises(repo.Refused, match='unexpected git settings'):
+        repo.check(ready)
+
+
+def test_common_dir_identity(ready, monkeypatch):
+    original = repo.git
+    def fake(root, *args, **kwargs):
+        result = original(root, *args, **kwargs)
+        if args == ('rev-parse', '--git-common-dir'):
+            result.stdout = b'/evil\n'
+        return result
+    monkeypatch.setattr(repo, 'git', fake)
+    with pytest.raises(repo.Refused, match='unexpected git settings'):
+        repo.check(ready)
+
+
+@pytest.mark.parametrize('native', [True, False])
+def test_junction_detection(root, monkeypatch, native):
+    from types import SimpleNamespace
+    path = root / '.orch/run'
+    path.mkdir()
+    if native:
+        monkeypatch.setattr(repo.os.path, 'isjunction', lambda p: p == path, raising=False)
+    else:
+        monkeypatch.delattr(repo.os.path, 'isjunction', raising=False)
+        original = Path.lstat
+        def lstat(p):
+            info = original(p)
+            return (SimpleNamespace(st_mode=info.st_mode,
+                                    st_file_attributes=repo.stat.FILE_ATTRIBUTE_REPARSE_POINT)
+                    if p == path else info)
+        monkeypatch.setattr(Path, 'lstat', lstat)
+    with pytest.raises(repo.Refused, match='links'):
+        repo.safe(root, 'run/sync')
+
+
+def test_recover_junction(ready, monkeypatch):
+    scratch = ready / '.orch/run/tmp-sync'
+    junction = scratch / 'junction'
+    junction.mkdir(parents=True)
+    monkeypatch.setattr(repo.os.path, 'isjunction', lambda p: p == junction, raising=False)
+    removed = []
+    monkeypatch.setattr(Path, 'unlink', lambda p: removed.append(p))
+    monkeypatch.setattr(Path, 'rmdir', lambda p: removed.append(p))
+    def forbidden(*args, **kwargs):
+        raise AssertionError('must never traverse junction')
+    monkeypatch.setattr(repo.shutil, 'rmtree', forbidden)
+    repo.recover(ready)
+    assert removed == [junction]

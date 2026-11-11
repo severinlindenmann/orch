@@ -2,6 +2,7 @@
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -22,12 +23,23 @@ OPTIONS = ('protocol.allow=never', 'protocol.https.allow=always', 'protocol.ssh.
            'core.fsmonitor=false', 'commit.gpgsign=false', 'core.symlinks=false')
 
 
+def is_link(path):
+    """Include junctions and other Windows reparse points without following them."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    junction = getattr(os.path, 'isjunction', None)
+    return (stat.S_ISLNK(info.st_mode) or (junction is not None and junction(path))
+            or bool(getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT))
+
+
 def safe(root, relative):
     """Reject links in every component before local reads/writes."""
     p = Path(root).absolute()
     for part in Path('.orch', relative).parts:
         p /= part
-        if p.is_symlink():
+        if is_link(p):
             raise Refused('Sync paths must not be links')
     return p
 
@@ -56,7 +68,7 @@ def git(root, *args, input=None, timeout=60, index=None):
         attrs = Path(empty) / 'attributes'
         attrs.touch()
         opts = (*OPTIONS, f'core.hooksPath={empty}', f'core.attributesFile={attrs}')
-        cmd = ['git', '-C', str(work), *[v for opt in opts for v in ('-c', opt)], *args]
+        cmd = ['git', '-C', str(work), '--no-replace-objects', *[v for opt in opts for v in ('-c', opt)], *args]
         try:
             return subprocess.run(cmd, input=input, capture_output=True, env=env, timeout=timeout, check=True)
         except (OSError, subprocess.SubprocessError) as e:
@@ -69,25 +81,50 @@ def version_ok(root=None):
             root = Path(directory)
             (root / '.orch').mkdir()
             return version_ok(root)
-    m = re.search(rb'git version (\d+)\.(\d+)', git(root, '--version').stdout)
-    return bool(m and tuple(map(int, m.groups())) >= (2, 38))
+    m = re.search(rb'git version (\d+)\.(\d+)\.(\d+)', git(root, '--version').stdout)
+    return bool(m and tuple(map(int, m.groups())) >= (2, 45, 1))
 
 
 def check(root):
     gd = safe(root, '.git')
     if not gd.is_dir():
         raise Refused('.git must be a real directory')
-    if not version_ok(root):
-        raise Refused('Update git to use sync')
-    safe(root, '.git/config')
-    records = git(root, 'config', '--file', '.git/config', '--no-includes', '--list', '-z').stdout
-    for record in records.split(b'\0'):
-        if record:
-            key, _, value = record.partition(b'\n')
-            if not CONFIG.fullmatch(key.decode('utf-8')):
+    # lstat detects dangling links too; reject indirection before invoking git.
+    for name in ('commondir', 'gitdir', 'config.worktree', 'objects/info/alternates', 'info/grafts'):
+        path = gd / name
+        parent = gd
+        for part in Path(name).parts[:-1]:
+            parent /= part
+            if is_link(parent):
                 raise Refused('unexpected git settings')
-            if key == b'remote.origin.url':
-                validate_url(value.decode('utf-8'))
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        raise Refused('unexpected git settings')
+    replace = gd / 'refs/replace'
+    if is_link(gd / 'refs') or is_link(replace) or (replace.exists() and
+            (not replace.is_dir() or any(replace.iterdir()))):
+        raise Refused('unexpected git settings')
+    if not version_ok(root):
+        raise Refused('Update git to 2.45.1 or newer to use sync')
+    common = os.fsdecode(git(root, 'rev-parse', '--git-common-dir').stdout).strip()
+    if (Path(root) / '.orch' / common).resolve() != gd.resolve():
+        raise Refused('unexpected git settings')
+    safe(root, '.git/config')
+    records = git(root, 'config', '--list', '--show-origin', '--show-scope', '-z').stdout.split(b'\0')
+    if records.pop() != b'' or len(records) % 3:
+        raise Refused('unexpected git settings')
+    for scope, origin, record in zip(records[::3], records[1::3], records[2::3]):
+        if scope not in (b'local', b'worktree'):
+            continue
+        if scope == b'worktree' or origin != b'file:.git/config':
+            raise Refused('unexpected git settings')
+        key, _, value = record.partition(b'\n')
+        if not CONFIG.fullmatch(key.decode('utf-8')):
+            raise Refused('unexpected git settings')
+        if key == b'remote.origin.url':
+            validate_url(value.decode('utf-8'))
     hooks = safe(root, '.git/hooks')
     if hooks.exists() and any(p.is_symlink() or not p.name.endswith('.sample') for p in hooks.iterdir()):
         raise Refused('unexpected hook, sync stopped')
@@ -116,7 +153,7 @@ def ensure(root):
     if current != 'new':
         raise Refused(f'{current}: explicit consent flow is not available yet')
     if not version_ok(root):
-        raise Refused('Update git to use sync')
+        raise Refused('Update git to 2.45.1 or newer to use sync')
     git(root, 'init', '-b', 'orch-state', '--template=')
     check(root)
     safe(root, '.git/info').mkdir(exist_ok=True)
@@ -129,7 +166,12 @@ def recover(root):
     scratch = safe(root, 'run/tmp-sync')
     if scratch.exists():
         for p in scratch.iterdir():
-            if p.is_symlink() or not p.is_dir():
+            if is_link(p):
+                if os.name == 'nt' and not p.is_symlink():
+                    p.rmdir()  # remove the junction itself, never its target
+                else:
+                    p.unlink()
+            elif not p.is_dir():
                 p.unlink()
             else:
                 shutil.rmtree(p)  # exact enumerated child; never follow a link
@@ -139,7 +181,7 @@ def validate_url(url):
     if not url or any(c.isspace() or ord(c) < 32 for c in url) or url.startswith(('-', 'ext::', 'fd::')):
         raise Refused('Unsupported remote address')
     parsed = urlsplit(url)
-    if parsed.password is not None:
+    if parsed.password is not None or (parsed.scheme in ('http', 'https') and '@' in parsed.netloc):
         raise Refused('Use your own git login, orch does not store passwords')
     if not (Path(url).is_absolute() or re.fullmatch(r'git@[A-Za-z0-9.-]+:[^\s]+', url)
             or (parsed.scheme in ('https', 'ssh') and parsed.hostname)
