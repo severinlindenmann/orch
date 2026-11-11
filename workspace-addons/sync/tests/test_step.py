@@ -301,6 +301,36 @@ def test_unreadable_tracked_ticket_preserves_folder(root, monkeypatch):
     assert set(repo.git(root, 'ls-files').stdout.decode().splitlines()) == {TICKET, ART}
 
 
+def test_future_dated_remote_ticket_does_not_win(root):
+    # Fable A15: updated_at 9999-... won every both-changed field, permanently.
+    from orch_sync import pause
+
+    base = ticket()
+    local = dict(ticket(), title='Local title', updated_at='2026-11-11T12:30:00Z')
+    remote = dict(ticket(), title='Remote title', updated_at='9999-12-31T23:59:59Z')
+    with pytest.raises(pause.Pause, match='future'):
+        step.merge_document(root, TICKET, base, local, remote, NOW)
+    near = dict(remote, updated_at='2026-11-11T12:40:00Z')  # small clock skew is normal
+    assert step.merge_document(root, TICKET, base, local, near, NOW)['title'] == 'Remote title'
+
+
+def test_failed_write_leaves_no_temp_file(root, monkeypatch):
+    # Fable A12: a temp file named like an artifact survived a failed write and was synced.
+    import os
+
+    configure(root)
+    save(root)
+    p = save(root, ART, b'old')
+    os.chmod(p, 0o640)
+    step.write(root, ART, b'new')
+    assert p.read_bytes() == b'new' and (p.stat().st_mode & 0o777) == 0o640
+    monkeypatch.setattr(step.os, 'fsync', lambda fd: (_ for _ in ()).throw(OSError('disk full')))
+    with pytest.raises(OSError):
+        step.write(root, ART, b'partial')
+    assert sorted(x.name for x in p.parent.iterdir()) == ['a.txt']
+    assert p.read_bytes() == b'new'
+
+
 def test_merge_document_preserves_local_history_and_demotes_remote(root):
     local_line = {"at": NOW, "by": "human:lindenmann", "text": "Answered q1: yes"}
     remote_line = {"at": NOW, "by": "agent:relay from ph_abc", "text": "Approved"}

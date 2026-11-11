@@ -47,14 +47,22 @@ def strict_load(data):
     return value
 
 
+TREE_BYTES = 8 * MB  # 5000 entries with long artifact paths fit easily; a tree bomb is cut off while streaming
+
+
 def tree(root, ref):
-    raw = repo.git(root, 'ls-tree', '-r', '-z', ref).stdout
+    raw = repo.git(root, 'ls-tree', '-r', '-z', ref, max_output=TREE_BYTES).stdout
     return [(*entry.split(b'\t', 1)[0].decode('ascii').split(),
              entry.split(b'\t', 1)[1].decode('utf-8')) for entry in raw.split(b'\0') if entry]
 
 
-def check(root, ref='origin/orch-state', *, base='HEAD') -> Result:
-    """PR 4 must merge result.commit only after accepting result.problems."""
+def _fold(prefix):
+    return '/'.join(scan.norm_segment(s) for s in prefix.split('/'))
+
+
+def check(root, ref='origin/orch-state', *, base='HEAD', local=None, gone=()) -> Result:
+    """PR 4 must merge result.commit only after accepting result.problems. `gone`: local paths a person
+    renamed away (orch sync resolve --rename-local) that the next stage removes: no case clash with them."""
     # The step supplies the common ancestor: a new local-only ticket is not a remote deletion.
     problems = []
     tip = None
@@ -76,10 +84,18 @@ def check(root, ref='origin/orch-state', *, base='HEAD') -> Result:
             parts = path.split('/')
             for i in range(1, len(parts) + 1):
                 prefix = '/'.join(parts[:i])
-                key = prefix.casefold()
+                key = _fold(prefix)  # Fable B13: the same name on macOS/Windows (case, NFC/NFD, ignorables)
                 if key in seen and seen[key] != prefix:
                     problems.append(Problem(path, 'path', 'Case-fold collision'))
                 seen[key] = prefix
+        # Fable A6/B13: an incoming name that only differs from one of this machine's files in case (a
+        # case-only rename too) is the same file on a case-insensitive disk: a person decides.
+        mine = {_fold(e[3]): e[3] for e in tree(root, local) if e[3] not in gone} if local else {}
+        incoming_paths = {e[3] for e in entries}
+        for path in sorted(incoming_paths):
+            other = mine.get(_fold(path))
+            if other is not None and other != path:
+                problems.append(Problem(path, 'path', 'Same name as a local file in different case'))
         if problems:
             return Result(tip, problems)
         sizes = repo.git(root, 'cat-file', '--batch-check',
@@ -121,7 +137,12 @@ def check(root, ref='origin/orch-state', *, base='HEAD') -> Result:
             problems.extend(Problem(path, f.code, f.rule) for f in scan.scan_blob(path, data))
             if not (paths.TICKET.fullmatch(path) or path == 'ticket-counter.json'):
                 continue
-            doc = strict_load(data)
+            try:
+                doc = strict_load(data)
+            except (ValueError, RecursionError):
+                # A content problem of one file: a person may still keep their own copy of it.
+                problems.append(Problem(path, 'invalid', 'Incoming state could not be validated: not valid JSON'))
+                continue
             if doc.get('general') is True:
                 problems.append(Problem(path, 'private', 'General ticket stays local'))
             if paths.TICKET.fullmatch(path):
