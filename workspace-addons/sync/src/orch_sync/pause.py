@@ -90,7 +90,7 @@ def checked_tree(root, remote, index):
         if decisions[path].get("incoming"):
             changed = paths.TICKET.fullmatch(path) and live.exists()
         else:
-            changed = not live.exists() or live.read_bytes() not in (data, step.view_bytes(root, path, data))
+            changed = not live.exists() or live.read_bytes() != data
         if changed:
             # Fable B7: the file moved on after the choice. Drop that one choice and ask again, never refuse
             # every later run (the path is no longer paused, so it could not be chosen again).
@@ -215,12 +215,6 @@ def resolve(root, path, keep, args=None, *, now=None):
             live = repo.safe(root, path)
             head = step.blob(root, step.entries(root, "HEAD").get(path))
             mine = live.read_bytes() if live.exists() else head
-            if mine is not None and paths.TICKET.fullmatch(path):
-                try:
-                    mine = step.committed(root, path, mine, head)  # this machine's live copy -> synced form
-                except (ValueError, RecursionError):
-                    if keep == "mine":
-                        raise
             saved = repo.safe(root, "run/sync/theirs/" + path)
             theirs = saved.read_bytes() if saved.exists() else None
             if remote and theirs != step.blob(root, step.entries(root, remote).get(path)):
@@ -246,6 +240,7 @@ def resolve(root, path, keep, args=None, *, now=None):
                 approved = cli.read(root, "checked-files")
                 approved[path] = hashed
                 step.write(root, "run/sync/checked-files.json", step.encoded(approved))
+            covers = None
             if paths.TICKET.fullmatch(path):
                 doc = step.document(path, data)
                 try:
@@ -296,6 +291,12 @@ def resolve(root, path, keep, args=None, *, now=None):
 
                 docs = [step.document(path, d) for d in (mine, theirs) if d is not None]
                 jump = paused.get("reason") == JUMP
+                if keep == "theirs" and len(docs) == 2:
+                    data = step.encoded(merge.merge_counter({}, *docs))
+                step.document(path, data)
+                # Everything that can refuse runs before the proof, so a refusal never uses it up (LOW-4).
+                # The person's proven choice covers the incoming numbers they reviewed (a far key included).
+                covers = step.top_number(root, remote) if jump and remote else None
                 if keep == "theirs" or jump:
                     # M3: numbers only go up, so their counter (or clearing a jump at all) is a person's
                     # decision, bound to the reviewed remote commit.
@@ -307,9 +308,6 @@ def resolve(root, path, keep, args=None, *, now=None):
                         no_handoff="Choosing the ticket counter needs a person's proof over stdin.",
                     )
                     config.require_person(by, "choose the ticket counter")
-                if keep == "theirs" and len(docs) == 2:
-                    data = step.encoded(merge.merge_counter({}, *docs))
-                step.document(path, data)
             elif paths.ARTIFACT.fullmatch(path) and keep == "theirs" and mine is not None and mine != data:
                 # No overwrite even on retries or two choices on the same day.
                 suffix = f" (mine {now[:10]})"
@@ -327,11 +325,10 @@ def resolve(root, path, keep, args=None, *, now=None):
                 decisions = {"remote_sha": remote, "files": {}}
             step.write(root, "run/sync/choices/" + path, data)
             decisions["files"][path] = {"keep": keep, "at": now}
-            if path == "ticket-counter.json" and paused.get("reason") == JUMP and remote:
-                # The person's proven choice covers the incoming numbers they reviewed (a far key included).
-                decisions["files"][path]["covers"] = step.top_number(root, remote)
+            if covers is not None:
+                decisions["files"][path]["covers"] = covers
             step.write(root, "run/sync/choices.json", step.encoded(decisions))
-            step.write(root, path, step.view_bytes(root, path, data))
+            step.write(root, path, data)
             paused["files"].remove(path)
             if not paused["files"]:
                 state["paused"] = None
@@ -478,8 +475,6 @@ def keep_key(root, key, tid, args, *, now=None):
             live = repo.safe(root, path)
             raw = live.read_bytes() if live.exists() else None
             originals[path] = raw
-            if raw is not None:
-                raw = step.committed(root, path, raw, step.blob(root, ours.get(path)))
             local = step.document(path, raw) if raw else {}
             other = step.document(path, step.blob(root, theirs[path])) if path in theirs else {}
             if local.get("general") is True or other.get("general") is True:
@@ -559,7 +554,7 @@ def keep_key(root, key, tid, args, *, now=None):
             step.write(root, "run/sync/choices/" + path, data)
             is_incoming = path == counter_path or originals[path] is None
             if path == counter_path or not is_incoming:
-                step.write(root, path, live_reservation if path == counter_path else step.view_bytes(root, path, data))
+                step.write(root, path, live_reservation if path == counter_path else data)
             decisions["files"][path] = {"keep": "key", "at": now, "incoming": is_incoming}
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
         paused["key_clashes"].pop(key)

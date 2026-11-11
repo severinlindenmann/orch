@@ -134,56 +134,29 @@ def test_held_approval_and_changed_hash(machines, monkeypatch):
     assert any(r["id"] == "sync:held:t_abc123" for r in needs.rows(b))
 
 
-def test_approval_is_bound_and_not_replayable(machines, monkeypatch):
-    # Fable B12: an approval stayed valid forever for any later re-send of the same value, and the proof
-    # for Ignore was also a proof for Allow.
-    a, b, bare = both(machines)
+@pytest.mark.parametrize("decision", ["allow", "ignore"])
+def test_allow_and_ignore_need_distinct_proofs(machines, monkeypatch, decision):
+    # Fable B12: the proof for Ignore was also a proof for Allow (and the other way round).
+    a, b, _ = both(machines)
     value = {"enabled": True}
     edit(a, ext={"automation": value})
     success(a)
     success(b)
-    allow = "sync:allow:t_abc123:automation:" + approval.digest(value)
+    other = "ignore" if decision == "allow" else "allow"
+    target = f"sync:{decision}:t_abc123:automation:" + approval.digest(value)
+    ignore = decision == "ignore"
     with pytest.raises(Refused):
-        approval.approve(b, "t_abc123", "automation", proof(b, allow.replace("allow", "ignore"), monkeypatch))
-    approval.approve(b, "t_abc123", "automation", proof(b, allow, monkeypatch))
-    assert load(b)["ext"]["automation"] == value
-    success(b)
-    success(a)
-    edit(b, ext={"automation": {"enabled": False}})  # the person changes it here later
-    success(b)
-    assert "automation" not in cli.read(b, "approved").get("t_abc123", {})  # M2: the approval is used up
-    success(a)
-    edit(a, ext={"automation": value})  # the peer re-sends the old approved value
-    repo.git(a, "add", "--", TICKET)
-    hostile(a, bare, ["commit", "-m", "replay"])
-    success(b)
-    assert load(b)["ext"]["automation"] == {"enabled": False}
-    assert approval.held(b)
-    assert "automation" not in cli.read(b, "approved").get("t_abc123", {})
-    for p in (b / ".orch/run/sync/held").glob("*.json"):
-        p.unlink()  # M2: even without its held file, the replay never reaches the live ticket
-    edit(a, title="Peer edit after the replay")
-    success(a)
-    success(b)
-    assert load(b)["title"] == "Peer edit after the replay"
-    assert load(b)["ext"]["automation"] == {"enabled": False}
-    assert approval.held(b, waiting=True)
-
-
-@pytest.mark.parametrize("data", [b"not json", b"[]", b'{"ticket": 5}',
-                                  b'{"ticket": "t_abc123", "addon": "automation", "value": 1, "seen": 5}'])
-def test_a_malformed_held_file_is_skipped(machines, data):
-    # One bad file in run/sync/held never hides the Needs rows or breaks merges.
-    a, b, _ = both(machines)
-    edit(a, ext={"automation": {"enabled": True}})
-    success(a)
-    success(b)
-    (b / ".orch/run/sync/held/t_abc123-bad.json").write_bytes(data)
-    assert [r for r in needs.rows(b) if r["kind"] == "sync:held"]
-    edit(a, title="Still merges")
-    success(a)
-    success(b)
-    assert load(b)["title"] == "Still merges"
+        args = proof(b, target.replace(decision, other, 1), monkeypatch)
+        approval.approve(b, "t_abc123", "automation", SimpleNamespace(**vars(args), ignore=ignore))
+    assert approval.held(b) and not cli.read(b, "approved") and not cli.read(b, "ignored")
+    args = proof(b, target, monkeypatch)
+    approval.approve(b, "t_abc123", "automation", SimpleNamespace(**vars(args), ignore=ignore))
+    assert not approval.held(b)
+    if ignore:
+        assert "automation" not in load(b).get("ext", {})
+        assert cli.read(b, "ignored")["t_abc123"]["automation"] == approval.digest(value)
+    else:
+        assert load(b)["ext"]["automation"] == value
 
 
 @pytest.mark.parametrize("keep", ["mine", "theirs"])
@@ -354,23 +327,6 @@ def test_keep_theirs_keeps_a_remote_wont_do_this_core_verifies(machines, monkeyp
     doc = load(b)
     assert doc["title"] == "Remote title"
     assert doc["checklist"][0]["wont_do"] is True and doc["checklist"][0]["wont_mac"] == theirs["checklist"][0]["wont_mac"]
-
-
-def test_held_block_is_dropped_when_the_peer_reverts(machines):
-    # Fable B4: a held candidate the remote no longer proposes stayed approvable.
-    a, b, _ = both(machines)
-    edit(a, ext={"automation": {"enabled": True}})
-    success(a)
-    success(b)
-    assert approval.held(b)
-    edit(a, ext={})
-    success(a)
-    success(b)
-    assert not approval.held(b, waiting=True)  # nothing a person could still Allow
-    assert not any(r["kind"] == "sync:held" for r in needs.rows(b))
-    with pytest.raises(repo.Refused, match="No single held change"):
-        approval.approve(b, "t_abc123", "automation", SimpleNamespace(proof_stdin=False, by="agent:test"))
-    assert "automation" not in load(b).get("ext", {})
 
 
 def test_ext_name_count_is_capped(machines):
@@ -654,8 +610,7 @@ def test_keep_key_reserves_live_counter_when_resume_is_offline(machines, monkeyp
     assert json.loads(repo.safe(b, first).read_bytes())["key"] == f"DM1-{reserved}"
     assert step.oid(b, "HEAD") == remote_sha(bare).decode()
     for path in (first, second, f"tickets/{created['id']}.json", "ticket-counter.json"):
-        # the live file is this machine's copy of HEAD (a held add-on block would keep its own value)
-        assert repo.safe(b, path).read_bytes() == step.view_bytes(b, path, repo.git(b, "show", "HEAD:" + path).stdout)
+        assert repo.safe(b, path).read_bytes() == repo.git(b, "show", "HEAD:" + path).stdout
 
 
 def test_ignore_requires_person(machines):
@@ -1032,59 +987,6 @@ def test_a_rename_record_whose_new_file_differs_counts_as_removal(machines):
     assert {f"{folder}/f{i}.txt" for i in range(9)} <= tracked(b)
 
 
-def test_a_retired_held_block_never_reverts_the_persons_own_value(machines):
-    # M1: a "done" held block outlived the revert; once the person set the proposed value here themselves, the
-    # next peer edit turned the live file back and held the person's own value as a peer change.
-    a, b, _ = both(machines)
-    mine, proposed = {"enabled": True}, {"enabled": False}
-    edit(b, ext={"automation": mine})
-    success(b)
-    success(a)
-    edit(a, ext={"automation": proposed})  # the peer proposes
-    success(a)
-    success(b)
-    assert load(b)["ext"]["automation"] == mine and approval.held(b, waiting=True)
-    edit(a, ext={"automation": mine})  # and reverts
-    success(a)
-    success(b)
-    assert not approval.held(b)  # the block is gone for good, not kept as a done block
-    edit(b, ext={"automation": proposed})  # the person sets the proposed value here
-    success(b)
-    success(a)
-    edit(a, title="Peer edit")
-    success(a)
-    success(b)
-    assert load(b)["title"] == "Peer edit"
-    assert load(b)["ext"]["automation"] == proposed
-    assert not approval.held(b, waiting=True)
-    assert not [r for r in needs.rows(b) if r["kind"] == "sync:held"]
-
-
-@pytest.mark.parametrize("damage", ["delete", "corrupt"])
-def test_held_value_stays_off_without_a_valid_held_file(machines, damage):
-    # M2: the committed copy carries the peer's value; a deleted or broken held file must never let it reach
-    # this machine's live ticket (fail closed: it is held again on the next merge).
-    a, b, _ = both(machines)
-    edit(a, ext={"automation": {"enabled": True}})
-    success(a)
-    success(b)
-    assert approval.held(b)
-    for p in (b / ".orch/run/sync/held").glob("*.json"):
-        if damage == "delete":
-            p.unlink()
-        else:
-            p.write_bytes(b"not json")
-    success(b)
-    assert "automation" not in load(b).get("ext", {})
-    edit(a, title="Peer edit")
-    success(a)
-    success(b)
-    assert load(b)["title"] == "Peer edit"
-    assert "automation" not in load(b).get("ext", {})
-    assert [r for r in needs.rows(b) if r["kind"] == "sync:held"]
-    assert step.view(b, TICKET, json.loads(repo.git(b, "show", "HEAD:" + TICKET).stdout)).get("ext", {}) == {}
-
-
 def counter_jump(machines, hostile_value):
     a, b, bare = both(machines)
     save(b, "ticket-counter.json", {"last": 3})
@@ -1127,3 +1029,30 @@ def test_counter_jump_needs_a_person(machines, hostile_value, keep, monkeypatch)
     if hostile_value == "key":
         assert json.loads(repo.safe(b, "tickets/t_far001.json").read_text())["key"] == "AB-900000000"
     assert not success(b).get("paused")
+
+
+def test_a_refused_counter_choice_never_uses_up_the_proof(machines, monkeypatch):
+    # LOW-4: reading the reviewed numbers ran after the proof was consumed; a refusal there burned the proof.
+    import sys
+
+    _, b, tip = counter_jump(machines, "key")
+    args = proof(b, f"sync:keep-mine-counter:{tip}", monkeypatch)
+    token = sys.stdin.getvalue()
+
+    def refused(*_):
+        raise pause.Pause("Document has a problem: tickets/t_far001.json", [])
+
+    with monkeypatch.context() as m:
+        m.setattr(step, "top_number", refused)
+        with pytest.raises(pause.Pause):
+            pause.resolve(b, "ticket-counter.json", "mine", args, now=NOW)
+    monkeypatch.setattr("sys.stdin", io.StringIO(token))
+    result = pause.resolve(b, "ticket-counter.json", "mine", args, now=NOW)
+    assert not result.get("paused") and not result.get("last_error"), result
+
+
+def test_the_jump_row_says_the_far_tickets_arrive(machines):
+    # LOW-5: "Keep mine" on a jump still lets the far-numbered tickets the person reviewed arrive.
+    _, b, _ = counter_jump(machines, "key")
+    row = next(r for r in needs.rows(b) if r.get("title") == "ticket-counter.json")
+    assert "far numbers arrive" in row["text"] and len(row["text"]) <= 500

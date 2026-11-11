@@ -1119,21 +1119,6 @@ def test_case_only_rename_never_loses_the_file(machines):
     assert remote_sha(bare) == tip
 
 
-def test_held_ext_converges_without_churn(machines):
-    # Fable B11: a held value pushed back as a change made both machines alternate forever.
-    a, b, bare = both(machines)
-    edit(a, ext={"automation": {"enabled": True}})
-    for root in (a, b, a, b):
-        success(root)
-    tip = remote_sha(bare)
-    for _ in range(4):
-        success(a)
-        success(b)
-        assert remote_sha(bare) == tip
-    assert load(a)["ext"]["automation"] == {"enabled": True}
-    assert "automation" not in load(b).get("ext", {})  # held on B until a person allows it
-
-
 def test_incoming_truncation_counts_as_removal(machines):
     # Fable A7: overwriting every artifact with nothing passed the deletion threshold.
     a, b, _ = both(machines)

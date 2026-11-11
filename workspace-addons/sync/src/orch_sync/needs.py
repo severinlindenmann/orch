@@ -6,7 +6,7 @@ import shlex
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import approval, cli
+from . import approval, cli, pause
 
 
 def row(kind, key, text, since, command, options, ticket=None, title="Sync needs you", tone="needs-you"):
@@ -115,6 +115,12 @@ def rows(root):
             )
             if "Many files" in reason:
                 text = reason + " Keep files to preserve every copy."
+            if reason == pause.JUMP and path == "ticket-counter.json":
+                # LOW-5: either choice lets the far-numbered tickets you reviewed arrive; only the counter differs.
+                text = (
+                    f"{reason}. Keep mine keeps your counter, Keep theirs takes theirs; either way the tickets "
+                    "with the far numbers arrive."
+                )
             out.append(
                 row(
                     "secret" if secret else "paused",
@@ -139,7 +145,7 @@ def rows(root):
                 )
             )
     grouped, dates = {}, {}
-    for _, block in approval.held(root, waiting=True):
+    for _, block in approval.held(root):
         grouped.setdefault(block["ticket"], []).append(block["addon"])
         dates[block["ticket"]] = min(dates.get(block["ticket"], now), block.get("since", now))
     for tid, names in grouped.items():

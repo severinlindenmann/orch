@@ -29,64 +29,16 @@ def digest(value):
     ).hexdigest()
 
 
-def _block_ok(b):
-    return (
-        isinstance(b, dict)
-        and isinstance(b.get("ticket"), str)
-        and isinstance(b.get("addon"), str)
-        and "value" in b
-        and isinstance(b.get("seen", []), list)
-        and all(isinstance(h, str) for h in b.get("seen", []))
-        and isinstance(b.get("had", False), bool)
-    )
-
-
-def _load(p):
-    try:
-        return json.loads(p.read_bytes())
-    except (ValueError, RecursionError):
-        return None
-
-
-def held(root, *, waiting=False):
-    """Held blocks; waiting=True: only those still waiting for a person (not ignored, not settled). A file of
-    any other shape (not JSON, wrong types) is no block: one bad file never breaks a merge or a row; it holds its
-    ticket's add-on blocks on the recorded live value instead (`broken`)."""
+def held(root):
     folder = repo.safe(root, "run/sync/held")
-    blocks = [(p, _load(p)) for p in sorted(folder.glob("*.json"))] if folder.exists() else []
-    return [
-        (p, b)
-        for p, b in blocks
-        if _block_ok(b) and not (waiting and (b.get("ignored") is True or b.get("waiting", True) is not True))
-    ]
-
-
-def broken(root):
-    """Tickets with a held file of any other shape: all their add-on blocks stay on the recorded live value."""
-    folder = repo.safe(root, "run/sync/held")
-    names = sorted(folder.glob("*.json")) if folder.exists() else []
-    return {p.name.rsplit("-", 1)[0] for p in names if "-" in p.name and not _block_ok(_load(p))}
-
-
-def holds(local, remote):
-    """The add-on names a merge of these sides holds for a person."""
-    installed = manifests()
-    old, new = local.get("ext", {}), remote.get("ext", {})
-    return {
-        n
-        for n in set(old) | set(new)
-        if n != "sync" and installed.get(n, {}).get("ticket_ext_inert") is not True and old.get(n) != new.get(n)
-    }
+    return [(p, json.loads(p.read_text())) for p in sorted(folder.glob("*.json"))] if folder.exists() else []
 
 
 def filter_ticket(root, path, doc, local, remote):
     from .step import encoded, write
 
     tid = Path(path).stem
-    # Fable B12: an approval is used up where it is given: `approve` writes the value into the live ticket.
-    # The merge never applies a value from the store, so a later re-send of the same value is held again.
-    # approved.json is the record the automation add-on checks, while the live block is the approved value
-    # (step.remember drops it once the live block moves on).
+    approved = cli.read(root, "approved").get(tid, {})
     ignored = cli.read(root, "ignored").get(tid, {})
     installed = manifests()
     old, new = local.get("ext", {}), remote.get("ext", {})
@@ -101,52 +53,33 @@ def filter_ticket(root, path, doc, local, remote):
         from .pause import Pause
 
         raise Pause(f"Ticket has too many add-on blocks: {path}", [path])
-    # Fable B4: read the held blocks once per ticket, not once per name.
-    mine = [(p, b) for p, b in held(root) if b["ticket"] == tid]
-    # every name the merge produced too (it can synthesise one, e.g. {} for a deletion), so the result never
-    # depends on which blocks happen to be on disk (a replay in apply must give the same ticket)
-    for name in sorted(names | set(ext) | {b["addon"] for _, b in mine}):
-        current = [(p, b) for p, b in mine if b["addon"] == name]
-        # Fable B11: the synced bytes keep the merged value (so both machines converge); a block is what keeps
-        # this machine's live ticket on its own value for every synced value it held (`seen`).
-        seen = {h for _, b in current for h in b.get("seen", []) if isinstance(h, str)}
-        if (
-            name == "sync"
-            or installed.get(name, {}).get("ticket_ext_inert") is True
-            or old.get(name) == new.get(name)
-        ):
-            # The peer no longer proposes a change: nothing left to allow. The block goes for good (M1): the
-            # committed value below is the agreed one, and the live-ext record covers the copy still applied.
-            for p, _ in current:
-                p.unlink(missing_ok=True)
-            if name != "sync" and installed.get(name, {}).get("ticket_ext_inert") is not True:
-                # Both sides agree: that value, never one the ext merge synthesised (a deletion gives {}).
-                if name in old:
-                    ext[name] = old[name]
-                else:
-                    ext.pop(name, None)
+    for name in names:
+        if name == "sync" or installed.get(name, {}).get("ticket_ext_inert") is True:
+            continue
+        if old.get(name) == new.get(name):
             continue
         value = new.get(name)
         block = {"ticket": tid, "addon": name, "value": value, "hash": digest(value)}
         since = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         # One current candidate per ticket/add-on; an old approval never selects an old candidate.
-        for p, previous in current:
-            if previous.get("hash") == block["hash"] and previous.get("waiting", True):
-                since = previous.get("since", since)
-            p.unlink(missing_ok=True)
+        for p, previous in held(root):
+            if previous.get("ticket") == tid and previous.get("addon") == name:
+                if previous.get("hash") == block["hash"]:
+                    since = previous.get("since", since)
+                p.unlink()
         block["since"] = since
-        block.update(
-            had=name in old,
-            local=old.get(name),
-            seen=sorted(seen | {block["hash"]}),
-            waiting=True,
-            ignored=ignored.get(name) == block["hash"],
-        )
-        write(root, f"run/sync/held/{tid}-{digest(block)}.json", encoded(block))
-        if name in old:
-            ext[name] = old[name]
+        if approved.get(name) == block["hash"]:
+            if value is None:
+                ext.pop(name, None)
+            else:
+                ext[name] = value
         else:
-            ext.pop(name, None)
+            if ignored.get(name) != block["hash"]:
+                write(root, f"run/sync/held/{tid}-{digest(block)}.json", encoded(block))
+            if name in old:
+                ext[name] = old[name]
+            else:
+                ext.pop(name, None)
     if ext or "ext" in local:
         doc["ext"] = ext
     else:
@@ -159,10 +92,10 @@ def filter_ticket(root, path, doc, local, remote):
 
 
 def approve(root, tid, addon, args):
-    from .step import document, encoded, remember, step_lock, write
+    from .step import document, encoded, step_lock, write
 
     with step_lock(root), syncgate.hold(root), tickets.sync_apply(root, tid):
-        candidates = [(p, b) for p, b in held(root, waiting=True) if b["ticket"] == tid and b["addon"] == addon]
+        candidates = [(p, b) for p, b in held(root) if b["ticket"] == tid and b["addon"] == addon]
         if len(candidates) != 1:
             raise repo.Refused("No single held change for this ticket and add-on")
         p, block = candidates[0]
@@ -177,7 +110,7 @@ def approve(root, tid, addon, args):
             ignored = cli.read(root, "ignored")
             ignored.setdefault(tid, {})[addon] = hashed
             write(root, "run/sync/ignored.json", encoded(ignored))
-            write(root, str(p.relative_to(repo.safe(root, ""))), encoded({**block, "ignored": True}))
+            p.unlink()
             return {"ignored": addon, "ticket": tid}
         path = f"tickets/{tid}.json"
         doc = document(path, repo.safe(root, path).read_bytes())
@@ -191,6 +124,5 @@ def approve(root, tid, addon, args):
         store.setdefault(tid, {})[addon] = hashed
         write(root, "run/sync/approved.json", encoded(store))
         write(root, path, encoded(doc))
-        remember(root, tid, doc)
         p.unlink()
     return {"approved": addon, "ticket": tid}

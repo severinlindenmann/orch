@@ -5,7 +5,6 @@ import json
 import os
 import stat
 import tempfile
-from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -248,14 +247,6 @@ def stage(root, head, index, state, now):
                     if doc.get("general") is True:
                         (preserved if path in old else generals).add(Path(path).stem)
                         continue
-                    if paths.TICKET.fullmatch(path):
-                        head_blob = blob(root, old.get(path))  # never rebinds `head` (the commit id)
-                        staged = committed(root, path, data, head_blob)
-                        remember(root, tid, doc)  # after `committed`, which compares with the previous record
-                        if staged != data:
-                            if staged != head_blob:
-                                put(root, index, path, staged)
-                            continue  # the index already holds HEAD's blob for an unchanged display copy
                 repo.git(root, "add", "-f", "--", ":(literal)" + path, index=index)
             except FileNotFoundError:
                 if paths.TICKET.fullmatch(path):
@@ -267,7 +258,7 @@ def stage(root, head, index, state, now):
                         if cli.read(root, "allow-delete").get(Path(path).stem) is True:
                             repo.git(root, "update-index", "--force-remove", "--", path, index=index)
                             continue
-                        write(root, path, view_bytes(root, path, blob(root, old[path])))
+                        write(root, path, blob(root, old[path]))
                         state["notices"].append(f"Restored a missing ticket file: {path}")
                         state.setdefault("deleted", {})[Path(path).stem] = (
                             datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -338,172 +329,6 @@ def held_ticket(root, path, doc, local, remote):
     return filter_ticket(root, path, doc, local, remote)
 
 
-def _held(root, path):
-    from .approval import held
-
-    return [b for _, b in held(root) if b.get("ticket") == Path(path).stem and "had" in b]
-
-
-def live_ext(root):
-    """{ticket: {add-on: value}}: the add-on blocks this machine's live tickets last held (stage records them).
-    A held file can be deleted or broken; this record keeps a peer's synced value off the live ticket anyway."""
-    from .approval import manifest_cache
-
-    cached = manifest_cache.get()
-    if cached is not None and "live-ext" in cached:
-        return cached["live-ext"]
-    data = cli.read(root, "live-ext")
-    if cached is not None:
-        cached["live-ext"] = data
-    return data
-
-
-def remember(root, tid, doc):
-    """Record a live ticket's add-on blocks (not ext.sync); writes only when they changed."""
-    ext = doc.get("ext") if isinstance(doc.get("ext"), dict) else {}
-    own = {k: v for k, v in ext.items() if k != "sync"}
-    record = live_ext(root)
-    if record.get(tid) != own:
-        record = {**record, tid: own}
-        write(root, "run/sync/live-ext.json", encoded(record))
-        from .approval import digest, manifest_cache
-
-        if manifest_cache.get() is not None:
-            manifest_cache.get()["live-ext"] = record
-        # An approval is used up once the live block moves on from the approved value: a later re-send of that
-        # value is never blessed by it again.
-        store = cli.read(root, "approved")
-        mine = store.get(tid) if isinstance(store.get(tid), dict) else {}
-        kept = {name: h for name, h in mine.items() if digest(own.get(name)) == h}
-        if kept != mine:
-            rest = {k: v for k, v in store.items() if k != tid}
-            write(root, "run/sync/approved.json", encoded({**rest, tid: kept} if kept else rest))
-
-
-def _unguarded(root, path, blocks):
-    """(names, recorded): the add-on names no valid held block covers (every name when a held file of this ticket
-    is broken), and this machine's recorded live values. A different synced value on such a name stays held."""
-    from .approval import broken, manifests
-
-    tid = Path(path).stem
-    # None: this ticket was never live here (nothing of a peer's is trusted)
-    recorded = live_ext(root).get(tid)
-    recorded = recorded if isinstance(recorded, dict) or recorded is None else {}
-    covered = set() if tid in broken(root) else {b.get("addon") for b in blocks}
-    installed = manifests()
-    return (
-        lambda name: (
-            name != "sync"
-            and name not in covered
-            and installed.get(name, {}).get("ticket_ext_inert") is not True
-        )
-    ), recorded
-
-
-def _differs(a, b, name):
-    return (name in a) != (name in b) or a.get(name) != b.get(name)
-
-
-def _ext_view(root, path, doc):
-    """Held add-on blocks show this machine's own value until a person allows the synced one (Fable B11).
-    Fails closed: a synced value no valid block covers shows this machine's recorded live value instead."""
-    from .approval import digest
-
-    blocks = _held(root, path)
-    ext = doc.get("ext") if isinstance(doc.get("ext"), dict) else None
-    out = dict(ext or {})
-    for b in blocks:
-        if digest(out.get(b.get("addon"))) in b.get("seen", []):
-            if b["had"]:
-                out[b["addon"]] = b.get("local")
-            else:
-                out.pop(b["addon"], None)
-    by_record, recorded = _unguarded(root, path, blocks)
-    recorded = recorded if recorded is not None else {}
-    for name in sorted(set(out) | set(recorded)):
-        if by_record(name) and _differs(out, recorded, name):
-            if name in recorded:
-                out[name] = recorded[name]
-            else:
-                out.pop(name, None)
-    if out == (ext or {}):
-        return doc
-    return {**doc, "ext": out} if out or ext is not None else {k: v for k, v in doc.items() if k != "ext"}
-
-
-def view(root, path, doc):
-    """This machine's live copy of a committed ticket: held add-on blocks on this machine's own value."""
-    return _ext_view(root, path, doc)
-
-
-def view_bytes(root, path, data):
-    """Live bytes for committed ticket bytes (the same bytes when no add-on block is held here)."""
-    if data is None or not paths.TICKET.fullmatch(path):
-        return data
-    try:
-        doc = incoming.strict_load(data)
-    except (ValueError, RecursionError):
-        return data
-    shown = view(root, path, doc)
-    return data if shown is doc else encoded(shown)
-
-
-def committed(root, path, data, head):
-    """Committed bytes for live ticket bytes: an unchanged live copy is HEAD's blob; an edited one keeps HEAD's
-    synced value of every add-on block still held on this machine's own value."""
-    if head is not None and data != head and data == view_bytes(root, path, head):
-        return head
-    from .approval import digest, held
-
-    doc = incoming.strict_load(data)
-    ext = doc.get("ext") if isinstance(doc.get("ext"), dict) else {}
-    for p, b in held(root):
-        # M1: a person moved this add-on on (neither their own held-against value nor a held one): the block is
-        # done, so it can never turn their value back into the old one.
-        if b["ticket"] != Path(path).stem or "had" not in b:
-            continue
-        if not _own(ext, b) and digest(ext.get(b["addon"])) not in b.get("seen", []):
-            p.unlink(missing_ok=True)
-    blocks = _held(root, path)
-    try:
-        head_doc = incoming.strict_load(head) if head is not None else {}
-    except (ValueError, RecursionError):
-        head_doc = {}
-    promoted = _ext_committed(root, path, doc, head_doc, blocks)
-    return data if promoted == doc else encoded(promoted)
-
-
-def _own(ext, b):
-    return (b["addon"] in ext and ext[b["addon"]] == b.get("local")) if b["had"] else b["addon"] not in ext
-
-
-def _ext_committed(root, path, doc, head_doc, blocks):
-    """Reverse of _ext_view: a held block still on this machine's own value keeps HEAD's synced value; so does an
-    unchanged recorded live value no valid block covers."""
-    from .approval import digest
-
-    head_ext = head_doc.get("ext") if isinstance(head_doc.get("ext"), dict) else {}
-    ext = doc.get("ext") if isinstance(doc.get("ext"), dict) else {}
-    out = dict(ext)
-    for b in blocks:
-        name = b.get("addon")
-        if _own(ext, b) and digest(head_ext.get(name)) in b.get("seen", []):
-            if name in head_ext:
-                out[name] = head_ext[name]
-            else:
-                out.pop(name, None)
-    by_record, recorded = _unguarded(root, path, blocks)
-    for name in sorted(set(ext) | set(head_ext) | set(recorded)) if recorded is not None else ():
-        if by_record(name) and not _differs(ext, recorded, name) and _differs(head_ext, recorded, name):
-            if name in head_ext:
-                out[name] = head_ext[name]
-            else:
-                out.pop(name, None)
-    if out == ext:
-        return doc
-    return {**doc, "ext": out} if out or "ext" in doc else doc
-
-
 FUTURE_SKEW = 86_400  # seconds a peer's clock may run ahead
 
 
@@ -526,22 +351,7 @@ def merge_document(root, path, base, local, remote, now):
         raise pause.Pause(f"Ticket cannot be merged: {path}", [path]) from None
     if doc is None:
         raise pause.Pause(f"Ticket cannot be merged: {path}", [path])
-    from .approval import holds
-
-    merged_ext = deepcopy(doc.get("ext")) if isinstance(doc.get("ext"), dict) else {}
-    # Held blocks are judged against this machine's own (live) value; `view` keeps them off the live file.
-    effective = view(root, path, local) if local else local
-    held_names = holds(effective, remote)
-    doc = held_ticket(root, path, doc, effective, remote)
-    ext = dict(doc.get("ext", {}))
-    for name in held_names:  # Fable B11: the synced bytes keep the merged value, never a held revert
-        if name in merged_ext:
-            ext[name] = merged_ext[name]
-        else:
-            ext.pop(name, None)
-    if ext or "ext" in doc:
-        doc["ext"] = ext
-    return doc
+    return held_ticket(root, path, doc, local, remote)
 
 
 def merged_tree(root, head, remote, index, now):
@@ -729,10 +539,9 @@ def renumber(root, index, now, merges=None, *, held, live=False):
         path = f"tickets/{tid}.json"
         if live:
             with tickets.sync_apply(root, tid):
-                staged = blob(root, rows[path])
-                if repo.safe(root, path).read_bytes() not in (staged, view_bytes(root, path, staged)):
+                if repo.safe(root, path).read_bytes() != blob(root, rows[path]):
                     raise Busy(f"{path}: busy")
-                write(root, path, view_bytes(root, path, encoded(doc)))
+                write(root, path, encoded(doc))
         else:
             merges[path] = {"selected": doc, "now": now}
         put(root, index, path, encoded(doc))
@@ -761,9 +570,8 @@ def apply(root, old, new, state, merges=None):
             p = repo.safe(root, path)
             previous, data = blob(root, before.get(path)), blob(root, after.get(path))
             current = p.read_bytes() if p.is_file() and not repo.is_link(p) else None
-            shown_previous, shown_data = view_bytes(root, path, previous), view_bytes(root, path, data)
             regular = not p.exists() or (stat.S_ISREG(p.lstat().st_mode) and p.stat().st_nlink == 1)
-            if not regular or current not in (previous, data, shown_previous, shown_data):
+            if not regular or current not in (previous, data):
                 if unstageable(root, path):
                     # A local file stage keeps out (General, broken, too big, a link): it stays as it is and
                     # the merged version stays committed, so nothing is lost and nothing else waits for it.
@@ -778,9 +586,7 @@ def apply(root, old, new, state, merges=None):
                 inputs = merges[path]
                 # On recovery an already-applied file uses the original local input.
                 local = (
-                    incoming.strict_load(previous or b"{}")
-                    if current in (previous, shown_previous)
-                    else inputs.get("local", {})
+                    incoming.strict_load(current or b"{}") if current == previous else inputs.get("local", {})
                 )
                 if "selected" in inputs:
                     checked = merge_document(
@@ -794,8 +600,7 @@ def apply(root, old, new, state, merges=None):
                     raise Busy(f"{path}: busy")
             plan.append((path, p, current, data))
         for path, p, current, data in plan:
-            shown = view_bytes(root, path, data)  # the merges above may have held new add-on blocks
-            if current == shown:
+            if current == data:
                 continue  # an interrupted apply already replaced this path
             if (p.read_bytes() if p.is_file() else None) != current:
                 raise Busy(f"{path}: busy")  # a plain file writer slipped in since the check
@@ -803,7 +608,7 @@ def apply(root, old, new, state, merges=None):
                 if data is None:
                     p.unlink(missing_ok=True)
                 else:
-                    write(root, path, shown)
+                    write(root, path, data)
             except PermissionError:
                 raise Busy(f"{path}: busy") from None
     repo.git(root, "update-ref", "refs/heads/orch-state", new, old)
@@ -1065,8 +870,8 @@ def _renamed_away(root):
 
 
 def _settle_unapplied(root, state, head):
-    """Drop the paths that apply again: the live file now holds the committed version (or this machine's
-    live copy of it), e.g. after the local file became syncable and was committed. Never raises."""
+    """Drop the paths that apply again: the live file now holds the committed version, e.g. after the local
+    file became syncable and was committed. Never raises."""
     pending = state.get("unapplied")
     if not isinstance(pending, dict) or not pending:
         state.pop("unapplied", None)
@@ -1080,7 +885,7 @@ def _settle_unapplied(root, state, head):
             p = repo.safe(root, path)
             live = p.read_bytes() if p.is_file() and not repo.is_link(p) else None
             data = blob(root, rows.get(path))
-            if live in (data, view_bytes(root, path, data)):
+            if live == data:
                 pending.pop(path)
         except (ValueError, OSError):
             continue
