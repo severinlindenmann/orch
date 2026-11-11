@@ -219,7 +219,7 @@ prints a header).
   Binary key files (no text form) are hidden by the lower-case hex and the padded base64 / base64url of the
   whole file; raw bytes, upper-case hex, unpadded or line-wrapped base64 of such a file are **not** hidden (Level 1).
 - Known limits (Level 1): a child can still open `/dev/tty` itself; a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
-  terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences.
+  terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences. The approved command also reads the caller's input, folder and the user's config files (Level 1).
 
 ## Wrapper examples (a skill ships them; `orch-wrapper-maker` teaches agents to write them)
 
