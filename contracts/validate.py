@@ -201,7 +201,6 @@ def _core_clean(*names):
 
 # --- activity (activity.md) ------------------------------------------------------------------------------------------
 EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
-FILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 PRECEDENCE = {"hook": 2, "broker": 2, "job": 2, "core": 2, "log": 1}
 
 
@@ -214,8 +213,10 @@ def act_event_id(tool_call_id, run, seq):
     return "x_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:32]
 
 
-def act_detail_name(event_id):
-    return event_id if FILE_ID.match(event_id) else "x_" + hashlib.sha256(event_id.encode()).hexdigest()[:32]
+def act_detail_name(run, kind, event_id):
+    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/1\\0" run \\0 kind \\0 id)."""
+    data = b"orch.detail/1\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id))
+    return hashlib.sha256(data).hexdigest()[:32]
 
 
 def act_dedupe(lines):
@@ -325,12 +326,12 @@ def act_map_stream(lines, ctx):
                 first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
                 err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
                 emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
-                     detail=f"detail/{run}/{act_detail_name(eid)}.json")
+                     detail=f"detail/{run}/{act_detail_name(run, 'step', eid)}.json")
         elif t == "item.completed" and item.get("type") == "agent_message":
             eid = f"{run}:{turn}:{item['id']}"
             say = _one_line(item.get("text", ""), 200)
             emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
-                 detail=f"detail/{run}/{act_detail_name(eid)}.json")
+                 detail=f"detail/{run}/{act_detail_name(run, 'run.state', eid)}.json")
         elif t == "turn.completed":
             u = m.get("usage") or {}
             emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
@@ -349,7 +350,7 @@ def kind_activity():
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:
-        _expect(f"activity detail_names {c['id']}", act_detail_name(c["id"]), c["file"])
+        _expect(f"activity detail_names {c['kind']} {c['id']}", act_detail_name(c["run"], c["kind"], c["id"]), c["file"])
     for c in vec["dedupe"]:
         _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
     for c in vec["hook_entry"]:

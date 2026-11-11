@@ -15,7 +15,7 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
 .orch/record/                         LOCAL, in .orch/.gitignore ("record/") and the .git/info/exclude block. Never committed
   meta.json                           {"schema": "orch.record/1", "since": "<time>", "keep_days": 90, "max_mb": 2048}
   runs/<run>.jsonl                    one file per run, one orch.activity/1 event per line
-  detail/<run>/<file id>.json         full payload of one event ($defs/detail_file), at most 1 MB, key values hidden
+  detail/<run>/<file name>.json       full payload of one event ($defs/detail_file), at most 1 MB, key values hidden
   jobs/<run>/<job>.jsonl              orch.job/1 events of one job (job-events.md)
   counts/<YYYY-MM-DD>.json            daily counts (orch.counts/1 day file, counts.md), kept after detail is gone
   proposals/<id>.json                 check-up proposals (proposal.md)
@@ -37,8 +37,13 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   replaced by `x_` + the first 32 hex of its sha256, the same for hook and collector, so dedupe still works (vectors `ids`).
 - `seq` = position in the run file, 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
 - `run`, `session`, `agent` (`main` or `h_<n>`), `parent` (null for main) bind the event; `ticket` is the run's ticket.
-- **Detail file id**: `id` when it matches `^[A-Za-z0-9_-]{1,128}$`, else `x_` + the first 32 hex characters of
-  sha256(id as UTF-8) (vectors `detail_names`). The path is `detail/<run>/<file id>.json`.
+- **Detail file name** (invariant): always 32 lowercase hex characters, `sha256(b"orch.detail/1\0" + run + b"\0" + kind +
+  b"\0" + id)[:32]` (UTF-8, vectors `detail_names`); no raw id ever becomes a file name, so case-insensitive file systems,
+  separators and reserved names cannot make two events share a file. The path is `detail/<run>/<file name>.json`. The file
+  stores `id` and `kind`; a writer never overwrites a file whose stored `(kind, id)` differs.
+- **Detail lost.** When a payload exists but cannot be stored (the file name is taken by another event, a write fails, or it
+  is too large even after cutting), the line is still written with `detail: null` and `detail_lost: true`. A detail problem
+  never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file.
 
 ## Writing (one writer per run file)
 

@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
@@ -86,12 +87,16 @@ def test_ids(store, case):
     assert writer.append(value)["id"] == case["id"]
 
 
-@pytest.mark.parametrize("case", VECTORS["detail_names"])
+@pytest.mark.parametrize("case", [c for c in VECTORS["detail_names"] if c["kind"] == "step"])
 def test_detail_names(store, case):
     ws, writer = store
-    stored = writer.append(event(id=case["id"]), detail={"input": {}, "output": "ok"})
-    assert stored["detail"] == f"detail/{stored['run']}/{case['file']}.json"
-    assert read_detail(ws, stored["run"], case["file"])["output"] == "ok"
+    raw = (
+        "call/../x y" if case["id"].startswith("x_") else case["id"]
+    )  # the writer hashes unsafe raw ids first
+    stored = writer.append(event(id=raw, run=case["run"]), detail={"input": {}, "output": "ok"})
+    assert stored["id"] == case["id"]
+    assert stored["detail"] == f"detail/{case['run']}/{case['file']}.json"
+    assert read_detail(ws, case["run"], case["file"])["output"] == "ok"
 
 
 @pytest.mark.parametrize("case", VECTORS["dedupe"])
@@ -165,7 +170,7 @@ def test_hiding_every_file(store):
         )
         stored = writer.append(value, detail={"input": {form: form}, "output": form})
         assert "[hidden: " in stored["text"]
-        detail = read_detail(ws, stored["run"], f"secret{i}")
+        detail = read_detail(ws, stored["run"], Path(stored["detail"]).stem)
         assert detail["hidden"] >= 5
     stored = writer.append(event(id="generic", text="ghp_" + "a" * 36))
     assert "ghp_" not in stored["text"]
@@ -290,9 +295,10 @@ def test_detail_schema_and_runtime_schema():
 
 def test_preflight_leaves_nothing(store):
     ws, writer = store
-    with pytest.raises(RecordRefused):
-        writer.append(event(), detail={"input": "x" * (1024**2), "output": ""})
-    assert not ws.exists()
+    lost = writer.append(event(), detail={"input": "x" * (1024**2), "output": ""})
+    assert lost["detail"] is None and lost["detail_lost"] is True  # the audit line is kept
+    assert not (record_dir(ws) / "detail").exists()
+    shutil.rmtree(ws)
     with pytest.raises(RecordRefused):
         writer.append(event(data={"large": ["x" * 5000] * 3}))
     assert not ws.exists()
@@ -301,7 +307,7 @@ def test_preflight_leaves_nothing(store):
 def test_stale_lock_and_missing_reads(store):
     ws, writer = store
     assert read_events(ws, "r_8k2m01") == []
-    assert read_detail(ws, "r_8k2m01", "missing") is None
+    assert read_detail(ws, "r_8k2m01", "0" * 32) is None
     assert list_runs(ws) == []
     writer.append(event())
     lock = record_dir(ws) / "runs/r_8k2m01.lock"
@@ -343,9 +349,9 @@ def test_symlink_swapped_after_check_is_refused(store, tmp_path, monkeypatch):
             target.symlink_to(outside, target_is_directory=True)
 
     monkeypatch.setattr(record, "_safe", swap_after_check)
-    with pytest.raises(RecordRefused):
-        writer.append(event(), detail={"input": "i", "output": "o"})
+    kept = writer.append(event(), detail={"input": "i", "output": "o"})
     assert swapped
+    assert kept["detail"] is None and kept["detail_lost"] is True  # nothing followed, the audit line is kept
     assert list(outside.iterdir()) == []
 
 
@@ -408,7 +414,7 @@ def test_detail_of_colliding_id_never_replaces_other_detail(store):
 
 def test_detail_pointer_and_reserved_ids(store):
     ws, writer = store
-    stored = writer.append(event(detail="detail/r_8k2m01/ghost.json"))
+    stored = writer.append(event(detail="detail/r_8k2m01/" + "a" * 32 + ".json"))
     assert stored["detail"] is None
     for raw in ("r_8k2m01:5", "x_" + "a" * 32):
         got = writer.append(event(id=raw))
@@ -424,30 +430,117 @@ def test_late_started_detail_keeps_finished_detail(store):
     assert json.loads((record_dir(ws) / done["detail"]).read_text())["output"] == "final"
 
 
-def test_detail_name_domains_never_collide(store):
+def test_detail_name_property():
+    import random
+    import re
+
+    from orch.collect_execjson import detail_name
+
+    rng = random.Random(7)
+    alphabet = "abAB09_-.:|/\\ \u00e9\u00c9\u4e2d"
+    ids = {"".join(rng.choice(alphabet) for _ in range(rng.randint(1, 12))) for _ in range(400)}
+    ids |= {"A", "a", "same|step", "same", "x_" + "a" * 32, "X_" + "A" * 32}
+    seen = {}
+    for run in ("r_8k2m01", "r_8k2m02"):
+        for kind in ("step", "helper.start", "run.state"):
+            for eid in ids:
+                name = detail_name(run, kind, eid)
+                assert re.fullmatch("[0-9a-f]{32}", name)
+                assert seen.setdefault(name, (run, kind, eid)) == (run, kind, eid)
+    assert len({n.lower() for n in seen}) == len(seen)
+
+
+def test_case_variants_and_collisions_never_drop_the_line(store):
     ws, writer = store
-    raw = "weird id|helper.start"  # unsafe step id: hashed; the same text hashed for a non-step must differ
-    step = writer.append(event(id=raw), detail={"input": "step", "output": "step"})
-    other = writer.append(
-        event(
-            id=raw,
-            kind="helper.start",
-            agent="h_1",
-            parent="main",
-            via="hook",
-            used={"kind": "helper", "name": "h", "action": None, "source": "builtin", "version": None},
-        ),
-        detail={"input": "other", "output": "other"},
+    one = writer.append(event(id="A"), detail={"input": "upper", "output": "upper"})
+    two = writer.append(event(id="a"), detail={"input": "lower", "output": "lower"})
+    assert one["detail"] != two["detail"] and not one.get("detail_lost") and not two.get("detail_lost")
+    # a planted file of another event under the name an append would use: the line is kept, detail given up
+    target = record_dir(ws) / writer_detail_path(ws, "z1")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(
+            {
+                "v": 1,
+                "id": "someone",
+                "run": "r_8k2m01",
+                "kind": "step",
+                "input": "p",
+                "output": "p",
+                "truncated": False,
+                "hidden": 0,
+            }
+        )
     )
-    assert step["detail"] != other["detail"]
-    assert json.loads((record_dir(ws) / step["detail"]).read_text())["input"] == "step"
-    got = writer.append(event(id="k_" + "b" * 32))
-    assert got["id"].startswith("x_")
-    # a stored file of another event under the target name is never replaced
-    target = record_dir(ws) / "detail/r_8k2m01/victim.json"
-    victim = json.loads((record_dir(ws) / step["detail"]).read_text())
-    victim["id"] = "someone-else"
-    target.write_text(json.dumps(victim))
+    kept = writer.append(event(id="z1"), detail={"input": "x", "output": "y"})
+    assert kept is not None and kept["detail"] is None and kept["detail_lost"] is True
+    assert json.loads(target.read_text())["id"] == "someone"
+    assert [e["id"] for e in read_events(ws, "r_8k2m01")] == ["A", "a", "z1"]
+    # unreadable planted file: same
+    target2 = record_dir(ws) / writer_detail_path(ws, "z2")
+    target2.write_text("not json")
+    assert writer.append(event(id="z2"), detail={"input": "x", "output": "y"})["detail_lost"] is True
+    # too large even after cutting: line kept
+    big = writer.append(event(id="z3"), detail={"input": "x" * (2 * 1024**2), "output": ""})
+    assert big["detail"] is None and big["detail_lost"] is True
+
+
+def writer_detail_path(ws, eid):
+    from orch.collect_execjson import detail_name
+
+    return f"detail/r_8k2m01/{detail_name('r_8k2m01', 'step', eid)}.json"
+
+
+def test_fifo_planted_as_run_file_does_not_hang(store):
+    ws, writer = store
+    fifo = record_dir(ws) / "runs/r_8k2m01.jsonl"
+    fifo.parent.mkdir(parents=True)
+    os.mkfifo(fifo)
     with pytest.raises(RecordRefused):
-        writer.append(event(id="victim"), detail={"input": "x", "output": "y"})
-    assert json.loads(target.read_text())["id"] == "someone-else"
+        writer.append(event())
+    assert not (record_dir(ws) / "runs/r_8k2m01.lock").exists()
+
+
+def test_no_fchmod_still_writes(store, monkeypatch):
+    ws, writer = store
+    monkeypatch.delattr(record.os, "fchmod")
+    assert writer.append(event())
+    assert read_events(ws, "r_8k2m01")
+
+
+def test_only_name_surrogate_reparse_tags_refused(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    folder = tmp_path / "ws" / ".orch" / "record" / "runs"
+    folder.mkdir(parents=True)
+    tag = {"v": 0x9000001A}  # a cloud placeholder: not a name surrogate
+    real_lstat = Path.lstat
+
+    def fake_lstat(self, *a, **k):
+        result = real_lstat(self, *a, **k)
+        if self == folder:
+            return SimpleNamespace(st_mode=result.st_mode, st_file_attributes=0x400, st_reparse_tag=tag["v"])
+        return result
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    assert not record._is_link(folder)
+    tag["v"] = 0xA000000C  # symlink
+    assert record._is_link(folder)
+    tag["v"] = 0xA0000003  # mount point
+    assert record._is_link(folder)
+
+
+def test_finished_detail_is_write_once(store):
+    ws, writer = store
+    done = {"ok": True, "error": None, "ms": 1}
+    first = writer.append(
+        event(id="w1", via="log", outcome=done), detail={"input": "a", "output": "collector"}
+    )
+    hook = writer.append(event(id="w1", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
+    assert hook is not None  # the hook line is kept (higher precedence) ...
+    assert (
+        json.loads((record_dir(ws) / first["detail"]).read_text())["output"] == "collector"
+    )  # ... its detail is not
+    started = writer.append(event(id="w2"), detail={"input": "a", "output": "early"})
+    writer.append(event(id="w2", outcome=done), detail={"input": "a", "output": "final"})
+    assert json.loads((record_dir(ws) / started["detail"]).read_text())["output"] == "final"

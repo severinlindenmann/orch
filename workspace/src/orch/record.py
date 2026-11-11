@@ -1,7 +1,6 @@
 """Private, hidden activity records and explicit retention."""
 
 import errno
-import hashlib
 import json
 import os
 import re
@@ -26,8 +25,8 @@ _NOT_SAFE = "The record folder is not safe."
 _OFF = "Recording is off until key hiding is ready."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
-_FILE = r"[A-Za-z0-9_-]{1,128}"
-_RESERVED_ID = r"r_[a-z0-9_]{6,32}:[0-9]+|[xk]_[0-9a-f]{32}"
+_FILE = r"[0-9a-f]{32}"
+_RESERVED_ID = r"r_[a-z0-9_]{6,32}:[0-9]+|x_[0-9a-f]{32}"
 
 
 class RecordRefused(Refused):
@@ -51,6 +50,7 @@ def _name(value: Any, pattern: str) -> str:
     return value
 
 
+_SURROGATE = 0x20000000  # reparse tag bit: the point names another path
 _REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT (Windows junctions, mount points and symlinks)
 
 
@@ -62,7 +62,12 @@ def _is_link(part: Path) -> bool:
         attrs = getattr(part.lstat(), "st_file_attributes", 0)
     except OSError:
         return False
-    return bool(attrs & _REPARSE)
+    if not attrs & _REPARSE:
+        return False
+    tag = getattr(part.lstat(), "st_reparse_tag", None)
+    # Name-surrogate tags (symlink, mount point/junction) redirect; others (OneDrive placeholders) do not.
+    # Unknown tag (older Python): fail closed.
+    return tag is None or bool(tag & _SURROGATE)
 
 
 def _within_record(path: Path) -> bool:
@@ -78,7 +83,11 @@ def _within_record(path: Path) -> bool:
 
 def _safe(path: Path) -> None:
     for part in (path, *path.parents):
-        if _is_link(part):
+        if ".orch" in part.parts:  # the workspace's own tree: every kind of link or reparse point
+            unsafe = _is_link(part)
+        else:  # above the workspace (home, drive redirects): plain symlinks only, and not on Windows
+            unsafe = os.name == "posix" and part.is_symlink()
+        if unsafe:
             raise RecordRefused(_NOT_SAFE)
     if not _within_record(path):
         raise RecordRefused(_NOT_SAFE)
@@ -138,19 +147,22 @@ def _mkdir(path: Path) -> None:
 
 def _open(path: Path, flags: int) -> int:
     _safe(path)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)  # a planted FIFO must not hang us
     if _FD:
         with _parent(path) as (pfd, name):
             fd = os.open(name, flags, 0o600, dir_fd=pfd)
     else:
         fd = os.open(path, flags, 0o600)
     info = os.fstat(fd)
-    if not stat.S_ISREG(info.st_mode) or (
-        os.name == "posix" and (info.st_nlink != 1 or info.st_uid != os.geteuid())
+    writing = bool(flags & (os.O_WRONLY | os.O_RDWR))
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or (writing and info.st_nlink != 1)
+        or (os.name == "posix" and writing and info.st_uid != os.geteuid())
     ):
         os.close(fd)  # a hardlink to a file elsewhere, a device or a file of another user: never written
         raise RecordRefused(_NOT_SAFE)
-    if flags & (os.O_WRONLY | os.O_RDWR):
+    if writing and hasattr(os, "fchmod"):
         os.fchmod(fd, 0o600)
     return fd
 
@@ -266,25 +278,24 @@ class RecordWriter:
             raise RecordRefused("This record cannot be hidden safely.")
         return line.encode("utf-8")
 
-    def _prepare(self, event: dict, payload: dict | None, hidden: int) -> tuple[bytes, bytes | None]:
+    def _prepare(
+        self, event: dict, payload: dict | None, hidden: int, lost: bool = False
+    ) -> tuple[bytes, bytes | None]:
         run = event["run"]
         detail_bytes = None
-        if payload is None:
-            event["detail"] = None  # a line never points at a file this call did not write
-        else:
-            # A step keeps the contract name (the id); any other kind gets its own file, so an event with a
-            # colliding id can never replace another kind's detail.
-            # Non-step names live in their own "k_" domain; ids of that shape are re-hashed (_RESERVED_ID),
-            # so they can never equal a step's file name, whatever the raw ids were.
-            if event["kind"] == "step":
-                name = detail_name(event["id"])
-            else:
-                name = "k_" + hashlib.sha256(f"{event['kind']}\0{event['id']}".encode()).hexdigest()[:32]
-            event["detail"] = f"detail/{run}/{name}.json"
+        event.pop("detail_lost", None)
+        event["detail"] = None  # a line never points at a file this call did not write
+        if payload is not None and lost:
+            event["detail_lost"] = True  # the audit line is always kept; only its detail is given up
+        elif payload is not None:
+            # INVARIANT: a detail file name is only ever lowercase hex of a domain-separated hash of
+            # (run, kind, id); no raw id becomes a file name. The file carries (kind, id) for verification.
+            name = detail_name(run, event["kind"], event["id"])
             wrapped = dict(
                 v=1,
                 id=event["id"],
                 run=run,
+                kind=event["kind"],
                 input=payload["input"],
                 output=payload["output"],
                 truncated=False,
@@ -296,11 +307,16 @@ class RecordWriter:
                 if not isinstance(output, str):
                     output = _json(output)
                 if not output:
-                    raise RecordRefused("The record detail is too large.")
+                    detail_bytes = None
+                    break
                 wrapped["output"] = self.hider.hide_cut(output, len(output) // 2)
                 wrapped["truncated"] = True
                 detail_bytes = self._serialized(wrapped)
-            _validate(wrapped, detail=True)
+            if detail_bytes is None:
+                event["detail_lost"] = True
+            else:
+                _validate(wrapped, detail=True)
+                event["detail"] = f"detail/{run}/{name}.json"
         line = self._serialized(event) + b"\n"
         while len(line) > 8192:
             if event["text"]:
@@ -313,6 +329,30 @@ class RecordWriter:
             line = self._serialized(event) + b"\n"
         _validate(event)
         return line, detail_bytes
+
+    def _store_detail(self, root: Path, previous: list[dict], event: dict, payload: bytes) -> bool:
+        """Write the detail file; False = give the detail up (the line is still written, with detail_lost).
+
+        A file whose stored (kind, id) differs, an unreadable file or any write problem is never overwritten
+        or followed; the audit line does not depend on it."""
+        run, target = event["run"], root / event["detail"]
+        try:
+            _mkdir(target.parent)
+            if target.exists():
+                stored = read_detail(self.workspace, run, target.stem) or {}
+                if (stored.get("kind"), stored.get("id")) != (event["kind"], event["id"]):
+                    return False
+            # Write once: a finished line's detail is never replaced (hook after collector, or the reverse);
+            # only a finished line may replace the detail of a started one (which may also arrive late).
+            finished_before = any(
+                _key(old) == (run, event["id"], event["kind"], True) and old.get("detail") == event["detail"]
+                for old in previous
+            )
+            if not target.exists() or (event["outcome"] is not None and not finished_before):
+                _atomic(target, payload)
+            return True
+        except (OSError, RecordRefused):
+            return False
 
     def append(self, event: dict, *, detail: dict | None = None) -> dict | None:
         try:
@@ -343,8 +383,11 @@ class RecordWriter:
         # Reject malformed input, including controls, before normalizing display text.
         if not isinstance(event.get("text"), str) or re.search(r"[\x00-\x1f\x7f]", event["text"]):
             raise RecordRefused(_INVALID)
-        if event.get("detail") is not None:
+        if (
+            event.get("detail") is not None
+        ):  # a supplied pointer must at least be well formed; _prepare owns it
             _name(event["detail"], rf"detail/{_RUN}/{_FILE}\.json")
+        event.pop("detail_lost", None)
         if detail is not None and (
             not isinstance(detail, dict)
             or not {"input", "output"} <= detail.keys()
@@ -376,17 +419,8 @@ class RecordWriter:
             if any(_key(old) == _key(event) and _precedence(old) >= _precedence(event) for old in previous):
                 return None
             line, detail_bytes = self._prepare(event, payload, hidden)
-            if detail_bytes is not None:
-                target = root / event["detail"]
-                _mkdir(target.parent)
-                # A started step never replaces the detail of its finished line (it may arrive late).
-                if (
-                    target.exists()
-                    and (read_detail(self.workspace, run, target.stem) or {}).get("id") != event["id"]
-                ):
-                    raise RecordRefused(_INVALID)  # never replace the detail of another event
-                if event["outcome"] is not None or not target.exists():
-                    _atomic(target, detail_bytes)
+            if detail_bytes is not None and not self._store_detail(root, previous, event, detail_bytes):
+                line, _ = self._prepare(event, payload, hidden, lost=True)
             meta = self._serialized(
                 dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048)
             )
@@ -587,22 +621,7 @@ _SCHEMA = {
         "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"},
         "harness": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
         "via": {"enum": ["hook", "log", "broker", "job", "core"]},
-        "kind": {
-            "enum": [
-                "step",
-                "task.start",
-                "task.done",
-                "ask",
-                "denial",
-                "helper.start",
-                "helper.end",
-                "run.state",
-                "usage",
-                "key.use",
-                "job",
-                "session.input",
-            ]
-        },
+        "kind": {"$ref": "#/$defs/kind"},
         "text": {"type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f]*$"},
         "used": {
             "oneOf": [
@@ -649,11 +668,12 @@ _SCHEMA = {
         "detail": {
             "oneOf": [
                 {"type": "null"},
-                {"type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[A-Za-z0-9_-]{1,128}\\.json$"},
+                {"type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[0-9a-f]{32}\\.json$"},
             ]
         },
         "coverage": {"enum": ["full", "partial"]},
         "data": {"type": "object"},
+        "detail_lost": {"type": "boolean"},
     },
     "allOf": [
         {
@@ -853,6 +873,22 @@ _SCHEMA = {
     ],
     "$defs": {
         "time": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "kind": {
+            "enum": [
+                "step",
+                "task.start",
+                "task.done",
+                "ask",
+                "denial",
+                "helper.start",
+                "helper.end",
+                "run.state",
+                "usage",
+                "key.use",
+                "job",
+                "session.input",
+            ]
+        },
         "run": {"type": "string", "pattern": "^r_[a-z0-9_]{6,32}$"},
         "agent": {"type": "string", "pattern": "^(main|h_[0-9]{1,4})$"},
         "event_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_.:-]+$"},
@@ -865,12 +901,13 @@ _SCHEMA = {
         "version": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
         "detail_file": {
             "type": "object",
-            "required": ["v", "id", "run", "input", "output", "truncated", "hidden"],
+            "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"],
             "additionalProperties": False,
             "properties": {
                 "v": {"const": 1},
                 "id": {"$ref": "#/$defs/event_id"},
                 "run": {"$ref": "#/$defs/run"},
+                "kind": {"$ref": "#/$defs/kind"},
                 "input": {},
                 "output": {},
                 "truncated": {"type": "boolean"},
