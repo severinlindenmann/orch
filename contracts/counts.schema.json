@@ -223,7 +223,9 @@
         "coverage",
         "items",
         "inventory",
-        "sharing"
+        "sharing",
+        "unavailable",
+        "complete"
       ],
       "additionalProperties": false,
       "properties": {
@@ -322,34 +324,9 @@
         "unavailable": {
           "type": "array",
           "items": {
-            "type": "object",
-            "required": [
-              "run",
-              "status",
-              "reason",
-              "message"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "run": {
-                "type": "string"
-              },
-              "status": {
-                "enum": [
-                  "ok",
-                  "unavailable",
-                  "tampered"
-                ]
-              },
-              "reason": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            }
+            "$ref": "activity.schema.json#/$defs/read_status"
           },
-          "description": "Runs (or meta) that could not be read in full (activity.md, Integrity); empty when everything was read."
+          "description": "Runs (or the record's meta, run null) that could not be read in full (activity.md, Integrity); empty when everything was read."
         },
         "complete": {
           "type": "boolean",

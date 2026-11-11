@@ -110,7 +110,7 @@ def test_cursor_path_escape_is_invalid(ws, capsys):
 
 
 def test_tail_pruned_cursor_resets(ws, capsys):
-    gone = cli_record.encode_cursor({"r_gone0001": 3})
+    gone = cli_record.TailCursor(None, {"r_gone0001": 3}).encode()
     code, lines = cli_lines(capsys, "tail", "--since", gone)
     assert code == 0 and lines[0]["type"] == "reset" and lines[0]["reason"] == "pruned"
     assert len([ln for ln in lines if ln["type"] == "event"]) == 6
@@ -478,7 +478,8 @@ def test_counts_meta_unavailable_falls_back_and_is_listed(ws, capsys):
     meta.symlink_to(outside)
     _, (ans,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
     assert ans["since"] == "2026-11-16T09:00:01Z" and ans["complete"] is False
-    assert [u["run"] for u in ans["unavailable"]] == ["meta"]
+    assert [u["run"] for u in ans["unavailable"]] == [None]
+    check(validator("counts", "answer"), ans, "counts")
 
 
 def test_detail_tampered_and_lost_codes(ws, capsys):
@@ -500,3 +501,108 @@ def test_cli_record_has_no_direct_file_access():
     names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     assert not names & {"read_text", "read_bytes", "open", "read_events", "run_readable", "glob", "iterdir"}
     assert "open" not in {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+
+
+# --- review fixes: small cursors, alerts once, markers follow state, detail identity ---
+def make_runs(root, count):
+    writer = RecordWriter(root, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    for n in range(count):
+        run = f"r_many{n:04d}"
+        writer.append(
+            example(
+                run=run, ticket=TICKET_A, id=f"toolu_m{n}", at=f"2026-11-16T10:{n // 60:02d}:{n % 60:02d}Z"
+            )
+        )
+    return writer
+
+
+def test_tail_cursor_stays_small_with_300_runs(proj, capsys):
+    writer = make_runs(proj, 300)
+    code, lines = cli_lines(capsys, "tail")
+    assert code == 0 and len(lines) == 300
+    assert max(len(ln["cursor"]) for ln in lines) < 4096
+    last = lines[-1]["cursor"]
+    _, rest = cli_lines(capsys, "tail", "--since", last)
+    assert rest == []
+    _, rest = cli_lines(capsys, "tail", "--since", lines[149]["cursor"])
+    assert [ln["event"]["id"] for ln in rest] == [ln["event"]["id"] for ln in lines[150:]]
+    writer.append(example(run="r_many0007", ticket=TICKET_A, id="toolu_new", at="2026-11-16T11:00:00Z"))
+    _, rest = cli_lines(capsys, "tail", "--since", last)
+    assert [ln["event"]["id"] for ln in rest] == ["toolu_new"]
+
+
+def test_tail_cursor_with_unknown_shape_is_invalid(ws, capsys):
+    code, (line,) = cli_lines(capsys, "tail", "--since", cli_record.encode_cursor({RUN_A: 1}))
+    assert code == 2 and line["code"] == "invalid"
+
+
+def follow(root, polls, between=None, **kw):
+    count = []
+
+    def sleep(_):
+        count.append(1)
+        if between:
+            between(len(count))
+        if len(count) >= polls:
+            raise KeyboardInterrupt
+
+    ticks = iter(range(0, 100000))
+    out = []
+    try:
+        for ln in cli_record.tail_lines(root, follow=True, sleep=sleep, clock=lambda: next(ticks), **kw):
+            out.append(ln)
+    except KeyboardInterrupt:
+        pass
+    return out
+
+
+def test_follow_prints_the_alert_once(ws, capsys):
+    hardlink(ws)
+    out = follow(ws, 6)
+    err = capsys.readouterr().err
+    assert [ln["type"] for ln in out].count("unavailable") == 1
+    assert len([x for x in err.splitlines() if x.startswith("{")]) == 1
+
+
+def test_marker_state_follows_the_run(ws):
+    outside = hardlink(ws)
+    path = run_file(ws)
+    saved = outside.read_bytes()
+
+    def between(n):
+        path.unlink()
+        if n == 1:
+            path.write_bytes(saved)  # readable again
+        else:
+            os.link(outside, path)  # tampered again
+
+    out = follow(ws, 3, between)
+    marks = [(ln["status"], ln["reason"]) for ln in out if ln["type"] == "unavailable"]
+    assert marks == [("tampered", "hardlink"), ("ok", "recovered"), ("tampered", "hardlink")]
+    for ln in out:
+        if ln["type"] == "unavailable":
+            check(validator("cli-answer", "stream_line"), ln, "marker")
+
+
+def test_follow_drops_cursor_entries_of_pruned_runs(ws):
+    since = cli_record.TailCursor(("2026-11-16T09:00:17Z", RUN_B, 2), {RUN_A: 4, RUN_B: 2}).encode()
+
+    def between(n):
+        if n == 1:
+            run_file(ws, RUN_B).unlink()
+
+    out = follow(ws, 25, between, since=since)
+    ping = [ln for ln in out if ln["type"] == "ping"][-1]
+    assert cli_record.TailCursor.decode(ping["cursor"]).seqs == {RUN_A: 4}
+
+
+def test_detail_file_of_another_event_is_tampered(ws, capsys, monkeypatch):
+    real = cli_record.record.read_detail
+
+    def other(root, run, file_id):
+        result = real(root, run, file_id)
+        return type(result)("ok", dict(result.value, id="toolu_other"))
+
+    monkeypatch.setattr(cli_record.record, "read_detail", other)
+    code, (err,) = cli_lines(capsys, "query", "--detail", "toolu_a1", "--run", RUN_A)
+    assert code == 2 and err["code"] == "tampered"

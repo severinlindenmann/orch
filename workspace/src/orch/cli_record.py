@@ -111,8 +111,8 @@ def _emit(obj) -> None:
 
 
 # --- cursors ---
-def encode_cursor(positions: dict[str, int]) -> str:
-    raw = json.dumps(positions, separators=(",", ":"), sort_keys=True).encode()
+def _pack(value) -> str:
+    raw = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     cursor = _PREFIX + base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
     if len(cursor) > _MAX_CURSOR:
         raise RecordError(
@@ -121,7 +121,7 @@ def encode_cursor(positions: dict[str, int]) -> str:
     return cursor
 
 
-def decode_cursor(text: str) -> dict[str, int]:
+def _unpack(text) -> dict:
     bad = RecordError("That position in the record is not valid.")
     if not isinstance(text, str) or not text.startswith(_PREFIX) or len(text) > _MAX_CURSOR:
         raise bad
@@ -134,10 +134,80 @@ def decode_cursor(text: str) -> dict[str, int]:
         raise bad from None
     if not isinstance(value, dict):
         raise bad
+    return value
+
+
+def _positions(value, bad) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise bad
     for run, seq in value.items():  # every run id is checked before it can become a file path
         if not _RUN.fullmatch(run) or isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
             raise bad
     return value
+
+
+def encode_cursor(positions: dict[str, int]) -> str:
+    """A page cursor of query: one `{run: seq}` entry (the last item returned)."""
+    return _pack(positions)
+
+
+def decode_cursor(text: str) -> dict[str, int]:
+    return _positions(_unpack(text), RecordError("That position in the record is not valid."))
+
+
+class TailCursor:
+    """Where a tail stands: a watermark (the last event sent, in (at, run, seq) order) plus a per-run
+    last seq for the runs that still have events at or after the watermark's time. Everything older
+    than the watermark is known as sent, so the cursor stays small however many runs there are."""
+
+    def __init__(self, mark=None, seqs=None):
+        self.mark = mark  # (at, run, seq) or None
+        self.seqs = dict(seqs or {})
+        self.last_at: dict[str, str] = {}
+
+    @classmethod
+    def decode(cls, text: str) -> "TailCursor":
+        bad = RecordError("That position in the record is not valid.")
+        value = _unpack(text)
+        if set(value) != {"w", "r"}:
+            raise bad
+        mark = value["w"]
+        if mark is not None:
+            if not (isinstance(mark, list) and len(mark) == 3):
+                raise bad
+            at, run, seq = mark
+            if not isinstance(at, str) or not _RUN.fullmatch(str(run)) or isinstance(seq, bool):
+                raise bad
+            if not isinstance(seq, int) or seq < 0:
+                raise bad
+            _time(at, "at")
+            mark = (at, run, seq)
+        cursor = cls(mark, _positions(value["r"], bad))
+        if mark:  # every run in `r` has its last sent event at the watermark's time (older ones were dropped)
+            cursor.last_at = dict.fromkeys(cursor.seqs, mark[0])
+        return cursor
+
+    def encode(self) -> str:
+        return _pack({"w": list(self.mark) if self.mark else None, "r": self.seqs})
+
+    def is_new(self, event: dict) -> bool:
+        seen = self.seqs.get(event["run"])
+        if seen is not None:
+            return event["seq"] > seen
+        return self.mark is None or (event["at"], event["run"], event["seq"]) > self.mark
+
+    def advance(self, event: dict) -> None:
+        self.mark = (event["at"], event["run"], event["seq"])
+        self.seqs[event["run"]] = event["seq"]
+        self.last_at[event["run"]] = event["at"]
+        for run in [r for r in self.seqs if self.last_at.get(r, event["at"]) < event["at"]]:
+            del self.seqs[run]  # all of its events are older than the watermark: the watermark covers them
+            self.last_at.pop(run, None)
+
+    def drop_unlisted(self, known: set[str]) -> None:
+        for run in [r for r in self.seqs if r not in known]:
+            del self.seqs[run]
+            self.last_at.pop(run, None)
 
 
 # --- selection ---
@@ -149,6 +219,7 @@ def _check_filters(ticket, run) -> None:
 
 
 _SKIPPED = "Some lines of this run could not be read and are not shown."
+_RECOVERED = "The records of this run can be read again."
 
 
 def _show_alert(alert) -> None:
@@ -157,12 +228,22 @@ def _show_alert(alert) -> None:
         print(json.dumps(alert, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
 
 
+class _Problem(dict):
+    """One thing a person must be told about a read; `alert` is shown with it, never on its own."""
+
+    alert = None
+
+
 def _known(root: Path) -> list[str]:
     result = record.list_runs(root)
     _show_alert(result.alert)
     if result.status == "unavailable" and result.reason == "missing":
         return []  # nothing has been recorded yet
-    return result.unwrap()
+    try:
+        return result.unwrap()
+    except record.RecordRefused as e:
+        e.alert = None  # shown above
+        raise
 
 
 def _fail(result) -> RecordError:
@@ -178,28 +259,35 @@ def _fail(result) -> RecordError:
 def _problems(run: str, result) -> list[dict]:
     """What a person must be told about one read: it failed, lines were skipped, writes are pending."""
     if result.status != "ok":
-        return [{"run": run, "status": result.status, "reason": result.reason, "message": result.message}]
+        found = [_Problem(run=run, status=result.status, reason=result.reason, message=result.message)]
+        found[0].alert = result.alert
+        return found
     out = []
     if result.skipped:
-        out.append({"run": run, "status": "ok", "reason": "skipped", "message": _SKIPPED})
+        out.append(_Problem(run=run, status="ok", reason="skipped", message=_SKIPPED))
     if result.pending:
-        out.append({"run": run, "status": "ok", "reason": "pending", "message": result.message})
+        out.append(_Problem(run=run, status="ok", reason="pending", message=result.message))
     return out
 
 
-def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False):
-    """(events per run, problems). An explicit run that cannot be read is an error, never empty."""
+def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False, tell: bool = True):
+    """(events per run, problems). An explicit run that cannot be read is an error, never empty.
+    `tell=False` leaves the alerts to the caller (a followed stream tells each one once)."""
     out, problems = {}, []
     for run in runs:
         result = record.read_run(root, run)
-        _show_alert(result.alert)
         if result.status != "ok":
             if explicit:
+                _show_alert(result.alert)
                 raise _fail(result)
             out[run] = []
         else:
             out[run] = [e for e in result.value if ticket is None or e.get("ticket") == ticket]
-        problems += _problems(run, result)
+        found = _problems(run, result)
+        if tell:
+            for problem in found:
+                _show_alert(problem.alert)
+        problems += found
     return out, problems
 
 
@@ -229,37 +317,54 @@ def tail_lines(
 ) -> Iterator[dict]:
     _check_filters(ticket, run)
     now = now or (lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
-    cursor = decode_cursor(since) if since is not None else {}
+    cursor = TailCursor.decode(since) if since is not None else TailCursor()
     known = set(_known(root))
     if run is not None and run not in known:
         raise RecordError("That run does not exist.", "not_found")
-    if any(r not in known for r in cursor):
-        yield {"type": "reset", "cursor": encode_cursor({}), "reason": "pruned"}
-        cursor = {}
+    if any(r not in known for r in cursor.seqs):
+        cursor = TailCursor()
+        yield {"type": "reset", "cursor": cursor.encode(), "reason": "pruned"}
     last_ping = clock()
-    told: dict[tuple, bool] = {}
+    told: dict[str, tuple] = {}  # per run: the marks sent last (A -> B -> A is sent again)
+    # Every poll re-reads the runs it follows (simple and safe; fine up to a few hundred runs).
     while True:
         sent = False
         runs = [run] if run else _known(root)
-        by_run, problems = _events(root, runs, ticket, explicit=run is not None)
-        for problem in problems:  # once per run and state; again only after it changed
-            mark = (problem["run"], problem["status"], problem["reason"])
-            if mark not in told:
-                told[mark] = True
-                yield {"type": "unavailable", "cursor": encode_cursor(cursor), **problem}
-                sent = True
-        streams = [[e for e in events if e["seq"] > cursor.get(r, 0)] for r, events in sorted(by_run.items())]
-        for event in heapq.merge(*streams, key=lambda e: (e["at"], e["run"])):
-            cursor[event["run"]] = event["seq"]
+        cursor.drop_unlisted(set(runs))
+        by_run, problems = _events(root, runs, ticket, explicit=run is not None, tell=False)
+        now_marks: dict[str, list] = {r: [] for r in told}
+        for problem in problems:
+            now_marks.setdefault(problem["run"], []).append(problem)
+        for name, found in now_marks.items():
+            marks = tuple(sorted((p["status"], p["reason"]) for p in found))
+            if marks == told.get(name, ()):
+                continue
+            told[name] = marks
+            for problem in found:
+                _show_alert(problem.alert)
+                yield {"type": "unavailable", "cursor": cursor.encode(), **problem}
+            if not found:  # it can be read again
+                yield {
+                    "type": "unavailable",
+                    "cursor": cursor.encode(),
+                    "run": name,
+                    "status": "ok",
+                    "reason": "recovered",
+                    "message": _RECOVERED,
+                }
             sent = True
-            yield {"type": "event", "cursor": encode_cursor(cursor), "event": event}
+        streams = [[e for e in events if cursor.is_new(e)] for _, events in sorted(by_run.items())]
+        for event in heapq.merge(*streams, key=lambda e: (e["at"], e["run"])):
+            cursor.advance(event)
+            sent = True
+            yield {"type": "event", "cursor": cursor.encode(), "event": event}
         if not follow:
             return
         if sent:
             last_ping = clock()
         elif clock() - last_ping >= PING_SECONDS:
             last_ping = clock()
-            yield {"type": "ping", "cursor": encode_cursor(cursor), "at": now()}
+            yield {"type": "ping", "cursor": cursor.encode(), "at": now()}
         sleep(POLL_SECONDS)
 
 
@@ -374,6 +479,8 @@ def _detail(root: Path, args) -> dict:
     _show_alert(detail.alert)
     if detail.status != "ok":
         raise _fail(detail)
+    if detail.value.get("id") != args.detail:  # the file must be the one this event points to
+        raise RecordError(str(record.RecordTampered("swapped")), "tampered")
     return detail.value
 
 
@@ -525,7 +632,7 @@ def _since(root: Path, models: list[dict]) -> tuple[str | None, list[dict]]:
         if isinstance(value, str):
             return value, []
     firsts = [m["first"] for m in models if m.get("first")]
-    problem = [] if meta.status == "ok" or meta.reason == "missing" else _problems("meta", meta)
+    problem = [] if meta.status == "ok" or meta.reason == "missing" else _problems(None, meta)
     return (min(firsts) if firsts else None), problem
 
 
