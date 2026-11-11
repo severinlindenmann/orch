@@ -534,9 +534,9 @@ def _release_lock(ws, rel, fd, *, _directory=None):
 
 
 @contextmanager
-def _lock(ws, run):
+def _lock(ws, run, wait=None):
     rel = ("runs", f"{run}.lock")
-    deadline = time.monotonic() + _LOCK_WAIT
+    deadline = time.monotonic() + (_LOCK_WAIT if wait is None else wait)
     while True:
         fd = _open(ws, rel, "create_excl", create_dirs=True)
         if fd is not None:
@@ -696,6 +696,75 @@ def _alert(ws, *, target, run, reason, seen_by):
         except (RecordTampered, RecordUnavailable):
             pass  # the returned alert still reaches the caller; never recurse
     return alert
+
+
+LOST_REASONS = (
+    "hider_off",
+    "invalid",
+    "too_large",
+    "other_run",
+)  # after the caller is proven to be in the run
+UNPROVEN_REASONS = ("not_active", "other_run", "not_provable")  # before it is: never under a run id
+_LOST_RUN_LINES = 50  # per run and day; the next one is a "trimmed" marker, then nothing
+_LOST_FILE_BYTES = 1024**2  # per file; over it only a global "trimmed" marker is written
+
+
+def _note(ws, name, run, reason, now, run_lines):
+    now = datetime.now(UTC) if now is None else now
+    stamp = now.isoformat().replace("+00:00", "Z")
+    try:
+        fd = _open(ws, ("alerts", f"{name}-{stamp[:10]}.jsonl"), "read_append", create_dirs=True)
+        try:
+            raw = _read_bytes(fd)
+            rows = []
+            for line in raw.splitlines():
+                try:
+                    rows.append(json.loads(line))
+                except (ValueError, TypeError):
+                    continue
+            rows = [r for r in rows if isinstance(r, dict)]
+            if len(raw) > _LOST_FILE_BYTES:
+                if not any(r.get("run") is None and r.get("reason") == "trimmed" for r in rows):
+                    write = dict(run=None, reason="trimmed")
+                else:
+                    return
+            else:
+                mine = [r for r in rows if r.get("run") == run]
+                for old in mine[-200:]:
+                    try:
+                        if old["reason"] == reason and (
+                            timedelta(0) <= now - datetime.fromisoformat(old["at"]) < timedelta(minutes=1)
+                        ):
+                            return
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                if run_lines and len(mine) >= run_lines:
+                    if any(r.get("reason") == "trimmed" for r in mine):
+                        return
+                    write = dict(run=run, reason="trimmed")  # loud, never a silent stop (invariant I3)
+                else:
+                    write = dict(run=run, reason=reason)
+            note = dict(v=1, schema="orch.record-lost/1", at=stamp, **write)
+            _write(fd, (_json(note) + "\n").encode())
+        finally:
+            _close(fd)
+    except (RecordTampered, RecordUnavailable):
+        pass  # a trace that cannot be stored is not worth failing the hook
+
+
+def note_lost(ws, run, reason, *, now=None):
+    """A hook entry of a PROVEN caller (live claim, inside its process tree) that could not be written leaves
+    one short trace (orch.record-lost/1, no content): alerts/hook-lost-<day>.jsonl, at most one per run and
+    reason per minute, at most 50 lines per run, then one "trimmed" line. Never raises."""
+    if reason in LOST_REASONS and isinstance(run, str) and re.fullmatch(_RUN, run):
+        _note(ws, "hook-lost", run, reason, now, _LOST_RUN_LINES)
+
+
+def note_unattributed(ws, reason, *, now=None):
+    """A hook entry whose caller could not be proven to be in the run: nothing under any run id (the claimed
+    run is the caller's word), only the reason, in alerts/hook-lost-unattributed-<day>.jsonl, 1 per minute."""
+    if reason in UNPROVEN_REASONS:
+        _note(ws, "hook-lost-unattributed", None, reason, now, 0)
 
 
 def _report(ws, error, target, run, seen_by):
@@ -858,13 +927,14 @@ class RecordWriter:
             event["detail_lost"] = True
             return None
 
-    def append(self, event, *, detail=None):
+    def append(self, event, *, detail=None, lock_wait=None):
+        """lock_wait: seconds to wait for the run lock before the write is spooled (default 30)."""
         try:
-            return self._append(event, detail)
+            return self._append(event, detail, lock_wait)
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             raise RecordInvalid() from None
 
-    def _append(self, event, detail):
+    def _append(self, event, detail, lock_wait=None):
         if not isinstance(event, dict):
             raise RecordInvalid()
         run = _name(event.get("run"), _RUN)
@@ -875,9 +945,13 @@ class RecordWriter:
             raise RecordInvalid()
         eid = self.hider.hide_text(eid)
         if not default_id:
-            if event.get("via") == "hook" and re.fullmatch(_RUN + r":.*", eid):
+            if event.get("via") == "hook" and re.fullmatch(r"(?:h_)?" + _RUN + r":.*", eid):
                 eid = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + eid.encode()).hexdigest()[:32]
-            elif not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) or re.fullmatch(r"x_[0-9a-f]{32}", eid):
+            elif (
+                not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid)
+                or re.fullmatch(r"x_[0-9a-f]{32}", eid)
+                or re.fullmatch(r"h_" + _RUN + r":.*", eid)  # the hook's own default namespace: never sent
+            ):
                 eid = _hash(eid)
         event["id"] = eid
         if not isinstance(event.get("text"), str) or re.search(r"[\x00-\x1f\x7f]", event["text"]):
@@ -922,7 +996,7 @@ class RecordWriter:
         self._line(dict(prepared, detail=None, detail_lost=True))
         self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
         try:
-            with _lock(self.workspace, run) as check_lock:
+            with _lock(self.workspace, run, lock_wait) as check_lock:
                 check_lock()
                 self._drain(run, check_lock=check_lock)
                 check_lock()
@@ -947,7 +1021,9 @@ class RecordWriter:
             previous, count, torn = _read_run_strict(self.workspace, run, fd)
             event = dict(event, seq=count + 1)
             if default_id:
-                event["id"] = f"{run}:{event['seq']}"
+                # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook
+                # line can never take the id of a collector line that is still to come (dedupe would drop it)
+                event["id"] = f"{'h_' if event.get('via') == 'hook' else ''}{run}:{event['seq']}"
                 if payload is not None:
                     wrapped = json.loads(payload)
                     wrapped["id"] = event["id"]

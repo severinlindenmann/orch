@@ -54,9 +54,13 @@ def require_run(root, agent) -> None:
         if agent:
             raise Refused(NO_RUN)
         return
+    check_live_run(root, *ids)
+
+
+def check_live_run(root, run, ticket) -> dict:
+    """run and ticket name a live claim that belong together: the claim, or Refused (BAD_RUN)."""
     from orch import runs
 
-    run, ticket = ids
     try:
         rec = runs.read(root, ticket)
         ok = bool(rec) and rec.get("run") == run and runs.state(rec) in ("alive", "maybe-stale")
@@ -64,6 +68,7 @@ def require_run(root, agent) -> None:
         ok = False
     if not ok:
         raise Refused(BAD_RUN)
+    return rec
 
 
 def _record_event(root, ev):
@@ -131,7 +136,14 @@ def _write_record(root, ev):
         read = record.read_run(root, line["run"], seen_by="writer")
         if read.status == "ok" and len(read.value) >= OUTSIDE_DAY_CAP:
             raise Refused("Refused: too many key uses outside a run today.")
-    record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root))).append(line)
+    record_writer(root).append(line)
+
+
+def record_writer(root):
+    """The record writer with a hider built from THIS workspace's key store (the one place that wires it)."""
+    from orch import record
+
+    return record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root)))
 
 
 def set_recorder(fn):

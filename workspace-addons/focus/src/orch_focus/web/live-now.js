@@ -21,13 +21,22 @@
         if (!response.ok) return;
         const data = await response.json(), json = JSON.stringify(data);
         if (version !== generation || sending || document.hidden || !box.isConnected || json === last) return;
-        paint(data.cards || []);
+        paint(data.cards || [], data.same_file || []);
         last = json;
       } catch (e) { /* Keep the last snapshot until the next poll. */ }
       finally {
         loading = false;
         if (version !== generation && !sending) load();
       }
+    }
+
+    /* Same file, two tickets: one yellow line (display only; the agents' own record said so). */
+    const HOW = {read: 'read it', changed: 'changed it', touched: 'used it'};
+    function clashLines(clash) {
+      return (Array.isArray(clash) ? clash : []).slice(0, 3).map(c => {
+        const who = (c.tickets || []).map(t => text(t.key) + ' ' + (HOW[t.how] || 'used it')).join(', ');
+        return h('p', {class: 'fx-ln-clash', role: 'status'}, h('b', {text: 'Two tickets have the same file open: '}), text(String(c.path || '')) + ' (' + who + ')');
+      });
     }
 
     function cardView(card) {
@@ -94,13 +103,14 @@
     }
     current = hideListed;
 
-    function paint(cards) {
+    function paint(cards, clash) {
       shown = new Set(cards.map(c => c.ticket));
       hideListed();
       section.hidden = !cards.length;
       box.classList.toggle('fx-pick-live', !!cards.length);
       section.replaceChildren(...(cards.length ? [
         h('h2', {text: 'Live now '}, h('span', {class: 'meta', text: '(' + cards.length + ')'})),
+        ...clashLines(clash),
         h('div', {class: 'fx-ln-grid' + (cards.length > 4 ? ' compact' : '')}, cards.map(cardView))
       ] : []));
     }

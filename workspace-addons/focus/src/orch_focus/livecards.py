@@ -80,7 +80,21 @@ def card(v: dict) -> dict:
         "now": now, "why": _task_line(board, checklist),
         "progress": {"done": int(v.get("done") or 0), "total": int(v.get("total") or 0)},
         "steps": steps, "question": question, "working": v.get("state") == "working",
+        "files": [{"path": f["path"], "how": f["how"]} for f in board.get("files") or []][:50],
     }  # fmt: skip
+
+
+def same_file(cards: list[dict]) -> list[dict]:
+    """Files two or more running tickets have touched, when at least one of them changed it. Display only."""
+    by: dict[str, list[dict]] = {}
+    for c in cards:
+        for f in c.get("files") or []:
+            by.setdefault(f["path"], []).append({"key": c.get("key") or c["title"], "how": f["how"]})
+    return [
+        {"path": p, "tickets": t[:4]}
+        for p, t in sorted(by.items())
+        if len(t) >= 2 and any(x["how"] == "changed" for x in t)
+    ][:5]
 
 
 def cards(tracker) -> list[dict]:

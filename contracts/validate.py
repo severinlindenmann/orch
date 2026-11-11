@@ -411,6 +411,13 @@ def kind_activity():
         value = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + case["id"].encode()).hexdigest()[:32]
         _expect("activity hook namespace", value, case["stored"])
 
+    for c in vec.get("hook_default_id", []):
+        _expect("activity hook default id", "h_" + c["collector"], c["hook"])
+        _expect("activity hook default id is not the collector id", c["hook"] != c["collector"], True)
+
+    for c in vec.get("reserved_ids", []):
+        _expect("activity reserved id", "x_" + hashlib.sha256(c["id"].encode()).hexdigest()[:32], c["stored"])
+
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:

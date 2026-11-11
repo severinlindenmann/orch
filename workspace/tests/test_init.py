@@ -1169,7 +1169,7 @@ def test_can_import_runs_the_hook_argv_with_cwd_capture_and_timeout(proj, monkey
     assert reminder_settings.can_import(proj) is False
 
 
-def test_reminder_hooks_of_a_run_need_the_import_check(monkeypatch):
+def test_reminder_hooks_of_a_run_need_the_import_check(monkeypatch, proj):
     from orch import reminder_settings
 
     monkeypatch.setattr(reminder_settings, "_IMPORT_OK", {})
@@ -1177,7 +1177,7 @@ def test_reminder_hooks_of_a_run_need_the_import_check(monkeypatch):
     monkeypatch.setattr(reminder_settings, "can_import", lambda root: calls.append(1) or False)
     assert adapters.reminder_doc("claude") is None and adapters.hooks_doc("claude", "r_1")["hooks"]["Stop"]
     v = {"prompt": "p", "new_session": "0" * 8 + "-0000-0000-0000-" + "0" * 12}
-    argv = adapters.render("claude", "fresh", "oneshot", v)
+    argv = adapters.render("claude", "fresh", "oneshot", v, proj)
     assert "--settings" not in argv and len(calls) == 1  # cached: asked once
     assert all(
         len(g) == 1 for g in adapters.hooks_doc("claude", "r_1")["hooks"].values()

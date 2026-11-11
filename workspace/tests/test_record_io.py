@@ -84,6 +84,11 @@ def plant(ws, kind):
 
 # Exact call expressions keep arbitrary Path receivers out of the allowlist.
 SAFE_ATTRIBUTE_CALLS = {
+    "r.get",
+    "rows.append",
+    "(_json(note) + '\\n').encode",
+    "now.isoformat",
+    "now.isoformat().replace",
     "' '.join",
     "(_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid",
     "(_json(alert) + '\\n').encode",
@@ -186,6 +191,8 @@ SAFE_ATTRIBUTE_VALUES = {
 }
 ERROR_BOUNDARIES = {
     "_alert",
+    "note_lost",
+    "_note",
     "read_run",
     "_pending_count",
     "apply_retention",
@@ -931,11 +938,11 @@ def test_27_retention_rechecks_under_lock(store, monkeypatch):
     thread = threading.Thread(target=append_late)
 
     @contextmanager
-    def late(workspace, run):
+    def late(workspace, run, wait=None):
         if threading.current_thread() is not thread:
             barrier.wait(timeout=2)
             assert done.wait(timeout=2)
-        with real(workspace, run) as check_lock:
+        with real(workspace, run, wait) as check_lock:
             yield check_lock
 
     monkeypatch.setattr(record, "_lock", late)
