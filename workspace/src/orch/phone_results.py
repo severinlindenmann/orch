@@ -129,6 +129,17 @@ def value_hider(root: Path):
         return None
 
 
+def _scrub(o, redact):
+    """Every string leaf and every dict key through the pattern scrub the other phone text gets."""
+    if isinstance(o, str):
+        return redact(o)
+    if isinstance(o, list):
+        return [_scrub(x, redact) for x in o]
+    if isinstance(o, dict):
+        return {redact(k): _scrub(v, redact) for k, v in o.items()}
+    return o
+
+
 def _one(r: dict, h) -> dict | None:
     """One candidate -> the phone form, or None (dropped)."""
     try:
@@ -137,10 +148,11 @@ def _one(r: dict, h) -> dict | None:
         r = {k: v for k, v in r.items() if k in ("id", "from", "title", "at", "checked", "doc")}
         if r.get("from") != r["doc"].get("from"):
             return None
-        for _ in range(2):  # hide, trim, hide again: a trim never uncovers a value, the second pass proves it
-            r = h.hide_json(r)
-            r = trim(r)
-        return r if phone_ok(r) and h.hide_json(r) == r else None
+        from orch.phone_view import redact  # late: phone_view imports this module
+
+        for _ in range(2):  # hide (exact values), scrub (patterns), trim; twice: the second pass proves it
+            r = trim(_scrub(h.hide_json(r), redact))
+        return r if phone_ok(r) and h.hide_json(r) == r and _scrub(r, redact) == r else None
     except Exception:
         return None
 

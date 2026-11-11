@@ -227,3 +227,24 @@ def test_older_relay_gets_the_same_update_without_results(proj, run, new_ticket,
     (m,) = views(conn)
     assert "results" not in m["body"]["ticket_view"] and m["body"]["ticket_view"]["title"]
     assert len({b["id"] for b in seen}) == 1, "the same message id"
+
+
+def test_pattern_secrets_in_cell_title_and_key_never_reach_the_output(proj, new_ticket, conn):  # noqa: F811
+    tok = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    forms = [tok, tok.encode().hex(), base64.b64encode(tok.encode()).decode()]
+    d = doc(
+        blocks=[
+            {"type": "table", "columns": [{"key": "c", "label": "C"}], "rows": [{"c": f"token={tok}"}]},
+            {"type": "kv", "items": [{"key": f"password={tok}", "value": "x"}]},
+        ]
+    )
+    d["title"] = f"password: {tok}"
+    tid = _evidence_ticket(proj, new_ticket, [("a.json", d, "2026-11-11T08:00:00Z")])
+    out = json.dumps(phone_view.view_for(proj, tid).get("results", []))
+    assert not any(f in out for f in forms)
+    assert (
+        phone_results.prepare(proj, [cand(1, "2026-11-11T08:00:00Z") | {"title": f"token={tok}"}], h=NOHIDE)[
+            0
+        ]["title"]
+        == "token=[hidden]"
+    )
