@@ -42,7 +42,11 @@ def main(argv=None):
             p.add_argument("--kind", choices=("private", "team"), default="private")
     p = sub.add_parser("resolve")
     p.add_argument("path")
-    p.add_argument("--keep", choices=("mine", "theirs"), required=True)
+    choice = p.add_mutually_exclusive_group(required=True)
+    choice.add_argument("--keep", choices=("mine", "theirs"))
+    # a name that differs from this machine's only in case: keep my file name, or rename my file
+    choice.add_argument("--keep-local-name", action="store_true")
+    choice.add_argument("--rename-local", metavar="NEW_NAME")
     p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
@@ -132,9 +136,12 @@ def main(argv=None):
                 **{k: state.get(k) for k in ("last_ok", "last_error", "ahead", "behind")},
             }
         elif args.cmd == "resolve":
-            from .pause import resolve
+            from .pause import resolve, resolve_case
 
-            result = resolve(root, args.path, args.keep, args)
+            if args.keep:
+                result = resolve(root, args.path, args.keep, args)
+            else:
+                result = resolve_case(root, args.path, args, rename=args.rename_local)
         elif args.cmd == "keep-key":
             from .pause import keep_key
 
@@ -188,9 +195,10 @@ def main(argv=None):
         else:
             print(json.dumps(result) if args.json else str(result))
         return 0
-    except (ValueError, OSError, CoreRefused) as e:
+    except Exception as e:  # noqa: BLE001 - Fable B14: fail closed on any error, including hostile data shapes
+        message = str(e) if isinstance(e, (ValueError, OSError, CoreRefused)) else f"Sync stopped: {type(e).__name__}"
         print(
-            json.dumps({"error": str(e)}) if args.json else f"Refused: {e}",
+            json.dumps({"error": message}) if args.json else f"Refused: {message}",
             file=sys.stdout if args.json else sys.stderr,
         )
         return 2

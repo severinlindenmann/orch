@@ -30,6 +30,10 @@ def test_preview(root, monkeypatch):
     assert run(root, "set", "--mode", "remote", "--remote", "file:///tmp/bare") == 2
     assert not (root / ".orch/.git").exists()
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
+    # Fable B1: a local folder remote is allowed (its hooks are switched off on every push/fetch); helper
+    # transports and git:// stay refused even in preview.
+    for bad in ("ext::sh -c touch% PWNED", "fd::3", "git://host/repo"):
+        assert run(root, "set", "--mode", "remote", "--remote", bad) == 2
     assert run(root, "set", "--mode", "remote", "--remote", "file:///tmp/bare") == 0
     assert run(root, "set", "--mode", "remote", "--kind", "team") == 2
 

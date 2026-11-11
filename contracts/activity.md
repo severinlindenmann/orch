@@ -13,7 +13,7 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
 
 ```
 .orch/record/                         LOCAL, in .orch/.gitignore ("record/") and the .git/info/exclude block. Never committed
-  alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1)
+  alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1) and a person's changes (orch.record-change/1)
   alerts/hook-lost-<YYYY-MM-DD>.jsonl  hook entries of a proven caller that could not be written: {v, schema
                                       "orch.record-lost/1", at, run, reason: hider_off | invalid | too_large | other_run};
                                       no content; 1 per run and reason per minute, 50 lines per run, then one "trimmed"
@@ -45,10 +45,18 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   replaced by `x_` + the first 32 hex of its sha256, the same for hook and collector, so dedupe still works (vectors `ids`).
 - `seq` = position in the run file, 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
 - `run`, `session`, `agent` (`main` or `h_<n>`), `parent` (null for main) bind the event; `ticket` is the run's ticket.
-- **Detail file name** (invariant): always 32 lowercase hex characters, `sha256(b"orch.detail/1\0" + run + b"\0" + kind +
-  b"\0" + id)[:32]` (UTF-8, vectors `detail_names`); no raw id ever becomes a file name, so case-insensitive file systems,
-  separators and reserved names cannot make two events share a file. The path is `detail/<run>/<file name>.json`. The file
-  stores `id` and `kind`; a writer never overwrites a file whose stored `(kind, id)` differs.
+- **Detail file name** (invariant I4): always 32 lowercase hex characters, `sha256(b"orch.detail/2\0" + run + b"\0" + kind +
+  b"\0" + id + b"\0" + ticket)[:32]` (UTF-8; vectors `detail_names`). **An event with no ticket gets no detail file**: its
+  `detail` stays null, it is not `detail_lost`, the line keeps its other fields (the detail schema requires `ticket`). No raw id ever
+  becomes a file name, so case-insensitive file systems, separators and reserved names cannot make two events share a file.
+  The ticket is part of the name, so two tickets never share a detail file, even with the same run, kind and id: a line of
+  ticket B can only name a file made for B. The path is `detail/<run>/<file name>.json`. The file stores `id`, `kind` and
+  `ticket`; a writer never overwrites a file whose stored `(run, kind, id, ticket)` differs. A reader recomputes the name
+  from the stored `(run, kind, id, ticket)` and refuses a file whose name does not match (`swapped`); `--detail` also
+  refuses (`tampered`) a file whose stored `ticket` or `id` is not the one of the line pointing at it (always compared: a
+  line with no ticket never matches a stored `t_…`).
+  Detail files made before the ticket-bound name (`orch.detail/1`) are not read (a read reports them `swapped`) and not
+  migrated or deleted by delete-detail: the record store was not released before this rule (pre-release, no legacy rule).
 - **Detail lost.** When a payload exists but cannot be stored (the file name is taken by another event, a write fails, or it
   exceeds the 1 MB limit), the line is still written with `detail: null` and `detail_lost: true`. A detail problem
   never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file.
@@ -167,20 +175,25 @@ keeps) and `files_normalise` (producer normalisation).
 
 ## Retention (owner decision R5)
 
-`[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048`. Pruning runs when a run ends and once a day:
+`[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048` (512 · 1024 · 2048 · 4096). Pruning uses the
+**effective** values (`config.record_keep_days` / `record_max_mb`): the lower of the file value and the person's settings
+record (default record 90 / 2048; human-proof.md, Settings), so a file value alone never keeps more; a file value is
+snapped down to the list with a floor of 30 / 512, so a file edit alone never makes pruning delete nearly everything. Raising either needs an
+`insights.settings` proof bound to the new value (target `insights.keep_days=365`); lowering does not, and deletes nothing at once (the next pruning applies it).
+Pruning runs when a run ends and once a day:
 1. Before anything is deleted, the run is folded into `counts/<day>.json` (counts never depend on detail).
    Fold must be idempotent per run: retention may fold again after a run was skipped.
 2. Runs that ended more than `keep_days` ago lose their detail folder and their run file (and `jobs/<run>/`).
 3. While the record is over `max_mb`: delete the detail folder of the oldest ended run, then (when no detail is left) the
    oldest ended run file. A running run is never pruned.
 4. Counts are kept until "Delete all records". "Delete detail for this ticket" (`orch record delete-detail <ticket>`, a
-   person only: `record.delete_detail` proof, invariant H1) deletes the detail folders of that ticket's runs and sets nothing else; events then show "details not available".
+   person only: `record.delete_detail` proof, invariant H1) deletes the detail files that ticket's own lines point at and sets nothing else; events then show "details not available".
 A run that is not ok or has pending lines is skipped; other runs proceed.
 Pending runs report `status: unavailable, reason: pending` to retention. Under the run lock, read again
 and verify the run still ended. The result retains the first non-ok status, reason, message and alert.
 Vectors `retention` fix the order.
 
-## Reading: `orch record tail | query | counts | delete-detail`
+## Reading: `orch record tail | query | counts | settings | delete-detail`
 
 - `orch record tail [--ticket T | --run R] [--since <cursor>] [--follow] --json` → NDJSON on stdout, one object per line:
   `{"type": "event", "cursor": "<c>", "event": {…}}`, `{"type": "ping", "cursor": "<c>", "at"}` every 15 s while following,
@@ -202,9 +215,41 @@ Vectors `retention` fix the order.
 - `orch record query [--ticket T] [--run R] [--kind K]… [--from <time>] [--to <time>] [--limit N] [--after <cursor>] --json`
   → a page `{"items": [event…], "next": "<cursor>" | null, "unavailable": [{run, status, reason, message}]}` (cli-answer.schema.json `page`), newest first, limit 1–500
   (default 100). `--detail <id> --run R` → one detail file.
-- `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only). `orch record delete-detail <ticket> --json` → `{"deleted": n}` (person only).
-- Refused (exit 2, `{"error", "code"}`) for `delete-detail` without a valid proof (human-proof.md), for a ticket that does not exist, and when the
-  record folder is unsafe (symlink).
+- `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only).
+- `orch record settings --json` (no proof; it writes nothing but a lower retention record, human-proof.md) → `{"keep_days": 90, "max_mb": 2048, "share_counts": true,
+  "share_names": false, "record_mb": <int>, "detail_mb": <int>, "runs": <int>}`: the effective settings (human-proof.md,
+  Settings), the size of `.orch/record/` and of `detail/` in MB (rounded up) and the number of run files, read through the
+  hardened helpers (no record yet: 0). When the record cannot be read, the sizes and `runs` are `null` and the answer
+  carries the read marker `status` (`unavailable` | `tampered`), `reason`, `message` (exit 0).
+- **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…", "kept":
+  k, "unreadable": u, "skipped": s}` (a person only: op `record.delete_detail`, target = the ticket id). The detail files the ticket's
+  OWN lines point at go (`detail/<run>/<file name>.json` of a line with that `ticket` whose file name is the I4 name of
+  that line's run, kind, id and ticket), and so do this ticket's own files that no line points at (orphans, e.g. a crash
+  between the detail write and its line): a file in `detail/<run>/` whose stored `ticket` is this ticket and whose stored
+  `(run, kind, id, ticket)` gives its own name. Lines of other tickets never veto it: by I4 their own files have other
+  names, so a run shared with other tickets keeps their detail and a line planted elsewhere cannot block the deletion. A
+  line of this ticket that points at a file whose name is not this ticket's own (planted or changed) is not followed:
+  that file stays and is counted in `k` (never skipped silently). What is not safe is skipped at its own level, never a
+  veto (anything with file access can plant a line and a file): a run that cannot be read (its run file, or its detail
+  folder or lock a link, not a folder, unreadable) is skipped: its detail is not deleted, it is counted in `u`, and the
+  CLI (stderr) and the page say so plainly ("N runs could not be read; their detail was not deleted"); a single file
+  that is not safe (a link, FIFO or hardlink at its name, also one swapped in after it was found) stays, counted in `s`
+  ("N detail files were changed outside orch; they were not deleted"), and the run's other files go. The files of one
+  run are deleted under that run's lock; its detail folder goes only when `rmdir` finds it empty (a file written in
+  between, or a skipped one, stays). `n` = the runs that lost detail in this call. Run files, lines and counts stay; the
+  events then show "Details not available" (`--detail` answers `not_found`). Before anything is deleted the core appends
+  one `orch.record-change/1` line (`$defs/record_change`: `{v, schema, at, change: "record.delete_detail", by: <the
+  proven person>, ticket, deleted}`, no path, no content) to `alerts/<day>.jsonl`, so the deletion itself stays
+  auditable; if that line cannot be written nothing is deleted (`not_available`). The line is not authenticated (an
+  agent can append look-alike lines): it is a note, not evidence. Its `deleted` is what was going to go (the runs); the
+  answer's `n` is what went (lower when a run was pruned or a file swapped in between). A failure in the middle (the
+  run's lock busy, an I/O error) answers `not_available` ("Some details could not be deleted"), the rest goes with a
+  new proof (and a new line).
+- Refused (exit 2, `{"error", "code"}`), in this order, for `delete-detail`: an agent caller (agent tool in the
+  environment, `--by agent:…`) before anything else, `needs_person`; a ticket that does not exist, `not_found` (accepted:
+  the detail of a ticket deleted from disk goes with retention); no or an invalid proof (missing, expired, other
+  target, other op, replayed, a `--by` other than the proof's), `needs_person`; the record or its `detail` folder itself
+  unsafe (e.g. a symlink), `not_available` | `tampered`, with nothing deleted.
 
 ## Mapping from a JSON event stream (one-shot collectors)
 
@@ -274,6 +319,8 @@ Integrity alerts (`orch.record-alert/1`) live at
 `.orch/record/alerts/<YYYY-MM-DD>.jsonl`. They contain no paths, user ids, or
 record contents. Each process emits one per day, target, run, and reason. If
 alert storage fails, the alert remains attached to the result or exception.
+The same daily file also holds `orch.record-change/1` lines (a person's proven
+change, e.g. Delete detail); readers tell the two apart by `schema`.
 
 Writing validates and hides the event and both detail outcomes before taking
 the run lock. A strict read of the run fd precedes meta, detail, and line writes;
@@ -305,7 +352,10 @@ lock identity again before deleting. Retention preflights `pending/<run>` under
 the lock and skips runs with pending files without folding or deleting them.
 
 Retention skips a run that is unavailable, tampered, or has pending lines: it folds and deletes
-nothing for that run and keeps the alert; other runs proceed. The result carries
+nothing for that run and keeps the alert; other runs proceed. Inside `detail/<run>/` only the
+run's folder itself can make the run tampered: a single entry that is not safe (a planted link,
+FIFO or hardlink) is alerted and stays, the rest of the run's detail and its lines go, so a
+planted file never keeps a run's detail past retention. The result carries
 the first non-ok status, reason, and message. Under each run lock, retention
 reads again and checks the run still ended before folding or deleting.
 

@@ -7,6 +7,8 @@ redacted by events.make(); ids appear only where the page needs them for a link 
 
 from __future__ import annotations
 
+from . import areas
+
 MAX_CARDS = 8
 MAX_STEPS = 3
 MAX_OPTIONS = 4
@@ -80,7 +82,7 @@ def card(v: dict) -> dict:
         "now": now, "why": _task_line(board, checklist),
         "progress": {"done": int(v.get("done") or 0), "total": int(v.get("total") or 0)},
         "steps": steps, "question": question, "working": v.get("state") == "working",
-        "files": [{"path": f["path"], "how": f["how"]} for f in board.get("files") or []][:50],
+        "files": [{"path": f["path"], "how": f["how"], "at": f.get("at")} for f in board.get("files") or []][:50],
     }  # fmt: skip
 
 
@@ -89,7 +91,16 @@ def same_file(cards: list[dict]) -> list[dict]:
     by: dict[str, list[dict]] = {}
     for c in cards:
         for f in c.get("files") or []:
-            by.setdefault(f["path"], []).append({"key": c.get("key") or c["title"], "how": f["how"]})
+            by.setdefault(f["path"], []).append(
+                {
+                    "ticket": c["ticket"],
+                    "key": c.get("key") or c["title"],
+                    "title": c["title"],
+                    "agent": c["agent"],
+                    "how": f["how"],
+                    "at": f.get("at"),
+                }
+            )
     return [
         {"path": p, "tickets": t[:4]}
         for p, t in sorted(by.items())
@@ -108,4 +119,5 @@ def cards(tracker) -> list[dict]:
             out.append(card(v))
         if len(out) == MAX_CARDS:
             break
+    areas.label(tracker.root, out)
     return sorted(out, key=lambda c: c["question"] is None)

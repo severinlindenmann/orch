@@ -39,7 +39,7 @@ struct ChatHistoryView: View {
                         ForEach(groups, id: \.key) { group in
                             NavigationLink { GroupRoomView(key: group.key) } label: {
                                 Text("\(group.title) · finished \(ShellTime.day(group.messages.last?.at))")
-                            }
+                            }.accessibilityIdentifier(GroupListRow.rowID(group))
                         }
                     }
                 }.listStyle(.plain).scrollContentBackground(.hidden).background(Theme.bg)
@@ -48,6 +48,17 @@ struct ChatHistoryView: View {
             .foregroundStyle(Theme.text).navigationTitle("Earlier").navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search old chats")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to today") { dismiss() } } }
+            // A pushed group room links "From ticket ›" / "Open task ›" (and info) by ChatRoute value: this stack needs
+            // the same destinations as the chats list, or those links do nothing here.
+            .navigationDestination(for: ChatRoute.self) { route in
+                switch route {
+                case .ticket(let ws, let ticket): TicketChatView(workspaceId: ws, ticketId: ticket)
+                case .info(let ws, let ticket):
+                    ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))
+                case .group(let host, let id): GroupRoomView(key: GroupKey(host: host, id: id))
+                default: EmptyView()
+                }
+            }
         }.tint(Theme.brand)
     }
 }

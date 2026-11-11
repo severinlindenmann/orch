@@ -44,7 +44,21 @@ def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
 
 
 def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str]:
-    who = net.connect_service(root, "relay", "orch-relay", url, workspace, token, "orn_")
+    # a (re)connection never inherits the last relay's admin policy (a stale "off" or "on"), and a FAILED one
+    # (a wrong token, the relay not answering) leaves the current connection's policy alone: it is cleared
+    # once connect_service succeeded, or when it stopped half-way after writing the new relay.json (written
+    # atomically: net.write_json). refresh below writes the policy of THIS connection. While disconnected (no
+    # relay.json) it counts for nothing (config.share_counts_state reads relay.json first); orch has no
+    # disconnect command that removes relay.json.
+    secrets = net.secrets_dir(root)
+    before = net.read_json(secrets / "relay.json", None)
+    connected = False
+    try:
+        who = net.connect_service(root, "relay", "orch-relay", url, workspace, token, "orn_")
+        connected = True
+    finally:
+        if connected or net.read_json(secrets / "relay.json", None) != before:
+            (secrets / "policy.json").unlink(missing_ok=True)
     return who, refresh(root)
 
 
@@ -2506,6 +2520,7 @@ def refresh(root: Path) -> str:
         _commit(root, stage, snap, names, skipped)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+    _keep_policy(root, snap.get("policy"))
     skillrender.refresh_skills(root)
     sync_phone_views(root)
     with locked(root):  # the refresh-hints waiting in the inbox are handled now
@@ -2524,6 +2539,13 @@ def refresh(root: Path) -> str:
     if skipped:
         msg += "\nSkipped: " + "; ".join(skipped)
     return msg
+
+
+def _keep_policy(root: Path, policy) -> None:
+    """The admin's policy from the snapshot (usage-counts.md): kept so the core knows `off_by_admin`
+    (config.share_counts_state) while the relay cannot be reached. A snapshot without one keeps the last."""
+    if isinstance(policy, dict) and policy.get("usage_counts") in ("on", "off"):
+        net.write_json(net.secrets_dir(root) / "policy.json", {"usage_counts": policy["usage_counts"]}, True)
 
 
 def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:

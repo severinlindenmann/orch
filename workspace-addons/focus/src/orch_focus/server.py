@@ -582,7 +582,8 @@ class Handler(BaseHTTPRequestHandler):
             cards = livecards.cards(self.tracker)
             return self._json(200, {"cards": cards, "same_file": livecards.same_file(cards)})
         if path == "/api/areas":
-            return self._json(200, {"areas": areas.strip(self.root, livecards.cards(self.tracker))})
+            cards = livecards.cards(self.tracker)
+            return self._json(200, {"areas": areas.strip(self.root, cards), "same_file": livecards.same_file(cards)})
         if path == "/api/procs":
             return self._json(200, {"procs": self.tracker.procs()})
         if path == "/api/mobile":
@@ -703,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence("POST", True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch.pageproof import COOKIE, forwarded, host_ok
+        from orch.pageproof import forwarded, host_ok
 
         if self.session is None or forwarded(self.headers) or not host_ok(self.headers, self.server.server_address[1]):
             return self._send(403, b"forbidden", "text/plain")
@@ -715,7 +716,7 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "Focus"), "text/plain; charset=utf-8")
-        self._send(204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"})
+        self._send(204, b"", "text/plain", {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)})
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]

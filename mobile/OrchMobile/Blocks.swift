@@ -2,7 +2,7 @@ import Foundation
 import CoreFoundation
 
 /// Invalid results retain their source only for the collapsed Details disclosure.
-enum BlocksResult {
+enum BlocksResult: Sendable {
     case invalid(rawJSON: String)
     case shown(BlocksDoc)
 
@@ -24,11 +24,13 @@ enum BlocksResult {
               let doc = try? JSONDecoder().decode(BlocksDocumentInput.self, from: compact) else {
             return .invalid(rawJSON: source)
         }
-        return .shown(BlocksDoc(from: doc.from, title: doc.title, rows: doc.blocks.map(BlockRow.init)))
+        // Same display rule as the envelope title: a bidi/line-separator/C1 title is not drawn.
+        let title = doc.title.flatMap { TicketResult.displaySafe($0) ? $0 : nil }
+        return .shown(BlocksDoc(from: doc.from, title: title, rows: doc.blocks.map(BlockRow.init)))
     }
 }
 
-struct BlocksDoc {
+struct BlocksDoc: Sendable {
     let from: String
     let title: String?
     let rows: [BlockRow]
@@ -44,7 +46,7 @@ private struct BlocksDocumentInput: Decodable {
 }
 
 /// JSON dictionary decoding preserves table keys (including underscores).
-indirect enum BlockValue: Decodable {
+indirect enum BlockValue: Decodable, Sendable {
     case string(String), number(Double), null, array([BlockValue]), object([String: BlockValue]), bool(Bool)
     /// Nesting cap: hostile deeply nested values must fail cleanly, not overflow the stack (no block needs > ~10 levels).
     static let maxDepth = 40
@@ -66,7 +68,7 @@ indirect enum BlockValue: Decodable {
     var fields: BlockFields { if case .object(let o) = self { return BlockFields(values: o) }; return BlockFields(values: [:]) }
 }
 
-struct BlockFields: Decodable {
+struct BlockFields: Decodable, Sendable {
     let values: [String: BlockValue]
     init(values: [String: BlockValue]) { self.values = values }
     init(from decoder: Decoder) throws { values = try decoder.singleValueContainer().decode([String: BlockValue].self) }
@@ -88,7 +90,7 @@ struct BlockFields: Decodable {
     var chartLabel: String { (heading + objects("series").compactMap { $0.text("name") }).joined(separator: ", ") }
 }
 
-enum BlockRow {
+enum BlockRow: Sendable {
     case summary(BlockFields), steps(BlockFields), progress(BlockFields), stat(BlockFields), kv(BlockFields)
     case table(BlockFields), file(BlockFields), link(BlockFields), log(BlockFields), chart(BlockFields), unsupported
     init(_ b: BlockFields) {
@@ -136,6 +138,15 @@ enum BlocksFormat {
         f.numberStyle = .decimal; f.usesGroupingSeparator = false; f.maximumFractionDigits = 12
         return f
     }()
+    // Built once: a table of date cells must not create formatters per cell and per body pass.
+    nonisolated(unsafe) private static let iso = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f
+    }()
+    nonisolated(unsafe) private static let dateOut: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss 'UTC'"; return f
+    }()
     static func number(_ value: Double) -> String {
         formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
@@ -155,14 +166,8 @@ enum BlocksFormat {
             return number(n)
         }
         if case .string(let s) = value {
-            if kind == "date" {
-                let iso = ISO8601DateFormatter()
-                var date = iso.date(from: s)
-                if date == nil { iso.formatOptions.insert(.withFractionalSeconds); date = iso.date(from: s) }
-                if let date {
-                    let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(secondsFromGMT: 0)
-                    f.dateFormat = "yyyy-MM-dd HH:mm:ss 'UTC'"; return f.string(from: date)
-                }
+            if kind == "date", let date = iso.date(from: s) ?? isoFractional.date(from: s) {
+                return dateOut.string(from: date)
             }
             return s
         }
@@ -171,8 +176,13 @@ enum BlocksFormat {
 }
 
 private enum BlocksValidation {
+    /// The few fixed patterns compiled once (match runs per block, per key, per table cell).
+    nonisolated(unsafe) private static let compiled: [String: NSRegularExpression] = Dictionary(uniqueKeysWithValues:
+        [typePattern, keyPattern, linkPattern].compactMap { p in (try? NSRegularExpression(pattern: p)).map { (p, $0) } })
+    static let typePattern = "[a-z][a-z0-9-]{0,31}", keyPattern = "[a-z][a-z0-9_]{0,31}"
+    static let linkPattern = #"https://(?![^/?#]*@)[^\s<>"'`]+"#
     static func match(_ s: String, _ pattern: String) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        guard let regex = compiled[pattern] ?? (try? NSRegularExpression(pattern: pattern)) else { return false }
         let range = NSRange(s.startIndex..., in: s)
         return regex.firstMatch(in: s, range: range)?.range == range
     }
@@ -208,7 +218,7 @@ private enum BlocksValidation {
             && !rest.components(separatedBy: "/").contains { $0.hasPrefix(".") }
     }
     static func block(_ value: Any) -> Bool {
-        guard let o = value as? [String: Any], let type = o["type"] as? String, match(type, "[a-z][a-z0-9-]{0,31}") else { return false }
+        guard let o = value as? [String: Any], let type = o["type"] as? String, match(type, typePattern) else { return false }
         let line: (Any?) -> Bool = { string($0) }, short: (Any?) -> Bool = { string($0, max: 64) }
         let tone: (Any?) -> Bool = { one($0, ["neutral", "good", "warn", "bad"]) }
         switch type {
@@ -227,17 +237,17 @@ private enum BlocksValidation {
         case "table": return fields(o, ["type", "columns", "rows"], ["title", "total_rows"]) && optional(o, "title", line) && optional(o, "total_rows", integer)
             && items(o["columns"], min: 1, max: 12) {
                 guard let c = $0 as? [String: Any], let key = c["key"] as? String else { return false }
-                return fields(c, ["key", "label"], ["kind"]) && match(key, "[a-z][a-z0-9_]{0,31}") && short(c["label"])
+                return fields(c, ["key", "label"], ["kind"]) && match(key, keyPattern) && short(c["label"])
                     && optional(c, "kind") { one($0, ["text", "number", "duration", "date", "tone"]) }
             } && items(o["rows"], max: 200) {
                 guard let r = $0 as? [String: Any], r.count <= 12 else { return false }
-                return r.allSatisfy { match($0.key, "[a-z][a-z0-9_]{0,31}") && cell($0.value) }
+                return r.allSatisfy { match($0.key, keyPattern) && cell($0.value) }
             }
         case "file": return fields(o, ["type", "path"], ["label", "size", "preview"]) && path(o["path"]) && optional(o, "label", line)
             && optional(o, "size", integer) && optional(o, "preview") { one($0, ["image"]) }
         case "link":
             guard fields(o, ["type", "url", "label"]), line(o["label"]), let s = o["url"] as? String,
-                  s.unicodeScalars.count <= 2000, match(s, #"https://(?![^/?#]*@)[^\s<>"'`]+"#),
+                  s.unicodeScalars.count <= 2000, match(s, linkPattern),
                   let u = URLComponents(string: s), u.scheme == "https", let host = u.host, !host.isEmpty,
                   u.user == nil, u.password == nil else { return false }
             return true
