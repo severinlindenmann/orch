@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -51,7 +52,7 @@ _SECRET_PATTERNS = [
 # The ONE list of secret-name words: the key=value pattern of redact/_has_secret and secret_name() (labels of
 # phone results) are both built from it, so a word added here reaches both (tests/test_phone_results.py).
 SECRET_NAME_WORDS = (
-    "password", "passwd", "passphrase", "secret", "token", "credential", "bearer", "signature", "auth",
+    "passw", "passphrase", "secret", "token", "credential", "bearer", "signature", "auth",
     "api key", "access key", "private key",
 )  # fmt: skip
 SECRET_LABEL_WORDS = (
@@ -60,6 +61,7 @@ SECRET_LABEL_WORDS = (
     "pin",
     "pincode",
     "pwd",
+    "pass",
     "otp",
     "cookie",
     "cookies",
@@ -77,9 +79,31 @@ def _words_rx(sep: str) -> str:
     return "|".join(parts)
 
 
-_SECRET_KV = re.compile(
-    r"(?i)\b([\w-]*(?:" + _words_rx("[_-]?") + r")[\w-]*)(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|\S+)"
+_KV_NAME = re.compile(_words_rx("[_-]?"), re.I)
+_KV_RAW = re.compile(  # possessive: linear on a long run of name characters without ':' or '='
+    r"(?<![\w-])([\w-]++)(\s*+[:=]\s*+)((?:(?:bearer|basic|token|digest)\s++)?(?:\"[^\"]*\"|'[^']*'|\S++))",
+    re.I,
 )
+
+
+class _KV:
+    """The `name: value` pattern (the interface of a compiled regex for search/sub/finditer), matching only
+    where the name holds a secret-name word. Authorization: Bearer x takes the scheme AND the token."""
+
+    @staticmethod
+    def finditer(text):
+        return (m for m in _KV_RAW.finditer(text) if _KV_NAME.search(m.group(1)))
+
+    @classmethod
+    def search(cls, text):
+        return next(cls.finditer(text), None)
+
+    @staticmethod
+    def sub(repl, text):
+        return _KV_RAW.sub(lambda m: repl(m) if _KV_NAME.search(m.group(1)) else m.group(0), text)
+
+
+_SECRET_KV = _KV()
 _SECRET_PARAM = re.compile(r"(?i)token|secret|key|sig|signature|password|passwd|auth|code|credential")
 HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
@@ -200,14 +224,17 @@ def safe_url(url: str) -> str | None:
 
 
 _NAME_SUBSTR = re.compile(_words_rx(" ?"))
-_NAME_WORD = re.compile(r"\b(" + "|".join(SECRET_LABEL_WORDS) + r")\b")
+_NAME_WORD = re.compile(
+    r"(?<![a-z])(" + "|".join(SECRET_LABEL_WORDS) + r")(?![a-z])"
+)  # letters only: key2, pin1
 
 
 def secret_name(name: str) -> bool:
-    """Does a label (kv key, column key or label, stat label) name a secret? camelCase, _ and - split into
-    words first, so basic_auth, authCode, hmac_signature and session_id match; Author, Keyboard, Monkey,
-    Hotkey, Turkey, Passed and Passage do not. The one predicate for labelled values in phone results."""
-    words = re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(name))).lower()
+    """Does a label (kv key, column key or label, stat label) name a secret? NFKC first, then camelCase, _ - .
+    split into words, so basic_auth, authCode, X-Api-Key, DB_PASS and session_id match; Author, Keyboard,
+    Monkey, Hotkey, Turkey, Passed and Passage do not. The one predicate for labelled values in results."""
+    t = unicodedata.normalize("NFKC", str(name))
+    words = re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)).lower()
     return bool(_NAME_SUBSTR.search(words) or _NAME_WORD.search(words))
 
 

@@ -176,11 +176,11 @@ def _when(r: dict):
 def _scrub(o, redact):
     """Every string leaf and every dict key through the pattern scrub the other phone text gets."""
     if isinstance(o, str):
-        return redact(o)
+        return CUT if len(o) > 4096 else redact(o)  # a very long string is not scanned: hidden whole
     if isinstance(o, list):
         return [_scrub(x, redact) for x in o]
     if isinstance(o, dict):
-        return {redact(k): _scrub(v, redact) for k, v in o.items()}
+        return {_scrub(k, redact): _scrub(v, redact) for k, v in o.items()}
     return o
 
 

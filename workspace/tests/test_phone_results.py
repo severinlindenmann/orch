@@ -365,3 +365,51 @@ def test_one_word_list_drives_secret_name_and_the_kv_redact(word):
     for sep in (":", "="):
         out = phone_view.redact(f"{word.replace(' ', '_')}{sep}hunter2value")  # a name has no spaces here
         assert "hunter2value" not in out, (word, sep)
+
+
+def test_authorization_header_loses_scheme_and_token():
+    for text in ("Authorization: Bearer abcdefghijklmnop", "Authorization: Basic dXNlcjpwYXNzd29yZA=="):
+        out = phone_view.redact(text)
+        assert "abcdefghijklmnop" not in out and "dXNlcjpwYXNzd29yZA" not in out, out
+        assert phone_view._SECRET_KV.search(text)
+    kv = phone_view._SECRET_KV
+    assert not any("tkn" in m.group(0) for m in [] if kv)
+    assert kv.sub(lambda m: m.group(1) + m.group(2) + "[hidden]", "Authorization: Bearer abc") == (
+        "Authorization: [hidden]"
+    )
+
+
+@pytest.mark.parametrize("unit", ["token-", "auth-", "pass-", "secret_", "x"])
+def test_kv_pattern_is_linear_on_long_names(unit):
+    import time
+
+    text = unit * (65536 // len(unit))
+    t0 = time.perf_counter()
+    phone_view.redact(text)
+    phone_view._SECRET_KV.search(text)
+    assert time.perf_counter() - t0 < 0.5
+
+
+def test_very_long_string_is_hidden_whole():
+    assert phone_results._scrub({"k" * 5000: ["token-" * 1000]}, phone_view.redact) == {
+        "[hidden]": ["[hidden]"]
+    }
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Passwort",
+        "passwrd",
+        "key2",
+        "pin1",
+        "otp6",
+        "pwd2",
+        "X-Api-Key",
+        "DB_PASS",
+        "ＴＯＫＥＮ",
+        "Ｐassword",
+    ],
+)
+def test_more_secret_names(label):
+    assert phone_view.secret_name(label), label
