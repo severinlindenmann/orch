@@ -777,10 +777,10 @@ def is_conn_grant_key(setting) -> bool:
 
 
 def is_secret_get_key(setting) -> bool:
-    """Exactly a per-profile secret printing switch."""
+    """Exactly a per-profile secret switch (allow_get, agents_may_env)."""
     return (
         isinstance(setting, str)
-        and re.fullmatch(r"secret\.allow_get\.[a-z][a-z0-9-]{0,31}", setting) is not None
+        and re.fullmatch(r"secret\.(allow_get|agents_may_env)\.[a-z][a-z0-9-]{0,31}", setting) is not None
     )
 
 

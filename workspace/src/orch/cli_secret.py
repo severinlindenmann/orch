@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from orch import humanproof as hp
-from orch import keystore, secretrun
+from orch import keystore, secretrun, tickets
 from orch.errors import Refused
 
 SUBCOMMANDS = ("env", "file", "exec", "list", "get", "add", "remove", "profile")
@@ -34,7 +34,7 @@ def add_parsers(sub, common) -> None:
                 p.add_argument("--file", type=Path)
         elif name == "profile":
             actions = p.add_subparsers(dest="profile_action", required=True)
-            for action in ("set", "get-enable", "get-disable", "remove"):
+            for action in ("set", "get-enable", "get-disable", "agents-enable", "agents-disable", "remove"):
                 q = parser(actions, action)
                 q.add_argument("name")
                 if action == "set":
@@ -79,25 +79,30 @@ def _file_bytes(path):
 def _change_profile(root, args, who):
     name, action = args.name, args.profile_action
     setting = f"secret.allow_get.{name}"
+    agents = f"secret.agents_may_env.{name}"
     profiles = keystore.read_profiles(root)
     if action == "set":
         profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
-        profile.update(allow_get=False)
+        profile.update(allow_get=False, agents_may_env=False)
         if args.run:
             profile["run"] = args.run
         if args.skill:
             profile["skills"] = args.skill
         hp.record_set(root, setting, False, who)
+        hp.record_set(root, agents, False, who)
         profiles[name] = profile
     else:
         if name not in profiles:
             raise Refused(f"Refused: there is no profile named {name}.")
-        enabled = action == "get-enable"
-        hp.record_set(root, setting, enabled, who)
         if action == "remove":
+            hp.record_set(root, setting, False, who)
+            hp.record_set(root, agents, False, who)
             del profiles[name]
         else:
-            profiles[name]["allow_get"] = enabled
+            flag, rec = ("allow_get", setting) if action.startswith("get") else ("agents_may_env", agents)
+            enabled = action.endswith("enable")
+            hp.record_set(root, rec, enabled, who)  # the record first, then the file
+            profiles[name][flag] = enabled
     keystore.write_profiles(root, profiles)
 
 
@@ -108,7 +113,13 @@ def dispatch(args, root: Path) -> bool:
     if action in ("env", "file", "exec"):
         rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
         code = secretrun.run(
-            root, action, args.profile, rest, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer
+            root,
+            action,
+            args.profile,
+            rest,
+            stdout=sys.stdout.buffer,
+            stderr=sys.stderr.buffer,
+            agent=bool(tickets.agent_tool()) or str(getattr(args, "by", None) or "").startswith("agent:"),
         )
         sys.stdout.flush()
         sys.stderr.flush()
@@ -127,6 +138,8 @@ def dispatch(args, root: Path) -> bool:
         target = args.name
         if action == "profile" and args.profile_action in ("get-enable", "get-disable"):
             target += ":allow_get"
+        elif action == "profile" and args.profile_action in ("agents-enable", "agents-disable"):
+            target += ":agents_may_env"
         if (
             action == "add"
             and args.type == "key-file"

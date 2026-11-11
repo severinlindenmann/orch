@@ -106,7 +106,7 @@ run = ["pass-cli"]
 ```
 
 A profile maps variables to key names (`env`: the value in the variable; `files`: a temp file path in the variable), may set
-plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false).
+plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false), and may let agents use its keys in any command (`agents_may_env`, default false).
 Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
 ORCH_*, proxies, CA bundles, JAVA_TOOL_OPTIONS, …). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
@@ -132,14 +132,22 @@ an argument), `orch secret remove <name>`, `orch secret profile <name> …`. The
   caller names**, including an interpreter (`python -c`, `sh -c`, `env`, `curl`) that can write a key to a file or the
   network. Output hiding cannot stop that; it is a best-effort safety net for accidents (a CLI that echoes its token),
   not a control against a caller that deliberately exfiltrates. Only `exec` is bound to a command a person approved
-  (the profile's `run`, set with a `secret.profile` proof). Skills and screens say so in plain words. Restricting
-  `env`/`file` to person-approved commands is a possible later opt-in (not part of Level 1).
+  (the profile's `run`, set with a `secret.profile` proof). Skills and screens say so in plain words. To limit this
+  by default, a profile has the switch `agents_may_env` (screen wording: **"Let agents use these keys in any command"**),
+  **off for every new profile and for every profile without a matching record** (deny by default). While it is off, an
+  **agent** caller (an agent tool in the environment, or `--by agent:...`) of `env` or `file` is refused unless its whole
+  command equals the profile's `run` exactly: same argv, the program an **absolute path**, no extra arguments (vectors
+  `agent_env`). Otherwise: `Refused: agents may only run this profile's own command. Ask the person to allow any command, or use orch secret exec <profile>.`
+  (`data.refused` = `agent_command`). `exec` is unchanged; a person or script caller is not restricted. The switch counts
+  only with a settings record (secret.agents_may_env.<profile>, like `allow_get`), set by a person with a `secret.profile`
+  proof, target `<profile>:agents_may_env`; `profile set` and `profile remove` turn it off. An agent that hides its
+  identity looks like a script (Level 1: not a sandbox).
 - **Hiding the child's output.** stdout and stderr of the child go through pipes and the streaming hider (below) before they
   reach the caller. Interactive programs see pipes, not a terminal; that is accepted.
 - **No shell.** argv is run as given; orch never builds a shell line from a key.
 - **key.use.** One event per key per call, written before the child starts (activity.md `key.use`: `used.action` = env ·
   file · exec · get, `data.profile`, `data.command` = the program's base name, `data.skill` from `ORCH_SKILL` when set).
-  A refused call writes `outcome.ok: false` with `data.refused`: `not_in_profile`, `get_off`, `get_to_terminal`, `missing`.
+  A refused call writes `outcome.ok: false` with `data.refused`: `not_in_profile`, `get_off`, `get_to_terminal`, `missing`, `agent_command`.
 - Refusals are exit 2 with plain words: `Refused: the profile "billing" does not allow printing keys. Use orch secret env billing -- <command>.`
   The text names keys and profiles, never values.
 

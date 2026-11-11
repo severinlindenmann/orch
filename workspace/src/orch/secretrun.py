@@ -137,6 +137,21 @@ def sweep_tmp(root):
             shutil.rmtree(p)
 
 
+AGENT_COMMAND = (
+    "Refused: agents may only run this profile's own command. "
+    "Ask the person to allow any command, or use orch secret exec {p}."
+)
+
+
+def _agent_may_run(root, name, profile, command) -> bool:
+    """An agent's env/file call: any command only with agents_may_env (file flag AND a person's record);
+    else exactly the profile's own `run` (same argv, absolute program, no extra arguments)."""
+    if profile.get("agents_may_env") is True and hp.effective(root, f"secret.agents_may_env.{name}", True):
+        return True
+    run = profile.get("run")
+    return bool(run) and os.path.isabs(run[0]) and list(command) == list(run)
+
+
 def _profile(root, name):
     profile = keystore.read_profiles(root).get(name)
     if profile is None:
@@ -203,7 +218,7 @@ def _child(command, env, h, stdout, stderr):
             signal.signal(signal.SIGTERM, old)
 
 
-def run(root, mode, profile_name, argv, *, stdout, stderr) -> int:
+def run(root, mode, profile_name, argv, *, stdout, stderr, agent=False) -> int:
     temp = None
     h = None
     try:
@@ -224,6 +239,10 @@ def run(root, mode, profile_name, argv, *, stdout, stderr) -> int:
         needles = keystore.all_needles(root)
         h = hider.Hider(needles)
         recorder = Recorder(root, h, mode, profile_name, command[0])
+        if mode in ("env", "file") and agent and not _agent_may_run(root, profile_name, profile, command):
+            for name in dict.fromkeys([*profile.get("env", {}).values(), *profile.get("files", {}).values()]):
+                recorder.record(name, "agent_command")
+            raise Refused(AGENT_COMMAND.format(p=profile_name))
         files = profile.get("files", {}) if mode != "env" else {}
         names = list(dict.fromkeys([*profile.get("env", {}).values(), *files.values()]))
         values = {name: _value(root, name, recorder) for name in names}
