@@ -794,12 +794,20 @@ def is_conn_grant_key(setting) -> bool:
     return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
 
 
+def is_secret_get_key(setting) -> bool:
+    """Exactly a per-profile secret switch (allow_get, agents_may_env)."""
+    return (
+        isinstance(setting, str)
+        and re.fullmatch(r"secret\.(allow_get|agents_may_env)\.[a-z][a-z0-9-]{0,31}", setting) is not None
+    )
+
+
 def record_set(root: Path, setting: str, value, by: str) -> None:
     """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
     but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
     an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
     moment where the file says on and the record is stale."""
-    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting):
+    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting) and not is_secret_get_key(setting):
         raise Refused("That is not a setting a person has to allow.")
     if value is not False and not str(by).startswith("human:"):
         raise Refused(AGENT_REFUSED)
@@ -830,7 +838,7 @@ def conn_grants(root: Path) -> dict:
 def effective(root: Path, setting: str, file_value: bool) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
-    default = SETTING_DEFAULTS[setting]
+    default = SETTING_DEFAULTS.get(setting, False)
     try:
         path, wkey = _settings_path(root)
         data = _settings_load(root, path)

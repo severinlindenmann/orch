@@ -518,7 +518,7 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
     for pn, p in profiles.items():
         if not isinstance(pn, str) or not PROFILE_RE.match(pn) or not isinstance(p, dict):
             raise Refused("A profile name uses lower-case letters, digits and dashes.")
-        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "skills"}):
+        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills"}):
             raise Refused(f"The profile {pn} has a setting orch does not know.")
         if not (p.get("env") or p.get("files")):
             raise Refused(f"The profile {pn} needs at least one key.")
@@ -555,8 +555,9 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             or not all(isinstance(x, str) and 1 <= len(x) <= 300 for x in run)
         ):
             raise Refused(f"The profile {pn} has a bad command.")
-        if "allow_get" in p and not isinstance(p["allow_get"], bool):
-            raise Refused(f"The profile {pn} has a bad print setting.")
+        for flag in ("allow_get", "agents_may_env"):
+            if flag in p and not isinstance(p[flag], bool):
+                raise Refused(f"The profile {pn} has a bad {flag.replace('_', ' ')} setting.")
         sk = p.get("skills", [])
         if (
             not isinstance(sk, list)
@@ -582,8 +583,9 @@ def _toml(profiles: dict) -> str:
             out.append("run = [" + ", ".join(_q(x) for x in p["run"]) + "]")
         if p.get("skills"):
             out.append("skills = [" + ", ".join(_q(x) for x in p["skills"]) + "]")
-        if p.get("allow_get"):
-            out.append("allow_get = true")
+        for flag in ("allow_get", "agents_may_env"):
+            if p.get(flag):
+                out.append(f"{flag} = true")
         out.append("")
     return "\n".join(out)
 
@@ -648,3 +650,43 @@ def record_read(root: Path, record: str) -> dict | None:
     if data is not None and not isinstance(data, dict):
         raise Refused("A record in the orch folder is unreadable.")
     return data
+
+
+def all_needles(root: Path) -> dict[str, str | dict | list]:
+    """Every stored value, including shadowed admin keys, for output hiding."""
+    d = _existing_dir(root)
+    if d is None:
+        return {}
+    mine, theirs = _load(d), _load(d, admin=True)
+    out = {}
+    for entries, admin in ((mine, False), (theirs, True)):
+        for name, entry in entries.items():
+            label = name + "#admin" if admin and name in mine else name
+            if entry["type"] == "key-file":
+                try:
+                    raw = _read(d / "files" / _name(name), FILE_MAX + 1)
+                except FileNotFoundError:
+                    continue
+                try:
+                    value = raw.decode("utf-8")
+                except UnicodeDecodeError:  # a binary file: its text encodings are what can show up
+                    import base64
+
+                    value = [
+                        raw.hex(),
+                        base64.b64encode(raw).decode(),
+                        base64.urlsafe_b64encode(raw).decode(),
+                    ]
+            else:
+                value = entry.get("value")
+                if not isinstance(value, str):
+                    raise Refused("The key file is damaged.")
+                if entry["type"] == "json":
+                    try:
+                        value = json.loads(value)
+                    except ValueError:
+                        raise Refused("The key file is damaged.") from None
+                    if not isinstance(value, dict):
+                        raise Refused("The key file is damaged.")
+            out[label] = value
+    return out
