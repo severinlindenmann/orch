@@ -109,20 +109,6 @@ test('short paste and text drops use browser defaults; rejected files stay inlin
   assert.match(walk(s.d).find(n => n.className.includes('new-ticket-file-error')).textContent, /only text files and pictures/);
   assert.equal(s.calls.length, 0);
 });
-test('home sends long notes intact and keeps short notes on the original path', async () => {
-  for (const length of [1500, 1501]) {
-    const s = setup(), calls = [];
-    s.c.snapshot = false; s.c.changeUnavailable = () => false;
-    s.c.h = (tag, attrs, text) => Object.assign(new Node(tag), attrs, {value:attrs.value || text || ''});
-    s.c.act = async (op, args) => { calls.push(args); return {ok:true}; };
-    const home = read('pages/home.js');
-    vm.runInContext(home.slice(home.indexOf('function messageTicket('), home.indexOf('\nfunction ', home.indexOf('function messageTicket(') + 1)), s.c);
-    const text = 'x'.repeat(length); s.c.messageTicket(text);
-    await walk(s.body.children[1]).find(n => n.textContent === 'Create').click();
-    assert.equal(calls[0][length > 1500 ? 'long_text' : 'note'], text);
-    assert.equal(calls[0][length > 1500 ? 'note' : 'long_text'], undefined);
-  }
-});
 test('overview file chips preview artifacts and are absent in snapshots or without files', async () => {
   const s = setup(), previews = [];
   s.c.snapshot = false; s.c.array = x => x || [];

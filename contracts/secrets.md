@@ -135,10 +135,10 @@ an argument), `orch secret remove <name>`, `orch secret profile <name> …`. The
   (the profile's `run`, set with a `secret.profile` proof). Skills and screens say so in plain words. To limit this
   by default, a profile has the switch `agents_may_env` (screen wording: **"Let agents use these keys in any command"**),
   **off for every new profile and for every profile without a matching record** (deny by default). While it is off, an
-  **agent** caller (an agent tool in the environment, or `--by agent:...`) of `env` or `file` is refused unless its whole
-  command equals the profile's `run` exactly: same argv, the program an **absolute path**, no extra arguments (vectors
-  `agent_env`). Otherwise: `Refused: agents may only run this profile's own command. Ask the person to allow any command, or use orch secret exec <profile>.`
-  (`data.refused` = `agent_command`). `exec` is unchanged; a person or script caller is not restricted. The switch counts
+  **agent** caller (an agent tool in the environment, or `--by agent:...`) of `env`, `file` or `exec` is refused unless its whole
+  command equals the profile's `run` exactly: same argv, the program an **absolute path**, no extra arguments (for `exec`:
+  the profile's `run` plus the arguments the agent gave; vectors `agent_env`). One gate, applied before any key is read. Otherwise: `Refused: agents may only run this profile's own command. Ask the person to allow any command, or use orch secret exec <profile>.`
+  (`data.refused` = `agent_command`). An agent calling `exec` may not add arguments unless `agents_may_env` is on; a person or script caller is not restricted (exec with extra arguments stays allowed). The switch counts
   only with a settings record (secret.agents_may_env.<profile>, like `allow_get`), set by a person with a `secret.profile`
   proof, target `<profile>:agents_may_env`; `profile set` and `profile remove` turn it off. Turning a switch **off**
   (`profile get-disable`, `profile agents-disable`) needs no proof: anyone may lower it, and the record then says `reset`.
@@ -192,8 +192,8 @@ prints a header).
 - **What approving a `run` command means.** `profile set` stores the real path of the program and refuses one inside
   the workspace or changeable by other users. It only warns when the program is an interpreter or a tool that runs
   arbitrary code (sh, bash, python, node, env, git, npm, curl, ssh, ...): approving one as `run` is the same as
-  approving any command. `exec` takes extra arguments even from an agent (they are appended to the approved command);
-  the agent rule of `env`/`file` (exact argv) does not apply to `exec`. Command and path are shown in the answer.
+  approving any command. `exec` takes extra arguments from a person or script (they are appended to the approved command); an agent
+  may add none unless `agents_may_env` is on (the same exact-argv gate as `env`/`file`). Command and path are shown in the answer.
 - **The command's processes end with the call.** On POSIX the child runs in its own session (when stdin is not a terminal) and,
   when the call ends or is interrupted (TERM, HUP, QUIT), everything it started is ended too (TERM, then KILL).
   Further signals during that cleanup are ignored. Pipes held by a leftover process cannot hang the call.

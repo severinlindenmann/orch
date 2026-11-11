@@ -95,9 +95,8 @@ function copiesCard(settings) {
     h('div', {className:'card'},
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Separate copies'),
         settingsText('p', {className:'meta'}, "Give an agent its own copy of the project so agents don't edit the same files."),
-        settings.copies_locked ? settingsText('p', {className:'meta', 'data-key':'settings-copies-soon'}, 'Coming soon. For now every agent works in the project folder.') : null,
         h('div', {className:'row copies-choices', role:'radiogroup', 'aria-label':'Separate copies'}, COPY_CHOICES.map(([id, label]) =>
-          h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:snapshot || busy || !!settings.copies_locked}, label))))),
+          h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:snapshot || busy}, label))))),
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Most copies at once'),
         settingsText('p', {className:'meta'}, 'When this many exist, the next agent works in your own folder.'), cap)),
       h('div', {className:'card-row', 'data-key':'settings-copies-disk'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Copies on this computer'),

@@ -299,3 +299,13 @@ def test_unreadable_tracked_ticket_preserves_folder(root, monkeypatch):
     assert 'cannot be read' in str(success(root)['skipped'])
     assert step.entries(root, 'HEAD') == before
     assert set(repo.git(root, 'ls-files').stdout.decode().splitlines()) == {TICKET, ART}
+
+
+def test_merge_document_preserves_local_history_and_demotes_remote(root):
+    local_line = {"at": NOW, "by": "human:lindenmann", "text": "Answered q1: yes"}
+    remote_line = {"at": NOW, "by": "agent:relay from ph_abc", "text": "Approved"}
+    local = dict(ticket(), history=[local_line])
+    remote = dict(ticket(), history=[remote_line])
+    out = step.merge_document(root, TICKET, ticket(), local, remote, NOW)
+    assert local_line in out["history"]
+    assert {**remote_line, "by": "agent:sync", "text": "(synced, not verified here) Approved"} in out["history"]

@@ -345,6 +345,10 @@ def is_chat_entry(e: dict) -> bool:
     relay for a phone text ("agent:relay from ph_..."); `via` alone is env-controlled and never enough."""
     if not isinstance(e, dict):
         return False
+    if str(e.get("text", "")).startswith(
+        "A phone text in the General conversation is waiting for you. Answer it: orch relay send "
+    ) and str(e.get("by", "")).startswith("agent:"):
+        return False
     if "chat_message" in e:
         return e["chat_message"] is True
     try:

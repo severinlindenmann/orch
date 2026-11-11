@@ -1,6 +1,8 @@
 """Pure three-way merge of orch tickets (git step 2, design D8). No git, no files, no clock: the caller passes
 `now`. Two machines that merge the same three versions with the same `now` get byte-identical output, in either
-argument order: merge_ticket(base, a, b, now) == merge_ticket(base, b, a, now).
+argument order, except history attribution: upstream is remote, mine is local.
+Local history is trusted; remote-only person attribution is demoted (decisions do not bind history authors).
+Non-history content is symmetric; revision/updated_at may differ on no-op reuse.
 Shared vectors: contracts/vectors/ticket-merge-v1.json.
 """
 
@@ -8,6 +10,9 @@ import json
 import re
 from copy import deepcopy
 from datetime import datetime
+
+from orch.phone_view import is_agent_history_author
+from rfc3339_validator import validate_rfc3339
 
 FINAL = ("done", "dropped")
 LOSER_FIELDS = ("title", "note", "summary", "owner", "due", "key", "text")  # a replaced value goes to history
@@ -382,8 +387,7 @@ def _ref_id(r):
 
 
 # The verdict entries a ticket carries (human-proof.md "Done needs a signed verdict"). The fields of a stored
-# entry: the core's humanproof.VERDICT_FIELDS (a test fails if the two drift apart). This module takes no
-# dependency on the core, so it keeps the list and the shape of the contract's ticket.schema.json.
+# entry: the core's humanproof.VERDICT_FIELDS (parity-tested).
 _VERDICT_FIELDS = ("kind", "nonce", "mac")
 VERDICT_CAP = 8
 _NONCE = re.compile(r"^[0-9a-f]{16}$")
@@ -538,8 +542,22 @@ def _merge(base, a, b, now, person=None, verdict=None):
         ext = out.setdefault("ext", {})
         sync = ext["sync"] if isinstance(ext.get("sync"), dict) else ext.setdefault("sync", {})
         sync["old_keys"] = sorted(set(old_keys_of(out)) | ctx.old_keys)
+    # Attribution is directional: locally present lines are never demoted. A
+    # demoted local copy suppresses a returning remote original; a peer cannot
+    # use a fabricated demotion to erase a genuine local person's attribution.
+    histories = [{_canon(h) for h in t.get("history", [])} for t in (base, a, b)]
+    incoming = histories[1] - histories[2] - histories[0]
+    lines = base.get("history", []) + a.get("history", []) + b.get("history", [])
     hist = {}
-    for h in base.get("history", []) + a.get("history", []) + b.get("history", []):
+    for h in sorted({_canon(h): h for h in lines}.values(), key=_canon):
+        key = _canon(h)
+        demoted = {**h, "by": SYNC_BY, "text": "(synced, not verified here) " + h.get("text", "")}
+        if (
+            not is_agent_history_author(h.get("by"))
+            and key not in histories[2]
+            and (_canon(demoted) in histories[2] or key in incoming)
+        ):
+            h = demoted
         hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via"), h.get("lost")])] = h
     old = {
         (h.get("text"), _canon(h["lost"]) if "lost" in h else "")
@@ -566,7 +584,7 @@ def _valid(base, a, b):
         return False
     if not isinstance(a.get("id"), str):
         return False
-    for t in (base, a, b):
+    for side, t in enumerate((base, a, b)):
         if _too_deep(t):
             return False
         for f, cap in MAX_ITEMS.items():
@@ -574,6 +592,10 @@ def _valid(base, a, b):
             if not isinstance(lst, list) or len(lst) > cap or not all(isinstance(i, dict) for i in lst):
                 return False
         if len(_canon(t)) > MAX_BYTES:
+            return False
+        # Remote malformed text is discarded below; malformed local/base data
+        # still pauses the merge rather than silently deleting local history.
+        if side != 1 and any(not isinstance(h.get("text"), str) for h in t.get("history", [])):
             return False
         if not all(isinstance(x.get("id"), str) for f in ("checklist", "questions") for x in t.get(f, [])):
             return False
@@ -592,7 +614,8 @@ def _valid(base, a, b):
 def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
-    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified.
+    lists): the caller pauses and keeps all three. Remote history lines with missing or non-string text or
+    invalid timestamps are discarded. Never raises. The inputs are not modified.
     `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
     wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so. The
     verdict reads the core's ledger when asked: the sync caller must read, merge and write under the ticket's
@@ -607,9 +630,16 @@ def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
-        out = _merge(
-            {} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person, verdict
-        )
+        remote = deepcopy(upstream)
+        remote["history"] = [
+            h
+            for h in remote.get("history", [])
+            if isinstance(h.get("text"), str)
+            and isinstance(h.get("at"), str)
+            and h["at"].endswith("Z")
+            and validate_rfc3339(h["at"])
+        ]
+        out = _merge({} if base is None else deepcopy(base), remote, deepcopy(mine), now, person, verdict)
         # Run the authority and normalization rules before reusing an input. A no-op
         # must never bypass the receiving core's verdict on signed decisions.
         matches = [t for t in (upstream, mine) if _content(t) == _content(out)]

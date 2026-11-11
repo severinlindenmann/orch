@@ -176,7 +176,13 @@ def test_cannot_check_incoming_needs_person_for_theirs(machines, keep, monkeypat
 
 def test_ticket_theirs_preserves_history_and_sessions(machines, monkeypatch):
     a, b, _ = both(machines)
-    edit(a, title="Remote title")
+    shared = {"at": NOW, "by": "human:Pat", "text": "Already local"}
+    remote = {"at": NOW, "by": "human:Pat", "text": "Remote claim"}
+    edit(a, history=[shared])
+    edit(b, history=[shared])
+    success(a)
+    success(b)
+    edit(a, title="Remote title", history=[shared, remote])
     success(a)
     edit(b, title="Local title")
     original = step.merge.merge_ticket
@@ -187,6 +193,9 @@ def test_ticket_theirs_preserves_history_and_sessions(machines, monkeypatch):
     result = pause.resolve(b, TICKET, "theirs", now=NOW)
     assert not result.get("last_error"), result
     assert load(b)["title"] == "Remote title"
+    assert shared in load(b)["history"]
+    assert remote not in load(b)["history"]
+    assert {**remote, "by": "agent:sync", "text": "(synced, not verified here) Remote claim"} in load(b)["history"]
     assert any(
         "Local title" in h["text"] and "my version before sync" in h["text"] for h in load(b)["history"]
     )
@@ -383,7 +392,22 @@ def test_person_keeps_key_without_live_duplicates(machines, monkeypatch, winner)
     success(b)
     success(a)
     for tid in (winner, loser):
-        assert repo.safe(a, f"tickets/{tid}.json").read_bytes() == repo.safe(b, f"tickets/{tid}.json").read_bytes()
+        docs = [json.loads(repo.safe(root, f"tickets/{tid}.json").read_bytes()) for root in (a, b)]
+        # Keys and content converge; local human attribution and its remote demotion
+        # intentionally differ, and that history difference can advance revisions.
+        assert {k: v for k, v in docs[0].items() if k not in ("history", "revision")} == {
+            k: v for k, v in docs[1].items() if k not in ("history", "revision")
+        }
+        histories = []
+        for doc in docs:
+            events = set()
+            for line in doc["history"]:
+                assert line["by"] in ("human:Pat", "agent:sync")
+                text = line["text"].removeprefix("(synced, not verified here) ")
+                assert "key changed" in text
+                events.add((line["at"], text))
+            histories.append(events)
+        assert histories[0] == histories[1]
 
 
 @pytest.mark.parametrize("current", [0, 40])

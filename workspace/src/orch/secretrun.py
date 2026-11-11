@@ -354,7 +354,8 @@ def _switch_on(root, name, flag) -> bool:
 
 
 def _agent_may_run(root, name, profile, command) -> bool:
-    """An agent's env/file call: any command only with agents_may_env (file flag AND a person's record);
+    """The one gate for an agent's env, file AND exec call (`command` is the full argv, for exec the profile's
+    `run` plus any extra arguments): any command only with agents_may_env (file flag AND a person's record);
     else exactly the profile's own `run` (same argv, absolute program, no extra arguments)."""
     if _switch_on(root, name, "agents_may_env"):
         return True
@@ -502,7 +503,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         needles = keystore.all_needles(root)
         h = hider.Hider(needles)
         recorder = Recorder(root, h, mode, profile_name, command[0])
-        if mode in ("env", "file") and agent and not _agent_may_run(root, profile_name, profile, command):
+        if agent and not _agent_may_run(root, profile_name, profile, command):
             for name in dict.fromkeys([*profile.get("env", {}).values(), *profile.get("files", {}).values()]):
                 recorder.record(name, "agent_command")
             raise Refused(AGENT_COMMAND.format(p=profile_name))

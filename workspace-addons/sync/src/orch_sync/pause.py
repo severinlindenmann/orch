@@ -161,7 +161,10 @@ def resolve(root, path, keep, args=None, *, now=None):
                     local = {}  # The raw bytes are retained locally below.
                 doc = step.held_ticket(root, path, doc, local, doc)
                 # Re-run authority-sensitive merge rules; synced human text is never proof.
-                doc = step.merge_document(root, path, {}, doc, doc, now)
+                # Selecting a remote copy does not make its history locally trusted.
+                # Mirror the chosen fields, but only locally present history lines.
+                trusted = {**doc, "history": [h for h in doc.get("history", []) if h in local.get("history", [])]}
+                doc = step.merge_document(root, path, {}, trusted, doc, now)
                 doc = step.held_ticket(root, path, doc, local, doc)
                 if keep == "theirs" and mine != data:
                     raw = mine or b"{}"

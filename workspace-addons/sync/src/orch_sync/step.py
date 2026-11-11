@@ -241,9 +241,15 @@ def held_ticket(root, path, doc, local, remote):
 
 
 def merge_document(root, path, base, local, remote, now):
+    # Direction matters: only remote-only history attribution is demoted.
     try:
         doc = merge.merge_ticket(
-            base or None, remote, local or remote, now=now, person=humanproof.wont_verifier(root)
+            base or None,
+            remote,
+            local or {"id": remote["id"]},
+            now=now,
+            person=humanproof.wont_verifier(root),
+            verdict=humanproof.verdict_verifier(root),
         )
     except Exception:  # noqa: BLE001 - an invalid merge always keeps both versions
         raise pause.Pause(f"Ticket cannot be merged: {path}", [path]) from None
