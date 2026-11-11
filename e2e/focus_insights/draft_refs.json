@@ -39,5 +39,9 @@
   "insights-detail": {
     "image": "img2/ins-sugg.png",
     "note": "Detail panel of one row (draft insights-handover/ui detail screen); read only in v1"
+  },
+  "insights-settings": {
+    "image": null,
+    "note": "Settings: draft/final/index.html, Insights settings table (record, keep full detail, sharing); delete detail per ticket"
   }
 }
