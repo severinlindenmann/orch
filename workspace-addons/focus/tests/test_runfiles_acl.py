@@ -87,7 +87,7 @@ def test_runs_dir_grants_only_what_it_created(tmp_path, win):
 
 def test_admin_made_folder_is_reported_when_it_is_opened(tmp_path, monkeypatch):
     monkeypatch.setattr(runfiles, "WINDOWS", True)
-    monkeypatch.setattr(runfiles, "grant_user", lambda d: None)
+    monkeypatch.setattr(runfiles, "grant_user", lambda d, root=None: None)
     (tmp_path / ".orch" / "run" / "x").mkdir(parents=True)
 
     def deny(*a, **k):
@@ -140,7 +140,7 @@ def test_runs_dir_refuses_a_junction_and_reports_an_admin_made_folder(tmp_path, 
         events.runs_dir(tmp_path)
     monkeypatch.setattr(runfiles, "reparse", lambda p: False)
     monkeypatch.setattr(runfiles, "WINDOWS", True)
-    monkeypatch.setattr(runfiles, "grant_user", lambda d: None)
+    monkeypatch.setattr(runfiles, "grant_user", lambda d, root=None: None)
 
     def deny(*a, **k):
         raise PermissionError(13, "Access is denied")
@@ -184,3 +184,19 @@ def test_run_dir_from_a_public_like_cwd_touches_only_orch(tmp_path, win, monkeyp
     monkeypatch.chdir(ws)  # orch start run from inside the shared folder (its root is the workspace)
     runfiles.run_dir(ws, "x")
     assert [c[1] for c in win] == [str(ws / ".orch" / "run"), str(ws / ".orch" / "run" / "x")]
+
+
+def test_a_folder_that_is_only_named_orch_does_not_count(tmp_path):
+    """The rule is anchored to THIS workspace: ws/.orch yes; another folder named .orch (a stray one, another
+    workspace's) no, even when the caller passes the real workspace root."""
+    ws = tmp_path / "ws"
+    (ws / ".orch" / "run").mkdir(parents=True)
+    stray = tmp_path / "elsewhere" / ".orch" / "run"
+    stray.mkdir(parents=True)
+    assert runfiles.in_orch_area(ws / ".orch" / "run" / "x", ws)
+    assert runfiles.in_orch_area(ws / ".orch", ws)
+    assert not runfiles.in_orch_area(stray, ws)
+    assert not runfiles.in_orch_area(ws, ws)
+    with pytest.raises(RuntimeError, match=r"\.orch folder"):
+        runfiles.mkdir_private(stray / "new", ws)
+    assert not (stray / "new").exists()

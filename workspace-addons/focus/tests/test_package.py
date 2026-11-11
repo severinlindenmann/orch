@@ -38,4 +38,4 @@ def test_web_scripts_are_served_and_loaded_in_order():
     html = (web / "index.html").read_text()
     scripts = re.findall(r'<script src="([^"]+)" defer></script>', html)
     names = ["helpers", "proof", "store", "jobs", "session", "settings", "live", "ticket", "focus"]
-    assert scripts[-len(names):] == [f"__P__/web/{name}.js" for name in names]
+    assert scripts[-len(names) :] == [f"__P__/web/{name}.js" for name in names]

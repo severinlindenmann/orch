@@ -36,6 +36,10 @@ ENFORCE_PENDING_MAC = True
 
 HP_MAX_LIFE = 60
 NOT_TOGETHER = "home_pairing"  # the code, for tests and logs; people read the plain texts below
+MSG_HOME_PLACE = (
+    "orch will not use that folder as its home (it is a shared or system place, or outside your profile). "
+    "Use the default orch folder in your own account."
+)
 MSG_OTHER_HOME = (
     "This workspace uses a different orch folder than your account's. "
     "Start orch normally (without ORCH_HOME) to approve things here."
@@ -148,7 +152,9 @@ def install_record_text(kind: str, root: str | Path) -> str:
 def write_install_record(env_dir: Path, kind: str) -> None:
     """Only for the update that reinstalls the tool environment (which drops the record): it carries over the
     kind the installer wrote, never a new one. No orch command takes a kind from its caller."""
-    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind, env_dir))
+    # Not a secret (the installer writes it with a plain write too) and it lives in the uv tool
+    # folder, outside every guarded orch home: so NO rights change here (the scope guard would refuse it).
+    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind, env_dir), private=False)
 
 
 def install_kind() -> str:
@@ -252,7 +258,10 @@ def guarded_home(root: Path) -> Path:
             raise HomeRefused(MSG_LINKED_HOME.format(path=cand))
     if not home_ok(acct, install, real_dir, ws_real, home_real):
         raise HomeRefused(MSG_TEST_WS if ws_test else MSG_OTHER_HOME)
-    winacl.allow_home(cand)  # Windows: rights are written only inside this home (not cwd, Public)
+    try:
+        winacl.allow_home(cand)  # Windows: rights are written only inside this home (not cwd, Public)
+    except Refused:
+        raise HomeRefused(MSG_HOME_PLACE) from None
     return cand
 
 
@@ -452,12 +461,13 @@ def _check_binding(root: Path, d: Path) -> None:
         raise Refused(BINDING_MISMATCH)
 
 
-def _write_private(path: Path, text: str) -> None:
+def _write_private(path: Path, text: str, *, private: bool = True) -> None:
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            winacl.set_private(tmp, False)  # before any secret is written (Windows)
+            if private:
+                winacl.set_private(tmp, False)  # before any secret is written (Windows)
             f.write(text)
         os.replace(tmp, path)
     finally:

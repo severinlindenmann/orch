@@ -30,7 +30,14 @@ def test_records_skip_general(tmp_path):
     d.mkdir(parents=True)
     for tid in ("t_gen001", "t_real01"):
         (d / f"{tid}.json").write_text(
-            json.dumps({"ticket": tid, "run": "r_1", "pid": 1, "renewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+            json.dumps(
+                {
+                    "ticket": tid,
+                    "run": "r_1",
+                    "pid": 1,
+                    "renewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            )
         )
     got = {r["ticket"] for r in livedata.records(tmp_path)}
     assert "t_gen001" not in got

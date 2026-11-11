@@ -16,6 +16,7 @@ from orch import humanproof as hp
 from orch import winacl
 from orch.errors import Refused
 
+_REAL_WRITE_DACL = winacl._write_dacl
 SID = "S-1-5-21-2313884086-3657026201-3636488430-1002"
 OTHER = "S-1-5-21-2313884086-3657026201-3636488430-1003"
 SY = "S-1-5-18"
@@ -525,10 +526,14 @@ def test_scope_never_the_current_folder_or_above(win, users, monkeypatch):
     sub = users["home"] / "keys"
     sub.mkdir()
     monkeypatch.chdir(sub)
-    for target in (sub, users["home"]):
-        with pytest.raises(Refused, match="current folder"):
-            winacl.set_private(target, True)
+    with pytest.raises(Refused, match="current folder"):
+        winacl.set_private(sub, True)
     assert _writes(win) == []
+    # The guarded home itself may contain the current folder (ORCH_HOME=~/.orch-test, a workspace under it,
+    # the shell standing in that workspace): it is validated by humanproof.guarded_home, so it is allowed.
+    winacl.allow_home(users["home"])
+    winacl.set_private(users["home"], True)
+    assert [c[1] for c in _writes(win)] == [str(users["home"])]
 
 
 def test_public_like_cwd_stays_untouched_through_keys(win, tws, tmp_path, monkeypatch):
@@ -550,3 +555,75 @@ def test_scope_is_a_no_op_on_posix(tmp_path, monkeypatch):
     winacl.check_scope(tmp_path)  # POSIX: modes and lstat do the job; nothing to refuse here
     winacl.allow_home(tmp_path)
     assert winacl._homes == set()
+
+
+# ------------------------------------------------------------- install record, one-handle write, home refusal
+
+
+def test_install_record_is_written_with_no_rights_change_outside_any_home(win, tmp_path, monkeypatch):
+    """`orch update` rewrites orch-install.json in the uv tool folder (outside every guarded home). Not a
+    secret: it must succeed with no recorded home and never reach the DACL writer or the scope guard."""
+    monkeypatch.setattr(winacl, "_homes", set())  # no guarded home recorded
+    monkeypatch.setattr(
+        winacl, "set_private", lambda *a: pytest.fail("a rights write for the install record")
+    )
+    monkeypatch.setattr(winacl, "_write_dacl", lambda *a: pytest.fail("a DACL write outside the home"))
+    env = tmp_path / "tools" / "orch"
+    env.mkdir(parents=True)
+    hp.write_install_record(env, "dev")
+    assert (env / "orch-install.json").read_text() == hp.install_record_text("dev", env)
+    assert not [p for p in env.iterdir() if p.name.endswith(".tmp")]
+    assert _writes(win) == []
+
+
+def _handle_seams(monkeypatch, *, attrs=0, final=None, log=None):
+    log = [] if log is None else log
+    monkeypatch.setattr(winacl, "_open_target", lambda p: log.append("open") or "H")
+    monkeypatch.setattr(winacl, "_close_target", lambda h: log.append("close"))
+    monkeypatch.setattr(winacl, "_handle_attrs", lambda h: log.append("attrs") or attrs)
+    monkeypatch.setattr(winacl, "_handle_path", lambda h: log.append("final") or final)
+    monkeypatch.setattr(winacl, "_set_dacl_on_handle", lambda h, d, s: log.append("set"))
+    monkeypatch.setattr(winacl, "_read_dacl", lambda p, handle=None: log.append(("read", handle)) or FILE_OK)
+    return log
+
+
+def test_write_dacl_opens_once_checks_the_final_path_then_sets_and_reads_by_handle(
+    win, tmp_path, monkeypatch
+):
+    f = tmp_path / "k.key"
+    f.write_text("x")
+    monkeypatch.setattr(winacl, "_write_dacl", _REAL_WRITE_DACL)  # the fixture fakes it; run the real one
+    log = _handle_seams(monkeypatch, final=str(f))
+    winacl._write_dacl(f, False, SID)
+    assert log == ["open", "attrs", "final", "set", ("read", "H"), "close"]
+
+
+def test_write_dacl_refuses_when_the_final_path_is_outside_the_home(win, users, monkeypatch):
+    """The name looked inside the home at check time but the handle points at Public: refused."""
+    monkeypatch.setattr(winacl, "_write_dacl", _REAL_WRITE_DACL)
+    f = users["home"] / "k.key"
+    f.write_text("x")
+    log = _handle_seams(monkeypatch, final=str(users["shared"] / "k.key"))
+    with pytest.raises(Refused, match="Public"):
+        winacl._write_dacl(f, False, SID)
+    assert "set" not in log and log[-1] == "close"
+
+
+def test_write_dacl_refuses_a_reparse_point_handle(win, tmp_path, monkeypatch):
+    monkeypatch.setattr(winacl, "_write_dacl", _REAL_WRITE_DACL)
+    f = tmp_path / "k.key"
+    f.write_text("x")
+    log = _handle_seams(monkeypatch, attrs=winacl.REPARSE, final=str(f))
+    with pytest.raises(Refused, match="link or junction"):
+        winacl._write_dacl(f, False, SID)
+    assert log == ["open", "attrs", "close"]
+
+
+def test_guarded_home_raises_home_refused_not_a_winacl_refusal(tws, tmp_path, monkeypatch):
+    def refuse(path):
+        raise winacl._no("orch would change rights outside its own folder: it is a drive root")
+
+    monkeypatch.setattr(winacl, "allow_home", refuse)
+    with pytest.raises(hp.HomeRefused) as e:
+        hp.guarded_home(tws)
+    assert "drive root" not in str(e.value) and "orch folder" in str(e.value)

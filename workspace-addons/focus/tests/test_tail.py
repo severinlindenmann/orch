@@ -136,12 +136,14 @@ def test_the_feed_hides_raw_output_injected_lines_and_repeats():
     def e(kind, text, **d):
         return ev.make(RUN, TID, "main", kind, text, "adapter", **d)
 
-    got = ev.for_display([
-        e("tool.start", "Read SKILL.md", id="a"),
-        e("tool.end", "Base directory for this skill: /x ...", id="a", ok=True),
-        e("tool.start", "Run orch ticket show", id="b"),
-        e("tool.end", "New on t_abc12345 since you looked: x", id="b", ok=False),
-        e("tool.start", "Run orch ticket show", id="c"),
-        e("tool.end", "no such file", id="c", ok=False),
-    ])
+    got = ev.for_display(
+        [
+            e("tool.start", "Read SKILL.md", id="a"),
+            e("tool.end", "Base directory for this skill: /x ...", id="a", ok=True),
+            e("tool.start", "Run orch ticket show", id="b"),
+            e("tool.end", "New on t_abc12345 since you looked: x", id="b", ok=False),
+            e("tool.start", "Run orch ticket show", id="c"),
+            e("tool.end", "no such file", id="c", ok=False),
+        ]
+    )
     assert [x["text"] for x in got] == ["Read SKILL.md", "Run orch ticket show", "Failed: no such file"]

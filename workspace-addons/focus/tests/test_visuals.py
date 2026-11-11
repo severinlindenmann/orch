@@ -1,4 +1,5 @@
 """Contracts needed by the accepted Focus layouts."""
+
 import json
 
 import pytest
@@ -14,8 +15,11 @@ def test_mark_done_is_revision_checked_and_fixed_scope():
     assert argv[:3] == ["ticket", "patch", TID]
     assert "--if-revision=7" in argv
     assert json.loads(argv[-1]) == {"status": "done"}
-    for args in ({"ticket": TID}, {"ticket": TID, "if_revision": True},
-                 {"ticket": TID, "if_revision": 7, "status": "active"}):
+    for args in (
+        {"ticket": TID},
+        {"ticket": TID, "if_revision": True},
+        {"ticket": TID, "if_revision": 7, "status": "active"},
+    ):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("ticket.done", args)
 
@@ -24,10 +28,14 @@ def test_mark_done_is_revision_checked_and_fixed_scope():
 def test_started_and_question_delivery_survive_view(server, ws, started):
     path = ws / ".orch" / "tickets" / f"{TID}.json"
     ticket = json.loads(path.read_text())
-    ticket.update(status="open", ticket_view={"started": started}, questions=[
-        {"id": "q1", "text": "Which greeting?", "answer": None, "sent_to_phone": True},
-        {"id": "q2", "text": "Which colour?", "answer": None},
-    ])
+    ticket.update(
+        status="open",
+        ticket_view={"started": started},
+        questions=[
+            {"id": "q1", "text": "Which greeting?", "answer": None, "sent_to_phone": True},
+            {"id": "q2", "text": "Which colour?", "answer": None},
+        ],
+    )
     path.write_text(json.dumps(ticket))
     view = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
     assert view["ticket"]["started"] is started

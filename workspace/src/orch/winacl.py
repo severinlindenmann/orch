@@ -148,10 +148,87 @@ def user_sid() -> str:
     return _sid_cache
 
 
-def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
-    """Replace the DACL by: this user and SYSTEM, full control; protected (inheritance removed)."""
-    check_scope(path)  # the only DACL writer: the scope guard holds here too, whoever calls it
+GENERIC_WRITE_DAC = 0x00040000  # WRITE_DAC
+GENERIC_READ_CONTROL = 0x00020000  # READ_CONTROL
+FILE_SHARE_ALL = 0x7  # READ | WRITE | DELETE
+OPEN_EXISTING = 3
+FLAG_BACKUP_SEMANTICS = 0x02000000  # lets CreateFileW open a folder
+FLAG_OPEN_REPARSE_POINT = 0x00200000  # open a link itself, never its target
+
+
+def _open_target(path: Path):
+    """ONE handle on the target for the whole write (WRITE_DAC | READ_CONTROL; a link is opened itself, not
+    followed). Scope check, rights write and read-back all go through this handle, so nothing can be swapped
+    in between them. Tests replace this."""
     ctypes, wintypes, adv, k32 = _api()
+    k32.CreateFileW.argtypes = [
+        ctypes.c_wchar_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    k32.CreateFileW.restype = ctypes.c_void_p
+    h = k32.CreateFileW(
+        str(path),
+        GENERIC_WRITE_DAC | GENERIC_READ_CONTROL,
+        FILE_SHARE_ALL,
+        None,
+        OPEN_EXISTING,
+        FLAG_BACKUP_SEMANTICS | FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if h is None or h in (0, ctypes.c_void_p(-1).value):
+        raise _no("Windows would not open it to set its rights")
+    return h
+
+
+def _close_target(h) -> None:
+    _api()[3].CloseHandle(h)
+
+
+def _handle_attrs(h) -> int:
+    """File attributes of what the handle really is. Tests replace this."""
+    ctypes, wintypes, adv, k32 = _api()
+
+    class _Info(ctypes.Structure):
+        _fields_ = [("attrs", wintypes.DWORD), ("rest", ctypes.c_ubyte * 48)]
+
+    info = _Info()
+    k32.GetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    if not k32.GetFileInformationByHandle(h, ctypes.byref(info)):
+        raise _cant("a part of its path could not be checked")
+    return info.attrs
+
+
+def _handle_path(h) -> str:
+    """The real path the handle points at (GetFinalPathNameByHandleW, no long-path prefix)."""
+    ctypes, wintypes, adv, k32 = _api()
+    k32.GetFinalPathNameByHandleW.argtypes = [
+        ctypes.c_void_p,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    buf = ctypes.create_unicode_buffer(32768)
+    n = k32.GetFinalPathNameByHandleW(h, buf, 32768, 0)
+    if n == 0 or n >= 32768:
+        raise _cant("a part of its path could not be checked")
+    got = buf.value
+    if got.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + got[8:]
+    if got.startswith("\\\\?\\"):
+        return got[4:]
+    return got
+
+
+def _set_dacl_on_handle(h, is_dir: bool, sid: str) -> None:
+    """Replace the DACL through the handle: this user and SYSTEM, full control; protected."""
+    ctypes, wintypes, adv, k32 = _api()
+    adv.SetSecurityInfo.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.DWORD] + [ctypes.c_void_p] * 4
+    adv.SetSecurityInfo.restype = wintypes.DWORD
     inh = "OICI" if is_dir else ""
     sddl = f"D:P(A;{inh};FA;;;{SYSTEM_SID})(A;{inh};FA;;;{sid})"
     sd = ctypes.c_void_p()
@@ -165,18 +242,42 @@ def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
         ) or not (present.value and dacl.value):
             raise _no("Windows would not set its rights")
         # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION; SE_FILE_OBJECT = 1
-        rc = adv.SetNamedSecurityInfoW(str(path), 1, 0x4 | 0x80000000, None, None, dacl, None)
-        if rc != 0:
+        if adv.SetSecurityInfo(h, 1, 0x4 | 0x80000000, None, None, dacl, None) != 0:
             raise _no("Windows would not set its rights")
     finally:
         k32.LocalFree(sd)
 
 
-def _read_dacl(path: Path) -> tuple[bool, list[tuple[int, int, int, str]]]:
-    """(protected, [(ace type, ace flags, access mask, SID string)]). Raises Refused when it cannot tell."""
+def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
+    """Replace the DACL by: this user and SYSTEM, full control; protected (inheritance removed).
+    The target is opened ONCE; a link handle is refused; the scope guard judges the handle's final path; the
+    rights are set and read back through that same handle (no check-then-use gap on the name)."""
+    check_scope(path)  # the only DACL writer: the scope guard holds here too, whoever calls it (early, cheap)
+    h = _open_target(path)
+    try:
+        if _handle_attrs(h) & REPARSE:
+            raise _no("it is a link or junction")
+        check_scope(_handle_path(h))  # what was REALLY opened, not the name
+        _set_dacl_on_handle(h, is_dir, sid)
+        protected, aces = _read_dacl(path, handle=h)
+        parse_aces(protected, aces, sid)
+    finally:
+        _close_target(h)
+
+
+def _read_dacl(path: Path, handle=None) -> tuple[bool, list[tuple[int, int, int, str]]]:
+    """(protected, [(ace type, ace flags, access mask, SID string)]). Raises Refused when it cannot tell.
+    With `handle` the rights are read from that open handle (not by name)."""
     ctypes, wintypes, adv, k32 = _api()
     dacl, sd = ctypes.c_void_p(), ctypes.c_void_p()
-    rc = adv.GetNamedSecurityInfoW(str(path), 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    if handle is not None:
+        adv.GetSecurityInfo.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.DWORD] + [ctypes.c_void_p] * 5
+        adv.GetSecurityInfo.restype = wintypes.DWORD
+        rc = adv.GetSecurityInfo(handle, 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    else:
+        rc = adv.GetNamedSecurityInfoW(
+            str(path), 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd)
+        )
     if rc != 0:
         raise _cant("Windows would not tell its rights")
     try:
@@ -367,8 +468,10 @@ def _guard_profile() -> str:
     return profile_dir()
 
 
-def _forbidden(rp: str) -> str | None:
-    """Why `rp` (real, normcased) may never get its rights changed by orch, or None."""
+def _forbidden(rp: str, *, is_home: bool = False) -> str | None:
+    """Why `rp` (real, normcased) may never get its rights changed by orch, or None. A guarded HOME (already
+    validated by humanproof: the account's own orch folder, or the test home) may contain the current folder:
+    ORCH_HOME=~/.orch-test with a workspace under it and the shell standing in that workspace is normal."""
     if rp == os.path.dirname(rp):
         return "it is a drive root"
     try:
@@ -386,7 +489,7 @@ def _forbidden(rp: str) -> str | None:
         cwd = _real(os.getcwd())
     except OSError:
         return "the current folder could not be found"
-    if _inside(cwd, rp):
+    if not is_home and _inside(cwd, rp):
         return "it is the current folder or above it"
     return None
 
@@ -397,7 +500,7 @@ def allow_home(path: str | os.PathLike) -> None:
     if not _windows():
         return
     rp = _real(path)
-    why = _forbidden(rp)
+    why = _forbidden(rp, is_home=True)
     if why:
         raise _no(f"orch would change rights outside its own folder: {why}")
     _homes.add(rp)
@@ -409,7 +512,7 @@ def check_scope(path: str | os.PathLike) -> None:
     if not _windows():
         return
     rp = _real(path)
-    why = _forbidden(rp)
+    why = _forbidden(rp, is_home=rp in _homes)
     if why is None and not any(_inside(rp, h) for h in _homes):
         why = "it is not inside orch's own folder"
     if why:

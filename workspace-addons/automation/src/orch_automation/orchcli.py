@@ -1,4 +1,5 @@
 """Calls to the orch CLI (`$ORCH_BIN`, else `orch`) with --json. The scheduler touches tickets only through it."""
+
 from __future__ import annotations
 
 import json
@@ -42,8 +43,18 @@ def tickets(root: Path) -> list[dict]:
     a repeat goes on after its ticket was finished (callers check the status they need)."""
     data = call(root, "ticket", "list", "--all", by=False)
     items = data.get("tickets", []) if isinstance(data, dict) else data
-    return [t for t in items if isinstance(t, dict) and isinstance(t.get("id"), str)
-            and ID_RE.match(t["id"]) and t.get("status")] if isinstance(items, list) else []
+    return (
+        [
+            t
+            for t in items
+            if isinstance(t, dict)
+            and isinstance(t.get("id"), str)
+            and ID_RE.match(t["id"])
+            and t.get("status")
+        ]
+        if isinstance(items, list)
+        else []
+    )
 
 
 def addon_on(root: Path, name: str) -> bool | None:
@@ -85,8 +96,14 @@ def ext_unset(root: Path, t: dict, by: str | None = None) -> bool:
 AGENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 
-def run_start(root: Path, tid: str, text: str | None = None, agent: str | None = None, by: str | None = None,
-              mode: str | None = "oneshot") -> dict:
+def run_start(
+    root: Path,
+    tid: str,
+    text: str | None = None,
+    agent: str | None = None,
+    by: str | None = None,
+    mode: str | None = "oneshot",
+) -> dict:
     """`orch run start <tid> --by agent:automation`: all of resume / fresh / busy is decided inside core.
     mode None lets core choose (a live session the person can open when the machine can).
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
@@ -110,7 +127,11 @@ def run_start(root: Path, tid: str, text: str | None = None, agent: str | None =
         return {"result": "started", "run": data.get("run"), "log": data.get("log")}
     if isinstance(data, dict) and data.get("pending") is True:
         return {"result": "pending"}
-    reason = str(data.get("error")) if isinstance(data, dict) and data.get("error") else (p.stderr.strip() or "unknown")
+    reason = (
+        str(data.get("error"))
+        if isinstance(data, dict) and data.get("error")
+        else (p.stderr.strip() or "unknown")
+    )
     if "No agent found" in reason:
         reason = "No agent set: orch config set workspace.agent <name>"
     return {"result": "failed", "reason": reason[:300]}
