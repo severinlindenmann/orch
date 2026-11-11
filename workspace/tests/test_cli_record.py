@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -109,13 +110,19 @@ def test_cursor_path_escape_is_invalid(ws, capsys):
         assert code == 2 and line["code"] == "invalid"
 
 
-def test_tail_pruned_cursor_resets(ws, capsys):
-    gone = cli_record.TailCursor(None, {"r_gone0001": 3}).encode()
+def test_tail_cursor_naming_a_pruned_run_is_one_marker_not_a_reset(ws, capsys):
+    gone = cli_record.TailCursor({"r_gone0001": 3}).encode()
     code, lines = cli_lines(capsys, "tail", "--since", gone)
-    assert code == 0 and lines[0]["type"] == "reset" and lines[0]["reason"] == "pruned"
+    assert code == 0 and lines[0]["type"] == "unavailable"
+    assert (lines[0]["run"], lines[0]["status"], lines[0]["reason"]) == (
+        "r_gone0001",
+        "unavailable",
+        "missing",
+    )
     assert len([ln for ln in lines if ln["type"] == "event"]) == 6
-    _, again = cli_lines(capsys, "tail", "--since", lines[0]["cursor"])
-    assert again == lines[1:]
+    assert "r_gone0001" not in cli_record.TailCursor.decode(lines[-1]["cursor"]).seqs
+    _, again = cli_lines(capsys, "tail", "--since", lines[-1]["cursor"])
+    assert again == []
 
 
 def test_tail_unknown_run_is_not_found(ws, capsys):
@@ -524,7 +531,7 @@ def make_runs(root, count):
     return writer
 
 
-def test_tail_cursor_stays_small_with_300_runs(proj, capsys):
+def test_tail_cursor_stays_small_with_300_runs_compressed(proj, capsys):
     writer = make_runs(proj, 300)
     code, lines = cli_lines(capsys, "tail")
     assert code == 0 and len(lines) == 600
@@ -537,7 +544,7 @@ def test_tail_cursor_stays_small_with_300_runs(proj, capsys):
     writer.append(example(run="r_many0007", ticket=TICKET_A, id="toolu_new", at="2026-11-16T11:00:00Z"))
     _, rest = cli_lines(capsys, "tail", "--since", last)
     assert [ln["event"]["id"] for ln in rest] == ["toolu_new"]
-    assert len(cli_record.TailCursor.decode(last).seqs) < 5  # finished runs are covered by the watermark
+    assert len(cli_record.TailCursor.decode(last).seqs) == 300
 
 
 def test_tail_cursor_with_unknown_shape_is_invalid(ws, capsys):
@@ -594,7 +601,7 @@ def test_marker_state_follows_the_run(ws):
 
 
 def test_follow_drops_cursor_entries_of_pruned_runs(ws):
-    since = cli_record.TailCursor(("2026-11-16T09:00:17Z", RUN_B, 2), {RUN_A: 4, RUN_B: 2}).encode()
+    since = cli_record.TailCursor({RUN_A: 4, RUN_B: 2}).encode()
 
     def between(n):
         if n == 1:
@@ -637,7 +644,7 @@ def test_late_event_of_a_live_run_is_still_delivered(ws, capsys):
 
 
 def test_unseen_live_run_with_old_events_is_delivered_not_skipped(ws):
-    since = cli_record.TailCursor((at(30), RUN_A, 4), {RUN_A: 4}).encode()  # B was never sent, and is older
+    since = cli_record.TailCursor({RUN_A: 4}).encode()  # B was never sent, and is older
     out = follow(ws, 1, since=since)
     assert {ln["event"]["run"] for ln in out if ln["type"] == "event"} == {RUN_B}
 
@@ -654,3 +661,106 @@ def test_vanished_tampered_run_is_missing_not_recovered(ws):
     check(
         validator("cli-answer", "stream_line"), [m for m in out if m["type"] == "unavailable"][-1], "marker"
     )
+
+
+# --- Opus delta findings, one named test each ---
+def raw_line(ws, run, n):
+    return run_file(ws, run).read_text().splitlines()[n]
+
+
+def test_high1_old_runs_never_cause_a_resend_loop(ws):
+    old = "2026-11-01T09:00:00Z"  # more than a week before the others
+    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(example(run="r_old00001", ticket=TICKET_A, id="toolu_old", at=old))
+    out = follow(ws, 6)
+    ids = [ln["event"]["id"] for ln in out if ln["type"] == "event"]
+    assert len(ids) == len(set(ids)) == 7
+
+
+def test_high2_late_line_in_an_ended_run_is_delivered(ws, capsys):
+    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(
+        example(
+            "valid-run-state-say", run=RUN_B, ticket=TICKET_B, id="b:done", at=at(40), data={"state": "done"}
+        )
+    )
+    _, lines = cli_lines(capsys, "tail")
+    last = lines[-1]["cursor"]
+    w.append(example(run=RUN_B, ticket=TICKET_B, id="toolu_drained", at=at(2)))  # old time, written late
+    _, rest = cli_lines(capsys, "tail", "--since", last)
+    assert [ln["event"]["id"] for ln in rest] == ["toolu_drained"]
+
+    # and while following
+    def late(n):
+        if n == 1:
+            w.append(example(run=RUN_B, ticket=TICKET_B, id="toolu_drained2", at=at(3)))
+
+    out = follow(ws, 3, late, since=rest[-1]["cursor"])
+    assert [ln["event"]["id"] for ln in out if ln["type"] == "event"] == ["toolu_drained2"]
+
+
+def test_high3_a_rewritten_run_is_marked_and_resent(ws, capsys):
+    _, lines = cli_lines(capsys, "tail")
+    last = lines[-1]["cursor"]
+    path = run_file(ws, RUN_B)
+    path.write_text(raw_line(ws, RUN_B, 0) + "\n")  # shorter than the cursor
+    _, rest = cli_lines(capsys, "tail", "--since", last)
+    marks = [ln for ln in rest if ln["type"] == "unavailable"]
+    assert [(m["run"], m["status"], m["reason"]) for m in marks] == [(RUN_B, "ok", "rewound")]
+    check(validator("cli-answer", "stream_line"), marks[0], "marker")
+    assert [ln["event"]["seq"] for ln in rest if ln["type"] == "event"] == [1]
+
+
+def test_med_vanish_and_return_is_missing_then_recovered(ws):
+    path = run_file(ws, RUN_B)
+    away = path.with_suffix(".away")
+
+    def between(n):
+        if n == 1:
+            path.rename(away)
+        elif n == 2:
+            away.rename(path)
+
+    out = follow(ws, 4, between)
+    marks = [(m["status"], m["reason"]) for m in out if m["type"] == "unavailable"]
+    assert marks == [("unavailable", "missing"), ("ok", "recovered")]
+
+
+def test_med_too_large_trims_finished_runs_loudly(proj, capsys, monkeypatch):
+    make_runs(proj, 40)
+    monkeypatch.setattr(cli_record, "_MAX_CURSOR", 120)
+    code, lines = cli_lines(capsys, "tail")
+    assert code == 0 and len([ln for ln in lines if ln["type"] == "event"]) == 80
+    trimmed = [ln for ln in lines if ln["type"] == "unavailable" and ln["reason"] == "trimmed"]
+    assert trimmed and all(ln["status"] == "ok" for ln in trimmed)
+    check(validator("cli-answer", "stream_line"), trimmed[0], "marker")
+    assert max(len(ln["cursor"]) for ln in lines) <= 120
+    out = follow(proj, 3)  # a followed stream does not send trimmed runs again
+    ids = [ln["event"]["id"] for ln in out if ln["type"] == "event"]
+    assert len(ids) == len(set(ids)) == 80
+
+
+def test_med_too_large_with_live_runs_is_an_error(proj, capsys, monkeypatch):
+    w = RecordWriter(proj, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    for n in range(40):
+        w.append(example(run=f"r_live{n:04d}", ticket=TICKET_A, id=f"toolu_l{n}", at=at(n)))
+    monkeypatch.setattr(cli_record, "_MAX_CURSOR", 100)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["record", "tail", "--json"])
+    lines = [json.loads(x) for x in capsys.readouterr().out.splitlines()]
+    assert exc.value.code == 2 and lines[-1] == {
+        "type": "error",
+        "error": lines[-1]["error"],
+        "code": "too_large",
+    }
+
+
+def test_zlib_bomb_cursor_is_invalid(ws, capsys):
+    import base64
+
+    bomb = (
+        "rc1."
+        + base64.urlsafe_b64encode(zlib.compress(b"[" + b"0," * 5_000_000 + b"0]")).rstrip(b"=").decode()
+    )
+    code, (line,) = cli_lines(capsys, "tail", "--since", bomb)
+    assert code == 2 and line["code"] == "invalid"
