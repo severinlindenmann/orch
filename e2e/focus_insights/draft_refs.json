@@ -1,9 +1,43 @@
 {
   "_comment": "screen name (SCREENS in e2e/focus_insights_shots.cjs) -> owner-decided draft reference, relative to ~/orch-dev/state/drafts-to-build/02-livemap-insights/draft/final/. null = no picture in the draft (see the note).",
-  "start": {"image": "img2/live.png", "note": "Start screen: strip, Live now cards, same-file line (draft/focus.html, start screen)"},
-  "start-areas": {"image": null, "note": "Areas dialog: draft/focus.html, note under the start screen ('Areas...' opens a list with Accept and Remove)"},
-  "ticket-steps": {"image": "img2/used.png", "note": "Ticket page, step labels Skill / Tool / Connection, 'All live' back link"},
-  "ticket-used": {"image": "img2/used.png", "note": "Used tab: What / Name / From / How often / Note (draft/final/index.html, Used tab)"},
-  "ticket-files": {"image": "img2/used.png", "note": "Files tab (draft/final/index.html, Files)"},
-  "ticket-helpers": {"image": "img2/tree-main.png", "note": "Helper tree in the left rail; also img2/tree-job.png"}
+  "start": {
+    "image": "img2/live.png",
+    "note": "Start screen: strip, Live now cards, same-file line (draft/focus.html, start screen)"
+  },
+  "start-areas": {
+    "image": null,
+    "note": "Areas dialog: draft/focus.html, note under the start screen ('Areas...' opens a list with Accept and Remove)"
+  },
+  "ticket-steps": {
+    "image": "img2/used.png",
+    "note": "Ticket page, step labels Skill / Tool / Connection, 'All live' back link"
+  },
+  "ticket-used": {
+    "image": "img2/used.png",
+    "note": "Used tab: What / Name / From / How often / Note (draft/final/index.html, Used tab)"
+  },
+  "ticket-files": {
+    "image": "img2/used.png",
+    "note": "Files tab (draft/final/index.html, Files)"
+  },
+  "ticket-helpers": {
+    "image": "img2/tree-main.png",
+    "note": "Helper tree in the left rail; also img2/tree-job.png"
+  },
+  "insights-overview": {
+    "image": "img2/ins-overview.png",
+    "note": "Overview: needs-a-look cards (max 3), Skills / Connections / Keys tabs"
+  },
+  "insights-connections": {
+    "image": "img2/ins-overview.png",
+    "note": "Connections list (tab of the overview; draft insights-handover/ui screen overview)"
+  },
+  "insights-keys": {
+    "image": null,
+    "note": "Keys list: draft/final/index.html, Insights Keys table (names only, never values)"
+  },
+  "insights-detail": {
+    "image": "img2/ins-sugg.png",
+    "note": "Detail panel of one row (draft insights-handover/ui detail screen); read only in v1"
+  }
 }
