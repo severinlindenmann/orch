@@ -98,8 +98,12 @@ def test_a_done_written_into_the_file_is_review_for_every_reader(ws, run):
     from orch import phone_view
 
     assert phone_view.view_for(ws, tid)["status"] != "done"
-    import orch_automation.loop as loop
 
+
+def test_an_unsigned_done_is_not_finished_for_automation(ws, run):
+    loop = pytest.importorskip("orch_automation.loop")
+    tid = _finished(ws, run)
+    _edit(ws, tid, status="done")
     assert loop.scheduled({**tickets.load(ws, tid), "ext": {"automation": {"recurring": True}}}) is True
 
 
@@ -193,7 +197,7 @@ def test_a_person_actor_cannot_sign_without_the_proof_flag(ws, run):
     with pytest.raises(Refused, match="Done needs your OK"):
         tickets.set_status(ws, tid, "done", "human:me")
     with pytest.raises(Refused, match="Done needs your OK"):
-        tickets.patch(ws, tid, 1, '{"status": "done"}', "human:me")
+        tickets.patch(ws, tid, tickets.revision(tickets.load(ws, tid)), '{"status": "done"}', "human:me")
 
 
 # 5. reopen tombstones, replays do not come back --------------------------------------------------------------
