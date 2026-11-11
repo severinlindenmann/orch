@@ -1,10 +1,10 @@
-// "Where work is happening" on the start screen: accepted areas and who works in them. Agents only suggest areas; a person accepts them here.
+// "Where work is happening" on the start screen: areas in the strip and who works in them. Areas are display labels only (they group work on this page; they never give an agent access to anything).
 (function () {
   'use strict';
   const S = window.FocusStore;
   const {h, P, toast} = S;
   const text = value => String(value ?? '').replace(/\bVPN\b/gi, 'network').replace(/\bMCP\b/gi, 'connection').replace(/\bt_[a-z0-9]{6,16}\b/g, '');
-  const STATE = {suggested: 'Suggested', accepted: 'Accepted'};
+  const STATE = {suggested: 'Suggested', accepted: 'In the strip'};
 
   function mount(box) {
     if (!box || box.querySelector('.fx-areas')) return;
@@ -77,7 +77,7 @@
 
     function row(area) {
       const buttons = [];
-      if (area.state === 'suggested') buttons.push(h('button', {type: 'button', class: 'btn primary sm', text: 'Accept', 'aria-label': 'Accept ' + text(area.name), onclick: () => send('area.accept', area, all())}));
+      if (area.state === 'suggested') buttons.push(h('button', {type: 'button', class: 'btn primary sm', text: 'Add to strip', 'aria-label': 'Add to strip: ' + text(area.name), onclick: () => send('area.accept', area, all())}));
       buttons.push(h('button', {type: 'button', class: 'btn outline sm', text: 'Remove', 'aria-label': 'Remove ' + text(area.name), onclick: () => send('area.remove', area, all())}));
       return h('li', {class: 'fx-areas-row'},
         h('div', {class: 'grow'}, h('strong', {text: text(area.name)}), h('span', {class: 'fx-area-path', text: text(area.path)})),
@@ -99,7 +99,7 @@
       list = h('ul', {class: 'fx-areas-list'});
       dialog = h('dialog', {class: 'dialog fx-areas-dialog', 'aria-labelledby': 'fx-areas-t'},
         h('h2', {id: 'fx-areas-t', text: 'Areas'}),
-        h('p', {class: 'meta', text: 'Agents suggest areas. You decide which ones count.'}),
+        h('p', {class: 'meta', text: 'Agents suggest areas. You choose which ones show in the strip. Areas only label and group work here; they change nothing about what an agent may do.'}),
         list,
         h('div', {class: 'actions'}, h('button', {type: 'button', class: 'btn ghost', text: 'Close', onclick: () => dialog.close()})));
       dialog.addEventListener('close', () => { dialog.remove(); dialog = null; list = null; });

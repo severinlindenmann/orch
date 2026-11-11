@@ -9,6 +9,10 @@ Stored in `.orch/addons/focus/areas.toml`:
     state = "suggested"        # or "accepted"; only a click on the Focus page makes it accepted
     tickets = ["t_abc123"]     # tickets set to this area (`orch focus area set`)
 
+Areas are DISPLAY LABELS ONLY (they group work on the start screen). areas.toml is writable by agents, so it is
+untrusted: nothing about permissions, routing, what an agent may touch or any approval may depend on it
+(tests/test_areas.py pins this). "accepted" only means "shown in the strip"; it is not an approval.
+
 Nothing here follows a symlink, reads outside `.orch/addons/focus`, or trusts the file: a bad file reads as
 "no areas", a bad row is skipped. Paths are workspace-relative and never leave the workspace.
 """
