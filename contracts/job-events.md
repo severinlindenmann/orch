@@ -65,11 +65,29 @@ The job id comes from `--job <id>` or `ORCH_JOB`. Output: the stored event (`--j
 | `orch job progress --done N [--total M] [--unit files] [--text "<t>"]` | `progress` |
 | `orch job artifact <path> [--label "<l>"]` | `artifact` (path inside the workspace, file must exist) |
 | `orch job metric <name> <number> [--unit ms]` | `metric` |
-| `orch job table --json '<blocks table>'` | `table` (blocks.schema.json `$defs/table`) |
+| `orch job table --table '<blocks table>'` | `table` (blocks.schema.json `$defs/table`; `--json` is the global output flag, so the table has its own flag, `-` reads stdin) |
 | `orch job link <https url> --label "<l>"` | `link` |
 | `orch job log "<text>" [--err]` | `log` |
 | `orch job end --status ok\|failed\|cancelled [--summary "<s>"]` | `end` |
+| `orch job done\|fail [--summary "<s>"] [--exit N]` | `end` with `status: ok` / `failed` (shorthand) |
+| `orch job result --table '<blocks table>'` | the same as `table` (a job's result is a blocks table) |
+| `orch job list [--run R] [--ticket T]`, `orch job show <job>` | read back (below) |
 | `orch job run [--title "<t>"] [--ticket T] -- <command…>` | generic wrapper (below) |
+
+Writing needs a live run: `ORCH_RUN` + `ORCH_TICKET` must name a live claim and the caller must sit inside that claim's
+process tree (the proof of `orch record hook`), else refused `not_active` (nothing stored); without a run `no_run`; without a
+registered value hider `hider_off`. Every string of an entry (and every table key) passes the value hider before anything is
+stored; an entry that is invalid after hiding is refused (`invalid`, plain words), never stored raw. A field the schema does not
+name for that `type` is `invalid`; `by`, `seq`, `ticket`, `pid`, `command` and type `lost` from a program are `not_allowed`.
+A job whose id belongs to another run is `other_run`. A job started inside an agent run is bound by its first stored line
+(`.orch/record/jobs/<run>/<job>.jsonl` names run and job; ticket and run are stored in every line), so no separate binding
+file is needed until `orch job run` (which needs `pid`, `events_path`) is built.
+
+Reads: `orch job list --json` -> `{"status":"ok","jobs":[{job, run, ticket, title, state, events, started_at, last_at,
+progress, reported_by:"job"}]}`; a stream that cannot be read is an explicit row (`status: tampered|unavailable`, `reason`,
+`message`), never left out. `orch job show <job> --json` -> `{"status":"ok","job":{…},"events":[…]}` or a refusal with code
+`tampered` / `not_available` / `not_found`. Streams changed outside orch (a line that is not this job's, out of order, a
+link) are `tampered`.
 
 ## `$ORCH_EVENTS` and `orch job run`
 
