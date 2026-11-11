@@ -53,7 +53,10 @@ def put(root, index, path, data):
 
 
 def document(path, data):
-    doc = incoming.strict_load(data)
+    try:
+        doc = incoming.strict_load(data)
+    except (ValueError, RecursionError):
+        raise repo.Refused(f'Document has a problem: {path}') from None
     if paths.TICKET.fullmatch(path):
         if not isinstance(doc.get('ext', {}), dict):
             raise repo.Refused(f'Ticket has a problem: {path}')
@@ -100,14 +103,27 @@ def validate_tree(root, tree):
                 raise repo.Refused('General ticket stays local')
             if paths.TICKET.fullmatch(path) and doc.get('key') and keys.setdefault(doc['key'], path) != path:
                 raise repo.Refused('Ticket key clash needs a person')
+    for path in rows:
+        if paths.ARTIFACT.fullmatch(path):
+            owner = '/'.join(path.split('/')[:2]) + '.json'
+            if owner not in rows:
+                raise repo.Refused(f'Artifact has no ticket: {path}')
+            doc = document(owner, blob(root, rows[owner]))
+            if doc.get('general') is True:
+                raise repo.Refused('General ticket stays local')
     if total > 500 * MB or any(n > 200 or size > 200 * MB for n, size in folders.values()):
         raise repo.Refused('Too much to sync')
 
 
 def deletions(old, new):
     gone = [p for p in old.keys() - new.keys() if paths.ARTIFACT.fullmatch(p)]
-    count = sum(bool(paths.ARTIFACT.fullmatch(p)) for p in old)
-    if len(gone) > 5 or len(gone) > count * .2:
+    folders = {p.split('/')[1] for p in gone}
+    too_many = any(
+        (count := sum(paths.ARTIFACT.fullmatch(p) is not None and p.split('/')[1] == tid for p in old)) > 5
+        and sum(p.split('/')[1] == tid for p in gone) > count * .2
+        for tid in folders
+    )
+    if len(gone) > 5 or too_many:
         raise repo.Refused(f'Many files were removed ({len(gone)}). Apply?')
 
 
@@ -137,13 +153,16 @@ def stage(root, head, index, state):
                 info = p.lstat()
                 if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                     raise ValueError('Not a regular single-link file')
-                if info.st_size > MB and paths.TICKET.fullmatch(path):
-                    raise repo.Refused(f'Too much to sync in {path}')
                 if info.st_size > 25 * MB:
                     raise ValueError('File exceeds 25 MB')
                 if paths.TICKET.fullmatch(path) or path == 'ticket-counter.json':
                     try:
-                        doc = document(path, p.read_bytes())
+                        data = p.read_bytes()
+                        doc = incoming.strict_load(data)
+                        if doc.get('general') is not True:
+                            if paths.TICKET.fullmatch(path) and info.st_size > MB:
+                                raise ValueError('Ticket exceeds 1 MB')
+                            doc = document(path, data)
                     except (ValueError, RecursionError):
                         raise ValueError('Ticket has a problem') from None
                     if doc.get('general') is True:
@@ -153,18 +172,29 @@ def stage(root, head, index, state):
                         continue
                 repo.git(root, 'add', '-f', '--', ':(literal)' + path, index=index)
             except FileNotFoundError:
+                if paths.TICKET.fullmatch(path):
+                    generals.add(Path(path).stem)
                 if path in old:
                     if paths.TICKET.fullmatch(path):
                         write(root, path, blob(root, old[path]))
                         state['skipped'].append(f'A ticket file is missing: {path}. Restored it.')
                     else:
                         repo.git(root, 'update-index', '--force-remove', '--', path, index=index)
-            except ValueError as e:
-                if isinstance(e, repo.Refused):
+            except (ValueError, OSError) as e:
+                if paths.TICKET.fullmatch(path):
+                    generals.add(Path(path).stem)
+                elif isinstance(e, repo.Refused):
                     raise
                 state['skipped'].append(f'{path}: {e}')
+    # Purge the whole excluded ticket, including blobs inherited from HEAD.
+    excluded = {p for p in names if any(
+        p == f'tickets/{tid}.json' or p.startswith(f'tickets/{tid}/') for tid in generals
+    )}
+    for path in sorted(excluded & old.keys()):
+        repo.git(root, 'update-index', '--force-remove', '--', path, index=index)
+        repo.git(root, 'update-index', '--force-remove', '--', path)
     tree = repo.git(root, 'write-tree', index=index).stdout.decode().strip()
-    deletions(old, entries(root, tree))
+    deletions({p: e for p, e in old.items() if p not in excluded}, entries(root, tree))
     validate_tree(root, tree)  # every byte, including unchanged staged blobs
     return tree
 
@@ -363,8 +393,13 @@ def _run(root, reason, now, remote_allowed):
                     break
                 if offline:
                     raise repo.Refused('offline')
+                # A push transfers history, not just the current tree. Validate every
+                # outgoing tree, scanning full blob bytes (including unchanged blobs).
+                revisions = [head] + (['--not', remote] if remote else [])
+                for outgoing in repo.git(root, 'rev-list', *revisions).stdout.decode().splitlines():
+                    validate_tree(root, outgoing)
                 try:
-                    pushed = repo.git(root, 'push', 'origin', 'HEAD:orch-state', timeout=60, allowed_codes=(0, 1))
+                    pushed = repo.git(root, 'push', 'origin', f'{head}:refs/heads/orch-state', timeout=60, allowed_codes=(0, 1))
                 except repo.Refused:
                     raise repo.Refused('offline') from None
                 if pushed.returncode == 0:

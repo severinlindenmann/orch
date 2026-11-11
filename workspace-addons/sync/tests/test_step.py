@@ -81,16 +81,21 @@ def test_missing_ticket_restored(root):
     p.unlink()
     assert 'Restored' in str(success(root)['skipped'])
     assert p.read_bytes() == original
+    assert tracked(root) == set()
+    success(root)
+    assert tracked(root) == {TICKET}
 
 
 def test_artifact_deletion_threshold(root):
     configure(root)
+    save(root)
     p = save(root, ART, b'hello')
     success(root)
     head = step.oid(root, 'HEAD')
     p.unlink()
-    assert 'Many files' in run(root)['last_error']
-    assert step.oid(root, 'HEAD') == head
+    success(root)
+    assert ART not in tracked(root)
+    assert step.oid(root, 'HEAD') != head
 
 
 def test_invalid_ticket_skipped(root):
@@ -98,14 +103,16 @@ def test_invalid_ticket_skipped(root):
     save(root, value={'id': 't_abc123'})
     save(root, ART, b'ok')
     assert 'problem' in str(success(root)['skipped'])
-    assert tracked(root) == {ART}
+    assert tracked(root) == set()
+    assert not repo.git(root, 'ls-files').stdout
 
 
 def test_stage_limits(root):
     configure(root)
     save(root, value=dict(ticket(), note='x' * 1_000_000))
-    assert 'Too much' in run(root)['last_error']
-    assert step.oid(root, 'HEAD') is None
+    save(root, ART, b'private')
+    assert 'problem' in str(success(root)['skipped'])
+    assert tracked(root) == set()
 
 
 def test_cli_now_and_status(root, capsys):
@@ -146,6 +153,7 @@ def test_unsafe_local_file_skipped(root, kind):
 
 def test_full_staged_bytes_rescanned(root):
     configure(root)
+    save(root)
     save(root, ART, b'safe')
     success(root)
     save(root, ART, b'orp_' + b'x' * 30)
@@ -173,12 +181,14 @@ def test_case_collision_and_folder_limit(root):
     # Case-sensitive filesystems retain both; on macOS assert the tree checker directly below.
     index = repo.local_dir(root) / 'test-index'
     repo.git(root, 'read-tree', '--empty', index=index)
+    step.put(root, index, TICKET, step.encoded(ticket()))
     for path in (ART, 'tickets/t_abc123/artifacts/A.TXT'):
         step.put(root, index, path, b'text')
     tree = repo.git(root, 'write-tree', index=index).stdout.decode().strip()
     with pytest.raises(repo.Refused, match='Case-fold'):
         step.validate_tree(root, tree)
     repo.git(root, 'read-tree', '--empty', index=index)
+    step.put(root, index, TICKET, step.encoded(ticket()))
     for n in range(201):
         step.put(root, index, f'tickets/t_abc123/artifacts/{n}.txt', b'text')
     tree = repo.git(root, 'write-tree', index=index).stdout.decode().strip()
@@ -202,3 +212,68 @@ def test_step_lock_covers_state_write_and_recovers_scratch(root, monkeypatch):
     success(root)
     assert not abandoned.exists()
     assert not repo.safe(root, 'run/sync/step.lock').exists()
+
+
+@pytest.mark.parametrize('owner', [None, b'{"general": true,',
+                                  step.encoded(ticket(general=True)), b'{"id":"t_abc123"}'])
+def test_tree_refuses_artifact_without_valid_owner(root, owner):
+    configure(root)
+    index = repo.local_dir(root) / 'test-index'
+    repo.git(root, 'read-tree', '--empty', index=index)
+    step.put(root, index, ART, b'private chat')
+    if owner is not None:
+        step.put(root, index, TICKET, owner)
+    tree = repo.git(root, 'write-tree', index=index).stdout.decode().strip()
+    with pytest.raises(ValueError):
+        step.validate_tree(root, tree)
+
+
+@pytest.mark.parametrize('value', [b'{"general": true,', ticket(general=True, unknownfield='x'),
+                                   ticket(general=True), ticket(note='x' * 1_000_000)])
+def test_excluded_ticket_untracks_existing_folder(root, value):
+    configure(root)
+    save(root)
+    for n in range(7):
+        save(root, f'tickets/t_abc123/artifacts/{n}.txt', b'local')
+    success(root)
+    save(root, value=value)
+    success(root)
+    assert tracked(root) == set()
+    assert not repo.git(root, 'ls-files').stdout
+    assert (root / '.orch/tickets/t_abc123/artifacts/0.txt').read_bytes() == b'local'
+
+
+@pytest.mark.parametrize(('count', 'removed', 'blocked'), [(5, 2, False), (6, 2, True),
+                                                          (30, 6, True), (6, 1, False)])
+def test_deletion_limits_per_ticket(count, removed, blocked):
+    old = {f'tickets/t_abc123/artifacts/{n}.txt': None for n in range(count)}
+    # Other tickets must not dilute the percentage for this ticket.
+    old.update({f'tickets/t_second/artifacts/{n}.txt': None for n in range(100)})
+    new = {p: e for p, e in old.items() if p not in
+           {f'tickets/t_abc123/artifacts/{n}.txt' for n in range(removed)}}
+    if blocked:
+        with pytest.raises(repo.Refused, match='Many files'):
+            step.deletions(old, new)
+    else:
+        step.deletions(old, new)
+
+
+
+def test_unreadable_ticket_excludes_folder(root, monkeypatch):
+    from pathlib import Path
+
+    configure(root)
+    save(root)
+    save(root, ART, b'private chat')
+    success(root)
+    read_bytes = Path.read_bytes
+
+    def unreadable(path):
+        if path == root / '.orch' / TICKET:
+            raise PermissionError('Ticket cannot be read')
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, 'read_bytes', unreadable)
+    assert 'cannot be read' in str(success(root)['skipped'])
+    assert tracked(root) == set()
+    assert not repo.git(root, 'ls-files').stdout

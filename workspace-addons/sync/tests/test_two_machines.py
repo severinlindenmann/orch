@@ -2,7 +2,7 @@ import json
 import subprocess
 
 import pytest
-from test_step import ART, NOW, TICKET, configure, run, save, success
+from test_step import ART, NOW, TICKET, configure, run, save, success, ticket, tracked
 
 from orch_sync import repo, step
 
@@ -362,3 +362,54 @@ def test_remote_settings_require_preview_on_every_run(machines, monkeypatch, gat
         assert 'preview' in run(a)['last_error']
     assert len(calls) == 2 and not network
     assert step.oid(a, 'HEAD') == head and remote_sha(bare) == tip
+
+
+@pytest.mark.parametrize('value', [b'{"general": true,', ticket(general=True, unknownfield='x'),
+                                   ticket(general=True), ticket(general=True, note='x' * 1_100_000)])
+def test_general_artifacts_never_committed_or_pushed(machines, value):
+    a, _, bare = machines
+    save(a)
+    if isinstance(value, dict):
+        value = value | {'id': 't_genchat'}
+    save(a, 'tickets/t_genchat.json', value)
+    artifact = 'tickets/t_genchat/artifacts/chat.txt'
+    save(a, artifact, b'private chat text')
+    success(a)
+    assert tracked(a) == {TICKET}
+    reachable = subprocess.run(['git', '--git-dir', str(bare), 'rev-list', '--objects', 'orch-state'],
+                               capture_output=True, check=True).stdout
+    assert b't_genchat' not in reachable
+    assert artifact not in repo.git(a, 'ls-files').stdout.decode()
+
+
+@pytest.mark.parametrize(('path', 'payload', 'remove'), [
+    ('me/private.txt', b'orp_' + b'z' * 30, True),
+    ('me/notes.txt', b'just private notes', False),
+    (ART, b'prefix\n' + b'x' * 20_000 + b'\norp_' + b'z' * 30, True),
+])
+def test_outgoing_history_scanned_before_push(machines, monkeypatch, path, payload, remove):
+    a, _, bare = both(machines)
+    tip = remote_sha(bare)
+    save(a, path, payload)
+    identity = ['-c', 'user.name=test', '-c', 'user.email=test@example.invalid']
+    repo.git(a, 'add', '-f', '--', path)
+    repo.git(a, *identity, 'commit', '-m', 'unsafe history')
+    if remove:
+        repo.git(a, 'rm', '--', path)
+        repo.git(a, *identity, 'commit', '-m', 'remove unsafe file')
+    edit(a, title='next')
+    git = repo.git
+
+    def no_push(root, *args, **kwargs):
+        assert args[0] != 'push', 'Unsafe history reached push'
+        return git(root, *args, **kwargs)
+
+    monkeypatch.setattr(repo, 'git', no_push)
+    state = run(a)
+    assert state['last_error']
+    assert payload.decode() not in state['last_error']
+    assert json.loads(repo.safe(a, 'run/sync/state.json').read_text())['last_error'] == state['last_error']
+    assert remote_sha(bare) == tip
+    reachable = subprocess.run(['git', '--git-dir', str(bare), 'rev-list', '--objects', 'orch-state'],
+                               capture_output=True, check=True).stdout
+    assert path.encode() not in reachable
