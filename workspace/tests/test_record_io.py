@@ -85,8 +85,6 @@ def plant(ws, kind):
 # Exact call expressions keep arbitrary Path receivers out of the allowlist.
 SAFE_ATTRIBUTE_CALLS = {
     "b''.join",
-    "raw.splitlines",
-    "raw.endswith",
     "r.get",
     "rows.append",
     "(_json(note) + '\\n').encode",
