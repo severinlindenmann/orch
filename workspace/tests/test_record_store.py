@@ -479,10 +479,14 @@ def test_finished_detail_is_write_once(store):
         event(id="w1", via="log", outcome=done), detail={"input": "a", "output": "collector"}
     )
     hook = writer.append(event(id="w1", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
-    assert hook is not None  # the hook line is kept (higher precedence) ...
+    assert hook is None  # a hook line after the log's is dropped (the log wins) ...
     assert (
         json.loads((record_dir(ws) / first["detail"]).read_text())["output"] == "collector"
-    )  # ... its detail is not
+    )  # ... and so is its detail
+    # the other order: the log line writes its own detail over the hook's
+    writer.append(event(id="w3", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
+    log = writer.append(event(id="w3", via="log", outcome=done), detail={"input": "a", "output": "collector"})
+    assert json.loads((record_dir(ws) / log["detail"]).read_text())["output"] == "collector"
     started = writer.append(event(id="w2"), detail={"input": "a", "output": "early"})
     writer.append(event(id="w2", outcome=done), detail={"input": "a", "output": "final"})
     assert json.loads((record_dir(ws) / started["detail"]).read_text())["output"] == "final"

@@ -1,13 +1,15 @@
 """The oneshot wrapper's part of the record (contracts/activity.md): after each turn, the agent's stdout lines
 go to the collector its adapter names (adapters.collector, by `oneshot.events`), and from there to the run's
 record. The tool's own hooks (`record_hooks`, `orch record hook`) write the same tool calls as they happen,
-with the same tool-call id, so a call both saw is one line. Hook lines come from inside the agent's trust
-boundary: a hook's end line is provisional (`ok: null`) and the log's end line of that call replaces it.
+with the same tool-call id. Hook lines come from inside the agent's trust boundary: a hook's end line is
+provisional (`ok: null`), and the log's line of a call (started or finished) replaces the hook's; where the
+two disagree both are kept and the log's carries `conflict`.
 
 Nothing is written when key hiding is not ready (the same writer as the hook: record_hook.record_writer; never
-raw). Two traces under the run (record.note_lost) say when the hooks went quiet: `hooks_off` (the agent's
-folder settings switch the tool's hooks off) and `hooks_missing` (the turn's log has tool calls, none of them
-reached the record through a hook).
+raw). Two traces under the run (record.note_lost) say when the hooks went quiet: `hooks_off` (the tool's
+settings in the run's folder or the person's own switch its hooks off) and `hooks_missing` (the turn's log has
+tool calls, none of them reached the record through a hook line that says the same). Both are hints, not
+proof: the agent can forge a matching hook line (the collector's `hook_seen`).
 """
 
 from __future__ import annotations
@@ -21,16 +23,18 @@ _HELPER = re.compile(r"h_(\d+)")
 LOCK_WAIT = 10.0  # seconds: a run lock held longer skips the turn's numbering read (a trace, never a hang)
 
 
-def _so_far(root: Path, run: str) -> tuple[int, int]:
+def _so_far(root: Path, run: str, writer=None) -> tuple[int, int]:
     """(highest number used, helpers started) of the run file as written (record.run_lines: raw, under the
-    run lock): the highest seq and the highest n of a `<run>:<n>` id (a collector's id counter also counts
-    lines dedupe dropped, so ids can run ahead of seqs), and the highest helper number the log gave. A later
-    turn's collector never reuses an id or a helper number of an earlier one. Raises the record's refusal."""
+    run lock, after `writer` committed the lines an earlier turn spooled while the lock was busy): the highest
+    seq and the highest n of a `<run>:<n>` id (a collector's id counter also counts lines dedupe dropped, so
+    ids can run ahead of seqs), and the highest helper number the log gave. A later turn's collector never
+    reuses an id or a helper number of an earlier one. Raises the record's refusal."""
     from orch import record
 
     prefix = re.compile(re.escape(run) + r":(\d{1,18})")
     seq = helpers = 0
-    for e in record.run_lines(root, run, lock_wait=LOCK_WAIT):
+    drain = writer.drain if writer is not None else None
+    for e in record.run_lines(root, run, lock_wait=LOCK_WAIT, drain=drain):
         if type(e.get("seq")) is int:
             seq = max(seq, e["seq"])
         if isinstance(e.get("id"), str) and (m := prefix.fullmatch(e["id"])):
@@ -56,7 +60,7 @@ def collect_turn(root: Path, run: str, tid: str, name: str, work: Path, lines) -
     except record.RecordOff:
         return None
     try:
-        seq, helpers = _so_far(root, run)
+        seq, helpers = _so_far(root, run, writer)
     except record.RecordTampered:
         return None  # its integrity alert is left (record._report)
     except record.RecordRefused as e:  # busy past LOCK_WAIT, unavailable: the turn is skipped, with a trace
@@ -73,10 +77,21 @@ def collect_turn(root: Path, run: str, tid: str, name: str, work: Path, lines) -
         lock_wait=LOCK_WAIT,
     )
     stats = collector.collect(lines, writer, ctx)
-    settings = (adapters.load(name, root).get("reminder") or {}).get("settings_file")
-    hooks_disabled = getattr(collector, "hooks_disabled", None)
-    if hooks_disabled is not None and isinstance(settings, str) and hooks_disabled(work, settings):
+    try:
+        off = _hooks_off(collector, name, root, work)
+    except Exception:  # noqa: BLE001 - the turn is recorded: a failed check is not a collector error
+        off = False
+    if off:
         record.note_lost(root, run, "hooks_off")
     elif stats.get("tool_calls") and not stats.get("hook_seen"):
         record.note_lost(root, run, "hooks_missing")
     return stats
+
+
+def _hooks_off(collector, name: str, root: Path, work: Path) -> bool:
+    """The tool's settings (the run's folder, the person's own) switch its hooks off (hooks_disabled)."""
+    from orch import adapters
+
+    settings = (adapters.load(name, root).get("reminder") or {}).get("settings_file")
+    hooks_disabled = getattr(collector, "hooks_disabled", None)
+    return hooks_disabled is not None and isinstance(settings, str) and hooks_disabled(work, settings)

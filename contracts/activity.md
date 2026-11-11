@@ -16,10 +16,12 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
   alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1)
   alerts/hook-lost-<YYYY-MM-DD>.jsonl  hook entries of a proven caller that could not be written: {v, schema
                                       "orch.record-lost/1", at, run, reason: hider_off | invalid | too_large | other_run};
-                                      the run's own wrapper adds collector_error (its collector failed on a turn; the
-                                      run goes on; optional `error` = the exception's type name, never its message),
-                                      hooks_off (the agent's folder settings switch the tool's hooks off) and
-                                      hooks_missing (a turn's log has tool calls, no hook line of them arrived);
+                                      the run's own wrapper adds collector_error (its collector failed on a turn, or the
+                                      run file could not be read to number it; the run goes on; optional `error` = the
+                                      exception's type name, never its message), hooks_off (the tool's settings in the
+                                      agent's folder or the person's own switch its hooks off) and hooks_missing (a
+                                      turn's log has tool calls, no hook line saying the same arrived); `orch job` adds
+                                      job_activity (a job line was stored, its activity line was not);
                                       no content; 1 per run and reason per minute, 50 lines per run, then one "trimmed"
                                       line (run set), and a global "trimmed" line (run null) when the file passes 1 MB
   alerts/hook-lost-unattributed-<YYYY-MM-DD>.jsonl  the same for a caller NOT proven to be in the run (not_active |
@@ -56,7 +58,7 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
 - **Detail lost.** When a payload exists but cannot be stored (the file name is taken by another event, a write fails, or it
   exceeds the 1 MB limit), the line is still written with `detail: null` and `detail_lost: true`. A detail problem
   never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file,
-  except the log line that replaces a provisional hook end (Precedence and dedupe), which writes its own.
+  except a log line after a hook line of that call (the log wins, Precedence and dedupe), which writes its own.
 
 ## Writing (one writer per run file)
 
@@ -75,10 +77,12 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   Where the process tree cannot be read (**Windows today: the hook records nothing**, reason `not_provable`, until the
   token below or a Windows process-tree proof exists) nothing is written. Nested runs: the check accepts the claim's own
   pids anywhere among the caller's ancestors, so a call from a child run's tree can still name its parent run; telling
-  them apart needs the token below. `orch record hook` always exits 0 (a tool's hook exit 2 would block the tool call; main handles it before the
-  parser, the Chat guard and the notices) unless `--strict`. The hook wiring must call exactly `orch record hook` (optionally `--strict`): the root comes from `ORCH_ROOT` or the
-  working folder only, `--root` and other flags are ignored, and a global flag before `record` is an argparse error
-  (exit 2) that cannot be softened. The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
+  them apart needs the token below. `orch record hook` always exits 0 with nothing on stdout and at most one stderr
+  line (a tool's hook exit 2 would block the tool call) unless `--strict` (then 2): any `orch record [flags] hook
+  [anything]` is taken before the parser, the Chat guard and the notices, and `python -m orch` turns anything that
+  still fails (an import of a broken install, a SystemExit) into the same exit. The hook wiring calls exactly
+  `orch record hook` (optionally `--strict`): the root comes from `ORCH_ROOT` or the working folder only; other flags
+  are ignored. The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
   never ends the process inside a write. *Follow-up:* the per-run hook file token
   (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
   The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller
@@ -109,21 +113,28 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 
 - Dedupe key: `(run, id, kind, finished, via_class)`, where `finished` means a non-null outcome.
   `via_class` is `hl` only for hook and log; every other origin has its own key.
-- **Hooks win when outcomes agree.** The hook replaces the meaning of a log line by appending a line;
-  readers retain the hook. Repeated lines from the same origin keep the first written.
-- When hook and log finished outcomes disagree in `ok` or `error`, both lines are kept. The later line
-  carries `conflict: true`; repeated delivery of either origin is still deduped. A hook line never suppresses a log
-  line whose outcome differs; where the two disagree, the log line is the one to believe.
+  Repeated lines from the same origin keep the first written.
 - **Hook lines are inside the agent's trust boundary.** The hook runs as a child of the agent, and the agent can run
-  the same command itself with any payload (the process-tree proof only shows it comes from inside the run). So a hook
-  line is the agent's word, never authoritative about how a call ended. The tool-payload hook (`record_hooks`) writes a
-  finished step as **provisional**: `outcome.ok: null` (no `error`, no `ms`). A provisional hook end never replaces and
-  never conflicts with a log line: a later log end line of that call replaces it (it is written, with its own detail
-  file, and readers keep it), and a provisional hook end after a log end line is dropped (vectors `dedupe`). Without
-  a log (a live run) the call stays "finished, result unknown". Its detail keeps only an allow-list of plain result
-  fields, each text cut at 32 K characters (never the tool's internal copies such as `originalFile` or `structuredPatch`).
-  The agent can also switch the tool's hooks off from its own folder's settings; the oneshot wrapper then leaves a
-  `hooks_off` or `hooks_missing` trace (Where), and the log still records every call.
+  the same command itself with any payload and read its own tool-call ids (the process-tree proof only shows it
+  comes from inside the run). So a hook line is the agent's word:
+  - **The hook entry never says how a call ended.** On every path (the tool's payload or an event-shaped line) it
+    writes a finished `step` or `helper.end` as **provisional**: `outcome` `{ok: null, error: null, ms: null}`,
+    whatever the caller sent. Without a log (a live run) the call stays "finished, result unknown".
+  - **The log line wins, started and finished alike.** For a key that a log line also has, the log line replaces the
+    hook line (it is written, with its own detail file over the hook's, and readers keep it), and a hook line after the
+    log line is dropped (vectors `dedupe`).
+  - **Disagreement is kept, never hidden.** When the hook line says something else than the log line (`used`, `text`,
+    `files`, or, both finished and the hook's not provisional, `ok` or `error`), both lines are kept and the log line
+    carries `conflict: true`; the log line is the one to believe (counts take its result).
+  - The writer removes the hook's detail file when the log line that replaced it has none of its own (lost or none),
+    so the agent's payload never stays behind without a line pointing to it.
+  The hook's detail keeps the tool's input with every text cut at 32 K characters (lists at 100 entries) and only an
+  allow-list of plain result fields, each text cut the same way (never the tool's internal copies such as
+  `originalFile` or `structuredPatch`). The agent can also switch the tool's hooks off (its folder's or the person's
+  own tool settings); the oneshot wrapper then leaves a `hooks_off` or `hooks_missing` trace (Where), and the log still
+  records every call. Both traces are hints: hooks the agent adds itself, a settings file changed and changed back
+  between turns, or a started hook line forged to match the log are not detected; calls of a turn spooled behind a
+  busy lock are not counted for `hooks_missing`.
 - A finished line without a started line is fine. Readers apply the same idempotent rule (vectors `dedupe`).
 
 ## Kinds
@@ -302,15 +313,18 @@ is separated by a newline; sequence numbers count all physical lines.
 Only hook and log origins share dedupe keys. All other origins have separate
 `(run, id, kind, finished, via)` keys. Hook ids in the writer/collector namespace
 `r_[a-z0-9_]{6,32}:.*` become `x_` plus 32 lowercase hex characters of
-SHA-256 of `b"orch.id.hook/1\0" + hidden_id.encode("utf-8")`. When hook and log
-finished outcomes disagree in `ok` or `error`, both lines remain and the later
-line has `conflict: true`. A provisional hook end (`ok: null`) never conflicts:
-a log end line replaces it, and it is dropped after one.
+SHA-256 of `b"orch.id.hook/1\0" + hidden_id.encode("utf-8")`. For one hook/log
+key the log line replaces the hook line and a later hook line is dropped; when
+they disagree (`used`, `text`, `files`, or a non-provisional `ok`/`error`), both
+lines remain and the log line has `conflict: true`. A provisional hook end
+(`ok: null`) never disagrees on its outcome.
 
 Lock waits cover the 30-second stale window. A timed-out write is spooled in
 `pending/<run>/` and drained in name-time order by the next append, under the
 same run lock. The spool receipt has `pending: true` and `seq: null`; a default
-id is omitted until the line is committed. `read_run` reports `status: ok`,
+id is omitted until the line is committed. A collector that numbers its own
+`<run>:<n>` ids commits the spool first (under the lock) and then reads the run
+file, so a turn written to the spool never shares an id with the next turn. `read_run` reports `status: ok`,
 `reason: pending`, and `pending: n` while prepared writes remain. Readers show
 this status alongside committed events.
 

@@ -179,14 +179,17 @@ def test_cli_never_blocks_the_agent_but_strict_refuses(live, monkeypatch, capsys
 def test_dedupe_with_a_collector_line(live):
     root, run, tid = live
     hook_ev = record_hook.hook(root, line(outcome={"ok": True, "error": None, "ms": 5}))
-    collector = dict(hook_ev, via="log", seq=1)
+    assert hook_ev["outcome"] == {"ok": None, "error": None, "ms": None}  # a hook never says how a call ended
+    collector = dict(hook_ev, via="log", outcome={"ok": True, "error": None, "ms": 5})
     collector.pop("seq")
     with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
-        assert record.registered_writer(root).append(collector) is None  # same id/kind/finished: hl dedupe
-    assert len(events(root, run)) == 1
+        got = record.registered_writer(root).append(collector)  # same id/kind/finished: the log line wins
+        assert got is not None and got["replaced_hook"] is True and "conflict" not in got
+        assert record.registered_writer(root).append(collector) is None  # a log repeat
+    assert [(e["via"], e["outcome"]["ok"]) for e in events(root, run)] == [("log", True)]
     assert (
         record_hook.hook(root, line(outcome={"ok": True, "error": None, "ms": 5})) is None
-    )  # hook repeat too
+    )  # a hook line after the log's: dropped
     # another origin keeps its own key
     denial = dict(json.loads(line(kind="denial", used=USED, outcome={"ok": False, "error": "no", "ms": 1})))
     record_hook.hook(root, json.dumps(denial))
@@ -468,7 +471,9 @@ def test_the_tool_call_id_is_the_event_id_so_hook_and_collector_dedupe(live):
     assert first["id"].startswith("x_") and len(first["id"]) == 34
     collector = collector_line(run, tid, 9) | {"id": unsafe, "outcome": {"ok": True, "error": None, "ms": 1}}
     with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
-        assert record.registered_writer(root).append(collector) is None  # the same hashed id: deduped
+        stored = record.registered_writer(root).append(collector)
+    assert stored["id"] == first["id"] and stored["replaced_hook"] is True  # the same hashed id: one call
+    assert [e["via"] for e in events(root, run) if e["id"] == first["id"]] == ["log"]
 
 
 def _claim_file(root):
@@ -801,9 +806,9 @@ def test_pre_and_post_tool_use_of_one_call_make_one_step_with_its_detail(tool_ru
     assert "/elsewhere" not in (root / f".orch/record/runs/{run}.jsonl").read_text()  # nothing else is kept
 
 
-def test_hook_and_collector_of_one_tool_call_leave_one_record_line_each(tool_run):
-    """The started line is the hook's (the log's repeat is dropped); the end is the log's: it replaces the
-    hook's provisional end, with how the call really ended, its time and its own detail."""
+def test_hook_and_collector_of_one_tool_call_the_logs_lines_replace_the_hooks(tool_run):
+    """The hook lines come first (as the call happens); the log's lines of that call replace them, started and
+    finished alike (N1: a hook line is the agent's word): how the call really ended, its time, its detail."""
     from orch import cli_record, collect_claude
 
     root, run, tid = tool_run
@@ -811,20 +816,22 @@ def test_hook_and_collector_of_one_tool_call_leave_one_record_line_each(tool_run
     record_hook.hook(root, tool_hook("PostToolUse"))
     ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
     stats = collect_claude.collect([use_line(), result_line()], record.registered_writer(root), ctx)
-    assert stats["written"] == 1 and stats["deduped"] == 1  # the started line: the hook's stays
-    assert (stats["tool_calls"], stats["hook_seen"]) == (1, 1)
+    assert stats["written"] == 2 and stats["deduped"] == 0
+    assert (stats["tool_calls"], stats["hook_seen"]) == (1, 1)  # the hook's started line said the same
     assert [(e["id"], e["via"], e["outcome"] is not None) for e in run_lines(root, run)] == [
         (TOOL_ID, "hook", False),
         (TOOL_ID, "hook", True),
+        (TOOL_ID, "log", False),
         (TOOL_ID, "log", True),
     ]
     seen = events(root, run)
-    assert [(e["via"], e["outcome"] and e["outcome"]["ok"]) for e in seen] == [("hook", None), ("log", True)]
-    assert "conflict" not in seen[1]
+    assert [(e["via"], e["outcome"] and e["outcome"]["ok"]) for e in seen] == [("log", None), ("log", True)]
+    assert not any("conflict" in e for e in seen)
     detail = record.read_detail(root, run, seen[1]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
     assert detail["output"] == "hello"  # the log's detail replaced the hook's
     assert [u["result"] for u in cli_record.run_model(run, seen)["uses"]] == ["ok"]
     assert record_hook.hook(root, tool_hook("PostToolUse")) is None  # a late hook end after the log: dropped
+    assert record_hook.hook(root, tool_hook("PreToolUse")) is None  # and a late started line
 
 
 def test_a_denied_call_is_a_started_step_and_the_logs_denial(tool_run):
@@ -840,7 +847,7 @@ def test_a_denied_call_is_a_started_step_and_the_logs_denial(tool_run):
     collect_claude.collect([use_line("toolu_denied", "Bash", bash), end], record.registered_writer(root), ctx)
     got = [(e["kind"], e["via"], e["outcome"]) for e in events(root, run) if e["id"] == "toolu_denied"]
     assert got == [
-        ("step", "hook", None),
+        ("step", "log", None),  # the log's started line replaced the hook's
         ("denial", "log", {"ok": False, "error": "Not allowed by this workspace", "ms": None}),
     ]
 
@@ -952,7 +959,7 @@ def _fake_agent(tmp_path, root):
     return [sys.executable, str(script)], seen
 
 
-def test_the_wrapper_records_the_agents_stream_and_the_hook_lines_win(tool_run, tmp_path, monkeypatch):
+def test_the_wrapper_records_the_agents_stream_its_lines_replace_the_hooks(tool_run, tmp_path, monkeypatch):
     root, run, tid = tool_run
     monkeypatch.setattr(runs, "_on_term", lambda *a: None)  # no SIGTERM handler left in the test process
     inp = {"file_path": f"{root}/notes.txt"}
@@ -965,14 +972,16 @@ def test_the_wrapper_records_the_agents_stream_and_the_hook_lines_win(tool_run, 
     assert [(e["via"], e["outcome"] is not None) for e in lines if e["id"] == TOOL_ID] == [
         ("hook", False),
         ("hook", True),
+        ("log", False),
         ("log", True),
-    ]  # the collector's started line was dropped; its end line replaces the hook's provisional one
+    ]  # the collector's lines replace the hook's (the started one and the provisional end)
     from_log = [e for e in lines if e["via"] == "log"]
-    assert [e["kind"] for e in from_log] == ["run.state", "step", "usage", "run.state"]
+    assert [e["kind"] for e in from_log] == ["run.state", "step", "step", "usage", "run.state"]
     assert all(e["run"] == run and e["ticket"] == tid and e["harness"] == "claude" for e in lines)
-    assert [e["files"] for e in lines if e["id"] == TOOL_ID] == [["notes.txt"]] * 3
-    ends = [e for e in events(root, run) if e["id"] == TOOL_ID and e["outcome"] is not None]
-    assert [(e["via"], e["outcome"]["ok"], e["outcome"]["error"]) for e in ends] == [("log", True, None)]
+    assert [e["files"] for e in lines if e["id"] == TOOL_ID] == [["notes.txt"]] * 4
+    shown = [e for e in events(root, run) if e["id"] == TOOL_ID]
+    assert [(e["via"], e["outcome"] and e["outcome"]["ok"]) for e in shown] == [("log", None), ("log", True)]
+    assert not any("conflict" in e for e in shown)
     assert "hooks_missing" not in lost_notes(root) and "hooks_off" not in lost_notes(root)
     env = json.loads(seen.read_text())
     assert (env["ORCH_RUN"], env["ORCH_TICKET"], env["ORCH_AGENT"]) == (run, tid, "claude")
@@ -1020,16 +1029,20 @@ def test_later_turn_ids_stay_unique_with_deduped_lines_and_hook_lines_in_between
     record_hook.hook(root, tool_hook("PreToolUse"))
     record_hook.hook(root, tool_hook("PostToolUse"))
     no_uuid = json.dumps({"type": "result", "is_error": False})  # a default id <run>:<n>
-    # turn 1: the log's started line is a repeat of the hook's (dropped): its id <run>:5 is ahead of its seq 4
-    first = run_record.collect_turn(root, run, tid, "claude", root, [use_line(), result_line(), no_uuid])
-    assert first["deduped"] == 1 and first["written"] == 2
-    assert [e["seq"] for e in run_lines(root, run) if e["id"] == f"{run}:5"] == [4]
+    # turn 1: a replayed started line is a repeat (dropped): the next id <run>:6 is ahead of its seq 5
+    lines = [use_line(), result_line(), use_line(), no_uuid]
+    first = run_record.collect_turn(root, run, tid, "claude", root, lines)
+    assert first["deduped"] == 1 and first["written"] == 3
+    assert [e["seq"] for e in run_lines(root, run) if e["id"] == f"{run}:6"] == [5]
     real = record_hook.record_writer(root)
 
     class Interleaved:  # turn 2: a hook line lands before every collector line
         def append(self, event, **kw):
             real.append(_hook_event(run, tid))
             return real.append(event, **kw)
+
+        def __getattr__(self, name):  # the rest (the spool drain before numbering) is the real writer's
+            return getattr(real, name)
 
     monkeypatch.setattr(record_hook, "record_writer", lambda r: Interleaved())
     second = run_record.collect_turn(root, run, tid, "claude", root, [no_uuid])
@@ -1116,19 +1129,71 @@ def test_the_lost_trace_keeps_only_a_plain_type_name(tool_run):
 def test_a_forged_hook_success_never_hides_the_logs_failure(tool_run):
     """H1: the agent can send any line to `orch record hook` (it is inside the run's process tree) and can
     read its real tool-call ids from its transcript. A forged success never suppresses the log's failure."""
-    from orch import collect_claude
+    from orch import cli_record, collect_claude
 
     root, run, tid = tool_run
-    forged = line(id=TOOL_ID, used=READ, text="Read notes.txt", outcome={"ok": True, "error": None, "ms": 1})
-    record_hook.hook(root, forged)
+    forged = line(
+        id=TOOL_ID, used=READ, text="Read notes.txt", files=["notes.txt"],
+        outcome={"ok": True, "error": None, "ms": 1}, payload={"input": "forged", "output": "forged"},
+    )  # fmt: skip
+    stored = record_hook.hook(root, forged)  # the generic path: whatever it sends, the end is provisional
+    assert stored["outcome"] == {"ok": None, "error": None, "ms": None}
     ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
     failed = dict(type="tool_result", tool_use_id=TOOL_ID, content="Exit code 1\nboom", is_error=True)
     end = json.dumps(dict(type="user", session_id=SID, uuid="u-2", message=dict(content=[failed])))
     stats = collect_claude.collect([use_line(), end], record.registered_writer(root), ctx)
     assert stats["written"] == 2  # the log's started line (the forged line is finished) and its failed end
     finished = [e for e in events(root, run) if e["outcome"] is not None]
-    assert [(e["via"], e["outcome"]["ok"]) for e in finished] == [("hook", True), ("log", False)]
-    assert finished[1]["conflict"] is True and finished[1]["outcome"]["error"] == "Exit code 1"
+    assert [(e["via"], e["outcome"]["ok"], e["outcome"]["error"]) for e in finished] == [
+        ("log", False, "Exit code 1")
+    ]
+    detail = record.read_detail(root, run, finished[0]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    assert detail["output"] == "Exit code 1\nboom"  # the forged detail is gone with its line
+    assert [u["result"] for u in cli_record.run_model(run, events(root, run))["uses"]] == ["failed"]
+    assert record_hook.hook(root, forged) is None  # sent again after the log: dropped
+
+
+def test_a_forged_started_line_never_hides_what_the_call_did(tool_run):
+    """N1: the agent sends a started line for its real tool-call id naming another tool, text and files (a
+    Bash `rm -rf build/` as "Read notes.txt"). Both lines are kept, the log's with `conflict`; readers
+    believe it."""
+    from orch import cli_record, collect_claude
+
+    root, run, tid = tool_run
+    record_hook.hook(root, line(id=TOOL_ID, used=READ, text="Read notes.txt", files=["notes.txt"]))
+    bash = {"command": "rm -rf build/"}
+    failed = dict(type="tool_result", tool_use_id=TOOL_ID, content="Exit code 1", is_error=True)
+    end = json.dumps(dict(type="user", session_id=SID, uuid="u-2", message=dict(content=[failed])))
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    writer = record.registered_writer(root)
+    stats = collect_claude.collect([use_line(TOOL_ID, "Bash", bash), end], writer, ctx)
+    assert (stats["written"], stats["tool_calls"], stats["hook_seen"]) == (2, 1, 0)  # not this call's line
+    seen = [(e["via"], e["used"]["name"], e["text"], e.get("conflict")) for e in events(root, run)]
+    assert seen == [
+        ("hook", "Read", "Read notes.txt", None),
+        ("log", "Bash", "Run rm -rf build/", True),
+        ("log", "Bash", "Run rm -rf build/", None),
+    ]
+    model = cli_record.run_model(run, events(root, run))
+    assert [(u["name"], u["result"]) for u in model["uses"]] == [("Bash", "failed")]
+
+
+def test_run_model_reports_the_logs_result_on_a_conflict(tool_run):
+    """A hook end that says how the call ended (another writer, an older file) and disagrees with the log:
+    both lines are kept with `conflict`, and the counts take the log's result, whichever came last."""
+    from orch import cli_record
+
+    root, run, tid = tool_run
+    writer = record.registered_writer(root)
+    done = {"ok": True, "error": None, "ms": 1}
+    writer.append(collector_line(run, tid, 0) | {"id": "toolu_c", "via": "hook", "outcome": done})
+    failed = {"ok": False, "error": "Exit code 1", "ms": 9}
+    got = writer.append(collector_line(run, tid, 0) | {"id": "toolu_c", "outcome": failed})
+    assert got["conflict"] is True
+    seen = events(root, run)
+    assert [(e["via"], e["outcome"]["ok"]) for e in seen] == [("hook", True), ("log", False)]
+    assert [u["result"] for u in cli_record.run_model(run, seen)["uses"]] == ["failed"]
+    assert [u["result"] for u in cli_record.run_model(run, seen[::-1])["uses"]] == ["failed"]
 
 
 def test_a_provisional_hook_end_after_the_logs_failure_is_dropped(tool_run):
@@ -1238,3 +1303,157 @@ def test_a_live_run_gives_its_agent_the_tool_name_the_hook_needs(tool_run, tmp_p
     runs.wrap_live(root, run, tid, "claude", [sys.executable, "-c", code], None)
     env = json.loads(seen.read_text())
     assert (env["ORCH_AGENT"], env["ORCH_RUN"], env["ORCH_TICKET"]) == ("claude", run, tid)
+
+
+def test_a_turn_spooled_behind_a_busy_lock_never_shares_ids_with_the_next(tool_run, monkeypatch):
+    """N2: the run lock is busy while turn 1 is written, so its lines wait in pending/<run>/. Turn 2 numbers
+    its ids after those spooled lines are committed (record.run_lines drains them under the lock first)."""
+    from orch import run_record
+
+    root, run, tid = tool_run
+    lock = root / ".orch/record/runs" / f"{run}.lock"
+    real = run_record._so_far
+
+    def then_busy(*a):
+        got = real(*a)
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))  # somebody else's fresh lock
+        return got
+
+    monkeypatch.setattr(run_record, "LOCK_WAIT", 0.05)
+    monkeypatch.setattr(run_record, "_so_far", then_busy)
+    no_uuid = json.dumps({"type": "result", "is_error": False})  # default ids <run>:<n>
+    first = run_record.collect_turn(root, run, tid, "claude", root, [no_uuid, no_uuid])
+    assert first["written"] == 2 and len(list((root / ".orch/record/pending" / run).glob("*.json"))) == 2
+    lock.unlink()
+    monkeypatch.setattr(run_record, "_so_far", real)
+    second = run_record.collect_turn(root, run, tid, "claude", root, [no_uuid])
+    assert second["written"] == 1 and second["deduped"] == 0  # not taken for a repeat of a spooled line
+    assert [e["id"] for e in run_lines(root, run)] == [f"{run}:1", f"{run}:2", f"{run}:3"]
+    assert not list((root / ".orch/record/pending" / run).glob("*.json"))
+
+
+def test_a_log_end_without_its_own_detail_removes_the_hooks(tool_run):
+    """N5: the log's detail is lost (too large): the hook's provisional payload must not stay behind with no
+    line the reader keeps pointing at it."""
+    from orch import collect_claude
+
+    root, run, tid = tool_run
+    record_hook.hook(root, tool_hook("PreToolUse"))
+    post = record_hook.hook(root, tool_hook("PostToolUse"))
+    hook_detail = root / ".orch/record" / post["detail"]
+    assert hook_detail.is_file()
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    big = result_line(content="x" * (1024**2 + 10))
+    collect_claude.collect([use_line(), big], record.registered_writer(root), ctx)
+    end = [e for e in events(root, run) if e["outcome"] is not None]
+    assert [(e["via"], e["detail"], e.get("detail_lost")) for e in end] == [("log", None, True)]
+    assert not hook_detail.exists()
+
+
+def test_a_hooks_tool_input_is_cut_too():
+    """N7: a Write or MultiEdit input holds whole files; the hook's detail keeps each text cut."""
+    from orch import collect_claude
+
+    big = {"file_path": "a.txt", "content": "x" * 100_000, "edits": [{"old_string": "a"}] * 300, "n": 3}
+    line_ = collect_claude.hook_line(
+        {"hook_event_name": "PostToolUse", "tool_use_id": "toolu_w", "tool_name": "Write", "tool_input": big}
+    )
+    inp = line_["payload"]["input"]
+    assert len(inp["content"]) < 33_000 and inp["content"].endswith("more characters]")
+    assert len(inp["edits"]) == 100 and inp["edits"][0] == {"old_string": "a"} and inp["n"] == 3
+    deep: dict = {}
+    node = deep
+    for _ in range(100):
+        node["x"] = {}
+        node = node["x"]
+    assert "[cut: nested too deep]" in json.dumps(collect_claude.hook_input(deep))
+
+
+def test_the_persons_own_settings_that_switch_the_hooks_off_leave_a_trace(tool_run, tmp_path):
+    """N4: the person's own tool settings (under the home; faked per test) can switch the hooks off too."""
+    from orch import run_record
+
+    root, run, tid = tool_run
+    user = Path.home() / ".claude"
+    user.mkdir(parents=True, exist_ok=True)
+    (user / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    run_record.collect_turn(root, run, tid, "claude", tmp_path / "copy", [use_line(), result_line()])
+    rows = [json.loads(x) for x in lost_notes(root).splitlines()]
+    assert [(r["run"], r["reason"]) for r in rows] == [(run, "hooks_off")]
+
+
+def test_a_failing_hooks_check_after_a_recorded_turn_is_not_a_collector_error(tool_run, monkeypatch):
+    """N8: the turn was recorded; a check after it that breaks is no collector_error."""
+    from orch import run_record
+
+    root, run, tid = tool_run
+    monkeypatch.setattr(run_record, "_hooks_off", lambda *a: (_ for _ in ()).throw(OSError("x")))
+    runs._record_turn(root, run, tid, "claude", root, "\n".join([use_line(), result_line()]))
+    assert len([e for e in events(root, run) if e["via"] == "log"]) == 2
+    assert [json.loads(x)["reason"] for x in lost_notes(root).splitlines()] == ["hooks_missing"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["record", "--json", "hook", "--bogus"],
+        ["record", "--by", "agent:x", "hook"],
+        ["record", "hook", "--json", "-x", "extra", "words"],
+    ],
+)
+def test_malformed_hook_argv_still_exits_zero_with_one_stderr_line(live, monkeypatch, capsys, argv):
+    """L4: any form of `orch record ... hook` is the hook (no parser): exit 0, nothing on stdout, one line."""
+    from orch import cli
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("not json\n"))
+    assert cli.main(argv) == 0
+    cap = capsys.readouterr()
+    assert cap.out == "" and len(cap.err.splitlines()) == 1 and cap.err.startswith("orch: ")
+
+
+def test_only_the_hook_form_skips_the_parser():
+    from orch import is_record_hook
+
+    assert is_record_hook(["record", "hook"]) and is_record_hook(["record", "--json", "--by", "x", "hook"])
+    for argv in (
+        ["record", "query", "--detail", "hook"],
+        ["record", "--by", "hook", "tail"],
+        ["ticket", "record", "hook"],
+        ["record"],
+        [],
+    ):
+        assert not is_record_hook(argv), argv
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "sys.argv = ['orch', 'record', '--json', 'hook', '--bogus']",
+        "sys.modules['orch.cli'] = None; sys.argv = ['orch', 'record', 'hook']",  # a broken install
+    ],
+)
+def test_the_hook_process_exits_zero_whatever_breaks(tmp_path, code):
+    """L4: as the tool runs it (`python -m orch ...`): exit 0, empty stdout, one stderr line."""
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ORCH_RUN") and k != "ORCH_TICKET"}
+    run_main = f"import runpy, sys; {code}; runpy.run_module('orch', run_name='__main__', alter_sys=True)"
+    r = subprocess.run(
+        [sys.executable, "-c", run_main], cwd=tmp_path, input="not json\n", capture_output=True, text=True,
+        env=env, timeout=60,
+    )  # fmt: skip
+    assert (r.returncode, r.stdout) == (0, "") and len(r.stderr.splitlines()) == 1, r.stderr
+    assert r.stderr.startswith("orch: ")
+    strict = run_main.replace("'hook'", "'hook', '--strict'")
+    r = subprocess.run(
+        [sys.executable, "-c", strict], cwd=tmp_path, input="not json\n", capture_output=True, text=True,
+        env=env, timeout=60,
+    )  # fmt: skip
+    assert r.returncode == 2 and r.stdout == "" and r.stderr.startswith("Refused: ")
+
+
+def test_every_lost_reason_is_named_in_the_contract():
+    """N6: no strict validator of orch.record-lost/1 exists; the contract names every reason written."""
+    text = (ROOT / "contracts/activity.md").read_text()
+    for reason in (*record.LOST_REASONS, *record.UNPROVEN_REASONS, "trimmed"):
+        assert reason in text, reason

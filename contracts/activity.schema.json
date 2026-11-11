@@ -51,7 +51,7 @@
     "detail": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[0-9a-f]{32}\\.json$" }], "description": "Full payload file, relative to .orch/record/; null = details not available." },
     "coverage": { "enum": ["full", "partial"], "description": "full = the source saw everything of this step; partial = something is missing (no chat text, cut output, no helper)." },
     "data": { "type": "object", "description": "Per-kind fields (activity.md, Kinds). Unknown fields are kept." },
-    "conflict": {"type": "boolean", "description": "Hook and log finished outcomes disagree; both lines are kept."},
+    "conflict": {"type": "boolean", "description": "The hook and log lines of one call disagree; both are kept, this (log) line is the one to believe."},
     "detail_lost": { "type": "boolean", "description": "true = a full payload existed but could not be stored (name collision with another event's file, write problem, too large); the line is kept with detail null (activity.md, Detail files)." },
     "files": { "$ref": "#/$defs/files" }
   },

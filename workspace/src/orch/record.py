@@ -638,42 +638,54 @@ def _key(event):
 
 
 def _provisional(event):
-    """A hook's finished line that does not know how the call ended (`ok: null`). Hook lines come from inside
-    the agent's trust boundary: the log line of the same call replaces it; it never replaces a log line."""
+    """A hook's finished line that does not know how the call ended (`ok: null`; the hook entry writes every
+    finished step this way)."""
     return event["via"] == "hook" and event["outcome"] is not None and event["outcome"]["ok"] is None
 
 
-def _conflict(a, b):
-    return (
-        {a["via"], b["via"]} == {"hook", "log"}
-        and a["outcome"] is not None
-        and b["outcome"] is not None
-        and not _provisional(a)
-        and not _provisional(b)
-        and any(a["outcome"][k] != b["outcome"][k] for k in ("ok", "error"))
-    )
+def _agree(old, event):
+    """The hook line `old` of a call says what the log line `event` of that call says: what was used, the
+    text, the files, and (when both are finished and the hook's is not provisional) `ok` and `error`."""
+    if any(old.get(k) != event.get(k) for k in ("used", "text")) or (old.get("files") or []) != (
+        event.get("files") or []
+    ):
+        return False
+    if old["outcome"] is None or event["outcome"] is None or _provisional(old):
+        return True
+    return all(old["outcome"][k] == event["outcome"][k] for k in ("ok", "error"))
+
+
+def _replaces(old, event):
+    """`event` (a log line) replaces `old` (the hook line of the same key) in the reader's view."""
+    return event["via"] == "log" and old["via"] == "hook" and _key(old) == _key(event) and _agree(old, event)
 
 
 def _decision(previous, event):
+    """Keep `event`? Hook lines come from inside the agent's trust boundary, so for one key (started or
+    finished alike) the log line wins: it replaces the hook line, a hook line after it is dropped. When the
+    two disagree, both are kept and the log line carries `conflict: true` (the log line is the one to
+    believe). Repeats of one origin keep the first."""
     matching = [old for old in previous if _key(old) == _key(event)]
     if any(old["via"] == event["via"] for old in matching):
         return False
-    if _provisional(event) and any(old["via"] == "log" for old in matching):
-        return False  # the log already says how the call ended
-    if any(_conflict(old, event) for old in matching):
+    if event["via"] == "hook" and any(old["via"] == "log" for old in matching):
+        return False  # the log already has this call
+    if event["via"] == "log" and any(not _agree(old, event) for old in matching):
         event["conflict"] = True
-        return True
-    return not any(old["via"] == "hook" and not _provisional(old) for old in matching)
+    return True
+
+
+def _shown(events):
+    """The lines a reader keeps, in file order."""
+    kept = []
+    for event in events:
+        if _decision(kept, event):
+            kept = [old for old in kept if not _replaces(old, event)] + [event]
+    return kept
 
 
 def _dedupe(events, run):
-    kept = []
-    for event in events:
-        if event["run"] != run or not _decision(kept, event):
-            continue
-        kept = [old for old in kept if not (_key(old) == _key(event) and not _conflict(old, event))]
-        kept.append(event)
-    return sorted(kept, key=lambda e: e["seq"])
+    return sorted(_shown([e for e in events if e["run"] == run]), key=lambda e: e["seq"])
 
 
 def _parse(fd, run):
@@ -958,15 +970,19 @@ def _pending_count(workspace, run):
         raise
 
 
-def run_lines(workspace, run, *, lock_wait=None) -> list[dict]:
+def run_lines(workspace, run, *, lock_wait=None, drain=None) -> list[dict]:
     """The run file's lines AS WRITTEN (no dedupe, no reader view), read under the run lock: for a writer-side
     caller that must see every line (a collector numbering its id-less lines `<run>:<n>` past every seq and
-    every such id already used). No run file yet: []. Raises RecordBusy, RecordTampered (its alert is left)
-    or RecordUnavailable."""
+    every such id already used). `drain`: a writer's drain (RecordWriter.drain); the spooled lines of the run
+    (pending/<run>/) are committed first, under the same lock, so their ids are seen too. No run file yet: [].
+    Raises RecordBusy, RecordTampered (its alert is left) or RecordUnavailable."""
     _name(run, _RUN)
     try:
         with _lock(workspace, run, lock_wait) as check_lock:
             check_lock()
+            if drain is not None:
+                drain(run, check_lock=check_lock)
+                check_lock()
             try:
                 fd = _open(workspace, ("runs", run + ".jsonl"), "read")
             except RecordUnavailable as error:
@@ -1079,9 +1095,9 @@ def _store_detail(ws, event, payload, previous):
             finished = any(
                 old.get("detail") == event["detail"]
                 and old.get("outcome") is not None
-                and not _provisional(old)
+                and not (old.get("via") == "hook" and event["via"] == "log")
                 for old in previous
-            )  # a log line that replaces a provisional hook line writes its own detail
+            )  # a log line writes its own detail over a hook line's (the log wins, Precedence and dedupe)
             if finished or event["outcome"] is None:
                 return _Detail()
         _write_new(ws, rel, payload)
@@ -1283,7 +1299,23 @@ class RecordWriter:
                         if isinstance(cleanup, RecordTampered):
                             _report(self.workspace, cleanup, "detail", run, "writer")
                 raise
-            return event
+            replaced = [old for old in previous if _replaces(old, event)]
+            # a log line without a detail of its own (lost, or none) replaced hook lines: the hook's detail
+            # file (the same name) goes when no line the reader keeps points to it, so the agent's payload
+            # never stays behind without a line. The line is already written: a failure is only reported.
+            file = f"{detail_name(run, event['kind'], event['id'])}.json"
+            if (
+                event["detail"] is None
+                and any(old.get("detail") == f"detail/{run}/{file}" for old in replaced)
+                and not any(old.get("detail") == f"detail/{run}/{file}" for old in _shown([*previous, event]))
+            ):
+                try:
+                    _unlink(self.workspace, ("detail", run, file))
+                except (RecordTampered, RecordUnavailable) as cleanup:
+                    if isinstance(cleanup, RecordTampered):
+                        _report(self.workspace, cleanup, "detail", run, "writer")
+            # for the collector (not stored): the hook line of this call was there and said the same
+            return dict(event, replaced_hook=True) if replaced else event
         finally:
             _close(fd)
 
@@ -1311,6 +1343,11 @@ class RecordWriter:
         if default_id:
             result.pop("id", None)
         return result
+
+    def drain(self, run, *, check_lock):
+        """Commit the run's spooled lines (pending/<run>/) in order. Only for a caller that holds the run
+        lock (record.run_lines(drain=...)); `check_lock` is that lock's check."""
+        self._drain(run, check_lock=check_lock)
 
     def _drain(self, run, *, check_lock=lambda: None):
         try:
@@ -1692,7 +1729,8 @@ _SCHEMA = {
         },
         "conflict": {
             "type": "boolean",
-            "description": "Hook and log finished outcomes disagree; both lines are kept.",
+            "description": "The hook and log lines of one call disagree; both are kept, this (log) line is "
+            "the one to believe.",
         },
         "files": {"$ref": "#/$defs/files"},
     },

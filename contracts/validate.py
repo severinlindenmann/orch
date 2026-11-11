@@ -221,8 +221,10 @@ def act_detail_name(run, kind, event_id):
 
 
 def act_dedupe(lines):
-    """Only hook/log share an origin; disagreeing finished outcomes both survive. A provisional hook end
-    (`ok: null`) never replaces nor conflicts with a log line: the log's end line replaces it."""
+    """Only hook/log share an origin. For one key the log line wins, started and finished alike: it replaces
+    the hook line, and a hook line after it is dropped. When the two disagree (`used`, `text`, `files`, or both
+    finished and the hook's not provisional: `ok`/`error`) both are kept (the log line carries `conflict`).
+    Repeats of one origin keep the first."""
     kept = []
     def key(line):
         via = line["via"]
@@ -230,20 +232,20 @@ def act_dedupe(lines):
                 "hl" if via in ("hook", "log") else via)
     def provisional(line):
         return line["via"] == "hook" and line.get("outcome") is not None and line["outcome"].get("ok") is None
-    def conflict(a, b):
-        return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
-                and b.get("outcome") is not None and not provisional(a) and not provisional(b)
-                and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
+    def agree(hook, log):
+        if (any(hook.get(k) != log.get(k) for k in ("used", "text"))
+                or (hook.get("files") or []) != (log.get("files") or [])):
+            return False
+        if hook.get("outcome") is None or log.get("outcome") is None or provisional(hook):
+            return True
+        return all(hook["outcome"].get(k) == log["outcome"].get(k) for k in ("ok", "error"))
     for i, line in enumerate(lines):
         matches = [j for j in kept if key(lines[j]) == key(line)]
         if any(lines[j]["via"] == line["via"] for j in matches):
             continue
-        if provisional(line) and any(lines[j]["via"] == "log" for j in matches):
+        if line["via"] == "hook" and any(lines[j]["via"] == "log" for j in matches):
             continue
-        if any(conflict(lines[j], line) for j in matches):
-            kept.append(i)
-        elif not any(lines[j]["via"] == "hook" and not provisional(lines[j]) for j in matches):
-            kept = [j for j in kept if j not in matches] + [i]
+        kept = [j for j in kept if not (j in matches and line["via"] == "log" and agree(lines[j], line))] + [i]
     return sorted(kept)
 
 

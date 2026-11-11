@@ -10,6 +10,8 @@ says in one plain stderr line why nothing was recorded. What it never does:
   that claim's process (the wrapper or the agent), so a process outside the run cannot write into it by
   setting the same variables (the pid must match the recorded start time, never just "not different"); a line
   naming another run is dropped;
+- say how a call ended: on every path (the tool's payload or an event-shaped line) a finished step or
+  helper.end is written provisional (`ok`, `error`, `ms` null); the log's line of that call replaces it;
 - write when key hiding is not ready (no registered hider: nothing is written, never raw);
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
 A hook line that cannot be written leaves a short trace: under the run (record.note_lost) only for a proven
@@ -45,6 +47,7 @@ _FIELDS = ("id", "kind", "text", "session", "agent", "parent", "coverage", "used
 _HARNESS = re.compile(r"[a-z][a-z0-9-]{0,31}")
 _BAD = "The record entry is not valid; nothing was recorded."
 _TOO_BIG = {"input": "x" * (1024**2 + 1), "output": ""}  # a detail over 1 MB: the writer marks detail_lost
+_PROVISIONAL = ("step", "helper.end")  # kinds whose finished line reports how a call ended
 
 
 class NotRecorded(Exception):
@@ -195,6 +198,10 @@ def _event(raw: dict, ids, tool, root=None) -> tuple[dict, dict | None]:
         "via": "hook",
         "detail": None,
     }
+    if filtered["kind"] in _PROVISIONAL and isinstance(event["outcome"], dict):
+        # whatever the caller sent: a hook line is the agent's word and never says how a call ended (no `ok`,
+        # `error` or `ms`); the log's line of that call does (contracts/activity.md, Precedence and dedupe)
+        event["outcome"] = {"ok": None, "error": None, "ms": None}
     if filtered["kind"] != "step":
         event.setdefault("used", None)  # only a step names the thing it used
     files = filtered.get(

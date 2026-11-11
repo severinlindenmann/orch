@@ -133,13 +133,27 @@ def hook_output(response: Any) -> Any:
     return out
 
 
+def hook_input(value: Any, depth: int = 0) -> Any:
+    """The detail input of a hook: the tool's input with every text cut at _OUTPUT_CAP (a Write or MultiEdit
+    input holds whole files), every list at _LIST_CAP entries, nesting at 32 levels."""
+    if isinstance(value, str):
+        return _cut(value)
+    if depth >= 32:
+        return "[cut: nested too deep]"
+    if isinstance(value, list):
+        return [hook_input(v, depth + 1) for v in value[:_LIST_CAP]]
+    if isinstance(value, dict):
+        return {_cut(str(k)): hook_input(v, depth + 1) for k, v in value.items()}
+    return value
+
+
 def hook_line(raw: dict) -> dict | None:
     """The tool's own hook payload (hook_event_name, tool_name, tool_input, tool_use_id; PostToolUse adds
     tool_response) as the event line `orch record hook` takes: a step whose id is the tool-call id, so the
     hook line and the collector's line of one tool call dedupe. PreToolUse: no outcome, no detail;
     PostToolUse: finished with `ok: null` (provisional: a hook line comes from inside the agent's trust
     boundary, so it never says how the call ended; the log's line replaces it, contracts/activity.md), with
-    the input and hook_output as the detail. None: a helper start (Task/Agent), left to the log (only the log
+    hook_input and hook_output as the detail. None: a helper start (Task/Agent), left to the log (only the log
     knows the helper's number). ValueError: not a tool-call payload."""
     event = raw.get("hook_event_name")
     tid = raw.get("tool_use_id")
@@ -161,7 +175,7 @@ def hook_line(raw: dict) -> dict | None:
         line["files"] = paths
     if event == "PostToolUse":
         line["outcome"] = dict(ok=None, error=None, ms=None)
-        line["payload"] = {"input": inp, "output": hook_output(raw.get("tool_response"))}
+        line["payload"] = {"input": hook_input(inp), "output": hook_output(raw.get("tool_response"))}
     return line
 
 
@@ -185,14 +199,19 @@ def _small_json(path: Path) -> Any:
 
 
 def hooks_disabled(folder: str | Path, settings_file: str) -> bool:
-    """The tool's settings in the agent's folder switch its hooks off (`disableAllHooks`): the agent can write
-    them, so orch's record hooks stop from its next turn on. `settings_file`: the tool's local settings file
-    (agents/reminder.json, reminder.settings_file); the shared `settings.json` next to it counts too. Not
-    readable or not JSON: False."""
+    """The tool's settings switch its hooks off (`disableAllHooks`): the agent can usually write them, so
+    orch's record hooks stop from its next turn on. `settings_file`: the tool's local settings file in the
+    agent's folder (agents/reminder.json, reminder.settings_file, e.g. `<dir>/settings.local.json`); the
+    shared `settings.json` next to it and the person's own (`~/<dir>/settings.json`) count too. Not readable
+    or not JSON: False. Not seen here: a settings folder moved by the tool's own environment variable, hooks
+    the agent adds itself (one that answers before orch's), and a file changed and changed back between
+    turns; hooks_missing is the backstop for those."""
     local = Path(folder) / settings_file
+    paths = [local, local.with_name("settings.json")]
+    if Path(settings_file).parent.parts:  # the tool's own settings folder, under the person's home
+        paths.append(Path.home() / Path(settings_file).parent / "settings.json")
     return any(
-        isinstance(doc := _small_json(path), dict) and doc.get("disableAllHooks") is True
-        for path in (local, local.with_name("settings.json"))
+        isinstance(doc := _small_json(path), dict) and doc.get("disableAllHooks") is True for path in paths
     )
 
 
@@ -511,14 +530,19 @@ def collect(lines: Iterable[str | bytes], writer: Any, ctx: dict) -> dict:
                 invalid += 1  # one bad event must not stop the rest of the run; every other refusal
                 continue  # (off, tampered, unavailable) propagates and stops the run loudly
             if stored is None:
-                deduped += 1
-                hooked += started  # the hook's line of that call was there first
-            else:
-                written += 1
-                if stored.get("pending"):
-                    wait = 0  # the run lock is busy: the rest of the turn is spooled at once, in order
-                    continue
+                deduped += 1  # a repeat of a log line already written (a replay)
+                continue
+            written += 1
+            if stored.get("pending"):
+                # the run lock is busy: the rest of the turn is spooled at once, in order. Whether a hook
+                # line of a spooled call was there is not known yet: it counts in neither tool_calls nor
+                # hook_seen
+                wait = 0
+                continue
             calls += started
+            # the hook's started line of that call was there and said the same (the log line replaced it). A
+            # hint only: the agent can send such a line itself (record_hook), so hooks_missing is not proof
+            hooked += started and bool(stored.get("replaced_hook"))
     return dict(
         written=written,
         deduped=deduped,
