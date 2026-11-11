@@ -287,7 +287,8 @@ class RecordWriter:
         if not isinstance(eid, str):
             raise RecordRefused(_INVALID)
         # Hide key values in the raw id BEFORE it is judged or hashed, so a secret-bearing id
-        # never leaves as an unsalted (guessable) hash; the same id still gives the same name for hook and collector (dedupe).
+        # never leaves as an unsalted (guessable) hash;
+        # the same id still gives the same name for hook and collector (dedupe).
         eid = self.hider.hide_text(eid)
         event["id"] = eid if re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) else _hash(eid)
         # Reject malformed input, including controls, before normalizing display text.
