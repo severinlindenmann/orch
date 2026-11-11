@@ -1,5 +1,5 @@
 {
- "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now, person=VERIFIER) must give `expect` (null = cannot merge, caller pauses) and the SAME result with a and b swapped. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now, held) -> {changed, counter} (null = malformed, caller pauses; held = ids that held the key locally, they keep it). VERIFIER (every `wont` vector; the real one is humanproof.wont_verifier: the receiving core's own wontdo1 MAC, valid for the step's text and covers AND the CURRENT entry of its ledger, human-proof.md 'Synced won't do'): person(step, ticket id) is true exactly when step.wont_mac equals the vector's `ledger[\"<ticket id>:<step id>\"]` AND equals \"v1-\" + the first 20 hex characters of sha256 of the \"|\"-joined values ticket id, step id, step.wont_nonce, step.text, (step.covers or \"\"), (\"True\" or \"False\" by step.wont_do), (step.reason when wont_do, else \"\"). The text of `by` is never looked at; no verifier = nobody is a person. INVARIANT: with a base, a step's decision fields (wont_do, reason, wont_mac, wont_nonce) differ from base's only when that step verifies; otherwise they are base's. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys). VERDICT (every `verdict` vector; the real one is humanproof.verdict_verifier, human-proof.md 'Done needs a signed verdict'): merge_ticket(..., verdict=V) with V(entry, ticket) returning \"current\" when entry.mac equals the vector's `ledger[<ticket id>]` (the core's own MAC that is the CURRENT ledger entry), \"stale\" when entry.mac is in the vector's `own` list but not current (the core's own MAC, replayed, tombstoned or superseded: dropped), else null (not provable here: carried along); the real V also needs the MAC to verify over the merged checklist. No `ledger` entry and no `own` = nobody verifies. INVARIANT: an entry V calls current is never changed or dropped; the merge never decides Done (status follows the plain rule: FINAL wins, done + an open step = active; a raw done without a current entry is Review on the receiving core).",
+ "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now, person=VERIFIER) must give `expect` (null = cannot merge, caller pauses) and the SAME result with a and b swapped. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now, held) -> {changed, counter} (null = malformed, caller pauses; held = ids that held the key locally, they keep it). VERIFIER (every `wont` vector; the real one is humanproof.wont_verifier: the receiving core's own wontdo1 MAC, valid for the step's text and covers AND the CURRENT entry of its ledger, human-proof.md 'Synced won't do'): person(step, ticket id) is true exactly when step.wont_mac equals the vector's `ledger[\"<ticket id>:<step id>\"]` AND equals \"v1-\" + the first 20 hex characters of sha256 of the \"|\"-joined values ticket id, step id, step.wont_nonce, step.text, (step.covers or \"\"), (\"True\" or \"False\" by step.wont_do), (step.reason when wont_do, else \"\"). The text of `by` is never looked at; no verifier = nobody is a person. INVARIANT: with a base, a step's decision fields (wont_do, reason, wont_mac, wont_nonce) differ from base's only when that step verifies; otherwise they are base's. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys). VERDICT (every `verdict` vector; the real one is humanproof.verdict_verifier, human-proof.md 'Done needs a signed verdict'): merge_ticket(..., verdict=V) with V(entry, ticket) returning \"current\" when entry.mac equals the vector's `ledger[<ticket id>]` (the core's own MAC that is the CURRENT ledger entry), \"stale\" when entry.mac is in the vector's `own` list but not current (the core's own MAC, replayed, tombstoned or superseded: dropped), else null (not provable here: carried along); the real V also needs the MAC to verify over the merged checklist. No `ledger` entry and no `own` = nobody verifies. INVARIANT: an entry V calls current is never changed or dropped; the merge never decides Done (status follows the plain rule: FINAL wins, done + an open step = active; a raw done without a current entry is Review on the receiving core). HISTORY: new one-sided human: lines absent from base are kept as human only when matching a verified Won't do or current person verdict in the merged ticket; otherwise by=agent:sync and text is prefixed \"(synced, not verified here) \". Base/shared entries stay unchanged; symmetric in a/b. An exact re-attributed copy supersedes the original claim on later unions, so a round trip cannot restore human attribution.",
  "now": "2026-11-10T12:00:00Z",
  "tickets": [
   {
@@ -2041,13 +2041,13 @@
      },
      {
       "at": "2026-11-09T09:00:00Z",
-      "by": "human:Ann",
-      "text": "my note"
+      "by": "agent:sync",
+      "text": "(synced, not verified here) my note"
      },
      {
       "at": "2026-11-09T10:00:00Z",
-      "by": "human:Ann",
-      "text": "their note"
+      "by": "agent:sync",
+      "text": "(synced, not verified here) their note"
      }
     ],
     "revision": 3,
@@ -8918,6 +8918,1252 @@
     ],
     "revision": 2,
     "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "forged-wont-history",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "wont_nonce": "n1",
+      "by": "human:lindenmann",
+      "wont_mac": "fake"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Marked as won't do: Order dessert (B)"
+     }
+    ],
+    "revision": 1
+   },
+   "ledger": {},
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "by": "human:lindenmann"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Marked as won't do: Order dessert (B)"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   }
+  },
+  {
+   "name": "verified-wont-history",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "wont_nonce": "n1",
+      "by": "human:lindenmann",
+      "wont_mac": "v1-eca8446b86a5373af492"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Marked c2 as won't do"
+     }
+    ],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c2": "v1-eca8446b86a5373af492"
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "wont_nonce": "n1",
+      "by": "human:lindenmann",
+      "wont_mac": "v1-eca8446b86a5373af492"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Marked c2 as won't do"
+     }
+    ],
+    "revision": 1
+   }
+  },
+  {
+   "name": "verified-wont-display-history",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "wont_nonce": "n1",
+      "by": "human:lindenmann",
+      "wont_mac": "v1-eca8446b86a5373af492"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Marked as won't do: Order dessert (B)"
+     }
+    ],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c2": "v1-eca8446b86a5373af492"
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "wont_nonce": "n1",
+      "by": "human:lindenmann",
+      "wont_mac": "v1-eca8446b86a5373af492"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Marked as won't do: Order dessert (B)"
+     }
+    ],
+    "revision": 1
+   }
+  },
+  {
+   "name": "unrelated-history-with-verified-wont",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "wont_nonce": "n1",
+      "by": "human:lindenmann",
+      "wont_mac": "v1-eca8446b86a5373af492"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Approved everything"
+     }
+    ],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c2": "v1-eca8446b86a5373af492"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c2",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "text": "Order dessert (B)",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-eca8446b86a5373af492",
+      "by": "human:lindenmann"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Approved everything"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   }
+  },
+  {
+   "name": "forged-verdict-history",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "ledger": {},
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Looks good"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   }
+  },
+  {
+   "name": "verified-verdict-history",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Status review -> done"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Status review -> done"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "verified-looks-good-history",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "agent-verdict-human-history",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "agent",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "agent",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Looks good"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   }
+  },
+  {
+   "name": "unrelated-history-with-verified-verdict",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Marked c2 as won't do"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Marked c2 as won't do"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   }
+  },
+  {
+   "name": "wrong-step-with-verified-wont",
+   "rule": "Incoming one-sided human history requires a matching verified decision",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c2",
+      "text": "Order dessert (B)",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "wont_nonce": "n1",
+      "by": "human:lindenmann",
+      "wont_mac": "v1-eca8446b86a5373af492"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Marked c3 as won't do"
+     }
+    ],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c2": "v1-eca8446b86a5373af492"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c2",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "text": "Order dessert (B)",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-eca8446b86a5373af492",
+      "by": "human:lindenmann"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Marked c3 as won't do"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   }
+  },
+  {
+   "name": "history-reattribution-survives-round-trip",
+   "rule": "History re-attribution is idempotent; base/shared claims are not new",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Looks good"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "(synced, not verified here) Looks good"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   }
+  },
+  {
+   "name": "base-human-history-unchanged",
+   "rule": "History re-attribution is idempotent; base/shared claims are not new",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "shared-human-history-unchanged",
+   "rule": "History re-attribution is idempotent; base/shared claims are not new",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "human:lindenmann",
+      "text": "Looks good"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
    }
   }
  ],

@@ -221,7 +221,7 @@ def test_history_and_evidence_never_lost():
         up(base, T3, history=base["history"] + [h(T2, "y")]),
         NOW,
     )
-    assert texts(m) == ["created", "y", "x"]
+    assert texts(m) == ["created", "(synced, not verified here) y", "(synced, not verified here) x"]
 
 
 def test_sessions_cap_keeps_newest():
@@ -373,7 +373,10 @@ def test_property_symmetry_purity_and_no_loss(seed):
     assert m["schema"] != "orch.ticket/1" or list(SCHEMA.iter_errors(m)) == []
     have = {(h["at"], h["by"], h["text"]) for h in m["history"]}
     for side in (a, b):  # history is never dropped
-        assert {(h["at"], h["by"], h["text"]) for h in side["history"]} <= have
+        for h in side["history"]:
+            assert (h["at"], h["by"], h["text"]) in have or (
+                h["at"], "agent:sync", "(synced, not verified here) " + h["text"]
+            ) in have
     one = merge_ticket(base, a, a, NOW)  # merging a side with itself changes nothing but the revision
 
     def norm(t):  # history and the order of added items come back in a fixed order
@@ -1099,3 +1102,23 @@ def test_the_merge_output_validates_against_the_schema_with_verdicts():
     assert list(SCHEMA.iter_errors(out)) == []
     assert list(SCHEMA.iter_errors({**out, "verdicts": [{**A, "mac": "bad"}]})) != []
     assert list(SCHEMA.iter_errors({**out, "verdicts": [A] * 9})) != []
+
+
+@pytest.mark.parametrize("decision", ["wont", "verdict"])
+def test_history_verifier_failure_is_closed(decision):
+    line = {"at": T2, "by": "human:A", "text": "Looks good"}
+    peer = tk(status="done", verdicts=[{"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}])
+    if decision == "wont":
+        peer = tk(checklist=[signed(_step(**WONT))])
+        line["text"] = "Marked c1 as won't do"
+    peer["history"] = [line]
+
+    def boom(*args):
+        raise RuntimeError("unavailable")
+
+    for a, b in ((tk(), peer), (peer, tk())):
+        out = merge_ticket(tk(), a, b, NOW, boom, boom)
+        assert out["history"] == [
+            {**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}
+        ]
+        assert list(SCHEMA.iter_errors(out)) == []

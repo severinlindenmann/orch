@@ -428,6 +428,29 @@ def _verdicts(ctx, base, a, b, out):
     return sorted(keep, key=lambda e: e["mac"])
 
 
+def _verified_history(ctx, h, ticket):
+    """Match only decision history, never arbitrary prose accompanying a valid MAC.
+
+    MACs authenticate decisions, not history authors or timestamps. The existing decision
+    verifiers are the sole authority; matching text only associates a line with that decision.
+    """
+    text = h.get("text")
+    for check in ticket.get("checklist", []):
+        if text in (
+            f"Marked {check['id']} as won't do",
+            f"Marked as won't do: {check.get('text', '')}",
+        ) and _person_wont(ctx, check):
+            return True
+    return (
+        text in ("Status review -> done", "Looks good")
+        and ticket.get("status") == "done"
+        and any(
+            e.get("kind") == "person" and ctx.verdict_state(e, ticket) == "current"
+            for e in ticket.get("verdicts", [])
+        )
+    )
+
+
 def _merge(base, a, b, now, person=None, verdict=None):
     ctx = _Ctx(a, b, now, person, verdict)
     # the same id added on both sides with different content: the newer side's item is renumbered
@@ -538,8 +561,25 @@ def _merge(base, a, b, now, person=None, verdict=None):
         ext = out.setdefault("ext", {})
         sync = ext["sync"] if isinstance(ext.get("sync"), dict) else ext.setdefault("sync", {})
         sync["old_keys"] = sorted(set(old_keys_of(out)) | ctx.old_keys)
+    # New, one-sided human claims require a verified decision. Treat both sides
+    # alike so swapping merge inputs produces identical bytes. Base/shared lines stay.
+    histories = [{_canon(h) for h in t.get("history", [])} for t in (base, a, b)]
+    incoming = (histories[1] ^ histories[2]) - histories[0]
+    lines = base.get("history", []) + a.get("history", []) + b.get("history", [])
+    # A returning re-attributed copy supersedes its original claim, including in
+    # base. Otherwise the history union would resurrect the human attribution.
+    carried = {_canon(h) for h in lines}
     hist = {}
-    for h in base.get("history", []) + a.get("history", []) + b.get("history", []):
+    for h in lines:
+        if (
+            str(h.get("by", "")).startswith("human:")
+            and (
+                (_canon(h) in incoming and not _verified_history(ctx, h, out))
+                or _canon({**h, "by": SYNC_BY, "text": "(synced, not verified here) " + h["text"]})
+                in carried
+            )
+        ):
+            h = {**h, "by": SYNC_BY, "text": "(synced, not verified here) " + h["text"]}
         hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via"), h.get("lost")])] = h
     old = {
         (h.get("text"), _canon(h["lost"]) if "lost" in h else "")
