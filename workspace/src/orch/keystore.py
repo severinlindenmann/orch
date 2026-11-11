@@ -575,8 +575,8 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
         for x in extra:
             if not set_name_ok(x):
                 raise Refused(f"The profile {pn} may not approve the variable {x}.")
-        # env names in `approved` are redundant with the duplicate check below (a set/files name equal to an env
-        # name is refused as "twice"); kept for clarity: effectively set/files names need `extra`.
+        # env names in `approved` are redundant with the duplicate check below (a set/files name equal to an
+        # env name is refused as "twice"); kept for clarity: effectively set/files names need `extra`.
         approved = {
             *(p.get("env") or {}),
             *extra,
