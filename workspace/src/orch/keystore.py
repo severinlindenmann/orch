@@ -54,28 +54,38 @@ ENV_DENY = frozenset(
     "BROWSER LESSOPEN".split()
 )
 ENV_DENY_PREFIX = (
-    "LD_",
-    "DYLD_",
-    "GIT_",
-    "ORCH_",
-    "PYTHON",
-    "PERL5",
-    "RUBY",
-    "NODE_",
-    "COR_PROFILER",
-    "CORECLR_",
-)
+    "LD_", "DYLD_", "PATH", "GIT_", "ORCH_", "PYTHON", "PERL", "RUBY", "NODE_", "BASH", "XDG_", "LESS",
+    "LUA_", "GCONV", "GLIBC", "COR_", "CORECLR", "DOTNET", "NPM_", "RUSTC", "CARGO_", "SSH_", "GPG_", "SUDO_",
+)  # fmt: skip
 ENV_DENY_SUFFIX = ("_OPTIONS",)
+ENV_DENY_CONTAINS = ("ASKPASS",)
 _ENV_DENY_UP = frozenset(
-    {*(v.upper() for v in ENV_DENY), "SHELLOPTS", "PS4", "PATHEXT", "COMSPEC", "BASHOPTS", "PROMPT_COMMAND"}
-)
+    {
+        *(v.upper() for v in ENV_DENY),
+        "SHELLOPTS", "PS4", "PATHEXT", "COMSPEC", "PROMPT_COMMAND", "VISUAL", "MANPAGER", "LOCPATH",
+        "TMPDIR", "TEMP", "TMP",
+    }
+)  # fmt: skip
+SET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
 def env_denied(var: str) -> bool:
-    """Loader, interpreter, shell, git and proxy variables a profile may never set (case-insensitive: Windows
-    folds names). The ONE check, at profile set AND on every read and run."""
+    """Control variables a profile may never name in env, files or set (case-insensitive: Windows folds
+    names): loader, interpreter, shell, git, ssh, editor, proxy, home/config locations. The ONE hard-deny,
+    at profile set AND on every read and run."""
     up = var.upper()
-    return up in _ENV_DENY_UP or up.startswith(ENV_DENY_PREFIX) or up.endswith(ENV_DENY_SUFFIX)
+    return (
+        up in _ENV_DENY_UP
+        or up.startswith(ENV_DENY_PREFIX)
+        or up.endswith(ENV_DENY_SUFFIX)
+        or any(x in up for x in ENV_DENY_CONTAINS)
+    )
+
+
+def set_name_ok(var: str) -> bool:
+    """A plain `set` variable: structural (upper-case letters, digits, underscore, starting with a letter) AND
+    not a control variable. Follow-up: only names the profile declares or a person approves (`extra`)."""
+    return isinstance(var, str) and bool(SET_NAME_RE.fullmatch(var)) and not env_denied(var)
 
 
 RECORDS = frozenset({"relay", "dev"})  # allowlist: the other files of the key folder have other owners
@@ -556,7 +566,7 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             for var, tgt in m.items():
                 if not isinstance(var, str) or not ENV_RE.match(var):
                     raise Refused(f"The profile {pn} names an unusable variable.")
-                if env_denied(var):
+                if env_denied(var) or (sect == "set" and not set_name_ok(var)):
                     raise Refused(f"The profile {pn} may not set the variable {var}.")
                 if var.upper() in seen:
                     raise Refused(f"The profile {pn} uses the variable {var} twice.")

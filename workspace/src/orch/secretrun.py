@@ -373,7 +373,10 @@ def _verified(root, name):
     if not hp.profile_verified(root, name, profile):
         raise Refused("Refused: " + hp.PROFILE_CHANGED + ".")
     for sect in ("env", "files", "set"):
-        if any(keystore.env_denied(v) for v in profile.get(sect, {})):
+        if any(
+            keystore.env_denied(v) or (sect == "set" and not keystore.set_name_ok(v))
+            for v in profile.get(sect, {})
+        ):
             raise Refused("Refused: this key profile sets a variable orch does not allow.")
     return profile
 

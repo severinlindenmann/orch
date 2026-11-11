@@ -886,3 +886,7 @@ def test_an_unreadable_profiles_file_refuses_the_save(tws):
 def test_loader_variables_are_refused_in_any_case(tws, var):
     with pytest.raises(Refused):
         seed_profiles(tws, {"p": {"env": {"A": "k"}, "set": {var: "x"}}})
+
+
+def test_a_normal_setting_name_is_accepted(tws):
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}, "set": {"DATABRICKS_HOST": "https://h.test"}}})
