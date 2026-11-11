@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
-from orch import procs, syncgate, tickets
+from orch import humanproof, procs, syncgate, tickets
 from orch.errors import Refused as CoreRefused
 
 from . import cli, incoming, merge, paths, repo, scan
@@ -227,6 +227,14 @@ def held_ticket(root, path, doc, local, remote):
     return doc
 
 
+def merge_document(root, path, base, local, remote, now):
+    doc = merge.merge_ticket(base or None, remote, local or remote, now=now,
+                             person=humanproof.wont_verifier(root))
+    if doc is None:
+        raise repo.Refused(f'Ticket cannot be merged: {path}')
+    return held_ticket(root, path, doc, local, remote)
+
+
 def merged_tree(root, head, remote, index, now):
     result = repo.git(root, 'merge-tree', '--write-tree', '--no-messages', '-z',
                       '--allow-unrelated-histories', head, remote, allowed_codes=(0, 1))
@@ -245,6 +253,7 @@ def merged_tree(root, head, remote, index, now):
     base_result = repo.git(root, 'merge-base', head, remote, allowed_codes=(0, 1))
     base = entries(root, base_result.stdout.decode().strip() or None)
     ours, theirs = entries(root, head), entries(root, remote)
+    merges = {}
     for path in sorted(theirs):
         if not (paths.TICKET.fullmatch(path) or path == 'ticket-counter.json'):
             continue
@@ -255,19 +264,18 @@ def merged_tree(root, head, remote, index, now):
         if path == 'ticket-counter.json':
             doc = merge.merge_counter(b, a, t)
         else:
-            doc = merge.merge_ticket(b or None, t, a or t, now=now)
-            if doc is None:
-                raise repo.Refused(f'Ticket cannot be merged: {path}')
-            doc = held_ticket(root, path, doc, a, t)
+            # Speculative tree only: apply repeats this merge under the ticket lock.
+            doc = merge_document(root, path, b, a, t, now)
+            merges[path] = {'base': b, 'local': a, 'remote': t, 'now': now}
         document(path, encoded(doc))
         put(root, index, path, encoded(doc))
     tree = repo.git(root, 'write-tree', index=index).stdout.decode().strip()
     validate_tree(root, tree)
     deletions(ours, entries(root, tree))
-    return tree
+    return tree, merges
 
 
-def apply(root, old, new, state):
+def apply(root, old, new, state, merges=None):
     before, after = entries(root, old), entries(root, new)
     for path in sorted(before.keys() | after.keys()):
         if before.get(path) == after.get(path):
@@ -279,11 +287,19 @@ def apply(root, old, new, state):
             if p.exists() and (not stat.S_ISREG(p.lstat().st_mode) or p.stat().st_nlink != 1):
                 raise repo.Refused(f'{path}: busy')
             current = p.read_bytes() if p.exists() else None
-            if current == data:
-                continue  # an interrupted apply already replaced this path
-            if current != previous or (p.exists() and not p.is_file()):
+            if current not in (previous, data) or (p.exists() and not p.is_file()):
                 state['skipped'].append(f'{path}: busy')
                 raise repo.Refused(f'{path}: busy')
+            if path in (merges or {}):
+                inputs = merges[path]
+                # On recovery an already-applied file uses the original local input.
+                local = incoming.strict_load(current or b'{}') if current == previous else inputs['local']
+                checked = encoded(merge_document(root, path, inputs['base'], local,
+                                                inputs['remote'], inputs['now']))
+                if checked != data:
+                    raise repo.Refused(f'{path}: busy')
+            if current == data:
+                continue  # an interrupted apply already replaced this path
             try:
                 if data is None:
                     p.unlink(missing_ok=True)
@@ -368,7 +384,9 @@ def _run(root, reason, now, remote_allowed):
                     if pending and not offline:
                         if pending['old'] == head and pending.get('url') == url and pending.get('remote') == remote:
                             validate_tree(root, pending['new'])
-                            apply(root, head, pending['new'], state)
+                            if 'merges' not in pending:
+                                raise repo.Refused('Pending merge needs a fresh check: busy')
+                            apply(root, head, pending['new'], state, pending['merges'])
                             head = pending['new']
                         repo.safe(root, 'run/sync/pending.json').unlink()
                     tree = stage(root, head, index, state)
@@ -380,15 +398,18 @@ def _run(root, reason, now, remote_allowed):
                 if network and not offline:
                     first = state.get('remote_url') != url
                     parent = commit(root, tree, [], now) if first else head
+                    merges = {}
                     if remote and remote != parent:
-                        tree = merged_tree(root, parent, remote, index, now)
+                        tree, merges = merged_tree(root, parent, remote, index, now)
                         new = commit(root, tree, [parent, remote], now)
                     else:
                         new = parent
                     if new != head:
-                        write(root, 'run/sync/pending.json', encoded({'old': head, 'new': new, 'url': url, 'remote': remote}))
+                        write(root, 'run/sync/pending.json', encoded({
+                            'old': head, 'new': new, 'url': url, 'remote': remote, 'merges': merges,
+                        }))
                         with syncgate.hold(root):
-                            apply(root, head, new, state)
+                            apply(root, head, new, state, merges)
                         repo.safe(root, 'run/sync/pending.json').unlink()
                         head = new
                 if not network:

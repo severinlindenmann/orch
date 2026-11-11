@@ -1,3 +1,4 @@
+import contextlib
 import json
 import subprocess
 
@@ -177,9 +178,9 @@ def test_agent_write_between_commit_apply(machines, monkeypatch):
     save(a, ART, b'remote edit')
     success(a)
     apply = step.apply
-    def agent_write(root, old, new, state):
+    def agent_write(root, old, new, state, merges=None):
         save(root, ART, b'agent edit')
-        return apply(root, old, new, state)
+        return apply(root, old, new, state, merges)
     monkeypatch.setattr(step, 'apply', agent_write)
     tip = remote_sha(bare)
     assert 'busy' in run(b)['last_error']
@@ -482,3 +483,100 @@ def test_broken_tracked_ticket_kept_on_remote(machines, broken, artifact_change)
     expected.pop('revision', None)
     assert received == expected
     assert (b / '.orch' / ART).read_bytes() == b'original artifact'
+
+
+def signed_wont(root, monkeypatch):
+    from orch import humanproof
+
+    # Use the real key, MAC and current-ledger helpers in an isolated guarded home.
+    monkeypatch.setattr(humanproof, 'guarded_home', lambda root: root.parent / 'proof-home')
+    humanproof.human_key(root)
+    check = {'id': 'c1', 'text': 'Email finance', 'done': False, 'evidence': [],
+             'wont_do': True, 'reason': 'Not needed', 'wont_nonce': 'test-decision',
+             'by': 'human:Pat'}
+    check['wont_mac'] = humanproof.wont_sign(root, 't_abc123', check)
+    assert check['wont_mac']
+    assert humanproof.wont_verifier(root)(check, 't_abc123')
+    return check
+
+
+@pytest.mark.parametrize('mac', ['valid', 'forged', 'absent'])
+@pytest.mark.parametrize('side', ['local', 'remote'])
+def test_synced_wont_do_requires_receivers_current_mac(machines, monkeypatch, mac, side):
+    a, b, _ = both(machines)
+    check = signed_wont(b, monkeypatch)
+    if mac == 'forged':
+        check['wont_mac'] = 'forged'
+    elif mac == 'absent':
+        check.pop('wont_mac')
+    edit(a, title='Remote change')
+    edit(b, note='Local change')
+    edit(b if side == 'local' else a, checklist=[check])
+    success(a)
+    sync_apply, merge_document, write = step.tickets.sync_apply, step.merge_document, step.write
+    active, checked = {}, {}
+
+    @contextlib.contextmanager
+    def locked(root, tid):
+        with sync_apply(root, tid):
+            token = object()
+            active[tid] = token
+            try:
+                yield
+            finally:
+                active.pop(tid)
+
+    def merged(root, path, *args):
+        doc = merge_document(root, path, *args)
+        if path == TICKET and 't_abc123' in active:
+            checked['lock'] = active['t_abc123']
+            checked['data'] = step.encoded(doc)
+        return doc
+
+    def written(root, path, data):
+        if root == b and path == TICKET:
+            assert checked['lock'] is active['t_abc123']
+            assert checked['data'] == data
+            checked['written'] = True
+        return write(root, path, data)
+
+    monkeypatch.setattr(step.tickets, 'sync_apply', locked)
+    monkeypatch.setattr(step, 'merge_document', merged)
+    monkeypatch.setattr(step, 'write', written)
+    success(b)
+    assert checked['written']
+    result = load(b)
+    assert bool(result['checklist'][0].get('wont_do')) == (mac == 'valid')
+    assert result['title'] == 'Remote change' and result['note'] == 'Local change'
+    assert (b / '.orch' / TICKET).read_bytes() == repo.git(b, 'show', 'HEAD:' + TICKET).stdout
+
+
+@pytest.mark.parametrize('recover', [False, True])
+def test_ledger_changes_before_apply_fail_closed(machines, monkeypatch, recover):
+    from orch import humanproof
+
+    a, b, bare = both(machines)
+    check = signed_wont(b, monkeypatch)
+    edit(a, checklist=[check], title='Remote change')
+    success(a)
+    before, head, tip = (b / '.orch' / TICKET).read_bytes(), step.oid(b, 'HEAD'), remote_sha(bare)
+    apply = step.apply
+
+    def revoke(root, old, new, state, merges=None):
+        assert humanproof._ledger_set(root, 't_abc123', 'c1', None)
+        if recover:
+            raise RuntimeError('crash')
+        return apply(root, old, new, state, merges)
+
+    with monkeypatch.context() as m:
+        m.setattr(step, 'apply', revoke)
+        if recover:
+            with pytest.raises(RuntimeError, match='crash'):
+                run(b)
+        else:
+            assert 'busy' in run(b)['last_error']
+    if recover:
+        assert 'busy' in run(b)['last_error']
+    assert (b / '.orch' / TICKET).read_bytes() == before
+    assert step.oid(b, 'HEAD') == head and remote_sha(bare) == tip
+    assert not (b / '.orch/run/sync/pending.json').exists()
