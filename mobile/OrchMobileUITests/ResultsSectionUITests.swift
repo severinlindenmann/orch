@@ -37,6 +37,7 @@ final class ResultsSectionUITests: XCTestCase {
         let more = app.staticTexts["More on the computer"]
         for _ in 0..<4 where !more.isHittable { app.swipeUp() }
         XCTAssertTrue(more.exists, "closing summary of a trimmed result")
-        XCTAssertTrue(app.buttons["Invoice list"].exists || app.staticTexts["Invoice list"].exists, "link block label shown")
+        // A SwiftUI Link is exposed as a link element.
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Invoice list")).firstMatch.exists, "link block label shown")
     }
 }
