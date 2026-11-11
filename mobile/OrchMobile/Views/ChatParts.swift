@@ -270,7 +270,8 @@ struct MessageBubble: View {
     let quotedText: String?
     let onRetry: (() -> Void)?
     let onDiscard: (() -> Void)?
-    var onOpenArtifact: (String) -> Void
+    var onOpenArtifact: (String) -> Void = { _ in }
+    var attachments: [TicketSnapshot.Attachment] = []
     var onReply: (() -> Void)? = nil
     /// "Try again later" next to the clock while the relay is throttling this message.
     var waitNote: String? = nil
@@ -289,7 +290,9 @@ struct MessageBubble: View {
                 if let label = item.label {
                     Text(label).themeFont(12, .semibold).foregroundStyle(label == "DID NOT WORK" ? Theme.danger : Theme.brand)
                 }
-                if !item.text.isEmpty { Text(item.text).themeFont(17).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                if !item.text.isEmpty {
+                    messageText.themeFont(17).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
                 ForEach(item.attachments) { attachment in
                     if attachment.kind == .image, BlobID.isValid(attachment.blobId) {
                         Button { onOpenArtifact(attachment.blobId) } label: {
@@ -348,6 +351,19 @@ struct MessageBubble: View {
             if !mine { Spacer(minLength: ChatBubbleLayout.agentTrailingSpace(for: typeSize)) }
         }
     }
+    @ViewBuilder private var messageText: some View {
+        if item.side == .them && conversationId.ticket != nil {
+            Text(ArtifactMentions.attributed(item.text, attachments: attachments))
+                .environment(\.openURL, OpenURLAction { url in
+                    guard let id = ArtifactMentions.attachmentId(from: url) else { return .systemAction }
+                    onOpenArtifact(id)
+                    return .handled
+                })
+        } else {
+            Text(item.text)
+        }
+    }
+
     private static func symbol(_ kind: String) -> String {
         switch kind.lowercased() {
         case "html", "page", "text/html": "globe"
