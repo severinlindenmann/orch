@@ -127,6 +127,11 @@
               "pid": {
                 "type": "integer",
                 "minimum": 2
+              },
+              "token_hash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "Set by orch at start: sha256 of the job's write token (never the token). Not accepted from a program."
               }
             }
           }
@@ -320,6 +325,10 @@
                 ],
                 "default": "out"
               },
+              "capped": {
+                "const": true,
+                "description": "Set by orch on the one 'more events were left out' line. Not accepted from a program."
+              },
               "text": {
                 "type": "string",
                 "maxLength": 500,
@@ -435,6 +444,16 @@
           {
             "required": [
               "command"
+            ]
+          },
+          {
+            "required": [
+              "token_hash"
+            ]
+          },
+          {
+            "required": [
+              "capped"
             ]
           }
         ]
