@@ -64,7 +64,7 @@ def test_a_start_that_hangs_twice_is_reported_and_not_started_a_third_time(
     assert len(calls.read_text().splitlines()) == 2  # one fresh retry, never a loop
     hist = [h["text"] for h in tickets.load(proj, tid)["history"]]
     assert any("error" in h or "got going" in h for h in hist), hist  # a person sees it did not work
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) is None
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) is None
 
 
 @pytest.mark.parametrize("sid", ["../../etc/passwd", "a/b", "/abs", ".hidden", ""])

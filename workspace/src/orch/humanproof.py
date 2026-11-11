@@ -282,7 +282,13 @@ SAFE_DEFAULTS = {
     "conn.allow": False,
 }  # live_session and share_counts stay at the owner defaults (3C, I5): their records are dropped
 RESET_NOTICE = "orch reset its protection on this computer; please turn on again what you need."
-_SECRET_FILES = ("proofs-used.json", "delivered.json", "handoffs.json")
+_SECRET_FILES = (
+    "proofs-used.json",
+    "delivered.json",
+    "handoffs.json",
+    "wont.json",
+    "verdict.json",
+)  # the ledgers go with the key they were signed with
 
 
 def _check_dir(p: Path) -> None:
@@ -1172,31 +1178,44 @@ LEDGER_DAMAGED = (
 )
 
 
-def _ledger_read(root: Path) -> dict | None:
-    """The ledger entries: {} when there is none yet, None when it cannot be trusted (damaged or loose)."""
+def _ledger_load(root: Path, name: str) -> dict | None:
+    """The entries of ledger file `name`: {} when there is none yet, None when it cannot be trusted (damaged
+    or loose). ONE reader for every ledger (wont.json, verdict.json)."""
     try:
         d = key_dir(root, create=False)
-        data = _read_json(root, d / LEDGER, {"entries": {}})
-    except (Refused, OSError):
-        return None
+        try:
+            data = json.loads(_read_guarded(d / name))
+        except FileNotFoundError:
+            data = {"entries": {}}
+    except (Refused, OSError, ValueError):  # incl. LooseFile: a loose or damaged ledger vouches for nobody,
+        return None  # and a reader never resets protection (no DoS by chmod)
     ent = data.get("entries") if isinstance(data, dict) else None
     return ent if isinstance(ent, dict) else None
 
 
-def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
-    """Make `mac` the current entry. A damaged ledger is NEVER overwritten (that would wipe every other
-    entry): returns False and keeps the file."""
+def _ledger_put(root: Path, name: str, schema: str, key: str, mac: str | None) -> bool:
+    """Make `mac` the current entry of `key` in ledger file `name`. A damaged ledger is NEVER
+    overwritten (that
+    would wipe every other entry): returns False and keeps the file. ONE writer for every ledger."""
     try:
         d = key_dir(root)
         with _key_lock(d):
-            ent = _ledger_read(root)
+            ent = _ledger_load(root, name)
             if ent is None:
                 return False
-            ent[f"{ticket}:{check}"] = mac
-            _write_private(d / LEDGER, json.dumps({"schema": "orch.wont-ledger/1", "entries": ent}))
+            ent[key] = mac
+            _write_private(d / name, json.dumps({"schema": schema, "entries": ent}))
         return True
     except (Refused, OSError):
         return False
+
+
+def _ledger_read(root: Path) -> dict | None:
+    return _ledger_load(root, LEDGER)
+
+
+def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
+    return _ledger_put(root, LEDGER, "orch.wont-ledger/1", f"{ticket}:{check}", mac)
 
 
 def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
@@ -1259,6 +1278,192 @@ def wont_verifier(root: Path, relay_ok=None):
         return hmac.compare_digest(mac, current) and wontdo_is_human(key, ws, ticket, decision, mac, False)
 
     return person
+
+
+# ------------------------------------------------------------------------------------------- signed verdict
+
+# A ticket counts as Done on this machine only when it carries a verdict entry whose MAC is this core's own
+# verdict1 MAC over the ticket's current state AND is the CURRENT entry of this core's verdict ledger
+# (keys/<ws>/verdict.json, per ticket id the current MAC, null = tombstone). Every other raw "done" is Review.
+# Decided here (verdict_ok), applied in ONE read path (tickets._effective) and ONE write guard
+# (tickets._write).
+# Leaving Done needs no proof (more work, never less): the core tombstones the entry on every non-done write
+# and whenever it reads a non-done ticket.
+VERDICT_LEDGER = "verdict.json"
+VERDICT_MAX = 8  # verdict entries kept on one ticket
+# What a stored entry holds. ONE source of truth: the sync merge imports it (a test fails if it keeps a copy).
+VERDICT_FIELDS = ("kind", "nonce", "mac")
+VERDICT_KINDS = ("person", "agent")
+
+VERDICT_LEDGER_DAMAGED = (
+    "orch's record of your Done decisions is damaged, so this was not saved. Nothing was changed. "
+    "Ask your admin to reset orch's protection on this computer, then decide again."
+)
+VERDICT_NEEDED = "Done needs your OK. Click Looks good in the dashboard."
+
+
+def verdict_checks(ticket: dict) -> str:
+    """sha256 hex of WHAT was accepted: every step's id, text, done and won't-do flags. A later change of the
+    checklist makes an old verdict stop verifying. Title, note, summary, outcome, history, evidence are not
+    bound (a person may rename a Done ticket; the agent writes its summary after finishing)."""
+    rows = [
+        [c.get("id"), c.get("text"), c.get("done") is True, c.get("wont_do") is True]
+        for c in ticket.get("checklist") or []
+    ]
+    return hashlib.sha256(_canon(rows).encode()).hexdigest()
+
+
+def verdict_record(ticket: dict, entry: dict) -> dict:
+    """The record the MAC covers. `status` is always "done" (domain separation: a future signed status gets
+    its own prefix)."""
+    return {
+        "status": "done",
+        "kind": entry.get("kind"),
+        "checks": verdict_checks(ticket),
+        "nonce": entry.get("nonce"),
+    }
+
+
+def verdict_mac(key: bytes, workspace: str, ticket: str, record: dict) -> str:
+    """verdict1.<workspace id>.<ticket id>.<canonical record {status, kind, checks, nonce}>. Binds WHERE it
+    belongs (another ticket or workspace) and WHAT was accepted (the checklist); the nonce makes equal
+    decisions differ. FRESHNESS comes from the ledger, not from the MAC."""
+    return _b64u(
+        hmac.new(key, f"verdict1.{workspace}.{ticket}.{_canon(record)}".encode(), hashlib.sha256).digest()
+    )
+
+
+def verdict_is_human(
+    key: bytes, workspace: str, ticket_id: str, ticket: dict, entry, ledger_current
+) -> str | None:
+    """ "current" when `entry` carries this key's MAC over the ticket's state AND that MAC is the
+    current ledger
+    entry; "stale" when the MAC is ours but no longer current (replayed, tombstoned, superseded); None when it
+    is not ours at all (another machine, forged, the checklist changed). Never raises."""
+    try:
+        if not isinstance(entry, dict) or entry.get("kind") not in VERDICT_KINDS:
+            return None
+        mac, nonce = entry.get("mac"), entry.get("nonce")
+        if not (isinstance(mac, str) and mac and isinstance(nonce, str) and nonce):
+            return None
+        mine = hmac.compare_digest(mac, verdict_mac(key, workspace, ticket_id, verdict_record(ticket, entry)))
+        if not mine:
+            return None
+        if isinstance(ledger_current, str) and hmac.compare_digest(mac, ledger_current):
+            return "current"
+        return "stale"
+    except Exception:  # noqa: BLE001 - a malformed ticket is nobody's verdict (fail closed)
+        return None
+
+
+def verdict_ledger(root: Path) -> dict | None:
+    """The verdict ledger entries ({} when none yet, None when damaged or loose)."""
+    return _ledger_load(root, VERDICT_LEDGER)
+
+
+def _verdict_ledger_put(root: Path, tid: str, mac: str | None) -> bool:
+    return _ledger_put(root, VERDICT_LEDGER, "orch.verdict-ledger/1", tid, mac)
+
+
+def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
+    """A fresh verdict entry for the ticket as it is NOW (its checklist must be final), recorded as the
+    CURRENT ledger entry. No key, no workspace id or a damaged ledger = Refused: never a half-signed Done."""
+    from orch import addons
+
+    if kind not in VERDICT_KINDS:
+        raise Refused(VERDICT_NEEDED)
+    tid = ticket.get("id")
+    try:
+        ws = addons.workspace_id(root, create=False)
+        key = human_key(root, create=False)
+    except (Refused, OSError):
+        raise Refused(VERDICT_LEDGER_DAMAGED) from None
+    if not ws or not isinstance(tid, str):
+        raise Refused(VERDICT_LEDGER_DAMAGED)
+    entry = {"kind": kind, "nonce": secrets.token_hex(8)}
+    entry["mac"] = verdict_mac(key, ws, tid, verdict_record(ticket, entry))
+    if not _verdict_ledger_put(root, tid, entry["mac"]):
+        raise Refused(VERDICT_LEDGER_DAMAGED)
+    return entry
+
+
+def verdict_forget(root: Path, tid: str, ledger: dict | None = None) -> bool:
+    """Tombstone this ticket's ledger entry (it left Done, or the file was deleted). Nothing to do when there
+    is no live entry; a damaged ledger is left alone (it vouches for nobody). True when it wrote one."""
+    ent = verdict_ledger(root) if ledger is None else ledger
+    if ent and ent.get(tid) is not None:
+        return _verdict_ledger_put(root, tid, None)
+    return False
+
+
+class VerdictChecker:
+    """Asks "does this raw done ticket carry a current verdict?" The workspace id and key are read once; the
+    ledger is read at each ask (a fresh read), or once when `snapshot` (one listing)."""
+
+    def __init__(self, root: Path, snapshot: bool = False):
+        from orch import addons
+
+        self.root = root
+        self._ctx = None
+        self._tried = False
+        self._snapshot = snapshot
+        self._ledger = None
+        self._have_ledger = False
+        self._addons = addons
+
+    def _context(self):
+        if not self._tried:
+            self._tried = True
+            try:
+                ws = self._addons.workspace_id(self.root, create=False)
+                self._ctx = (ws, human_key(self.root, create=False)) if ws else None
+            except (Refused, OSError):
+                self._ctx = None
+        return self._ctx
+
+    def ledger(self) -> dict | None:
+        if self._snapshot and self._have_ledger:
+            return self._ledger
+        led = verdict_ledger(self.root)
+        if self._snapshot:
+            self._ledger, self._have_ledger = led, True
+        return led
+
+    def state(self, entry, ticket: dict) -> str | None:
+        """ "current" | "stale" | None for one entry of `ticket` (see verdict_is_human)."""
+        ctx = self._context()
+        tid = ticket.get("id") if isinstance(ticket, dict) else None
+        if ctx is None or not isinstance(tid, str):
+            return None
+        led = self.ledger()
+        if led is None:
+            return (
+                None  # damaged or loose ledger: nobody is vouched for, and nothing is judged "stale" either
+            )
+        return verdict_is_human(ctx[1], ctx[0], tid, ticket, entry, led.get(tid))
+
+    def ok(self, ticket: dict) -> bool:
+        """True only when some entry is current. Missing, loose or damaged ledger, no key, no workspace id, a
+        non-list `verdicts`, any error = False."""
+        try:
+            entries = ticket.get("verdicts")
+            if not isinstance(entries, list) or not entries:
+                return False
+            return any(self.state(e, ticket) == "current" for e in entries)
+        except Exception:  # noqa: BLE001 - fail closed
+            return False
+
+
+def verdict_ok(root: Path, ticket: dict) -> bool:
+    return VerdictChecker(root).ok(ticket)
+
+
+def verdict_verifier(root: Path):
+    """`verdict(entry, ticket) -> "current" | "stale" | None` for the sync merge: the ledger is read at
+    each call,
+    so the sync caller must read, merge and write under the ticket's lock. Fails closed (no key, no workspace
+    id, no readable ledger = None for everything)."""
+    return VerdictChecker(root).state
 
 
 def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:

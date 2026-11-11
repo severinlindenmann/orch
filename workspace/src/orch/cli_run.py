@@ -382,7 +382,7 @@ def dispatch(args, root: Path) -> bool:
         _status(args, root)
     elif sub == "session":
         name = args.agent or adapters.chosen(root)
-        sid = tickets.sessions_for(tickets.load(root, tid), name, runs.host())
+        sid = tickets.sessions_for(root, tid, tickets.load(root, tid), name, runs.host())
         _out(args, {"agent": name, "session": sid}, sid or "")
     elif sub == "argv":
         prompt = Path(args.prompt_file).read_text(encoding="utf-8") if args.prompt_file else None

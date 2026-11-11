@@ -223,7 +223,9 @@
         "coverage",
         "items",
         "inventory",
-        "sharing"
+        "sharing",
+        "unavailable",
+        "complete"
       ],
       "additionalProperties": false,
       "properties": {
@@ -318,6 +320,17 @@
               "description": "Days waiting to be sent (admin server offline)."
             }
           }
+        },
+        "unavailable": {
+          "type": "array",
+          "items": {
+            "$ref": "activity.schema.json#/$defs/read_status"
+          },
+          "description": "Runs (or the record's meta, run null) that could not be read in full (activity.md, Integrity); empty when everything was read."
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "false when `unavailable` is not empty: the counts are partial."
         }
       }
     },
