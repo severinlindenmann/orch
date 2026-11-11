@@ -350,4 +350,3 @@ def stray_tmux(under: str) -> list[str]:
             if (m := _TMUX.search(line)) and m.group(2).startswith(under)
         }
     )
-
