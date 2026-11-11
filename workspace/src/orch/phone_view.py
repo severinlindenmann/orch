@@ -386,15 +386,22 @@ def _has_secret(data: bytes) -> bool:
 def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
     """True when the file holds a stored key value of the keystore (the value hider: exact needles in all the
     forms it knows). Read as _scan read it (`texts`: the BOM-decoded text of a UTF-16/32 file, else the UTF-8
-    text), as raw bytes, and with CR removed (a CRLF copy of a multi-line value); plus the lenient UTF-16
-    readings of a file without BOM. A hider that can not be built: True (fail closed)."""
-    h = phone_results.value_hider(root)
-    if h is None:
+    text), as raw bytes, with CR removed, NUL-stripped (UTF-16/32 text in a picture's text chunk), as lenient
+    UTF-16/32 readings, and cleaned and NFKC-normalized (invisible characters, fullwidth forms). A hider that
+    can not be built or fails: True (fail closed)."""
+    try:
+        h = phone_results.value_hider(root)
+        if h is None:
+            return True
+        more = [data[k:].decode(c, "ignore") for c in ("utf-16-le", "utf-16-be") for k in (0, 1)]
+        more += [data[k:].decode(c, "ignore") for c in ("utf-32-le", "utf-32-be") for k in range(4)]
+        more.append(data.replace(b"\x00", b"").decode("utf-8", "ignore"))
+        seen = list(dict.fromkeys(texts + more))
+        seen += [t.replace("\r", "") for t in seen if "\r" in t]
+        seen += [unicodedata.normalize("NFKC", _clean_full(t)) for t in list(seen)]
+        return h.hide_bytes(data) != data or any(h.hide_text(t) != t for t in dict.fromkeys(seen))
+    except Exception:  # noqa: BLE001 - never a failed view, never a pass
         return True
-    more = [data[k:].decode(c, "ignore") for c in ("utf-16-le", "utf-16-be") for k in (0, 1)]
-    seen = [t for t in dict.fromkeys(texts + more)]
-    seen += [t.replace("\r", "") for t in seen if "\r" in t]
-    return h.hide_bytes(data) != data or any(h.hide_text(t) != t for t in seen)
 
 
 def _scan(data: bytes, name: str) -> str:

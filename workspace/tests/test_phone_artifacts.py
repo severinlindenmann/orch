@@ -661,3 +661,28 @@ def test_the_needle_check_reads_the_file_the_way_the_scan_does(proj, new_ticket,
     body = f"the new one is {value}, rotate it\n".encode(codec)
     assert phone_view._gate(proj, tid, body, "notes.txt", None) is False
     assert phone_view._gate(proj, tid, "nothing here\n".encode(codec), "notes.txt", None) is True
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda v: v.encode("utf-32-le"),  # no BOM, inside a text-like file with NULs is unknown anyway
+        lambda v: "\u200b".join(v).encode(),  # zero-width characters between the letters
+        lambda v: v.translate({ord(c): ord(c) + 0xFEE0 for c in "0123456789"}).encode(),  # fullwidth digits
+    ],
+)
+def test_the_needle_check_sees_obfuscated_forms(proj, new_ticket, make):
+    value = "Xk93-pq7Lm-4521-zQ"
+    keystore.add(proj, "db-cred", "token", value)
+    tid = new_ticket("Needle forms")
+    assert phone_view._gate(proj, tid, make(f"the value is {value} ok"), "notes.txt", None) is False
+
+
+def test_a_failing_value_hider_refuses_only_that_file(proj, new_ticket, monkeypatch):
+    tid = new_ticket("Hider raises")
+
+    def boom(root):
+        raise OSError("keystore unreadable")
+
+    monkeypatch.setattr(phone_view.phone_results, "value_hider", boom)
+    assert phone_view._gate(proj, tid, b"nothing secret\n", "notes.txt", None) is False
