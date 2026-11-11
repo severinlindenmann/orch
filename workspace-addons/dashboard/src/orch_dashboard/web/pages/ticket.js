@@ -653,6 +653,38 @@ function ticketButton(label, cls, click, attrs = {}) {
   node.onclick = click;
   return node;
 }
+// "Review and bring back": a dialog shows exactly what the click approves (the tip, the count, the first
+// control paths; all made plain on the server) and sends back that same tip, count and path hash.
+function ticketBringBackDialog(t) {
+  const b = t.bring_back || {}, paths = array(b.paths).map(p => clean(p)), count = Number(b.control_paths) || 0;
+  const {d, actions} = dialog('Bring back this work?');
+  const more = Math.max(0, count - paths.length);
+  const body = [
+    h('p', {}, 'Tip ', h('code', {}, clean(String(b.tip || '').slice(0, 12)))),
+    h('p', {'data-key':'bring-back-count'}, count === 1 ? 'It changes 1 file that controls orch or git:' : count ? 'It changes ' + count + ' files that control orch or git:' : 'It changes no files that control orch or git.'),
+    paths.length ? h('ul', {className:'bring-back-paths', 'data-key':'bring-back-paths'}, paths.map(p => h('li', {}, h('code', {}, p)))) : null,
+    more ? h('p', {className:'meta'}, 'and ' + more + ' more') : null,
+  ].filter(Boolean);
+  const go = ticketButton('Bring back', 'primary', async () => {
+    if (go.disabled) return;
+    go.disabled = true;
+    const r = await act('copies.approve', {ticket:t.id, tip:b.tip, control_paths:b.control_paths, paths_hash:b.paths_hash});
+    window.orch.close(d);
+    window.orch.toast(r.ok ? 'Review submitted' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+  });
+  actions.append(go); d.append(...body, actions); window.orch.open(d);
+  return d;
+}
+function ticketBringBackRow(t) {
+  const b = t.bring_back;
+  if (b?.state !== 'waiting') return null;
+  const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask the agent to update', 'ghost sm', async () => {
+    const r = await act('copies.ask-update', {ticket:t.id});
+    window.orch.toast(r.ok ? 'Asked the agent to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+  }) : null;
+  return h('div', {className:'row', 'data-key':'bring-back'}, h('span', {}, 'Done · changes waiting'), h('span', {}, clean(b.reason)),
+    !snapshot && b.tip ? ticketButton('Review and bring back', 'outline sm', () => ticketBringBackDialog(t)) : null, ask);
+}
 let ticketHistoryTechnical = false;
 let ticketHistoryActor = 'All';
 function ticketHistoryWho(entry) {
@@ -905,7 +937,7 @@ function detail(t) {
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id}, h('header', {className:'stack ticket-heading'},
     parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
-    t.bring_back?.state === 'waiting' ? h('div', {className:'row'}, h('span', {}, 'Done · changes waiting'), h('span', {}, clean(t.bring_back.reason)), !snapshot && t.bring_back.tip ? ticketButton('Review and bring back', 'outline sm', async () => { if (!window.confirm(`Bring back tip ${t.bring_back.tip}? It touches ${t.bring_back.control_paths} control paths: ${t.bring_back.paths_summary || "none"}.`)) return; const r = await act('copies.approve', {ticket:t.id, tip:t.bring_back.tip, control_paths:t.bring_back.control_paths, paths_hash:t.bring_back.paths_hash}); window.orch.toast(r.ok ? 'Review submitted' : r.text || 'That did not work.', r.ok ? 'success' : 'error'); }) : null) : null,
+    ticketBringBackRow(t),
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), planQ ? null : openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && !planQ && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t), headerProof(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,

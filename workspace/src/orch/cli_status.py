@@ -34,6 +34,10 @@ def add_parsers(sub, common) -> None:
     for name in ("update", "ask-update", "review", "approve"):
         item = c.add_parser(name, parents=[common])
         item.add_argument("ticket")
+        if name == "approve":  # what the person was shown; compared with the copy as it is now
+            item.add_argument("--approve-tip", help=argparse.SUPPRESS)
+            item.add_argument("--control-paths", type=int, help=argparse.SUPPRESS)
+            item.add_argument("--paths-hash", help=argparse.SUPPRESS)
     cc = c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
     cc.add_argument("--trash", action="store_true", help=argparse.SUPPRESS)  # empty the trash (detached run)
     cc.add_argument("--background", action="store_true", help=argparse.SUPPRESS)  # sweep + trash, silent
@@ -189,13 +193,15 @@ def _copy_clean(args, root: Path) -> None:
         return
     if args.sub == "review":
         target, tip, paths = worktrees.approval_view(root, args.ticket)
-        summary = worktrees.control_summary(paths)
+        # Path names are the agent's: each one is shown as one plain line (no newlines, no fake quotes).
+        shown = [humanproof.part(p) for p in paths]
+        summary = worktrees.control_summary(shown)
         result = {
             "target": target,
             "tip": tip,
             "control_paths": len(paths),
             "paths_hash": target.rsplit(":", 1)[1],
-            "paths": paths[:5],
+            "paths": shown[:5],
             "paths_summary": summary,
         }
         text = f"Tip {tip}: {len(paths)} orch or git control paths." + (f" {summary}" if summary else "")
@@ -204,8 +210,9 @@ def _copy_clean(args, root: Path) -> None:
     if args.sub == "approve" or (args.sub == "retry" and getattr(args, "approve_tip", None)):
         target, tip, paths = worktrees.approval_view(root, args.ticket)
         count, digest = len(paths), target.rsplit(":", 1)[1]
-        if args.sub == "retry" and (
-            args.approve_tip != tip or args.control_paths != count or args.paths_hash != digest
+        shown = getattr(args, "approve_tip", None)
+        if (shown is not None or args.sub == "retry") and (
+            shown != tip or args.control_paths != count or args.paths_hash != digest
         ):
             raise Refused("The copy changed after it was shown. Review it again.")
         who = humanproof.person_by(
@@ -229,7 +236,7 @@ def _copy_clean(args, root: Path) -> None:
                 "title": humanproof.ticket_name(root, args.ticket),
                 "tip": tip,
                 "control_paths": count,
-                "paths": humanproof.part(worktrees.control_summary(paths)),
+                "paths": humanproof.part(worktrees.control_summary([humanproof.part(p) for p in paths])),
             },
         )
         if not who.startswith("human:"):

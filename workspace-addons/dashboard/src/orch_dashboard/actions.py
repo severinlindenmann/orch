@@ -569,7 +569,9 @@ def _copies_approve(a):
         or not re.fullmatch(r"[0-9a-f]{8}", a["paths_hash"])
     ):
         raise BadRequest("Review the copy again before bringing it back.")
-    return ["copy", "approve", tid, "--json"], [], []
+    # What the person saw travels with the click; the core compares it with the copy as it is now.
+    shown = ["--approve-tip", tip, "--control-paths", str(count), "--paths-hash", a["paths_hash"]]
+    return ["copy", "retry", tid, *shown, "--json"], [], []
 
 
 def _copies_retry(a):

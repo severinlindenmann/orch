@@ -60,6 +60,9 @@ def make(repo, i=0):
 
 def close(repo, tid, status="dropped"):
     tickets.set_status(repo, tid, status, "human:test")
+    if status == "done":
+        # Done records the reviewed tip and schedules a detached sweep (B13e); the tests run that sweep here.
+        worktrees.sweep(repo)
 
 
 def branches(repo):
@@ -1408,7 +1411,12 @@ def test_task_e_real_guard_round_trip(repo, monkeypatch):
     assert worktrees._known_copies(p.parent.parent)[wid8(repo)] == {
         "main": str(repo.resolve()),
         "workspace_id": addons.workspace_id(repo),
-        "tickets": {repo.tids[0]: {"origin_branch": git(repo, "symbolic-ref", "HEAD")}},
+        "tickets": {
+            repo.tids[0]: {
+                "origin_branch": git(repo, "symbolic-ref", "HEAD"),
+                "base": git(repo, "rev-parse", "HEAD"),
+            }
+        },
     }
 
 
@@ -1623,15 +1631,21 @@ def test_a_live_claim_inside_the_copy_still_holds_it(repo):
     assert t in worktrees.registry(repo) and p.is_dir()
 
 
-def test_done_by_patch_takes_the_copy_away(repo):
+def test_done_by_patch_takes_the_copy_away(repo, monkeypatch):
     """Lane C D6b rerun: the dashboard marks Done with `ticket patch` (not set_status/accept), which never
     called on_closed, so the copy only went at some later sweep (and not at all when nothing swept).
-    apply_op is the one place a ticket becomes done: every op that does it releases the copy."""
+    apply_op is the one place a ticket becomes done: every op that does it schedules the (detached) sweep
+    that brings the work back and releases the copy (B13e: never inside the click itself)."""
     t = repo.tids[0]
     p = make(repo)
     rev = tickets.revision(tickets.load(repo, t))
+    scheduled = []
+    real = worktrees.schedule_sweep
+    monkeypatch.setattr(worktrees, "schedule_sweep", lambda r: scheduled.append(r) or real(r))
     tickets.patch(repo, t, rev, '{"status": "done"}', "human:test")
     assert tickets.load(repo, t)["status"] == "done"
+    assert scheduled == [repo]
+    worktrees.sweep(repo)  # what the detached `orch copy clean --background` runs
     assert t not in worktrees.registry(repo)
     assert not p.exists()
     assert str(p) not in git(repo, "worktree", "list", "--porcelain")
@@ -1645,7 +1659,7 @@ def test_copy_clean_removes_a_done_tickets_copy_without_a_claim(repo, run, monke
     p = make(repo)
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a, **k: None)  # as if Done never released it
-        close(repo, t, "done")
+        tickets.set_status(repo, t, "done", "human:test")  # (no sweep either)
     worktrees._record_done_tip(repo, t)  # model Done recorded before cleanup was interrupted
     assert t in worktrees.registry(repo) and p.is_dir()
     code, out, err = run("copy", "clean", "--json")

@@ -403,7 +403,9 @@ OURS = {
     "GIT_EDITOR",
     "GIT_SEQUENCE_EDITOR",
     "GIT_ASKPASS",
-}  # set by safegit, not inherited
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_GRAFT_FILE",
+}  # set by safegit, not inherited (the last two: no replace refs or grafts, B13d)
 
 
 def test_git_env_is_dropped_by_prefix(proj, run, new_ticket, monkeypatch):

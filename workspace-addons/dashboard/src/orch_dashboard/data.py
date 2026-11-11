@@ -168,6 +168,54 @@ def _mark_missing_proofs(root: Path, t: dict) -> None:
                 ev["missing"] = not _file_here(root, str(t["id"]), ev["ref"])
 
 
+def _plain(text, cap: int = 120) -> str:
+    """One untrusted fragment (a path name an agent chose) as one plain line, like the core's
+    humanproof.part: control and format characters and line breaks become spaces, runs of space collapse,
+    double quotes become single ones (it cannot fake the quotes around it), at most `cap` characters."""
+    import unicodedata
+
+    t = "".join(
+        " " if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") else c
+        for c in str(text if text is not None else "")
+    )
+    t = " ".join(t.split()).translate({ord(c): "'" for c in '"\u201c\u201d\u201e\u2033\u00ab\u00bb'})
+    return t[:cap] + "\u2026" if len(t) > cap else t
+
+
+def _bring_back_view(back: dict, review) -> dict:
+    """The waiting state for the ticket page: what the core's `copy review` says, checked and made plain
+    HERE (server side), so the approval dialog shows exactly the tip, the count and the paths it binds."""
+    code = back.get("reason_code")
+    view = {
+        "state": "waiting",
+        "reason": _plain(back.get("reason") or "", 200),
+        "reason_code": code if isinstance(code, str) and re.fullmatch(r"[a-z-]{1,20}", code) else "waiting",
+    }
+    if not isinstance(review, dict):
+        return view
+    tip, count, digest = review.get("tip"), review.get("control_paths", 0), review.get("paths_hash")
+    paths = review.get("paths") if isinstance(review.get("paths"), list) else []
+    if (
+        isinstance(tip, str)
+        and re.fullmatch(r"[0-9a-f]{40,64}", tip)
+        and type(count) is int
+        and count >= 0
+        and isinstance(digest, str)
+        and re.fullmatch(r"[0-9a-f]{8}", digest)
+    ):
+        shown = [_plain(p) for p in paths[:5]]
+        view.update(
+            tip=tip,
+            control_paths=count,
+            paths_hash=digest,
+            paths=shown,
+            paths_more=max(0, count - len(shown)),
+            paths_summary=", ".join(shown)
+            + (f" and {count - len(shown)} more" if count > len(shown) else ""),
+        )
+    return view
+
+
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
     """Valid-looking tickets (schema orch.ticket/1, id, title, status). Returns (tickets, skipped).
     Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets would vanish); without the orch command (standalone use) from .orch/tickets."""
@@ -193,15 +241,9 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
                 t[k] = []
         back = (t.get("work") or {}).get("bring_back") or {}
         if back.get("state") == "waiting":
-            t["bring_back"] = {"state": "waiting", "reason": str(back.get("reason") or "")}
-            review = run_orch(orch_bin, ["copy", "review", t["id"], "--json"], root)
-            if isinstance(review, dict) and isinstance(review.get("tip"), str):
-                t["bring_back"].update(
-                    tip=review["tip"],
-                    control_paths=review.get("control_paths", 0),
-                    paths_hash=review.get("paths_hash"),
-                    paths_summary=str(review.get("paths_summary") or ""),
-                )
+            t["bring_back"] = _bring_back_view(
+                back, run_orch(orch_bin, ["copy", "review", t["id"], "--json"], root)
+            )
         _mark_missing_proofs(root, t)
         mobile.mark_chat_history(t)
         tickets.append(t)
