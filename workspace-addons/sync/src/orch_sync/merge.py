@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime
 
 from orch.phone_view import is_agent_history_author
+from rfc3339_validator import validate_rfc3339
 
 FINAL = ("done", "dropped")
 LOSER_FIELDS = ("title", "note", "summary", "owner", "due", "key", "text")  # a replaced value goes to history
@@ -613,8 +614,8 @@ def _valid(base, a, b):
 def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
-    lists): the caller pauses and keeps all three. Remote history lines with missing or non-string text are
-    discarded. Never raises. The inputs are not modified.
+    lists): the caller pauses and keeps all three. Remote history lines with missing or non-string text or
+    invalid timestamps are discarded. Never raises. The inputs are not modified.
     `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
     wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so. The
     verdict reads the core's ledger when asked: the sync caller must read, merge and write under the ticket's
@@ -630,7 +631,14 @@ def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
         if not _valid({} if base is None else base, upstream, mine):
             return None
         remote = deepcopy(upstream)
-        remote["history"] = [h for h in remote.get("history", []) if isinstance(h.get("text"), str)]
+        remote["history"] = [
+            h
+            for h in remote.get("history", [])
+            if isinstance(h.get("text"), str)
+            and isinstance(h.get("at"), str)
+            and h["at"].endswith("Z")
+            and validate_rfc3339(h["at"])
+        ]
         out = _merge({} if base is None else deepcopy(base), remote, deepcopy(mine), now, person, verdict)
         # Run the authority and normalization rules before reusing an input. A no-op
         # must never bypass the receiving core's verdict on signed decisions.

@@ -1150,6 +1150,16 @@ def test_history_verifier_failure_is_closed(decision):
         "agent:" + "a" * 41,
         "agent:worker\n",
         "agent:ＲＥＬＡＹ",
+        "ａｇｅｎｔ:ＣＯＤＥＸ",
+        "agent：severin",
+        "agent﹕x",
+        "\u0430gent:x",  # Cyrillic a
+        "agent:\u0445",  # Cyrillic x
+        "\u03b1gent:x",  # Greek alpha
+        "agent:\u200bx",  # zero-width space
+        "agent:\u00a0x",  # no-break space
+        "agent:x\u2010y",  # Unicode hyphen
+        "agent\u02d0x",  # modifier-letter colon
         None,
     ],
 )
@@ -1211,7 +1221,6 @@ def test_returned_demotion_cannot_erase_local_unpushed_answer():
         "agent:focus",
         "agent:my-agent_1.2",
         "agent:" + "a" * 40,
-        "ａｇｅｎｔ:ＣＯＤＥＸ",
     ],
 )
 def test_phone_attribution_and_sync_share_agent_allowlist(by):
@@ -1223,11 +1232,24 @@ def test_phone_attribution_and_sync_share_agent_allowlist(by):
     assert merge_ticket(tk(), tk(history=[line]), tk(), NOW)["history"] == [line]
 
 
-@pytest.mark.parametrize("text", [123, ["bad"], None])
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        {"text": 123},
+        {"text": ["bad"]},
+        {"text": None},
+        {"at": 5},
+        {"at": None},
+        {"at": ""},
+        {"at": "not-a-timestamp"},
+        {"at": "2026-02-30T00:00:00Z"},
+        {"at": "2026-11-09T09:00:00+01:00"},
+    ],
+)
 @pytest.mark.parametrize("by", ["human:Ann", "agent:worker", "agent:sync"])
 @pytest.mark.parametrize("has_base", [False, True])
-def test_malformed_remote_history_text_does_not_stall_merge(text, by, has_base):
-    bad = {"at": T2, "by": by, "text": text}
+def test_malformed_remote_history_does_not_stall_merge(malformed, by, has_base):
+    bad = {"at": T2, "by": by, "text": "Malformed", **malformed}
     good = {"at": T2, "by": "agent:worker", "text": "Working"}
     local_line = {"at": T1, "by": "human:Ann", "text": "Requested"}
     base = tk() if has_base else None

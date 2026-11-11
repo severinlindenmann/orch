@@ -51,9 +51,14 @@ def test_plain_local_relay_history_renders_as_agent(proj):
         "agent:automation",
         "agent:focus",
         "agent:my-agent_1.2",
-        "ａｇｅｎｔ:ＣＯＤＥＸ",
+        "AGENT:CODEX",
     ],
 )
 def test_local_agent_ids_remain_agent_authors(by):
     assert phone_view.is_agent_history_author(by)
     assert phone_view._who(by)[1] == "agent"
+
+
+@pytest.mark.parametrize("by", ["agent：severin", "agent﹕x", "ａｇｅｎｔ:ＣＯＤＥＸ"])
+def test_non_ascii_agent_labels_are_not_trusted(by):
+    assert not phone_view.is_agent_history_author(by)

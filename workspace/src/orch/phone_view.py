@@ -178,9 +178,9 @@ def size_of(view: dict) -> int:
 
 def is_agent_history_author(by) -> bool:
     """Only explicit agent labels are safe as unverified synced attribution."""
-    if not isinstance(by, str):
+    if not isinstance(by, str) or not by.isascii() or by != unicodedata.normalize("NFKC", by):
         return False
-    label = unicodedata.normalize("NFKC", by).casefold()
+    label = by.casefold()
     return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
         ("relay", "phone", "ph_")
     )
