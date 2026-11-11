@@ -88,6 +88,7 @@ def _change_profile(root, args, who):
     setting = f"secret.allow_get.{name}"
     agents = f"secret.agents_may_env.{name}"
     extra: dict = {}
+    tomb: frozenset = frozenset()
     # One lock across record and file: a reader (secretrun._switch_on) never sees one without the other.
     with hp._key_lock(hp.key_dir(root)):
         profiles = keystore.read_profiles(root)
@@ -104,18 +105,27 @@ def _change_profile(root, args, who):
             hp.record_set(root, agents, False, who)
             profiles[name] = profile
         else:
-            if name not in profiles:
-                raise Refused(f"Refused: there is no profile named {name}.")
-            if action == "remove":
+            if action == "remove":  # the tombstone is written even when the file has no such profile
+                tomb = frozenset({name})
                 hp.record_set(root, setting, False, who)
                 hp.record_set(root, agents, False, who)
+                if name not in profiles:
+                    keystore.write_profiles(root, profiles, tombstone=tomb)
+                    raise Refused(f"Refused: there is no profile named {name}.")
                 del profiles[name]
+            elif name not in profiles:
+                raise Refused(f"Refused: there is no profile named {name}.")
             else:
                 flag, rec = ("allow_get", setting) if action.startswith("get") else ("agents_may_env", agents)
                 enabled = action.endswith("enable")
                 hp.record_set(root, rec, enabled, who)  # the record first, then the file
                 profiles[name][flag] = enabled
-        keystore.write_profiles(root, profiles, sign=frozenset({name}) if action == "set" else frozenset())
+        keystore.write_profiles(
+            root,
+            profiles,
+            sign=frozenset({name}) if action == "set" else frozenset(),
+            tombstone=tomb,
+        )
     secretrun.record_change(root, "profile." + action.replace("-", "_"), name, who)
     return extra
 

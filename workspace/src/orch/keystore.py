@@ -49,9 +49,22 @@ ENV_DENY = frozenset(
     "ORCH_BIN "
     "ORCH_EVENTS ORCH_RUN ORCH_JOB ORCH_HOME ORCH_ROOT HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy "
     "https_proxy all_proxy SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE CURL_CA_BUNDLE "
-    "JAVA_TOOL_OPTIONS _JAVA_OPTIONS".split()
+    "JAVA_TOOL_OPTIONS _JAVA_OPTIONS GCONV_PATH GLIBC_TUNABLES LOCPATH LUA_INIT LUA_PATH PERLLIB ZDOTDIR "
+    "DOTNET_STARTUP_HOOKS NPM_CONFIG_SCRIPT_SHELL RUSTC_WRAPPER SYSTEMROOT USERPROFILE APPDATA EDITOR PAGER "
+    "BROWSER LESSOPEN".split()
 )
-ENV_DENY_PREFIX = ("LD_", "DYLD_", "GIT_", "ORCH_", "PYTHON", "PERL5", "RUBY", "NODE_")
+ENV_DENY_PREFIX = (
+    "LD_",
+    "DYLD_",
+    "GIT_",
+    "ORCH_",
+    "PYTHON",
+    "PERL5",
+    "RUBY",
+    "NODE_",
+    "COR_PROFILER",
+    "CORECLR_",
+)
 ENV_DENY_SUFFIX = ("_OPTIONS",)
 _ENV_DENY_UP = frozenset(
     {*(v.upper() for v in ENV_DENY), "SHELLOPTS", "PS4", "PATHEXT", "COMSPEC", "BASHOPTS", "PROMPT_COMMAND"}
@@ -545,9 +558,9 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
                     raise Refused(f"The profile {pn} names an unusable variable.")
                 if env_denied(var):
                     raise Refused(f"The profile {pn} may not set the variable {var}.")
-                if var in seen:
+                if var.upper() in seen:
                     raise Refused(f"The profile {pn} uses the variable {var} twice.")
-                seen.add(var)
+                seen.add(var.upper())
                 if sect == "set":
                     if (
                         not isinstance(tgt, str)
@@ -603,12 +616,15 @@ def _toml(profiles: dict) -> str:
     return "\n".join(out)
 
 
-def write_profiles(root: Path, profiles: dict, *, sign: frozenset = frozenset()) -> None:
+def write_profiles(
+    root: Path, profiles: dict, *, sign: frozenset = frozenset(), tombstone: frozenset = frozenset()
+) -> None:
     """Replace profiles.toml (a person's action: the proof is the caller's job, slice 1.2). Names only.
-    A new or changed profile body gets its MAC (human key) in the guarded ledger BEFORE the file is written; a
-    removed profile is tombstoned; an unchanged body keeps whatever the ledger says (rewriting a switch never
-    vouches for a body that was edited outside orch). `sign`: names being set now, signed even when the file
-    already holds that exact body."""
+    ONLY the names in `sign` (the profile the person is setting right now, with proof) get a body MAC in the
+    guarded ledger, BEFORE the file is written. Every other profile is written back as it is and its ledger
+    entry is left untouched (an edited body stays unverified, a switch change never vouches for it); a
+    removed profile (`tombstone`, passed by the caller, whatever the file says) is tombstoned. What to sign is
+    never decided from the unverified file. An unreadable old file refuses the save (nothing is signed)."""
     d = hp.key_dir(root)
     with hp._key_lock(d):
         _tighten_locked(d)
@@ -617,14 +633,12 @@ def write_profiles(root: Path, profiles: dict, *, sign: frozenset = frozenset())
             if isinstance(e.get("value"), str):
                 values.add(e["value"])
         _profile_check(profiles, values)
-        try:
-            old = read_profiles(root)
-        except Refused:
-            old = {}
-        for pn, p in profiles.items():
-            if pn in sign or pn not in old or hp.profile_body(old[pn]) != hp.profile_body(p):
-                hp.profile_sign(root, pn, p)
-        for pn in old.keys() - profiles.keys():
+        read_profiles(root)  # Refused when damaged: never fall back to {}
+        for pn in sign:
+            if pn not in profiles:
+                raise Refused("The profile to sign is not in the profiles.")
+            hp.profile_sign(root, pn, profiles[pn])
+        for pn in tombstone:
             hp.profile_sign(root, pn, None)
         hp._write_private(d / "profiles.toml", _toml(profiles))
 

@@ -350,3 +350,19 @@ def stray_tmux(under: str) -> list[str]:
             if (m := _TMUX.search(line)) and m.group(2).startswith(under)
         }
     )
+
+
+def seed_profiles(root, profiles):
+    """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
+    write_profiles signs only the names it is told to)."""
+    from orch import humanproof as hp
+    from orch import keystore
+
+    try:
+        old = keystore.read_profiles(root)
+    except Exception:  # noqa: BLE001
+        old = {}
+    changed = frozenset(
+        n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
+    )
+    keystore.write_profiles(root, profiles, sign=changed)

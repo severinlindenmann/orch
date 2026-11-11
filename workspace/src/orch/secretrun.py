@@ -609,7 +609,9 @@ def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
 
 
 def list_answer(root) -> dict:
-    profiles = keystore.read_profiles(root)
+    profiles = {  # a profile changed outside orch counts for nothing (it cannot run)
+        n: v for n, v in keystore.read_profiles(root).items() if hp.profile_verified(root, n, v)
+    }
     items = []
     for row in keystore.list_keys(root):
         members = sorted(

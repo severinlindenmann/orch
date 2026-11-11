@@ -121,6 +121,9 @@ what a profile runs or receives. `profile set` (a `secret.profile` proof) stores
 ledger) with `Refused: this key profile was changed outside orch; set it up again.` The switches (`allow_get`, `agents_may_env`) keep their
 own settings records and are not part of the body; rewriting a switch never signs a body that was edited outside orch. `exec` also re-runs
 the `run` program approval (absolute path, outside the workspace, not changeable by others, exists) when it starts.
+The MAC protects against an attacker who can write `profiles.toml` but can neither read `human.key` nor write `profile.json` (same folder, same
+rights: the guard is the boundary). Only the profile a person is setting (with proof) is signed; every other profile keeps its ledger entry,
+and `profile remove` always writes the tombstone, even when the file has no such profile. A profile that fails verification is shown as unusable.
 **No legacy:** profiles saved before this change have no MAC and are refused until a person sets them up again (owner rule: no
 compatibility code until the pilot cut).
 
