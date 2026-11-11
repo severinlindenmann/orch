@@ -233,7 +233,10 @@ def approve(root, tid, addon, args):
         write(root, "run/sync/approved.json", encoded(store))
         known, known_ok = local_ext(root)  # this machine's own value now (the automation add-on reads it)
         if known_ok and isinstance(known.get(tid), dict):
-            known[tid][addon] = hashed
+            if block["value"] is None:  # a removal: no own value any more (absent, as for a ticket without it)
+                known[tid].pop(addon, None)
+            else:
+                known[tid][addon] = hashed
             write_local_ext(root, known)
         write(root, path, encoded(doc))
         p.unlink()

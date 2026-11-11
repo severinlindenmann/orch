@@ -165,7 +165,7 @@ def main(argv=None):
         elif args.cmd == "deleted":
             from orch import config, humanproof, syncgate
 
-            from .step import encoded, step_lock, write
+            from .step import encoded, entries, step_lock, write
 
             with step_lock(root), syncgate.hold(root):
                 state = read(root, "state")
@@ -182,8 +182,14 @@ def main(argv=None):
                     config.require_person(by, "leave this ticket deleted")
                     from . import records
 
+                    # bound to the synced copy the person leaves deleted: a changed ticket needs them again
+                    old = entries(root, "HEAD").get(f"tickets/{args.ticket}.json")
+                    if not old:
+                        raise repo.Refused("This ticket has no synced copy to leave deleted")
                     allowed = read(root, "allow-delete")
-                    allowed[args.ticket] = records.make(root, "delete", args.ticket, {"ticket": args.ticket})
+                    allowed[args.ticket] = records.make(
+                        root, "delete", f"{args.ticket}:{old[1]}", {"ticket": args.ticket, "blob": old[1]}
+                    )
                     write(root, "run/sync/allow-delete.json", encoded(allowed))
                 state["deleted"].pop(args.ticket)
                 from .pause import verified_pause

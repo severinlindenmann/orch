@@ -361,6 +361,11 @@ def is_chat_entry(e: dict) -> bool:
     return (via == "dashboard" and _person(by)) or (via == "phone" and by.startswith("agent:relay from ph_"))
 
 
+# agent: labels the relay add-on gives to others (a phone, a peer): never a plain agent's (orch.history
+# is_agent_history_author has the same list; data._demote_all uses it without the core)
+NOT_PLAIN_AGENTS = ("relay", "phone", "ph_")
+
+
 def _person(by: str) -> bool:
     """`by` of a SHOWN line (data.shown) is the person: orch.history.is_person_line. Without the core: no."""
     try:

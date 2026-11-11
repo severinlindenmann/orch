@@ -45,6 +45,38 @@ ALLOW = {
         "mark_chat_history",
     ): "shown ticket (data.shown)",
 }
+# (file, function) -> why it may read a step/ref/plan `by` or another person field (answered_by, wont_by,
+# person, description_by) raw. History reads stay under ALLOW.
+PERSON_OK = {
+    (
+        "workspace/src/orch/adapters.py",
+        "render",
+    ): "v['person'] is the adapter's template value, not a ticket's",
+    (
+        "workspace/src/orch/humanproof.py",
+        "wont_decision",
+    ): "proof code: the bytes a person's decision MAC covers",
+    ("workspace/src/orch/relay.py", "_answer_by"): "a relay message's body (its own rule), not a ticket",
+    (
+        "workspace/src/orch/relay.py",
+        "_applied_ticket",
+    ): "writer check: did this message's own answer land (compares stored bytes, shows nothing)",
+    (
+        "workspace/src/orch/tickets.py",
+        "_wont_view",
+    ): "writer guard: the stored Won't do state before/after an op",
+}
+# (file, function) -> readers that take the shown ticket at their entry (history.shown_ticket / shown_json /
+# shown_item, checked below) and read person fields of THAT: the reason says which.
+SHOWN = {
+    ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
+    ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
+    (
+        "workspace/src/orch/relay.py",
+        "apply_allow_answers",
+    ): "t = history.shown_ticket(...); `raw` only for the proof (history.answer_proven)",
+}
+SHOWN_CALLS = ("shown_ticket", "shown_json", "shown_item")
 # The sync add-on is the merge authority: it reads and writes stored bytes by design (its readers of person
 # fields are the merge rules in merge.py, vector-tested); every module of it is a writer here.
 WRITER_TREES = ("workspace-addons/sync/src/",)
@@ -134,6 +166,34 @@ def _evidence_names(func) -> set[str]:
     return names
 
 
+def _names(target) -> set[str]:
+    return {n.id for n in ast.walk(target) if isinstance(n, ast.Name)}
+
+
+def _item_names(func, keys) -> set[str]:
+    """Names bound from something that reads one of `keys`: loop and comprehension targets over it, and
+    plain assignments from it (`plan = t.get("plan")`, `step = next(c for c in t["checklist"] ...)`)."""
+    names = set()
+    for node in ast.walk(func):
+        pairs = []
+        if isinstance(node, (ast.For, ast.comprehension)):
+            pairs = [(node.target, node.iter)]
+        elif isinstance(node, ast.Assign):
+            pairs = [(t, node.value) for t in node.targets]
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            pairs = [(node.target, node.value)]
+        for target, it in pairs:
+            if any(_key_read(x, k) for x in ast.walk(it) for k in keys):
+                names |= _names(target)
+    return names
+
+
+# Person fields with their own key: any read of them is a person read.
+PERSON_KEYS = ("answered_by", "wont_by", "person", "description_by")
+# `by` is a person field on these items (history and evidence have their own rules above).
+BY_ITEMS = ("refs", "plan", "checklist")
+
+
 def violations(path: Path, repo: Path = REPO) -> list[str]:
     rel = path.relative_to(repo).as_posix()
     if rel == OWNER or rel.startswith(WRITER_TREES):
@@ -158,12 +218,24 @@ def violations(path: Path, repo: Path = REPO) -> list[str]:
     for f in funcs:
         if (rel, f.name) in ALLOW:
             continue
+        person_ok = (rel, f.name) in PERSON_OK or (rel, f.name) in SHOWN
         ev = _evidence_names(f)
+        items = _item_names(f, BY_ITEMS)
         for node in ast.walk(f):
-            if _key_read(node, "by"):
+            if owner.get(id(node)) is not f:
+                continue  # an inner function is checked (and allowlisted) on its own
+            if any(_key_read(node, k) for k in PERSON_KEYS):
+                if not person_ok:
+                    out.append(f"{rel}:{node.lineno} {f.name}: reads a person field raw (use shown_ticket)")
+            elif _key_read(node, "by"):
                 target = node.value if isinstance(node, ast.Subscript) else node.func.value
                 if isinstance(target, ast.Name) and target.id in ev:
                     out.append(f"{rel}:{node.lineno} {f.name}: reads an evidence `by` (use shown_ticket)")
+                elif not person_ok and (
+                    (isinstance(target, ast.Name) and target.id in items)
+                    or any(_key_read(target, k) for k in BY_ITEMS)
+                ):
+                    out.append(f"{rel}:{node.lineno} {f.name}: reads a step/ref/plan `by` (use shown_ticket)")
     return out
 
 
@@ -175,13 +247,31 @@ def test_no_reader_reads_person_fields_raw():
 def test_allowlist_has_no_stale_entries():
     """Every allowlisted function exists (a renamed one must not keep a hole open)."""
     missing = []
-    for rel, name in ALLOW:
+    for rel, name in (*ALLOW, *PERSON_OK, *SHOWN):
         tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
         if not any(
             isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name for n in ast.walk(tree)
         ):
             missing.append(f"{rel}:{name}")
     assert not missing, missing
+
+
+def test_shown_readers_take_the_shown_ticket():
+    """A SHOWN entry reads person fields only because it calls history.shown_* itself."""
+    wrong = []
+    for rel, name in SHOWN:
+        tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
+        f = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
+        if not any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr in SHOWN_CALLS
+            and isinstance(n.func.value, ast.Name)
+            and n.func.value.id == "history"
+            for n in ast.walk(f)
+        ):
+            wrong.append(f"{rel}:{name}")
+    assert not wrong, wrong
 
 
 def test_the_lint_catches_each_kind(tmp_path):
@@ -196,3 +286,23 @@ def test_the_lint_catches_each_kind(tmp_path):
     )
     found = violations(src, tmp_path)
     assert len(found) == 5, found
+
+
+def test_the_lint_catches_every_person_field(tmp_path):
+    src = tmp_path / "bad.py"
+    src.write_text(
+        "def a(q):\n    return q['answered_by']\n"
+        "def b(c):\n    return c.get('wont_by')\n"
+        "def c(v):\n    return v.get('person')\n"
+        "def d(t):\n    return t['description_by']\n"
+        "def e(t):\n    return [r.get('by') for r in t.get('refs') or []]\n"
+        "def f(t):\n    for i, c in enumerate(t['checklist']):\n        print(c['by'])\n"
+        "def g(t):\n    return t['plan']['by']\n"
+        "def h(t):\n    plan = t.get('plan') or {}\n    return plan.get('by')\n"
+        "def i(t):\n    step = next(c for c in t['checklist'])\n    return step.get('by')\n"
+        "def ok(t, args):\n    return args.by, t.get('by'), [h for h in t.get('items', [])]\n",
+        encoding="utf-8",
+    )
+    found = violations(src, tmp_path)
+    assert len(found) == 9, found
+    assert not [v for v in found if " ok:" in v], found

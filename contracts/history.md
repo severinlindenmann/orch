@@ -2,8 +2,10 @@
 
 ONE rule, in one module (`workspace/src/orch/history.py`), decides how every person field of a ticket is shown to
 people and agents. Every reader goes through it at the source; `workspace/tests/test_history_lint.py` fails when a
-module reads a ticket's `history`, an evidence entry's `by`, or tests an entry's `by` for `human:` itself
-(writers and readers of no author are listed there with their reason).
+module reads a ticket's `history`, an evidence entry's `by`, any other person field (`answered_by`, `wont_by`,
+`person`, `description_by`, the `by` of a step, ref or plan), or tests an entry's `by` for `human:` itself
+(writers and readers of no author are listed there with their reason; a reader of person fields that takes the
+shown ticket itself is listed too, and the lint checks that it calls `history.shown_*`).
 
 ## Fields
 
@@ -29,7 +31,7 @@ proof. Every other value is shown as written only when this core proves it **her
    in this process is never recorded, whatever the file's encoding or form. A store that cannot be written, read or
    verified proves nothing (fail closed).
 2. **Decisions.** A current verdict (`verdicts[].person`, its line) and a Won't do this core's ledger vouches for
-   (`wont_by`, the step's `by`, its line) prove their own person fields. The history line a decision was signed with
+   (`wont_by`, the step's `by` only when it is that same value, its line) prove their own person fields. The history line a decision was signed with
    (`person`, `line` = digest of `{text, via}`, `at`) is matched ONCE: the one line by that person with exactly that
    digest, the writer's shape and the `at` closest to the decision's (within 5 s). Other copies are not the
    decision's.
@@ -47,7 +49,7 @@ the enabled record in the guarded orch home (`sync-enabled/<sha256("path:" + rea
 `sync-enabled/<sha256("ws:" + workspace id)[:32]>.json`, local1 MAC; either one counts), or a ticket shows sync's
 traces (`ext.sync`, or a line by the reserved label `agent:sync`). The sync add-on calls `history.enable_sync` first
 in every `repo.ensure`, before anything can refuse: it writes the record and, only for a workspace that never synced
-(no state repository, no earlier step's state) and only when no ticket shows sync's traces, adopts the person
+(no state repository, no `run/sync` folder or file) and only when no ticket shows sync's traces, adopts the person
 fields already in this machine's tickets as its own. Removing `.orch/.git` or `run/sync` never makes a workspace
 trust every line again.
 
@@ -57,12 +59,15 @@ it was without this module (`test_history.py::test_sync_free_outputs_are_what_th
 
 ## Readers
 
-`orch ticket show` and every `--json` output of the CLI (`_out` -> `shown_json` with the command's root), the
+`orch ticket show` and every `--json` output of the CLI (`_out` -> `shown_json` with the command's root; a command
+that outputs a bare step, question or ref - `orch check ...`, `orch answer`, `orch ref add/remove/list` - shows it
+through `history.shown_item` / `shown_ticket` first, since `shown_json` cannot tell it from other data), the
 conflict message, `cli._who_added` (`history.evidence_author` on a shown ticket), core needs rows, run prompts
-(fresh, resume) and the news footer, `runs_live._asker`, the phone view, the relay's allow answers, the dashboard
-(`data.shown`: the core's rule; without the core every person field is demoted) and its mobile/Chat views,
-automation and focus (they read orch's CLI JSON, which is shown already). `root` is required: a caller without one
-looks it up (`history.here`).
+(fresh, resume; `root` required) and the news footer, `runs_live.resume_after_answer`, the phone view (full and
+light), the relay's allow answers, the dashboard (`data.shown`: the core's rule; without the core every person
+field is demoted, with the same agent-label rule) and its mobile/Chat views, automation and focus (they read orch's
+CLI JSON, which is shown already). Each takes the shown ticket at its entry, not only for the history. `root` is
+required: a CLI command without one looks it up (`history.here`).
 
 ## The reserved label
 

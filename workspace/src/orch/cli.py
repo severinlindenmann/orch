@@ -922,6 +922,7 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
+        c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
     elif cmd == "check" and sub == "wont-do":
         who = humanproof.person_by(
@@ -933,9 +934,11 @@ def run(args: argparse.Namespace) -> None:
             parts=humanproof.step_parts(root, args.id, args.check),
         )
         t, c = tickets.check_wont_do(root, args.id, args.check, who, args.reason)
+        c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
     elif cmd == "check" and sub == "record":
         t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
+        c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"Recorded for {c['id']}: {c['evidence'][-1]['ref']}")
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
@@ -978,7 +981,7 @@ def run(args: argparse.Namespace) -> None:
         else:
             t, c = tickets.check_stop(root, args.id, args.check, who)
             msg = f"{c['id']}: no longer marked as being worked on."
-        _out(args, c, msg)
+        _out(args, history.shown_item(root, t, "checklist", c), msg)
     elif cmd == "check":
         extra = {k: getattr(args, k) for k in ("title", "role") if getattr(args, k)}
         # the summary says what came out of the step: it goes on ONE proof (the file, else the first one)
@@ -995,7 +998,7 @@ def run(args: argparse.Namespace) -> None:
         copied = args.file and tickets.proof_present(root, ev)
         _out(
             args,
-            c,
+            history.shown_item(root, t, "checklist", c),
             f"Done: {c['text']} (proof: {ev['ref']})"
             + (f"\nProof copied: {ev['ref']} ({ev['text']})" if copied else ""),
         )
@@ -1046,7 +1049,11 @@ def run(args: argparse.Namespace) -> None:
         ):  # the answer is saved; a busy run only delays it reaching the agent
             runs_live.pass_answer(root, t["id"], q, who, proven=who.startswith("human:"))
         note = _addon_note(root, q)
-        _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
+        _out(
+            args,
+            history.shown_item(root, t, "questions", q),
+            f"Answered: {q['answer']}" + (f"\n{note}" if note else ""),
+        )
     elif cmd == "ref":
         _ref(args, root, by)
     elif cmd == "publish":
@@ -1082,9 +1089,9 @@ def _ref(args, root: Path, by) -> None:
             if added
             else f"{key} already has this reference: {refs.target(ref)}"
         )
-        _out(args, ref, message)
+        _out(args, history.shown_item(root, t, "refs", ref), message)
     elif args.sub == "list":
-        t = tickets.load(root, args.id)
+        t = history.shown_ticket(root, tickets.load(root, args.id))  # the rows carry each ref's `by`
         rows = refs.all_refs(root, t)
         if args.json:
             _out(args, [{"n": n, **ref, "view": refs.describe(ref, kinds, root)} for n, ref in rows], "")
@@ -1099,7 +1106,11 @@ def _ref(args, root: Path, by) -> None:
                 print(f"  {n}  {d['type']}  {value}{suffix}" + (f"  {d['status']}" if d["status"] else ""))
     else:
         t, ref = tickets.ref_remove(root, args.id, args.target, by())
-        _out(args, ref, f"Removed reference {args.target} from {t.get('key') or t['id']}")
+        _out(
+            args,
+            history.shown_item(root, t, "refs", ref),
+            f"Removed reference {args.target} from {t.get('key') or t['id']}",
+        )
 
 
 def _ticket_set(args, root: Path, by) -> None:

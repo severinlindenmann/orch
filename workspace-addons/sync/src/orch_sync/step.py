@@ -262,8 +262,10 @@ def stage(root, head, index, state, now):
                     if paths.TICKET.fullmatch(path):
                         # Only a person's signed, single-use record lets a missing ticket go (a deletion is
                         # pushed to every machine); a planted or reused one restores the file as usual.
+                        # bound to the very copy the person left deleted (its blob in HEAD)
                         allowed = cli.read(root, "allow-delete").get(Path(path).stem)
-                        if records.ok(root, "delete", Path(path).stem, allowed, single_use=True):
+                        target = f"{Path(path).stem}:{old[path][1]}"
+                        if records.ok(root, "delete", target, allowed, single_use=True):
                             records.spend(root, allowed)
                             repo.git(root, "update-index", "--force-remove", "--", path, index=index)
                             continue
@@ -381,7 +383,9 @@ def reach_gate(root, counters, keys, decisions):
     reach = max([counters[0], *keys[0]])
     counter_choice = decisions.get("ticket-counter.json")
     if counter_choice and counter_choice.get("keep") in ("theirs", "key"):
-        chosen = document("ticket-counter.json", pause.selected(root, "ticket-counter.json")).get("last", 0)
+        chosen = document(
+            "ticket-counter.json", pause.selected(root, "ticket-counter.json", counter_choice)
+        ).get("last", 0)
         reach = max(reach, chosen if type(chosen) is int else 0)
     if counter_choice and type(counter_choice.get("covers")) is int:
         # A person's proven (signed) counter choice on a jump covers the incoming numbers they reviewed.
@@ -512,7 +516,7 @@ def merged_tree(root, head, remote, index, now, first=False):
             continue  # Incoming key choices must retain the verified normal merge.
         if decisions[path].get("keep") == pause.LOCAL_NAME:
             continue  # the checked remote tree already leaves the other computer's case variant out
-        data = pause.selected(root, path)
+        data = pause.selected(root, path, decisions[path])
         if paths.TICKET.fullmatch(path):
             # Fable A3: a person's choice is the remote side of a normal merge against this machine's copy,
             # so the verifiers, history demotion and held ext apply; apply replays exactly these inputs. What

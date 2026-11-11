@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 from conftest import ensure_signing
 
-from orch import cli, history, humanproof, needs, phone_view, runs, tickets
+from orch import cli, history, humanproof, needs, phone_view, runs, runs_live, tickets
 from orch.errors import Refused
+
+_REAL_RESUME = runs_live.resume_after_answer  # conftest stubs it in every test (no agent is started)
 
 PEER = {
     "at": "2026-11-09T09:00:00Z",
@@ -184,6 +186,102 @@ def test_every_person_field_goes_through_the_one_rule(synced):
     assert t["description_by"] == history.SYNC_BY
     out = json.dumps(history.shown_json(root, {"tickets": [_raw(root, tid)]}))
     assert "human:alice" not in out
+
+
+def _peer_person_fields(t):
+    """A peer sets every per-item person field to a person (and leaves a question open for Needs)."""
+    c = t["checklist"][0]
+    c.update(wont_do=True, wont_by="human:alice", by="human:alice", reason="no")
+    t["questions"] += [
+        {
+            "id": "q8",
+            "text": "?",
+            "options": [],
+            "recommended": None,
+            "answer": "yes",
+            "answered_by": "human:alice",
+            "via": "cli",
+        },
+        {"id": "q9", "text": "Open?", "options": [], "recommended": None, "answer": None},
+    ]
+    t["refs"].append({"kind": "url", "url": "https://x.example", "at": PEER["at"], "by": "human:alice"})
+
+
+def _no_alice(t):
+    c = t["checklist"][0]
+    assert c["wont_by"] == c["by"] == history.SYNC_BY
+    assert next(q for q in t["questions"] if q["id"] == "q8")["answered_by"] == history.SYNC_BY
+    assert t["refs"][-1]["by"] == history.SYNC_BY
+    assert "human:alice" not in json.dumps(t)
+
+
+def test_phone_view_needs_and_resume_read_the_shown_ticket(synced, monkeypatch):
+    """Opus PR B #2: these readers take shown_ticket at their entry, not only for the history."""
+    root, tid = synced
+    _plant(root, tid, _peer_person_fields)
+    seen = {}
+    real_checklist = phone_view._shown_checklist
+    monkeypatch.setattr(
+        phone_view, "_shown_checklist", lambda t: seen.setdefault("phone", t) and real_checklist(t)
+    )
+    phone_view.build(root, _raw(root, tid), [])
+    monkeypatch.setattr(phone_view, "_agent", lambda r, t, h: seen.setdefault("light", t) and (None, False))
+    try:
+        phone_view.light_view(root, _raw(root, tid))
+    except Refused:
+        pass  # no value hider here: the ticket was shown before that
+    monkeypatch.setattr(needs, "_asked_at", lambda r, t, qid: seen.setdefault("needs", t) and PEER["at"])
+    assert [r["id"] for r in needs.core_rows(root) if r["ticket"] == tid] == [f"core:q:{tid}:q9"]
+    monkeypatch.setattr(runs_live, "_asker", lambda r, t, qid: seen.setdefault("resume", t) and None)
+    assert (
+        _REAL_RESUME(root, tid, {"id": "q8", "kind": "plain"}, "human:tester") is None
+    )  # (conftest stubs it)
+    assert set(seen) >= {"phone", "needs", "resume"}
+    for t in seen.values():
+        _no_alice(t)
+
+
+def test_bare_items_and_ref_rows_on_the_cli_are_shown(synced, run):
+    root, tid = synced
+    _plant(root, tid, _peer_person_fields)
+    rows = json.loads(run("ref", "list", tid, "--json")[1])
+    assert rows[-1]["by"] == history.SYNC_BY
+    raw = _raw(root, tid)
+    assert history.shown_item(root, raw, "refs", raw["refs"][-1])["by"] == history.SYNC_BY
+    assert history.shown_item(root, raw, "checklist", raw["checklist"][0])["wont_by"] == history.SYNC_BY
+    tickets.ref_add(root, tid, "https://example.com/own", "human:tester")
+    own = _raw(root, tid)["refs"][-1]
+    assert history.shown_item(root, _raw(root, tid), "refs", own)["by"] == "human:tester"
+
+
+def test_the_fail_closed_path_demotes_plan_and_description(synced, monkeypatch):
+    root, tid = synced
+    _plant(
+        root, tid, lambda t: t.update(plan={"text": "p", "by": "human:alice"}, description_by="human:alice")
+    )
+    monkeypatch.setattr(history, "_shown", lambda *a: 1 / 0)
+    t = history.shown_ticket(root, _raw(root, tid))
+    assert t["plan"]["by"] == t["description_by"] == history.SYNC_BY
+
+
+def test_a_verified_wont_do_proves_only_its_own_by(synced):
+    root, tid = synced
+    tickets.check_wont_do(root, tid, "c1", "human:tester", "not needed")
+    _plant(root, tid, lambda t: t["checklist"][0].update(by="human:alice"))  # relabelled by a peer
+    c = history.shown_ticket(root, _raw(root, tid))["checklist"][0]
+    assert c["wont_by"] == "human:tester" and c["by"] == history.SYNC_BY
+
+
+@pytest.mark.parametrize(
+    "line", ['"by": "AGENT:SYNC"', '"by": "\\u0061gent:sync"', '"by": "agent:\\u0053ync"']
+)
+def test_a_sync_trace_is_found_in_any_case_or_escape(proj, line):
+    t = tickets.create(proj, "x", "human:tester")
+    p = tickets.ticket_path(proj, t["id"])
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc["history"].append({**PEER, "by": "PLACEHOLDER"})
+    p.write_text(json.dumps(doc).replace('"by": "PLACEHOLDER"', line), encoding="utf-8")
+    assert history.tickets_show_sync(proj)
 
 
 def test_own_ref_and_answer_stay_the_persons(synced):

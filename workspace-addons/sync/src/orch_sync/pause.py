@@ -113,11 +113,10 @@ def record_choice(root, decisions, remote, path, fields, data=None):
     decisions["files"][path] = records.make(root, "choice", f"{remote}:{path}", fields)
 
 
-def selected(root, path):
-    """The chosen bytes of `path`: only when they are exactly the bytes its signed choice names."""
+def selected(root, path, entry):
+    """The chosen bytes of `path`: only when they are exactly the bytes its signed choice names. `entry` is the
+    VERIFIED choice (from choices()); the store is never read again here (no swap between the two reads)."""
     data = repo.safe(root, "run/sync/choices/" + path).read_bytes()
-    files = cli.read(root, "choices").get("files")
-    entry = files.get(path) if isinstance(files, dict) else None
     if not isinstance(entry, dict) or entry.get("sha256") != hashlib.sha256(data).hexdigest():
         drop_choice(root, path)  # the chosen bytes were changed: that choice is gone
         raise Pause(f"{Path(path).name} changed after your choice; choose again", [path])
@@ -146,7 +145,7 @@ def checked_tree(root, remote, index):
         if decisions[path].get("keep") == LOCAL_NAME:
             _keep_local_name(root, remote, index, path, decisions[path])
             continue
-        data = selected(root, path)
+        data = selected(root, path, decisions[path])
         live = repo.safe(root, path)
         if decisions[path].get("incoming"):
             changed = paths.TICKET.fullmatch(path) and live.exists()
@@ -439,7 +438,7 @@ def take_remote(root, args, *, now=None):
                     new = step.commit(root, tree, [head], now)
                     repo.git(root, "update-ref", "refs/heads/orch-state", new, head or "0" * 40)
                     head = new
-                repo.git(root, "read-tree", head)
+                repo.git(root, "read-tree", head, index=index)  # the temp index (apply sets the default one)
             tree, merges = step.taken_tree(root, head, remote, index, now)
             by = humanproof.person_by(
                 root,
@@ -622,8 +621,10 @@ def keep_key(root, key, tid, args, *, now=None):
             incoming.strict_load(step.blob(root, theirs.get(counter_path)) or b"{}"),
             [k for doc in docs.values() for k in [doc.get("key"), *merge.old_keys_of(doc)]],
         )
-        if counter_path in choices(root, remote):
-            counter = merge.merge_counter({}, counter, incoming.strict_load(selected(root, counter_path)))
+        if counter_choice := choices(root, remote).get(counter_path):
+            counter = merge.merge_counter(
+                {}, counter, incoming.strict_load(selected(root, counter_path, counter_choice))
+            )
         selected_docs = {}
         for i in sorted(group):
             doc = docs[i]

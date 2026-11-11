@@ -403,13 +403,18 @@ nothing.
 **Answers as authority.** Once sync is on, an answer acts on this machine (`relay.apply_allow_answers`: a
 relay:allow question) only when `history.answer_proven`: the "Answered <id>: <answer>" line of exactly
 `answered_by` and `via` is in this machine's own-lines store (made here by `tickets.answer`, which the dashboard,
-phone and relay paths use), for any label, an agent's too; or the allow was already given here. A synced answer
-is not applied (it shows as `agent:sync`); the ticket gets one note naming `orch relay allow` / `orch relay done`.
-The message an answer allows is never read from the synced `ext.relay`: when the question is asked here, the guarded
-home records `(ticket, question) → allow_message` (`keys/<ws>/relay-allow.json`, `humanproof.relay_allow_set`; a
-recorded message is never replaced) and the answer is applied only when the ticket's `allow_message` is that one;
-"applied" is recorded there too (never reset), so a peer that swaps `allow_message` or clears `allow_applied`
-applies nothing. Once sync is on, a question with no record here applies nothing.
+phone and relay paths use), for any label, an agent's too. The proof is for the stored question at the SAME place
+as the shown one, of kind relay:allow, with the very same answer word; a ticket with two questions of one id
+applies nothing (one note). An allow already given here for that message (`orch relay allow`) only marks the
+question applied: it never proves a (maybe synced) answer word. A synced answer is not applied (it shows as
+`agent:sync`); the ticket gets one note naming `orch relay allow` / `orch relay done`.
+The message an answer allows is never read from the synced `ext.relay`: when the question is asked here with sync
+on, the guarded home records `(ticket, question) → allow_message` (`keys/<ws>/relay-allow.json`,
+`humanproof.relay_allow_set`; a recorded message is never replaced; enabling sync adopts the questions already asked
+here, with the ticket's `allow_applied`) and the answer is applied only when the ticket's `allow_message` is that
+one; "applied" is recorded there too, BEFORE anything is applied (never reset; not recordable: nothing applied), so
+a peer that swaps `allow_message` or clears `allow_applied` applies nothing. Once sync is on, a question with no
+record here applies nothing. Sync-free: nothing is written to the guarded home; `allow_applied` decides, as before.
 
 **take-remote** (`orch sync take-remote --proof-stdin`, a person only, `addon.act`): the way out of a HISTORY pause
 (several merge bases, or none outside a machine's first join). It is the normal merge authority with this machine's

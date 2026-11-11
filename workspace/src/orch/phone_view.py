@@ -1247,6 +1247,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     """The full view. Every text goes through the scrub and the value hider `h` (built here when not given):
     a stored key value never leaves, also in prose without a label. No value hider, or a value still in the
     finished view: _closed_view (fail closed)."""
+    ticket = history.shown_ticket(root, ticket)  # EVERY person field as this machine can prove it
     checklist = _shown_checklist(ticket)
     done, wont, total = tickets.checks_split({"checklist": checklist})
     h = h if h is not None else phone_results.value_hider(root)
@@ -1398,6 +1399,7 @@ def light_view(root: Path, ticket: dict) -> dict:
     The phone overlays these on its last full snapshot. No questions, no checklist, history or files. Texts
     pass the scrub and the value hider; without a value hider (or a stored value still in it) Refused: the
     light update is not sent (sync_light backs off), never sent with a value or with a blank title."""
+    ticket = history.shown_ticket(root, ticket)  # as in build
     h = phone_results.value_hider(root)
     if h is None:
         raise Refused("Stored key values can't be hidden right now, so no light update was sent.")

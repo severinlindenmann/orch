@@ -963,7 +963,7 @@ def _asker(root: Path, ticket: dict, qid: str) -> str | None:
 
 
 def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
-    ticket = tickets.load(root, tid)
+    ticket = history.shown_ticket(root, tickets.load(root, tid))  # every person field as proven here
     asker = _asker(root, ticket, q["id"]) if q.get("kind") in (None, "plain") else None
     if not asker or ticket.get("status") in ("done", "dropped") or tickets._open_questions(ticket):
         return None  # tickets.answer left it Ready (not Working): nobody works on it

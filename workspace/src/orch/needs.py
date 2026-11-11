@@ -48,7 +48,7 @@ def _asked_at(root: Path, t: dict, qid: str) -> str:
 def core_rows(root: Path, now: str | None = None) -> list[dict]:
     now = now or _now()
     rows = []
-    for t in tickets.list_all(root):
+    for t in history.shown_json(root, tickets.list_all(root)):  # every person field as proven here
         if t.get("status") in OPEN or not isinstance(t.get("id"), str):
             continue
         title = _clip(t.get("title", t["id"]), 200)

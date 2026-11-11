@@ -4,7 +4,6 @@ values (single use, #540), held blocks (signed, per ticket, capped) and the paus
 
 import hashlib
 import json
-from types import SimpleNamespace
 
 from orch import humanproof
 from test_pause import proof
@@ -41,7 +40,7 @@ def test_chosen_bytes_must_be_the_signed_ones(machines):
     step.write(b, "run/sync/choices.json", step.encoded(decisions))
     step.write(b, "run/sync/choices/" + TICKET, b'{"swapped": true}')
     try:
-        pause.selected(b, TICKET)
+        pause.selected(b, TICKET, pause.choices(b, remote)[TICKET])
         raise AssertionError("swapped bytes were used")
     except pause.Pause:
         pass
@@ -57,11 +56,15 @@ def test_a_planted_checked_file_record_allows_nothing(root):
     hashed = hashlib.sha256(data).hexdigest()
     step.write(root, "run/sync/checked-files.json", step.encoded({path: hashed}))  # the old, unsigned shape
     before = pause.findings(root, path, data)
+    assert any(f.code == "cannot-check" for f in before)  # the planted unsigned shape vouches for nothing
     entry = records.make(root, "file", f"{path}:{hashed}", {"path": path, "sha256": hashed})
     step.write(root, "run/sync/checked-files.json", step.encoded({path: entry}))
     after = pause.findings(root, path, data)
-    assert all(f.code != "cannot-check" for f in after)
-    assert len(before) >= len(after)
+    assert all(f.code != "cannot-check" for f in after)  # only the signed record does
+
+
+def _blob(b):
+    return step.entries(b, "HEAD")[TICKET][1]
 
 
 def test_a_missing_ticket_goes_only_with_a_signed_single_use_record(machines):
@@ -70,12 +73,42 @@ def test_a_missing_ticket_goes_only_with_a_signed_single_use_record(machines):
     step.write(b, "run/sync/allow-delete.json", step.encoded({"t_abc123": True}))  # planted
     success(b)
     assert repo.safe(b, TICKET).exists()  # restored
-    entry = records.make(b, "delete", "t_abc123", {"ticket": "t_abc123"})
+    target = f"t_abc123:{_blob(b)}"
+    entry = records.make(b, "delete", target, {"ticket": "t_abc123", "blob": _blob(b)})
     step.write(b, "run/sync/allow-delete.json", step.encoded({"t_abc123": entry}))
     repo.safe(b, TICKET).unlink()
     success(b)
     assert not repo.safe(b, TICKET).exists()
-    assert not records.ok(b, "delete", "t_abc123", entry, single_use=True)  # used up
+    assert not records.ok(b, "delete", target, entry, single_use=True)  # used up
+
+
+def test_an_allowed_deletion_is_bound_to_the_copy_the_person_saw(machines):
+    """Opus PR B part 1 LOW 2: the ticket comes back and changes before the next step: the unspent record
+    no longer lets a deletion of the NEW copy go."""
+    _a, b, _ = both(machines)
+    entry = records.make(b, "delete", f"t_abc123:{_blob(b)}", {"ticket": "t_abc123", "blob": _blob(b)})
+    step.write(b, "run/sync/allow-delete.json", step.encoded({"t_abc123": entry}))
+    edit(b, title="changed here after the decision")
+    success(b)  # the changed copy is committed (the file was there: nothing spent)
+    repo.safe(b, TICKET).unlink()
+    success(b)
+    assert repo.safe(b, TICKET).exists() and load(b)["title"] == "changed here after the decision"  # restored
+    assert cli.read(b, "state")["deleted"].get("t_abc123")
+
+
+def test_the_deleted_command_binds_the_record_to_the_synced_copy(machines, monkeypatch):
+    _a, b, _ = both(machines)
+    state = cli.read(b, "state")
+    state["deleted"] = {"t_abc123": NOW}
+    step.write(b, step.STATE, step.encoded(state))
+    monkeypatch.setattr(humanproof, "person_by", lambda *a, **k: "human:tester")
+    from orch import config
+
+    monkeypatch.setattr(config, "require_person", lambda *a, **k: None)
+    assert cli.main(["--dir", str(b), "deleted", "t_abc123", "--json"]) == 0
+    entry = cli.read(b, "allow-delete")["t_abc123"]
+    assert records.ok(b, "delete", f"t_abc123:{_blob(b)}", entry)
+    assert not records.ok(b, "delete", "t_abc123", entry)  # never the bare ticket id
 
 
 def test_an_approval_is_never_replayed_and_a_planted_one_applies_nothing(machines, monkeypatch):
@@ -168,9 +201,8 @@ def test_a_core_state_write_never_signs_a_planted_pause(machines):
     step.write(b, step.STATE, step.encoded(state))  # the generic core write path
     assert _stored_pause(b) is None and pause.verified_pause(b, cli.read(b, "state")) is None
     _planted(b, mac="forged")
-    success(b)  # a whole step writes the state too
-    stored = _stored_pause(b)  # none, or only a pause this step made itself: never the planted one
-    assert stored is None or (pause.verified_pause(b, cli.read(b, "state")) and stored["reason"] != "x")
+    assert not success(b).get("paused")  # a whole step writes the state too; nothing to pause for here
+    assert _stored_pause(b) is None and pause.verified_pause(b, cli.read(b, "state")) is None
 
 
 def test_the_deleted_notice_does_not_launder_a_planted_pause(machines):
@@ -277,5 +309,28 @@ def test_records_need_the_workspace_key(root):
     except repo.Refused:
         pass
     assert not records.ok(root, "delete", "t_abc123", {"kind": "delete", "target": "t_abc123", "id": "x", "mac": "y"})
-    assert humanproof.action_spent(root, "not-an-id")
-    assert SimpleNamespace  # (imported for parity with the proof helpers)
+    assert humanproof.action_spent(root, "not-an-id")  # an unknown id counts as spent (fail closed)
+
+
+def test_an_approved_removal_leaves_no_own_value(machines, monkeypatch):
+    """Opus PR B part 1 LOW 11: approving a peer's removal removes the add-on's key from local-ext (absent,
+    as automation reads it), not a digest of None."""
+    a, b, _ = both(machines)
+    value = {"enabled": True}
+    edit(a, ext={"automation": value})
+    success(a)
+    success(b)
+    approval.approve(b, "t_abc123", "automation",
+                     proof(b, "sync:allow:t_abc123:automation:" + approval.digest(value), monkeypatch))
+    assert approval.local_ext(b)[0]["t_abc123"] == {"automation": approval.digest(value)}
+    doc = load(a)
+    doc.pop("ext")
+    save(a, value={**doc, "updated_at": "2026-11-11T14:00:00Z"})  # the peer removes the block
+    success(a)
+    success(b)
+    assert load(b)["ext"]["automation"] == value  # held until a person decides
+    approval.approve(b, "t_abc123", "automation",
+                     proof(b, "sync:allow:t_abc123:automation:" + approval.digest(None), monkeypatch))
+    assert "automation" not in (load(b).get("ext") or {})
+    known, ok = approval.local_ext(b)
+    assert ok and known["t_abc123"] == {}  # automation: no own value, as for a ticket that never had one

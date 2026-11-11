@@ -225,7 +225,9 @@ def _ticket_shows_sync(p: Path) -> bool:
             return _TICKET_MARKS[key]
         raw = p.read_bytes() if st.st_size <= 64 * 1024 * 1024 else b""
         hit = False
-        if b"agent:sync" in raw or b'"sync"' in raw:
+        # only a skip of what cannot hold a trace: is_reserved_label is caseless (casefold), and JSON may
+        # \u-escape any letter; plain ASCII without escapes casefolds as lower(), so only that is filtered
+        if b"sync" in raw.lower() or b"\\u" in raw or not raw.isascii():
             hit = doc_shows_sync(json.loads(raw))
     except (OSError, ValueError, RecursionError, AttributeError):
         return False
@@ -438,6 +440,20 @@ def remember(root: Path, tid, found: dict[str, list]) -> bool:
     return True
 
 
+def _adopt_relay_allow(root: Path, doc: dict) -> None:
+    """A relay:allow question asked here before sync was on (relay writes no binding while sync-free): its
+    binding to the ticket's allow_message, "applied" as the ticket says (the same trust as adopted lines)."""
+    r = (doc.get("ext") or {}).get("relay") if isinstance(doc.get("ext"), dict) else None
+    mid = r.get("allow_message") if isinstance(r, dict) else None
+    if not isinstance(mid, str):
+        return
+    for q in doc.get("questions") or []:
+        if isinstance(q, dict) and q.get("kind") == "relay:allow" and isinstance(q.get("id"), str):
+            humanproof.relay_allow_set(
+                root, doc["id"], q["id"], mid, applied=r.get("allow_applied") == q["id"]
+            )
+
+
 def adopt_local_objects(root: Path) -> int:
     """The one-time adoption when sync is first enabled (enable_sync, BEFORE the first fetch and only when no
     ticket shows sync's traces): the person fields already in this machine's tickets are its own. Returns how
@@ -472,6 +488,7 @@ def adopt_local_objects(root: Path) -> int:
                 }
                 if remember(root, tid, found):
                     n += 1
+                _adopt_relay_allow(root, doc)
         except Exception:  # noqa: BLE001 - a ticket that cannot be read adopts nothing (its lines: unverified)
             continue
     return n
@@ -628,7 +645,9 @@ def _shown(proof: _Proof, t: dict) -> dict:
                 if field in c and needs_proof(c.get(field)):
                     if wont_proven is None:
                         wont_proven = c.get("wont_do") is True and proof.wont_ok(c, tid)
-                    if not wont_proven:
+                    # the decision record (humanproof.wont_decision) covers wont_by, not `by`: `by` is
+                    # proven by it only as the very same value
+                    if not wont_proven or (field == "by" and c.get("by") != c.get("wont_by")):
                         nc = {**nc, field: SYNC_BY}
             new_list.append(nc)
         if any(a is not b for a, b in zip(new_list, checklist, strict=True)):
@@ -757,6 +776,8 @@ def _all_demoted(t: dict) -> dict:
             ]
     if "description_by" in t:
         out["description_by"] = SYNC_BY if needs_proof(t.get("description_by")) else t["description_by"]
+    if isinstance(t.get("plan"), dict) and "by" in t["plan"] and needs_proof(t["plan"].get("by")):
+        out["plan"] = {**t["plan"], "by": SYNC_BY}
     return out
 
 
@@ -793,6 +814,19 @@ def shown_json(root: Path, data, _proof: _Proof | None = None, _depth: int = 0):
     if isinstance(data, dict):
         return {k: shown_json(root, v, proof, _depth + 1) for k, v in data.items()}
     return data
+
+
+def shown_item(root: Path, ticket, field: str, item):
+    """One step, question or ref of `ticket` (field "checklist", "questions" or "refs") as shown_ticket shows
+    it: for a command that outputs the bare item (`orch check ... --json`, `orch answer --json`, `orch ref add
+    --json`), which shown_json cannot tell from other data. The item need not be in the ticket any more (a
+    removed ref): it is proven against the ticket's id and history all the same."""
+    root = _need_root(root)
+    if not isinstance(ticket, dict) or not isinstance(item, dict) or not sync_enabled(root):
+        return item
+    shown = shown_ticket(root, {**ticket, field: [item]})
+    got = shown.get(field) if isinstance(shown, dict) else None
+    return got[0] if isinstance(got, list) and got else item
 
 
 def evidence_author(ticket: dict, check: dict, ev: dict) -> str:

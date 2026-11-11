@@ -9,6 +9,7 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -174,8 +175,13 @@ SYNCED_UNVERIFIED = "(synced, not verified here) "
 def _demote_all(t: dict) -> dict:
     """Without the core nothing can be proven: every person field is the sync role (fail closed)."""
 
-    def agent(by) -> bool:
-        return isinstance(by, str) and re.fullmatch(r"agent:[a-z0-9._-]{1,40}", by) is not None
+    def agent(by) -> bool:  # orch.history.is_agent_history_author, the same rule
+        if not isinstance(by, str) or not by.isascii() or by != unicodedata.normalize("NFKC", by):
+            return False
+        label = by.casefold()
+        return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
+            mobile.NOT_PLAIN_AGENTS
+        )
 
     out = dict(t)
     if isinstance(t.get("history"), list):
@@ -211,6 +217,10 @@ def _demote_all(t: dict) -> dict:
                 {**x, key: SYNC_BY} if isinstance(x, dict) and x.get(key) is not None and not agent(x[key]) else x
                 for x in t[field]
             ]
+    if "description_by" in t and not agent(t.get("description_by")):
+        out["description_by"] = SYNC_BY
+    if isinstance(t.get("plan"), dict) and "by" in t["plan"] and not agent(t["plan"].get("by")):
+        out["plan"] = {**t["plan"], "by": SYNC_BY}
     return out
 
 

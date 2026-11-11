@@ -293,7 +293,11 @@ def state(root):
 
 
 
-EARLIER = ('run/sync/state.json', 'run/sync/pending.json', 'run/sync/choices.json', 'run/sync/held')
+# Any trace of the sync add-on's local state means "synced before" (never adopt). The whole run/sync folder
+# counts too (an agent deleting single files must not get adoption). The first `orch sync set` (local or
+# remote) calls _history_on before it writes anything there; a step only reaches it once `set` has run.
+EARLIER = ('run/sync/state.json', 'run/sync/pending.json', 'run/sync/choices.json', 'run/sync/held',
+           'run/sync/settings.json', 'run/sync')
 
 
 def _history_on(root):

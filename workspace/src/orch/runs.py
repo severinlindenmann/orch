@@ -1088,8 +1088,8 @@ def _plan_first_plan(ticket: dict) -> list[str]:
     ]
 
 
-def fresh_prompt(ticket: dict, items: list[dict], root: Path | None = None) -> str:
-    root = root if root is not None else history.here()  # never without a workspace: looked up
+def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
+    """`root`: the ticket's workspace (required: never looked up, a lookup can find another workspace)."""
     ticket = history.shown_ticket(root, ticket)  # person fields as this machine can prove them
     tid = ticket["id"]
     out = [
@@ -1154,11 +1154,8 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path | None = None) -> s
     return "\n\n".join(out)[:12000]
 
 
-def resume_prompt(
-    ticket: dict, items: list[dict], since: str | None, agent: str, root: Path | None = None
-) -> str:
-    root = root if root is not None else history.here()  # never without a workspace: looked up
-    ticket = history.shown_ticket(root, ticket)
+def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str, root: Path) -> str:
+    ticket = history.shown_ticket(root, ticket)  # `root` required, as in fresh_prompt
     tid = ticket["id"]
     news = []
     for h in history.lines(root, ticket):

@@ -37,6 +37,20 @@ def test_without_the_core_every_person_field_is_demoted(monkeypatch, tmp_path):
     assert not mobile._person("human:alice")
 
 
+def test_without_the_core_plan_description_and_lookalike_agents_are_demoted(monkeypatch):
+    monkeypatch.setitem(sys.modules, "orch.history", None)
+    t = {
+        **_ticket(),
+        "plan": {"text": "p", "by": "human:alice"},
+        "description_by": "human:alice",
+        "history": [{**LINE, "by": by} for by in ("agent:relay", "agent:phone1", "AGENT:CLAUDE", "agent:claude")],
+    }
+    shown = data._demote_all(t)
+    assert shown["plan"]["by"] == shown["description_by"] == data.SYNC_BY
+    # core's rule (orch.history.is_agent_history_author): relay/phone labels are not plain agents
+    assert [h["by"] for h in shown["history"]] == [data.SYNC_BY, data.SYNC_BY, "AGENT:CLAUDE", "agent:claude"]
+
+
 def test_a_synced_workspace_read_from_files_shows_the_sync_role(tmp_path):
     root = _workspace(tmp_path, synced=True)
     tickets, _ = data.load_tickets(root, None)
