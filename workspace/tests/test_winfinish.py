@@ -395,6 +395,41 @@ def test_failed_project_step_restores_registry(tmp_path, existing, crash):
     assert not (tmp_path / "finish.pending").exists()
 
 
+@pytest.mark.parametrize("failure", [None, "uv", "then"])
+def test_a_failed_finisher_drops_the_consents_of_its_job(tmp_path, failure):
+    """#437: init --recommended on Windows recorded consents for all its add-ons before the finisher ran;
+    a failed finisher drops exactly those (other workspaces and add-ons keep theirs)."""
+    cpath = tmp_path / "consent.json"
+    keep = [{"workspace_id": "w1", "name": "focus"}, {"workspace_id": "w2", "name": "dashboard"}]
+    cpath.write_text(json.dumps([*keep, {"workspace_id": "w1", "name": "dashboard"}]))
+    job = _job(
+        tmp_path,
+        uv_code="import sys; sys.exit(3)" if failure == "uv" else "pass",
+        then_code="import sys; sys.exit(2)" if failure == "then" else "pass",
+    )
+    job["consents"] = [str(cpath), "w1", ["automation", "dashboard"]]
+    assert _run_finisher(tmp_path, job).returncode == (1 if failure else 0)
+    left = json.loads(cpath.read_text())
+    assert left == keep if failure else len(left) == 3
+
+
+def test_windows_batch_hands_its_new_consents_to_the_finisher(proj, monkeypatch):
+    jobs = []
+    monkeypatch.setattr(winfinish, "needed", lambda: True)
+    monkeypatch.setattr(addons, "_which_uv", lambda: "uv.exe")
+    monkeypatch.setattr(addons, "_reinstall_plan", lambda: None)
+    monkeypatch.setattr(addons, "_reinstall_anywhere", lambda: True)
+    monkeypatch.setattr(
+        winfinish, "start", lambda home, uv, then, cwd, done, reg=None, extra=None: jobs.append(extra) or home
+    )
+    monkeypatch.setattr(addons, "active", lambda root: {"focus": {}})  # on before: its consent stays
+    with addons.batch_install(proj):
+        for n in ("automation", "dashboard", "focus"):
+            _collect(proj, n)
+    wid = addons.workspace_id(proj)
+    assert jobs == [{"consents": [str(addons.consent_path()), wid, ["automation", "dashboard"]]}]
+
+
 @pytest.mark.parametrize("failure", ["ok", "exit", "exception"])
 def test_updating_marker_covers_reinstall_and_followup(tmp_path, failure):
     mark = winfinish.marker_path(tmp_path)
