@@ -115,7 +115,7 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   assert.equal(nodes(c.privateCard(settings), n => n.tag === 'h3').length, 1);
 });
 
-test('Separate copies card: three choices, the saved one is selected, setup and cap are controls', () => {
+test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote behind Details', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
@@ -123,35 +123,62 @@ test('Separate copies card: three choices, the saved one is selected, setup and 
   vm.runInContext(src.slice(start, end), c);
   const card = vm.runInContext('copiesCard', c)({copies:'always', copies_max:5, copy_setup:'npm ci'});
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
-  const choices = all(card, n => n.attrs?.['data-action'] === 'copies-mode');
-  assert.deepEqual(choices.map(n => n.attrs['data-mode']), ['off', 'together', 'always']);
-  assert.deepEqual(choices.map(n => n.attrs['aria-checked']), [false, false, true]);
-  assert.equal(all(card, n => n.attrs?.['data-key'] === 'settings-copy-setup')[0].attrs.value, 'npm ci');
-  assert.equal(all(card, n => n.tag === 'select')[0].value, '5');
+  const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
+  // the visible part: one row, plain words, a switch; nothing technical outside Details
+  const details = all(card, n => n.tag === 'details')[0];
+  const outside = text({children:all(card, n => n.tag === 'div' && n.attrs?.className === 'card')[0].children.filter(n => n !== details)});
+  assert.match(outside, /Helpers working at the same time: each gets its own copy of your files/);
+  assert.doesNotMatch(text(vm.runInContext('copiesCard', c)({copies:'together'})), /\bgit\b|npm ci|\.env|nested repositories|warning line|e\.g\./i);
+  const sw = all(card, n => n.attrs?.['data-key'] === 'settings-switch-copies')[0];
+  assert.equal(sw.attrs.role, 'switch'); assert.equal(sw.attrs['aria-checked'], true); assert.equal(sw.attrs['data-mode'], 'off');
+  // behind Details: when (two choices, the saved one selected), the cap, the setup and the plain footnote
+  const choices = all(details, n => n.attrs?.['data-action'] === 'copies-mode');
+  assert.deepEqual(choices.map(n => n.attrs['data-mode']), ['together', 'always']);
+  assert.deepEqual(choices.map(n => n.attrs['aria-checked']), [false, true]);
+  assert.equal(all(details, n => n.tag === 'select')[0].value, '5');
+  assert.match(text(details), /Needs version history in this folder\./);
+  assert.match(text(details), /Prepare a copy with/);
+  // the setup field follows the page's one editing pattern: the value and Edit, then the field with Save / Cancel
+  assert.match(text(details), /npm ci/);
+  assert.equal(all(card, n => n.attrs?.['data-key'] === 'settings-copy-setup').length, 0);
+  assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-setup-edit')[0].children[0], 'Edit');
+  vm.runInContext('copySetupEditing = true', c);
+  const editing = vm.runInContext('copiesCard', c)({copies:'always', copy_setup:'npm ci'});
+  assert.equal(all(editing, n => n.attrs?.['data-key'] === 'settings-copy-setup')[0].attrs.value, 'npm ci');
+  assert.deepEqual(all(editing, n => ['copies-setup', 'copies-setup-cancel'].includes(n.attrs?.['data-action'])).map(n => n.children[0]), ['Save', 'Cancel']);
+  vm.runInContext('copySetupEditing = false', c);
   const dflt = vm.runInContext('copiesCard', c)({});
-  assert.deepEqual(all(dflt, n => n.attrs?.['data-action'] === 'copies-mode').map(n => n.attrs['aria-checked']), [false, true, false]);
+  assert.equal(all(dflt, n => n.attrs?.['data-key'] === 'settings-switch-copies')[0].attrs['aria-checked'], true);
+  assert.deepEqual(all(dflt, n => n.attrs?.role === 'radio').map(n => n.attrs['aria-checked']), [true, false]);
+  const off = vm.runInContext('copiesCard', c)({copies:'off'});
+  const offSwitch = all(off, n => n.attrs?.['data-key'] === 'settings-switch-copies')[0];
+  assert.equal(offSwitch.attrs['aria-checked'], false); assert.equal(offSwitch.attrs['data-mode'], 'together');
+  assert.equal(all(details, n => n.attrs?.open === '').length, 0, 'Details stays closed while nothing needs a look');
 });
 
-test('Copies on this computer line: count, size, "..." while counting, Clean up now button', () => {
+test('Copies on this computer line: count, size, "Counting…" then a real empty state, Clean up now button', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
   const c = vm.createContext({h, array:x => Array.isArray(x) ? x : [], snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const text = d => vm.runInContext('copiesDiskText', c)(d);
-  assert.match(text(null), /^…/);
+  assert.equal(text(null), 'Counting…');
+  assert.equal(text({copies:0, bytes:0}), 'None right now · a copy is removed by itself when its ticket is done');
+  assert.doesNotMatch(text({copies:0, bytes:0}), /…/);
   assert.equal(text({copies:2, bytes:1.4e9, partial:false}), '2 copies · 1.4 GB · removed by themselves when a ticket is done');
   assert.match(text({copies:1, bytes:5e6, partial:true}), /^1 copy · more than 5 MB/);
   assert.match(text({copies:1, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}]}), /2 copies from a moved or deleted project/);
   assert.match(text({copies:1, bytes:0, changed:1}), /1 removed copy changed after being saved/);
-  assert.match(text({copies:1, bytes:0, stuck:[{ticket:'t_abc123'}]}), /git was interrupted/);
+  assert.match(text({copies:1, bytes:0, stuck:[{ticket:'t_abc123'}]}), /a copy could not be cleaned up/);
+  assert.doesNotMatch(text({copies:1, bytes:0, stuck:[{ticket:'t_abc123'}]}), /\bgit\b/);
   const card = vm.runInContext('copiesCard', c)({copies_disk:{copies:0, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}], stuck:[{ticket:'t_abc123'}]}});
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const btn = all(card, n => n.attrs?.['data-action'] === 'copies-clean')[0];
   assert.equal(btn.children[0], 'Clean up now');
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-orphaned').length, 1);
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-retry').length, 1);
-  assert.match(JSON.stringify(card), /files git ignores/);
+  assert.equal(all(card, n => n.tag === 'details')[0].attrs.open, '', 'Details opens by itself when a copy needs a look');
 });
 
 test('General phone messages belong in Chat, not Home Messages', () => {

@@ -37,3 +37,20 @@ def test_the_copies_count_is_live_while_the_size_walk_is_cached(ws, tmp_path):
     )  # a third copy appears within the TTL
     assert data.copies_disk(ws)["copies"] == 3  # not the cached 2
     data.copies_disk_forget(ws)
+
+
+def test_a_count_that_fails_reads_as_none_not_a_stuck_line(ws, monkeypatch):
+    """The settings line must never stay at "..." for good: when the walk fails, the page gets a real empty state."""
+    from orch import worktrees
+
+    def boom(*a, **k):
+        raise OSError("no")
+
+    data.copies_disk_forget(ws)
+    monkeypatch.setattr(worktrees, "usage", boom)
+    monkeypatch.setattr(worktrees, "count", boom)
+    data.copies_disk(ws)
+    _wait_counted(ws)
+    got = data.copies_disk(ws)
+    assert got is not None and got["copies"] == 0 and got["stuck"] == [] and got["orphaned"] == []
+    data.copies_disk_forget(ws)

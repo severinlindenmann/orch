@@ -20,10 +20,16 @@ def test_page_is_wired_into_the_shell():
 def test_groups_render_only_when_data_exists():
     assert "state?.groups?.hosted" in JS and "state?.groups?.joined" in JS
     for text in (
-        "Done groups → History",
+        "'Earlier'",
+        "'Earlier days'",
+        "'Finished groups'",
+        " · you can read, not reply",
+        "'Back to today'",
         "Search chats",
-        "Search History",
-        "Context cleared daily at 04:00",
+        "Search earlier chats",
+        "Starts fresh each day at 04:00",
+        "'From my phone'",
+        "'Needs your OK'",
         "is thinking…",
         "Members",
         "Remove from group",
@@ -32,6 +38,16 @@ def test_groups_render_only_when_data_exists():
         assert text in JS
     assert "'chat.say'" in JS and "'group.say'" in JS and "'group.remove'" in JS and "'group.add'" in JS
     assert "chat.group_" not in JS
+    # one entry point to Earlier, no counter chips, no second name for the AI where a person reads it
+    for gone in (
+        "Done groups → History",
+        "'All History'",
+        "From phone · ",
+        "Running · ",
+        "Context cleared daily",
+        "'Chat · '",
+    ):
+        assert gone not in JS, gone
 
 
 def test_history_is_read_only_and_data_never_goes_through_innerhtml():
@@ -101,9 +117,10 @@ def test_open_agent_proposal_and_moved_conversation():
     index = (webjs.WEB / "index.html").read_text()
     assert 'data-action="open-agent"' in index
     assert "getElementById('open-agent').hidden = snapshot" in app
+    assert ">Open helper</button>" in index and ">Open agent<" not in index
     for text in (
-        "New conversation with your agent",
-        "Talk it through first. When you are ready, the agent can make the ticket.",
+        "New conversation with your helper",
+        "Talk it through first. When you are ready, the helper can make the ticket.",
         "Make ticket",
         "This conversation now belongs to ticket",
         "chat.make_ticket",

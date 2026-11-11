@@ -1,0 +1,83 @@
+{
+ "_note": "Screenshot state for Chat (Today, Earlier, a past day) and Settings, 1280 and 390 px wide (e2e/dash_ux_shots.cjs). The Chat day itself comes from chat-day-pilatus-2026-11-11.json. The three 'Team lunch' groups of the live test data are distinct groups and stay distinct.",
+ "rev": "shots-1",
+ "now": "2026-11-11T13:05:00",
+ "workspace": "pilatus",
+ "who": "me",
+ "look": {"icon": "office", "color": "teal", "workspaces": [{"name": "pilatus", "here": true, "needs": 7}]},
+ "addons": [{"name": "automation", "dashboard": {"panel": "repeats", "label": "Automation"}}],
+ "needs": [
+  {"id": "n_1", "ticket": "t_xcl5y8", "answer": {"question": "q_w71"}},
+  {"id": "n_2", "ticket": "t_wo3trx", "answer": {"question": "q_w74"}},
+  {"id": "n_3", "ticket": "t_ofjc0e", "answer": {"question": "q_w60"}},
+  {"id": "n_4", "ticket": "t_9dz65z", "answer": {"question": "q_lunch"}},
+  {"id": "n_5", "ticket": "t_6cbxce"},
+  {"id": "n_6", "ticket": "t_rev001"},
+  {"id": "n_7", "ticket": "t_hbneed"}
+ ],
+ "runs": {},
+ "tickets": [
+  {"id": "t_xcl5y8", "key": "PIL-71", "title": "Water office plants – planter 0142-FFE2A659, Wed 11 Nov", "status": "waiting", "due": "2026-11-11",
+   "created_at": "2026-11-10T07:00:00Z", "updated_at": "2026-11-11T07:00:00Z", "checklist": [], "children": [], "parent": null,
+   "questions": [{"id": "q_w71", "text": "Were the plants watered?", "options": ["Watered", "Not yet"], "answer": null}]},
+  {"id": "t_wo3trx", "key": "PIL-74", "title": "Water office plants (planter 0531-D6B6EF8F), Wed 11 Nov", "status": "waiting", "due": "2026-11-11",
+   "created_at": "2026-11-10T07:00:00Z", "updated_at": "2026-11-11T07:00:00Z", "checklist": [], "children": [], "parent": null,
+   "questions": [{"id": "q_w74", "text": "Were the plants watered?", "options": ["Watered", "Not yet"], "answer": null}]},
+  {"id": "t_ofjc0e", "key": "PIL-60", "title": "Water office plants (planter 1429-BB3E17C2) on Tue 10 Nov", "status": "waiting", "due": "2026-11-10",
+   "created_at": "2026-11-09T07:00:00Z", "updated_at": "2026-11-10T07:00:00Z", "checklist": [], "children": [], "parent": null,
+   "questions": [{"id": "q_w60", "text": "Were the plants watered?", "options": ["Watered", "Not yet"], "answer": null}]},
+  {"id": "t_9dz65z", "key": "PIL-9", "title": "Book a table for the team lunch on Friday 13 Nov, 8 people, near the office. Ask me before you book.", "status": "waiting", "due": "2026-11-13",
+   "created_at": "2026-11-08T07:00:00Z", "updated_at": "2026-11-11T08:00:00Z", "checklist": [], "children": [], "parent": null,
+   "questions": [{"id": "q_lunch", "text": "Is the table at Mövenpick booked for 12:00?", "options": ["Yes", "Not yet"], "answer": null}]},
+  {"id": "t_l6diqq", "key": "PIL-55", "title": "Check the backups on Friday 13 Nov", "status": "open", "due": "2026-11-13",
+   "created_at": "2026-11-08T07:00:00Z", "updated_at": "2026-11-08T07:00:00Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_hbneed", "key": "PIL-3", "title": "Q4 budget review with the board", "status": "review",
+   "created_at": "2026-11-08T07:32:48Z", "updated_at": "2026-11-11T12:56:20Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_6cbxce", "key": "PIL-2", "title": "Move the Lucerne office to the new floor", "status": "active",
+   "created_at": "2026-11-08T07:32:48Z", "updated_at": "2026-11-08T13:53:25Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_q08kk8", "key": "PIL-7", "title": "Christmas dinner 18 Dec", "status": "open",
+   "created_at": "2026-11-08T07:32:48Z", "updated_at": "2026-11-08T07:32:48Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_rev001", "key": "PIL-12", "title": "Order six new desks for the window row", "status": "review",
+   "created_at": "2026-11-08T10:44:07Z", "updated_at": "2026-11-11T09:44:07Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_grp911", "key": "PIL-80", "title": "Team lunch 20 Nov", "status": "active",
+   "created_at": "2026-11-11T09:11:00Z", "updated_at": "2026-11-11T09:36:00Z", "checklist": [], "children": [], "parent": null, "questions": [],
+   "history": [{"at": "2026-11-11T09:36:00Z", "by": "agent:Home", "text": "Tuesday works for us.", "in_chat": true}]},
+  {"id": "t_grp040", "key": "PIL-81", "title": "Team lunch 20 Nov", "status": "done",
+   "created_at": "2026-11-10T10:40:00Z", "updated_at": "2026-11-10T16:20:00Z", "checklist": [], "children": [], "parent": null, "questions": []}
+ ],
+ "groups": {
+  "hosted": [
+   {"id": "g_0911", "ticket": "t_grp911", "title": "Team lunch 20 Nov", "closed": false, "seq": 3,
+    "members": [{"ws": "ws_pilatus01", "name": "Pilatus", "host": true, "joined_at": "2026-11-11T09:11:00Z"},
+                {"ws": "ws_home00001", "name": "Home", "joined_at": "2026-11-11T09:12:00Z"},
+                {"ws": "ws_report001", "name": "Reports", "joined_at": "2026-11-11T09:13:00Z"}],
+    "connectable": [], "tasks": []},
+   {"id": "g_1040", "ticket": "t_grp040", "title": "Team lunch 20 Nov", "closed": true, "seq": 9,
+    "members": [{"ws": "ws_pilatus01", "name": "Pilatus", "host": true, "joined_at": "2026-11-10T10:40:00Z"},
+                {"ws": "ws_home00001", "name": "Home", "joined_at": "2026-11-10T10:41:00Z"}],
+    "connectable": [], "tasks": []}
+  ],
+  "joined": []
+ },
+ "settings": {
+  "agents_may_finish": false,
+  "copies": "together",
+  "copies_max": 3,
+  "copy_setup": "",
+  "copies_disk": {"copies": 0, "bytes": 0, "partial": false, "orphaned": [], "changed": 0, "stuck": []},
+  "folder": "/Users/someone/work/pilatus",
+  "share": false,
+  "git_private": {"count": 0, "lines": [], "agent_command_ignored": false, "pending": []},
+  "permissions": "auto",
+  "agents": [
+   {"name": "claude", "label": "Claude Code", "adapter": "claude", "found": true, "version": "2.1", "status": "found", "chosen": true},
+   {"name": "codex", "label": "Codex", "adapter": "codex", "found": false, "status": "missing", "chosen": false}
+  ],
+  "addons": [
+   {"name": "dashboard", "label": "Dashboard", "description": "This page.", "active": true},
+   {"name": "automation", "label": "Automation", "description": "Repeat a ticket on a schedule.", "active": true}
+  ]
+ },
+ "mobile_mode": {"on": false, "default_hours": 12, "hours_choices": [4, 8, 12, 24], "awake": null, "since": null, "ends_at": null, "machine": "Office Mac", "ended": null},
+ "chat_activity": {"day": "2026-11-11", "phone_today": 8, "from_workspaces": {"Home": 10, "Reports": 32}, "running": 2}
+}

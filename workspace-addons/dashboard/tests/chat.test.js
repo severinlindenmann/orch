@@ -25,13 +25,14 @@ test('proposal offers a person Make ticket, then a ticket chip', () => {
   c.snapshot = true;
   assert.equal(c.chatRefs([{kind:'proposal',title:'Fish'}], 'x')[0].attrs.disabled, true);
 });
-test('Open agent starts empty and shows only the latest conversation after sending', () => {
+test('Open helper starts empty and shows only the latest conversation after sending', () => {
   const c = context();
   c.state.chat.messages = [{id:'old', text:'Old'}, {id:'new', text:'Fish', convo_start:true}];
   c.chatOpenAgent();
   assert.equal(c.location.hash, '#chat');
   assert.equal(c.chatConversation().length, 0);
-  assert.match(JSON.stringify(c.chatHeader(null, false)), /New conversation with your agent/);
+  assert.match(JSON.stringify(c.chatHeader(null, false)), /New conversation with your helper/);
+  assert.doesNotMatch(JSON.stringify(c.chatHeader(null, false)), /agent/);
   vm.runInContext('chatUi.newConversation = false', c);
   assert.deepEqual(Array.from(c.chatConversation(), m => m.id), ['new']);
 });
@@ -43,15 +44,90 @@ test('moved conversation renders its banner and header ticket link', () => {
   assert.match(thread, /Open ticket/);
   assert.match(JSON.stringify(c.chatHeader(null, false)), /FS-1/);
 });
-test('the helper is shown by the workspace name only, no "helper" suffix', () => {
+test('one name for the AI: "Your helper" in the title, the bubble, the composer and the thinking line', () => {
   const c = context();
   c.state.workspace = 'pilatus'; c.state.chat.helper = 'pilatus helper';
-  c.state.chat.messages = [{id:'m1', by:'ws_x', text:'Hi', at:'2026-11-09T10:00:00Z'}];
+  c.state.chat.messages = [{id:'m1', by:'ws_x', via:'helper', text:'Hi', at:'2026-11-09T10:00:00Z'}, {id:'m2', by:'you', via:'phone', text:'Yo', at:'2026-11-09T10:01:00Z'}];
   const thread = JSON.stringify(c.chatThread(null, null));
-  assert.match(thread, /Pilatus/);
-  assert.doesNotMatch(thread, /[Pp]ilatus helper/);
-  assert.match(JSON.stringify(c.chatThinking('Pilatus', true)), /Pilatus is thinking/);
-  assert.doesNotMatch(JSON.stringify(c.chatThinking('Pilatus', true)), /helper/);
+  assert.match(thread, /Your helper/);
+  assert.match(thread, /Message your helper/);
+  assert.doesNotMatch(thread, /[Pp]ilatus helper|Message Pilatus/);
+  const times = nodes(c.chatThread(null, null), n => /chat-message-time/.test(n.attrs?.className || '')).map(n => n.textContent);
+  assert.ok(times.every(t => !/helper/.test(t)), 'the time line never says "helper"');
+  assert.ok(times.some(t => /from your phone/.test(t)));
+  assert.match(thread, /Starts fresh each day at 04:00/);
+  assert.doesNotMatch(thread, /Context cleared/);
+  const head = JSON.stringify(c.chatHeader(null, false));
+  assert.match(head, /Your helper/); assert.doesNotMatch(head, /Chat · /);
+  assert.match(JSON.stringify(c.chatThinking('Your helper', true)), /Your helper is thinking/);
+});
+
+test('the chip row is gone: one Show filter, and "Working on N tickets" only when N > 0', () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', activity:{phone_today:2, from_workspaces:{Home:3}, running:0}, messages:[
+    {id:'p1', by:'you', via:'phone', text:'From the phone'}, {id:'r1', by:'ws_x', via:'helper', text:'Reply to phone', reply_to:'p1'},
+    {id:'d1', by:'you', via:'dashboard', text:'At the desk'}, {id:'r2', by:'ws_x', via:'helper', text:'Reply to desk', reply_to:'d1'}]};
+  const page = JSON.stringify(c.chatPage());
+  assert.doesNotMatch(page, /From phone · |From Home · |Running · /);
+  assert.doesNotMatch(page, /Working on/);
+  assert.match(page, /Show:/); assert.match(page, /From my phone/);
+  c.state.chat.activity.running = 2;
+  assert.match(JSON.stringify(c.chatHeader(null, false)), /Working on 2 tickets/);
+  vm.runInContext("chatUi.filter = 'phone'", c);
+  const ids = nodes(c.chatThread(null, null), n => n.attrs?.['data-message-id']).map(n => n.attrs['data-message-id']);
+  assert.deepEqual(ids, ['p1', 'r1']);
+});
+
+test('ticket card: plain title and due first, "Needs your OK" in the accent, the option buttons, the key behind Details', () => {
+  const c = context();
+  c.state.now = '2026-11-11T10:00:00';
+  c.window.DashHelpers = {statusWord:s => ({review:'Ready for review', waiting:'Needs you', ready:'Not started'}[s] || s)};
+  const tickets = {
+    t_plant1:{id:'t_plant1', key:'PIL-71', status:'waiting', due:'2026-11-11', title:'Water office plants – planter 0142-FFE2A659, Wed 11 Nov',
+      questions:[{id:'q_water1', text:'Watered?', options:['Watered', 'Not yet']}]},
+    t_lunch1:{id:'t_lunch1', key:'PIL-9', status:'ready', due:'2026-11-13', title:'Book a table for the team lunch. Ask me before you book.', questions:[]},
+  };
+  c.ticketOf = id => tickets[id] || null;
+  const [plant, lunch] = c.chatRefs([{kind:'ticket', id:'t_plant1', key:'PIL-71', title:tickets.t_plant1.title}, {kind:'ticket', id:'t_lunch1', key:'PIL-9', title:tickets.t_lunch1.title}], 'm', 'm_x');
+  const strong = n => nodes(n, x => x.tag === 'strong')[0].textContent;
+  assert.equal(strong(plant), 'Water office plants · today');
+  assert.equal(strong(lunch), 'Book a table for the team lunch · 2026-11-13');
+  const status = nodes(plant, n => /chat-status/.test(n.attrs?.className || ''))[0];
+  assert.equal(status.textContent, 'Needs your OK'); assert.match(status.attrs.className, /chat-needs-ok/);
+  assert.doesNotMatch(JSON.stringify(nodes(lunch, n => /chat-status/.test(n.attrs?.className || ''))), /chat-needs-ok/);
+  const answers = nodes(plant, n => n.attrs?.['data-chat-action'] === 'answer');
+  assert.deepEqual(answers.map(b => b.attrs['data-answer']), ['Watered', 'Not yet']);
+  assert.ok(answers.every(b => b.attrs['data-ticket'] === 't_plant1' && b.attrs['data-q'] === 'q_water1'));
+  assert.equal(nodes(lunch, n => n.attrs?.['data-chat-action'] === 'answer').length, 0, 'no invented actions');
+  const details = nodes(plant, n => n.tag === 'details')[0];
+  assert.match(details.textContent, /PIL-71/);
+  const outside = plant.children.filter(n => n !== details).map(n => typeof n === 'object' ? n.textContent : n).join(' ');
+  assert.doesNotMatch(outside, /PIL-71|FFE2A659/);
+  const readOnly = c.chatRefs([{kind:'ticket', id:'t_plant1', key:'PIL-71', title:'x'}], 'm', 'm_x', true)[0];
+  assert.equal(nodes(readOnly, n => n.attrs?.['data-chat-action'] === 'answer').length, 0, 'a day you can only read has no buttons');
+});
+
+test('Earlier: one entry point, past days first without today, then finished groups with their day', async () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', messages:[]};
+  c.state.groups = {hosted:[{id:'g1', ticket:'t_g', title:'Team lunch', closed:true, members:[{ws:'ws_a', name:'Home', joined_at:'2026-11-10T09:11:00'}], tasks:[]},
+    {id:'g2', ticket:'t_h', title:'Office move', closed:false, members:[{ws:'ws_a', name:'Home', joined_at:'2026-11-11T08:05:00'}, {ws:'ws_b', name:'Reports', joined_at:'2026-11-11T08:06:00'}], tasks:[]}]};
+  const list = JSON.stringify(c.chatList());
+  assert.doesNotMatch(list, /History/);
+  assert.match(list, /Office move/); assert.match(list, /2 helpers · started/);
+  assert.match(JSON.stringify(c.chatHeader(null, false)), /Earlier/);
+  c.fetch = async () => ({ok:true, json:async () => [{day:'2026-11-11', count:4, last:'today'}, {day:'2026-11-10', count:3, last:'tue'}]});
+  vm.runInContext("chatUi.open = 'history'", c);
+  await c.chatLoad();
+  const page = c.chatHistory(), text = JSON.stringify(page);
+  assert.doesNotMatch(text, /day-2026-11-11/);
+  assert.match(text, /day-2026-11-10/);
+  assert.ok(text.indexOf('Earlier days') < text.indexOf('Finished groups'));
+  assert.match(text, /Team lunch · finished/);
+  assert.equal(nodes(c.chatPage(), n => n.attrs?.type === 'search').length, 1, 'one search box');
+  vm.runInContext("chatUi.day = '2026-11-10'", c);
+  assert.match(JSON.stringify(c.chatHistory()), /you can read, not reply/);
+  assert.match(JSON.stringify(c.chatHistory()), /Back to today/);
 });
 
 test('General phone text is rendered before the helper answer', () => {

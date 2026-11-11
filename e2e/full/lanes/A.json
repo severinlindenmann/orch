@@ -410,7 +410,7 @@
   },
   {
    "id": "A12",
-   "name": "Settings tabs: General, Agent, Add-ons",
+   "name": "Settings tabs: General, Helper, Add-ons",
    "page": "settings",
    "expect": "each tab shows its page",
    "actions": [
@@ -420,7 +420,7 @@
     },
     {
      "do": "click",
-     "sel": "role=tab[name='Agent']"
+     "sel": "role=tab[name='Helper']"
     },
     {
      "do": "wait",
@@ -1180,7 +1180,7 @@
     },
     {
      "do": "click",
-     "sel": "role=tab[name='Agent']"
+     "sel": "role=tab[name='Helper']"
     },
     {
      "do": "click_all_census",

@@ -23,8 +23,13 @@ def test_settings_navigation_and_cards():
         "a?.dashboard?.label",
     ):
         assert text in src
-    assert "className:'settings-details'" not in src  # fb11: the folder is shown directly
+    assert "className:'settings-details'" not in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
+    # owner pass 11 Nov: no raw folder path in the primary text; the row says it in plain words, the path is under Details
+    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:400]
+    assert "h('p', {}, 'Stored on this computer')" in folder
+    assert folder.index("h('summary', {}, 'Details')") < folder.index("settings.folder")
+    assert "['agent', 'Helper']" in src and "['agent', 'Agent']" not in src
     css = (webjs.WEB / "pages/settings.css").read_text()
     assert "@media(max-width:760px)" in css
     assert "overflow-x:auto" in css

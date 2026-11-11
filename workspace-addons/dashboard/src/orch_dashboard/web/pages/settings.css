@@ -42,7 +42,20 @@
 .settings .ad-h>.switch{padding-left:48px;min-width:80px;color:var(--text)}
 .settings [data-key=settings-workspace]{order:-1}
 
-/* Separate-copy controls; row wrapping and spacing come from the kit. */
-.settings .copies-setup{width:100%;margin-top:6px}
+/* Separate copies: one row with a switch; the rest behind Details. */
+.settings .copies-details{padding:0 16px 8px;border-top:1px solid var(--border)}
+.settings .copies-more{gap:16px;padding:4px 0 12px}
+.settings .copies-sub{display:grid;gap:6px;justify-items:start;min-width:0}
+.settings .copies-sub>.row,.settings .copies-choices{flex-wrap:wrap;gap:8px}
+.settings .copies-setup-edit{display:grid;gap:8px;width:100%}
+.settings .copies-setup-view{width:100%;gap:8px;align-items:center;flex-wrap:nowrap}
+.settings .copies-setup{width:100%;max-width:420px}
 .settings .copies-max{flex:none;width:5.5rem}
-.settings .copies-choices,.settings .copies-setup-save{margin-top:8px}
+.settings .copies-max,.settings .copies-setup{font-size:13px;min-height:36px;padding:5px 10px}
+.settings .folder-details p{margin-top:4px;overflow-wrap:anywhere}
+/* Narrow: every labelled row puts its label above the value (no label running into the value). */
+@media(max-width:720px){
+  .settings .card-row:has(>.set-label){flex-wrap:wrap}
+  .settings .card-row>.set-label{flex-basis:100%}
+  .settings .copies-max,.settings .copies-setup{min-height:44px}
+}

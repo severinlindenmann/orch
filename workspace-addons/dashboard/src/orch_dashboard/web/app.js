@@ -211,6 +211,12 @@ function render(arrived = new Set()) {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
   } else crumb.textContent = pageName;
+  // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
+  const needCount = needsList().length, menuToggle = document.getElementById('menu-toggle');
+  menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
+  menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
+  const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
+  if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
   reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:window.DashHelpers.needsYou(needsList().length), 'aria-label':window.DashHelpers.needsYou(needsList().length)}, window.DashHelpers.needsYou(needsList().length)) : null), navLink('#tickets', 'Tickets', 'table'), navLink('#notes', 'Notes', 'text'), state.chat || state.general ? navLink('#chat', 'Chat', 'text', chatBadge()) : null,
     addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
@@ -337,7 +343,7 @@ toggle.addEventListener('click', () => {
   toggle.setAttribute('aria-expanded', String(open));
   document.querySelector('.sidebar').dataset.open = String(open);
 });
-nav.addEventListener('click', event => {
+document.querySelector('.sidebar').addEventListener('click', event => {
   if (!event.target.closest('a')) return;
   toggle.setAttribute('aria-expanded', 'false');
   document.querySelector('.sidebar').dataset.open = 'false';
@@ -515,7 +521,13 @@ main.addEventListener('click', async event => {
     return;
   }
   if (action === 'copies-clean') { settingsSend('copies.clean', {}, 'copies-clean'); return; }
-  if (action === 'copies-setup') { settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies'); return; }
+  if (action === 'copies-setup-edit') { copySetupEditing = true; render(); document.querySelector('[data-key="settings-copy-setup"]')?.focus(); return; }
+  if (action === 'copies-setup-cancel') { copySetupEditing = false; render(); return; }
+  if (action === 'copies-setup') {
+    const result = await settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies');
+    if (result.ok) { copySetupEditing = false; render(); }
+    return;
+  }
   if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }
   if (action === 'link-add') startLinkAdd(control);
   if (action === 'link-remove') { event.preventDefault(); removeLink(control); return; }

@@ -26,7 +26,6 @@
 .chat-page .chat-row-text small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px}
 .chat-page .chat-row-time{display:grid;justify-items:end;gap:8px;font-size:10px;color:var(--text-muted);flex:none}
 .chat-page .count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:var(--brand);color:var(--on-brand);font-size:11px}
-.chat-page .chat-list-footer{margin-top:auto;width:100%;flex:none}
 .chat-page .chat-avatar{position:relative;display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--surface-3);font-size:12px;font-weight:600;flex:none}
 .chat-page .chat-avatar{background:color-mix(in srgb,currentColor 14%,var(--surface))}
 .chat-page .chat-spark{position:absolute;right:-4px;bottom:-4px;border-radius:50%;background:var(--surface);font-size:11px;line-height:14px}
@@ -42,11 +41,11 @@
 .chat-page .chat-member-chip .chat-avatar{height:22px;width:22px;font-size:10px}
 .chat-page .chat-stopped .chat-avatar{color:var(--text-muted)!important;background:var(--surface-3)}
 .chat-page .chat-ticket-link{display:flex;align-items:center;width:fit-content;font-size:12px;color:var(--brand);overflow-wrap:anywhere}
-.chat-page .chat-activity{display:flex;flex-wrap:wrap;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex:none}
-.chat-page .chat-activity .chat-button{font-size:11px;padding:8px 10px}
-.chat-page .chat-activity [aria-expanded=true]{border-color:var(--brand)}
-.chat-page .chat-panel{display:grid;gap:8px;max-height:200px;overflow:auto;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0}
-.chat-page .chat-panel .chat-button{text-align:left;justify-content:flex-start}
+.chat-page .chat-filter{display:flex;align-items:center;flex-wrap:nowrap;gap:6px;margin-top:8px}
+.chat-page .chat-filter-label{color:var(--text-muted);font-size:12px;flex:none}
+.chat-page .chat-seg{padding:6px 12px;font-size:12px;white-space:nowrap;background:transparent;color:var(--text-muted)}
+.chat-page .chat-seg[aria-pressed=true]{border-color:var(--brand);background:var(--brand-soft);color:var(--text)}
+.chat-page .chat-running{margin-top:6px;font-size:12px}
 .chat-page .chat-log{display:flex;flex-direction:column;gap:12px;padding:22px 20px;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;overflow-anchor:none}
 .chat-page .chat-divider{display:flex;align-items:center;gap:12px;justify-content:center;color:var(--text-muted);font-size:11px;flex:none}
 .chat-page .chat-divider:before,.chat-page .chat-divider:after{content:'';height:1px;flex:1;background:var(--border)}
@@ -66,6 +65,15 @@
 .chat-page .chat-card strong,.chat-page .chat-card small{display:block}
 .chat-page .chat-card small{margin-top:5px;font-size:11px}
 .chat-page .chat-file-path{display:block;padding:8px;overflow-wrap:anywhere}
+/* Ticket card: plain title and due first, a person's OK in the accent colour, the key behind Details. */
+.chat-page .chat-ticket{display:grid;gap:6px;justify-items:start}
+.chat-page .chat-ticket-title{display:flex;align-items:center;color:var(--text);text-decoration:none}
+.chat-page .chat-ticket-title:hover strong{text-decoration:underline}
+.chat-page .chat-needs-ok{color:var(--brand);background:var(--brand-soft);font-weight:600}
+.chat-page .chat-ticket .chat-actions{margin-top:2px}
+.chat-page .chat-ticket-more summary{font-size:11px;color:var(--text-muted)}
+.chat-page .chat-ticket-more small{margin-top:0}
+.chat-page .chat-from-phone{color:var(--info)}
 .chat-page .chat-task-title{display:flex;align-items:center;gap:8px;margin:10px 0}
 .chat-page .chat-status{display:inline-block;border-radius:999px;padding:3px 8px;color:var(--text-muted);background:var(--surface-2);font-size:11px}
 .chat-page .chat-working{color:var(--success);background:var(--success-soft)}
@@ -128,8 +136,6 @@
   .chat-page .chat-thread-head{padding:10px 12px}
   .chat-page .chat-composer-area{padding:8px 12px}
   .chat-page .chat-history{padding:16px}
-  .chat-page .chat-activity{gap:6px}
-  .chat-page .chat-activity .chat-button{padding:6px 8px}
 }
 @media(prefers-reduced-motion:reduce){
   .chat-page *,.chat-page *:before,.chat-page *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}

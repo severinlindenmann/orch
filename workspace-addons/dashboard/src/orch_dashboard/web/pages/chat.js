@@ -1,6 +1,7 @@
 'use strict';
 // Classic-script page: rendering is side-effect free; events own requests and UI state.
-let chatUi = {open:'chat', agentConversation:false, newConversation:false, day:null, listOpen:true, sheet:null, panel:null, search:'', historySearch:'', menu:false,
+// The thread is open by default (on a narrow screen "‹ Chats" goes back to the list).
+let chatUi = {open:'chat', agentConversation:false, newConversation:false, day:null, listOpen:false, sheet:null, filter:'all', search:'', historySearch:'', menu:false,
   drafts:Object.create(null), sending:new Set(), pending:new Map(), files:new Set(), historyFocus:null};
 let chatDays = {status:'idle', rows:[]}, chatArchive = new Map();
 const chatScroll = new WeakMap();
@@ -8,6 +9,8 @@ const chatObjects = value => array(value).filter(v => v && typeof v === 'object'
 // Groups come from state.groups = {hosted:[...], joined:[...]} (the group list). A hosted group's talk is the
 // host ticket's history, its tasks are task cards; a joined group shows the log this workspace stored. Only the host can write.
 const chatGroupMembers = (rows, tasks) => chatObjects(rows).filter(m => !m.left_at).map(m => ({...m, task:chatObjects(tasks).find(t => t.ws === m.ws && t.key)}));
+// Groups carry no start or end time: started = the first join or message, finished = the last thing that happened.
+const chatTimes = values => values.filter(v => Number.isFinite(Date.parse(v))).sort((a, b) => Date.parse(a) - Date.parse(b));
 function chatHostedGroup(g) {
   const ticket = ticketOf(g.ticket), members = chatGroupMembers(g.members, g.tasks), host = members.find(m => m.host);
   const nameOf = ws => clean(members.find(m => m.ws === ws)?.name);
@@ -16,18 +19,19 @@ function chatHostedGroup(g) {
     return {id:'h-' + i + '-' + (e.at || ''), at:e.at, by:mine ? 'you' : who, name:mine ? 'You' : /helper$/.test(who) ? who : who + ' helper', text:e.text};
   });
   const tasks = chatObjects(g.tasks).filter(t => t.delegate).map(t => ({id:'task-' + t.delegate, text:'', by:host?.ws || 'host', name:clean(host?.name) + ' helper', task:{...t, name:nameOf(t.ws) || 'Workspace'}}));
-  const messages = [...talk, ...tasks], last = talk[talk.length - 1];
+  const messages = [...talk, ...tasks], last = talk[talk.length - 1], times = chatTimes([...chatObjects(g.members).map(m => m.joined_at), ...talk.map(m => m.at)]);
   return {id:g.id, ticket:g.ticket, host:host?.ws, title:g.title || ticket?.title, key:typeof ticket?.key === 'string' ? ticket.key : '', closed:g.closed, done:g.closed,
-    members, messages, last:last?.text || '', last_at:last?.at, unread:0, connectable:array(g.connectable)};
+    members, messages, last:last?.text || '', last_at:last?.at, unread:0, connectable:array(g.connectable),
+    started:times[0], finished:chatTimes([...times, ticket?.updated_at]).at(-1)};
 }
 function chatJoinedGroup(g) {
   const members = chatGroupMembers(g.members), nameOf = ws => clean(members.find(m => m.ws === ws)?.name);
   const messages = chatObjects(g.log).map(x => ({id:x.id, at:x.at, by:'ws', name:clean(x.shown), text:x.text || '',
     group_event:x.event ? {...x.event, name:x.event.name || nameOf(x.event.ws)} : null, task:x.task ? {...x.task, name:nameOf(x.task.ws) || 'Workspace'} : null,
     share:x.file ? {kind:'file', title:x.file.title || x.file.name} : null}));
-  const last = messages.filter(m => m.text).pop(), card = g.card;
+  const last = messages.filter(m => m.text).pop(), card = g.card, times = chatTimes([...chatObjects(g.members).map(m => m.joined_at), ...messages.map(m => m.at)]);
   return {id:g.id, host:g.host, title:g.title, key:'', closed:g.closed || g.left, done:g.closed || g.left, readOnly:true, members, messages, last:last?.text || '', last_at:last?.at, unread:0,
-    shared_ticket:card && typeof card === 'object' ? card : null};
+    shared_ticket:card && typeof card === 'object' ? card : null, started:times[0], finished:times.at(-1)};
 }
 const chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
 const chatGroup = () => chatGroups().find(g => g.id === chatUi.open);
@@ -56,33 +60,41 @@ function chatAvatar(member, helper = false) {
   if (typeof color === 'string' && CSS.supports('color', color)) { badge.style.backgroundColor = color; badge.style.color = 'var(--text)'; }
   return badge;
 }
+// One search box at a time: the list's while chatting, Earlier's own while Earlier is open.
 function chatSearch(history = false) {
   return h('input', {type:'search', className:'chat-search', 'data-key':history ? 'history-search' : 'chat-search',
-    'data-chat-input':history ? 'historySearch' : 'search', 'aria-label':history ? 'Search History' : 'Search chats',
-    placeholder:history ? 'Search History' : 'Search chats', value:history ? chatUi.historySearch : chatUi.search});
+    'data-chat-input':history ? 'historySearch' : 'search', 'aria-label':history ? 'Search earlier chats' : 'Search chats',
+    placeholder:history ? 'Search earlier chats' : 'Search chats', value:history ? chatUi.historySearch : chatUi.search});
 }
+// One name for the AI a person talks to: "your helper" (the workspace name stays on the avatar only).
+const CHAT_HELPER = 'Your helper';
+const chatLocalDay = d => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+const chatToday = () => state?.chat?.day || chatLocalDay(new Date(state?.now || Date.now()));
+// A time today reads "09:11"; an older one reads as its day.
+const chatWhen = at => !at ? '' : chatLocalDay(new Date(at)) === chatLocalDay(new Date(state?.now || Date.now())) ? time(at) : date(at);
+const chatHelpers = g => { const n = chatObjects(g.members).length; return n + (n === 1 ? ' helper' : ' helpers'); };
 function chatListRow(g) {
   const id = g?.id || 'chat', messages = chatObjects(state?.chat?.messages), last = messages[messages.length - 1];
   return h('button', {type:'button', className:'chat-list-row', 'data-key':'row-' + id, 'data-chat-action':'select', 'data-id':id,
     'aria-current':(chatUi.open === id || (id === 'chat' && chatUi.open !== 'history' && !chatGroup())) ? 'true' : null},
     g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : chatAvatar(chatWorkspace()),
-    h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : 'Chat · ' + chatWorkspace()),
-      chatText('small', '', g ? g.last : last?.text || 'No messages yet.'), g ? chatText('small', '', g.key) : null),
+    h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : CHAT_HELPER),
+      g ? chatText('small', 'chat-row-meta', [chatHelpers(g), g.started ? 'started ' + chatWhen(g.started) : ''].filter(Boolean).join(' · ')) : null,
+      chatText('small', '', g ? g.last : last?.text || 'No messages yet.')),
     h('span', {className:'chat-row-time'}, time(g ? g.last_at : last?.at), g && chatCount(g.unread) ? h('span', {className:'count', 'aria-label':chatCount(g.unread) + ' unread'}, chatCount(g.unread)) : null));
 }
 function chatList() {
-  const groups = chatGroups(), query = chatUi.search.toLowerCase();
+  const groups = chatGroups(), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
   const rows = [chatListRow(null), ...groups.filter(g => !g.done && !g.closed).map(chatListRow)];
-  rows.forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
-  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chat · ', chatWorkspace()), chatSearch(), rows[0],
-    groups.length || chatGroup() ? h('h2', {}, 'Groups') : null, rows.slice(1),
-    rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null,
-    groups.length ? chatButton('Done groups → History', 'history', {className:'chat-button chat-list-footer'}) : null);
+  rows.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
+  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'), history ? null : chatSearch(), rows[0],
+    rows.length > 1 ? h('h2', {}, 'Groups') : null, rows.slice(1),
+    rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null);
 }
 function chatOpenAgent() {
   if (snapshot) return;
   chatUi.agentConversation = true; chatUi.newConversation = true; chatUi.drafts.chat = '';
-  chatUi.open = 'chat'; chatUi.day = null; chatUi.listOpen = false; chatUi.sheet = null; chatUi.panel = null;
+  chatUi.open = 'chat'; chatUi.day = null; chatUi.listOpen = false; chatUi.sheet = null; chatUi.filter = 'all';
   location.hash = '#chat'; render();
 }
 function chatConversation() {
@@ -96,41 +108,78 @@ function chatMovedBanner(moved) {
   return h('div', {className:'chat-archive-banner'}, 'This conversation now belongs to ticket ', clean(moved.key), ' · ',
     h('a', {href:chatLink(moved.id)}, 'Open ticket'));
 }
+// "Show: All | From my phone" replaces the old counter chips; "Working on N tickets" shows only when N > 0.
+function chatFilter() {
+  return h('div', {className:'chat-filter', role:'group', 'aria-label':'Show', 'data-key':'chat-filter'}, chatText('span', 'chat-filter-label', 'Show:'),
+    [['all', 'All'], ['phone', 'From my phone']].map(([id, label]) => chatButton(label, 'filter', {className:'chat-button chat-seg', 'data-key':'filter-' + id, 'data-id':id, 'aria-pressed':String(chatUi.filter === id)})));
+}
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
+  const running = !g && !history && !agent ? chatCount(state?.chat?.activity?.running) : 0;
+  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent ? 'New conversation with your helper' : CHAT_HELPER);
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}),
-      h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(history ? 'History' : g?.title || (agent ? 'New conversation with your agent' : 'Chat · ' + chatWorkspace()))),
+      h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null,
-      history ? null : chatButton('History', 'history')),
-    agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the agent can make the ticket.') : null,
+      history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g ? null : chatButton('Earlier', 'history')),
+    !g && !history && !agent ? chatFilter() : null,
+    running ? chatText('p', 'chat-muted chat-running', 'Working on ' + running + (running === 1 ? ' ticket' : ' tickets')) : null,
+    agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(moved.title)) : null,
-    history || agent ? null : h('div', {className:'chat-member-chips'}, (g ? chatObjects(g.members) : [{name:chatWorkspace()}]).map(m =>
-      h('span', {className:'chat-member-chip' + (m.running === false ? ' chat-stopped' : '')}, chatAvatar(m), clean(m.name), m.running === false ? ' · not running' : ''))),
-    g ? h(ticketOf(g.ticket) ? 'a' : 'span', {className:'chat-ticket-link', href:ticketOf(g.ticket) ? chatLink(g.ticket) : null}, 'From ticket ', clean(g.key), ' ›') : null);
+    g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
+      h('span', {className:'chat-member-chip' + (m.running === false ? ' chat-stopped' : '')}, chatAvatar(m), clean(m.name), m.running === false ? ' · not running' : ''))) : null,
+    g && ticketOf(g.ticket) ? h('a', {className:'chat-ticket-link', href:chatLink(g.ticket)}, 'Open the ticket ›') : null);
 }
-function chatActivity() {
-  const activity = state?.chat?.activity || {}, entries = Object.entries(activity.from_workspaces || {});
-  const toggles = [['phone', 'From phone · ' + chatCount(activity.phone_today) + ' today'], ...entries.map(([n, count]) => ['from:' + n, 'From ' + clean(n) + ' · ' + chatCount(count)]), ['running', 'Running · ' + chatCount(activity.running) + ' tickets']];
-  let body = null;
-  if (chatUi.panel === 'phone') body = chatObjects(state?.chat?.messages).filter(m => m.via === 'phone').slice(0, 5).map((m, i) => chatButton(time(m.at) + ' ' + clean(m.text), 'jump', {'data-key':'phone-' + (m.id || i), 'data-id':m.id}));
-  else if (chatUi.panel === 'running') body = chatObjects(state?.tickets).filter(t => state?.runs?.[t.id]?.running).slice(0, 6).map(t => h('a', {className:'chat-card', href:chatLink(t.id)}, clean(t.key) + ' · ' + clean(t.title)));
-  else if (chatUi.panel?.startsWith('from:')) body = chatText('p', '', chatCount(activity.from_workspaces?.[chatUi.panel.slice(5)]) + ' messages today');
-  return fragment(h('div', {className:'chat-activity', 'data-key':'activity'}, toggles.map(([id, label]) => chatButton(label, 'activity', {'data-key':id, 'data-id':id, 'aria-expanded':String(chatUi.panel === id), 'aria-controls':'chat-activity-panel'}))),
-    chatUi.panel ? h('div', {className:'chat-panel', id:'chat-activity-panel'}, body?.length === 0 ? chatText('p', 'chat-muted', 'Nothing here today.') : body) : null);
+// "From my phone": what you sent from your phone and the answers to it.
+function chatPhoneOnly(messages) {
+  const sent = new Set(messages.filter(m => m.via === 'phone').map(m => m.id));
+  return messages.filter(m => m.via === 'phone' || sent.has(m.reply_to));
 }
 function chatRefs(refs, prefix, mid, readOnly = false) {
   return chatObjects(refs).map((ref, i) => {
     const key = prefix + '-ref-' + i;
     if (ref.kind === 'proposal') return ref.made ? h('a', {className:'chat-member-chip', 'data-key':key, href:chatLink(ref.made.id)}, clean(ref.made.key)) : chatButton('Make ticket: ' + clean(ref.title).slice(0, 80), 'make-ticket', {className:'btn outline', 'data-key':key, 'data-id':mid, disabled:snapshot || readOnly || chatUi.pending.has(mid)});
-    if (ref.kind === 'ticket' && ref.id) {
-      const ticket = ticketOf(ref.id);
-      return h('a', {className:'chat-card', 'data-key':key, href:chatLink(ref.id)}, chatText('strong', '', [ref.key, ref.title].filter(Boolean).join(' · ')), ticket?.status ? chatText('small', '', window.DashHelpers.statusWord(ticket.status)) : null);
-    }
+    if (ref.kind === 'ticket' && ref.id) return chatTicketCard(ref, key, readOnly);
     if (ref.kind === 'reference' && chatHttp(ref.url)) return h('a', {className:'chat-card', 'data-key':key, href:chatHttp(ref.url), target:'_blank', rel:'noopener noreferrer'}, chatText('strong', '', ref.title || 'Reference'), chatText('small', '', new URL(ref.url).hostname));
     if (ref.kind === 'file') return h('div', {'data-key':key}, chatButton(clean(ref.title || 'File') + ' · ' + clean(String(ref.path || '').split('/').pop()), 'file', {className:'chat-card', 'data-id':key, 'aria-expanded':String(chatUi.files.has(key)), 'aria-controls':key + '-path'}), h('small', {className:'chat-file-path', id:key + '-path', hidden:!chatUi.files.has(key)}, clean(ref.path)));
     return null;
   });
+}
+// Ticket cards: the plain title and when it is due first; the key and the full title sit behind Details.
+// Codes such as "planter 0142-FFE2A659" and the ticket's own key leave the shown title; a second sentence
+// (often an instruction to the helper) and a trailing date that the due word repeats do too.
+const CHAT_CODE = '\\b(?=[0-9A-F-]*\\d)[0-9A-F]{4,}-[0-9A-F]{6,}\\b';
+const CHAT_DAY = /,?\s+(?:on\s+)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+\d{1,2}\s+[A-Z][a-z]{2,}\.?$/;
+function chatPlainTitle(title, key = '', due = false) {
+  let text = clean(title).split(/(?<=[.!?])\s+(?=[A-Z])/)[0];
+  if (key) text = text.split(key).join('');
+  text = text.replace(new RegExp('\\s*\\([^()]*' + CHAT_CODE + '[^()]*\\)', 'g'), '')
+    .replace(new RegExp('\\s*[–—-]\\s+[^,–—()]*?' + CHAT_CODE, 'g'), '').replace(new RegExp('\\s*' + CHAT_CODE, 'g'), '');
+  if (due) text = text.replace(CHAT_DAY, '');
+  return text.replace(/^[\s,;:·–—-]+|[\s,;:·–—.-]+$/g, '') || clean(title);
+}
+function chatDue(due) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(due || ''))) return '';
+  const shift = n => { const d = new Date(state?.now || Date.now()); d.setDate(d.getDate() + n); return chatLocalDay(d); };
+  return due === shift(0) ? 'today' : due === shift(1) ? 'tomorrow' : due === shift(-1) ? 'yesterday' : date(due);
+}
+function chatTicketCard(ref, key, readOnly) {
+  const ticket = ticketOf(ref.id), due = chatDue(ticket?.due), title = chatPlainTitle(ref.title || ticket?.title, ref.key || ticket?.key, !!due);
+  const open = chatObjects(ticket?.questions).filter(q => q.answer == null), q = open[0];
+  // A person's OK is the one status that gets the accent colour.
+  const word = open.length ? 'Needs your OK' : ticket?.status ? window.DashHelpers.statusWord(ticket.status) : '';
+  const pending = q ? chatUi.pending.has('answer-' + ticket.id + '-' + q.id) : false;
+  // Only actions the ticket already offers: a plain question's options (one tap, like Home), else Answer on
+  // the ticket; a ticket ready for review gets Mark done / Send back. Nothing in a day you can only read.
+  const actions = readOnly || snapshot || !ticket ? null : q ? q.kind == null && array(q.options).length
+    ? array(q.options).slice(0, 4).map((option, i) => chatButton(option, 'answer', {'data-key':key + '-answer-' + i, 'data-ticket':ticket.id, 'data-q':q.id, 'data-answer':option, disabled:pending}))
+    : h('a', {className:'chat-button', href:chatLink(ticket.id)}, 'Answer')
+    : ticket.status === 'review' && typeof reviewActions === 'function' ? reviewActions(ticket) : null;
+  return h('article', {className:'chat-card chat-ticket', 'data-key':key},
+    h('a', {className:'chat-ticket-title', href:chatLink(ref.id)}, chatText('strong', '', [title, due].filter(Boolean).join(' · '))),
+    word ? chatText('span', 'chat-status' + (open.length ? ' chat-needs-ok' : ''), word) : null,
+    actions ? h('div', {className:'chat-actions'}, actions) : null,
+    h('details', {className:'chat-ticket-more'}, h('summary', {}, 'Details'), chatText('small', '', [ref.key || ticket?.key, ref.title || ticket?.title].filter(Boolean).join(' · '))));
 }
 function chatTask(task, g, readOnly) {
   const member = chatObjects(g.members).find(m => m.ws === task.ws) || {name:task.name};
@@ -158,14 +207,14 @@ function chatApproval(m, g, index, readOnly) {
 }
 function chatEvent(ev, g) {
   const who = clean(ev.name) || 'Workspace';
-  const words = {created:'Group started from ticket ' + clean(g.key) + ' · ' + clean(g.title), member_added:chatHost(g) + ' helper added ' + who + ' to this group', member_left:who + ' left the group', approved:'You allowed ' + who + ' ' + clean(ev.mode || 'once') + ' · ' + who + ' joined', denied:'You said no to ' + who, closed:'This group is done. It is in History.'};
+  const words = {created:'Group started from ticket ' + clean(g.key) + ' · ' + clean(g.title), member_added:chatHost(g) + ' helper added ' + who + ' to this group', member_left:who + ' left the group', approved:'You allowed ' + who + ' ' + clean(ev.mode || 'once') + ' · ' + who + ' joined', denied:'You said no to ' + who, closed:'This group is finished. You find it under Earlier.'};
   return clean(ev.text || words[ev.kind] || '');
 }
 function chatMessage(m, previous, g, index, readOnly, lastMine) {
   const key = 'message-' + (m.id || index), mine = m.by === 'you';
   if (g && m.group_event) return m.group_event.kind === 'approval_needed' ? chatApproval(m, g, index, readOnly) : chatText('div', 'chat-system', chatEvent(m.group_event, g));
   const member = g ? chatObjects(g.members).find(item => item.ws === m.by) || {name:m.name} : {name:chatWorkspace()};
-  const sender = mine ? 'You' : clean(g ? m.name || (member.name ? member.name + ' helper' : 'Helper') : chatWorkspace());
+  const sender = mine ? 'You' : clean(g ? m.name || (member.name ? member.name + ' helper' : 'Helper') : CHAT_HELPER);
   const grouped = previous && !previous.group_event && previous.by === m.by;
   return h('article', {className:'chat-message' + (mine ? ' chat-out' : '') + (grouped ? ' chat-grouped' : ''), 'data-key':key, 'data-message-id':m.id, tabindex:'-1'},
     !mine && !grouped ? h('div', {className:'chat-who'}, chatAvatar(member, true), sender) : null,
@@ -174,7 +223,8 @@ function chatMessage(m, previous, g, index, readOnly, lastMine) {
       g && m.task ? chatTask(m.task, g, readOnly) : null,
       g && m.added_to ? h('a', {className:'chat-card', href:chatLink(g.ticket)}, 'Added to ', clean(m.added_to.key), ' › ', clean(m.added_to.label)) : null,
       m.share ? chatText('span', 'chat-file-chip', m.share.title || m.share.kind) : null),
-    chatText('small', 'chat-message-time', [mine ? 'You' : '', time(m.at), m.via, m.to_everyone ? 'to everyone' : ''].filter(Boolean).join(' · ')),
+    // How a message travelled is shown only when it came from your phone ("13:00 · helper" said nothing).
+    chatText('small', 'chat-message-time' + (m.via === 'phone' ? ' chat-from-phone' : ''), [mine ? 'You' : '', time(m.at), m.via === 'phone' ? 'from your phone' : '', m.to_everyone ? 'to everyone' : ''].filter(Boolean).join(' · ')),
     mine && index === lastMine && g?.delivered?.text ? chatText('small', 'chat-delivery', g.delivered.text) : null);
 }
 function chatThinking(who, plain = false) {
@@ -189,17 +239,18 @@ function chatSharedTicket(g) {
     h('ul', {}, chatObjects(ticket.checklist).slice(0, 6).map(item => h('li', {}, h('span', {'aria-hidden':'true'}, item.wont_do ? '– ' : window.DashHelpers.resolved(item) ? '☑ ' : '☐ '), h('span', {className:'chat-sr'}, item.wont_do ? "Won't do: " : window.DashHelpers.resolved(item) ? 'done: ' : 'open: '), clean(item.text)))));
 }
 function chatThread(g, archived) {
-  const messages = chatObjects(archived ? archived.messages : g ? g.messages : chatConversation());
+  const all = chatObjects(archived ? archived.messages : g ? g.messages : chatConversation());
+  const phoneOnly = !g && !archived && chatUi.filter === 'phone', messages = phoneOnly ? chatPhoneOnly(all) : all;
   const readOnly = snapshot || !!archived || !!(g?.done || g?.closed || g?.readOnly), last = messages[messages.length - 1];
   const lastMine = messages.reduce((found, m, i) => m.by === 'you' ? i : found, -1);
   const since = Date.now() - Date.parse(last?.at);
-  const thinking = readOnly ? [] : g ? array(g.thinking).filter(n => typeof n === 'string') : state?.chat?.running || (last?.by === 'you' && since >= 0 && since < 600000) ? [chatWorkspace()] : [];
+  const thinking = readOnly ? [] : g ? array(g.thinking).filter(n => typeof n === 'string') : state?.chat?.running || (last?.by === 'you' && since >= 0 && since < 600000) ? [CHAT_HELPER] : [];
   const logKey = 'log-' + (archived ? chatUi.day : g?.id || 'chat');
   return fragment(g ? chatSharedTicket(g) : null,
-    g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Done · read only') : g?.readOnly ? chatText('div', 'chat-archive-banner', 'Read only here. Write in ' + chatHost(g) + '.') : null,
+    g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Finished · you can read, not reply') : g?.readOnly ? chatText('div', 'chat-archive-banner', 'You can read here. Write in ' + chatHost(g) + '.') : null,
     h('div', {className:'chat-log', 'data-key':logKey, role:'log', 'aria-live':'polite', 'aria-label':g ? 'Group messages' : 'Chat messages'},
       h('div', {className:'chat-divider'}, archived ? date(chatUi.day) : 'Today'),
-      messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : chatUi.agentConversation && !g && !archived ? null : chatText('p', 'chat-empty', readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g))),
+      messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : chatUi.agentConversation && !g && !archived ? null : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g))),
     readOnly ? snapshot ? chatText('p', 'chat-readonly', 'This is a shared copy.') : null : chatComposer(g));
 }
 function chatComposer(g) {
@@ -208,32 +259,35 @@ function chatComposer(g) {
     chatUi.menu && g ? h('div', {className:'chat-menu', id:'chat-compose-menu', role:'menu'}, [['Ask a workspace','ask'], ['Give a workspace a task','task'], ['Add a workspace','add']].map(([label, action]) => chatButton(label, action, {role:'menuitem'}))) : null,
     h('form', {className:'chat-compose', 'data-key':'form-' + id},
       g ? chatButton('+', 'menu', {'aria-label':'Add to conversation', 'aria-haspopup':'menu', 'aria-expanded':String(chatUi.menu), 'aria-controls':'chat-compose-menu'}) : null,
-      h('textarea', {rows:1, className:'chat-draft', 'data-key':'draft-' + id, 'data-chat-input':'draft', 'data-thread':id, 'aria-label':g ? 'Message the group' : 'Message ' + chatWorkspace(), placeholder:g ? 'Message the group' : 'Message ' + chatWorkspace()}, draft),
+      h('textarea', {rows:1, className:'chat-draft', 'data-key':'draft-' + id, 'data-chat-input':'draft', 'data-thread':id, 'aria-label':g ? 'Message the group' : 'Message your helper', placeholder:g ? 'Message the group' : 'Message your helper'}, draft),
       h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'send', disabled:sending || !draft.trim(), 'data-state':sending ? 'sending' : draft.trim() ? 'ready' : 'empty'}, sending ? h('span', {className:'spinner', 'aria-hidden':'true'}) : iconEl('send'), sending ? 'Sending' : 'Send')),
-    !g && chatUi.agentConversation ? null : h('div', {className:'chat-context'}, g ? 'Everyone in this group sees what you write here · ' : 'Context cleared daily at 04:00 · ',
-      h('details', {'data-key':'context-details'}, h('summary', {}, 'Details'), h('p', {}, g ? "Members see the group's messages from when they joined. They do not see the rest of the " + chatHost(g) + ' ticket.' : "Every night at 04:00 the helper starts fresh. Today's messages move to History; nothing is deleted."))));
+    !g && chatUi.agentConversation ? null : h('div', {className:'chat-context'}, g ? 'Everyone in this group sees what you write here · ' : 'Starts fresh each day at 04:00 · ',
+      h('details', {'data-key':'context-details'}, h('summary', {}, 'Details'), h('p', {}, g ? "Members see the group's messages from when they joined. They do not see the rest of the " + chatHost(g) + ' ticket.' : "Every night at 04:00 your helper starts fresh. Today's messages move to Earlier; nothing is deleted."))));
 }
 function chatDayLabel(day) {
   const today = new Date((state?.chat?.day || new Date().toISOString().slice(0, 10)) + 'T12:00:00');
   today.setDate(today.getDate() - 1);
   return date(day) === date(today.toISOString()) ? 'Yesterday' : date(day);
 }
+// Earlier: past days first (today is the live thread, never repeated here), then finished groups.
 function chatHistory() {
   if (chatUi.day) {
     const archive = chatArchive.get(chatUi.day);
-    return fragment(h('div', {className:'chat-archive-banner'}, date(chatUi.day) + ' · read only', chatButton('All History', 'all-history')),
+    return fragment(h('div', {className:'chat-archive-banner'}, chatText('span', '', chatDayLabel(chatUi.day) + ' · you can read, not reply'), chatButton('Back to today', 'today')),
       archive?.status === 'ready' ? chatThread(null, archive.data) : chatHistoryStatus(archive?.status, 'retry-day'));
   }
-  const groups = chatGroups().filter(g => g.done || g.closed), query = chatUi.historySearch.toLowerCase();
-  const groupRows = groups.map(g => chatButton(g.title, 'select', {className:'chat-day-row', 'data-key':'history-' + g.id, 'data-id':g.id}));
-  const dayRows = chatObjects(chatDays.rows).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.day || '')).map(d => h('button', {type:'button', className:'chat-day-row', 'data-chat-action':'day', 'data-day':d.day, 'data-key':'day-' + d.day}, chatDayLabel(d.day) + ' · ' + chatCount(d.count) + ' messages', chatText('small', '', d.last)));
-  [...groupRows, ...dayRows].forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
-  return h('div', {className:'chat-history', 'data-key':'history-list'}, chatText('p', 'chat-muted', 'Done groups and past days of Chat.'), chatSearch(true),
-    groups.length ? h('h2', {}, 'Done groups') : null, groupRows, h('h2', {}, 'Chat · ', chatWorkspace()), dayRows,
-    chatDays.status !== 'ready' ? chatHistoryStatus(chatDays.status, 'retry-days') : [...groupRows, ...dayRows].every(row => row.hidden) ? chatText('p', 'chat-muted', 'No history matches.') : null);
+  const groups = chatGroups().filter(g => g.done || g.closed), query = chatUi.historySearch.toLowerCase(), today = chatToday();
+  const dayRows = chatObjects(chatDays.rows).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.day || '') && d.day !== today).map(d => h('button', {type:'button', className:'chat-day-row', 'data-chat-action':'day', 'data-day':d.day, 'data-key':'day-' + d.day}, chatDayLabel(d.day) + ' · ' + chatCount(d.count) + ' messages', chatText('small', '', d.last)));
+  const groupRows = groups.map(g => chatButton([g.title, g.finished ? 'finished ' + chatWhen(g.finished) : 'finished'].filter(Boolean).join(' · '), 'select', {className:'chat-day-row', 'data-key':'history-' + g.id, 'data-id':g.id}));
+  [...dayRows, ...groupRows].forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
+  const ready = chatDays.status === 'ready';
+  return h('div', {className:'chat-history', 'data-key':'history-list'}, chatSearch(true),
+    h('h2', {}, 'Earlier days'), ready ? dayRows.length ? dayRows : chatText('p', 'chat-muted', 'No earlier days yet.') : chatHistoryStatus(chatDays.status, 'retry-days'),
+    groups.length ? h('h2', {}, 'Finished groups') : null, groupRows,
+    ready && query && [...dayRows, ...groupRows].every(row => row.hidden) ? chatText('p', 'chat-muted', 'Nothing matches.') : null);
 }
 function chatHistoryStatus(status, retry) {
-  return h('div', {className:'chat-history-status', role:'status'}, status === 'error' ? fragment('Could not load History.', chatButton('Retry', retry)) : 'Loading…');
+  return h('div', {className:'chat-history-status', role:'status'}, status === 'error' ? fragment('Could not load earlier chats.', chatButton('Try again', retry)) : 'Loading…');
 }
 function chatSheet(g, readOnly) {
   const host = chatHost(g), adding = chatUi.sheet === 'add';
@@ -254,7 +308,7 @@ function chatSheet(g, readOnly) {
 function chatPage() {
   const g = chatGroup(), history = chatUi.open === 'history';
   const page = h('section', {className:'chat-page' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, chatList(),
-    h('div', {className:'chat-main', 'data-key':'chat-main'}, chatHeader(g, history), history ? chatHistory() : fragment(g || chatUi.agentConversation ? null : chatActivity(), chatThread(g, null)),
+    h('div', {className:'chat-main', 'data-key':'chat-main'}, chatHeader(g, history), history ? chatHistory() : chatThread(g, null),
       g && chatUi.sheet ? chatSheet(g, snapshot || g.done || g.closed || g.readOnly) : null));
   page.addEventListener('click', chatClick);
   page.addEventListener('input', chatInput);
@@ -268,7 +322,7 @@ function chatPage() {
 function chatFocus(selector) { document.querySelector('.chat-page ' + selector)?.focus(); }
 function chatSelect(id) {
   chatUi.agentConversation = false; chatUi.newConversation = false;
-  chatUi.open = id; chatUi.day = null; chatUi.listOpen = false; chatUi.sheet = null; chatUi.menu = false; chatUi.panel = null;
+  chatUi.open = id; chatUi.day = null; chatUi.listOpen = false; chatUi.sheet = null; chatUi.menu = false;
   render(); chatFocus('[data-key="chat-title"]');
 }
 async function chatLoad(day) {
@@ -330,8 +384,16 @@ async function chatClick(event) {
   if (action === 'all-history') { chatUi.day = null; render(); return chatFocus('[data-key="' + (chatUi.historyFocus || 'history-search') + '"]'); }
   if (action === 'retry-days') { chatDays.status = 'idle'; return chatLoad(); }
   if (action === 'retry-day') { chatArchive.delete(chatUi.day); return chatLoad(chatUi.day); }
-  if (action === 'activity') { chatUi.panel = chatUi.panel === control.dataset.id ? null : control.dataset.id; return render(); }
-  if (action === 'jump') { const node = [...document.querySelectorAll('.chat-page [data-message-id]')].find(n => n.dataset.messageId === control.dataset.id); node?.scrollIntoView({block:'center'}); node?.focus(); return; }
+  if (action === 'today') { chatSelect('chat'); return; }
+  if (action === 'filter') { chatUi.filter = control.dataset.id === 'phone' ? 'phone' : 'all'; return render(); }
+  if (action === 'answer') {
+    // The same answer a question card sends (op "answer"); the buttons wait while it is on its way.
+    const {ticket, q, answer} = control.dataset, id = 'answer-' + ticket + '-' + q;
+    if (snapshot || chatUi.pending.has(id)) return;
+    chatUi.pending.set(id, true); render();
+    if (await chatOperation('answer', {ticket, question:q, answer}, 'Could not send your answer.')) window.orch.toast('Answered: ' + clean(answer), 'ok');
+    chatUi.pending.delete(id); render(); return;
+  }
   if (action === 'file') { const id = control.dataset.id; chatUi.files.has(id) ? chatUi.files.delete(id) : chatUi.files.add(id); return render(); }
   if (action === 'make-ticket') {
     if (snapshot || chatUi.open === 'history' || chatUi.pending.has(control.dataset.id)) return;
