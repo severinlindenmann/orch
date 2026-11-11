@@ -153,3 +153,11 @@ test('Copies on this computer line: count, size, "..." while counting, Clean up 
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-retry').length, 1);
   assert.match(JSON.stringify(card), /files git ignores/);
 });
+
+test('General phone messages belong in Chat, not Home Messages', () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/general-chat.json'), 'utf8'));
+  const c = context([], {state:fixture});
+  const home = JSON.stringify(c.home());
+  assert.doesNotMatch(home, /What is still open this week|Make a ticket|home-message/);
+  assert.equal(fixture.chat.messages[0].via, 'phone');
+});

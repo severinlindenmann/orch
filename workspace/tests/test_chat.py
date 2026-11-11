@@ -1202,3 +1202,50 @@ def test_make_ticket_across_midnight_local(proj, monkeypatch):
     result = chat.make_ticket(proj, "proposal", by="human:me")
     assert len(tickets.list_all(proj)) == 1
     assert chat.read_day(proj, "2026-11-09")["messages"][0]["moved_to"]["id"] == result["ticket"]
+
+
+def test_general_ticket_addressed_phone_text_is_chat(proj, run, conn):
+    gid = tickets.ensure_general(proj, "human:test")
+    message = pv3.msg(pv3.GEN, {"text": "What is still open this week?"})
+    message["ticket"] = gid
+    conn.inbox.append(message)
+    assert run("relay", "inbox")[0] == 0
+    run("relay", "send", pv3.PHONE, "Two tasks remain.", "--ticket", gid)
+    expected = ["What is still open this week?", "Two tasks remain."]
+    assert [m["text"] for m in chat.status(proj)["messages"]] == expected
+    assert [m["text"] for m in chat.read_day(proj, chat.day_key(proj))["messages"]] == expected
+    assert chat.status(proj)["messages"][0]["by"] == "you"
+    assert chat.status(proj)["messages"][0]["via"] == "phone"
+
+
+def test_failed_chat_write_retries_phone_intake(proj, run, conn, monkeypatch):
+    from orch import relay
+
+    original = chat.record
+    monkeypatch.setattr(chat, "record", lambda *a, **kw: (_ for _ in ()).throw(OSError("disk busy")))
+    conn.inbox.append(pv3.msg(pv3.GEN, {"text": "What is still open this week?", "general": True}))
+    run("relay", "inbox")
+    assert pv3.GEN not in relay.seen(proj)
+    monkeypatch.setattr(chat, "record", original)
+    run("relay", "inbox")
+    assert pv3.GEN in relay.seen(proj)
+    assert [m["text"] for m in chat.status(proj)["messages"]] == ["What is still open this week?"]
+
+
+def test_legacy_wakeup_is_absent_from_chat_and_phone(proj, run, conn):
+    from orch import net, phone_view
+
+    gid = _general(proj, conn, run)
+    hint = f'A phone text in the General conversation is waiting for you. Answer it: orch relay send {pv3.PHONE} "<your answer>" --ticket {gid}'
+    tickets.log(proj, gid, hint, "agent:automation")
+    day = chat.day_key(proj)
+    saved = chat._read_day(proj, day)
+    saved["messages"].append({"id": "legacy", "by": WS, "via": "helper", "text": hint, "at": tickets.now()})
+    net.write_json(chat._day_path(proj, day), saved, True)
+    for data in (
+        chat.status(proj),
+        chat.read_day(proj, day),
+        phone_view.build(proj, tickets.load(proj, gid), []),
+    ):
+        assert "orch relay send" not in json.dumps(data)
+        assert "waiting for you. Answer it" not in json.dumps(data)

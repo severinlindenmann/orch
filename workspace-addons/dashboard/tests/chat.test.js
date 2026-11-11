@@ -51,3 +51,13 @@ test('the helper is shown by the workspace name only, no "helper" suffix', () =>
   assert.match(JSON.stringify(c.chatThinking('Pilatus', true)), /Pilatus is thinking/);
   assert.doesNotMatch(JSON.stringify(c.chatThinking('Pilatus', true)), /helper/);
 });
+
+test('General phone text is rendered before the helper answer', () => {
+  const c = context();
+  c.state = JSON.parse(fs.readFileSync(require('node:path').join(__dirname, 'fixtures/general-chat.json'), 'utf8'));
+  c.state.workspace = 'General';
+  const thread = JSON.stringify(c.chatThread(null, null));
+  assert.ok(thread.indexOf('What is still open this week?') >= 0);
+  assert.ok(thread.indexOf('What is still open this week?') < thread.indexOf('Two tasks remain.'));
+  assert.doesNotMatch(thread, /orch relay send|waiting for you\. Answer it/);
+});

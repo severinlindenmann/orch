@@ -190,6 +190,13 @@ _FROM_PREFIX = re.compile(r"From [^:\n]{1,100}: ")
 _RELAY_BY = re.compile(r"agent:relay from (ph_\S+)")  # a phone only; a workspace keeps its own label
 
 
+def internal_wakeup(entry: dict) -> bool:
+    """Hide the legacy automation prompt that used to be logged as helper speech."""
+    return entry.get("by") != "you" and str(entry.get("text", "")).startswith(
+        "A phone text in the General conversation is waiting for you. Answer it: orch relay send "
+    )
+
+
 def _phone_line(root: Path, h: dict) -> tuple[str, str, str] | None:
     """(who, role, text) of a text that came from a phone: its name (never the raw ph_ id), as a person."""
     from orch import relay
@@ -668,7 +675,7 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
-        if _ADMIN_NOTE.match(str(h.get("text", ""))):
+        if internal_wakeup(h) or _ADMIN_NOTE.match(str(h.get("text", ""))):
             continue
         pl = _phone_line(root, h)
         raw = pl[2] if pl else str(h.get("text", ""))
