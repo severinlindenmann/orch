@@ -50,11 +50,11 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
 ## Writing (one writer per run file)
 
 - The run's own orch process (the oneshot wrapper or the live run's watcher) is the only writer of `runs/<run>.jsonl`.
-  Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch run event`
+  Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch record hook`
   call that appends under the per-run lock `runs/<run>.lock`, named with O_EXCL and
   held with a kernel lock, released in a `finally`). Each event is one line, one
   `write()` of at most 8 KB (text is cut, never the line split), so lines never mix.
-- **The hook entry is narrow.** `orch run event` (the only out-of-process way in) accepts only `step`, `denial`,
+- **The hook entry is narrow.** `orch record hook` (the only out-of-process way in) accepts only `step`, `denial`,
   `helper.start`, `helper.end` and `usage`, and always writes `via: hook` whatever the caller sent. `task.*`, `ask`,
   `run.state`, `key.use`, `job` and `session.input` are written only in-process by the core, the broker and `orch job`
   (vectors `hook_entry`). *Implementing slice 1.7 must* also bind the call to the run (`ORCH_RUN` plus the run's per-run hook
