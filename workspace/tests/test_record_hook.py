@@ -434,9 +434,10 @@ def test_unproven_callers_cannot_write_traces_under_a_run(live, monkeypatch, whi
 
 def test_the_lost_trace_trims_loudly_never_silently(live):
     root, run, _ = live
-    base = datetime.now(UTC)
+    # a fixed time of day: the cap is per run AND DAY, so a base near midnight UTC split the lines over two days
+    base = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     for n in range(record._LOST_RUN_LINES + 20):
-        record.note_lost(root, run, "invalid", now=base + timedelta(minutes=2 * n))
+        record.note_lost(root, run, "invalid", now=base + timedelta(minutes=n))
     rows = [json.loads(x) for x in lost_notes(root).splitlines()]
     assert len(rows) == record._LOST_RUN_LINES + 1
     assert rows[-1]["reason"] == "trimmed" and rows[-1]["run"] == run
