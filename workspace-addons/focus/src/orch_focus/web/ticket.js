@@ -42,6 +42,7 @@
       }
       S.views.livenow.hideListed();
     }).catch(() => root.querySelector('.fx-pick').append(h('p', {role: 'alert', text: 'Could not load tickets. Reload to try again.'})));
+    S.views.areas.mount(root.querySelector('.fx-pick'));
     S.views.livenow.mount(root.querySelector('.fx-pick'));
     S.views.jobs.mount(root.querySelector('.fx-pick'));
     const help = helpPanel(); root.append(help);
