@@ -421,3 +421,50 @@ def test_collect_spool_failure_keeps_the_real_cause(store, monkeypatch):
     )
     with pytest.raises(record.RecordUnavailable):
         collect(STREAM2, writer, CTX)
+
+
+def _seed(ws, writer):
+    collect([use("t0", "Read", {"file_path": "seed.py"})], writer, CTX)
+    return ws / ".orch" / "record" / "runs" / f"{CTX['run']}.jsonl"
+
+
+def _alerts(ws):
+    return "".join(p.read_text() for p in (ws / ".orch" / "record" / "alerts").glob("*") if p.is_file())
+
+
+def test_collect_real_hardlinked_run_file_raises_tampered(store):
+    import os
+
+    from orch.record import RecordTampered
+
+    ws, writer = store
+    run_file = _seed(ws, writer)
+    twin = run_file.with_name("twin.copy")
+    try:
+        os.link(run_file, twin)
+    except (OSError, NotImplementedError, AttributeError):
+        pytest.skip("no hardlinks here")
+    before = twin.read_bytes()
+    with pytest.raises(RecordTampered) as caught:
+        collect(STREAM2, writer, CTX)
+    assert caught.value.reason == "hardlink"
+    assert twin.read_bytes() == before and run_file.read_bytes() == before  # nothing written through the link
+    assert '"reason":"hardlink"' in _alerts(ws)
+
+
+def test_collect_real_symlinked_run_file_raises_tampered(store, tmp_path):
+    from orch.record import RecordTampered
+
+    ws, writer = store
+    run_file = _seed(ws, writer)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("")
+    run_file.unlink()
+    try:
+        run_file.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("no symlinks here")
+    with pytest.raises(RecordTampered):
+        collect(STREAM2, writer, CTX)
+    assert outside.read_text() == ""
+    assert '"schema":"orch.record-alert/1"' in _alerts(ws) and '"reason":"link"' in _alerts(ws)
