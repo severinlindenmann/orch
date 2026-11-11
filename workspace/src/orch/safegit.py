@@ -278,6 +278,10 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
     e["PATH"] = safe_path(cwd, root)
     e["GIT_TERMINAL_PROMPT"] = "0"
     e["GIT_EDITOR"] = e["GIT_SEQUENCE_EDITOR"] = e["GIT_ASKPASS"] = true
+    # refs/replace/* and the grafts file live in the shared repository and an agent can write them: with them on,
+    # a commit id stays the same while its content or its parents change (reviewed-tip and ancestor checks lie)
+    e["GIT_NO_REPLACE_OBJECTS"] = "1"
+    e["GIT_GRAFT_FILE"] = os.devnull
     if config:
         e["GIT_CONFIG_COUNT"] = str(len(config))
         for i, (k, v) in enumerate(config):
@@ -310,6 +314,9 @@ def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> l
         # a repo's own .git/config (an agent can write it) must never make git run a signature program as the
         # person: no verification at all, and every gpg program is the trusted no-op
         "-c", "merge.verifySignatures=false",
+        "-c", "core.useReplaceRefs=false",
+        "-c", "diff.ignoreSubmodules=none",
+        "-c", "status.submoduleSummary=false",
         "-c", f"gpg.program={true}",
         "-c", f"gpg.openpgp.program={true}",
         "-c", f"gpg.x509.program={true}",

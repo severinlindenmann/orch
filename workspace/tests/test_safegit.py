@@ -822,6 +822,8 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         true = next(a.split("=", 1)[1] for a in argv if a.startswith("core.editor="))
         for want in (
             "merge.verifySignatures=false",
+            "core.useReplaceRefs=false",
+            "diff.ignoreSubmodules=none",
             f"gpg.program={true}",
             f"gpg.openpgp.program={true}",
             f"gpg.x509.program={true}",
@@ -1526,3 +1528,46 @@ def test_safegit_works_with_an_untrusted_orch_home(proj, monkeypatch, tmp_path):
     assert safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj)[0] in (0, 128)
     assert safegit.run(["--version"], proj, filters=False)[0] == 0
     assert harness._in_git_repo(proj) is False
+
+
+def test_replace_refs_and_grafts_never_change_what_orch_sees(tmp_path):
+    """The shared repository's refs/replace/* (an agent can write them) must not alter commit content or
+    ancestry for any orch git call: the reviewed-tip and ancestor checks depend on it."""
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("one\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "one")
+    plain_git(r, "checkout", "-qb", "side")
+    (r / "a.txt").write_text("two\n")
+    plain_git(r, "commit", "-qam", "two")
+    side = plain_git(r, "rev-parse", "HEAD")
+    plain_git(r, "checkout", "-q", "-")
+    (r / "a.txt").write_text("evil\n")
+    plain_git(r, "commit", "-qam", "evil")
+    evil = plain_git(r, "rev-parse", "HEAD")
+    plain_git(r, "replace", side, evil)  # same id, other content
+    plain_git(r, "replace", "--graft", plain_git(r, "rev-parse", "HEAD"), side)  # side becomes an ancestor
+    rc, out, _ = safegit.run(["cat-file", "-p", f"{side}:a.txt"], r, read_only=True)
+    assert rc == 0 and out.strip() == "two"
+    rc, _, _ = safegit.run(["merge-base", "--is-ancestor", side, "HEAD"], r, read_only=True)
+    assert rc != 0
+
+
+def test_ignore_submodules_in_the_repo_config_does_not_hide_a_gitlink(tmp_path):
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "base")
+    plain_git(r, "update-index", "--add", "--cacheinfo", "160000", "a" * 40, "sub")
+    plain_git(r, "commit", "-qm", "gitlink")
+    plain_git(r, "config", "diff.ignoreSubmodules", "all")
+    rc, out, _ = safegit.run(["diff", "--raw", "-z", "--no-renames", "HEAD~1", "HEAD"], r, read_only=True)
+    assert rc == 0 and ":000000 160000" in out
