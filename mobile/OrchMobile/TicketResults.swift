@@ -33,7 +33,7 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
             throw DecodingError.dataCorruptedError(in: c, debugDescription: "Invalid ticket result envelope")
         }
         self.id = id; self.from = from; self.at = at
-        title = fields["title"]?.string; checked = fields["checked"] == .bool(true)
+        title = fields["title"]?.string.flatMap { Self.displaySafe($0) ? $0 : nil }; checked = fields["checked"] == .bool(true)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         rawDoc = try encoder.encode(document)
     }
@@ -50,6 +50,16 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
     /// Schema: 1-200 characters, no control characters (a line break could fake a label line).
     static func validTitle(_ t: String) -> Bool {
         (1...200).contains(t.unicodeScalars.count) && !t.unicodeScalars.contains { $0.value < 32 || $0.value == 127 }
+    }
+
+    /// Schema-valid but could fake a second line or reorder text next to the label (U+0085, U+2028/29, C1, bidi
+    /// controls): the result stays, only its title is not shown.
+    static func displaySafe(_ t: String) -> Bool {
+        !t.unicodeScalars.contains { v in
+            let x = v.value
+            return (0x80...0x9F).contains(x) || x == 0x2028 || x == 0x2029 || x == 0x200E || x == 0x200F
+                || (0x202A...0x202E).contains(x) || (0x2066...0x2069).contains(x)
+        }
     }
 
     static func date(_ value: String) -> Date? {

@@ -112,6 +112,14 @@ final class TicketResultsTests: XCTestCase {
         if case .shown = result { XCTFail("500-deep doc must not render") }
     }
 
+    func testLineSeparatorTitleIsHiddenButResultKept() throws {
+        var sep = item("j_title03"); sep["title"] = "Done\u{2028}Checked by the agent"
+        var bidi = item("j_title04"); bidi["title"] = "abc\u{202E}def"
+        let decoded = try snapshot(["results": [sep, bidi]])
+        XCTAssertEqual(decoded.results.map(\.id), ["j_title03", "j_title04"])
+        XCTAssertNil(decoded.results[0].title); XCTAssertNil(decoded.results[1].title)
+    }
+
     func testTitleRulesAndBigNumbers() throws {
         var lined = item("j_title01"); lined["title"] = "A\nChecked by the agent"
         var long = item("j_title02"); long["title"] = String(repeating: "x", count: 201)
