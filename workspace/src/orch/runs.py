@@ -1631,7 +1631,11 @@ def wrap(
         if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
             sid = tickets.sessions_for(root, tid, tickets.load(root, tid), name, host())
         if sid:
-            tickets.record_session(root, tid, name, sid, host())
+            if tickets.valid_session_id(sid):
+                tickets.record_session(root, tid, name, sid, host())
+            else:
+                with contextlib.suppress(Exception):
+                    tickets.log(root, tid, "Skipped recording an invalid agent session id.", "orch")
         turns += 1
         why = failure_text(rc, out)
         now = read(root, tid)

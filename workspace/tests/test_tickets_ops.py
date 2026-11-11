@@ -767,11 +767,11 @@ def test_adoption_serializes_with_record_session(proj, new_ticket, monkeypatch):
 
 
 @pytest.mark.parametrize("blocked", ["tracked", "git-failure"])
-def test_adoption_checks_outer_git_per_file(proj, new_ticket, monkeypatch, blocked):
+def test_adoption_checks_outer_git_once(proj, new_ticket, monkeypatch, blocked):
     from orch import runs, safegit
 
-    bad, good = new_ticket(), new_ticket()
-    for tid in (bad, good):
+    bad, *good = [new_ticket() for _ in range(40)]
+    for tid in (bad, *good):
         ticket = tickets.load(proj, tid)
         ticket["sessions"] = [{"id": tid, "agent": "agent", "host": runs.host()}]
         tickets.save(proj, ticket)
@@ -782,13 +782,21 @@ def test_adoption_checks_outer_git_per_file(proj, new_ticket, monkeypatch, block
     subprocess.run(["git", "init", "-q", str(proj / ".orch")], check=True)
     original = safegit.run_bytes
 
+    listings = []
+
     def git(args, *a, **kw):
-        if blocked == "git-failure" and args[0] == "ls-files" and bad in args[-1]:
-            return 124, b"", "timeout"
+        if args[0] == "ls-files":
+            listings.append(args)
+            assert a[0] == proj
+            if blocked == "git-failure":
+                return 124, b"", "timeout"
         return original(args, *a, **kw)
 
     monkeypatch.setattr(safegit, "run_bytes", git)
-    assert [s["id"] for s in tickets._own_sessions(proj)] == [good]
+    expected = set(good) if blocked == "tracked" else set()
+    assert {s["id"] for s in tickets._own_sessions(proj)} == expected
+    assert len(listings) == 1
+    assert "-z" in listings[0]
 
 
 @pytest.mark.parametrize(

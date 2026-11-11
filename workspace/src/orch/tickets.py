@@ -21,6 +21,8 @@ from pathlib import Path
 
 from orch import config, humanproof, net, procs, saferead, syncgate, term
 from orch.errors import Refused
+from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
+from orch.session_ids import valid_session_id
 from orch.text import clean_untrusted
 
 STATUSES = ("open", "active", "waiting", "ready", "review", "done", "dropped")
@@ -2330,11 +2332,6 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bo
 
 
 OWN_SESSIONS_MAX = 500
-SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
-
-
-def valid_session_id(sid: object) -> bool:
-    return isinstance(sid, str) and SESSION_ID_RE.fullmatch(sid) is not None
 
 
 def adopt_own_sessions(root: Path) -> None:
@@ -2379,6 +2376,7 @@ def _own_sessions_locked(root: Path) -> list[dict]:
         adopted = []
         # Shared tickets cannot establish local ownership, even when the hostname matches.
         # General/Chat tickets also use sessions_for and therefore have session semantics.
+        candidates = []
         for p in sorted(tickets_dir(root).glob("t_*.json")):
             try:
                 ticket = load(root, p.stem)  # refuses embedded id / trusted filename mismatches
@@ -2387,8 +2385,11 @@ def _own_sessions_locked(root: Path) -> list[dict]:
             sessions = ticket.get("sessions")
             if not isinstance(sessions, list) or not sessions:
                 continue
-            if harness.is_tracked(root, p.relative_to(root).as_posix()):
-                continue  # includes git failures; ask from root, outside any .orch state repo
+            candidates.append((p, sessions))
+        tracked = harness.tracked_ticket_paths(root) if candidates else set()
+        for p, sessions in candidates:
+            if tracked is None or p.relative_to(root).as_posix().casefold() in tracked:
+                continue  # git failures grant no ownership
             for s in sessions:
                 if (
                     not isinstance(s, dict)
