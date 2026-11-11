@@ -1579,17 +1579,17 @@ def test_main_folder_run_then_copy_then_done_releases_the_copy(repo, monkeypatch
     assert str(copy) not in git(repo, "worktree", "list", "--porcelain")
 
 
-def test_a_live_claim_in_the_project_folder_does_not_hold_the_tickets_copy(repo):
-    """Lane C D6b: the ticket's (stand-in) claim says it works in the project folder, and its copy came later
-    (the mode was switched). Done releases the copy, keyed on the ticket; a claim INSIDE the copy holds it."""
+def test_a_live_claim_keeps_the_copy_wherever_the_claim_says_it_works(repo):
+    """Opus delta on #496: a claim's `folder` is not evidence of where the agent is (`orch run claim`
+    records the project folder for a session that works in the copy): ANY live claim holds the copy."""
     t = repo.tids[0]
-    p = make(repo)  # the copy
+    p = make(repo)
     runs.claim(repo, t, "human:t", "claude", "oneshot", folder=repo, pid=os.getpid())
-    assert runs.state(runs.read(repo, t)) == "alive"
     close(repo, t, "done")
-    assert t not in worktrees.registry(repo)
-    assert not p.exists()
-    assert str(p) not in git(repo, "worktree", "list", "--porcelain")
+    assert t in worktrees.registry(repo) and p.is_dir()
+    rec = runs.read(repo, t)
+    runs.release(repo, t, rec["run"])  # the claim ends: the copy goes
+    assert t not in worktrees.registry(repo) and not p.exists()
 
 
 def test_a_live_claim_inside_the_copy_still_holds_it(repo):
