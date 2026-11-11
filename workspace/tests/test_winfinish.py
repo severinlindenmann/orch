@@ -376,3 +376,18 @@ def test_a_concurrent_caller_is_not_collected(proj, tmp_path):
         seen["other"] = addons._batch_for(tmp_path / "elsewhere")
         seen["own"] = addons._batch_for(proj)
     assert seen["thread"] is None and seen["other"] is None and seen["own"] is not None
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("crash", [False, True])
+def test_failed_project_step_restores_registry(tmp_path, existing, crash):
+    path = tmp_path / "addons.json"
+    before = b'[ {"name": "automation"} ]\n'
+    if existing:
+        path.write_bytes(before)
+    job = _job(tmp_path, then_code="import sys; sys.exit(2)")
+    if crash:
+        job["then"][0]["argv"] = [str(tmp_path / "missing-executable")]
+    assert _run_finisher(tmp_path, job).returncode == 1
+    assert path.read_bytes() == before if existing else not path.exists()
+    assert not (tmp_path / "finish.pending").exists()

@@ -103,5 +103,7 @@
   "names": false,
   "last_sent": null,
   "queued": 0
- }
+ },
+  "unavailable": [],
+  "complete": true
 }

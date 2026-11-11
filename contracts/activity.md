@@ -126,14 +126,19 @@ Vectors `retention` fix the order.
 
 - `orch record tail [--ticket T | --run R] [--since <cursor>] [--follow] --json` → NDJSON on stdout, one object per line:
   `{"type": "event", "cursor": "<c>", "event": {…}}`, `{"type": "ping", "cursor": "<c>", "at"}` every 15 s while following,
-  `{"type": "reset", "cursor": "<c>", "reason": "pruned" | "deleted"}` when the cursor points at data that is gone (start
-  over from the returned cursor), `{"type": "error", "error": "<plain words>", "code"}` then exit 2.
+  `{"type": "error", "error": "<plain words>", "code"}` then exit 2. A cursor that names a run that is gone gives
+  one `unavailable` marker for that run (`status: unavailable, reason: missing`) and the stream goes on; the old
+  whole-cursor `reset` line is not used by the real command.
   Multi-run streams also emit `{"type": "unavailable", "cursor", "run", "status", "reason", "message"}`
   once per changed read status; invalid lines use `status: ok, reason: skipped`. Single-run failures use
   `tampered`, `not_available`, or `not_found` (missing) and exit 2.
   Without `--since` it starts at the first retained event; events of one run come in `seq` order, runs interleave by `at`.
   Readers already dedupe (above), so a reconnect with the last cursor never shows a step twice.
-- Cursors are opaque strings `rc1.<base64url>` (no padding). Producers encode `{"<run>": <last seq>, …}` as compact JSON;
+- Cursors are opaque strings `rc1.<base64url>` (no padding). Tail producers encode `{"r": {"<run>": <last seq>, …}}` (compact JSON, zlib-compressed); when that no longer fits, the runs whose events were all sent
+  (oldest last event first) are left out with an `unavailable` marker (reason `trimmed`) and may be sent again after a
+  reconnect (a duplicate, never a loss); when nothing can be left out the command ends with `too_large`. A run file
+  shorter than its cursor entry is marked `rewound` and sent again from its start; a rewrite of the same length is not
+  detected. A cursor belongs to the filter (`--ticket`, `--run`) it came from: another filter may send events again;
   consumers never look inside and keep the newest cursor they got. *Implementing slice 1.6 must* check every decoded run id
   and detail id against its pattern before it becomes a file path (a cursor `{"../x": 1}` → `invalid`).
 - `orch record query [--ticket T] [--run R] [--kind K]… [--from <time>] [--to <time>] [--limit N] [--after <cursor>] --json`
