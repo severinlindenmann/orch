@@ -338,11 +338,10 @@ def _write(root: Path, ticket: dict) -> None:
 NO_WRITE = object()  # an op returns this when it changed nothing
 
 
-def _wont_view(ticket: dict) -> list:
+def _wont_view(ticket: dict) -> dict:
     """The Won't do state of every step (id, flag, reason, who, when): what only a person may change."""
-    return [
-        (
-            c.get("id"),
+    return {
+        c.get("id"): (
             c.get("wont_do"),
             c.get("reason"),
             c.get("by") if c.get("wont_do") else None,
@@ -350,7 +349,7 @@ def _wont_view(ticket: dict) -> list:
         )
         for c in ticket.get("checklist") or []
         if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
-    ]
+    }
 
 
 def _is_person(by: str) -> bool:

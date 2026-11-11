@@ -275,7 +275,7 @@ def _impose(x, auth):
     no Won't do at all without an authority."""
     if auth is None:
         return _drop_wont(x)
-    fields = _SIGNED if auth.get("wont_do") is True else _DECISION
+    fields = (*_SIGNED, "by") if auth.get("wont_do") is True else _DECISION
     y = {k: v for k, v in x.items() if k not in fields}
     y.update({k: auth[k] for k in fields if k in auth})
     if y.get("wont_do"):
@@ -372,7 +372,9 @@ def _merge(base, a, b, now, person=None):
     cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
                 lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
     seen = {}
-    for side, t in (("0", base), ("a", a), ("b", b)):
+    # Prefer the newer side's attribution when both carry the verified decision.
+    sides = (("a", a), ("b", b)) if ctx.a_newer else (("b", b), ("a", a))
+    for side, t in (*sides, ("0", base)):
         for x in t.get("checklist", []):
             if isinstance(x, dict):
                 seen.setdefault(x.get("id"), {})[side] = x
