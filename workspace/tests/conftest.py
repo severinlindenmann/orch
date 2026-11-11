@@ -78,6 +78,15 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _no_tool_version_probe(monkeypatch):
+    """The deny-rule version check (adapters.deny_version_check) probes the tool; tests that only look at
+    an argv must not depend on a tool being installed. tests/test_deny_rules.py tests the real check."""
+    from orch import adapters
+
+    monkeypatch.setattr(adapters, "_deny_version_ok", lambda a: None)
+
+
+@pytest.fixture(autouse=True)
 def _strict_orch_home(monkeypatch, tmp_path_factory):
     """Every test: a faked real home with its own ORCH_HOME (a test that never asked for `proj` used to write
     the real ~/.orch-tool/addons.json: ORCH_HOME unset = real folder); untrusted ORCH_HOME = error."""

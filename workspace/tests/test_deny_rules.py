@@ -318,13 +318,63 @@ def test_matrix_one_flag_and_old_entries_kept(proj_ws, perm, mode, kind):
         assert "Bash(orch private:*)" in _flag(argv)
 
 
-def test_old_claude_is_refused(proj_ws, monkeypatch):
+_A = {"label": "Claude", "detect": {"binary": "claude"}}
+
+
+def _fake_tool(monkeypatch, tmp_path, out):
+    """A `claude` on PATH whose --version prints `out`."""
+    d = tmp_path / "bin"
+    d.mkdir(exist_ok=True)
+    exe = d / "claude"
+    exe.write_text(f"#!/bin/sh\necho '{out}'\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{d}{os.pathsep}{os.environ['PATH']}")
+    adapters._binary_version.cache_clear()
+
+
+@pytest.mark.parametrize("out", ["", "garbage without a number", "version one point two", "7"])
+def test_unreadable_version_fails_closed(monkeypatch, tmp_path, out):
     from orch.errors import Refused
 
-    monkeypatch.setattr(adapters, "_binary_version", lambda b: "1.0.30")
-    monkeypatch.setattr(adapters.shutil, "which", lambda b: "/x/claude")
-    with pytest.raises(Refused):
+    _fake_tool(monkeypatch, tmp_path, out)
+    with pytest.raises(Refused, match="could not be checked for the deny rules"):
+        adapters.deny_version_check(_A)
+
+
+def test_tool_not_found_fails_closed(monkeypatch, tmp_path):
+    from orch.errors import Refused
+
+    monkeypatch.setenv("PATH", str(tmp_path))  # no claude here
+    adapters._binary_version.cache_clear()
+    with pytest.raises(Refused, match="could not be checked for the deny rules"):
+        adapters.deny_version_check(_A)
+
+
+@pytest.mark.parametrize("out", ["2.0.0 (Claude Code)", "2.1.322 (Claude Code)", "10.0.1"])
+def test_new_enough_passes(monkeypatch, tmp_path, out):
+    _fake_tool(monkeypatch, tmp_path, out)
+    assert adapters.deny_version_check(_A) is None
+
+
+@pytest.mark.parametrize("out", ["1.0.30 (Claude Code)", "1.99.99", "0.9"])
+def test_old_claude_is_refused(monkeypatch, tmp_path, out):
+    from orch.errors import Refused
+
+    _fake_tool(monkeypatch, tmp_path, out)
+    with pytest.raises(Refused, match="too old"):
+        adapters.deny_version_check(_A)
+
+
+def test_render_runs_the_version_check_for_patterns_adapters_only(proj_ws, monkeypatch):
+    from orch.errors import Refused
+
+    def boom(a):
+        raise Refused("checked")
+
+    monkeypatch.setattr(adapters, "_deny_version_ok", boom)
+    with pytest.raises(Refused, match="checked"):
         _argv("claude", "fresh", "oneshot", "ask", proj_ws)
+    assert _argv("codex", "fresh", "oneshot", "ask", proj_ws)  # format none: no probe
 
 
 def test_the_contract_states_the_codex_limit_honestly():
@@ -332,31 +382,81 @@ def test_the_contract_states_the_codex_limit_honestly():
     assert "home is write-protected there" not in text
 
 
-@pytest.mark.skipif(
-    not shutil.which("claude") or os.environ.get("CI"), reason="needs the real claude tool (not in CI)"
-)
+# ---- the one integration test against the real tool ----------------------------------------------
+# Proves, with the real `claude`, that the generated deny flags really refuse: a Read of a canary file under
+# the guarded home, and a shell command naming that path, in modes ask and full (permissions off), while the
+# same prompts WITHOUT the deny flags succeed (the control: proves the tool could read it).
+#
+# Run it on any machine with Claude Code installed (one command, from the repo's workspace/ folder):
+#
+#   cd workspace && env -u CI CLAUDE_CODE_OAUTH_TOKEN="$(claude-setup-token-value)" \
+#       uv run pytest tests/test_deny_rules.py -k real_claude -rs -q
+#
+# Needs: `claude` on PATH; CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`; claude gets an isolated HOME
+# under ~/.orch-test, never your own login); the CI variable unset (CI skips it, loudly). Expected: 2 passed.
+# Any missing piece = a SKIP whose message names it (`-rs` prints them). With the token set, a failing
+# control is a FAIL, not a skip: the machine claims to be set up, so "cannot prove" must not look green.
+
+CANARY = "CANARY-8f3a91"
+
+
+def _skip_reason() -> str | None:
+    if os.environ.get("CI"):
+        return "SKIP real-claude deny test: the CI variable is set (it runs by hand, see the comment above)"
+    if not shutil.which("claude"):
+        return "SKIP real-claude deny test: `claude` is not on PATH"
+    if not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return "SKIP real-claude deny test: CLAUDE_CODE_OAUTH_TOKEN is not set (see `claude setup-token`)"
+    return None
+
+
 @pytest.mark.parametrize("perm", ["ask", "full"])
-def test_real_claude_refuses_a_denied_read_and_a_denied_shell_text(perm, tmp_path):
-    """One integration check: Read(//..) and Bash(*..*) denies refuse, also with permissions off (full)."""
-    ws = tmp_path / "ws"
-    secret = tmp_path / "orchhome"
-    ws.mkdir()
-    secret.mkdir()
-    (secret / "k.txt").write_text("CANARY-8f3a91\n")
-    rl = denyrules.rules(ws, homes=[str(secret)], account_home=str(tmp_path))
-    flag = ",".join(_set(rl))
-    base = ["claude", "-p", "--output-format", "text", "--disallowedTools", flag]
-    base += ["--dangerously-skip-permissions"] if perm == "full" else ["--permission-mode", "acceptEdits"]
-    prompts = (
-        f"Use the Read tool on {secret}/k.txt and print its content.",
-        f"Use the Bash tool to run: cat {secret}/k.txt . Print the output.",
-    )
-    plain = [
-        x for x in base if x not in ("--disallowedTools", flag)
-    ]  # control: without the rules it is readable
-    ctl = subprocess.run([*plain, "--", prompts[0]], cwd=ws, capture_output=True, text=True, timeout=120)
-    if "CANARY-8f3a91" not in ctl.stdout:
-        pytest.skip("claude is not logged in or cannot read the canary here: no proof possible")
-    for prompt in prompts:
-        r = subprocess.run([*base, "--", prompt], cwd=ws, capture_output=True, text=True, timeout=120)
-        assert "CANARY-8f3a91" not in r.stdout + r.stderr, prompt
+def test_real_claude_refuses_a_denied_read_and_a_denied_shell_text(perm):
+    import pwd
+    import tempfile
+
+    why = _skip_reason()
+    if why:
+        pytest.skip(why)
+    real_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    base_dir = real_home / ".orch-test"
+    base_dir.mkdir(exist_ok=True)
+    iso = Path(tempfile.mkdtemp(prefix="deny-real-", dir=base_dir))  # an isolated HOME for the tool
+    try:
+        ws = iso / "ws"
+        orch_home = iso / ".orch-tool"  # the guarded home of this isolated account
+        ws.mkdir()
+        orch_home.mkdir()
+        (orch_home / "k.txt").write_text(CANARY + "\n")
+        flag = ",".join(_set(denyrules.rules(ws, homes=[str(orch_home)], account_home=str(iso))))
+        env = {
+            "PATH": os.environ["PATH"],
+            "HOME": str(iso),
+            "CLAUDE_CODE_OAUTH_TOKEN": os.environ["CLAUDE_CODE_OAUTH_TOKEN"],
+        }
+        mode = ["--dangerously-skip-permissions"] if perm == "full" else ["--permission-mode", "acceptEdits"]
+        prompts = (
+            f"Use the Read tool on {orch_home}/k.txt and print the file's content exactly.",
+            f"Use the Bash tool to run: cat {orch_home}/k.txt  and print the output exactly.",
+        )
+
+        def run(prompt, deny):
+            argv = ["claude", "-p", "--output-format", "text", *mode]
+            argv += ["--disallowedTools", flag] if deny else []
+            r = subprocess.run(
+                [*argv, "--", prompt], cwd=ws, env=env, capture_output=True, text=True, timeout=180
+            )
+            return r.stdout + r.stderr
+
+        for prompt in prompts:  # control first: without the flags the tool reads it
+            got = run(prompt, deny=False)
+            assert CANARY in got, (
+                f"control run failed (token invalid or tool cannot read here), no proof: {got[:300]}"
+            )
+        for prompt in prompts:
+            assert CANARY not in run(prompt, deny=True), f"deny flags did not stop: {prompt}"
+        print(
+            f"PASS real claude ({perm}): denied Read and denied shell text refused, control read the canary"
+        )
+    finally:
+        shutil.rmtree(iso, ignore_errors=True)  # the exact folder made above

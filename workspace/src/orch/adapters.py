@@ -219,18 +219,24 @@ def _binary_version(binary: str) -> str | None:
     return _version(binary)
 
 
-def _deny_version_ok(a: Mapping) -> None:
-    """Refuse a tool too old to honour the deny patterns (an unreadable version is let through)."""
+def deny_version_check(a: Mapping) -> None:
+    """Fail closed (deny by default): the tool must be found and report a version >= DENY_MIN_VERSION.
+    Not found, no output, garbage output and too old all refuse."""
+    cannot = f"{a['label']} could not be checked for the deny rules: update or reinstall it, then try again."
     binary = (a.get("detect") or {}).get("binary")
     path = shutil.which(binary) if binary else None
     v = _binary_version(path) if path else None
-    if v:
-        nums = tuple(int(x) for x in re.findall(r"\d+", v)[:3])
-        if nums and nums < DENY_MIN_VERSION:
-            raise Refused(
-                f"{a['label']} {v} is too old to keep orch's own folders out of reach "
-                f"(needs {'.'.join(map(str, DENY_MIN_VERSION))} or newer). Update it, then try again."
-            )
+    found = re.findall(r"\d+", v)[:3] if v else []
+    if len(found) < 2:  # _version only returns dotted numbers, so this is "nothing readable"
+        raise Refused(cannot)
+    if tuple(int(x) for x in found) + (0,) * (3 - len(found)) < DENY_MIN_VERSION:
+        raise Refused(
+            f"{a['label']} {v} is too old to keep orch's own folders out of reach "
+            f"(needs {'.'.join(map(str, DENY_MIN_VERSION))} or newer). Update it, then try again."
+        )
+
+
+_deny_version_ok = deny_version_check  # render calls this name (tests that fake a tool replace it)
 
 
 @functools.cache
