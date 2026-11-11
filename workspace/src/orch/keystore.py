@@ -56,6 +56,7 @@ ENV_DENY = frozenset(
 ENV_DENY_PREFIX = (
     "LD_", "DYLD_", "PATH", "GIT_", "ORCH_", "PYTHON", "PERL", "RUBY", "NODE_", "BASH", "XDG_", "LESS",
     "LUA_", "GCONV", "GLIBC", "COR_", "CORECLR", "DOTNET", "NPM_", "RUSTC", "CARGO_", "SSH_", "GPG_", "SUDO_",
+    "PSMODULEPATH", "NPM_CONFIG", "GNUPG", "PHPRC", "TCLLIBPATH", "R_PROFILE", "CLASSPATH",
 )  # fmt: skip
 ENV_DENY_SUFFIX = ("_OPTIONS",)
 ENV_DENY_CONTAINS = ("ASKPASS",)

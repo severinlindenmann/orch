@@ -91,7 +91,12 @@ def _change_profile(root, args, who):
     tomb: frozenset = frozenset()
     # One lock across record and file: a reader (secretrun._switch_on) never sees one without the other.
     with hp._key_lock(hp.key_dir(root)):
-        profiles = keystore.read_profiles(root)
+        if action == "remove":  # first: switches off and the tombstone, whatever state the file is in
+            tomb = frozenset({name})
+            hp.record_set(root, setting, False, who)
+            hp.record_set(root, agents, False, who)
+            hp.profile_sign(root, name, None)
+        profiles = keystore.read_profiles(root)  # a damaged file refuses here (after a remove's tombstone)
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
@@ -105,12 +110,8 @@ def _change_profile(root, args, who):
             hp.record_set(root, agents, False, who)
             profiles[name] = profile
         else:
-            if action == "remove":  # the tombstone is written even when the file has no such profile
-                tomb = frozenset({name})
-                hp.record_set(root, setting, False, who)
-                hp.record_set(root, agents, False, who)
+            if action == "remove":
                 if name not in profiles:
-                    keystore.write_profiles(root, profiles, tombstone=tomb)
                     raise Refused(f"Refused: there is no profile named {name}.")
                 del profiles[name]
             elif name not in profiles:

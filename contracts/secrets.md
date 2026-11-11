@@ -109,7 +109,7 @@ A profile maps variables to key names (`env`: the value in the variable; `files`
 plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false), and may let agents use its keys in any command (`agents_may_env`, default false).
 Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
 ORCH_*, PATH*, PYTHON*, PERL*, RUBY*, NODE_*, LUA_*, BASH*, XDG_*, SSH_*, GPG_*, SUDO_*, `*ASKPASS*`, `*_OPTIONS`, SHELLOPTS, PS4,
-ENV, IFS, HOME, EDITOR/VISUAL/PAGER/MANPAGER/BROWSER, LESS*, TMPDIR, COMSPEC, proxies, CA bundles, …; see `keystore.ENV_DENY`; matched in
+ENV, IFS, HOME, EDITOR/VISUAL/PAGER/MANPAGER/BROWSER, LESS*, PSModulePath, CLASSPATH, PHPRC, TCLLIBPATH, R_PROFILE*, GNUPG*, NPM_CONFIG*, TMPDIR, COMSPEC, proxies, CA bundles, …; see `keystore.ENV_DENY`; matched in
 any letter case; `set` names are also structural: `^[A-Z][A-Z0-9_]{0,63}$` (follow-up: only names the profile declares or a person approves as `extra`, part of the MAC), at `profile set` AND again every time the profile is read or run). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
 only with a matching settings record (human-proof.md, Settings: records and tombstones), so editing the file alone does not enable `get`.
@@ -124,7 +124,7 @@ own settings records and are not part of the body; rewriting a switch never sign
 the `run` program approval (absolute path, outside the workspace, not changeable by others, exists) when it starts.
 The MAC protects against an attacker who can write `profiles.toml` but can neither read `human.key` nor write `profile.json` (same folder, same
 rights: the guard is the boundary). Only the profile a person is setting (with proof) is signed; every other profile keeps its ledger entry,
-and `profile remove` always writes the tombstone, even when the file has no such profile. A profile that fails verification is shown as unusable.
+and `profile remove` always writes the tombstone, even when the file has no such profile. A profile that fails verification is shown as unusable. `profile remove` first turns both switches off and writes the tombstone, then touches the file (a damaged file refuses after that). `skills` is outside the MAC (not used to decide anything).
 **No legacy:** profiles saved before this change have no MAC and are refused until a person sets them up again (owner rule: no
 compatibility code until the pilot cut).
 

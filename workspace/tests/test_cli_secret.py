@@ -1653,3 +1653,22 @@ def test_variable_names_clash_in_any_case(store, run, ws, monkeypatch):
         "--env", "Tok=other-token", "--set", "TOK=x",
     )  # fmt: skip
     assert code == 2 and "dup" not in keystore.read_profiles(ws)
+
+
+def test_remove_on_a_damaged_file_still_tombstones(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    saved = _pfile(ws).read_text()
+    _pfile(ws).write_text("not [ toml")
+    code, _, _ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
+    )
+    assert code == 2  # the file is damaged
+    _pfile(ws).write_text(saved)
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_list_on_a_damaged_file_shows_the_keys_without_profiles(store, run, ws):
+    _pfile(ws).write_text("not [ toml")
+    code, out, _ = run("secret", "list", "--json")
+    assert code == 0 and "api-token" in out
