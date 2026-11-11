@@ -355,7 +355,7 @@ def test_mac_ticket_reaches_the_phone_and_caps_and_done_window(proj, run, new_ti
     assert old not in {m["ticket"] for m in conn.sent}
 
 
-def test_phone_chat_hides_settings_notes_and_names_the_phone(proj, new_ticket, monkeypatch):
+def test_phone_chat_hides_settings_notes_without_trusting_raw_phone_label(proj, new_ticket, monkeypatch):
     from orch import relay
 
     tid = new_ticket("Chart")
@@ -368,10 +368,8 @@ def test_phone_chat_hides_settings_notes_and_names_the_phone(proj, new_ticket, m
 
     tickets.apply_op(proj, tid, op)
     hist = phone_view.build(proj, tickets.load(proj, tid), [])["history_tail"]
-    shown = [
-        (h["who"], h["role"], h["text"]) for h in hist if "relay" in h["who"].lower() or "iPhone" in h["who"]
-    ]
-    assert shown == [("My iPhone", "person", "Make the Q3 chart")]
+    shown = [h for h in hist if "Make the Q3 chart" in h["text"]]
+    assert [(h["who"], h["role"]) for h in shown] == [("orch", "agent")]
     assert not any("settings" in h["text"] for h in hist)
     assert not any(PHONE in h["who"] for h in hist)
 
