@@ -431,17 +431,105 @@ def test_plain_pairs_stay():
 
 
 @pytest.mark.parametrize("unit", ["a=", "x: ", "Config: ", "a=1,", "user=bob&"])
-def test_kv_pattern_is_linear_on_long_plain_pairs(unit):
+def test_kv_pattern_is_linear_on_long_plain_pairs(unit, monkeypatch):
+    """Structural, not a wall-clock race: the scan is one pass (every head search starts after the last
+    one, at most one search per separator). The 5 s bound only catches a quadratic blow-up (minutes here)."""
     import time
 
     text = unit * (65536 // len(unit)) + "password=hunter2"
+    real, starts = phone_view._KV_HEAD, []
+
+    class CountingHead:
+        def search(self, s, pos=0):
+            starts.append(pos)
+            return real.search(s, pos)
+
+    monkeypatch.setattr(phone_view, "_KV_HEAD", CountingHead())
+    t0 = time.perf_counter()
+    m = phone_view._SECRET_KV.search(text)
+    assert time.perf_counter() - t0 < 5
+    assert m and m.group(1) == "password" and m.group(3) == "hunter2"
+    assert starts == sorted(set(starts))  # strictly increasing: nothing is scanned twice
+    assert len(starts) <= text.count(":") + text.count("=") + 1
+    monkeypatch.undo()
     t0 = time.perf_counter()
     phone_view.redact(text)
-    m = phone_view._SECRET_KV.search(text)
-    assert time.perf_counter() - t0 < 0.5
-    assert m and m.group(1) == "password" and m.group(3) == "hunter2"
+    assert time.perf_counter() - t0 < 5
     short = unit * (16000 // len(unit)) + "password=hunter2"  # under the 20000 cut of clean_untrusted
     assert "hunter2" not in phone_view.redact(short)
+
+
+SECRET_FLAGS = [
+    ("mysql -u root --password hunter2 db", "mysql -u root --password [hidden] db"),
+    ("mysql -u root --password=hunter2 db", "mysql -u root --password=[hidden] db"),
+    ("mysql -u root -p hunter2 db", "mysql -u root -p [hidden] db"),
+    ("mysql -u root -phunter2 db", "mysql -u root -p[hidden] db"),
+    ("mysqldump -uroot -phunter2 shop", "mysqldump -uroot -p[hidden] shop"),
+    ("$ /usr/bin/mysql -h db -phunter2", "$ /usr/bin/mysql -h db -p[hidden]"),
+    ("sudo mysql -p'hunter2' -e 'select 1'", "sudo mysql -p[hidden] -e 'select 1'"),
+    ("sshpass -p hunter2 ssh -o X=1 me@host", "sshpass -p [hidden] ssh -o X=1 me@host"),
+    ("redis-cli -h cache -a hunter2 ping", "redis-cli -h cache -a [hidden] ping"),
+    ("curl -u bob:hunter2 https://x.ch/api", "curl -u [hidden] https://x.ch/api"),
+    ("curl -ubob:hunter2 https://x.ch/api", "curl -u[hidden] https://x.ch/api"),
+    ("deploy --token hunter2 --env prod", "deploy --token [hidden] --env prod"),
+    ("deploy --api-key hunter2", "deploy --api-key [hidden]"),
+    ('deploy --api-key "hunter2 x" now', "deploy --api-key [hidden] now"),
+    ("tool --password --token hunter2", "tool --password --token [hidden]"),
+    ("ran:\n  mysql -phunter2 shop\ndone", "ran:\n  mysql -p[hidden] shop\ndone"),
+]
+
+
+@pytest.mark.parametrize("text, want", SECRET_FLAGS)
+def test_secret_flag_values_are_hidden_flags_stay(text, want):
+    out = phone_view.redact(text)
+    assert out == want and "hunter2" not in out, out
+    assert phone_view.redact(out) == out  # stable: the results check scrubs twice
+
+
+def test_authorization_header_flag_is_hidden():
+    out = phone_view.redact('curl -H "Authorization: Bearer hunter2xyz" https://x.ch')
+    assert "hunter2xyz" not in out and "Bearer" not in out and "Authorization: [hidden]" in out, out
+
+
+@pytest.mark.parametrize("text", ["ｍｙｓｑｌ -phunter2", "mysql －－password hunter2", "mysql －ｐhunter2"])
+def test_secret_flags_in_fullwidth_forms_are_hidden(text):
+    out = phone_view.redact(text)
+    assert "hunter2" not in out and "[hidden]" in out, out
+
+
+PLAIN_FLAGS = [
+    "-p 8080",
+    "docker run -p 8080:80 web",
+    "serve --port 8080",
+    "ls -a",
+    "ls -la /tmp",
+    "psql -h db -p 5432 -U bob shop",
+    "mysql -u root -P 3306 -h db shop",
+    "redis-cli -h cache -p 6379 ping",
+    "curl -s -o out.html https://x.ch",
+    "mysql -u root -p",
+    "mysqlx -p 33060",
+    "run --verbose --author bob",
+]
+
+
+@pytest.mark.parametrize("text", PLAIN_FLAGS)
+def test_plain_flags_stay(text):
+    assert phone_view.redact(text) == text
+
+
+@pytest.mark.parametrize(
+    "unit", ["--password ", "--x ", "--password=", "mysql -p\n", "mysql -u -u -u\n", '--token "', "-- "]
+)
+def test_flag_scan_is_linear(unit):
+    """A generous bound: a quadratic scan of 64 KiB takes minutes, the linear one milliseconds."""
+    import time
+
+    text = unit * (65536 // len(unit)) + "\ncurl -u bob:hunter2"
+    t0 = time.perf_counter()
+    out = phone_view._hide_flag_values(text)
+    assert time.perf_counter() - t0 < 5
+    assert out.endswith("\ncurl -u [hidden]") and "hunter2" not in out
 
 
 FULLWIDTH = ["ｐａｓｓｗｏｒｄ=hunter2", "ＴＯＫＥＮ: hunter2", "Ａｐｉ_Ｋｅｙ = hunter2"]

@@ -145,6 +145,65 @@ class _KV:
 
 
 _SECRET_KV = _KV()
+
+# Command-line flags. A long flag whose name secret_name() accepts (the one predicate, no second word list)
+# hides the value after it: --password x, --password=x, --token x, --api-key "a b". A short flag only on a
+# line that starts one of _FLAG_COMMANDS (after a $/#/> prompt, sudo or a path), and only that command's
+# password flag, case-sensitive (mysql -P is the port): mysql -pX / -p X, sshpass -p x, redis-cli -a x,
+# curl -u user:pass. -p 8080, ls -a, psql -p 5432 and --port 8080 stay. The value stays on the flag's line.
+# A secret long flag followed by another long flag has no value (--password --token x: x is hidden).
+# Linear: one lookbehind-guarded start per flag, possessive runs, the line end is found once per line, and
+# the scan goes on after each hidden value (scanned once).
+_FLAG_COMMANDS = {"mysqldump": "p", "mysql": "p", "sshpass": "p", "redis-cli": "a", "curl": "u"}
+_LONG_FLAG = re.compile(r"(?<![\w.-])--([\w.-]++)(?:=|[ \t]++)")
+_SHORT_FLAG = re.compile(r"(?<!\S)-([A-Za-z])[ \t]*+")
+_CMD_LINE = re.compile(
+    r"(?m)^[ \t]*+(?:[$#>][ \t]++)?(?:sudo[ \t]++)?(?:[\w.~-]*+/)*+("
+    + "|".join(re.escape(c) for c in _FLAG_COMMANDS)
+    + r")(?![\w.-])"
+)
+
+
+def _line_end(text: str, pos: int) -> int:
+    end = text.find("\n", pos)
+    return len(text) if end == -1 else end
+
+
+def _flag_values(text: str) -> list[tuple[int, int]]:
+    """(start, end) of every secret flag value in text, unsorted; values may overlap."""
+    spans = []
+    pos, eol = 0, -1
+    while (flag := _LONG_FLAG.search(text, pos)) is not None:
+        pos = flag.end()
+        if pos > eol:
+            eol = _line_end(text, pos)
+        if not secret_name(flag.group(1)) or (text.startswith("--", pos) and flag.group(0)[-1] != "="):
+            continue  # a plain flag, or a secret flag without a value (--password --token x)
+        if (val := _KV_VAL.match(text, pos, eol)) is not None:
+            spans.append(val.span())
+            pos = val.end()
+    for line in _CMD_LINE.finditer(text):
+        letter, pos = _FLAG_COMMANDS[line.group(1)], line.end()
+        eol = _line_end(text, pos)
+        while (flag := _SHORT_FLAG.search(text, pos, eol)) is not None:
+            pos = flag.end()
+            if flag.group(1) == letter and (val := _KV_VAL.match(text, pos, eol)) is not None:
+                spans.append(val.span())
+                pos = val.end()
+    return spans
+
+
+def _hide_flag_values(t: str) -> str:
+    """Each secret flag value becomes [hidden] (overlapping values become one); the flag itself stays."""
+    out, last = [], 0
+    for start, end in sorted(_flag_values(t)):
+        if start >= last:
+            out += [t[last:start], HIDDEN]
+        last = max(last, end)
+    out.append(t[last:])
+    return "".join(out)
+
+
 # query parameter names: the secret-name words and a few old substrings anywhere, the label words (and a
 # bare pass) as whole words; secret_name() too (camelCase)
 _SECRET_PARAM = re.compile(
@@ -274,10 +333,22 @@ def redact(text: str) -> str:
     return HIDDEN
 
 
+# ACCEPTED GAPS: known cases the scrub (and the file scan) do NOT catch; tests/test_phone_results.py
+# pins what is covered.
+# - a secret split across lines (a flag value after a `\` continuation, a key wrapped over two lines),
+#   or base64, hex, URL-encoded or otherwise encoded so no pattern or label is visible;
+# - short flags of commands not in _FLAG_COMMANDS (psql, docker, ...), a known command not at the start
+#   of its line (after `&&`, `|`, `env X=1`), long flags without a secret name (curl --user u:p) and
+#   single-dash long flags (-password x);
+# - a secret in prose without a label or a known shape ("the new one is hunter2");
+# - JPEG, GIF and WebP get no structural walk (_image_clean): they are "unknown" and not sent, never
+#   checked as clean.
+# Over-redaction is accepted (fail safe): `--token-count 512`, `use --token to set it` hide the next word.
 def _scrub_text(t: str) -> str:
     for rx in _SECRET_PATTERNS:
         t = rx.sub(HIDDEN, t)
-    return _SECRET_KV.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, t)
+    t = _SECRET_KV.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, t)
+    return _hide_flag_values(t)
 
 
 def _clip(text: str, n: int) -> str:
