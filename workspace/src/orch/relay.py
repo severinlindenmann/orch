@@ -2073,7 +2073,9 @@ def apply_allow_answers(root: Path) -> list[str]:
                     tickets.apply_op(root, tid, op)
 
             ids = [str(x.get("id")) if isinstance(x, dict) else "" for x in raw["questions"]]
-            if len(ids) != len(set(ids)):  # which one was answered here cannot be told: none counts
+            # which one was answered here cannot be told: none counts (only with sync; without it there is no
+            # peer, and a sync-free workspace keeps its old behaviour)
+            if synced and len(ids) != len(set(ids)):
                 skip(
                     "Two questions on this ticket have the same id, so no answer is applied - run: "
                     f"orch relay allow {mid} --once (or --permanent), or: orch relay done {mid} to ignore it"

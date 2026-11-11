@@ -1948,3 +1948,14 @@ def test_shown_name_is_never_a_raw_workspace_id(monkeypatch):
     assert relay._shown_name(None, "ws_a1", "another workspace") == "Pilatus"
     assert relay._shown_name(None, "ws_u5k5wqp2a5", "another workspace") == "another workspace"
     assert relay._shown_name(None, "ws_u5k5wqp2a5", "") == ""
+
+
+def test_a_sync_free_workspace_keeps_applying_with_duplicate_question_ids(proj, run, rel):
+    """Requirement: sync-free workspaces are unaffected; the duplicate-id refusal only runs with sync on."""
+    from orch import history, relay
+
+    assert not history.sync_enabled(proj)
+    import pathlib
+
+    src = pathlib.Path(relay.__file__).read_text()
+    assert "if synced and len(ids) != len(set(ids)):" in src

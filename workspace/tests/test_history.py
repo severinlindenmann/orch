@@ -2,6 +2,7 @@
 field; sync-free workspaces are untouched (contracts/history.md)."""
 
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -225,18 +226,17 @@ def test_phone_view_needs_and_resume_read_the_shown_ticket(synced, monkeypatch):
         phone_view, "_shown_checklist", lambda t: seen.setdefault("phone", t) and real_checklist(t)
     )
     phone_view.build(root, _raw(root, tid), [])
-    monkeypatch.setattr(phone_view, "_agent", lambda r, t, h: seen.setdefault("light", t) and (None, False))
-    try:
-        phone_view.light_view(root, _raw(root, tid))
-    except Refused:
-        pass  # no value hider here: the ticket was shown before that
+    monkeypatch.setattr(phone_view, "_agent", lambda r, t, h: (seen.setdefault("light", t), (None, False))[1])
+    keep = types.SimpleNamespace(hide_text=lambda text: text, hide_json=lambda value: value)
+    monkeypatch.setattr(phone_view.phone_results, "value_hider", lambda r: keep)
+    phone_view.light_view(root, _raw(root, tid))
     monkeypatch.setattr(needs, "_asked_at", lambda r, t, qid: seen.setdefault("needs", t) and PEER["at"])
     assert [r["id"] for r in needs.core_rows(root) if r["ticket"] == tid] == [f"core:q:{tid}:q9"]
     monkeypatch.setattr(runs_live, "_asker", lambda r, t, qid: seen.setdefault("resume", t) and None)
     assert (
         _REAL_RESUME(root, tid, {"id": "q8", "kind": "plain"}, "human:tester") is None
     )  # (conftest stubs it)
-    assert set(seen) >= {"phone", "needs", "resume"}
+    assert set(seen) >= {"phone", "light", "needs", "resume"}
     for t in seen.values():
         _no_alice(t)
 
