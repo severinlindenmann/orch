@@ -361,19 +361,63 @@ def test_collect_passes_the_workspace_to_the_writer(store):
     assert SECRET not in json.dumps(events)
 
 
-def test_collect_goes_on_after_a_refused_event():
-    from orch.record import RecordInvalid
+STREAM2 = [use("toolu_a", "Read", {"file_path": "a.py"}), use("toolu_b", "Read", {"file_path": "b.py"})]
 
-    class Writer:
-        def __init__(self):
-            self.n = 0
 
-        def append(self, event, detail=None):
-            self.n += 1
-            if self.n == 1:
-                raise RecordInvalid("too large")
-            return event
+def test_collect_counts_and_skips_an_invalid_event(store, monkeypatch):
+    from orch import record
 
-    stream = [use("toolu_a", "Read", {"file_path": "a.py"}), use("toolu_b", "Read", {"file_path": "b.py"})]
-    stats = collect(stream, Writer(), CTX)
-    assert stats["invalid"] == 1 and stats["written"] >= 1
+    ws, writer = store
+    real = RecordWriter._commit
+    calls = []
+
+    def commit(self, event, *a, **k):
+        calls.append(event["id"])
+        if len(calls) == 1:
+            raise record.RecordInvalid("too large")
+        return real(self, event, *a, **k)
+
+    monkeypatch.setattr(RecordWriter, "_commit", commit)
+    stats = collect(STREAM2, writer, CTX)
+    assert stats["invalid"] == 1 and stats["written"] == 1
+
+
+@pytest.mark.parametrize("error", ["tampered", "unavailable"])
+def test_collect_stops_loudly_on_tampered_or_unavailable(store, monkeypatch, error):
+    from orch import record
+
+    ws, writer = store
+    exc = record.RecordTampered("swapped") if error == "tampered" else record.RecordUnavailable("io")
+
+    def commit(self, *a, **k):
+        raise exc
+
+    monkeypatch.setattr(RecordWriter, "_commit", commit)
+    with pytest.raises(type(exc)):
+        collect(STREAM2, writer, CTX)
+
+
+def test_collect_busy_goes_to_the_spool_and_the_run_continues(store, monkeypatch):
+    from orch import record
+
+    ws, writer = store
+
+    def busy(*a, **k):
+        raise record.RecordBusy("busy")
+
+    monkeypatch.setattr(record, "_lock", busy)
+    stats = collect(STREAM2, writer, CTX)
+    assert stats["invalid"] == 0 and stats["written"] == 2
+    assert len(list((record.record_dir(ws) / "pending" / CTX["run"]).iterdir())) == 2
+
+
+def test_collect_spool_failure_keeps_the_real_cause(store, monkeypatch):
+    from orch import record
+
+    ws, writer = store
+    monkeypatch.setattr(record, "_lock", lambda *a, **k: (_ for _ in ()).throw(record.RecordBusy("busy")))
+    monkeypatch.setattr(
+        record, "_open", lambda *a, **k: (_ for _ in ()).throw(record.RecordUnavailable("io"))
+    )
+    with pytest.raises(record.RecordUnavailable):
+        collect(STREAM2, writer, CTX)

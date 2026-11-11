@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .collect_execjson import _hash, _hide, _now, _one_line, detail_name
-from .record import RecordOff, RecordRefused, RecordTampered, RecordUnavailable
+from .record import RecordInvalid
 from .record_files import workspace_files
 
 # Tools whose input names the file or folder they touch (activity.md, Files).
@@ -381,11 +381,9 @@ def collect(lines: Iterable[str | bytes], writer: Any, ctx: dict) -> dict:
         for event, detail in mapper.feed_with_detail(line):
             try:
                 stored = writer.append(event, detail=detail)
-            except (RecordOff, RecordTampered, RecordUnavailable):
-                raise  # fail closed: hider off or a record that cannot be trusted stops the run's collecting
-            except RecordRefused:
-                invalid += 1  # one bad event must not stop the rest of the run
-                continue
+            except RecordInvalid:
+                invalid += 1  # one bad event must not stop the rest of the run; every other refusal
+                continue  # (off, tampered, unavailable) propagates and stops the run loudly
             if stored is None:
                 deduped += 1
             else:

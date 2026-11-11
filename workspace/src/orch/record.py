@@ -1102,9 +1102,7 @@ class RecordWriter:
                 _close(fd)
         except (RecordTampered, RecordUnavailable) as error:
             _report(self.workspace, error, "folder", event["run"], "writer")
-            busy = RecordBusy("The record is busy.")
-            busy.alert = error.alert
-            raise busy from None
+            raise  # the real cause (tampered / unavailable) stays visible to the caller
         result = dict(event, pending=True, seq=None)
         if default_id:
             result.pop("id", None)
