@@ -38,67 +38,75 @@ def _entry(tmp_path, code, *, fake_home=True):
     return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=10)
 
 
-@pytest.mark.parametrize("case", ["trusted", "outside", "home", "cwd", ".git", ".orch", ".agents"])
-def test_home_trust_agrees_with_core(monkeypatch, tmp_path, case):
-    top = addons.real_home()
-    home = top / "parent" / "tool"
-    home.mkdir(parents=True)
-    if case == "outside":
-        home = tmp_path
-    elif case == "home":
-        home = top
-    elif case == "cwd":
-        monkeypatch.chdir(home.parent)
-    elif case.startswith("."):
-        (home.parent / case).mkdir()
-    monkeypatch.setattr(orch_entry, "real_home", lambda: top)
-    monkeypatch.setenv("ORCH_HOME", str(home))
-    trusted = case == "trusted"
-    assert addons._trusted_home(home.resolve()) == trusted
-    assert orch_entry.trusted_home(home) == trusted
-    expected = [home.resolve()] if trusted else []
-    assert orch_entry.home_candidates() == [*expected, (top / ".orch-tool").resolve()]
-
-
-@pytest.mark.parametrize("case", ["outside", "cwd", "repo", "world-writable", "symlink", "owner"])
-def test_untrusted_home_marker_runs_normally(monkeypatch, tmp_path, case):
+@pytest.mark.parametrize(
+    "case", ["normal", "outside", "home", "cwd", ".git", ".orch", ".agents", "world-writable", "symlink"]
+)
+def test_resolved_home_marker_blocks_entry(monkeypatch, tmp_path, case):
     top = addons.real_home()
     home = top / "tool"
     home.mkdir()
     if case == "outside":
         home = tmp_path
+    elif case == "home":
+        home = top
     elif case == "cwd":
         monkeypatch.chdir(home)
-    elif case == "repo":
-        (home / ".git").mkdir()
-    elif case in {"world-writable", "owner", "symlink"}:
+    elif case.startswith("."):
+        (home / case).mkdir()
+    elif case == "world-writable":
         if sys.platform == "win32":
-            pytest.skip("POSIX permissions and symlinks")
-        if case == "world-writable":
-            home.chmod(0o777)
-        elif case == "symlink":
-            link = top / "link"
+            pytest.skip("POSIX permissions")
+        home.chmod(0o777)
+    elif case == "symlink":
+        link = top / "link"
+        try:
             link.symlink_to(home, target_is_directory=True)
-            home = link
-        else:
-            original = Path.lstat
-
-            def lstat(path, *args, **kwargs):
-                result = original(path, *args, **kwargs)
-                if path == home:
-                    return types.SimpleNamespace(st_mode=result.st_mode, st_uid=os.getuid() + 1)
-                return result
-
-            monkeypatch.setattr(Path, "lstat", lstat)
+        except OSError:
+            if sys.platform != "win32":
+                raise
+            pytest.skip("symlinks require Windows privileges")
+        home = link
     monkeypatch.setattr(orch_entry, "real_home", lambda: top)
     monkeypatch.setenv("ORCH_HOME", str(home))
     orch_entry.marker_path(home).write_text(str(os.getpid()))
+    assert orch_entry.home_candidates() == [home.resolve(), (top / ".orch-tool").resolve()]
+    assert orch_entry.main() == 3
+    # The default remains guarded even when the override has no marker.
+    orch_entry.marker_path(home).unlink()
+    default = top / ".orch-tool"
+    default.mkdir()
+    orch_entry.marker_path(default).write_text(str(os.getpid()))
+    assert orch_entry.main() == 3
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX home ownership")
+@pytest.mark.parametrize("symlink", [False, True])
+def test_foreign_home_owner_runs_normally(monkeypatch, symlink):
+    top = addons.real_home()
+    home = top / "tool"
+    home.mkdir()
+    override = home
+    if symlink:
+        override = top / "link"
+        override.symlink_to(home, target_is_directory=True)
+    orch_entry.marker_path(home).write_text(str(os.getpid()))
+    original = Path.stat
+
+    def foreign_stat(path, *args, **kwargs):
+        result = original(path, *args, **kwargs)
+        if path == home:
+            return types.SimpleNamespace(st_mode=result.st_mode, st_uid=os.getuid() + 1)
+        return result
+
+    monkeypatch.setattr(Path, "stat", foreign_stat)
+    monkeypatch.setattr(orch_entry, "real_home", lambda: top)
+    monkeypatch.setenv("ORCH_HOME", str(override))
     cli = types.ModuleType("orch.cli")
     cli.main = lambda: 17
     monkeypatch.setitem(sys.modules, "orch.cli", cli)
     assert orch_entry.home_candidates() == [(top / ".orch-tool").resolve()]
     assert orch_entry.main() == 17
-    # Even with an untrusted override, the account default remains guarded.
+    # Even with a foreign-owned override, the account default remains guarded.
     default = top / ".orch-tool"
     default.mkdir()
     orch_entry.marker_path(default).write_text(str(os.getpid()))
