@@ -29,37 +29,57 @@
    "run": "r_8k2m01",
    "kind": "step",
    "id": "toolu_01ABcd",
-   "file": "144002f0b5063b0a2c0c5ab0d541f4d4"
+   "ticket": "t_inv7c2",
+   "file": "7e1c87a7be50802d339694eef65d2a63"
+  },
+  {
+   "run": "r_8k2m01",
+   "kind": "step",
+   "id": "toolu_01ABcd",
+   "ticket": "t_other9",
+   "file": "96bf954ea2d8990c00bb18c8938ed804"
+  },
+  {
+   "run": "r_8k2m01",
+   "kind": "step",
+   "id": "toolu_01ABcd",
+   "ticket": null,
+   "file": null
   },
   {
    "run": "r_8k2m01",
    "kind": "step",
    "id": "Toolu_01ABcd",
-   "file": "db039331b1dc5d8ee9aa2884e98ba7b2"
+   "ticket": "t_inv7c2",
+   "file": "4f3cfc27f3c62af9e193888ae0ac5cc4"
   },
   {
    "run": "r_8k2m01",
    "kind": "step",
    "id": "x_547202005627c6b9548175b580367a6a",
-   "file": "f750b592acf461bac0e5f1bd2806de26"
+   "ticket": "t_inv7c2",
+   "file": "cdcda1abeac0cc823beafd5712f63771"
   },
   {
    "run": "r_8k2m01",
    "kind": "helper.start",
    "id": "toolu_01ABcd",
-   "file": "6f5ab356f737bb241afc633b55065283"
+   "ticket": "t_inv7c2",
+   "file": "72b379f56c0d3b8fe832ebc0a44c542e"
   },
   {
    "run": "r_8k2m01",
    "kind": "run.state",
    "id": "r_8k2m01:1:item_3",
-   "file": "14cec2370138f260ffb1819f34501e26"
+   "ticket": "t_inv7c2",
+   "file": "149e39588c668740ec19549aab9b8264"
   },
   {
    "run": "r_8k2m02",
    "kind": "step",
    "id": "toolu_01ABcd",
-   "file": "8aef2a3dd0d9d09cada098fe49e88c88"
+   "ticket": "t_inv7c2",
+   "file": "a19cebec721575851bcd60c152734cd3"
   }
  ],
  "dedupe": [
@@ -500,7 +520,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00001/858ba1d1652df6fc32c53faf2851e268.json",
+     "detail": "detail/r_cx00001/bbe8e2e4d00c797b825c92fb53f47e7a.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "I’ll check the directory recursively.",
@@ -558,7 +578,7 @@
       "error": null,
       "ms": null
      },
-     "detail": "detail/r_cx00001/42c6f1ca38fbb65efc001288cbdc2c22.json",
+     "detail": "detail/r_cx00001/7e87f1171bd28ce0d8e3332864d740cd.json",
      "coverage": "full",
      "kind": "step",
      "text": "rg --files --hidden -g '!.git'"
@@ -612,7 +632,7 @@
       "error": null,
       "ms": null
      },
-     "detail": "detail/r_cx00001/96d730c07a5d0d725921540c05d5eb91.json",
+     "detail": "detail/r_cx00001/6c11d699369c96848bad79d046e6508a.json",
      "coverage": "full",
      "kind": "step",
      "text": "rg --files --hidden --no-ignore"
@@ -631,7 +651,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00001/8fa973bb5f0b2efcc455e0a8722bec0c.json",
+     "detail": "detail/r_cx00001/79cf7aa466c70b8a961fe0b002556ad1.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "The files are `e1`, `readme.txt`, `notes.txt`, and `sub/a.py`.",
@@ -743,7 +763,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00002/60cfc3cab706a279852ca24ffb53e429.json",
+     "detail": "detail/r_cx00002/f52cb3843e80a5bdf991b2d5ec645423.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "I’ll run the command and check the result.",
@@ -801,7 +821,7 @@
       "error": "Exit code 1: cat: does-not-exist.txt: No such file or directory",
       "ms": null
      },
-     "detail": "detail/r_cx00002/6d858702e2c9abe42cfba1f5d87fba9c.json",
+     "detail": "detail/r_cx00002/6526e51bd3533a86d45b7f550d54197b.json",
      "coverage": "full",
      "kind": "step",
      "text": "cat does-not-exist.txt"
@@ -820,7 +840,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00002/c078573cdbc272666b2a692a88cb516c.json",
+     "detail": "detail/r_cx00002/1a90b836cc36063bd0ec85d4c86f8a84.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "The command failed with exit code 1 because `does-not-exist.txt` does not exist.",
@@ -932,7 +952,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00003/ad7b538b0ed151a9f1c140a1b724e273.json",
+     "detail": "detail/r_cx00003/705226c15d4ba889fb3c20bfbae9c885.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "I’ll read readme.txt and summarize it in one sentence.",
@@ -990,7 +1010,7 @@
       "error": null,
       "ms": null
      },
-     "detail": "detail/r_cx00003/a383bff788bc0335915ae0b17223a743.json",
+     "detail": "detail/r_cx00003/8c9dd45e1be39cd3cb013f5a211a9a82.json",
      "coverage": "full",
      "kind": "step",
      "text": "cat readme.txt"
@@ -1009,7 +1029,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00003/c8adc89672273d0d6083ce00e15ec4f9.json",
+     "detail": "detail/r_cx00003/330e7f4a31bab3635e0648070219ac19.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "Deployments run nightly at 02:00, failures page the on-call, and rollback takes one command.",
