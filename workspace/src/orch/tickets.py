@@ -2333,11 +2333,18 @@ OWN_SESSIONS_MAX = 500
 
 
 def _own_sessions(root: Path) -> list[dict]:
-    """Only a valid local record grants permission to resume; absent or corrupt means none."""
+    """Read local ownership, adopting pre-record sessions once under the writer's lock."""
+    with _locked(root, "own-sessions"):
+        return _own_sessions_locked(root)
+
+
+def _own_sessions_locked(root: Path) -> list[dict]:
+    """Caller holds own-sessions. After adoption, absent or corrupt records grant nothing."""
+    path = root / ".orch" / "run" / "own-sessions.json"
     try:
-        entries = json.loads((root / ".orch" / "run" / "own-sessions.json").read_text(encoding="utf-8"))
+        entries = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        entries = []
     if not isinstance(entries, list) or any(
         not isinstance(s, dict)
         or any(
@@ -2346,13 +2353,51 @@ def _own_sessions(root: Path) -> list[dict]:
         )
         for s in entries
     ):
-        return []
+        entries = []
+    marker = path.with_name("own-sessions.adopted")
+    if not marker.exists():
+        from orch import runs
+
+        host, first_seen = runs.host(), now()
+        owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in entries}
+        # Sync strips incoming sessions. Host match is the adoption rule even in a state repo
+        # whose last ticket change was a sync merge; no git-history inference is needed.
+        # General/Chat tickets also use sessions_for and therefore have session semantics.
+        for p in sorted(tickets_dir(root).glob("t_*.json")):
+            try:
+                ticket = load(root, p.stem)  # refuses embedded id / trusted filename mismatches
+            except (OSError, ValueError, Refused):
+                continue
+            sessions = ticket.get("sessions")
+            if not isinstance(sessions, list):
+                continue
+            for s in sessions:
+                if (
+                    not isinstance(s, dict)
+                    or s.get("host") != host
+                    or any(not isinstance(s.get(k), str) or not s[k] for k in ("id", "agent"))
+                ):
+                    continue
+                key = (s["id"], s["agent"], host, p.stem)
+                if key not in owned:
+                    entries.append(
+                        {
+                            "id": s["id"],
+                            "agent": s["agent"],
+                            "host": host,
+                            "ticket_id": p.stem,
+                            "first_seen": first_seen,
+                        }
+                    )
+                    owned.add(key)
+        net.write_json(path, entries)
+        net.write_json(marker, {"adopted": True})
     return entries
 
 
 def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -> None:
     with _locked(root, "own-sessions"):
-        entries = _own_sessions(root)
+        entries = _own_sessions_locked(root)
         entry = next(
             (
                 s

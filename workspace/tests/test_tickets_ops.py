@@ -667,3 +667,100 @@ def test_old_key_unissued_or_other_prefix_refused(proj, new_ticket, alias):
     with pytest.raises(Refused, match="doesn't exist"):
         tickets.resolve(proj, alias, follow_moved=True, notice=notices.append)
     assert notices == []
+
+
+@pytest.mark.parametrize("general", [False, True])
+def test_pre_ownership_sessions_adopted_once(proj, new_ticket, general):
+    from orch import runs
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    ticket.update(general=general, sessions=[{"id": "old-local", "agent": "agent", "host": runs.host()}])
+    tickets.save(proj, ticket)
+    record = proj / ".orch" / "run" / "own-sessions.json"
+    marker = record.with_name("own-sessions.adopted")
+    assert not record.exists()
+    assert tickets.sessions_for(proj, tid, ticket, "agent", runs.host()) == "old-local"
+    entries = json.loads(record.read_text())
+    assert len(entries) == 1
+    assert entries[0] == {
+        "id": "old-local",
+        "agent": "agent",
+        "host": runs.host(),
+        "ticket_id": tid,
+        "first_seen": entries[0]["first_seen"],
+    }
+    assert entries[0]["first_seen"]
+    assert json.loads(marker.read_text()) == {"adopted": True}
+    record.unlink()
+    assert tickets.sessions_for(proj, tid, ticket, "agent", runs.host()) is None
+    assert marker.exists()
+    assert not record.exists()
+
+
+def test_adoption_skips_foreign_malformed_and_mismatched_tickets(proj, new_ticket):
+    from orch import runs
+
+    tid, mismatch, malformed = (new_ticket() for _ in range(3))
+    ticket = tickets.load(proj, tid)
+    ticket["sessions"] = [
+        {"id": "foreign", "agent": "agent", "host": runs.host() + "-other"},
+        None,
+        "session",
+        {"id": [], "agent": "agent", "host": runs.host()},
+        {"id": "missing-agent", "host": runs.host()},
+        {"id": "empty-agent", "agent": "", "host": runs.host()},
+        {"id": "missing-host", "agent": "agent"},
+    ]
+    tickets.save(proj, ticket)
+    bad = tickets.load(proj, mismatch)
+    bad.update(id=tid, sessions=[{"id": "copied", "agent": "agent", "host": runs.host()}])
+    tickets.ticket_path(proj, mismatch).write_text(json.dumps(bad))
+    bad = tickets.load(proj, malformed)
+    bad["sessions"] = {"id": "not-a-list", "agent": "agent", "host": runs.host()}
+    tickets.save(proj, bad)
+    assert tickets._own_sessions(proj) == []
+    assert (proj / ".orch" / "run" / "own-sessions.adopted").exists()
+
+
+def test_adoption_serializes_with_record_session(proj, new_ticket, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from orch import runs
+    from orch.errors import Refused
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    ticket["sessions"] = [{"id": "old", "agent": "agent", "host": runs.host()}]
+    tickets.save(proj, ticket)
+    adopting, release, recording = Event(), Event(), Event()
+    write_json = tickets.net.write_json
+
+    def paused_write(path, obj, *args, **kwargs):
+        if path.name == "own-sessions.adopted":
+            adopting.set()
+            assert release.wait(5)
+        return write_json(path, obj, *args, **kwargs)
+
+    def record():
+        recording.set()
+        tickets.record_session(proj, tid, "agent", "new", runs.host())
+
+    monkeypatch.setattr(tickets.net, "write_json", paused_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        adoption = pool.submit(tickets._own_sessions, proj)
+        try:
+            assert adopting.wait(5)
+            writer = pool.submit(record)
+            assert recording.wait(5)
+            with pytest.raises(Refused):
+                with tickets._locked(proj, "own-sessions", wait=0):
+                    pass
+            assert not writer.done()
+        finally:
+            release.set()
+        adoption.result(timeout=5)
+        writer.result(timeout=5)
+    assert {s["id"] for s in tickets._own_sessions(proj)} == {"old", "new"}
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "agent", runs.host()) == "new"
