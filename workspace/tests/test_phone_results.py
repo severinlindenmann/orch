@@ -4,6 +4,7 @@ snapshots only, trimmed, value-hidden and checked; a result that fails any check
 import base64
 import copy
 import json
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -339,7 +340,11 @@ def test_secret_names_hide(label):
     assert "v4lu3xyz" not in json.dumps(r)
 
 
-@pytest.mark.parametrize("label", ["Keyboard", "Monkey", "Hotkey", "Turkey", "Passed", "Passage", "Author"])
+ORDINARY = ["Keyboard", "Monkey", "Hotkey", "Turkey", "Passed", "Passage", "Author", "Authored", "Authoring"]
+ORDINARY += ["Authority", "Pass", "Fail", "Pass/Fail", "pass count", "pass rate", "Passes"]
+
+
+@pytest.mark.parametrize("label", ORDINARY)
 def test_ordinary_names_stay(label):
     d = doc(blocks=[{"type": "kv", "items": [{"key": label, "value": "v4lu3xyz"}]}])
     (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
@@ -394,6 +399,83 @@ def test_very_long_string_is_hidden_whole():
     assert phone_results._scrub({"k" * 5000: ["token-" * 1000]}, phone_view.redact) == {
         "[hidden]": ["[hidden]"]
     }
+
+
+def test_several_long_keys_never_overwrite_each_other():
+    d = {"a" * 5000: 1, "b" * 5000: 2, "c" * 5000: 3, "ok": 4}
+    out = phone_results._scrub(d, phone_view.redact)
+    assert out == {"[hidden]": 1, "[hidden] 2": 2, "[hidden] 3": 3, "ok": 4}
+    assert phone_results._scrub(out, phone_view.redact) == out  # the second pass keeps them
+
+
+INNER_PAIRS = ["Config: password=hunter2", "a=1,token=hunter2", "user=bob&secret=hunter2"]
+INNER_PAIRS += ["x: y: password=hunter2"]
+
+
+@pytest.mark.parametrize("text", INNER_PAIRS)
+def test_a_plain_name_never_hides_a_secret_pair_in_its_value(text):
+    out = phone_view.redact(text)
+    assert "hunter2" not in out and "[hidden]" in out, out
+    assert phone_view._SECRET_KV.search(text)  # finditer/search see the inner pair too
+    assert phone_view._has_secret(text.encode())
+
+
+def test_plain_pairs_stay():
+    assert phone_view.redact("Config: debug=1, rows=9") == "Config: debug=1, rows=9"
+    assert phone_view.redact("Pass: 12, Fail: 0, pass rate: 100%") == "Pass: 12, Fail: 0, pass rate: 100%"
+
+
+@pytest.mark.parametrize("unit", ["a=", "x: ", "Config: ", "a=1,", "user=bob&"])
+def test_kv_pattern_is_linear_on_long_plain_pairs(unit):
+    import time
+
+    text = unit * (65536 // len(unit)) + "password=hunter2"
+    t0 = time.perf_counter()
+    phone_view.redact(text)
+    m = phone_view._SECRET_KV.search(text)
+    assert time.perf_counter() - t0 < 0.5
+    assert m and m.group(1) == "password" and m.group(3) == "hunter2"
+    short = unit * (16000 // len(unit)) + "password=hunter2"  # under the 20000 cut of clean_untrusted
+    assert "hunter2" not in phone_view.redact(short)
+
+
+FULLWIDTH = ["ｐａｓｓｗｏｒｄ=hunter2", "ＴＯＫＥＮ: hunter2", "Ａｐｉ_Ｋｅｙ = hunter2"]
+
+
+@pytest.mark.parametrize("text", FULLWIDTH)
+def test_fullwidth_names_are_hidden_in_free_text(text):
+    out = phone_view.redact(text)
+    assert "hunter2" not in out and "[hidden]" in out, out
+    assert phone_view._has_secret(text.encode())
+    assert phone_view.redact(out) == out  # stable: the results check scrubs twice
+
+
+def test_text_without_secrets_keeps_its_own_characters():
+    assert phone_view.redact("Ｈｅｌｌｏ ﬁle x²") == "Ｈｅｌｌｏ ﬁle x²"
+
+
+OVER_REDACTED = ["auth: none", "signature: approved", "credential: rotated", "token-count: 512"]
+
+
+@pytest.mark.parametrize("text", OVER_REDACTED)
+def test_secret_words_in_free_text_over_redact(text):
+    """Known and accepted (fail safe): a secret-name word hides the value even when it is harmless."""
+    name = text.split(":")[0]
+    assert phone_view.redact(text) == f"{name}: [hidden]"
+
+
+SECRET_PARAMS = ["pwd", "pass", "otp", "pin", "Password", "api_key", "authToken", "ｐｗｄ"]
+
+
+@pytest.mark.parametrize("param", SECRET_PARAMS)
+def test_secret_query_params_are_hidden(param):
+    url = phone_view.safe_url(f"https://example.ch/a?{urllib.parse.quote(param)}=s3cr3tv4lue&page=2")
+    assert url and "s3cr3tv4lue" not in url and "page=2" in url, url
+
+
+def test_ordinary_query_params_stay():
+    url = phone_view.safe_url("https://example.ch/a?page=2&author=bob&shipping=fast")
+    assert url == "https://example.ch/a?page=2&author=bob&shipping=fast"
 
 
 @pytest.mark.parametrize(

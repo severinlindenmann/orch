@@ -52,16 +52,16 @@ _SECRET_PATTERNS = [
 # The ONE list of secret-name words: the key=value pattern of redact/_has_secret and secret_name() (labels of
 # phone results) are both built from it, so a word added here reaches both (tests/test_phone_results.py).
 SECRET_NAME_WORDS = (
-    "passw", "passphrase", "secret", "token", "credential", "bearer", "signature", "auth",
-    "api key", "access key", "private key",
+    "passw", "passphrase", "secret", "token", "credential", "bearer", "signature", "auth", "authoriz",
+    "api key", "access key", "private key", "db pass",
 )  # fmt: skip
+# whole words only (not inside another word). No bare "pass": Pass, Pass/Fail, pass rate are test results.
 SECRET_LABEL_WORDS = (
     "key",
     "keys",
     "pin",
     "pincode",
     "pwd",
-    "pass",
     "otp",
     "cookie",
     "cookies",
@@ -71,28 +71,34 @@ SECRET_LABEL_WORDS = (
 
 
 def _words_rx(sep: str) -> str:
-    """The alternation of SECRET_NAME_WORDS; a space inside a word is `sep`. `auth` leaves Author(s) alone."""
+    """The alternation of SECRET_NAME_WORDS; a space inside a word is `sep`. `auth` leaves Author, Authored,
+    Authoring and Authority alone (Authorization is the word `authoriz`)."""
     parts = []
     for w in SECRET_NAME_WORDS:
         rx = sep.join(re.escape(x) for x in w.split(" "))
-        parts.append(rx + (r"(?!ors?\b)" if w == "auth" else ""))
+        parts.append(rx + (r"(?!or)" if w == "auth" else ""))
     return "|".join(parts)
 
 
-_KV_NAME = re.compile(_words_rx("[_-]?"), re.I)
-_KV_RAW = re.compile(  # possessive: linear on a long run of name characters without ':' or '='
-    r"(?<![\w-])([\w-]++)(\s*+[:=]\s*+)((?:(?:bearer|basic|token|digest)\s++)?(?:\"[^\"]*\"|'[^']*'|\S++))",
+# `name: value` where the name holds a secret-name word (the lookahead, inside the name's own run of name
+# characters). A name without one never matches, so it never swallows a pair in its value (Config: password=x,
+# a=1,token=x, user=bob&secret=x). Linear: the lookbehind allows one start per run, the run is possessive.
+# Authorization: Bearer x takes the scheme AND the token.
+_KV_RAW = re.compile(
+    r"(?<![\w-])(?=[\w-]*?(?:" + _words_rx("[_-]?") + r"))([\w-]++)(\s*+[:=]\s*+)"
+    r"((?:(?:bearer|basic|token|digest)\s++)?(?:\"[^\"]*\"|'[^']*'|\S++))",
     re.I,
 )
 
 
 class _KV:
-    """The `name: value` pattern (the interface of a compiled regex for search/sub/finditer), matching only
-    where the name holds a secret-name word. Authorization: Bearer x takes the scheme AND the token."""
+    """The `name: value` pattern (the interface of a compiled regex for search/sub/finditer). finditer and
+    search look at the NFKC form (a fullwidth name is caught); sub works on the text as given (redact
+    normalizes first)."""
 
     @staticmethod
     def finditer(text):
-        return (m for m in _KV_RAW.finditer(text) if _KV_NAME.search(m.group(1)))
+        return _KV_RAW.finditer(unicodedata.normalize("NFKC", text))
 
     @classmethod
     def search(cls, text):
@@ -100,11 +106,16 @@ class _KV:
 
     @staticmethod
     def sub(repl, text):
-        return _KV_RAW.sub(lambda m: repl(m) if _KV_NAME.search(m.group(1)) else m.group(0), text)
+        return _KV_RAW.sub(repl, text)
 
 
 _SECRET_KV = _KV()
-_SECRET_PARAM = re.compile(r"(?i)token|secret|key|sig|signature|password|passwd|auth|code|credential")
+# query parameter names: the secret-name words and a few old substrings anywhere, the label words (and a
+# bare pass) as whole words; secret_name() too (camelCase)
+_SECRET_PARAM = re.compile(
+    "(?i)" + _words_rx("[_-]?") + r"|key|sig|code|password|passwd"
+    r"|(?<![a-z])(?:" + "|".join((*SECRET_LABEL_WORDS, "pass")) + r")(?![a-z])"
+)
 HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 
@@ -158,7 +169,10 @@ def _image_clean(data: bytes) -> bool:
 
 def _has_secret(data: bytes) -> bool:
     text = data.decode(errors="ignore")
-    return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
+    norm = unicodedata.normalize("NFKC", text)
+    if any(rx.search(t) for rx in _SECRET_PATTERNS for t in (text, norm)):
+        return True
+    return bool(_SECRET_KV.search(text))
 
 
 def _scan(data: bytes, name: str) -> str:
@@ -195,8 +209,16 @@ def _scan(data: bytes, name: str) -> str:
 
 def redact(text: str) -> str:
     """Plain, safe text for the phone: invisible/control characters and comments go (clean_untrusted), then
-    anything that looks like a key, token or password is replaced by [hidden]."""
+    anything that looks like a key, token or password is replaced by [hidden]. The scan runs on the NFKC
+    form too (ｐａｓｓｗｏｒｄ=x): when that hides something, the NFKC form is what is shown."""
     t = clean_untrusted(str(text), 20000)
+    norm = unicodedata.normalize("NFKC", t)
+    if norm != t and (out := _scrub_text(norm)) != norm:
+        return clean_untrusted(out, 20000)  # after the scrub: NFKC may have made a new <!--, cut it
+    return _scrub_text(t)
+
+
+def _scrub_text(t: str) -> str:
     for rx in _SECRET_PATTERNS:
         t = rx.sub(HIDDEN, t)
     return _SECRET_KV.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, t)
@@ -205,6 +227,11 @@ def redact(text: str) -> str:
 def _clip(text: str, n: int) -> str:
     t = redact(text).strip()
     return t if len(t) <= n else t[: n - 1].rstrip() + "…"
+
+
+def _secret_param(name: str) -> bool:
+    """Does a query parameter name a secret? ?pwd=, ?pass=, ?otp=, ?api_key=, ?authToken=, fullwidth too."""
+    return bool(_SECRET_PARAM.search(unicodedata.normalize("NFKC", name))) or secret_name(name)
 
 
 def safe_url(url: str) -> str | None:
@@ -218,7 +245,7 @@ def safe_url(url: str) -> str | None:
         return None
     host = p.hostname + (f":{p.port}" if p.port else "")
     q = urllib.parse.parse_qsl(p.query, keep_blank_values=True)
-    query = urllib.parse.urlencode([(k, HIDDEN if _SECRET_PARAM.search(k) else redact(v)) for k, v in q])
+    query = urllib.parse.urlencode([(k, HIDDEN if _secret_param(k) else redact(v)) for k, v in q])
     out = urllib.parse.urlunsplit((p.scheme, host, redact(p.path), query, ""))
     return out if len(out) <= 2000 else None
 

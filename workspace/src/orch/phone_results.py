@@ -129,8 +129,9 @@ def value_hider(root: Path):
         return None
 
 
-# Known gaps (not covered by the value hider or the pattern scrub): fullwidth/NFKC forms, a value split over
-# cells, base32, host case in a URL, a token inside a URL path.
+# Known gaps (not covered by the value hider or the pattern scrub): fullwidth/NFKC forms of a stored value
+# (the pattern scrub does look at the NFKC form), a value split over cells, base32, host case in a URL, a token
+# inside a URL path.
 CUT = "[hidden]"
 
 
@@ -180,7 +181,15 @@ def _scrub(o, redact):
     if isinstance(o, list):
         return [_scrub(x, redact) for x in o]
     if isinstance(o, dict):
-        return {_scrub(k, redact): _scrub(v, redact) for k, v in o.items()}
+        out: dict = {}
+        for k, v in o.items():
+            key = base = _scrub(k, redact)
+            n = 1
+            while key in out:  # two keys hidden (or scrubbed) alike: an index, never one overwriting another
+                n += 1
+                key = f"{base} {n}"
+            out[key] = _scrub(v, redact)
+        return out
     return o
 
 
