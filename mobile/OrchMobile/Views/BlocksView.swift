@@ -3,6 +3,9 @@ import Charts
 
 struct BlocksView: View {
     let result: BlocksResult
+    var fromLabel: String? = nil
+    var fileAttachment: ((String) -> TicketSnapshot.Attachment?)? = nil
+    var onOpenAttachment: ((TicketSnapshot.Attachment) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -15,7 +18,7 @@ struct BlocksView: View {
                     } label: { Text(verbatim: "Details") }
                 }.accessibilityElement(children: .contain).accessibilityIdentifier("blocks-invalid")
             case .shown(let doc):
-                Text(verbatim: doc.fromLabel).themeFont(11).foregroundStyle(Theme.muted)
+                Text(verbatim: fromLabel ?? doc.fromLabel).themeFont(11).foregroundStyle(Theme.muted)
                 if let title = doc.title { Text(verbatim: title).themeFont(20, .semibold) }
                 ForEach(doc.rows.indices, id: \.self) { index in row(doc.rows[index]) }
             }
@@ -89,11 +92,12 @@ struct BlocksView: View {
             }
         case .table(let b): table(b)
         case .file(let b):
-            HStack {
-                Image(systemName: "doc").accessibilityHidden(true)
-                Text(verbatim: b.fileName)
-                if let size = b.sizeText { Text(verbatim: size).foregroundStyle(Theme.muted) }
-            }
+            let name = (b.text("path") ?? "").components(separatedBy: "/").last ?? ""
+            let attachment = fileAttachment?(name)
+            if let attachment, let onOpenAttachment {
+                Button { onOpenAttachment(attachment) } label: { file(b, attachment: attachment) }
+                    .buttonStyle(.plain).accessibilityLabel(Text(verbatim: b.fileName))
+            } else { file(b, attachment: attachment) }
         case .link(let b):
             if let url = SafeLink.url(b.text("url")), url.scheme == "https", url.user == nil, url.password == nil {
                 Link(destination: url) { Text(verbatim: b.text("label") ?? "") }.foregroundStyle(Theme.brand)
@@ -107,6 +111,21 @@ struct BlocksView: View {
                 if b.number("cut") != nil { Text(verbatim: "Cut").foregroundStyle(Theme.muted) }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(12).themeCard(fill: Theme.surface)
         case .chart(let b): BlocksChart(block: b)
+        }
+    }
+
+    private func file(_ b: BlockFields, attachment: TicketSnapshot.Attachment?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "doc").accessibilityHidden(true)
+                Text(verbatim: b.fileName)
+                if let size = b.sizeText { Text(verbatim: size).foregroundStyle(Theme.muted) }
+            }
+            if b.text("preview") == "image", attachment?.kind == "image", let blobId = attachment?.blobId {
+                BlobImage(id: blobId).frame(height: 160)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s))
+                    .accessibilityHidden(true)
+            }
         }
     }
 
