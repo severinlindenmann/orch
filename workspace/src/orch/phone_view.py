@@ -383,26 +383,35 @@ def _has_secret(data: bytes) -> bool:
     return any(_scrub_text(t) != t for t in dict.fromkeys(forms))
 
 
-def _holds_stored_value(root: Path, data: bytes) -> bool:
-    """True when the bytes hold a stored key value of the keystore (the value hider, exact needles in all the
-    forms it knows), as bytes or as text (UTF-8, UTF-16 either order). A hider that can not be built: True
-    (fail closed)."""
+def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
+    """True when the file holds a stored key value of the keystore (the value hider: exact needles in all the
+    forms it knows). Read as _scan read it (`texts`: the BOM-decoded text of a UTF-16/32 file, else the UTF-8
+    text), as raw bytes, and with CR removed (a CRLF copy of a multi-line value); plus the lenient UTF-16
+    readings of a file without BOM. A hider that can not be built: True (fail closed)."""
     h = phone_results.value_hider(root)
     if h is None:
         return True
-    texts = [data.decode(errors="ignore")] + [
-        data[k:].decode(c, "ignore") for c in ("utf-16-le", "utf-16-be") for k in (0, 1)
-    ]
-    return h.hide_bytes(data) != data or any(h.hide_text(t) != t for t in texts)
+    more = [data[k:].decode(c, "ignore") for c in ("utf-16-le", "utf-16-be") for k in (0, 1)]
+    seen = [t for t in dict.fromkeys(texts + more)]
+    seen += [t.replace("\r", "") for t in seen if "\r" in t]
+    return h.hide_bytes(data) != data or any(h.hide_text(t) != t for t in seen)
 
 
 def _scan(data: bytes, name: str) -> str:
-    """One of ok, secret (looks like a password or key) or unknown (can not be checked: a PDF, zip, docx,
-    xlsx or any other packed or binary file, or text with NULs; such a file is not sent, fail closed). Text
-    (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type matches its extension is
-    scanned as its raw bytes (text in metadata or after the image is still caught)."""
+    """The verdict of _scan_texts."""
+    return _scan_texts(data, name)[0]
+
+
+def _scan_texts(data: bytes, name: str) -> tuple[str, list[str]]:
+    """(verdict, texts). The verdict is one of ok, secret (looks like a password or key) or unknown (can not
+    be checked: a PDF, zip, docx, xlsx or any other packed or binary file, or text with NULs; such a file is
+    not sent, fail closed). Text (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type
+    matches its extension is scanned as its raw bytes (text in metadata or after the image is still caught).
+    `texts` are exactly the texts the verdict was read from (the BOM-decoded text of a UTF-16/32 file, else
+    the lenient UTF-8 text), so every other check of the same file (the stored-value needle check) reads
+    it the same way."""
     if any(magic in data for magic in _PACKED_MAGIC):  # pdf, zip/OOXML, OLE office anywhere in the file
-        return "unknown"
+        return "unknown", []
     for bom, codec in (
         ((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"), "utf-32"),  # before UTF-16: same first two bytes
         ((b"\xff\xfe", b"\xfe\xff"), "utf-16"),
@@ -411,21 +420,21 @@ def _scan(data: bytes, name: str) -> str:
             try:
                 text = data.decode(codec)
             except UnicodeDecodeError:
-                return "unknown"
+                return "unknown", []
             if "\x00" in text:
-                return "unknown"
-            return "secret" if _has_secret(text.encode()) else "ok"
+                return "unknown", []
+            return ("secret" if _has_secret(text.encode()) else "ok"), [text]
     if _is_image(data, name):
         if not _image_clean(data):  # compressed text chunks or data after the end: can not be checked
-            return "unknown"
+            return "unknown", []
     else:
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:
-            return "unknown"
+            return "unknown", []
         if b"\x00" in data:
-            return "unknown"
-    return "secret" if _has_secret(data) else "ok"
+            return "unknown", []
+    return ("secret" if _has_secret(data) else "ok"), [data.decode(errors="ignore")]
 
 
 _ROUNDS = 3
@@ -899,12 +908,12 @@ def _gate(root: Path, tid: str, data: bytes, name: str, state: dict | None, phot
     marked once in the ticket log and in state["secret_skipped"] (fail closed). `photo_ok` (evidence only): a
     picture that can't be fully checked (a JPEG photo) still goes when its raw bytes hold no secret."""
     try:
-        verdict = _scan(data, name)
+        verdict, texts = _scan_texts(data, name)
     except Exception:  # a malformed file skips only itself, never the whole view
-        verdict = "unknown"
+        verdict, texts = "unknown", []
     if verdict == "unknown" and photo_ok and _is_image(data, name):
         verdict = _photo_verdict(data)
-    if verdict == "ok" and _holds_stored_value(root, data):
+    if verdict == "ok" and _holds_stored_value(root, data, texts):
         verdict = "secret"  # the exact value of a stored key, whatever the label (or none)
     name = Path(name).name
     if verdict == "ok":

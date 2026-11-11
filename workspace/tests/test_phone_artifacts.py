@@ -650,3 +650,14 @@ def test_an_unbuildable_value_hider_fails_closed(proj, new_ticket, monkeypatch):
     assert phone_view._gate(proj, tid, b"nothing secret here\n", "notes.txt", None) is True
     monkeypatch.setattr(phone_view.phone_results, "value_hider", lambda root: None)
     assert phone_view._gate(proj, tid, b"nothing secret here\n", "notes.txt", None) is False
+
+
+@pytest.mark.parametrize("codec", ["utf-32", "utf-16", "utf-8"])
+def test_the_needle_check_reads_the_file_the_way_the_scan_does(proj, new_ticket, codec):
+    """A UTF-32/UTF-16 (BOM) file with a keystore value is refused: the gate checks the text _scan decoded."""
+    value = "Xk93-pq7Lm-aa21-zQ"
+    keystore.add(proj, "db-cred", "token", value)
+    tid = new_ticket("Needle codec")
+    body = f"the new one is {value}, rotate it\n".encode(codec)
+    assert phone_view._gate(proj, tid, body, "notes.txt", None) is False
+    assert phone_view._gate(proj, tid, "nothing here\n".encode(codec), "notes.txt", None) is True
