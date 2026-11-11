@@ -1,7 +1,8 @@
 """`orch record tail | query | counts | settings | delete-detail` (contracts/activity.md, counts.md).
 
-Every view reads the record through these commands (add-ons never read the files). The views write nothing and
-need no proof. `delete-detail` is a person's own decision (op `record.delete_detail`, invariant H1).
+Every view reads the record through these commands (add-ons never read the files). The views write nothing
+(but `settings` may record a lowered retention value, humanproof.retention) and need no proof. `delete-detail`
+is a person's own decision (op `record.delete_detail`, invariant H1).
 """
 
 import argparse
@@ -615,10 +616,12 @@ def settings(root: Path) -> dict:
 
 # --- delete-detail (a person only) ---
 def delete_detail(root: Path, args) -> dict:
-    """Delete the detail folders of one ticket's runs: a person's own decision (op `record.delete_detail`,
-    target the ticket id, invariant H1). Lines and counts stay. Order: an agent is refused before anything
-    else (needs_person); a ticket that does not exist is not_found; then the proof (needs_person); a record
-    that cannot be read refuses with nothing deleted; the audit line is written BEFORE anything is deleted."""
+    """Delete the detail of one ticket: the detail files its own lines point at (a person's own decision, op
+    `record.delete_detail`, target the ticket id, invariant H1); `deleted` = the runs that lost detail. Lines,
+    counts and the detail of other tickets stay. Order: an agent is refused before anything else
+    (needs_person); a ticket that does not exist is not_found; then the proof (needs_person); a record that
+    cannot be read refuses with nothing deleted; the audit line is written BEFORE anything is deleted (it
+    cannot be written: not_available, nothing deleted)."""
     from orch import humanproof, tickets
 
     agent = tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:")
@@ -643,7 +646,8 @@ def delete_detail(root: Path, args) -> dict:
         raise RecordError(str(e), "needs_person") from None
     if not who.startswith("human:"):
         raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
-    mine = []
+    mine: dict[tuple[str, str], None] = {}
+    others: set[tuple[str, str]] = set()
     for run in _known(root):
         result = record.read_run(root, run, seen_by="cli")
         _show_alert(result.alert)
@@ -651,15 +655,50 @@ def delete_detail(root: Path, args) -> dict:
             continue  # pruned since it was listed: nothing of it to delete
         if result.status != "ok":
             raise _fail(result)  # nothing is deleted when any run of the record cannot be read
-        if any(e.get("ticket") == tid for e in result.value):
-            mine.append(run)
-    found = record.detail_runs(root, mine)
+        for e in result.value:
+            ref = _detail_ref(run, e.get("detail"))
+            if ref is not None and e.get("ticket") == tid:
+                mine.setdefault(ref)
+            elif ref is not None:
+                others.add(ref)
+    # Only the detail this ticket's own lines point at, never one another ticket's line points at too: a run
+    # shared with other tickets keeps their detail (a planted line of this ticket erases nothing else).
+    found = record.detail_files(root, [ref for ref in mine if ref not in others])
     _show_alert(found.alert)
     if found.status != "ok":
         raise _fail(found)
-    record.note_change(root, change="record.delete_detail", by=who, ticket=tid, deleted=len(found.value))
-    record.delete_detail(root, found.value)
-    return {"deleted": len(found.value), "ticket": tid}
+    deleted = len({run for run, _ in found.value})
+    try:
+        record.note_change(root, change="record.delete_detail", by=who, ticket=tid, deleted=deleted)
+    except (OSError, record.RecordInvalid):
+        raise RecordError(DELETE_NOT_SAVED, "not_available") from None
+    try:
+        record.delete_detail_files(root, found.value)
+    except (OSError, record.RecordInvalid):
+        # The audit line above names what was going to go; what is left can be deleted with a new proof.
+        raise RecordError(DELETE_PARTLY, "not_available") from None
+    return {"deleted": deleted, "ticket": tid}
+
+
+def prune(root: Path, fold, now: str | None = None) -> dict:
+    """Apply retention (record.apply_retention) with the EFFECTIVE values: config.record_keep_days /
+    record_max_mb, the lower of the file and the person's record, never a file value alone. A lowered value
+    deletes nothing when it is set; it takes effect here, at the next pruning."""
+    from orch import config
+
+    when = now or _today().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return record.apply_retention(root, when, config.record_keep_days(root), config.record_max_mb(root), fold)
+
+
+DELETE_NOT_SAVED = "The deletion could not be noted in the record, so nothing was deleted. Try again later."
+DELETE_PARTLY = "Some details could not be deleted. Try again later."
+_DETAIL_REF = re.compile(r"^detail/(r_[a-z0-9_]{6,32})/([0-9a-f]{32})\.json$")
+
+
+def _detail_ref(run: str, value) -> tuple[str, str] | None:
+    """(run, detail id) of an event's `detail` path when it is one orch writes for this run, else None."""
+    m = _DETAIL_REF.fullmatch(value) if isinstance(value, str) else None
+    return (run, m[2]) if m and m[1] == run else None
 
 
 # --- counts ---

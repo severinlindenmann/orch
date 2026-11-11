@@ -48,7 +48,10 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    `humanproof.LAUNCH_SERVERS`, `pageproof.SERVERS`). A local or marketplace add-on never gets a launch token. (The key
    file itself is protected only by Level 1, below.) The dashboard is a named proof server for the Focus page it embeds,
    and for the Insights page it embeds (v1: Insights runs embedded under the dashboard); a standalone Insights page server
-   keeps its own session and mints `insights.settings` and `record.delete_detail` proofs from it.
+   keeps its own session and mints `insights.settings` and `record.delete_detail` proofs from it, and ONLY those
+   (`pageproof.SERVER_OPS`, checked at mint time; Focus and dashboard are not limited by it). Its `insights.settings`
+   target is built by `config.insights_target`, the one form the core checks. Until this orch ships the Insights add-on
+   (`addons.SHIPPED_ADDONS`), no launch token is written or accepted for `insights`.
 4. **Mint.** For a human-only click the server builds `payload = {op, target, by, iat, exp, nonce}` (`$defs/payload`):
    `op` from the fixed table below, `target` the exact ticket / run / setting / key / connection / proposal, `by` =
    `human:<user>` of the OS account the server runs as, `exp − iat ≤ 60 s`, `nonce` 16 random bytes. Proof =
@@ -89,7 +92,10 @@ person approved; **effective = the LOWER of the file value and the record** (the
 or when the record is unreadable or holds anything but a whole number from 1 to the largest allowed value). Raising above
 the record needs an `insights.settings` proof (target = `<setting>=<value>`, below); lowering is open to anyone and writes the lower
 record (`by: reset`, or `file` when the core saw a lower file value), so the file alone never keeps records longer or larger
-than a person approved. A protection reset keeps a retention record at or below its default (it only ever lowers).
+than a person approved. So a READ of a retention value (`orch config get`, `orch record settings`, pruning) may write:
+the lower record `by: file`, decided under keys.lock with the file and the record read again there (a person's widening
+writes record and file under that same lock, so a reader never writes an older file value over it). A protection reset
+keeps a retention record at or below its default (it only ever lowers).
 Lowering deletes nothing at once: the next pruning applies it (activity.md, Retention).
 CLI (`--json`): `orch config get insights.share_counts|insights.share_names|insights.keep_days|insights.max_mb`
 (`record.keep_days` / `record.max_mb` accepted too) answers the effective value (`{"insights.share_names": false}`; a file

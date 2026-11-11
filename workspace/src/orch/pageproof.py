@@ -27,6 +27,9 @@ from orch.errors import Refused
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE = "orch_page"
 SERVERS = ("focus", "dashboard", "insights")
+# The ops a page server may mint, enforced in PageSession.mint. A server not named here keeps every op (focus,
+# dashboard: their behaviour before 2.11); Insights mints only its two (human-proof.md, step 3).
+SERVER_OPS = {"insights": frozenset({"insights.settings", "record.delete_detail"})}
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 
@@ -124,8 +127,20 @@ class PageSession:
     def mint(self, op: str, target: str) -> str:
         if self.key is None:
             raise Refused("no key")
+        allowed = SERVER_OPS.get(self.server)
+        if allowed is not None and op not in allowed:
+            raise Refused("This page cannot approve that.")
         by = actor()
         return humanproof.mint(self.key, humanproof.new_payload(op, target, by))
+
+    def mint_insights_setting(self, setting: str, value: bool | int) -> str:
+        """An `insights.settings` proof: the target is built by config.insights_target, the ONE canonical form
+        the core checks against (`insights.keep_days=365`, `insights.share_names=on`)."""
+        from orch import config
+
+        if setting not in config.INSIGHTS_KEYS:
+            raise Refused("That is not an Insights setting.")
+        return self.mint("insights.settings", config.insights_target(setting, value))
 
 
 def actor() -> str:

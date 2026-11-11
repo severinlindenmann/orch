@@ -890,20 +890,42 @@ def _retention_set(root: Path, setting: str, value, by: str) -> None:
     _settings_write(root, setting, value, by if person else "reset", check)
 
 
+def _retention_record(root: Path, setting: str) -> int:
+    """The retention record value that counts (the default record when none / unreadable / not valid)."""
+    default = RETENTION_DEFAULTS[setting]
+    path, wkey = _settings_path(root)
+    data = _settings_load(root, path)
+    rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
+    rec_val = rec.get("value") if isinstance(rec, dict) else None
+    return rec_val if _retention_ok(setting, rec_val) else default
+
+
 def retention(root: Path, setting: str, file_value: int) -> int:
     """Effective retention value: the LOWER of the file value and the record (the default record when none
     exists, or when the record is unreadable or not a valid number). A file value below the record lowers the
-    record at once (like a tombstone), so editing the file back up later changes nothing without a proof."""
+    record at once (like a tombstone), so editing the file back up later changes nothing without a proof.
+
+    So a READ may write: the lowering record (`by: file`). It is decided under keys.lock with the file and the
+    record read AGAIN there (a person's widening writes the record and then the file under the same lock, so a
+    reader that saw the old file in between never writes the old value over the new record)."""
+    from orch import config
+
     default = RETENTION_DEFAULTS[setting]
     try:
-        path, wkey = _settings_path(root)
-        data = _settings_load(root, path)
-        rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
-        rec_val = rec.get("value") if isinstance(rec, dict) else None
-        rec_val = rec_val if _retention_ok(setting, rec_val) else default
+        rec_val = _retention_record(root, setting)
         if file_value < rec_val:
-            _settings_write(root, setting, file_value, "file")
-            rec_val = file_value
+            with _key_lock(key_dir(root)):  # re-entrant: _settings_write below takes it again
+                file_value = config.file_value(root, *config.INSIGHTS_KEYS[setting])
+                rec_val = _retention_record(root, setting)
+                if file_value < rec_val:
+                    lower = file_value
+
+                    def check(current) -> bool:  # the record as it is now, under the lock
+                        floor = current if _retention_ok(setting, current) else default
+                        return not lower < floor
+
+                    _settings_write(root, setting, lower, "file", check)
+                    rec_val = lower
     except (Refused, OSError):
         rec_val = default
     return min(file_value, rec_val)
@@ -912,6 +934,20 @@ def retention(root: Path, setting: str, file_value: int) -> int:
 # ------------------------------------------------------------------------------------------- launch token
 
 LAUNCH_SERVERS = ("focus", "dashboard", "insights")
+_ALWAYS_SHIPPED = ("focus", "dashboard")  # every other launch server needs its add-on shipped by this orch
+
+
+def launch_server_ok(server) -> bool:
+    """A launch server orch can start a page session for: focus and dashboard as before; any other one
+    (Insights) only once this orch ships its add-on (addons.SHIPPED_ADDONS: a shipped manifest), never on the
+    name alone."""
+    if server not in LAUNCH_SERVERS:
+        return False
+    if server in _ALWAYS_SHIPPED:
+        return True
+    from orch import addons
+
+    return server in addons.SHIPPED_ADDONS
 
 
 def is_test_workspace(root: Path) -> bool:
@@ -2185,7 +2221,7 @@ def write_launch_token(root: Path, server: str) -> str | None:
     """The one-time token that bootstraps a page session: <key folder>/launch-<server>.token (0600, once,
     30 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
     printed or logged."""
-    if server not in LAUNCH_SERVERS:
+    if not launch_server_ok(server):
         raise Refused("Unknown page server.")  # a local or marketplace add-on never gets a launch token
     try:
         d = key_dir(root)
@@ -2198,6 +2234,8 @@ def write_launch_token(root: Path, server: str) -> str | None:
 
 def consume_launch_token(root: Path, server: str, token: str) -> bool:
     """Compare with the file and delete it (single use), whatever the outcome of the comparison."""
+    if not launch_server_ok(server):
+        return False
     try:
         d = key_dir(root, create=False)
         f = d / f"launch-{server}.token"

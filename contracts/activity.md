@@ -149,7 +149,7 @@ Pruning runs when a run ends and once a day:
 3. While the record is over `max_mb`: delete the detail folder of the oldest ended run, then (when no detail is left) the
    oldest ended run file. A running run is never pruned.
 4. Counts are kept until "Delete all records". "Delete detail for this ticket" (`orch record delete-detail <ticket>`, a
-   person only: `record.delete_detail` proof, invariant H1) deletes the detail folders of that ticket's runs and sets nothing else; events then show "details not available".
+   person only: `record.delete_detail` proof, invariant H1) deletes the detail files that ticket's own lines point at and sets nothing else; events then show "details not available".
 A run that is not ok or has pending lines is skipped; other runs proceed.
 Pending runs report `status: unavailable, reason: pending` to retention. Under the run lock, read again
 and verify the run still ended. The result retains the first non-ok status, reason, message and alert.
@@ -178,18 +178,21 @@ Vectors `retention` fix the order.
   → a page `{"items": [event…], "next": "<cursor>" | null, "unavailable": [{run, status, reason, message}]}` (cli-answer.schema.json `page`), newest first, limit 1–500
   (default 100). `--detail <id> --run R` → one detail file.
 - `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only).
-- `orch record settings --json` (read only, no proof) → `{"keep_days": 90, "max_mb": 2048, "share_counts": true,
+- `orch record settings --json` (no proof; it writes nothing but a lower retention record, human-proof.md) → `{"keep_days": 90, "max_mb": 2048, "share_counts": true,
   "share_names": false, "record_mb": <int>, "detail_mb": <int>, "runs": <int>}`: the effective settings (human-proof.md,
   Settings), the size of `.orch/record/` and of `detail/` in MB (rounded up) and the number of run files, read through the
   hardened helpers (no record yet: 0). When the record cannot be read, the sizes and `runs` are `null` and the answer
   carries the read marker `status` (`unavailable` | `tampered`), `reason`, `message` (exit 0).
 - **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…"}` (a person
-  only: op `record.delete_detail`, target = the ticket id). `n` = the runs of that ticket (a run with any line for the
-  ticket) whose detail folder was removed. Only those detail folders go; run files, lines and counts stay; the events then
-  show "Details not available" (`--detail` answers `not_found`). Before anything is deleted the core appends one
-  `orch.record-change/1` line (`$defs/record_change`: `{v, schema, at, change: "record.delete_detail", by: <the proven
-  person>, ticket, deleted: n}`, no path, no content) to `alerts/<day>.jsonl`, so the deletion itself stays auditable; if
-  that line cannot be written nothing is deleted.
+  only: op `record.delete_detail`, target = the ticket id). Only the detail files the ticket's OWN lines point at go
+  (`detail/<run>/<id>.json` of a line with that `ticket`), never one a line of another ticket points at too: a run shared
+  with other tickets keeps their detail, and a run's detail folder goes only when nothing is left in it. `n` = the runs
+  that lost detail. Run files, lines and counts stay; the events then show "Details not available" (`--detail` answers
+  `not_found`). Before anything is deleted the core appends one `orch.record-change/1` line (`$defs/record_change`: `{v,
+  schema, at, change: "record.delete_detail", by: <the proven person>, ticket, deleted: n}`, no path, no content) to
+  `alerts/<day>.jsonl`, so the deletion itself stays auditable; if that line cannot be written nothing is deleted
+  (`not_available`). `deleted` is what was going to go: a failure in the middle answers `not_available` ("Some details
+  could not be deleted"), the rest goes with a new proof (and a new line).
 - Refused (exit 2, `{"error", "code"}`), in this order, for `delete-detail`: an agent caller (agent tool in the
   environment, `--by agent:…`) before anything else, `needs_person`; a ticket that does not exist, `not_found`; no or an
   invalid proof (missing, expired, other target, other op, replayed, a `--by` other than the proof's), `needs_person`;

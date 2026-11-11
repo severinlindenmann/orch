@@ -1173,21 +1173,55 @@ def delete_detail(workspace, runs, *, seen_by="cli"):
         raise
 
 
-def detail_runs(workspace, runs, *, seen_by="cli"):
-    """The runs (of `runs`) that have a detail folder, through the hardened walk: ReadResult of a list."""
+def _detail_file(run, file_id):
+    return ("detail", _name(run, _RUN), _name(file_id, _FILE) + ".json")
+
+
+def detail_files(workspace, items, *, seen_by="cli"):
+    """Of `items` ((run, detail id) pairs), the ones whose detail file is there, through the hardened walk:
+    ReadResult of a list. A detail folder or file that is a link or not what orch wrote refuses."""
     found = []
     try:
-        for run in runs:
+        for run, file_id in items:
             try:
-                _entries(workspace, ("detail", _name(run, _RUN)))
+                fd = _open(workspace, _detail_file(run, file_id), "read")
             except RecordUnavailable as error:
                 if error.reason != "missing":
                     raise
                 continue
-            found.append(run)
+            _close(fd)
+            found.append((run, file_id))
         return ReadResult("ok", found)
     except (RecordTampered, RecordUnavailable) as error:
         return _report(workspace, error, "folder", None, seen_by)
+
+
+def delete_detail_files(workspace, items, *, seen_by="cli"):
+    """Delete exactly these detail files ((run, detail id) pairs): every one is checked first (nothing is
+    deleted when one is not safe), then they go one by one; a run's detail folder left empty goes too. Detail
+    of other tickets in the same run stays. Returns how many files were deleted."""
+    rels = [_detail_file(run, file_id) for run, file_id in items]
+    run, gone = None, 0
+    try:
+        for rel in rels:
+            run = rel[1]
+            _size(workspace, rel)
+        for rel in rels:
+            run = rel[1]
+            gone += 1 if _unlink(workspace, rel) else 0
+        for run in dict.fromkeys(rel[1] for rel in rels):
+            try:
+                left = _entries(workspace, ("detail", run))
+            except RecordUnavailable as error:
+                if error.reason != "missing":
+                    raise
+                continue
+            if not left:
+                _rmtree(workspace, ("detail", run))
+    except (RecordTampered, RecordUnavailable) as error:
+        _report(workspace, error, "folder", run, seen_by)
+        raise
+    return gone
 
 
 def record_sizes(workspace):

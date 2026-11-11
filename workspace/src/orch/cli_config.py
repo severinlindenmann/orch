@@ -254,7 +254,12 @@ def _insights_set(args, root: Path) -> None:
         value,
         agent=AGENT_ASKS.format(what=f"change {key}") if _actor(args).startswith("agent:") else None,
         person=lambda target: _person(
-            args, root, "insights.settings", target, parts={"setting": key, "value": args.value}
+            args,
+            root,
+            "insights.settings",
+            target,
+            no_handoff=humanproof.HANDOFF,  # page only: a hand-off would wait for a click holding keys.lock
+            parts={"setting": key, "value": config.insights_text(value)},
         ),
         if_current=args.if_current,
     )
