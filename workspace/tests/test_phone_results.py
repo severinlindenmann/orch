@@ -327,8 +327,12 @@ def test_long_title_does_not_eat_the_block_budget():
     assert len(r["title"]) == 200 and r["doc"]["blocks"][0]["text"] == "Totals match."
 
 
-@pytest.mark.parametrize("label", ["Password", "pwd", "OTP", "Cookie", "Session", "Access_key", "Key ID",
-                                   "Auth", "OAuth", "Authorization", "Signature", "Pincode"])  # fmt: skip
+SECRET_LABELS = ["Password", "pwd", "OTP", "Cookie", "Session", "Access_key", "Key ID", "Auth", "OAuth"]
+SECRET_LABELS += ["Authorization", "Signature", "Pincode", "basic_auth", "auth_code", "authCode"]
+SECRET_LABELS += ["hmac_signature", "session_id"]
+
+
+@pytest.mark.parametrize("label", SECRET_LABELS)
 def test_secret_names_hide(label):
     d = doc(blocks=[{"type": "kv", "items": [{"key": label, "value": "v4lu3xyz"}]}])
     (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
@@ -340,3 +344,16 @@ def test_ordinary_names_stay(label):
     d = doc(blocks=[{"type": "kv", "items": [{"key": label, "value": "v4lu3xyz"}]}])
     (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
     assert "v4lu3xyz" in json.dumps(r)
+
+
+@pytest.mark.parametrize("label", ["basic_auth", "auth_code", "authCode", "hmac_signature", "session_id"])
+def test_split_names_hide_in_stat_and_table(label):
+    d = doc(
+        blocks=[
+            {"type": "stat", "label": label, "value": "v4lu3xyz"},
+            {"type": "table", "columns": [{"key": "a", "label": label}, {"key": label.lower(), "label": "X"}],
+             "rows": [{"a": "v4lu3xyz", label.lower(): "v4lu3xyz"}]},
+        ]
+    )  # fmt: skip
+    (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
+    assert "v4lu3xyz" not in json.dumps(r)

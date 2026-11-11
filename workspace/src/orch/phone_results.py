@@ -131,24 +131,21 @@ def value_hider(root: Path):
 
 # Known gaps (not covered by the value hider or the pattern scrub): fullwidth/NFKC forms, a value split over
 # cells, base32, host case in a URL, a token inside a URL path.
-NAME_RE = re.compile(
-    r"(?i)token|secret|passw|passphrase|credential|bearer|api[ _-]?key|private[ _-]?key|access[ _-]?key"
-    r"|\bkey\b|\bkey[ _-]?id\b|\bpin(code)?\b|\bpwd\b|\botp\b|\bcookies?\b|\bsessions?\b"
-    r"|\bauth\b|oauth|authori[sz]ation|\bsignature\b"
-)
 CUT = "[hidden]"
 
 
 def _hide_labelled(doc: dict) -> None:
     """A secret-looking label hides its value: kv key, stat label, table column key or label (cells)."""
+    from orch.phone_view import secret_name as named
+
     for b in doc.get("blocks", []):
         t = b.get("type")
         if t == "kv":
             for it in b.get("items", []):
-                if NAME_RE.search(str(it.get("key", ""))):
+                if named(it.get("key", "")):
                     it["value"] = CUT
         elif t == "stat":
-            if NAME_RE.search(str(b.get("label", ""))):
+            if named(b.get("label", "")):
                 b["value"] = CUT
                 b.pop("unit", None)
                 b.pop("delta", None)
@@ -156,7 +153,7 @@ def _hide_labelled(doc: dict) -> None:
             keys = {
                 c.get("key")
                 for c in b.get("columns", [])
-                if NAME_RE.search(str(c.get("key", ""))) or NAME_RE.search(str(c.get("label", "")))
+                if named(c.get("key", "")) or named(c.get("label", ""))
             }
             for row in b.get("rows", []):
                 for k in keys:

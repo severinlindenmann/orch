@@ -171,6 +171,20 @@ def safe_url(url: str) -> str | None:
     return out if len(out) <= 2000 else None
 
 
+_NAME_SUBSTR = re.compile(
+    r"token|secret|passw|passphrase|credential|bearer|signature|auth(?!ors?\b)|apikey|api key|private key"
+)
+_NAME_WORD = re.compile(r"\b(key|keys|pin|pincode|pwd|otp|cookies?|sessions?)\b")
+
+
+def secret_name(name: str) -> bool:
+    """Does a label (kv key, column key or label, stat label) name a secret? camelCase, _ and - split into
+    words first, so basic_auth, authCode, hmac_signature and session_id match; Author, Keyboard, Monkey,
+    Hotkey, Turkey, Passed and Passage do not. The one predicate for labelled values in phone results."""
+    words = re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(name))).lower()
+    return bool(_NAME_SUBSTR.search(words) or _NAME_WORD.search(words))
+
+
 def size_of(view: dict) -> int:
     return len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode())
 
