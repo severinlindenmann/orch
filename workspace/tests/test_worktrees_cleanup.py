@@ -1684,3 +1684,22 @@ def test_an_unrelated_op_on_an_unsigned_done_does_not_try_to_release_the_copy(re
     monkeypatch.setattr(worktrees, "on_closed", lambda *a, **k: calls.append(a))
     tickets.apply_op(repo, t, lambda tk: tk.setdefault("notes_probe", 1))
     assert calls == []
+
+
+@pytest.mark.parametrize("mode", ["always", "together"])
+def test_a_reclaim_right_after_release_goes_back_into_the_tickets_copy(repo, monkeypatch, mode):
+    """Lane C D6b: release, then claim the same (not done) ticket again at once: it works in its copy again,
+    never silently in the project folder while copies are on."""
+    from orch import config
+
+    t, other = repo.tids[0], repo.tids[1]
+    monkeypatch.setattr(config, "copies_mode", lambda root: mode)
+    if mode == "together":  # another alive run in the project folder makes the first start use a copy
+        runs.claim(repo, other, "human:t", "claude", "oneshot", folder=repo, pid=os.getpid())
+    rec, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    copy = Path(rec["folder"])
+    assert copy.resolve() != repo.resolve() and copy.is_dir()
+    runs.release(repo, t, rec["run"])
+    assert t in worktrees.registry(repo) and copy.is_dir()  # not done: the copy stays
+    rec2, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    assert Path(rec2["folder"]).resolve() == copy.resolve()
