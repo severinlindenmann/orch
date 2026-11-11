@@ -1,8 +1,8 @@
 """Private, hidden activity records and explicit retention."""
 
+import errno
 import json
 import os
-import errno
 import re
 import stat
 import time
