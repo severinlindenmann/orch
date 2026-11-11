@@ -343,8 +343,11 @@ def test_mac_ticket_reaches_the_phone_and_caps_and_done_window(proj, run, new_ti
     monkeypatch.setattr(phone_view, "OPEN_MAX", 2)
     made = [tickets.create(proj, f"More {i}", "human:t")["id"] for i in range(3)]
     old = tickets.create(proj, "Finished long ago", "human:t")["id"]
+    from conftest import sign_done
+
+    sign_done(proj, old)  # a signed Done (a raw "done" would read as Review); only the date is backdated
     t = tickets.load(proj, old)
-    t["status"], t["updated_at"] = "done", "2020-01-01T00:00:00Z"
+    t["updated_at"] = "2020-01-01T00:00:00Z"
     tickets.ticket_path(proj, old).write_text(json.dumps(t))  # save() would stamp updated_at with now
     sent = phone_view.sync_open(proj)
     assert 1 <= len(sent) <= 2 and old not in sent and set(sent) <= set(made)

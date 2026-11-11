@@ -1,5 +1,5 @@
 {
- "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now, person=VERIFIER) must give `expect` (null = cannot merge, caller pauses) and the SAME result with a and b swapped. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now, held) -> {changed, counter} (null = malformed, caller pauses; held = ids that held the key locally, they keep it). VERIFIER (every `wont` vector; the real one is humanproof.wont_verifier: the receiving core's own wontdo1 MAC, valid for the step's text and covers AND the CURRENT entry of its ledger, human-proof.md 'Synced won't do'): person(step, ticket id) is true exactly when step.wont_mac equals the vector's `ledger[\"<ticket id>:<step id>\"]` AND equals \"v1-\" + the first 20 hex characters of sha256 of the \"|\"-joined values ticket id, step id, step.wont_nonce, step.text, (step.covers or \"\"), (\"True\" or \"False\" by step.wont_do), (step.reason when wont_do, else \"\"). The text of `by` is never looked at; no verifier = nobody is a person. INVARIANT: with a base, a step's decision fields (wont_do, reason, wont_mac, wont_nonce) differ from base's only when that step verifies; otherwise they are base's. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys).",
+ "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now, person=VERIFIER) must give `expect` (null = cannot merge, caller pauses) and the SAME result with a and b swapped. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now, held) -> {changed, counter} (null = malformed, caller pauses; held = ids that held the key locally, they keep it). VERIFIER (every `wont` vector; the real one is humanproof.wont_verifier: the receiving core's own wontdo1 MAC, valid for the step's text and covers AND the CURRENT entry of its ledger, human-proof.md 'Synced won't do'): person(step, ticket id) is true exactly when step.wont_mac equals the vector's `ledger[\"<ticket id>:<step id>\"]` AND equals \"v1-\" + the first 20 hex characters of sha256 of the \"|\"-joined values ticket id, step id, step.wont_nonce, step.text, (step.covers or \"\"), (\"True\" or \"False\" by step.wont_do), (step.reason when wont_do, else \"\"). The text of `by` is never looked at; no verifier = nobody is a person. INVARIANT: with a base, a step's decision fields (wont_do, reason, wont_mac, wont_nonce) differ from base's only when that step verifies; otherwise they are base's. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys). VERDICT (every `verdict` vector; the real one is humanproof.verdict_verifier, human-proof.md 'Done needs a signed verdict'): merge_ticket(..., verdict=V) with V(entry, ticket) returning \"current\" when entry.mac equals the vector's `ledger[<ticket id>]` (the core's own MAC that is the CURRENT ledger entry), \"stale\" when entry.mac is in the vector's `own` list but not current (the core's own MAC, replayed, tombstoned or superseded: dropped), else null (not provable here: carried along); the real V also needs the MAC to verify over the merged checklist. No `ledger` entry and no `own` = nobody verifies. INVARIANT: an entry V calls current is never changed or dropped; the merge never decides Done (status follows the plain rule: FINAL wins, done + an open step = active; a raw done without a current entry is Review on the receiving core).",
  "now": "2026-11-10T12:00:00Z",
  "tickets": [
   {
@@ -7123,6 +7123,1801 @@
     "questions": [],
     "history": [],
     "revision": 2
+   }
+  },
+  {
+   "name": "verdict-1-peer-done-without-entry",
+   "rule": "verdict",
+   "ledger": {},
+   "own": [],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "active",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: status active was replaced by done"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-2-peer-drops-ours",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "note": "y"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "y",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: note \"x\" was replaced",
+      "lost": {
+       "field": "note",
+       "value": "x"
+      }
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-3-peer-garbles-ours",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "3333333333333333",
+      "mac": "short"
+     }
+    ]
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   }
+  },
+  {
+   "name": "verdict-4-peer-adds-its-own",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ]
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "x",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-5-stale-entry-dropped",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ],
+    "note": "y"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "y",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: note \"x\" was replaced",
+      "lost": {
+       "field": "note",
+       "value": "x"
+      }
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-6-tombstoned-entry-dropped",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": null
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "y"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "y",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: note \"x\" was replaced",
+      "lost": {
+       "field": "note",
+       "value": "x"
+      }
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-7-peer-reopen-wins",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "active",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "y"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "y",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "active",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-8-two-machines-both-kept",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ]
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-9-cap-keeps-authority",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000000",
+      "mac": "ddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000001",
+      "mac": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000002",
+      "mac": "fffffffffffffffffffffffffffffffffffffffffff"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000003",
+      "mac": "ggggggggggggggggggggggggggggggggggggggggggg"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000004",
+      "mac": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000005",
+      "mac": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000006",
+      "mac": "jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000007",
+      "mac": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000008",
+      "mac": "lllllllllllllllllllllllllllllllllllllllllll"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000009",
+      "mac": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm"
+     }
+    ]
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000000",
+      "mac": "ddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000001",
+      "mac": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000002",
+      "mac": "fffffffffffffffffffffffffffffffffffffffffff"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000003",
+      "mac": "ggggggggggggggggggggggggggggggggggggggggggg"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000004",
+      "mac": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000005",
+      "mac": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii"
+     },
+     {
+      "kind": "person",
+      "nonce": "0000000000000006",
+      "mac": "jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-10-no-verifier-nothing-dropped",
+   "rule": "verdict",
+   "ledger": {},
+   "own": [],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ]
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "x",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     },
+     {
+      "kind": "person",
+      "nonce": "1111111111111111",
+      "mac": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-11-new-open-step-reopens",
+   "rule": "verdict",
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "own": [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   ],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "note": "x"
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": true,
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     },
+     {
+      "id": "c2",
+      "text": "Another",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "x",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "active",
+    "checklist": [
+     {
+      "done": true,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": [
+       {
+        "type": "note",
+        "ref": "ok"
+       }
+      ]
+     },
+     {
+      "id": "c2",
+      "text": "Another",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "verdicts": [
+     {
+      "kind": "person",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: reopened, a new checklist item came in"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "verdict-12-unverified-wont-do-does-not-finish",
+   "rule": "verdict",
+   "ledger": {},
+   "own": [],
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "active",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "x",
+      "by": "agent:y",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n",
+      "wont_mac": "forged"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "active",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Write the file",
+      "done": false,
+      "evidence": []
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "note": "y"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "note": "y",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "active",
+    "checklist": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:y",
+      "done": false,
+      "id": "c1",
+      "text": "Write the file",
+      "evidence": []
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-10T12:00:00Z",
+      "by": "agent:sync",
+      "text": "sync: reopened, a new checklist item came in"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T10:00:00Z"
    }
   }
  ],

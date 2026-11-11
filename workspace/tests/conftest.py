@@ -250,7 +250,35 @@ def _start_guard_off(request, monkeypatch):
     monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)
 
 
-REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof")
+REAL_HOME_MODULES = (
+    "test_secret_store",
+    "test_install_kind",
+    "test_winacl",
+)  # they test the home pairing itself
+REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_verdict_mac")
+
+
+def ensure_signing(root):
+    """TEST HELPER: the workspace's local id and human key exist (a real proof needs both anyway)."""
+    from orch import humanproof
+    from orch.errors import Refused
+
+    try:
+        addons.workspace_id(root, create=True)
+        humanproof.human_key(root, create=True)
+    except (
+        Refused
+    ):  # a folder a test install may not use (not under ~/.orch-test): nothing can be signed there
+        pass
+
+
+def sign_done(root, tid, by="human:tester"):
+    """TEST HELPER: a ticket becomes Done the proven way (a person's verdict, signed and recorded in the
+    ledger). Fixtures never write "done" into a ticket file or call _write with it: that is Review."""
+    from orch import tickets
+
+    ensure_signing(root)
+    return tickets.set_status(root, tid, "done", by, proven=True)
 
 
 @pytest.fixture(autouse=True)
@@ -261,14 +289,52 @@ def _legacy_trust(request, monkeypatch):
     if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
         return
     from orch import humanproof, tickets
+    from orch.errors import Refused
 
     def legacy(root, args, op, target, **kw):
         if tickets.agent_tool():
             return "agent:" + str(tickets.agent_tool())
-        return tickets.current_actor(getattr(args, "by", None))
+        who = tickets.current_actor(getattr(args, "by", None))
+        if who.startswith("human:"):
+            ensure_signing(
+                root
+            )  # a person's Done is signed: the key and the local id exist, as after a real proof
+        return who
+
+    def test_home(root):
+        """TEST-ONLY: these tests keep the workspace in pytest's temp folder, which the real pairing refuses
+        (a test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set, so
+        a signed Done (key + ledger) works there. The pairing check itself is tested by test_human_proof*."""
+        home = Path(os.environ["ORCH_HOME"]) if os.environ.get("ORCH_HOME") else None
+        if home is None:
+            raise Refused("no test home")
+        home.mkdir(parents=True, exist_ok=True)
+        os.chmod(home, 0o700)
+        return home
 
     monkeypatch.setattr(humanproof, "person_by", legacy)
     monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
+    if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
+        monkeypatch.setattr(humanproof, "guarded_home", test_home)
+
+    def trusting(fn, proven_pos):
+        """TEST-ONLY, same trust as `legacy` above: a direct Python call as `human:` counts as the person's
+        proven verdict (key + ledger are real, only the proof ceremony is skipped)."""
+        real = fn
+
+        def call(*a, **kw):
+            ensure_signing(a[0])  # an agent finish under the grant is signed too: key + id exist after setup
+            if len(a) <= proven_pos and "proven" not in kw:
+                by = a[proven_pos - 1] if len(a) >= proven_pos else kw.get("by", "")
+                if isinstance(by, str) and by.startswith("human:"):
+                    kw["proven"] = True
+            return real(*a, **kw)
+
+        return call
+
+    monkeypatch.setattr(tickets, "set_status", trusting(tickets.set_status, 4))
+    monkeypatch.setattr(tickets, "patch", trusting(tickets.patch, 5))
+    monkeypatch.setattr(tickets, "accept_review", trusting(tickets.accept_review, 3))
 
 
 _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
