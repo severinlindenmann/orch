@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, safegit, worktrees
+from orch import addons, humanproof, safegit, worktrees
 from orch.errors import Refused
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "orch"
@@ -114,6 +114,9 @@ def test_creating_preparing_and_dropping_a_copy_never_runs_repo_code(hostile, pr
     for p in marker.parent.glob(marker.name + "*"):
         p.unlink()
     monkeypatch.chdir(r)
+    # the hostile repo lives under pytest's tmp dir, not ~/.orch-test: give it the usable guarded home
+    # that the other worktree tests use (the real pairing rules are tested in test_humanproof.py)
+    monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
     addons.workspace_id(r, create=True)
     e = worktrees.create(r, "t_abc123")
     assert e is not None and (Path(e["path"]) / "a.txt").read_text() == "hello\n"

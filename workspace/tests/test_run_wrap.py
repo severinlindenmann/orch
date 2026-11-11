@@ -167,7 +167,7 @@ def test_resume_is_used_when_there_is_a_session_and_allow_goes_to_argv_only(proj
     _wait(proj, tid)
     line = calls.read_text(encoding="utf-8").splitlines()[0]
     assert f"--resume {old}" in line and "--allowedTools Bash(git push:*)" in line
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == old
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) == old
     # nothing was written for the allowance
     assert not (proj / ".claude").exists() and not list(proj.glob("**/settings*.json"))
     # --fresh starts a new conversation and records its id
@@ -175,7 +175,7 @@ def test_resume_is_used_when_there_is_a_session_and_allow_goes_to_argv_only(proj
     _wait(proj, tid)
     second = calls.read_text(encoding="utf-8").splitlines()[1]
     assert "--session-id" in second and "--resume" not in second
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) != old
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) != old
 
 
 def test_failed_resume_falls_back_to_fresh_once_and_records_the_new_id(
@@ -191,7 +191,7 @@ def test_failed_resume_falls_back_to_fresh_once_and_records_the_new_id(
     _wait(proj, tid)
     lines = calls.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2 and "--resume" in lines[0] and "--session-id" in lines[1]
-    new = tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host())
+    new = tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host())
     assert new and new != old and new in lines[1]
 
 
@@ -217,7 +217,7 @@ def test_codex_session_comes_from_the_output(proj, run, tmp_path, monkeypatch):
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
     assert (
-        tickets.sessions_for(tickets.load(proj, tid), "codex", runs.host())
+        tickets.sessions_for(proj, tid, tickets.load(proj, tid), "codex", runs.host())
         == "01a1ad41-d898-7323-a687-0b497c12a830"
     )
 
@@ -249,7 +249,7 @@ def test_a_plain_failure_does_not_fall_back_to_fresh(proj, run, tmp_path, monkey
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
     assert len(out.read_text().splitlines()) == 1  # one try, no second run
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == old
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) == old
 
 
 def test_the_fresh_fallback_carries_the_pending_input(proj, run, tmp_path, monkeypatch, subprocess_home):
@@ -399,3 +399,22 @@ def test_the_holder_line_says_the_start_in_local_time():
 
     rec = {"agent": "claude", "by": "human:t", "started_at": "2026-11-06T13:57:13Z"}
     assert cli_run._holder_line(rec, "t_abc123").endswith(f"since {net.when('2026-11-06T13:57:13Z')}.")
+
+
+@pytest.mark.parametrize("sid", ["bad:id", "bad.id"])
+@pytest.mark.parametrize("parsed", [False, True])
+def test_invalid_output_session_does_not_end_run(proj, run, monkeypatch, sid, parsed):
+    from orch import adapters
+
+    tid = _ticket_with_check(proj, run)
+    rec = runs.claim(proj, tid, "x", "codex")
+    monkeypatch.setattr(runs, "_on_term", lambda *a: None)
+    monkeypatch.setattr(runs, "_run_turn", lambda *a: (0, json.dumps({"thread_id": sid})))
+    if parsed:  # defend the recording boundary even if an adapter returns an invalid ID
+        monkeypatch.setattr(adapters, "parse_session", lambda *a: sid)
+    assert runs.wrap(proj, rec["run"], tid, "codex", ["codex"]) == 0
+    assert runs.read(proj, tid) is None
+    ticket = tickets.load(proj, tid)
+    assert not ticket.get("sessions")
+    if parsed:
+        assert "Skipped recording an invalid agent session id." in json.dumps(ticket)

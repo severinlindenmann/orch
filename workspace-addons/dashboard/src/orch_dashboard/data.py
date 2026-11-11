@@ -558,16 +558,21 @@ def _disk_count(root: Path, key: str) -> None:
 def copies_disk(root: Path) -> dict | None:
     """{copies, bytes, partial} for the settings line "Copies on this computer", or None while it is being
     counted (the page shows "..."). The walk runs on a thread (capped by core), never on the request."""
+    from orch import worktrees
+
+    def current(val):
+        return {**val, "copies": worktrees.count(root)} if val is not None else None
+
     key = str(root)
     with _DISK_LOCK:
         e = _DISK.get(key)
         fresh = e is not None and time.monotonic() - e["at"] < DISK_TTL
         if e is not None and (fresh or e["busy"]):
-            return e["val"]
+            return current(e["val"])
         _DISK[key] = {"at": e["at"] if e else 0.0, "val": e["val"] if e else None, "busy": True}
         old = e["val"] if e else None
     threading.Thread(target=_disk_count, args=(root, key), daemon=True).start()
-    return old
+    return current(old)
 
 
 def copies_disk_forget(root: Path) -> None:
@@ -604,7 +609,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
-    from orch.config import COPIES_LOCKED, agents_may_finish, copies_max, copies_mode, copy_setup
+    from orch.config import agents_may_finish, copies_max, copies_mode, copy_setup
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
@@ -618,7 +623,6 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "copies": copies_mode(root),
-        "copies_locked": bool(COPIES_LOCKED),
         "copies_max": copies_max(root),
         "copy_setup": copy_setup(root) or "",
         "copies_disk": copies_disk(root),

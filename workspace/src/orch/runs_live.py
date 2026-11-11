@@ -905,7 +905,7 @@ def event(
             tickets.resume_after_start_wait(root, tid, f"agent:{rec['agent']}")
 
     if kind == "session":
-        if session_id and adapters.SESSION_RE.match(session_id):
+        if session_id and tickets.valid_session_id(session_id):  # fullmatch, shared rule
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
         up("idle")  # the tool is up and waiting for its first input
     elif kind == "idle":

@@ -735,3 +735,14 @@ def test_an_unapproved_shadow_of_a_builtin_is_ignored_and_the_builtin_works(proj
         adapters.render("claude", "fresh", "oneshot", {"prompt": "p", "new_session": NEW}, proj)[0]
         == "claude"
     )
+
+
+@pytest.mark.parametrize("sid", ["bad:id", "bad.id", "a" * 129, "valid\n"])
+def test_session_id_rule_is_shared(sid):
+    from orch import tickets
+
+    assert adapters.SESSION_RE is tickets.SESSION_ID_RE
+    assert adapters.parse_session("codex", json.dumps({"thread_id": sid})) is None
+    assert not tickets.valid_session_id(sid)
+    with pytest.raises(Refused):
+        adapters.render("codex", "resume", "oneshot", {"prompt": "p", "session": sid})

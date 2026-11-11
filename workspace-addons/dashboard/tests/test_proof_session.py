@@ -600,3 +600,30 @@ def test_group_say_target_is_host_and_group_like_the_cli(tmp_path, monkeypatch):
     assert hp.group_target(tmp_path, "Alpha", gid) == want[1]
     assert acts.proof_for("group.say", {"group": gid, "host": "ws_hostb00002"}, tmp_path) != want
     assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)
+
+
+@pytest.mark.parametrize(
+    "op,args,target,head",
+    [
+        ("copies.remove_orphaned", {"ws8": "deadbeef"}, "deadbeef", "remove-orphaned"),
+        ("copies.retry", {"ticket": "t_abc123"}, "t_abc123", "retry"),
+    ],
+)
+def test_copy_click_mints_exact_target(live, monkeypatch, op, args, target, head):
+    root, port = live
+    ck = session(root, port)
+    seen = {}
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    def fake(argv, proof, **kw):
+        seen.update(argv=argv, proof=proof)
+        return R()
+
+    monkeypatch.setattr(actions, "run_with_proof", fake)
+    st, _, body = post(port, "/api/act", {"op": op, "args": args}, {"Cookie": ck})
+    assert st == 200, body
+    assert seen["argv"][:3] == ["copy", head, target]
+    core_op = "copy." + head.replace("-", "_")
+    assert hp.verify_and_consume(root, seen["proof"], core_op, target).startswith("human:")

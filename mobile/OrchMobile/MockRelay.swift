@@ -74,6 +74,20 @@ actor MockRelay: RelayAPI {
                 ticket: Self.reviewTicketId, kind: "result", title: Self.reviewView.title, text: "Your fish test page is ready.", replyTo: nil,
                 at: Self.now(), key: "DT-2", ticketView: Self.reviewView))
         }
+        #if DEBUG
+        // #465: an agent's result still awaits the person's verdict. Opt-in keeps other fixture counts unchanged.
+        if UserDefaults.standard.bool(forKey: "mockDoneReview") {
+            for (ticket, title) in [("t_donerev1", "Done, verdict asked"), ("t_donerev2", "Done, no question")] {
+                updateLog.append(TicketUpdate(id: "m_doneupdate_" + ticket, workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
+                    ticket: ticket, kind: "result", title: title, text: "The agent finished the work.", replyTo: nil,
+                    at: Self.now(), ticketView: TicketSnapshot(title: title, status: "review", running: false)))
+            }
+            all.append(Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_donereview00001", from: Self.pilatus,
+                to: "phones", type: "question", createdAt: Self.now(), ticket: "t_donerev1",
+                body: QuestionBody(questionId: "review-1", title: "Done, verdict asked", text: "Is this done?",
+                    options: ["accept", "changes"], recommended: nil, review: true)), workspaceName: "Pilatus Workspace"))
+        }
+        #endif
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }

@@ -116,6 +116,11 @@ class NeedsPerson(Exception):
 # page op -> (core op, target of the proof) for the clicks that are a person's (H1, contracts/human-proof.md).
 # `ticket.patch` is a verdict only when it sets Done ("Looks good"); the core checks the rest.
 PROOF_OPS = {
+    "copies.remove_orphaned": (
+        "copy.remove_orphaned",
+        lambda a: f"{a.get('ws8')}:discard" if a.get("discard") else a.get("ws8"),
+    ),
+    "copies.retry": ("copy.retry", lambda a: a.get("ticket")),
     "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
     "chat.say": ("chat.send", lambda a: "general"),

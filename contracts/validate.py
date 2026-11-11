@@ -499,6 +499,19 @@ def sec_get(case):
     return "ok"
 
 
+def sec_agent_env(case):
+    """`orch secret env|file|exec` for an agent caller (one gate): allowed with agents_may_env, else only when the
+    whole argv equals the profile's `run` (absolute program, no extra arguments). For `mode` exec the argv is the
+    extra arguments and the whole argv is `run` + them. Non-agent callers are not restricted."""
+    if not case["agent"] or case["agents_may_env"]:
+        return "ok"
+    run = case["run"]
+    argv = (run or []) + case["argv"] if case.get("mode") == "exec" else case["argv"]
+    if run and run[0].startswith("/") and argv == run:
+        return "ok"
+    return "agent_command"
+
+
 def sec_resolve(entries):
     """Which entry is used per name ('workspace' wins) and which are shadowed."""
     used, shadowed = {}, []
@@ -532,6 +545,8 @@ def kind_secrets():
                 fails.append(f"secrets hide {c['name']}: a hidden form survives in expect: {n[:12]}...")
     for c in vec["min_len"]:
         _expect(f"secrets min_len {c['value']!r}", bool(sec_needles([{"name": "k", "type": "token", "value": c["value"]}])), c["hidden"])
+    for c in vec["agent_env"]:
+        _expect(f"secrets agent_env {c['name']}", sec_agent_env(c), c["result"])
     for c in vec["get"]:
         _expect(f"secrets get {c['name']}", sec_get(c), c["result"])
     for c in vec["resolve"]:

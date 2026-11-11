@@ -184,7 +184,7 @@ rows add a named case.
 | `focus.settings` | Settings > Add-ons > Focus: `live_session` / `session_typing` on | setting | page | `settle` |
 | `insights.settings` | Insights > Settings: `share_names`, `share_counts` on, `keep_days`, `max_mb` | setting | page | `settle` |
 | `record.delete_detail` | Delete detail for this ticket | ticket | page, terminal | `verify` delete detail |
-| `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get` | key / profile | page, terminal | `verify` key profile, `settle` allow_get |
+| `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get`, `agents_may_env` | key / profile (`<profile>`, `<profile>:remove`, `<profile>:allow_get`, `<profile>:agents_may_env`; switching a flag off needs no proof) | page, terminal | `verify` key profile, `settle` allow_get |
 | `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
 | `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<hash>` (proposal.md) / id | page | proposal `steps` |
 | `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict; `verdict` (what makes it Done) |
@@ -208,6 +208,8 @@ rows add a named case.
 | `config.permissions` | `orch config set workspace.permissions <mode>`, raising only (lowering is free for anyone) | the new `mode` | page, terminal | – |
 | `look.icon` | `orch look set` (icon and colour of the workspace, shown to peers and on shared pages) | `look` | page, terminal | – |
 | `config.copy_setup` | `orch config set workflow.copy_setup <command>`: a command orch runs in every new separate copy (clearing it needs no proof; an agent is refused) | sha256 of the command (the card shows it in full) | page, terminal | – |
+| `copy.remove_orphaned` | `orch copy remove-orphaned <ws8>`: remove copies of a project that is gone (an agent is refused) | ws8; `<ws8>:discard` with `--discard` | page, terminal | – |
+| `copy.retry` | `orch copy retry <ticket>`: retry interrupted copy cleanup (an agent is refused) | ticket id | page, terminal | – |
 | `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
 | `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
 | `run.human_input` | input that counts as a person's and may start a run (runs.py 375-397 `human_waiting`: today any `human:` by or phone line in the agent-writable `.orch/run/pending/<tid>.jsonl`) | ticket | page, phone | `pending` |

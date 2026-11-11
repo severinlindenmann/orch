@@ -106,7 +106,7 @@ run = ["pass-cli"]
 ```
 
 A profile maps variables to key names (`env`: the value in the variable; `files`: a temp file path in the variable), may set
-plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false).
+plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false), and may let agents use its keys in any command (`agents_may_env`, default false).
 Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
 ORCH_*, proxies, CA bundles, JAVA_TOOL_OPTIONS, …). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
@@ -128,12 +128,31 @@ Person-only, proven by the human channel (invariant H1, human-proof.md: a proof 
 the local page; done from the dashboard): `orch secret add <name> --type T [--file F]` (value from stdin, never
 an argument), `orch secret remove <name>`, `orch secret profile <name> …`. These are additions to the five agent commands.
 
+- **Who may run what (Level 1, stated plainly).** `env` and `file` hand the profile's keys to **whatever command the
+  caller names**, including an interpreter (`python -c`, `sh -c`, `env`, `curl`) that can write a key to a file or the
+  network. Output hiding cannot stop that; it is a best-effort safety net for accidents (a CLI that echoes its token),
+  not a control against a caller that deliberately exfiltrates. Only `exec` is bound to a command a person approved
+  (the profile's `run`, set with a `secret.profile` proof). Skills and screens say so in plain words. To limit this
+  by default, a profile has the switch `agents_may_env` (screen wording: **"Let agents use these keys in any command"**),
+  **off for every new profile and for every profile without a matching record** (deny by default). While it is off, an
+  **agent** caller (an agent tool in the environment, or `--by agent:...`) of `env`, `file` or `exec` is refused unless its whole
+  command equals the profile's `run` exactly: same argv, the program an **absolute path**, no extra arguments (for `exec`:
+  the profile's `run` plus the arguments the agent gave; vectors `agent_env`). One gate, applied before any key is read. Otherwise: `Refused: agents may only run this profile's own command. Ask the person to allow any command, or use orch secret exec <profile>.`
+  (`data.refused` = `agent_command`). An agent calling `exec` may not add arguments unless `agents_may_env` is on; a person or script caller is not restricted (exec with extra arguments stays allowed). The switch counts
+  only with a settings record (secret.agents_may_env.<profile>, like `allow_get`), set by a person with a `secret.profile`
+  proof, target `<profile>:agents_may_env`; `profile set` and `profile remove` turn it off. Turning a switch **off**
+  (`profile get-disable`, `profile agents-disable`) needs no proof: anyone may lower it, and the record then says `reset`.
+  Removing a profile has its own target `<profile>:remove` (a proof for `profile set` does not remove it). An agent that hides its
+  identity looks like a script (Level 1: not a sandbox).
+- **The profile's program is a full path.** `profile set` looks the program of `run` up once (the fixed system
+  folders and the caller's safe `PATH` entries, never the workspace or cwd) and stores its absolute path; `exec` and the
+  agent rule above never search `PATH` and refuse a stored name that is not a full path.
 - **Hiding the child's output.** stdout and stderr of the child go through pipes and the streaming hider (below) before they
   reach the caller. Interactive programs see pipes, not a terminal; that is accepted.
 - **No shell.** argv is run as given; orch never builds a shell line from a key.
 - **key.use.** One event per key per call, written before the child starts (activity.md `key.use`: `used.action` = env ·
   file · exec · get, `data.profile`, `data.command` = the program's base name, `data.skill` from `ORCH_SKILL` when set).
-  A refused call writes `outcome.ok: false` with `data.refused`: `not_in_profile`, `get_off`, `get_to_terminal`, `missing`.
+  A refused call writes `outcome.ok: false` with `data.refused`: `not_in_profile`, `get_off`, `get_to_terminal`, `missing`, `agent_command`.
 - Refusals are exit 2 with plain words: `Refused: the profile "billing" does not allow printing keys. Use orch secret env billing -- <command>.`
   The text names keys and profiles, never values.
 
@@ -170,7 +189,36 @@ prints a header).
 - **Error paths**: exception messages, tracebacks (exit 1), stderr of failed children, refusals and HTTP error bodies go
   through the same hider before they are printed, logged or recorded. A writer that cannot get a hider refuses
   (activity.md, Fail closed).
-- Known limits (Level 1): a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
+- **What approving a `run` command means.** `profile set` stores the real path of the program and refuses one inside
+  the workspace or changeable by other users. It only warns when the program is an interpreter or a tool that runs
+  arbitrary code (sh, bash, python, node, env, git, npm, curl, ssh, ...): approving one as `run` is the same as
+  approving any command. `exec` takes extra arguments from a person or script (they are appended to the approved command); an agent
+  may add none unless `agents_may_env` is on (the same exact-argv gate as `env`/`file`). Command and path are shown in the answer.
+- **The command's processes end with the call.** On POSIX the child runs in its own session (when stdin is not a terminal) and,
+  when the call ends or is interrupted (TERM, HUP, QUIT), everything it started is ended too (TERM, then KILL).
+  Further signals during that cleanup are ignored. Pipes held by a leftover process cannot hang the call.
+- **Where a use is recorded.** A use is recorded in the record of the orch run that makes it (`ORCH_RUN` +
+  `ORCH_TICKET`), or in the unattributed run (below). An **agent** caller (agent tool in the environment, or
+  `--by agent:...`) must be inside a live run whose run and ticket belong together (the same claim orch's own runs
+  use); otherwise `env`, `file`, `exec` and `get` are refused before any key or file is touched (`Refused: an agent
+  can use keys only inside an active orch run, where the use is recorded.` / `Refused: this run is not active, so the
+  use cannot be recorded.`). A script that names a run that is not live is refused.
+- **The unattributed run.** A person or script **without** a run is recorded in the workspace's unattributed run of
+  the day: run `r_outside_<yyyymmdd>` (UTC), ticket `t_outside`, agent `main`, harness `generic`, same fail-closed
+  rule. The ticket id `t_outside` is **reserved** (a follow-up makes ticket creation refuse it). A record view shows
+  `r_outside_*` / `t_outside` as **"Outside a run"**. Retention ends such a run at the next 00:00Z taken from its
+  **id**, never from lines in the file, so it is deleted after the keep time like any run; a day's run takes at most
+  5000 lines, then further uses outside a run are refused until the next day.
+- **Level 1 limits of the record.** An agent that hides its identity (no agent tool in the environment, no
+  `--by agent:`, no run variables) looks like a script: its uses are recorded in the unattributed run, not limited. An
+  agent can read another ticket's claim and frame its uses into that run (the record has no MAC chain). Planting a
+  file at tomorrow's `r_outside_*` path stops terminal key use for that day. A switch turned off by a caller with a
+  stale `ORCH_RUN` may go unrecorded (best effort). No pid-ancestor check is made.
+- **Streams are not delayed.** Only the tail of the output that could still become a key is held back; the rest is
+  passed on at once (an MCP server on stdio keeps working). A child without a terminal on stdin gets its own session.
+  Binary key files (no text form) are hidden by the lower-case hex and the padded base64 / base64url of the
+  whole file; raw bytes, upper-case hex, unpadded or line-wrapped base64 of such a file are **not** hidden (Level 1).
+- Known limits (Level 1): a child can still open `/dev/tty` itself; a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
   terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences.
 
 ## Wrapper examples (a skill ships them; `orch-wrapper-maker` teaches agents to write them)

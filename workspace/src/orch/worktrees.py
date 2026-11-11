@@ -24,12 +24,16 @@ The registry (.orch/run/worktrees.json, local, gitignored) says which copies orc
 [{path, branch, base, sub}], created_at}. `sub` is the workspace's folder below the git top folder (""
 when the
 workspace is the top): the agent starts in <path>/<sub>. `<ws8>/.owner` holds the workspace folder, for
-cleanup.
+cleanup. The guarded keys/copies/ registry independently records full workspace ids and paths, signed as
+a whole with a home-level key and checked against a separately guarded monotonic counter. Neither a
+forged .owner nor an unsigned history entry can authorize orphan removal.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -44,7 +48,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from orch import adapters, addons, config, harness, runs, safegit, sharedfolder, tickets
+from orch import adapters, addons, config, harness, humanproof, runs, safegit, sharedfolder, tickets
 from orch.errors import Refused
 
 REGISTRY = Path(".orch") / "run" / "worktrees.json"
@@ -117,6 +121,227 @@ def copies_dir(root: Path) -> Path | None:
     return ((addons.home(root) / "worktrees").resolve()) / wid[:8]
 
 
+def _check_copies_home(home: Path) -> None:
+    """Reject an unguarded destination before creating any folders or lock files."""
+    guarded = humanproof.guarded_home(home)
+    if guarded.resolve() != home.resolve():
+        raise Refused("The copies record is outside the guarded home.")
+
+
+def _copies_key(home: Path, *, create: bool = False) -> bytes:
+    """Account/home key, independent of workspace ids and path bindings; never in a copy."""
+    _check_copies_home(home)
+    humanproof.winacl.no_reparse(home)
+    if create:
+        home.mkdir(parents=True, exist_ok=True)
+    humanproof._check_dir(home)
+    d = home / "keys" / "copies"
+    if create:
+        humanproof._private_dir(d, home)
+    else:
+        humanproof._check_dir(d.parent)
+        humanproof._check_dir(d)
+    f = d / "identity.key"
+    with humanproof._key_lock(d) if create else contextlib.nullcontext():
+        try:
+            raw = humanproof._read_guarded(f)
+        except FileNotFoundError:
+            if not create:
+                raise
+            humanproof._write_private(f, secrets.token_hex(32) + "\n")
+            raw = humanproof._read_guarded(f)
+    key = bytes.fromhex(raw.decode("ascii").strip())
+    if len(key) != 32:
+        raise Refused("The copies identity key is damaged.")
+    return key
+
+
+def _copies_mac(key: bytes, data: dict) -> str:
+    raw = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return hmac.new(key, raw, hashlib.sha256).hexdigest()
+
+
+def _copies_store(home: Path, key: bytes) -> tuple[int, dict]:
+    """Read guarded state strictly. Only a never-created store may start at zero.
+
+    Caller holds the home copies lock. A verified store one step ahead repairs an
+    interrupted counter commit; all other mismatches fail closed.
+    Callers must never turn invalid state into an empty registry for a write.
+    """
+    d = home / "keys" / "copies"
+    try:
+        raw = humanproof._read_guarded(d / "registry.json")
+    except FileNotFoundError:
+        if os.path.lexists(d / "counter"):
+            raise Refused("The copies identity store is missing.") from None
+        return 0, {}
+    doc = json.loads(raw)
+    counter = json.loads(humanproof._read_guarded(d / "counter"))
+    if not isinstance(doc, dict):
+        raise Refused("The copies identity store is damaged.")
+    data = {k: doc.get(k) for k in ("version", "counter", "entries")}
+    mac = doc.get("mac")
+    if (
+        data["version"] != "orch.copies/2"
+        or type(counter) is not int
+        or counter < 1
+        or type(data["counter"]) is not int
+        or data["counter"] not in (counter, counter + 1)
+        or not isinstance(mac, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", mac)
+        or not hmac.compare_digest(mac, _copies_mac(key, data))
+        or not isinstance(data["entries"], dict)
+    ):
+        raise Refused("The copies identity store is damaged or out of date.")
+    for ws8, entry in data["entries"].items():
+        if (
+            not _WS8.fullmatch(ws8)
+            or not isinstance(entry, dict)
+            or not isinstance(entry.get("main"), str)
+            or not Path(entry["main"]).is_absolute()
+            or not isinstance(entry.get("workspace_id"), str)
+            or not addons.ID_RE.fullmatch(entry["workspace_id"])
+            or entry["workspace_id"][:8] != ws8
+        ):
+            raise Refused("The copies identity store has an invalid identity.")
+    if data["counter"] == counter + 1:
+        humanproof._write_private(d / "counter", str(data["counter"]) + "\n")
+    return data["counter"], data["entries"]
+
+
+def _save_copies_store(home: Path, key: bytes, counter: int, entries: dict) -> None:
+    """Caller holds the home copies lock; guarded atomic replacements, counter last."""
+    d = home / "keys" / "copies"
+    data = {"version": "orch.copies/2", "counter": counter + 1, "entries": entries}
+    doc = {**data, "mac": _copies_mac(key, data)}
+    humanproof._write_private(d / "registry.json", json.dumps(doc) + "\n")
+    humanproof._write_private(d / "counter", str(counter + 1) + "\n")
+
+
+def _known_copies(base: Path) -> dict:
+    """Only the current, whole-store authenticated mapping is deletion authority."""
+    try:
+        key = _copies_key(base.parent)
+        with runs.locked(base.parent / ".copies-state", "_known_copies"):
+            return _copies_store(base.parent, key)[1]
+    except (OSError, ValueError, Refused):
+        return {}
+
+
+def _known_main(base: Path, ws8: str) -> str | None:
+    entry = _known_copies(base).get(ws8)
+    return entry["main"] if entry is not None else None
+
+
+def _legacy_copies_entry(base: Path, ws8: str):
+    """Untrusted migration hint only; never used by any deletion/listing reader."""
+    path = base / ".known.json"
+    if not os.path.lexists(path):
+        return None
+    try:
+        if path.is_symlink():
+            raise ValueError
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict):
+            raise ValueError
+        if ws8 not in doc:
+            return None
+        if not isinstance(doc[ws8], str):
+            raise ValueError
+        return doc[ws8]
+    except (OSError, ValueError):
+        raise Refused("The legacy copies record cannot be migrated.") from None
+
+
+def _write_copies_owner(folder: Path, main: str) -> None:
+    """Anchor replacement to a no-follow directory fd; never write through an owner link."""
+    if os.name != "posix":
+        if _is_link(folder) or (folder / ".owner").is_symlink():
+            raise Refused("orch cannot use that folder for copies.")
+        runs._atomic(folder / ".owner", main + "\n")
+        return
+    directory = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temporary = ".owner-" + secrets.token_hex(16)
+    try:
+        # Refuse an existing link. Replacement itself never follows the destination,
+        # even if another process swaps it after this open.
+        try:
+            owner = os.open(".owner", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+        else:
+            os.close(owner)
+        fd = os.open(temporary, os.O_NOFOLLOW | os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(main + "\n")
+            os.replace(temporary, ".owner", src_dir_fd=directory, dst_dir_fd=directory)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=directory)
+    finally:
+        os.close(directory)
+
+
+def _remember_copies(root: Path, folder: Path) -> None:
+    wid = addons.workspace_id(root)
+    if not wid or _ws8(wid) != folder.name:
+        raise Refused("The copies folder does not match this workspace's id.")
+    home = folder.parent.parent
+    _check_copies_home(home)
+    with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
+        try:
+            key = _copies_key(home, create=True)
+            counter, known = _copies_store(home, key)
+        except (OSError, ValueError) as e:
+            raise Refused("The copies identity store cannot be read.") from e
+        main = str(root.resolve())
+        entry = known.get(folder.name)
+        old = entry["main"] if entry is not None else None
+        if entry is not None:
+            if entry["workspace_id"] != wid:
+                raise Refused("Another workspace uses the same copy folder.")
+        else:
+            owner = folder / ".owner"
+            if os.path.lexists(owner):
+                if (
+                    owner.is_symlink()
+                    or not owner.is_file()
+                    or owner.read_text(encoding="utf-8").strip() != main
+                ):
+                    raise Refused("Another workspace uses the same copy folder.")
+            elif folder.exists() and any(folder.iterdir()):
+                raise Refused("The existing copies folder has no matching owner.")
+            legacy = _legacy_copies_entry(folder.parent, folder.name)
+            if legacy is not None and legacy != main:
+                raise Refused("Another workspace uses the same copy folder.")
+        if old is not None and old != main:
+            _write_copies_owner(folder, main)
+        known[folder.name] = {"main": main, "workspace_id": wid}
+        _save_copies_store(home, key, counter, known)
+
+
+def _known_gone(d: Path, known: dict | None = None) -> bool:
+    """The marker agrees with a signed historical identity, and that workspace is gone. `known`: the store
+    already read by a caller that holds the copies-state lock (so this does not take that lock again)."""
+    try:
+        if known is None:
+            main = _known_main(d.parent, d.name)
+        else:
+            entry = known.get(d.name)
+            main = entry["main"] if entry is not None else None
+        if main is None:
+            return False
+        owner = d / ".owner"
+        if owner.is_symlink() or owner.read_text(encoding="utf-8").strip() != main:
+            return False
+        if addons.workspace_id(Path(main)) is not None:
+            return False
+        return not os.path.lexists(main)
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 def _safe_sub(sub) -> bool:
     """`sub` (the workspace's folder below the git top): a plain relative path, no anchor, drive or `..`."""
     if sub in (None, ""):
@@ -184,8 +409,8 @@ def _save_registry(root: Path, reg: dict) -> None:
 
 
 def count(root: Path) -> int:
-    """How many copies exist (every path of every ticket counts)."""
-    return sum(len(v["paths"]) for v in registry(root).values())
+    """How many registered copy folders currently exist (not vanished registry paths)."""
+    return sum(Path(e["path"]).is_dir() for v in registry(root).values() for e in v["paths"])
 
 
 @contextlib.contextmanager
@@ -325,15 +550,17 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     folder = dest.parent
     owner = folder / ".owner"
     try:
+        _check_copies_home(folder.parent.parent)
         folder.mkdir(parents=True, exist_ok=True)
+        _remember_copies(root, folder)
         if owner.is_symlink():
             return None, "orch cannot use that folder for copies."
         if owner.is_file():
             if owner.read_text(encoding="utf-8").strip() != str(root.resolve()):
                 return None, "Another workspace uses the same copy folder."
         else:
-            runs._atomic(owner, str(root.resolve()) + "\n")
-    except OSError as e:
+            _write_copies_owner(folder, str(root.resolve()))
+    except (OSError, Refused) as e:
         return None, f"orch cannot make the copy folder: {e}"
     if dest.exists() or dest.is_symlink():
         _git(
@@ -610,7 +837,8 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
 #   (3) no live run uses it;
 #   (4) its work is saved: every change, tracked and untracked (not what git ignores), is committed on
 #       branch orch/<ticket> through safegit, and HEAD is verified to BE that branch's tip afterwards.
-# Any step that fails, is refused or times out keeps the copy (the clean log and the "kept" list say why).
+# Any step before the rename that fails keeps the copy (the clean log and "kept" list say why).
+# A closed ticket's vanished copy is always removed from the registry, even if later cleanup fails.
 # Nothing is ever plain-deleted while it may hold unsaved work: the folder is first RENAMED into
 # <ws8>/.trash/ (atomic, same disk); only the trash, which holds saved work only, is deleted, relative to
 # open directories (no link is followed), outside the person's command (a detached `orch copy clean --trash`).
@@ -886,7 +1114,7 @@ def _gitdir_of(want: Path) -> Path | None:
         if not line.startswith("gitdir:"):
             return None
         g = Path(line.split(":", 1)[1].strip())
-        return (g if g.is_absolute() else want / g).resolve()
+        return Path(os.path.abspath(g if g.is_absolute() else want / g))
     except (OSError, ValueError, RuntimeError):
         return None
 
@@ -1014,6 +1242,16 @@ def _delete_copy(root: Path, ticket: str, reason: str, top: Path | None, entry: 
         res = _delete_copy_inner(root, ticket, top, entry or {})
     except Exception as e:  # noqa: BLE001 - fail closed
         res = f"kept: {e}"
+    # The rename is the removal boundary. Later git/trace cleanup can fail, but
+    # cannot turn a vanished closed copy back into a kept registry entry.
+    want = _want(root, ticket)
+    if want is not None and _ticket_closed(root, ticket):
+        try:
+            want.lstat()
+        except FileNotFoundError:
+            res = "removed"
+        except OSError:
+            pass  # unreadable is not missing
     if res == "removed":
         _mark(root, "kept", ticket)
         _log(root, f"{ticket}: removed ({reason})")
@@ -1045,10 +1283,13 @@ def _delete_copy_inner(root: Path, ticket: str, top: Path | None, entry: dict) -
         if moved is None:
             return "kept: it could not be moved away (a file is in use?)"
         _trash_note(root, ticket, moved.name)
+        _mark(root, "branches", ticket, branch=f"orch/{ticket}")
     if top is not None:
         _git(["worktree", "prune"], top, filters=False)  # its folder is gone from where git knew it
     if not _delete_branch(top, ticket):
         _mark(root, "branches", ticket, branch=f"orch/{ticket}")
+    else:
+        _mark(root, "branches", ticket)
     _forget_agent_traces(entry or {"path": str(want), "sub": ""}, want)
     return "removed"
 
@@ -1100,8 +1341,6 @@ def remove(root: Path, ticket: str, wait: float = 10.0) -> list[str]:
     invariant holds,
     else the copy stays and the notes say why. Never raises. The folder is moved to the trash; a detached
     `orch copy clean --trash` empties it."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return []
     try:
         with _scoped(root), runs.locked(root, LOCK_ID, wait=wait):
             before = getattr(_ctx, "deadline", None)
@@ -1118,8 +1357,6 @@ def remove(root: Path, ticket: str, wait: float = 10.0) -> list[str]:
 
 def on_closed(root: Path, ticket: str) -> None:
     """A ticket was done, closed or cancelled: its copy goes. Never raises, never waits long."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         if ticket not in registry(root):
             return  # no copy: nothing to do, no git call, no lock (the sweep finds odd leftovers)
@@ -1130,8 +1367,6 @@ def on_closed(root: Path, ticket: str) -> None:
 
 def on_run_ended(root: Path, tid: str) -> None:
     """A run of `tid` ended: when its ticket is already closed, its copy goes now (it waited for the run)."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         if tid in registry(root) and _ticket_closed(root, tid):
             remove(root, tid, wait=SWEEP_WAIT)
@@ -1227,8 +1462,6 @@ def _empty_trash_in(root: Path, wsdir: Path, deadline: float, grace: bool = True
 
 def empty_trash(root: Path, budget: float = 300.0) -> bool:
     """Empty this workspace's trash (explicit `orch copy clean --trash`, run detached). Never raises."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return True
     try:
         d = copies_dir(root)
         if d is None or not d.is_dir() or _is_link(d) or not _owned(root, d / "t_x000000"):
@@ -1263,8 +1496,6 @@ def _spawn_clean(root: Path, flag: str) -> None:
 
 def spawn_trash_clean(root: Path) -> None:
     """Empty the trash in a detached process, so a big folder never delays the person's command."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         d = copies_dir(root)
         if d is not None and (d / TRASH).is_dir():
@@ -1276,8 +1507,6 @@ def spawn_trash_clean(root: Path) -> None:
 def schedule_sweep(root: Path) -> None:
     """What a START does: never the sweep itself (its saves must not run under a start's patience), only a
     detached `orch copy clean --background`, and only when there is anything that could need cleaning."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         d = copies_dir(root)
         if (d is not None and d.is_dir() and any(True for _ in os.scandir(d))) or (
@@ -1407,7 +1636,7 @@ def orphaned(root: Path) -> list[dict]:
         d = base / ent.name
         if not _WS8.fullmatch(ent.name) or _is_link(d) or not d.is_dir() or d == mine:
             continue
-        if _owner_workspace_here(d) is not False:
+        if not _known_gone(d):
             continue
         try:
             n = sum(1 for e in os.scandir(d) if _TID.fullmatch(e.name) and e.is_dir(follow_symlinks=False))
@@ -1426,10 +1655,6 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
     is still reachable); one that cannot be saved stays, unless `discard` (CLI only: "throw the changes
     away").
     Refused for an agent. Never touches a workspace that is there."""
-    if config.COPIES_LOCKED:  # no human proof yet for this delete (B12 follow-up): refused while locked
-        raise Refused(
-            "Separate copies are paused in this release, so this isn't available yet. Nothing was changed."
-        )
     if tickets.agent_tool():
         raise Refused("Only a person can remove copies of a project that is gone.")
     if not isinstance(ws8, str) or not _WS8.fullmatch(ws8):
@@ -1437,7 +1662,7 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
     base = (addons.home(root) / "worktrees").resolve()
     d = base / ws8
     notes: list[str] = []
-    if _is_link(d) or not d.is_dir() or _owner_workspace_here(d) is not False or d == copies_dir(root):
+    if _is_link(d) or not d.is_dir() or not _known_gone(d) or d == copies_dir(root):
         raise Refused("That project is still here (or is not a copies folder). Nothing was removed.")
     with _scoped(root):
         for name in sorted(e.name for e in os.scandir(d)):
@@ -1469,10 +1694,30 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
         if _empty_trash_in(root, d, time.monotonic() + 300, grace=False) and not any(
             _TID.fullmatch(e.name) for e in os.scandir(d)
         ):
-            with contextlib.suppress(OSError):
-                (d / TRASH).rmdir()
-                (d / ".owner").unlink()
-                d.rmdir()
+            with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
+                key = _copies_key(base.parent)
+                counter, known = _copies_store(base.parent, key)
+                if ws8 not in known or not _known_gone(d, known):
+                    raise Refused("The copies identity changed. Nothing more was removed.")
+                try:
+                    with contextlib.suppress(FileNotFoundError):
+                        (d / TRASH).rmdir()
+                    (d / ".owner").unlink()
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        _write_copies_owner(d, known[ws8]["main"])
+                        raise
+                except OSError as e:
+                    notes.append(f"{ws8}: kept: could not remove the copies folder: {e}")
+                else:
+                    known.pop(ws8)
+                    try:
+                        _save_copies_store(base.parent, key, counter, known)
+                    except OSError as e:
+                        notes.append(
+                            f"{ws8}: copies folder removed, but could not update the identity store: {e}"
+                        )
     return notes
 
 
@@ -1482,15 +1727,13 @@ def retry(root: Path, ticket: str) -> list[str]:
     LOCK_STALE_SECONDS;
     safegit runs no such operation, so it is a plain unlink with these checks), then remove the copy through
     the normal path. Refused for an agent."""
-    if config.COPIES_LOCKED:  # no human proof yet for this delete (B12 follow-up): refused while locked
-        raise Refused(
-            "Separate copies are paused in this release, so this isn't available yet. Nothing was changed."
-        )
     if tickets.agent_tool():
         raise Refused("Only a person can do this.")
     if not isinstance(ticket, str) or not _TID.fullmatch(ticket):
         raise Refused(f"'{ticket}' is not a ticket id.")
-    with _scoped(root):
+    with _scoped(root), start_lock(root):
+        if _alive_here(root, ticket):
+            raise Refused(f"{INTERRUPTED}: an agent is still working in the copy. Try again when it ends.")
         want = _want(root, ticket)
         ent = registry(root).get(ticket)
         if want is None or not ent or not any(_same(Path(e["path"]), want) for e in ent["paths"]):
@@ -1502,12 +1745,30 @@ def retry(root: Path, ticket: str) -> list[str]:
                 try:
                     common = top / ".git"
                     wt = lock.parent
-                    if wt.parent.resolve() == (common / "worktrees").resolve() and not lock.is_symlink():
+                    expected = common / "worktrees" / wt.name
+                    backlink = wt / "gitdir"
+                    if (
+                        not _is_link(wt)
+                        and not _is_link(common / "worktrees")
+                        and wt == expected
+                        and lock.resolve() == expected.resolve() / "index.lock"
+                        and not lock.is_symlink()
+                        and not backlink.is_symlink()
+                        and Path(backlink.read_text(encoding="utf-8").strip()).resolve()
+                        == (want / ".git").resolve()
+                    ):
                         lock.unlink()
                         _log(root, f"{ticket}: removed a stale index.lock at a person's request")
                 except OSError as e:
                     raise Refused(f"The old lock file could not be removed: {e}") from None
-    return remove(root, ticket)
+        before = getattr(_ctx, "deadline", None)
+        _ctx.deadline = time.monotonic() + SWEEP_BUDGET
+        try:
+            notes = _remove_locked(root, ticket)
+        finally:
+            _ctx.deadline = before
+    spawn_trash_clean(root)
+    return notes
 
 
 def sweep(root: Path, budget: float = SWEEP_BUDGET) -> list[str]:
@@ -1518,12 +1779,8 @@ def sweep(root: Path, budget: float = SWEEP_BUDGET) -> list[str]:
     tickets, (3) leftover branches. The trash is emptied by a detached process. Triggers: orch start,
     orch run
     start, orch copy clean, the dashboard's "Clean up now"."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return []
     notes: list[str] = []
     try:
-        if not (addons.home(root) / "worktrees").is_dir():
-            return notes
         deadline = time.monotonic() + budget
         with _scoped(root):
             try:
@@ -1550,11 +1807,11 @@ def sweep(root: Path, budget: float = SWEEP_BUDGET) -> list[str]:
 
 
 def usage(root: Path, seconds: float = 3.0, max_entries: int = 200_000) -> dict:
-    """{"copies": N, "bytes": X, "partial": bool, "orphaned": [{ws8, copies}]}: ticket-named folders of this
-    workspace on disk and their size (a capped walk, no links followed; `partial` when the cap stopped it),
+    """{"copies": N, "bytes": X, "partial": bool, "orphaned": [{ws8, copies}]}: live registered copies
+    and ticket-named folders' size (a capped walk, no links followed; `partial` when the cap stopped it),
     and the copies of projects that are gone. Never on a request path."""
     d = copies_dir(root)
-    out = {"copies": 0, "bytes": 0, "partial": False, "orphaned": [], "changed": 0, "stuck": []}
+    out = {"copies": count(root), "bytes": 0, "partial": False, "orphaned": [], "changed": 0, "stuck": []}
     with contextlib.suppress(Exception):
         out["orphaned"] = orphaned(root)
         doc = _pending(root)
@@ -1570,7 +1827,6 @@ def usage(root: Path, seconds: float = 3.0, max_entries: int = 200_000) -> dict:
     try:
         for e in os.scandir(d):
             if _TID.fullmatch(e.name) and e.is_dir(follow_symlinks=False):
-                out["copies"] += 1
                 stack.append(e.path)
     except OSError:
         return out
