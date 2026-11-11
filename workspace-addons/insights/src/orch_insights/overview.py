@@ -1,6 +1,7 @@
 """Turn validated counts into plain, local overview rows without record identifiers."""
 
 import json
+import re
 from datetime import datetime, timedelta
 from importlib import resources
 
@@ -38,14 +39,62 @@ ERROR = "Insights could not read the workspace record."
 PARTIAL = "Some runs could not be read, numbers may be low."
 
 
+def _keep(entries, allowed):
+    """Copy whitelisted fields of dict entries; anything else (a key value, say) is never read."""
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        return entries
+    return [{k: v for k, v in entry.items() if k in allowed} for entry in entries]
+
+
+def _base_name(command):
+    """Program base name only: never arguments or folders."""
+    if not isinstance(command, str):
+        return command
+    first = (command.split() or [""])[0]
+    return first.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _host(address):
+    """Host only: never scheme, credentials, path or query."""
+    if not isinstance(address, str):
+        return address
+    return re.split(r"[/?#]", address.split("://")[-1])[0].rsplit("@", 1)[-1].lower()
+
+
+def _clean_inventory(inventory):
+    if not isinstance(inventory, dict):
+        return inventory
+    shapes = SCHEMA["properties"]["inventory"]["properties"]
+    clean = {**inventory}
+    for tab in ("skills", "connections", "keys"):
+        if tab in clean:
+            clean[tab] = _keep(clean[tab], shapes[tab]["items"]["properties"])
+    if isinstance(clean.get("connections"), list):
+        clean["connections"] = [_clean_connection(entry) for entry in clean["connections"]]
+    return clean
+
+
+def _clean_connection(entry):
+    if not isinstance(entry, dict):
+        return entry
+    entry = {**entry}
+    if "command" in entry:
+        entry["command"] = _base_name(entry["command"])
+    if "host" in entry:
+        entry["host"] = _host(entry["host"])
+    return entry
+
+
 def validated(counts):
-    """Validate the complete answer; discard unexpected item fields, including key values."""
+    """Validate the complete answer; discard unexpected item and inventory fields, including key values."""
     if not isinstance(counts, dict) or not isinstance(counts.get("items"), list):
         return None
     allowed = SCHEMA["properties"]["items"]["items"]["properties"]
     if not all(isinstance(item, dict) for item in counts["items"]):
         return None
-    clean = {**counts, "items": [{k: v for k, v in item.items() if k in allowed} for item in counts["items"]]}
+    clean = {**counts, "items": _keep(counts["items"], allowed)}
+    if "inventory" in counts:
+        clean["inventory"] = _clean_inventory(counts["inventory"])
     if not VALIDATOR.is_valid(clean):
         return None
     for item in clean["items"]:
@@ -99,7 +148,13 @@ def _row(item, inventory, generated):
 
 
 def _inventory(counts):
-    return {(kind, item["name"]): item for kind, tab in TABS.items() for item in counts["inventory"][tab]}
+    """One entry per name: the one in use wins over a shadowed one of another source."""
+    found = {}
+    for kind, tab in TABS.items():
+        for item in counts["inventory"][tab]:
+            if (kind, item["name"]) not in found or not item.get("shadowed"):
+                found[(kind, item["name"])] = item
+    return found
 
 
 def _entries(counts, inventory):
@@ -167,8 +222,13 @@ def _cards(entries, rows):
     return cards[:3]
 
 
-def build_overview(counts) -> dict:
-    """Fail closed: unavailable and partial answers contain no apparent zero totals or rows."""
+def order(row):
+    """Problems first, then the most used, then by name."""
+    return (row["health"] != "look", -(row["uses"] or 0), row["name"])
+
+
+def prepare(counts):
+    """Validated counts with one entry and row per visible item, or the fail-closed error answer."""
     counts = validated(counts)
     if counts is None:
         return {"error": ERROR, "complete": False}
@@ -177,11 +237,17 @@ def build_overview(counts) -> dict:
     inventory = _inventory(counts)
     entries = _entries(counts, inventory)
     rows = {key: _row(item, inventory.get(key, {}), counts["generated_at"]) for key, item in entries.items()}
-    tabs = {}
-    for kind, tab in TABS.items():
-        selected = [row for key, row in rows.items() if key[0] == kind]
-        selected.sort(key=lambda row: (row["health"] != "look", -(row["uses"] or 0), row["name"]))
-        tabs[tab] = {"count": len(selected), "rows": selected}
+    return {"counts": counts, "inventory": inventory, "entries": entries, "rows": rows}
+
+
+def build_overview(counts) -> dict:
+    """Fail closed: unavailable and partial answers contain no apparent zero totals or rows."""
+    ready = prepare(counts)
+    if "error" in ready:
+        return ready
+    counts, entries, rows = ready["counts"], ready["entries"], ready["rows"]
+    # Rows live in the lists (/api/list/<tab>); the overview keeps the tab counts and the cards.
+    tabs = {tab: {"count": sum(key[0] == kind for key in rows)} for kind, tab in TABS.items()}
     cards = _cards(entries, rows)
     sharing = counts["sharing"]["counts"] == "on"
     return {
