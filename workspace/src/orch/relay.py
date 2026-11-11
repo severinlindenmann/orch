@@ -593,14 +593,40 @@ UPDATE_KINDS = ("ack", "working", "note", "result", "question", "failure", "stop
 
 
 def _update_title(root: Path, ticket: str) -> str | None:
-    """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces)."""
+    """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces), with
+    secrets and stored key values hidden like every text of the ticket view (send_text itself hides nothing).
+    No value hider: no title (fail closed)."""
+    from orch import phone_results, phone_view
+
     try:
         title = tickets.load(root, ticket)["title"]
     except (Refused, ValueError, KeyError):
         return None
-    line = " ".join(clean_untrusted(title, 200).split())
+    if (h := phone_results.value_hider(root)) is None:
+        return None
+    # no cut before hiding (a cut ahead of a collapse can leave a prefix of a stored value inside the
+    # shown 120): titles are short, a huge one gets no title. Then clean, collapse and filter (these can
+    # join or split text into a secret), then hide the stored values and redact; the result must be a
+    # fixed point of both, else no title (fail closed)
+    raw = str(title)
+    if len(raw) > 4000:
+        return None
+    hidden = h.hide_text(raw)
+    lim = len(hidden) * 3 + 64  # cleaning only drops characters (NFC grows a text at most threefold)
+    cleaned = clean_untrusted(hidden, lim + 1)
+    if len(cleaned) > lim:  # never true; if it ever is, a cut happened: no title
+        return None
+    line = " ".join(cleaned.split())
     line = "".join(c for c in line if unicodedata.category(c)[0] in "LMNPS" or c == " ")
-    return line[:120].strip() or None
+
+    def stable(t: str) -> bool:
+        return h.hide_text(t) == t and phone_view.redact(t) == t
+
+    line = h.hide_text(phone_view.redact(h.hide_text(line)))
+    if not stable(line):
+        return None
+    line = line[:120].strip()  # a cut can only drop text, never join: but check the cut text as well
+    return line if line and stable(line) else None
 
 
 def _topic_of_message(root: Path, mid: str) -> str | None:
@@ -717,7 +743,27 @@ def send_text(
             if isinstance(view, dict) or _unreachable(e) or getattr(e, "status", None) is None:
                 raise  # a light update without its view says nothing: refused means refused
             try:
-                msg = _message(root, to, "text", body, ticket, reply_to, mid)
+                if tv.get(
+                    "results"
+                ):  # an older relay does not know results: the same update once without them
+                    try:
+                        msg = _message(
+                            root,
+                            to,
+                            "text",
+                            {**body, "ticket_view": {k: v for k, v in tv.items() if k != "results"}},
+                            ticket,
+                            reply_to,
+                            mid,
+                        )
+                    except Refused as e1:
+                        if _unreachable(e1) or getattr(e1, "status", None) is None:
+                            raise
+                        if getattr(e1, "status", None) == 409:
+                            raise
+                        msg = _message(root, to, "text", body, ticket, reply_to, mid)
+                else:
+                    msg = _message(root, to, "text", body, ticket, reply_to, mid)
             except Refused as e2:
                 if getattr(e2, "status", None) != 409:
                     raise
@@ -921,11 +967,12 @@ REVIEW_OPTIONS = ["accept", "changes"]
 def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
     """fb8: the review question of round n to the phones (contracts/relay-api.md 'Review question'), as the
     message `mid` the round is bound to. The asked record is written BEFORE the send. A normal question with
-    body.review true; the relay does not push it (the Ready-for-review text did)."""
+    body.review true; the relay does not push it (the Ready-for-review text did). The title is cut, scrubbed
+    and value-hidden like every ticket title for a phone (no value hider: "Ticket", fail closed)."""
     qid = f"review-{n}"
     body = {
         "question_id": qid,
-        "title": ticket["title"],
+        "title": _update_title(root, ticket["id"]) or "Ticket",
         "text": REVIEW_TEXT,
         "options": REVIEW_OPTIONS,
         "recommended": None,
@@ -1589,7 +1636,7 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
     """What a phone text says in plain words for the ticket's history and the agent: the text, the voice
     transcript (and its language), saved photos and files (paths), the location with a map link and the
     feedback on a proof. Files are downloaded on the way."""
-    from orch import phone_view
+    from orch import phone_results, phone_view
 
     lines = []
     limit = tickets.ATTACH_MAX // 4  # characters: at most 2 MB in the file
@@ -1647,10 +1694,11 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
             ticket = tickets.load(root, tid)
         except (Refused, OSError, ValueError):
             ticket = {}
-        title = (
-            _line(phone_view.artifact_title(root, ticket, str(fb.get("artifact_id", ""))) or "", 100)
-            or "a file"
+        aid = str(fb.get("artifact_id", ""))
+        title = _line(
+            phone_view.artifact_title(root, ticket, aid, phone_results.value_hider(root)) or "", 100
         )
+        title = title or "a file"
         rev = re.sub(r"[^A-Za-z0-9._:-]", "", str(fb.get("artifact_rev", "")))[:12]
         head = f"Feedback on {title}" + (f" ({rev})" if rev else "")
         if fb.get("verdict") == "approve":
