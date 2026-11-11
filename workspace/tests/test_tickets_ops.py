@@ -106,6 +106,29 @@ def test_agent_can_reorder_wont_do_steps_but_cannot_change_decisions(proj, new_t
         assert read(proj, tid) == moved
 
 
+@pytest.mark.parametrize("agent,wont_do", [(True, True), (True, False), (False, True)])
+def test_reword_step_respects_persons_wont_do(proj, new_ticket, monkeypatch, agent, wont_do):
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    _, step = tickets.check_add(proj, tid, "Ask finance", "human:Ann")
+    if wont_do:
+        tickets.check_wont_do(proj, tid, step["id"], "human:Ann", "Not needed")
+    before = read(proj, tid)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex" if agent else None)
+
+    def reword(ticket):
+        ticket["checklist"][0]["text"] = "Ask sales"
+
+    if agent and wont_do:
+        with pytest.raises(tickets.Refused, match="Only a person"):
+            tickets.apply_op(proj, tid, reword)
+        assert read(proj, tid) == before
+    else:
+        tickets.apply_op(proj, tid, reword)
+        expected = {**before["checklist"][0], "text": "Ask sales"}
+        assert read(proj, tid)["checklist"][0] == expected
+
+
 @pytest.mark.parametrize("reopen_original", [False, True])
 def test_agent_cannot_duplicate_wont_do_step(proj, new_ticket, monkeypatch, reopen_original):
     tid = new_ticket()
