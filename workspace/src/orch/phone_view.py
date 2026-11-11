@@ -374,11 +374,26 @@ def _clean_full(t: str) -> str:
 
 
 def _has_secret(data: bytes) -> bool:
+    """The file scan uses the SAME detection as redact (_scrub_text: patterns, key=value, spaced values, flag
+    values and URL userinfo): a text hides something when the scrub changes it, in its raw, NFKC and cleaned
+    (invisible characters and comments gone) form. Over-hiding is accepted: such a file is not sent."""
     text = data.decode(errors="ignore")
-    norm = unicodedata.normalize("NFKC", text)
-    if any(rx.search(t) for rx in _SECRET_PATTERNS for t in (text, norm)):
+    cleaned = _clean_full(text)
+    forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
+    return any(_scrub_text(t) != t for t in dict.fromkeys(forms))
+
+
+def _holds_stored_value(root: Path, data: bytes) -> bool:
+    """True when the bytes hold a stored key value of the keystore (the value hider, exact needles in all the
+    forms it knows), as bytes or as text (UTF-8, UTF-16 either order). A hider that can not be built: True
+    (fail closed)."""
+    h = phone_results.value_hider(root)
+    if h is None:
         return True
-    return bool(_SECRET_KV.search(text))
+    texts = [data.decode(errors="ignore")] + [
+        data[k:].decode(c, "ignore") for c in ("utf-16-le", "utf-16-be") for k in (0, 1)
+    ]
+    return h.hide_bytes(data) != data or any(h.hide_text(t) != t for t in texts)
 
 
 def _scan(data: bytes, name: str) -> str:
@@ -889,6 +904,8 @@ def _gate(root: Path, tid: str, data: bytes, name: str, state: dict | None, phot
         verdict = "unknown"
     if verdict == "unknown" and photo_ok and _is_image(data, name):
         verdict = _photo_verdict(data)
+    if verdict == "ok" and _holds_stored_value(root, data):
+        verdict = "secret"  # the exact value of a stored key, whatever the label (or none)
     name = Path(name).name
     if verdict == "ok":
         return True

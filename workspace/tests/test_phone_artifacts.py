@@ -5,7 +5,7 @@ import hashlib
 import pytest
 from test_ticket_view import conn  # noqa: F401 (fixture)
 
-from orch import phone_view, tickets
+from orch import keystore, phone_view, tickets
 
 
 def artifact(proj, tid, name, data=b"artifact bytes"):
@@ -614,3 +614,39 @@ def test_no_upload_without_the_gate(proj, run, new_ticket, conn, monkeypatch):  
     ticket["description"] = "See artifacts/a.txt"
     assert phone_view.attachments(proj, ticket, phone_view.load_state(proj)) == []
     assert not conn.blobs
+
+
+@pytest.mark.parametrize("how", ["artifact", "evidence"])
+def test_a_stored_key_value_is_never_uploaded_whatever_the_label(proj, run, new_ticket, conn, how):  # noqa: F811
+    """Needle check: a file that holds the exact value of a key saved in the keystore (no label, no pattern)
+    is not sent and is marked, as named artifact and as proof file alike."""
+    value = "Xk93-pq7Lm-aa21-zQ"
+    keystore.add(proj, "db-cred", "token", value)
+    tid = new_ticket("Needle")
+    body = f"The new one is {value}, rotate it.\n".encode()
+    if how == "artifact":
+        artifact(proj, tid, "notes.txt", body)
+        assert run("ask", tid, "See artifacts/notes.txt")[0] == 0
+    else:
+        run("check", "add", tid, "Attach")
+        src = proj / "notes.txt"
+        src.write_bytes(body)
+        assert run("check", "done", tid, "c1", "--file", str(src), "--role", "result")[0] == 0
+    assert phone_view.view_for(proj, tid)["attachments"] == []
+    assert not conn.blobs
+    assert [h for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]]
+
+
+def test_a_file_without_a_stored_value_still_goes(proj, run, new_ticket, conn):  # noqa: F811
+    keystore.add(proj, "db-cred", "token", "Xk93-pq7Lm-aa21-zQ")
+    tid = new_ticket("No needle")
+    artifact(proj, tid, "notes.txt", b"nothing secret here\n")
+    assert run("ask", tid, "See artifacts/notes.txt")[0] == 0
+    assert len(phone_view.view_for(proj, tid)["attachments"]) == 1
+
+
+def test_an_unbuildable_value_hider_fails_closed(proj, new_ticket, monkeypatch):
+    tid = new_ticket("No hider")
+    assert phone_view._gate(proj, tid, b"nothing secret here\n", "notes.txt", None) is True
+    monkeypatch.setattr(phone_view.phone_results, "value_hider", lambda root: None)
+    assert phone_view._gate(proj, tid, b"nothing secret here\n", "notes.txt", None) is False
