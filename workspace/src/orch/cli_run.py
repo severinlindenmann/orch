@@ -178,6 +178,7 @@ def _status(args, root: Path) -> None:
         # once per id). An agent's queued input is never in it.
         human = [i["id"] for i in runs.human_waiting(root, tid)]
         data = {"ticket": tid, "running": False, "pending": waiting, "human_pending_ids": human}
+        data["stop_held_ids"] = runs_live.stop_held(root, tid, human)  # a person stopped: no restart for them
         if waiting:  # input is really queued for a run
             text = (
                 "Queued. Nothing will start it: no background add-on is running here. "

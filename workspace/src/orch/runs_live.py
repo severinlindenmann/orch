@@ -1044,8 +1044,35 @@ def _close(root: Path, rec: dict, interrupt: bool) -> None:
     (runs.run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
 
 
+def _held_path(root: Path, tid: str) -> Path:
+    tickets.ticket_path(root, tid)  # id shape check
+    return runs.run_dir(root) / "stop-held" / f"{tid}.json"
+
+
+def stop_held(root: Path, tid: str, pending: list[str]) -> list[str]:
+    """Ids of a person's input that waited when a person stopped the run (`orch run stop`): the automation
+    host does not restart the ticket for them. Only ids still pending stay held; new input is never held."""
+    path = _held_path(root, tid)
+    try:
+        held = json.loads(path.read_text(encoding="utf-8")).get("ids") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    keep = [i for i in held if i in pending]
+    if keep != held:
+        if keep:
+            runs._atomic(path, json.dumps({"ids": keep}) + "\n")
+        else:
+            path.unlink(missing_ok=True)
+    return keep
+
+
 def stop(root: Path, tid: str) -> bool:
     with runs.locked(root, tid):  # the run we stop is the one that holds the claim now
+        held = [i["id"] for i in runs.human_waiting(root, tid)]  # a person stopped: no restart for these
+        if held:
+            runs._atomic(_held_path(root, tid), json.dumps({"ids": held}) + "\n")
+        else:
+            _held_path(root, tid).unlink(missing_ok=True)
         rec = runs.read(root, tid)
         if rec:
             rec["stop_requested"] = tickets.now()

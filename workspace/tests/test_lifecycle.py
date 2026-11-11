@@ -89,6 +89,40 @@ def test_stop_leaves_the_ticket_ready(proj, run, gen, one_step):
     assert _status_soon(proj, tid, "ready") == "ready"
 
 
+def _stop_a_run(proj, run, tid):
+    import subprocess
+    import sys
+
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        runs.claim(proj, tid, "human:t", "fake", "oneshot", pid=p.pid)
+        code, _, err = run("run", "stop", tid)
+        assert code == 0, err
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_run_stop_with_waiting_input_holds_it_from_the_automation(proj, run):
+    """A person's stop while their input waits: that input does not restart the ticket (stop_held_ids, read by
+    the automation host). New input after the stop is not held; a stop with nothing waiting holds nothing."""
+    tid = _new(run)
+    first = runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    _stop_a_run(proj, run, tid)
+    st = json.loads(run("run", "status", tid, "--json")[1])
+    assert st["human_pending_ids"] == [first["id"]] and st["stop_held_ids"] == [first["id"]]
+    later = runs.pending_add(proj, tid, "human:owner", "message", "and this")  # new input: not held
+    st = json.loads(run("run", "status", tid, "--json")[1])
+    assert st["human_pending_ids"] == [first["id"], later["id"]] and st["stop_held_ids"] == [first["id"]]
+    items = runs._pending_read(proj, tid)  # a run read everything that waited
+    for i in items:
+        i["delivered_at"] = tickets.now()
+    runs._pending_write(proj, tid, items)
+    _stop_a_run(proj, run, tid)  # a second stop, nothing waiting: no hold
+    assert not runs_live._held_path(proj, tid).exists()
+    assert json.loads(run("run", "status", tid, "--json")[1])["stop_held_ids"] == []
+
+
 def test_a_run_lock_is_never_empty(proj, monkeypatch):
     """A stop could hit the wrapper between creating its run lock and writing its name into it; that empty
     lock looked like a live writer for 30 s and the stop gave up ("busy"). The lock is now linked into place
