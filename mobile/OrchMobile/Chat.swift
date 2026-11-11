@@ -8,6 +8,7 @@ enum ChatRoute: Hashable {
     case general(String)   // the General conversation of a workspace (debug `-open general:<ws>`)
     case ticket(workspace: String, ticket: String)
     case group(host: String, id: String)
+    case groupHistory
     case newChat
     case newTopic(String)
     case info(workspace: String, ticket: String?)
