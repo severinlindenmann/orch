@@ -21,7 +21,7 @@ final class StatusRefsUITests: XCTestCase {
     func testWorkspaceGroupsByStatusAndDoneIsCollapsed() {
         let app = launch("ws_pilatus001")
         XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20), "General is pinned")
-        XCTAssertTrue(app.staticTexts["Needs you"].waitForExistence(timeout: 10), "the topic with an open question is under Needs you")
+        XCTAssertTrue(app.staticTexts["Needs your OK"].waitForExistence(timeout: 10), "the topic with an open question is under Needs your OK")
         XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_7k3f9q"].exists)
         XCTAssertFalse(app.staticTexts["Not started"].exists && app.staticTexts["Ready for review"].exists, "empty groups are hidden")
         let done = app.buttons["done-toggle"]
@@ -41,7 +41,7 @@ final class StatusRefsUITests: XCTestCase {
         let app = launch("ws_reports001")
         XCTAssertTrue(app.staticTexts["Working · 1"].waitForExistence(timeout: 20), "group header with its count")
         XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].exists)
-        XCTAssertTrue(app.staticTexts["Claude is working"].exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Helper is working")).firstMatch.exists)
         XCTAssertFalse(app.buttons["done-toggle"].exists, "no finished topic, no Done group")
         shot(app, "3-workspace-working")
     }
@@ -63,9 +63,11 @@ final class StatusRefsUITests: XCTestCase {
         // The Results section (draft 02, 2.6) sits above the references and the list is lazy: scroll down to them.
         for _ in 0..<4 where !el(app, "info-ref-ref0").exists { app.swipeUp() }
         XCTAssertTrue(el(app, "info-ref-ref0").waitForExistence(timeout: 5), "web address card")
-        XCTAssertTrue(app.staticTexts["PIL-13 · Rename field X in ingestion job"].exists, "ticket row with key and title")
-        for _ in 0..<3 where !app.staticTexts["docs/board/q3.md:12"].exists { app.swipeUp() }   // the list is lazy
-        XCTAssertTrue(app.staticTexts["docs/board/q3.md:12"].waitForExistence(timeout: 5), "file reference as plain text")
+        XCTAssertTrue(app.staticTexts["Rename field X in ingestion job"].exists, "ticket row with title")
+        let fileReference = el(app, "info-ref-ref3")
+        app.reveal(fileReference)
+        fileReference.buttons["Details"].tap()
+        XCTAssertTrue(app.staticTexts["docs/board/q3.md:12"].waitForExistence(timeout: 5), "file reference under Details")
         shot(app, "4-references")
         for _ in 0..<3 where !el(app, "info-ref-ref1").isHittable { app.swipeDown() }
         el(app, "info-ref-ref1").tap()   // opens that topic

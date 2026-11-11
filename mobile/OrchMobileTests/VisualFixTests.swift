@@ -30,8 +30,8 @@ final class VisualFixTests: XCTestCase {
     func testChatRowPreview() {
         XCTAssertEqual(ChatsRowRules.preview(""), "No messages yet")
         XCTAssertEqual(ChatsRowRules.preview(" \n "), "No messages yet")
-        XCTAssertEqual(ChatsRowRules.preview("Allow access?", shownQuestionCount: 1), "1 needs you")
-        XCTAssertEqual(ChatsRowRules.preview("Allow access?", shownQuestionCount: 2), "2 need you")
+        XCTAssertEqual(ChatsRowRules.preview("Allow access?", shownQuestionCount: 1), "1 needs your OK")
+        XCTAssertEqual(ChatsRowRules.preview("Allow access?", shownQuestionCount: 2), "2 need your OK")
         XCTAssertEqual(ChatsRowRules.preview("Allow access?"), "Allow access?")
         XCTAssertEqual(ChatsRowRules.preview("", starting: true), "Getting started…")
         XCTAssertEqual(ChatsRowRules.preview("Report ready"), "Report ready")

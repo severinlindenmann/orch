@@ -36,7 +36,7 @@ enum GroupRoomRules {
 
     static func taskHeading(target: (workspace: String, ticket: String, label: String, title: String?)?) -> String? {
         guard let target else { return nil }
-        return [target.label, target.title].compactMap { $0 }.joined(separator: " · ")
+        return target.title ?? "Task"
     }
 
     static func badgeName(group: PhoneGroup, ws: String) -> String {
@@ -169,11 +169,12 @@ struct GroupListRow: View {
                             Text(group.title).themeFont(17, .semibold).foregroundStyle(history ? Theme.muted : Theme.text)
                             if muted { MutedIcon() }
                         }
-                        lastLine.themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
-                        KeyTag(key: group.ticketKey)
+                        Text(history
+                             ? "finished \(ShellTime.day(group.messages.last?.at))"
+                             : "\(group.members.count) helpers · started \(ShellTime.short(group.messages.first?.at))")
+                            .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     VStack(spacing: 8) {
-                        Text(ShellTime.short(group.messages.last?.at)).themeFont(12).foregroundStyle(Theme.muted)
                         if !history { ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted) }
                     }
                 }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
@@ -205,9 +206,9 @@ struct GroupsSection: View {
             Text("Groups").themeFont(13, .semibold).foregroundStyle(Theme.muted).padding(.top, 12)
             ForEach(groups, id: \.key) { GroupListRow(group: $0) }
         }
-        if !groups.isEmpty || !GroupRoomRules.rows(model.groups, closed: true).isEmpty {
+        if !model.workspaceSummaries.isEmpty || !GroupRoomRules.rows(model.groups, closed: true).isEmpty {
             NavigationLink(value: ChatRoute.groupHistory) {
-                HStack { Text("Done groups"); Spacer(); ShellChevron() }
+                HStack { Text("Earlier"); Spacer(); ShellChevron() }
                     .themeFont(15).foregroundStyle(Theme.brand).frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
             }.accessibilityIdentifier("group-history")
         }
@@ -219,11 +220,22 @@ struct GroupHistoryView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
+                Text("Earlier days").themeFont(15, .semibold).frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(model.workspaceSummaries) { summary in
+                    ForEach(ChatDay.split(model.conversationItems(.general(workspace: summary.id)), today: ChatDay.key(for: Date())).past.reversed(), id: \.day) { day in
+                        NavigationLink {
+                            ConversationView(id: .general(workspace: summary.id), historyDay: day.day)
+                        } label: {
+                            Text("\(ChatDay.label(forDay: day.day, today: ChatDay.key(for: Date()))) · \(WorkspaceAlias.name(for: summary.workspace))")
+                        }
+                    }
+                }
+                Text("Finished groups").themeFont(15, .semibold).frame(maxWidth: .infinity, alignment: .leading)
                 let groups = GroupRoomRules.rows(model.groups, closed: true)
-                if groups.isEmpty { Text("No done groups yet.").foregroundStyle(Theme.muted) }
+                if groups.isEmpty { Text("No finished groups yet.").foregroundStyle(Theme.muted) }
                 ForEach(groups, id: \.key) { GroupListRow(group: $0, history: true) }
             }.padding(16)
-        }.background(Theme.bg).navigationTitle("Done groups").navigationBarTitleDisplayMode(.inline)
+        }.background(Theme.bg).navigationTitle("Earlier").navigationBarTitleDisplayMode(.inline)
     }
 }
 

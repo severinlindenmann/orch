@@ -87,7 +87,7 @@ enum ConversationRules {
             guard pm.message.body.update?.kind == "ack", let t = pm.message.ticket, let r = pm.message.replyTo, general.contains(r),
                   seen.insert(pm.id).inserted else { continue }
             // After the message it answers (clocks of phone and workspace may differ): never above it.
-            out.append(StartedChip(id: pm.id, at: max(pm.message.createdAt, generalAt[r] ?? ""), workspace: workspace, ticket: t, label: "\(pm.message.key ?? key(t) ?? "Topic") started"))
+            out.append(StartedChip(id: pm.id, at: max(pm.message.createdAt, generalAt[r] ?? ""), workspace: workspace, ticket: t, label: "Topic started"))
         }
         return out
     }
@@ -112,7 +112,7 @@ struct TicketChatView: View {
 
 struct ConversationView: View {
     let id: ConversationID
-    var historyDay: String? = nil
+    @State var historyDay: String? = nil
     var goToToday: (() -> Void)? = nil
     @AppStorage("workspaceAliasRevision") private var aliasRevision = 0
     @State private var historyShown = false
@@ -156,9 +156,9 @@ struct ConversationView: View {
     }
     private var title: String {
         switch resolved {
-        case .general: historyDay.map { ChatDay.label(forDay: $0, today: today) + " · read only" } ?? workspaceName
+        case .general: "Your helper"
         case .starting: "New topic"
-        case .topic: ticket.map { [$0.key, $0.displayTitle].compactMap { $0 }.joined(separator: " · ") } ?? "Topic"
+        case .topic: ticket.map { $0.displayTitle } ?? "Topic"
         }
     }
     private func working(_ items: [ConvItem], now: Date) -> Bool {
@@ -203,7 +203,7 @@ struct ConversationView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { historyShown = true } label: {
                             headerIcon("clock")
-                        }.buttonStyle(.plain).accessibilityLabel("History").accessibilityIdentifier("chat-history")
+                        }.buttonStyle(.plain).accessibilityLabel("Earlier").accessibilityIdentifier("chat-history")
                     }.chatCircleBackground()
                 }
                 if historyDay == nil {
@@ -224,8 +224,13 @@ struct ConversationView: View {
             .tint(Theme.brand)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if historyDay != nil {
-                        Button("Go to Today") { goToToday?() }.buttonStyle(WideButtonStyle(color: Theme.brand))
+                    if let historyDay {
+                        Text("\(ChatDay.label(forDay: historyDay, today: today)) · you can read, not reply")
+                            .themeFont(13).foregroundStyle(Theme.muted).padding(8)
+                        Button("Back to today") {
+                            if let goToToday { goToToday() }
+                            else { self.historyDay = nil }
+                        }.buttonStyle(WideButtonStyle(color: Theme.brand))
                     } else {
                     if working(items, now: now) { StatusLine(isGeneral ? "\(workspaceName) is thinking…" : "\(workspaceName) is working…") }
                     let reviewQuestion = resolved.ticket.flatMap { ticketId in
@@ -240,7 +245,7 @@ struct ConversationView: View {
             }
             .sheet(isPresented: $historyShown) { ChatHistoryView(workspaceId: resolved.workspace) }
             .sheet(isPresented: $dayDetails) {
-                Text("\(workspaceName) starts fresh at 04:00. Earlier chats stay in History.")
+                Text("\(workspaceName) starts fresh at 04:00. Find past chats in Earlier.")
                     .themeFont(17).foregroundStyle(Theme.text).padding(24)
                     .presentationDetents([.medium]).presentationBackground(Theme.surface).presentationDragIndicator(.visible)
             }
@@ -362,7 +367,8 @@ struct ConversationView: View {
                     if isGeneral && historyDay == nil && !items.isEmpty && !ChatDay.split(allItems, today: today).past.isEmpty {
                         VStack(spacing: 6) {
                             Text("New day").themeFont(13, .medium)
-                            Button("Context cleared at 04:00 · Details") { dayDetails = true }.themeFont(13)
+                            Text("Starts fresh each day at 04:00").themeFont(13)
+                            Button("Details") { dayDetails = true }.themeFont(12)
                         }.foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, 16)
                             .accessibilityIdentifier("chat-newday")
                     }

@@ -19,7 +19,7 @@ struct ConversationInfoView: View {
     init(conversation: ConversationID) { self.conversation = conversation }
 
     private var workspaceName: String {
-        model.workspace(conversation.workspace)?.displayName ?? conversation.workspace
+        model.workspace(conversation.workspace)?.displayName ?? "Workspace"
     }
 
     private var topic: TopicSummary? {
@@ -33,9 +33,8 @@ struct ConversationInfoView: View {
     }
 
     private var title: String {
-        if case .general = conversation { return "Chat - \(workspaceName)" }
+        if case .general = conversation { return "Your helper" }
         let name = topic?.title ?? ticket?.displayTitle ?? "Getting started…"
-        if let key = topic?.key ?? ticket?.key { return "\(key) · \(name)" }
         return name
     }
 
@@ -154,9 +153,11 @@ struct ConversationInfoView: View {
     @ViewBuilder private var header: some View {
         if let ticket {
             VStack(alignment: .leading, spacing: 12) {
-                Text([ticket.key, workspaceName].compactMap { $0 }.joined(separator: " · "))
-                    .themeFont(13, .semibold).foregroundStyle(Theme.muted)
                 Text(ticket.displayTitle).themeFont(22, .semibold).accessibilityAddTraits(.isHeader)
+                DisclosureGroup("Details") {
+                    Text([ticket.key, workspaceName].compactMap { $0 }.joined(separator: " · "))
+                        .foregroundStyle(Theme.muted)
+                }.themeFont(13)
                 TicketStatusChip(status: TopicStatus(ticket)).accessibilityIdentifier("info-summary")
                 if let description = ticket.view?.summary, !description.isEmpty {
                     Text(ArtifactMentions.attributed(description, attachments: ticket.view?.attachments ?? []))
@@ -289,7 +290,7 @@ struct ConversationInfoView: View {
                 artifactCard(nil, title: name, kindLabel: "Artifact").opacity(0.5)
             }
         case .file(_, let text):
-            Text(text).font(.system(size: 15, design: .monospaced))
+            DisclosureGroup("Details") { Text(text).font(.system(size: 15, design: .monospaced)) }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(16)
                 .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
         }

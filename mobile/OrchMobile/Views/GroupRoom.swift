@@ -146,7 +146,7 @@ struct GroupRoomView: View {
                 }.accessibilityIdentifier("group-members")
                 if let ticket = group.ticket {
                     NavigationLink(value: ChatRoute.ticket(workspace: key.host, ticket: ticket)) {
-                        Text("From ticket \(group.ticketKey ?? "") ›").themeFont(13).foregroundStyle(Theme.brand)
+                        Text("From ticket ›").themeFont(13).foregroundStyle(Theme.brand)
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -280,7 +280,7 @@ struct GroupTaskView: View {
             }
             if let target {
                 NavigationLink(value: ChatRoute.ticket(workspace: target.workspace, ticket: target.ticket)) {
-                    Text("Open \(target.label) ›").themeFont(15).foregroundStyle(Theme.brand).frame(minHeight: 44)
+                    Text("Open task ›").themeFont(15).foregroundStyle(Theme.brand).frame(minHeight: 44)
                 }
             }
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -356,7 +356,7 @@ struct GroupMembersView: View {
                                 Divider()
                                 HStack(spacing: 12) {
                                     GroupMemberBadge(group: group, ws: member.ws, size: 34)
-                                    group.memberText(member.ws, suffix: member.ws == key.host ? " · started the group from \(group.ticketKey ?? "")" : "").themeFont(15)
+                                    group.memberText(member.ws, suffix: member.ws == key.host ? " · started the group" : "").themeFont(15)
                                 }
                             }
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))

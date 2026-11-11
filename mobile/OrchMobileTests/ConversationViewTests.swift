@@ -64,7 +64,7 @@ final class ConversationViewTests: XCTestCase {
                     ack("a22", replyTo: "m_topic", ticket: "t_2"), ack("a333", replyTo: "m1", ticket: nil)]
         let chips = ConversationRules.startedChips(messages: msgs, workspace: "ws_a", key: { _ in nil })
         XCTAssertEqual(chips.map(\.id), ["a1"], "duplicate ack id shown once; acks of topic texts and acks without a ticket never")
-        XCTAssertEqual(chips.first?.label, "PIL-15 started")
+        XCTAssertEqual(chips.first?.label, "Topic started")
         XCTAssertEqual(chips.first?.ticket, "t_1")
     }
 

@@ -35,18 +35,18 @@ final class ConversationUITests: XCTestCase {
         let app = launch(["-openChat", "ws_pilatus001"])
         let title = el(app, "chat-title")
         must(app, title, "chat title")
-        XCTAssertFalse(title.label.contains("helper"))
+        XCTAssertEqual(title.label, "Your helper")
         XCTAssertNotEqual(title.label, "Chat")
         let history = el(app, "chat-history"), info = el(app, "chat-info")
-        must(app, history, "History"); must(app, info, "Info")
-        XCTAssertEqual(history.label, "History")
-        XCTAssertFalse(history.staticTexts["History"].exists)
+        must(app, history, "Earlier"); must(app, info, "Info")
+        XCTAssertEqual(history.label, "Earlier")
+        XCTAssertFalse(history.staticTexts["Earlier"].exists)
         XCTAssertEqual(history.frame.width, 44, accuracy: 1)
         XCTAssertEqual(history.frame.height, 44, accuracy: 1)
         XCTAssertEqual(info.frame.width, history.frame.width, accuracy: 1)
         XCTAssertEqual(info.frame.midY, history.frame.midY, accuracy: 1)
         history.tap()
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' helper'")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS ' · helper'")).firstMatch.exists)
     }
 
     func testQuestionUndoThenAnswered() {

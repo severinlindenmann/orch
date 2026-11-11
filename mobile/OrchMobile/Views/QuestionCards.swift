@@ -22,7 +22,7 @@ struct QuestionCard: View {
                         if q.isAllow {
                             Image(systemName: "lock").accessibilityLabel("Permission")
                         }
-                        Text(position.map { ConversationRules.needsYouText(position: $0.n, of: $0.of) } ?? "Needs you")
+                        Text(position.map { ConversationRules.needsYouText(position: $0.n, of: $0.of) } ?? "Needs your OK")
                     }.themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
                 }
                 questionText(q)

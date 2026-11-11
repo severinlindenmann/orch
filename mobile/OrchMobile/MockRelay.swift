@@ -79,7 +79,7 @@ actor MockRelay: RelayAPI {
         if UserDefaults.standard.bool(forKey: "mockDoneReview") {
             for (ticket, title) in [("t_donerev1", "Done, verdict asked"), ("t_donerev2", "Done, no question")] {
                 updateLog.append(TicketUpdate(id: "m_doneupdate_" + ticket, workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
-                    ticket: ticket, kind: "result", title: title, text: "The agent finished the work.", replyTo: nil,
+                    ticket: ticket, kind: "result", title: title, text: "The helper finished the work.", replyTo: nil,
                     at: Self.now(), ticketView: TicketSnapshot(title: title, status: "review", running: false)))
             }
             all.append(Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_donereview00001", from: Self.pilatus,

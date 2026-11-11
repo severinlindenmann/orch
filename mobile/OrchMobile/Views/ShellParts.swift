@@ -65,7 +65,9 @@ enum ShellTime {
     }
     static func day(_ iso: String?) -> String {
         guard let date = date(iso) else { return "" }
-        return formatted(date, "d MMM")
+        if Calendar.current.isDateInToday(date) { return "today" }
+        if Calendar.current.isDateInYesterday(date) { return "yesterday" }
+        return formatted(date, "EEE d MMM")
     }
     private static func formatted(_ date: Date, _ format: String, timeZone: TimeZone = .current) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = format; f.timeZone = timeZone

@@ -14,7 +14,7 @@ struct StatusPill: View {
     let status: Ticket.Status
     let kind: String
     var text: String {
-        switch status { case .needsYou: "Needs you"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "result" ? "Done" : (kind == "stopped" ? "Stopped" : "Did not work") }
+        switch status { case .needsYou: "Needs your OK"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "result" ? "Done" : (kind == "stopped" ? "Stopped" : "Did not work") }
     }
     var color: Color { switch status { case .needsYou: Theme.warn; case .review: Theme.warn; case .paused, .backlog: Theme.muted; case .working: Theme.brand; case .done: kind == "result" ? Theme.muted : Theme.danger } }
     var body: some View {
@@ -41,7 +41,7 @@ struct AttachmentBubble: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Agent").themeFont(11, .semibold).foregroundStyle(Theme.brand)
+                Text("Helper").themeFont(11, .semibold).foregroundStyle(Theme.brand)
                 AttachmentTile(attachment: attachment, large: true)
                 Text(ChatBuilder.timeText(at)).themeFont(11).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
             }.padding(10).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
