@@ -29,6 +29,14 @@
     var s = el("span"); s.appendChild(document.createTextNode(n)); s.appendChild(q(p.step)); return s;
   }
   var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
+  var INSIGHTS_SETTING = {"insights.keep_days": "how long full detail is kept", "insights.max_mb": "the largest size of the record", "insights.share_counts": "sharing counts with your admin", "insights.share_names": "sharing this workspace's names"};
+  function insightsValue(key, v) {  // plain words for the value; anything unexpected is shown capped, never as markup
+    var n = Number(v);
+    if (key === "insights.keep_days" && n > 0) return n + " days";
+    if (key === "insights.max_mb" && n > 0) return n >= 1024 ? n / 1024 + " GB" : n + " MB";
+    if (v === "on" || v === "off" || v === true || v === false) return v === "on" || v === true ? "on" : "off";
+    return cap(v);
+  }
   var TEMPLATES = {
     "copy.remove_orphaned": function (p) { return ["Remove copies of the missing project ", plain(p.ws8), p.discard ? ", discarding changes that cannot be saved?" : ", saving changes first?"]; },
     "copy.retry": function (p) { return ["Try cleaning up the copy for ", q(p.title), " again?"]; },
@@ -64,6 +72,8 @@
     "private.allow": function (p) { return ["Allow ", q(p.name), " to run ", full(p.command), p.interactive ? " (and, live: " : "", p.interactive ? full(p.interactive) : "", p.interactive ? ")" : "", " on this computer?"]; },
     "private.move": function () { return ["Move the personal files out of the team repo?"]; },
     "config.agent_add": function (p) { return ["Add the agent ", q(p.name), " that runs ", full(p.command)].concat(p.interactive ? [" (live: ", full(p.interactive), ")"] : [], ["?"]); },
+    "insights.settings": function (p) { return ["Change ", plain(INSIGHTS_SETTING[p.setting] || "an Insights setting"), " to ", plain(insightsValue(p.setting, p.value)), "?"]; },
+    "record.delete_detail": function (p) { return ["Delete the full detail of ", q(p.title), "? The counts stay."]; },
     "addon.add_local": function (p) { return ["Add the add-on from ", full(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
   };
   function sentence(i) {

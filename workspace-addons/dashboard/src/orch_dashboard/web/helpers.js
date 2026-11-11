@@ -219,7 +219,7 @@
     const agents = arr(settings && settings.agents).filter(Boolean);
     const match = agents.find(a => a.name === claim.agent);
     const chosen = agents.find(a => a.chosen);
-    return capital(noPrefix(claim.label || match?.label || claim.agent || chosen?.label || chosen?.name || agents[0]?.label || agents[0]?.name || 'Agent'));
+    return capital(noPrefix(claim.label || match?.label || claim.agent || chosen?.label || chosen?.name || agents[0]?.label || agents[0]?.name || 'Helper'));
   }
   const matchesTicket = (ref, t) => !!ref && (ref === t.id || (!!t.key && String(ref).toLowerCase() === String(t.key).toLowerCase()));
   // Creation order (the plan order): the key number counts up with every new ticket; created_at only breaks ties.

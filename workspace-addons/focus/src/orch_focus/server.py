@@ -16,13 +16,13 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, adapterdata, chat, proofs, runfiles, selfupdate
+from . import actions, adapterdata, areas, chat, livecards, proofs, runfiles, selfupdate
 from .board import Board, TicketWatcher
 from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
 from .permissions import Permissions
+from .record import RecordFeed
 from .revisions import Revisions
-from .tail import Tail
 
 
 def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
@@ -47,7 +47,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "live-now.js", "areas.js", "used.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -204,6 +204,10 @@ class Tracker:
     def close(self) -> None:
         """End the pin threads and wait for them, so none outlives the server (or the test that started it)."""
         self.stop.set()
+        with self.lock:
+            for tr in self.tickets.values():
+                if tr.get("feed") is not None:
+                    tr["feed"].close()
         with self.plock:
             threads = list(self.pin_threads)
         for t in threads:
@@ -347,6 +351,8 @@ class Tracker:
         with self.lock:
             tr = self.tickets.get(tid)
             if run and (tr is None or tr["run"] != run):
+                if tr and tr.get("feed") is not None:
+                    tr["feed"].close()  # a new run of this ticket: the old followed command ends
                 log = EventLog(self.root, run)
                 tr = {"run": run, "log": log, "offset": 0, "board": Board(), "events": [],
                       "watcher": TicketWatcher(run, tid)}  # fmt: skip
@@ -357,12 +363,9 @@ class Tracker:
                 mode, agent = claim.get("mode"), claim.get("agent")
                 if isinstance(mode, str) and isinstance(agent, str):
                     self.last_agent[tid] = (agent, mode)
-                    if tr.get("tail") is None:
-                        tr["tail"] = Tail(
-                            self.root, tid, run, agent, mode, session=lambda: self.session(tid, agent)
-                        )
-                if tr.get("tail") is not None:
-                    tr["tail"].poll()
+                if tr.get("feed") is None:
+                    tr["feed"] = RecordFeed(self.root, self.orch_bin, run, tid)
+                steps = tr["feed"].poll()
                 new = tr["watcher"].feed(ticket)
                 if new:
                     try:
@@ -371,6 +374,9 @@ class Tracker:
                         pass
                 got, tr["offset"] = tr["log"].read(tr["offset"])
                 for e in got:
+                    tr["board"].apply(e)
+                got = got + steps
+                for e in steps:
                     tr["board"].apply(e)
                 tr["events"] = (tr["events"] + got)[-80:]
                 tr["board"].resolve_asks(ticket)
@@ -572,6 +578,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if path == "/api/tickets":
             return self._json(200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()})
+        if path == "/api/live":
+            cards = livecards.cards(self.tracker)
+            return self._json(200, {"cards": cards, "same_file": livecards.same_file(cards)})
+        if path == "/api/areas":
+            return self._json(200, {"areas": areas.strip(self.root, livecards.cards(self.tracker))})
         if path == "/api/procs":
             return self._json(200, {"procs": self.tracker.procs()})
         if path == "/api/mobile":
@@ -665,6 +676,22 @@ class Handler(BaseHTTPRequestHandler):
             ok, failed = 1, 0
         self._json(200, {"stopped": ok, "failed": failed, "procs": self.tracker.procs()})
 
+    def _area_op(self, op, args):
+        """Accept or remove an area: a person's click, so under the real orch it needs the page session (like every
+        other click that acts as the person). Agents and the CLI can only suggest (areas.add)."""
+        bad = lambda: self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if not isinstance(args, dict) or set(args) != {"area"} or not isinstance(args["area"], str):
+            return bad()
+        if self.orch_bin == actions.SELF and not (
+            self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+        ):
+            return self._send(403, b"Open Focus from this computer (orch focus open) to do this.", "text/plain; charset=utf-8")
+        try:
+            (areas.accept if op == "area.accept" else areas.remove)(self.root, args["area"])
+        except areas.BadArea as e:
+            return self._send(422, str(e).encode(), "text/plain; charset=utf-8")
+        self._json(200, {"areas": areas.strip(self.root, livecards.cards(self.tracker))})
+
     def _refuse(self):
         self._send(405, b"not allowed", "text/plain")
 
@@ -715,6 +742,8 @@ class Handler(BaseHTTPRequestHandler):
         args = body.get("args", {})
         if body.get("op") in ("proc.stop", "proc.stop_all"):
             return self._proc_op(body["op"], args)
+        if body.get("op") in ("area.accept", "area.remove"):
+            return self._area_op(body["op"], args)
         try:
             mint = None
             if self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1]):

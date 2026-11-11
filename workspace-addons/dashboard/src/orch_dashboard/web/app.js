@@ -211,8 +211,16 @@ function render(arrived = new Set()) {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
   } else crumb.textContent = pageName;
+  // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
+  const needCount = needsList().length, menuToggle = document.getElementById('menu-toggle');
+  menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
+  menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
+  const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
+  if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
   reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:window.DashHelpers.needsYou(needsList().length), 'aria-label':window.DashHelpers.needsYou(needsList().length)}, window.DashHelpers.needsYou(needsList().length)) : null), navLink('#tickets', 'Tickets', 'table'), navLink('#notes', 'Notes', 'text'), state.chat || state.general ? navLink('#chat', 'Chat', 'text', chatBadge()) : null,
+    // On a narrow screen the header has no room for "Open helper": it is a Menu item there (CSS shows it only then).
+    snapshot ? null : h('button', {type:'button', className:'nav-item nav-helper', 'data-key':'nav-open-agent', 'data-nav':'open-agent'}, iconEl('spark'), 'Open helper'),
     addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
   reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
   if (changed) {
@@ -347,10 +355,12 @@ toggle.addEventListener('click', () => {
   toggle.setAttribute('aria-expanded', String(open));
   document.querySelector('.sidebar').dataset.open = String(open);
 });
-nav.addEventListener('click', event => {
-  if (!event.target.closest('a')) return;
+document.querySelector('.sidebar').addEventListener('click', event => {
+  const helper = event.target.closest('[data-nav="open-agent"]');
+  if (!event.target.closest('a') && !helper) return;
   toggle.setAttribute('aria-expanded', 'false');
   document.querySelector('.sidebar').dataset.open = 'false';
+  if (helper) chatOpenAgent();
 });
 let dragging = '';
 const columnOf = event => event.target.closest?.('.kanban-col');
@@ -388,11 +398,11 @@ main.addEventListener('change', async event => {
     const mode = perm.dataset.settingsPermissions;
     const send = async () => {
       const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
-      if (result.ok) window.orch.toast('Saved. New agent runs use ' + capitalise(mode) + '.', 'ok');
+      if (result.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
     };
     if (mode !== 'full') { await send(); return; }
     perm.checked = false;  // stays on the old choice until the person says Yes
-    settingsConfirm('Let the agent do everything?', FULL_WARNING, '', 'Yes, use Full', send);
+    settingsConfirm('Let the helper do everything?', FULL_WARNING, '', 'Yes, use Full', send);
     return;
   }
   const control = event.target.closest('[data-settings-agent]');
@@ -400,9 +410,10 @@ main.addEventListener('change', async event => {
   const agent = array(state.settings?.agents).find(agent => agent.name === control.dataset.settingsAgent);
   if (!agent) return;
   const result = await settingsSend('config.agent', {name:agent.name}, 'agent');
-  if (result.ok) window.orch.toast(agent.label + ' is now the default agent.', 'ok');
+  if (result.ok) window.orch.toast(agent.label + ' is now the default helper.', 'ok');
 });
 main.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && event.target.closest('.settings-review')) { event.preventDefault(); settingsReviewClose(); return; }
   const settingsTabControl = event.target.closest('[data-action="settings-tab"]');
   if (settingsTabControl && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
     event.preventDefault();
@@ -410,6 +421,7 @@ main.addEventListener('keydown', event => {
     const index = tabs.indexOf(settingsTabControl);
     const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
     settingsTab = next.dataset.tab;
+    settingsReview = null;
     render();
     document.getElementById(next.id)?.focus();
     return;
@@ -453,15 +465,16 @@ main.addEventListener('click', async event => {
   if (snapshot) return;
   if (action === 'settings-tab') {
     settingsTab = control.dataset.tab;
+    settingsReview = null;
     render(); return;
   }
-  if (action === 'settings-share') {
-    if (snapshot || settingsBusy.has('share')) return;
-    const on = state.settings?.share !== true;
-    const result = await settingsSend('share.set', {on}, 'share');
-    if (result.ok) window.orch.toast(on ? 'Shared. Your team can now see this workspace.' : 'Not shared any more.', 'ok');
-    return;
-  }
+  // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
+  if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
+  if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
+  if (action === 'copies-switch') { settingsReviewOpen('copies-switch', control); return; }
+  if (action === 'copies-clean') { settingsReviewOpen('copies-clean', control); return; }
+  if (action === 'settings-review-ok') { await settingsReviewRun(); return; }
+  if (action === 'settings-review-cancel') { settingsReviewClose(); return; }
   if (action === 'private-allow') {
     if (settingsBusy.has('private')) return;
     const p = array(state.settings?.git_private?.pending).find(x => x.name === control.dataset.name);
@@ -524,9 +537,13 @@ main.addEventListener('click', async event => {
     (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
     return;
   }
-  if (action === 'copies-clean') { settingsSend('copies.clean', {}, 'copies-clean'); return; }
-  if (action === 'copies-setup') { settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies'); return; }
-  if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }
+  if (action === 'copies-setup-edit') { copySetupEditing = true; render(); document.querySelector('[data-key="settings-copy-setup"]')?.focus(); return; }
+  if (action === 'copies-setup-cancel') { copySetupEditing = false; render(); return; }
+  if (action === 'copies-setup') {
+    const result = await settingsSend('copies.set', {setup:document.querySelector('[data-key="settings-copy-setup"]')?.value || ''}, 'copies');
+    if (result.ok) { copySetupEditing = false; render(); }
+    return;
+  }
   if (action === 'link-add') startLinkAdd(control);
   if (action === 'link-remove') { event.preventDefault(); removeLink(control); return; }
   if (action === 'link-refresh') { refreshLinks(control); return; }

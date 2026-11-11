@@ -51,7 +51,7 @@ test('changed since the check: the line and a button that sends one fixed text',
   assert.match(text(out), /Changes haven't been checked yet/);
   const find = n => n && (n.tag === 'button' ? n : (n.children || []).map(find).find(Boolean));
   const btn = find(out);
-  assert.equal(btn.label, 'Ask the agent to check again');
+  assert.equal(btn.label, 'Ask the helper to check again');
   btn.fn();
   assert.deepEqual(sent, [['t_1', 'Please run the checks again and record them with orch check record.']]); // fixed text, not the stored command
   assert.equal(find(c.ticketProofLine({...t, status:'active'})), undefined);

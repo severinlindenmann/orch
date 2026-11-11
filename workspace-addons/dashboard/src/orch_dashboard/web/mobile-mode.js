@@ -1,5 +1,5 @@
 'use strict';
-// Mobile mode: the switch in the top bar, the first-click question, the bar on every page, the Settings choice.
+// Mobile mode ("Send questions to my phone"): the switch in the menu, the first-click question, the bar on every page, the Settings choice.
 // All data comes from state.mobile_mode (the relay add-on, via the server); null = the add-on is off, nothing shows.
 // app.js hands over each new state (event "orch:state") and the act function (window.orchAct).
 (() => {
@@ -35,10 +35,10 @@
     if (mm.on) {
       const warn = mm.awake === 'could_not_keep_awake';
       const ends = hm(mm.ends_at);
-      const parts = [node('b', {}, 'Mobile mode is on' + (ends ? ' until ' + ends : '')),
+      const parts = [node('b', {}, 'Questions go to your phone' + (ends ? ' until ' + ends : '')),
         node('span', {className: 'mm-desc'}, warn
-          ? 'Could not keep this computer awake. Mobile mode may stop when it sleeps.'
-          : 'Questions go to your phone, this computer stays awake.')];
+          ? 'Could not keep this computer awake. Questions may stop reaching your phone when it sleeps.'
+          : 'This computer stays awake.')];
       bar.className = 'mm-bar banner live' + (warn ? ' attn' : '');
       bar.setAttribute('data-testid', 'mobile-mode-bar');
       bar.append(node('span', {className: 'mm-phone', 'aria-hidden': 'true'}), node('div', {className: 'grow'}, ...parts),
@@ -49,8 +49,8 @@
       bar.setAttribute('data-testid', 'mobile-mode-ask');
       const dont = node('input', {type: 'checkbox', id: 'mm-dont', 'data-testid': 'mobile-mode-dont-ask'});
       bar.append(node('div', {className: 'grow'},
-        node('h3', {}, 'Turn on Mobile mode?'),
-        node('p', {className: 'meta'}, 'Questions from your agents also go to your phone, and this computer stays awake until you turn it off. Closing the lid of a laptop still puts it to sleep.'),
+        node('h3', {}, 'Send questions to your phone?'),
+        node('p', {className: 'meta'}, 'Questions from your helpers also go to your phone, and this computer stays awake until you turn it off. Closing the lid of a laptop still puts it to sleep.'),
         node('div', {className: 'mm-actions'}, btn('Turn on', 'primary sm', 'confirm', 'mobile-mode-confirm'), btn('Cancel', 'ghost sm', 'cancel', 'mobile-mode-cancel'),
           node('label', {className: 'mm-chk', for: 'mm-dont'}, dont, "Don't ask again"))));
       bar.hidden = false;
@@ -113,11 +113,11 @@
       if (!mm) return null;
       const choices = mm.hours_choices?.length ? mm.hours_choices : HOURS;
       return h('div', {className: 'stack', 'data-key': 'settings-mobile-mode'},
-        h('h2', {className: 'set-sub'}, 'Mobile mode'),
+        h('h2', {className: 'set-sub'}, 'Send questions to my phone'),
         h('div', {className: 'card'}, h('div', {className: 'card-row'},
           h('div', {className: 'grow'}, h('p', {}, 'Switch off by itself after'),
-            h('p', {className: 'meta'}, 'Mobile mode sends questions to your phone and keeps this computer awake.')),
-          h('div', {className: 'mm-hours', role: 'radiogroup', 'aria-label': 'Mobile mode switches off after', 'data-testid': 'mobile-mode-hours'},
+            h('p', {className: 'meta'}, 'Turn it on in the menu. While it is on, questions go to your phone and this computer stays awake.')),
+          h('div', {className: 'mm-hours', role: 'radiogroup', 'aria-label': 'Switch off by itself after', 'data-testid': 'mobile-mode-hours'},
             choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === mm.default_hours ? 'primary' : 'ghost'), role: 'radio',
               'aria-checked': n === mm.default_hours ? 'true' : 'false', 'data-mm-hours': n, 'data-key': 'mm-hours-' + n,
               'data-testid': 'mobile-mode-hours-' + n}, n + ' h'))))));

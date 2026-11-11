@@ -205,7 +205,7 @@ struct GroupsSection: View {
             ForEach(groups, id: \.key) { GroupListRow(group: $0) }
         }
         if !groups.isEmpty || !GroupRoomRules.rows(model.groups, closed: true).isEmpty {
-            NavigationLink { GroupHistoryView() } label: {
+            NavigationLink(value: ChatRoute.groupHistory) {
                 Text("Done groups › History").themeFont(15).foregroundStyle(Theme.brand).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }.accessibilityIdentifier("group-history")
         }

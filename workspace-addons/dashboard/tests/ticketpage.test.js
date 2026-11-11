@@ -16,8 +16,9 @@ test('history defaults hide technical steps and combine actor filters', () => {
   const history = [{by:'human:Pat', text:'Created'}, {by:'agent:Claude', text:'Drafted the plan'}, {by:'agent:Claude', kind:'claimed', text:'Claimed'}, {by:'system', text:'Status open -> active'}, {by:'human:Pat', text:'Edited title'}, {by:'system', text:'Status review -> done'}];
   assert.equal(c.ticketHistoryEntries({history}).length, 4);
   assert.equal(c.ticketHistoryEntries({history}, 'People').length, 2);
-  assert.equal(c.ticketHistoryEntries({history}, 'Agent').length, 1);
-  assert.equal(c.ticketHistoryEntries({history}, 'Agent', true).length, 2);
+  assert.equal(c.ticketHistoryEntries({history}, 'Helper').length, 1);
+  assert.equal(c.ticketHistoryEntries({history}, 'Helper', true).length, 2);
+  assert.equal(c.ticketHistoryWho({by:'agent:Claude'}), 'Helper', 'a person reads "Helper", never "Agent"');
   for (const kind of ['answer', 'review-verdict', 'created', 'done']) assert.equal(c.ticketHistoryIsTechnical({kind}), false);
   for (const kind of ['released', 'run', 'session', 'evidence-added']) assert.equal(c.ticketHistoryIsTechnical({kind}), true);
 });
@@ -142,7 +143,7 @@ test('agent label uses adapter settings for missing and old claims', () => {
   for (const claim of [undefined, {}, {agent:'claude'}, {label:'claude'}]) assert.equal(helpers.agentLabel(settings, claim), 'Claude');
   assert.equal(helpers.agentLabel(settings, {label:'Custom'}), 'Custom');
   assert.equal(helpers.agentLabel({agents:[{name:'custom',label:'Studio'}]}), 'Studio');
-  assert.equal(helpers.agentLabel({}, {}), 'Agent');
+  assert.equal(helpers.agentLabel({}, {}), 'Helper');
   assert.equal(helpers.agentLabel(settings, {agent:'codex'}), 'Codex');
 });
 test('task outcomes and result cards use plain text without sizes', () => {

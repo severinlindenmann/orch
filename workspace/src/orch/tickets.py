@@ -210,8 +210,6 @@ def _counter_last(root: Path) -> int:
 def next_key(root: Path) -> str:
     """<code>-<n> for a new ticket. n is 1 + the highest number handed out (counter file or any ticket's key),
     written to the counter under one workspace lock, so no two tickets share a number and none is reused."""
-    from orch import config
-
     code = config.workspace_code(root) or config.set_code(root, config.suggest_code(root.resolve().name))
     with _locked(root, "key"):
         p = _counter_path(root)
@@ -330,11 +328,14 @@ def sync_apply(root: Path, tid: str):
 
     Call on the thread holding syncgate.hold; other writers retain the normal
     gate-before-ticket ordering. The caller checks and replaces the file while
-    this context is held, without importing core lock internals.
+    this context is held, without importing core lock internals. Before each
+    write batch the holder checks that the gate still carries its identity;
+    a thread holding no gate for `root` is refused (fail closed).
     """
     if tid != "key":
         ticket_path(root, tid)
     with _locked(root, tid):
+        syncgate.ensure_held(root)
         yield
 
 
@@ -983,7 +984,13 @@ def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
     else:
         raise Refused(humanproof.VERDICT_NEEDED)
     old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
-    entry = humanproof.verdict_sign(root, ticket, kind)
+    entry = humanproof.verdict_sign(
+        root,
+        ticket,
+        kind,
+        person=actor if kind == "person" else None,
+        line=ticket["history"][-1] if ticket["history"] else None,
+    )
     kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
     ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
 
@@ -1551,17 +1558,27 @@ def _person_only(by: str, item: dict, tid: str, cid: str) -> None:
         _refuse_if_wont_do(item, tid, cid)
 
 
-def _sign_wont(root: Path, tid: str, item: dict) -> None:
+def _sign_wont(root: Path, tid: str, item: dict, by: str | None = None, line: str | None = None) -> None:
     """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
     a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
     step as an agent's, which is the safe side)."""
     item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
+    if (
+        item.get("wont_do") and humanproof.bindable_actor(by) and isinstance(line, str)
+    ):  # who, when and which line are inside the MAC (new decisions)
+        item["wont_by"], item["wont_at"] = by, now()
+        item["wont_line"] = humanproof.history_digest(line, _env_via())  # the exact line the writer adds
+    else:
+        for k in ("wont_by", "wont_at", "wont_line"):
+            item.pop(k, None)
     mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
     if mac:
         item["wont_mac"] = mac
     else:
         item.pop("wont_mac", None)
-        item.pop("wont_nonce", None)  # (no usable key: unsigned, so the sync treats it as an agent's)
+        item.pop("wont_nonce", None)
+        for k in ("wont_by", "wont_at", "wont_line"):
+            item.pop(k, None)  # (no usable key: unsigned, so the sync treats it as an agent's)
 
 
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
@@ -1586,8 +1603,9 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         else:
             item.pop("reason", None)
         item.update({"by": by, "at": now()})
-        _sign_wont(root, tid, item)
-        add_history(t, by, f"Marked {cid} as won't do")
+        text = f"Marked {cid} as won't do"
+        _sign_wont(root, tid, item, by, text)
+        add_history(t, by, text)
         return item
 
     return apply_op(root, tid, op)

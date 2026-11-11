@@ -41,7 +41,7 @@ if(!state.round3Seeded){
  state.messages.ticket.unshift(msg('artifact-pdf','artifact','',{artifact:'pdf'}));
  state.messages.ticket.push(msg('free-answer','question','What should the board focus on?',{options:[],questionKind:'Free text'}));
  state.messages.rig4.push(msg('variants','question','Which version should we develop?',{options:['Version A','Version B'],previews:['landing','variant'],recommended:'Version A',questionKind:'Design:comparison'}));
- state.messages.rig4.push(msg('approval','question','Approve the page for publishing?',{options:['Approve','Request changes'],previews:['landing'],questionKind:'Approve with preview'}));
+ state.messages.rig4.push(msg('approval','question','Accept the page for publishing?',{options:['Accept','Ask for changes'],previews:['landing'],questionKind:'Accept with preview'}));
  state.messages.ticket.find(m=>m.type==='allow').options=['Allow once','Always','Ignore'];
  state.round3Seeded=true;persist();
 }
@@ -166,7 +166,7 @@ renderSettings=function(){
 };
 renderInfo=function(){
  const ms=state.messages[chat]||[],ids=tab==='Artifacts'?ms.filter(m=>m.type==='artifact').map(m=>m.artifact):tab==='Files'?ms.filter(m=>m.type==='file').map(m=>m.text.endsWith('.pdf')?'pdf':'file'):ms.filter(m=>m.type==='link').map(()=> 'url');
- contentRoot().innerHTML=nav('Chat info','back')+`<div class="scroll info-body"><div class="info-profile"><h2>${esc(parent[chat]?topicTitle(chat):names[chat])}</h2><p>${parent[chat]?statusFor(chat):'Online'} · Updated just now</p></div><div class="setting-block"><p class="sheet-note">Agent: Claude · Workspace: ${esc(names[workspace(chat)])}</p><p>Summary</p><p class="sheet-note">${state.topics[chat]?.done||0} tasks complete. ${parent[chat]?statusFor(chat):children(chat).length+' topics'}</p>${actionButton('chat-voice',`<span>Voice & reply language</span><span>›</span>`,'','setting-row')}</div><div class="info-tabs">${['Artifacts','Files','Links'].map(t=>actionButton('info-tab',t,t,tab===t?'active':'')).join('')}</div>${ids.map(artifactCard).join('')||'<p class="empty">Nothing shared yet.</p>'}</div>`;
+ contentRoot().innerHTML=nav('Chat info','back')+`<div class="scroll info-body"><div class="info-profile"><h2>${esc(parent[chat]?topicTitle(chat):names[chat])}</h2><p>${parent[chat]?statusFor(chat):'Online'} · Updated just now</p></div><div class="setting-block"><p class="sheet-note">Agent: Claude · Workspace: ${esc(names[workspace(chat)])}</p><p>Summary</p><p class="sheet-note">${state.topics[chat]?.done||0} tasks complete. ${parent[chat]?statusFor(chat):children(chat).length+' topics'}</p>${actionButton('chat-voice',`<span>Voice & reply language</span><span>›</span>`,'','setting-row')}</div><div class="info-tabs">${['Artifacts','Files','References'].map(t=>actionButton('info-tab',t,t,tab===t?'active':'')).join('')}</div>${ids.map(artifactCard).join('')||'<p class="empty">Nothing shared yet.</p>'}</div>`;
 };
 openContext=function(id){baseContext(id);const m=findMessage(id)?.m;if(!m)return;$('.context-menu').insertAdjacentHTML('beforeend',`${['Forward','Pin','Select','Delete','Info'].map(a=>actionButton('message-'+a.toLowerCase(),a,id,'')).join('')}${m.mine&&m.type==='voice'?actionButton('voice-menu','Correct language / Edit',id,''):''}`);$('.sheet').style.maxHeight=($('#overlay').clientHeight-parseFloat($('.sheet').style.top||0)-12)+'px';};
 function voiceMenu(id){sheet('Voice note',`${actionButton('language','Correct language',id)}${actionButton('edit','Edit transcript',id)}${actionButton('message-info','Info',id)}`);}
@@ -176,7 +176,7 @@ const reviewGroups=[
  ['Workspace topics',[['pilatus','Pilatus · Status groups'],['done-topics','Done / Stopped / Failed']]],
  ['Topic chat',[['ticket','PIL-12 · board summary'],['general','General'],['checklist-demo','Task checklist']]],
  ['Artifacts & feedback',[['artifact-demo','HTML preview'],['feedback-demo','Comment pins'],['gallery','All artifact kinds'],['info','Artifacts · Files · References']]],
- ['Questions',[['question-options','Options'],['question-allow','Permission'],['question-free','Free text'],['question-variants','A / B previews'],['question-approval','Approve preview'],['stale-demo-view','Already answered']]],
+ ['Questions',[['question-options','Options'],['question-allow','Permission'],['question-free','Free text'],['question-variants','A / B previews'],['question-approval','Accept preview'],['stale-demo-view','Already answered']]],
  ['Voice',[['rigi-voice','My voice note'],['record','Hold to record'],['locked','Hands-free'],['voice-errors','Capture errors']]],
  ['Media',[['attach','Attachments'],['camera','Camera & scan'],['preview','Photo caption'],['files','Documents'],['location','Location']]],
  ['New topic',[['new-chat-demo','Choose & compose']]],

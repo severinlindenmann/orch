@@ -13,13 +13,13 @@ enum GroupMock {
                                text: "Bank: let Finance give tasks?", options: ["once", "always", "no"], recommended: nil, scope: "tasks from Finance", allowQuestion: true, groupRef: GroupRef(host: finance, id: "grp_" + ticket)), key: "BANK-3"), workspaceName: "Bank")
     }
 
-    static func messages(now: Date = Date()) -> [PhoneMessage] {
+    static func messages(now: Date = Date(), long: Bool = false) -> [PhoneMessage] {
         let members = [finance, home, bank].map { GroupMember(ws: $0, name: names[$0] ?? "Workspace") }
         let formatter = ISO8601DateFormatter()
         func copy(_ seq: Int, _ text: String = "", by: String = finance, kind: String? = nil,
                   event: GroupEvent? = nil, task: GroupTask? = nil, file: Bool = false,
                   closed: Bool = false) -> PhoneMessage {
-            let at = formatter.string(from: now.addingTimeInterval(Double(seq - 10) * 20))
+            let at = formatter.string(from: now.addingTimeInterval(Double(seq - (long ? 35 : 10)) * 20))
             let t = closed ? "t_cartax2026" : ticket
             let title = closed ? "Pay car tax 2026" : "Pay car tax 2027"
             let id = "m_group\(closed ? "done" : "copy")\(String(format: "%05d", seq))"
@@ -35,7 +35,7 @@ enum GroupMock {
                                origin: GroupOrigin(id: "origin_" + id, from: origin, at: at), task: task, sharedFiles: file ? ["b_0123456789abcdef"] : nil),
                 key: closed ? "FIN-8" : "FIN-14", replyTo: phone ? "m_groupcopy00001" : nil), workspaceName: "Finance")
         }
-        return [
+        var messages = [
             copy(1, kind: "note", event: GroupEvent(kind: "created")),
             copy(2, "Please sort out the car tax.", by: "you"),
             copy(3, kind: "note", event: GroupEvent(kind: "member_added", ws: home, name: "Home", fromSeq: 3)),
@@ -48,5 +48,11 @@ enum GroupMock {
             copy(2, "The car tax is paid.", closed: true),
             copy(3, kind: "note", event: GroupEvent(kind: "closed"), closed: true)
         ]
+        #if DEBUG
+        if long {
+            messages += (9...33).map { copy($0, "Group scroll message \($0 - 8)") }
+        }
+        #endif
+        return messages
     }
 }

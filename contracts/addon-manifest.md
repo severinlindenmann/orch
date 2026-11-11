@@ -282,3 +282,8 @@ name, field, old, new}], say}`. Exit codes as for every add-on command. There is
 regular refreshes adds a schedule. Example: `workspace/tests/test_refs.py` (`REFRESH`) refreshes GitHub pull requests
 with `gh pr view <url> --json state,title`, and answers "gh is not installed here" without it.
 
+
+`ticket_ext_inert = true` declares that `ext.<name>` is data only and never starts work.
+It defaults to false. Sync holds changed non-inert blocks until a person approves
+that exact canonical block hash in this machine's local approval store. A declaration
+inside a synced ticket has no authority; only the installed add-on manifest counts.

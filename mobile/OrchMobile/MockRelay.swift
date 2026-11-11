@@ -91,7 +91,11 @@ actor MockRelay: RelayAPI {
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
+            #if DEBUG
+            received.append(contentsOf: GroupMock.messages(long: UserDefaults.standard.bool(forKey: "mockLongGroup")))
+            #else
             received.append(contentsOf: GroupMock.messages())
+            #endif
             all.append(GroupMock.question(at: Self.now()))
         }
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }

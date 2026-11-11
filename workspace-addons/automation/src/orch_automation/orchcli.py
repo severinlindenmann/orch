@@ -71,7 +71,12 @@ def set_ext(root: Path, t: dict, remove: tuple = (), by: str | None = None, **ch
     args = ["ext", "set", t["id"], "automation", json.dumps(cur)]
     if isinstance(t.get("revision"), int):
         args += ["--if-revision", str(t["revision"])]
-    return call(root, *args, by=by or True) is not None
+    from .syncapproval import record_local
+
+    if call(root, *args, by=by or True) is None:
+        return False
+    record_local(root, t, cur)
+    return True
 
 
 def ext_unset(root: Path, t: dict, by: str | None = None) -> bool:
@@ -91,6 +96,12 @@ def run_start(root: Path, tid: str, text: str | None = None, agent: str | None =
     mode None lets core choose (a live session the person can open when the machine can).
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
+    from .syncapproval import allowed
+
+    if (root / ".orch/run/sync/local-ext.json").exists():
+        current = ticket(root, tid)
+        if current is None or not allowed(root, current):
+            return {"result": "failed", "reason": "This synced automation needs local approval."}
     cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", by or BY]
     if mode:
         cmd += ["--mode", mode]
