@@ -604,9 +604,14 @@ def _update_title(root: Path, ticket: str) -> str | None:
         return None
     if (h := phone_results.value_hider(root)) is None:
         return None
-    # clean, collapse, filter and cut FIRST (those steps can join or split text into a secret), then hide the
-    # stored values and redact; the result must be a fixed point of both, else no title (fail closed)
-    line = " ".join(clean_untrusted(str(title), 400).split())
+    # no cut before hiding (a cut ahead of a collapse can leave a prefix of a stored value inside the
+    # shown 120): titles are short, a huge one gets no title. Then clean, collapse and filter (these can
+    # join or split text into a secret), then hide the stored values and redact; the result must be a
+    # fixed point of both, else no title (fail closed)
+    raw = str(title)
+    if len(raw) > 4000:
+        return None
+    line = " ".join(clean_untrusted(h.hide_text(raw), len(raw) * 3 + 64).split())
     line = "".join(c for c in line if unicodedata.category(c)[0] in "LMNPS" or c == " ")
 
     def stable(t: str) -> bool:

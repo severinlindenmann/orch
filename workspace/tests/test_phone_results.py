@@ -1255,3 +1255,11 @@ def test_r3_l6_sig_and_sid_in_free_text(text):
 )
 def test_r3_l7_more_mysql_family_commands(text, want):
     assert phone_view.redact(text) == want
+
+
+def test_update_title_no_prefix_of_a_stored_value_after_a_collapse(proj, new_ticket):
+    keystore.add(proj, "db-cred", "token", VALUE)
+    tid = new_ticket("Title")
+    tickets.apply_op(proj, tid, lambda t: t.update(title="a" + " " * 365 + VALUE))
+    title = relay._update_title(proj, tid)
+    assert title is None or VALUE[:8] not in title
