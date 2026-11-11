@@ -24,7 +24,7 @@
       "properties": { "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" } },
       "allOf": [
         { "if": { "properties": { "type": { "const": "error" } } }, "then": { "required": ["error"], "properties": { "error": { "$ref": "#/$defs/error/properties/error" }, "code": { "$ref": "#/$defs/error/properties/code" } } } },
-        {"if": {"properties": {"type": {"const": "unavailable"}}}, "then": {"required": ["cursor", "run", "status", "reason", "message"], "properties": {"status": {"enum": ["ok", "unavailable", "tampered"]}, "reason": {"enum": ["missing", "io", "skipped", "link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"]}, "message": {"type": "string"}, "run": {"type": "string"}, "cursor": {"type": "string"}}}}
+        {"if": {"properties": {"type": {"const": "unavailable"}}}, "then": {"required": ["cursor", "run", "status", "reason", "message"], "properties": {"status": {"enum": ["ok", "unavailable", "tampered"]}, "reason": {"enum": ["missing", "io", "skipped", "pending", "recovered", "rewound", "trimmed", "link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"]}, "message": {"type": "string"}, "run": {"type": "string"}, "cursor": {"type": "string"}}}}
       ],
       "description": "One line of a --follow stream. Readers skip types they do not know. A line of type error is the last line; the command then exits 2."
     }
