@@ -65,6 +65,7 @@ _ENV_DENY_UP = frozenset(
         *(v.upper() for v in ENV_DENY),
         "SHELLOPTS", "PS4", "PATHEXT", "COMSPEC", "PROMPT_COMMAND", "VISUAL", "MANPAGER", "LOCPATH",
         "TMPDIR", "TEMP", "TMP", "NPM_TOKEN", "LESS", "LESSOPEN", "LESSCLOSE", "LESSKEY", "LESSHISTFILE",
+        "LESSKEYIN", "LESSKEYIN_SYSTEM", "LESSKEY_SYSTEM", "LESSKEY_CONTENT", "LESSEDIT", "LESSSECURE",
     }
 )  # fmt: skip
 SET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -574,6 +575,8 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
         for x in extra:
             if not set_name_ok(x):
                 raise Refused(f"The profile {pn} may not approve the variable {x}.")
+        # env names in `approved` are redundant with the duplicate check below (a set/files name equal to an env
+        # name is refused as "twice"); kept for clarity: effectively set/files names need `extra`.
         approved = {
             *(p.get("env") or {}),
             *extra,

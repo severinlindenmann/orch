@@ -926,3 +926,11 @@ def test_lesson_key_is_an_ordinary_name(tws):
     keystore.write_profiles(
         tws, {"p": {"env": {"LESSON_KEY": "k"}, "set": {"LESSON_HOST": "h"}, "extra": ["LESSON_HOST"]}}
     )
+
+
+@pytest.mark.parametrize(
+    "var", ["LESSKEYIN", "LESSKEYIN_SYSTEM", "LESSKEY_SYSTEM", "LESSKEY_CONTENT", "LESSEDIT", "LESSSECURE"]
+)
+def test_less_command_variables_are_refused_even_in_env(tws, var):
+    with pytest.raises(Refused):
+        keystore.write_profiles(tws, {"p": {"env": {var: "k"}}})
