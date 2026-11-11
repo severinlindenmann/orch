@@ -206,7 +206,7 @@ def record_change(root, action, profile, by):
 
 RISKY_PROGRAMS = re.compile(
     r"^(sh|bash|zsh|dash|ksh|fish|csh|tcsh|env|xargs|python[0-9.]*|node|npx|npm|pip[0-9.]*|perl|ruby|php|lua|"
-    r"java|git|osascript|pwsh|powershell|cmd|ssh|curl|wget)(\.exe)?$",
+    r"java|git|osascript|pwsh|powershell|cmd|ssh|curl|wget|psql|mysql|sqlite3|redis-cli|mongosh)(\.exe)?$",
     re.IGNORECASE,
 )
 
@@ -219,8 +219,9 @@ def approve_program(root, name):
     """What a person approves as a profile's `run` program: (real path, warnings). Refused: a relative path;
     the program or a folder above it inside the workspace, or changeable by others (group/other-writable; the
     root and admin groups of a normal system are fine). Interpreters and tools that run arbitrary code (sh,
-    python, node, env, git, npm, curl, ...) are allowed but warned about: approving one is approving
-    anything."""
+    python, node, env, git, npm, curl, and database clients that read commands from stdin or run shell
+    escapes: psql, mysql, sqlite3, redis-cli, mongosh) are allowed but warned about: approving one is
+    approving anything."""
     if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
         raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
     path = resolve_program(root, name)

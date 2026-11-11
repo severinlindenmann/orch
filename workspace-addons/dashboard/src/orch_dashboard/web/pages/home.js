@@ -72,24 +72,6 @@ function resultRow(t) {
   return h('div', {className:'card-row home-result', 'data-key':'ticket-' + t.id}, ticketTitle(t),
     h('div', {className:'row'}, h('a', {className:'btn outline sm', href:href(t.id)}, 'Open result'), snapshot ? null : button('Mark done', 'outline sm', () => moveTicket(t.id, 'done')), snapshot ? null : button('Send back', 'outline sm', () => moveTicket(t.id, 'active'))));
 }
-function messageTicket(text) {
-  if (snapshot) return;
-  const {d, actions} = dialog('Make a ticket');
-  const title = h('input', {className:'input', 'aria-label':'Title', required:true, maxlength:200, value:text.split('\n')[0].slice(0, 200)});
-  const note = h('textarea', {className:'input', 'aria-label':'Note (optional)', rows:5}, text);
-  const create = button('Create', 'primary', async () => {
-    if (!title.value.trim()) { title.reportValidity(); return; }
-    if (changeUnavailable()) return;
-    create.disabled = true;
-    const result = await act('ticket.new', {title:title.value.trim(), ...(note.value.length > 1500 ? {long_text:note.value} : {note:note.value})});
-    create.disabled = false;
-    if (result.ok) { await window.orch.close(d); window.orch.toast('Ticket created', 'ok'); }
-    else window.orch.toast(changeError(result), 'error');
-  });
-  actions.append(create);
-  d.append(h('label', {className:'message-field'}, 'Title', title), h('label', {className:'message-field'}, 'Note (optional)', note), actions);
-  window.orch.open(d);
-}
 function homeSection(key, title, body) {
   return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null}, h('h2', {}, title), h('div', {className:'card'}, body));
 }
@@ -122,8 +104,6 @@ function home() {
     const at = parse(t.done_at || t.completed_at || t.updated_at);
     return at && at.toDateString() === now().toDateString();
   })());
-  const message = array(state.general?.history).filter(e => e.via === 'phone' && e.text).sort((a,b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))[0];
-  const text = message && String(message.text).replace(/^From [^:]{1,100}: /, '');
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const agent = window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, state.runs?.[working[0]?.id]?.claim) : capitalise(name(state.runs?.[working[0]?.id]?.claim?.label || state.runs?.[working[0]?.id]?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'Agent'));
   const hour = now().getHours();
@@ -135,7 +115,7 @@ function home() {
       homeSection('working-now', 'Working now', working.length ? working.map(workingRow) : emptyRow('No tickets are being worked on.')),
       homeSection('check-result', 'Check result (' + review.length + ')', review.length ? review.map(resultRow) : emptyRow('No results to check.')),
       h('div', {className:'card card-row', 'data-key':'everything-else'}, h('span', {className:'grow muted'}, 'Everything else (' + all.filter(t => activeTicket(t) && !used.has(t.id)).length + ')'), h('a', {className:'btn ghost sm', href:'#tickets'}, 'View Tickets →'))),
-    h('aside', {className:'stack', 'data-key':'right'}, message ? card('messages', 'Messages', '', h('div', {className:'card-row home-message', 'data-key':'message-' + (message.at || text)}, h('p', {}, clean(text)), snapshot ? null : button('Make a ticket', 'outline sm', () => messageTicket(text)))) : null,
+    h('aside', {className:'stack', 'data-key':'right'},
       card('finished-today', 'Finished today', '', finished.length ? finished.map(ticketRow) : emptyRow('Nothing finished today yet.')))));
 }
 function loadingView() {

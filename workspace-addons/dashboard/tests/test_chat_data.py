@@ -191,3 +191,30 @@ def test_dm_client_id_and_optional_sync():
     for bad in ("m_bad", "../x", 123):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("chat.send_ws", {**args, "client_id": bad})
+
+
+def test_general_history_hides_legacy_automation_prompt(ws):
+    from orch_dashboard.data import load_general
+
+    directory = ws / ".orch" / "tickets"
+    directory.mkdir(parents=True, exist_ok=True)
+    history = [
+        {
+            "by": "agent:automation",
+            "chat_message": True,
+            "text": 'A phone text in the General conversation is waiting for you. Answer it: orch relay send ph_iphone0001 "<your answer>" --ticket t_general1',
+        },
+        {
+            "by": "agent:relay from ph_iphone0001",
+            "via": "phone",
+            "chat_message": True,
+            "text": "What is still open this week?",
+        },
+    ]
+    (directory / "t_general1.json").write_text(
+        json.dumps({"id": "t_general1", "general": True, "history": history})
+    )
+    data = load_general(ws)
+    assert data["history"] == history[1:]
+    assert "orch relay send" not in json.dumps(data)
+    assert "waiting for you. Answer it" not in json.dumps(data)
