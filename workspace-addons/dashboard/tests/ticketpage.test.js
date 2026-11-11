@@ -285,6 +285,16 @@ test('shared folder line is one quiet text line from the core, absent when none'
   assert.equal(c.sharedFolderLine({id:'t2'}), null);
   assert.equal(c.sharedFolderLine({id:'nope'}), null);
 });
+test('a ticket with a copy shows the quiet "Works in a separate copy" line (the ticket has no local path)', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
+  const c = context({h, clean:v => String(v ?? '')});
+  vm.runInContext(source.slice(source.indexOf('function copyLine(t)'), source.indexOf('const surface =')), c);
+  const on = JSON.stringify(c.copyLine({work:{folders:[{branch:'orch/t_x', base:'abc', sub:'', host:'m'}]}}));
+  assert.match(on, /Works in a separate copy of your project/);
+  assert.match(on, /orch\/t_x/);
+  assert.equal(c.copyLine({work:{folders:[]}}), null);
+  assert.equal(c.copyLine({}), null);
+});
 test('plan-first waiting card answers and edits only unstarted steps', async () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
   const t = {id:'t_parent', title:'Plan', status:'waiting', questions:[{id:'q1',text:'First?'},{id:'q2',text:'Second?'}]};
