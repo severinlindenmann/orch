@@ -21,7 +21,8 @@ final class StatusRefsUITests: XCTestCase {
     func testWorkspaceGroupsByStatusAndDoneIsCollapsed() {
         let app = launch("ws_pilatus001")
         XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20), "General is pinned")
-        XCTAssertTrue(app.staticTexts["Needs your OK"].waitForExistence(timeout: 10), "the topic with an open question is under Needs your OK")
+        let needsHeader = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Needs your OK")).firstMatch   // header reads "Needs your OK · 1"
+        XCTAssertTrue(needsHeader.waitForExistence(timeout: 10), "the topic with an open question is under Needs your OK")
         XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_7k3f9q"].exists)
         XCTAssertFalse(app.staticTexts["Not started"].exists && app.staticTexts["Ready for review"].exists, "empty groups are hidden")
         let done = app.buttons["done-toggle"]
@@ -68,7 +69,9 @@ final class StatusRefsUITests: XCTestCase {
         XCTAssertTrue(ticketRow.waitForExistence(timeout: 5), "ticket row with title (key behind Details)")
         let fileReference = el(app, "info-ref-ref3")
         app.reveal(fileReference)
-        fileReference.buttons["Details"].tap()
+        // The Details disclosure may be the element itself (SwiftUI folds the id onto the disclosure button).
+        let details = fileReference.buttons["Details"]
+        if details.exists { details.tap() } else { fileReference.tap() }
         XCTAssertTrue(app.staticTexts["docs/board/q3.md:12"].waitForExistence(timeout: 5), "file reference under Details")
         shot(app, "4-references")
         for _ in 0..<3 where !el(app, "info-ref-ref1").isHittable { app.swipeDown() }
