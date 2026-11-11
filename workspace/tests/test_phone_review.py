@@ -306,3 +306,35 @@ def test_a_bare_changes_answer_is_a_history_line_only(proj, run, new_ticket, con
     answer(conn, q, "Rename Y", n=2)  # the round is still open for a real note
     run("relay", "inbox")
     assert status(run, tid)["status"] == "ready"
+
+
+def _file_says(proj, tid, status):
+    """What an agent's direct file edit does: no core code runs, no verdict."""
+    p = tickets.ticket_path(proj, tid)
+    t = json.loads(p.read_text())
+    t["status"] = status
+    p.write_text(json.dumps(t, indent=2))
+
+
+def test_an_unsigned_done_in_the_file_asks_the_phones_once(proj, run, new_ticket, conn):
+    tid = new_ticket()
+    _file_says(proj, tid, "done")  # raw done, no verdict: reads as Review
+    assert tickets.load(proj, tid)["status"] == "review"
+    assert phone_view.sync_reviews(proj) == [tid]
+    (q,) = review_questions(conn)
+    assert q["body"]["question_id"] == "review-1" and q["body"]["options"] == ["accept", "changes"]
+    assert phone_view.sync_reviews(proj) == [] and len(review_questions(conn)) == 1  # not duplicated
+    _file_says(proj, tid, "ready")  # leaves review: round closes
+    assert phone_view.sync_reviews(proj) == []
+    _file_says(proj, tid, "done")  # enters again: a new round
+    assert phone_view.sync_reviews(proj) == [tid]
+    assert review_questions(conn)[-1]["body"]["question_id"] == "review-2"
+
+
+def test_a_signed_done_sends_no_review_question(proj, run, new_ticket, conn):
+    from conftest import sign_done
+
+    tid = new_ticket()
+    sign_done(proj, tid)
+    assert tickets.load(proj, tid)["status"] == "done"
+    assert phone_view.sync_reviews(proj) == [] and not review_questions(conn)
