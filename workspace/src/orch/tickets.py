@@ -138,16 +138,35 @@ def new_id(root: Path) -> str:
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
 
 
-def resolve(root: Path, ref):
+def resolve(root: Path, ref, *, notice=None):
     """The one place a ticket key (DM1-12, any case) becomes the ticket id. Anything else is returned as it
     is (an id, or a word the command refuses later)."""
     if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
         return ref
     want = ref.strip().upper()
-    for t in list_all(root):
+    local = list_all(root)
+    for t in local:
         if str(t.get("key", "")).upper() == want:
             return t["id"]
+    matches = []
+    for t in local:
+        old_keys = _get(t, "ext.sync.old_keys")
+        if isinstance(old_keys, list) and any(isinstance(k, str) and k.upper() == want for k in old_keys):
+            matches.append(t)
+    if len(matches) > 1:
+        keys = ", ".join(sorted(str(t.get("key") or t["id"]) for t in matches))
+        raise Refused(f"{want} is an old key claimed by several tickets: {keys}. Use a current key.")
+    if matches:
+        t = matches[0]
+        if notice is not None:
+            notice(f"{want} moved to {t.get('key') or t['id']}")
+        return t["id"]
     raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
+
+
+def resolve_cli(root: Path, ref):
+    """Resolve a CLI reference, showing moved-key notices without changing JSON stdout."""
+    return resolve(root, ref, notice=lambda message: print(message, file=sys.stderr))
 
 
 def _counter_path(root: Path) -> Path:
@@ -2181,6 +2200,45 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
 # ---------------------------------------------------------------- agent sessions (used by the run lane)
 
 
+OWN_SESSIONS_MAX = 500
+
+
+def _own_sessions(root: Path) -> list[dict]:
+    """Only a valid local record grants permission to resume; absent or corrupt means none."""
+    try:
+        entries = json.loads((root / ".orch" / "run" / "own-sessions.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(entries, list) or any(
+        not isinstance(s, dict)
+        or any(not isinstance(s.get(k), str) or not s[k] for k in ("id", "agent", "host", "first_seen"))
+        for s in entries
+    ):
+        return []
+    return entries
+
+
+def _record_own_session(root: Path, agent: str, sid: str, host: str) -> None:
+    with _locked(root, "own-sessions"):
+        entries = _own_sessions(root)
+        entry = next(
+            (s for s in entries if (s["id"], s["agent"], s["host"]) == (sid, agent, host)),
+            {"id": sid, "agent": agent, "host": host, "first_seen": now()},
+        )
+        entries = [s for s in entries if s != entry]
+        entries.append(entry)
+        p = root / ".orch" / "run" / "own-sessions.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".own-sessions-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(entries[-OWN_SESSIONS_MAX:], f)
+                f.write("\n")
+            procs.replace(tmp, p)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+
+
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
     """Remember the agent session for this agent and machine (updates last_used when it is known)."""
 
@@ -2196,13 +2254,16 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
 
-    return apply_op(root, tid, op)[0]
+    ticket = apply_op(root, tid, op)[0]
+    _record_own_session(root, agent, sid, host)
+    return ticket
 
 
-def sessions_for(ticket: dict, agent: str, host: str) -> str | None:
-    """The session id to resume for this agent on this machine, else None. No age limit."""
+def sessions_for(root: Path, ticket: dict, agent: str, host: str) -> str | None:
+    """Resume only sessions recorded by this workspace on this machine. No age limit."""
+    owned = {(s["id"], s["agent"], s["host"]) for s in _own_sessions(root)}
     for s in ticket.get("sessions") or []:
-        if s.get("agent") == agent and s.get("host") == host:
+        if s.get("agent") == agent and s.get("host") == host and (s.get("id"), agent, host) in owned:
             return s.get("id")
     return None
 

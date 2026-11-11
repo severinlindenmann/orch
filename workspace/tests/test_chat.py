@@ -237,7 +237,7 @@ def test_session_is_resumed_the_same_day_and_fresh_the_next(proj, run, gen, one_
     tickets.apply_op(proj, gid, lambda t: t.setdefault("ext", {}).__setitem__("chat", {"session_day": today}))
     assert (
         runs.plan(proj, gid)["session"] in ("sess-1", None)
-        and tickets.sessions_for(tickets.load(proj, gid), "fake", runs.host()) == "sess-1"
+        and tickets.sessions_for(proj, tickets.load(proj, gid), "fake", runs.host()) == "sess-1"
     )
     # a session of an earlier Chat day: cut, the next start is empty
     tickets.apply_op(proj, gid, lambda t: t["ext"].__setitem__("chat", {"session_day": "2020-01-01"}))
@@ -267,7 +267,7 @@ def test_the_helper_is_an_agent_and_cannot_do_human_only_things(proj, run, conn,
 def test_sessions_of_normal_tickets_are_not_cut(proj, new_ticket):
     tid = new_ticket()
     tickets.record_session(proj, tid, "fake", "sess-2", runs.host())
-    assert tickets.sessions_for(tickets.load(proj, tid), "fake", runs.host()) == "sess-2"
+    assert tickets.sessions_for(proj, tickets.load(proj, tid), "fake", runs.host()) == "sess-2"
 
 
 # ---------------------------------------------------------------- the helper's role is enforced in code

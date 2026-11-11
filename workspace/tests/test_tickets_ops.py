@@ -270,10 +270,10 @@ def test_sessions_record_and_find(proj, validate, new_ticket):
     t = tickets.load(proj, tid)
     validate(t)
     assert len(t["sessions"]) == 2
-    assert tickets.sessions_for(t, "my-agent", "laptop") == "s-2"
-    assert tickets.sessions_for(t, "my-agent", "vps") == "s-1"
-    assert tickets.sessions_for(t, "other", "laptop") is None
-    assert tickets.sessions_for(t, "my-agent", "elsewhere") is None
+    assert tickets.sessions_for(proj, t, "my-agent", "laptop") == "s-2"
+    assert tickets.sessions_for(proj, t, "my-agent", "vps") == "s-1"
+    assert tickets.sessions_for(proj, t, "other", "laptop") is None
+    assert tickets.sessions_for(proj, t, "my-agent", "elsewhere") is None
     for i in range(40):
         tickets.record_session(proj, tid, "a", f"s{i}", f"h{i}")
     assert len(tickets.load(proj, tid)["sessions"]) == 32
@@ -494,3 +494,85 @@ def test_outcome_shown_by_show_on_done_only(proj, run, new_ticket):
     t["status"] = "done"
     (proj / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(t), encoding="utf-8")
     assert "Changed: Added CSV export." in run("ticket", "show", tid)[1]
+
+
+def test_sessions_require_local_ownership(proj, new_ticket):
+    tid = new_ticket()
+    tickets.record_session(proj, tid, "agent", "local", "host")
+    t = tickets.load(proj, tid)
+    t["sessions"].insert(0, {"id": "foreign", "agent": "agent", "host": "host"})
+    tickets.save(proj, t)  # incoming ticket JSON may contain a session from another machine
+    assert tickets.sessions_for(proj, tickets.load(proj, tid), "agent", "host") == "local"
+    t["sessions"] = t["sessions"][:1]
+    assert tickets.sessions_for(proj, t, "agent", "host") is None
+    # Neither the same id under another agent/host nor another workspace grants ownership.
+    assert (
+        tickets.sessions_for(
+            proj, {"sessions": [{"id": "local", "agent": "other", "host": "host"}]}, "other", "host"
+        )
+        is None
+    )
+    assert tickets.sessions_for(proj / "other", tickets.load(proj, tid), "agent", "host") is None
+
+
+@pytest.mark.parametrize("contents", [None, "{", "{}", '[{"id":"local"}]', "\udcff"])
+def test_sessions_missing_or_corrupt_record(proj, new_ticket, contents):
+    tid = new_ticket()
+    tickets.record_session(proj, tid, "agent", "local", "host")
+    p = proj / ".orch" / "run" / "own-sessions.json"
+    if contents is None:
+        p.unlink()
+    else:
+        p.write_bytes(contents.encode("utf-8", errors="surrogateescape"))
+    assert tickets.sessions_for(proj, tickets.load(proj, tid), "agent", "host") is None
+
+
+def test_own_sessions_bounded(proj, new_ticket):
+    tid = new_ticket()
+    for i in range(501):
+        tickets.record_session(proj, tid, "agent", f"s{i}", "host")
+    p = proj / ".orch" / "run" / "own-sessions.json"
+    entries = json.loads(p.read_text())
+    assert len(entries) == 500
+    assert entries[0]["id"] == "s1"
+    first_seen = entries[0]["first_seen"]
+    tickets.record_session(proj, tid, "agent", "s1", "host")
+    entries = json.loads(p.read_text())
+    assert len(entries) == 500
+    assert entries[-1]["first_seen"] == first_seen
+    assert (
+        tickets.sessions_for(
+            proj, {"sessions": [{"id": "s0", "agent": "agent", "host": "host"}]}, "agent", "host"
+        )
+        is None
+    )
+
+
+def test_old_key_resolution(proj, new_ticket, run):
+    tid = new_ticket()
+    t = tickets.load(proj, tid)
+    t["key"] = "DM1-15"
+    t["ext"] = {"sync": {"old_keys": ["DM1-13"]}}
+    tickets.save(proj, t)
+    notices = []
+    assert tickets.resolve(proj, "dm1-13", notice=notices.append) == tid
+    assert notices == ["DM1-13 moved to DM1-15"]
+    code, _, err = run("ticket", "show", "DM1-13")
+    assert code == 0
+    assert "DM1-13 moved to DM1-15" in err
+    from orch.errors import Refused
+
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj / "other", "DM1-13")
+    other = new_ticket()
+    t2 = tickets.load(proj, other)
+    t2["key"] = "DM1-13"
+    tickets.save(proj, t2)
+    notices.clear()
+    assert tickets.resolve(proj, "DM1-13", notice=notices.append) == other
+    assert notices == []
+    t2["key"] = "DM1-16"
+    t2["ext"] = {"sync": {"old_keys": ["DM1-13"]}}
+    tickets.save(proj, t2)
+    with pytest.raises(Refused, match="DM1-15, DM1-16"):
+        tickets.resolve(proj, "DM1-13")

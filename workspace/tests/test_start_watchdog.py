@@ -76,7 +76,7 @@ def test_a_start_with_no_sign_of_life_is_stopped_and_started_fresh(proj, run, tm
     ids = [re.search(r"--session-id (\S+)", ln).group(1) for ln in lines]
     assert ids[0] != ids[1]
     # the hung one is never kept; the one that worked is
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == ids[1]
+    assert tickets.sessions_for(proj, tickets.load(proj, tid), "claude", runs.host()) == ids[1]
     assert any("no sign of life" in h["text"] for h in tickets.load(proj, tid)["history"])
 
 
@@ -105,7 +105,7 @@ def test_a_new_session_the_tool_did_not_save_is_not_kept(proj, run, tmp_path, mo
     _session_dir(proj)  # folder there, the stub writes no conversation file
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) is None
+    assert tickets.sessions_for(proj, tickets.load(proj, tid), "claude", runs.host()) is None
 
 
 def test_a_quiet_generic_agent_is_not_stopped(proj, run, monkeypatch, gen):
