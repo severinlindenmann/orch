@@ -309,7 +309,11 @@ def test_git_timeout_or_no_git_keeps_the_copy_with_its_unsaved_work(repo, monkey
         m.setattr(worktrees, "_top_of", lambda r: None)  # git missing
         worktrees.sweep(repo)
         assert (p / "mine.txt").read_text() == "unsaved"
-    worktrees.sweep(repo)  # git is back: now it is saved and taken away
+    worktrees.sweep(repo)  # saved after Done: the person must review this tip
+    assert p.exists() and worktrees._unmerged_done_work(repo, t)
+    target, _, _ = worktrees.approval_target(repo, t)
+    assert worktrees.approve_copy(repo, t, target)["state"] == "merged"
+    worktrees.sweep(repo)
     assert not p.exists() and git(repo, "show", "HEAD:mine.txt") == "unsaved"
 
 
@@ -434,6 +438,7 @@ def test_copies_on_two_runs_done_leaves_no_copy_and_no_registry_line(repo):
     assert pa.is_dir() and pb.is_dir()  # the agents are still in them: they go when the runs end
     runs.release(repo, a, ra["run"])
     runs.release(repo, b, rb["run"])
+    worktrees.sweep(repo)  # execute the detached cleanup
     assert not pa.exists() and not pb.exists()
     assert worktrees.registry(repo) == {} and worktrees.count(repo) == 0
     assert branches(repo) == []  # nothing on them: merged, deleted
@@ -984,6 +989,10 @@ def test_a_stale_index_lock_keeps_the_copy_with_a_note_and_try_again_clears_it(r
     assert lock.exists()
     monkeypatch.delenv("CLAUDECODE")
     worktrees.retry(repo, t)
+    assert not lock.exists() and p.exists()
+    target, _, _ = worktrees.approval_target(repo, t)
+    assert worktrees.approve_copy(repo, t, target)["state"] == "merged"
+    worktrees.sweep(repo)
     assert not lock.exists() and not p.exists()
     assert git(repo, "show", "HEAD:w.txt") == "work"
     assert worktrees.usage(repo)["stuck"] == []
@@ -1052,6 +1061,7 @@ def test_lane_c_post_rename_failure_drops_closed_entry(repo, monkeypatch, ended)
         close(repo, a, "done")
         assert pa.exists()
         runs.release(repo, a, rec["run"])
+        worktrees.sweep(repo)  # execute the detached cleanup
     else:
         runs.release(repo, a, rec["run"])
         close(repo, a, "done")
@@ -1109,7 +1119,11 @@ def test_retry_live_run_keeps_stale_lock(repo):
         worktrees.retry(repo, t)
     assert lock.exists() and p.is_dir()
     runs.release(repo, t, rec["run"])
-    assert worktrees.retry(repo, t) == []
+    assert any("approval" in note for note in worktrees.retry(repo, t))
+    assert p.exists() and not lock.exists()
+    target, _, _ = worktrees.approval_target(repo, t)
+    assert worktrees.approve_copy(repo, t, target)["state"] == "merged"
+    worktrees.sweep(repo)
     assert not p.exists() and not lock.exists()
 
 
@@ -1394,6 +1408,7 @@ def test_task_e_real_guard_round_trip(repo, monkeypatch):
     assert worktrees._known_copies(p.parent.parent)[wid8(repo)] == {
         "main": str(repo.resolve()),
         "workspace_id": addons.workspace_id(repo),
+        "tickets": {repo.tids[0]: {"origin_branch": git(repo, "symbolic-ref", "HEAD")}},
     }
 
 
@@ -1580,6 +1595,7 @@ def test_main_folder_run_then_copy_then_done_releases_the_copy(repo, monkeypatch
     assert t in worktrees.registry(repo)
     close(repo, t, "done")  # the person's Done while the run is still alive: kept for now
     runs.release(repo, t, rec["run"])  # the run's end
+    worktrees.sweep(repo)  # execute the detached cleanup
     assert t not in worktrees.registry(repo)
     assert not copy.exists()
     assert str(copy) not in git(repo, "worktree", "list", "--porcelain")
@@ -1594,7 +1610,8 @@ def test_a_live_claim_keeps_the_copy_wherever_the_claim_says_it_works(repo):
     close(repo, t, "done")
     assert t in worktrees.registry(repo) and p.is_dir()
     rec = runs.read(repo, t)
-    runs.release(repo, t, rec["run"])  # the claim ends: the copy goes
+    runs.release(repo, t, rec["run"])  # the claim ends: cleanup is scheduled
+    worktrees.sweep(repo)
     assert t not in worktrees.registry(repo) and not p.exists()
 
 
@@ -1629,6 +1646,7 @@ def test_copy_clean_removes_a_done_tickets_copy_without_a_claim(repo, run, monke
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a, **k: None)  # as if Done never released it
         close(repo, t, "done")
+    worktrees._record_done_tip(repo, t)  # model Done recorded before cleanup was interrupted
     assert t in worktrees.registry(repo) and p.is_dir()
     code, out, err = run("copy", "clean", "--json")
     assert code == 0, err

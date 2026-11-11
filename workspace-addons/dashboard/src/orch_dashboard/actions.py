@@ -121,6 +121,10 @@ PROOF_OPS = {
         lambda a: f"{a.get('ws8')}:discard" if a.get("discard") else a.get("ws8"),
     ),
     "copies.retry": ("copy.retry", lambda a: a.get("ticket")),
+    "copies.approve": (
+        "copy.retry",
+        lambda a: f"approve:{a.get('ticket')}:{a.get('tip')}:{a.get('control_paths')}",
+    ),
     "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
     "chat.say": ("chat.send", lambda a: "general"),
@@ -551,6 +555,21 @@ def _copies_ask_update(a):
     return ["copy", "ask-update", v, "--json"], [], []
 
 
+def _copies_approve(a):
+    _only(a, ("ticket", "tip", "control_paths"))
+    tid, tip, count = a.get("ticket"), a.get("tip"), a.get("control_paths")
+    if (
+        not isinstance(tid, str)
+        or not TID.fullmatch(tid)
+        or not isinstance(tip, str)
+        or not re.fullmatch(r"[0-9a-f]{40,64}", tip)
+        or type(count) is not int
+        or count < 0
+    ):
+        raise BadRequest("Review the copy again before bringing it back.")
+    return ["copy", "approve", tid, "--json"], [], []
+
+
 def _copies_retry(a):
     """Try again (settings), for a copy kept because git was interrupted: `orch copy retry <ticket>` (core
     removes the stale lock file of that copy and cleans it; a person's click only)."""
@@ -785,6 +804,7 @@ OPS = {
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,
     "copies.retry": _copies_retry,
+    "copies.approve": _copies_approve,
     "copies.ask-update": _copies_ask_update,
     "ticket.field": _ticket_field,
 }

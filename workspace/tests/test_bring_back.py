@@ -7,7 +7,9 @@ import pytest
 from test_worktrees_cleanup import git, make
 from test_worktrees_cleanup import repo as repo_fixture
 
-from orch import tickets, worktrees
+from orch import humanproof, tickets, worktrees
+
+_REAL_PERSON_BY = humanproof.person_by
 
 repo = repo_fixture
 
@@ -188,6 +190,7 @@ def test_crash_after_merge_before_record(done_copy, monkeypatch):
     assert (root / "code.py").read_text() == "print(2)\n"
     monkeypatch.setattr(worktrees, "_bb_state", real)
     worktrees.on_run_ended(root, tid)
+    worktrees.sweep(root)
     assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
     assert not copy.exists()
 
@@ -329,6 +332,7 @@ def test_need_appears_and_clears(done_copy):
     assert any(row["kind"] == "copies:bring-back" for row in needs.core_rows(root))
     (root / "code.py").write_text("print(1)\n")
     worktrees.on_run_ended(root, tid)
+    worktrees.sweep(root)
     assert not any(row["kind"] == "copies:bring-back" for row in needs.core_rows(root))
 
 
@@ -396,6 +400,7 @@ def test_branch_only_without_registry(done_copy, monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
         tickets.set_status(root, tid, "done", "human:test", proven=True)
+    worktrees._record_done_tip(root, tid)
     worktrees.sweep(root)
     assert (root / "code.py").read_text() == "print(2)\n"
     assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
@@ -515,6 +520,7 @@ def test_process_death_recovers_journal(done_copy, monkeypatch):
         m.setattr(worktrees, "on_closed", lambda *a: None)
         tickets.set_status(root, tid, "done", "human:test", proven=True)
     before = project_hashes(root)
+    worktrees._record_done_tip(root, tid)
     # A fresh interpreter uses the same isolated fixture home and its test-only
     # pairing, with a different lock owner. Never fork a threaded pytest worker.
     script = """
@@ -591,6 +597,438 @@ def test_main_run_ending_retries_other_done_tickets(done_copy):
     before = project_hashes(root)
     assert_waiting_unchanged(root, tid, copy, before)
     runs.release(root, other, rec["run"])
+    worktrees.sweep(root)
     assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
     assert (root / "code.py").read_text() == "print(2)\n"
     assert not copy.exists()
+
+
+@pytest.mark.parametrize(
+    "mode", ["late_commit", "live_done", "forged_ticket", "forged_registry", "copy_update"]
+)
+def test_reviewed_tip_cannot_move(done_copy, monkeypatch, mode):
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("person dirty\n")
+    if mode == "live_done":
+        with monkeypatch.context() as m:
+            m.setattr(worktrees, "_alive_here", lambda *a: {"live": True})
+            finish(root, tid)
+    else:
+        finish(root, tid)
+    (root / "code.py").write_text("print(1)\n")
+    if mode == "copy_update":
+        (root / "other").write_text("new main\n")
+        git(root, "add", "other")
+        git(root, "commit", "-qm", "advance main")
+        monkeypatch.chdir(copy)
+        worktrees.update_copy(root, tid)
+    else:
+        (copy / "late").write_text("unreviewed\n")
+        assert worktrees._save_leftovers(copy, tid)[0]
+    if mode == "forged_ticket":
+        tickets.apply_op(
+            root,
+            tid,
+            lambda t: t["work"].update(
+                bring_back={"reviewed_tip": git(copy, "rev-parse", "HEAD"), "state": "merged"}
+            ),
+        )
+    if mode == "forged_registry":
+        reg = worktrees.registry(root)
+        reg[tid]["reviewed_tip"] = git(copy, "rev-parse", "HEAD")
+        worktrees._save_registry(root, reg)
+    before = project_hashes(root)
+    head = git(root, "rev-parse", "HEAD")
+    result = worktrees.bring_back(root, tid)
+    assert result["state"] == "waiting"
+    assert "need your approval" in result["reason"]
+    assert project_hashes(root) == before
+    assert git(root, "rev-parse", "HEAD") == head
+    assert copy.exists()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".orch/tickets/x.json",
+        ".ORCH/x",
+        ".Orch/x",
+        "sub/.gitattributes",
+        ".gitmodules",
+        ".githooks/pre-commit",
+        "caf\u00e9/.codex/x",
+        "cafe\u0301/.agents/x",
+        "sub\\.claude\\x",
+    ],
+)
+def test_control_paths_wait(done_copy, name):
+    root, tid, copy = done_copy
+    p = copy / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("hostile control\n")
+    git(copy, "add", "-f", "--", name)
+    before = project_hashes(root)
+    result = finish(root, tid)
+    assert result["state"] == "waiting"
+    assert "control orch or git" in result["reason"]
+    assert project_hashes(root) == before
+    assert copy.exists()
+
+
+def test_unresolved_copy_never_saved(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    (root / "code.py").write_text("conflicting main\n")
+    git(root, "add", "code.py")
+    git(root, "commit", "-qm", "main")
+    monkeypatch.chdir(copy)
+    assert "Resolve the conflicts" in worktrees.update_copy(root, tid)
+    before = project_hashes(root)
+    result = finish(root, tid)
+    assert result["state"] == "waiting"
+    assert result["reason"] == "The agent has not finished resolving a conflict"
+    assert project_hashes(root) == before
+    assert copy.exists()
+
+
+def test_refused_journal_does_not_abort_person_merge(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("conflicting main\n")
+    git(root, "add", "code.py")
+    git(root, "commit", "-qm", "main")
+    real = worktrees._bb_snapshot
+    calls = 0
+
+    def race(top):
+        nonlocal calls
+        snap = real(top)
+        calls += 1
+        if calls == 2:
+            snap["head"] = "0" * 40
+        return snap
+
+    monkeypatch.setattr(worktrees, "_bb_snapshot", race)
+    assert finish(root, tid)["state"] == "waiting"
+    monkeypatch.setattr(worktrees, "_bb_snapshot", real)
+    subprocess.run(["git", "merge", f"orch/{tid}"], cwd=root, capture_output=True)
+    (root / "code.py").write_text("PERSON RESOLUTION\n")
+    git(root, "add", "code.py")
+    before = git(root, "status", "--porcelain")
+    worktrees.bring_back(root, tid)
+    assert (root / "code.py").read_text() == "PERSON RESOLUTION\n"
+    assert git(root, "status", "--porcelain") == before
+    assert (root / ".git/MERGE_HEAD").exists()
+
+
+@pytest.mark.parametrize("kind", ["symlink", "gitlink", "rename", "delete"])
+def test_control_modes_and_old_paths(done_copy, kind):
+    root, tid, copy = done_copy
+    if kind == "symlink":
+        (copy / "link").symlink_to("code.py")
+    elif kind == "gitlink":
+        git(copy, "update-index", "--add", "--cacheinfo", f"160000,{git(copy, 'rev-parse', 'HEAD')},module")
+        (copy / "module").mkdir()
+        git(copy, "commit", "-qm", "gitlink")
+    else:
+        (root / ".orch/control").write_text("base control")
+        git(root, "add", "-f", ".orch/control")
+        git(root, "commit", "-qm", "tracked control")
+        git(copy, "merge", "--no-edit", git(root, "rev-parse", "HEAD"))
+        if kind == "rename":
+            git(copy, "mv", ".orch/control", "ordinary")
+        else:
+            git(copy, "rm", ".orch/control")
+    before = project_hashes(root)
+    result = finish(root, tid)
+    assert result["state"] == "waiting"
+    assert "control orch or git" in result["reason"]
+    assert project_hashes(root) == before
+    assert copy.exists()
+
+
+def test_forged_signed_review_is_refused(done_copy):
+    import json
+
+    from orch import addons
+
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("personal")
+    finish(root, tid)
+    (root / "code.py").write_text("print(1)\n")
+    (copy / "late").write_text("unreviewed")
+    assert worktrees._save_leftovers(copy, tid)[0]
+    store = addons.home(root) / "keys/copies/registry.json"
+    doc = json.loads(store.read_text())
+    entry = next(iter(doc["entries"].values()))
+    entry["tickets"][tid]["reviewed_tip"] = git(copy, "rev-parse", "HEAD")
+    store.write_text(json.dumps(doc))
+    before = project_hashes(root)
+    result = worktrees.bring_back(root, tid)
+    assert result["state"] == "waiting"
+    assert result["reason"] == worktrees.APPROVAL_NEEDED
+    assert project_hashes(root) == before
+    assert copy.exists()
+
+
+def test_person_approves_exact_control_tip(done_copy, run, monkeypatch):
+    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
+    import io
+
+    root, tid, copy = done_copy
+    (copy / ".gitignore").write_text("something\n")
+    assert finish(root, tid)["state"] == "waiting"
+    target, tip, count = worktrees.approval_target(root, tid)
+    assert count == 1
+    proof = humanproof.mint(
+        humanproof.human_key(root), humanproof.new_payload("copy.retry", target, "human:pat")
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
+    code, out, err = run("copy", "approve", tid, "--proof-stdin", "--json")
+    assert code == 0, out + err
+    assert git(root, "rev-parse", "HEAD^2") == tip
+    assert (root / ".gitignore").read_text() == "something\n"
+
+
+def test_approval_race_refused(done_copy):
+    from orch.errors import Refused
+
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("personal")
+    finish(root, tid)
+    target, _, _ = worktrees.approval_target(root, tid)
+    git(copy, "commit", "--allow-empty", "-qm", "late")
+    before = project_hashes(root)
+    with pytest.raises(Refused, match="changed after"):
+        worktrees.approve_copy(root, tid, target)
+    assert project_hashes(root) == before
+
+
+@pytest.mark.parametrize("prefix", ["", "\0binary\n"])
+def test_committed_conflict_markers_wait(done_copy, prefix):
+    root, tid, copy = done_copy
+    (copy / "code.py").write_text(prefix + "<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n")
+    before = project_hashes(root)
+    result = finish(root, tid)
+    assert result["state"] == "waiting"
+    assert result["reason"] == worktrees.CONFLICT_PENDING
+    assert project_hashes(root) == before
+
+
+def test_verify_signatures_cannot_run_repo_program(done_copy):
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    tree, parent = git(copy, "rev-parse", "HEAD^{tree}"), git(copy, "rev-parse", "HEAD")
+    body = (
+        f"tree {tree}\nparent {parent}\nauthor a <a@b> 1 +0000\ncommitter a <a@b> 1 +0000\n"
+        "gpgsig -----BEGIN PGP SIGNATURE-----\n \n x\n -----END PGP SIGNATURE-----\n\nsigned\n"
+    )
+    sha = subprocess.run(
+        ["git", "hash-object", "-t", "commit", "-w", "--stdin"],
+        cwd=copy,
+        input=body,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    git(copy, "reset", "-q", "--soft", sha)
+    mark = root.parent / (tid + "-gpg-ran")
+    evil = root.parent / (tid + "-evil.sh")
+    evil.write_text(f'#!/bin/sh\necho ran >> "{mark}"\nexit 0\n')
+    evil.chmod(0o755)
+    git(root, "config", "merge.verifySignatures", "true")
+    git(root, "config", "gpg.program", str(evil))
+    assert finish(root, tid)["state"] == "merged"
+    assert not mark.exists()
+
+
+def test_snapshot_does_not_read_large_ignored_file(done_copy, monkeypatch):
+    from pathlib import Path
+
+    root, tid, copy = done_copy
+    large = root / "large"
+    with large.open("wb") as f:
+        f.truncate(3 * 1024**3)
+    (root / ".git/info/exclude").write_text("large\n")
+    real = Path.read_bytes
+
+    def guarded(path):
+        assert path != large
+        return real(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    assert finish(root, tid)["state"] == "merged"
+
+
+def test_forged_base_does_not_choose_main_branch(done_copy):
+    root, tid, copy = done_copy
+    reg = worktrees.registry(root)
+    reg[tid]["paths"][0]["base"] = "0" * 40
+    worktrees._save_registry(root, reg)
+    assert finish(root, tid)["state"] == "merged"
+
+
+def test_same_history_other_branch_waits(done_copy):
+    root, tid, copy = done_copy
+    git(root, "checkout", "-b", "other")
+    before = project_hashes(root)
+    assert finish(root, tid)["state"] == "waiting"
+    assert project_hashes(root) == before
+
+
+def test_run_end_only_schedules(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    scheduled = []
+    monkeypatch.setattr(worktrees, "schedule_sweep", lambda r: scheduled.append(r))
+    monkeypatch.setattr(worktrees, "sweep", lambda *a: pytest.fail("synchronous sweep"))
+    worktrees.on_run_ended(root, tid)
+    assert scheduled == [root]
+
+
+def test_approval_without_proof_has_bound_handoff(done_copy, run, monkeypatch):
+    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
+
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("personal")
+    finish(root, tid)
+    target, tip, count = worktrees.approval_target(root, tid)
+    code, _, _ = run("copy", "approve", tid, "--by", "human:pat")
+    assert code == 2
+    handoff = next(h for h in humanproof.handoffs(root) if h["target"] == target)
+    assert handoff["argv"] == ["copy", "retry", tid, "--approve-tip", tip, "--control-paths", str(count)]
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_snapshot_memory_error_keeps_main_safe(done_copy, monkeypatch, phase):
+    root, tid, copy = done_copy
+    real = worktrees._bb_snapshot
+    calls = 0
+    before = project_hashes(root)
+
+    def snapshot(top):
+        nonlocal calls
+        calls += 1
+        if calls == (1 if phase == "before" else 3):
+            raise MemoryError
+        return real(top)
+
+    monkeypatch.setattr(worktrees, "_bb_snapshot", snapshot)
+    result = finish(root, tid)
+    if phase == "before":
+        assert result["state"] == "waiting"
+        assert project_hashes(root) == before
+        assert copy.exists()
+    else:
+        assert result["state"] == "merged"
+        assert (root / "code.py").read_text() == "print(2)\n"
+
+
+def test_snapshot_never_reads_run_state(done_copy, monkeypatch):
+    from pathlib import Path
+
+    root, tid, copy = done_copy
+    run = root / ".orch/run/ignored-state"
+    run.parent.mkdir(parents=True, exist_ok=True)
+    run.write_text("runtime")
+    real = Path.read_bytes
+
+    def guarded(path):
+        assert path != run
+        return real(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    assert finish(root, tid)["state"] == "merged"
+
+
+@pytest.mark.parametrize("marker", ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"])
+def test_copy_operation_in_progress_is_never_saved(done_copy, marker):
+    root, tid, copy = done_copy
+    path = worktrees._gitdir_of(copy) / marker
+    if marker.startswith("rebase"):
+        path.mkdir()
+    else:
+        path.write_text(git(copy, "rev-parse", "HEAD"))
+    before = project_hashes(root)
+    assert worktrees._save_leftovers(copy, tid) == (False, worktrees.CONFLICT_PENDING)
+    assert finish(root, tid)["reason"] == worktrees.CONFLICT_PENDING
+    assert project_hashes(root) == before
+
+
+@pytest.mark.parametrize("invalid", ["expired", "head", "message"])
+def test_recovery_needs_fresh_matching_head_and_message(done_copy, invalid):
+    import json
+
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("personal dirty")
+    finish(root, tid)
+    (root / "code.py").write_text("conflicting main\n")
+    git(root, "add", "code.py")
+    git(root, "commit", "-qm", "main")
+    head, tip = git(root, "rev-parse", "HEAD"), git(copy, "rev-parse", "HEAD")
+    subprocess.run(["git", "merge", "-m", f"orch: {tid} manual", tip], cwd=root, capture_output=True)
+    (root / "code.py").write_text("PERSON RESOLUTION\n")
+    git(root, "add", "code.py")
+    if invalid == "message":
+        (root / ".git/MERGE_MSG").write_text("My own merge\n")
+    journal = root / ".orch/run/bringback" / f"{tid}.json"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text(
+        json.dumps(
+            {
+                "pre_head": "0" * 40 if invalid == "head" else head,
+                "tip_sha": tip,
+                "started_at": "2000-01-01T00:00:00Z" if invalid == "expired" else tickets.now(),
+            }
+        )
+    )
+    before = project_hashes(root)
+    assert worktrees.bring_back(root, tid)["state"] == "waiting"
+    assert project_hashes(root) == before
+    assert (root / ".git/MERGE_HEAD").exists()
+    assert not journal.exists()
+
+
+def test_existing_base_marker_lines_are_allowed(repo):
+    (repo / "example").write_text("=======\n")
+    git(repo, "add", "example")
+    git(repo, "commit", "-qm", "example marker")
+    copy = make(repo)
+    (copy / "example").write_text("text\n=======\n=======\n")
+    assert finish(repo, repo.tids[0])["state"] == "merged"
+
+
+def test_copy_update_uses_short_timeout(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    seen = []
+    real = worktrees._git
+
+    def capture(args, cwd, timeout=worktrees.GIT_TIMEOUT, *a, **kw):
+        if args[0] == "merge":
+            seen.append((args, timeout))
+        return real(args, cwd, timeout, *a, **kw)
+
+    monkeypatch.setattr(worktrees, "_git", capture)
+    monkeypatch.chdir(copy)
+    worktrees.update_copy(root, tid)
+    assert seen and seen[0][1] == 30
+    assert "--no-verify-signatures" in seen[0][0]
+
+
+def test_review_command_is_read_only(done_copy, run):
+    import json
+
+    root, tid, copy = done_copy
+    before = project_hashes(root)
+    code, out, err = run("copy", "review", tid, "--json", "--by", "agent:x")
+    assert code == 0, err
+    assert json.loads(out)["tip"] == git(copy, "rev-parse", "HEAD")
+    assert project_hashes(root) == before
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+
+
+def test_done_without_copy_does_not_need_bring_back(repo):
+    from orch import needs
+
+    tid = repo.tids[0]
+    tickets.set_status(repo, tid, "done", "human:test", proven=True)
+    assert not tickets.load(repo, tid).get("work", {}).get("bring_back")
+    assert not any(row["kind"] == "copies:bring-back" for row in needs.core_rows(repo))

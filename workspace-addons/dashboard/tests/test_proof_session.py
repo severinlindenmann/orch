@@ -469,6 +469,7 @@ ACT_ARGS = {
     "copies.clean": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
+    "copies.approve": {"ticket": TID, "tip": "a" * 40, "control_paths": 0},
     "look.set": {"icon": "bolt", "color": "auto"},
     "look.shared": {"on": False},
     "mobile.set": {"on": True},

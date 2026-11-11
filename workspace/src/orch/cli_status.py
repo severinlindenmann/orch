@@ -31,7 +31,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
     c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
-    for name in ("update", "ask-update"):
+    for name in ("update", "ask-update", "review", "approve"):
         item = c.add_parser(name, parents=[common])
         item.add_argument("ticket")
     cc = c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
@@ -39,6 +39,8 @@ def add_parsers(sub, common) -> None:
     cc.add_argument("--background", action="store_true", help=argparse.SUPPRESS)  # sweep + trash, silent
     rt = c.add_parser("retry", parents=[common], help="try again where git was interrupted (a person's call)")
     rt.add_argument("ticket")
+    rt.add_argument("--approve-tip", help=argparse.SUPPRESS)
+    rt.add_argument("--control-paths", type=int, help=argparse.SUPPRESS)
     ro = c.add_parser(
         "remove-orphaned",
         parents=[common],
@@ -183,6 +185,29 @@ def _copy_clean(args, root: Path) -> None:
         tid = tickets.load(root, args.ticket)["id"]
         message = (worktrees.update_copy if args.sub == "update" else worktrees.ask_update)(root, tid)
         _out(args, {"message": message}, message)
+        return
+    if args.sub == "review":
+        target, tip, count = worktrees.approval_target(root, args.ticket)
+        result = {"target": target, "tip": tip, "control_paths": count}
+        _out(args, result, f"Tip {tip}: {count} orch or git control paths.")
+        return
+    if args.sub == "approve" or (args.sub == "retry" and getattr(args, "approve_tip", None)):
+        target, tip, count = worktrees.approval_target(root, args.ticket)
+        if args.sub == "retry" and (args.approve_tip != tip or args.control_paths != count):
+            raise Refused("The copy changed after it was shown. Review it again.")
+        who = humanproof.person_by(
+            root,
+            args,
+            "copy.retry",
+            target,
+            label="Review and bring back",
+            argv=["copy", "retry", args.ticket, "--approve-tip", tip, "--control-paths", str(count)],
+            parts={"title": humanproof.ticket_name(root, args.ticket), "tip": tip, "control_paths": count},
+        )
+        if not who.startswith("human:"):
+            raise Refused("Only a person can approve changes to bring back.")
+        result = worktrees.approve_copy(root, args.ticket, target)
+        _out(args, result, result.get("reason") or "Brought back.")
         return
     if args.sub == "remove-orphaned":
         if not isinstance(args.ws8, str) or not worktrees._WS8.fullmatch(args.ws8):

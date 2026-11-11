@@ -194,6 +194,9 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         back = (t.get("work") or {}).get("bring_back") or {}
         if back.get("state") == "waiting":
             t["bring_back"] = {"state": "waiting", "reason": str(back.get("reason") or "")}
+            review = run_orch(orch_bin, ["copy", "review", t["id"], "--json"], root)
+            if isinstance(review, dict) and isinstance(review.get("tip"), str):
+                t["bring_back"].update(tip=review["tip"], control_paths=review.get("control_paths", 0))
         _mark_missing_proofs(root, t)
         mobile.mark_chat_history(t)
         tickets.append(t)

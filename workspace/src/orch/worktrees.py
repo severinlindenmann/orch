@@ -317,8 +317,25 @@ def _remember_copies(root: Path, folder: Path) -> None:
                 raise Refused("Another workspace uses the same copy folder.")
         if old is not None and old != main:
             _write_copies_owner(folder, main)
-        known[folder.name] = {"main": main, "workspace_id": wid}
+        known[folder.name] = {**(entry or {}), "main": main, "workspace_id": wid}
         _save_copies_store(home, key, counter, known)
+
+
+def _copy_authority(root: Path, ticket: str, update=None) -> dict:
+    """Ticket authority lives only in the guarded, authenticated machine store."""
+    home = addons.home(root)
+    with runs.locked(home / ".copies-state", "_known_copies"):
+        key = _copies_key(home)
+        counter, entries = _copies_store(home, key)
+        wid = addons.workspace_id(root)
+        entry = entries.get((wid or "")[:8], {})
+        if entry.get("workspace_id") != wid or entry.get("main") != str(root.resolve()):
+            raise Refused("The copies identity does not match this project.")
+        record = entry.setdefault("tickets", {}).setdefault(ticket, {})
+        if update is not None:
+            update(record)
+            _save_copies_store(home, key, counter, entries)
+        return dict(record)
 
 
 def _known_gone(d: Path, known: dict | None = None) -> bool:
@@ -613,6 +630,8 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         return None, f"git could not fill the copy: {err.splitlines()[-1] if err else 'unknown error'}"
     start = dest / rel if rel else dest
     start.mkdir(parents=True, exist_ok=True)
+    origin = _bb_read(top, ["symbolic-ref", "-q", "HEAD"])
+    _copy_authority(root, ticket, lambda r: r.setdefault("origin_branch", origin))
     entry = {"path": str(dest), "branch": branch, "base": head, "sub": rel}
     try:
         reg = registry(root)
@@ -752,6 +771,122 @@ def _record_on_ticket(root: Path, ticket: str, entry: dict) -> None:
 BRING_BACK_TIMEOUT = 300
 
 
+APPROVAL_NEEDED = "New changes were added after you marked this done: they need your approval"
+CONFLICT_PENDING = "The agent has not finished resolving a conflict"
+
+
+def _copy_conflict(want: Path) -> bool:
+    for marker in ("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+        path = _bb_read(want, ["rev-parse", "--git-path", marker])
+        if (want / path).exists():
+            return True
+    return bool(_bb_read(want, ["ls-files", "--unmerged", "-z"], strip=False))
+
+
+def _control_paths(top: Path, tip: str) -> list[str]:
+    import unicodedata
+
+    controls = {
+        ".orch",
+        ".git",
+        ".gitattributes",
+        ".gitmodules",
+        ".gitignore",
+        ".githooks",
+        ".husky",
+        ".agents",
+        ".claude",
+        ".codex",
+    }
+    raw = _bb_read(top, ["diff", "--raw", "--no-renames", "-z", f"HEAD...{tip}"], strip=False)
+    fields = raw.split("\0")
+    found = []
+    for meta, path in zip(fields[0::2], fields[1::2], strict=False):
+        parts = unicodedata.normalize("NFC", path.replace("\\", "/")).casefold().split("/")
+        modes = meta.split()[:2]
+        if controls.intersection(parts) or any(m.lstrip(":") in ("120000", "160000") for m in modes):
+            found.append(path)
+    return found
+
+
+def _committed_conflict(top: Path, tip: str) -> bool:
+    marker = r"^\+((?:<{7}|={7}|>{7})(?: .*|$))"
+    diff = _bb_read(top, ["diff", "--no-renames", "-a", "--unified=0", f"HEAD...{tip}"], strip=False)
+    if not re.search(marker, diff, re.MULTILINE):
+        return False
+    base = _bb_read(top, ["merge-base", "HEAD", tip])
+    paths = _bb_read(top, ["diff", "--name-only", "--no-renames", "-a", "-z", f"HEAD...{tip}"], strip=False)
+    for path in filter(None, paths.split("\0")):
+        change = _bb_read(
+            top,
+            [
+                "--literal-pathspecs",
+                "diff",
+                "--no-renames",
+                "-a",
+                "--unified=0",
+                f"{base}..{tip}",
+                "--",
+                path,
+            ],
+            strip=False,
+        )
+        markers = set(re.findall(marker, change, re.MULTILINE))
+        if not markers:
+            continue
+        rc, content, _ = _git(["show", f"{base}:{path}"], top, read_only=True, strip=False)
+        if rc == 0:
+            markers.difference_update(content.splitlines())
+        if markers:
+            return True
+    return False
+
+
+def approval_target(root: Path, ticket: str) -> tuple[str, str, int]:
+    if not _TID.fullmatch(ticket):
+        raise Refused("That is not a ticket id.")
+    with _scoped(root):
+        top = _top_of(root)
+        if top is None:
+            raise Refused("git could not read your folder")
+        tip = _bb_read(top, ["rev-parse", "--verify", f"refs/heads/orch/{ticket}"])
+        count = len(_control_paths(top, tip))
+        return f"approve:{ticket}:{tip}:{count}", tip, count
+
+
+def approve_copy(root: Path, ticket: str, target: str) -> dict:
+    """Caller has consumed a person proof for this exact target; recheck under lock."""
+    with _scoped(root), runs.locked(root, LOCK_ID, wait=LOCK_WAIT):
+        current, tip, count = approval_target(root, ticket)
+        if current != target:
+            raise Refused("The copy changed after it was shown. Review it again.")
+        if tickets.load(root, ticket).get("status") != "done":
+            raise Refused("Mark this ticket done before bringing it back.")
+        _copy_authority(
+            root, ticket, lambda r: r.update(reviewed_tip=tip, reviewed_at=tickets.now(), controls_tip=tip)
+        )
+        return _bring_back_locked(root, ticket)
+
+
+def _record_done_tip(root: Path, ticket: str) -> None:
+    with _scoped(root), runs.locked(root, LOCK_ID, wait=LOCK_WAIT):
+        if _copy_authority(root, ticket).get("done_seen"):
+            return
+        # Persist the first call even if saving fails: a retry is never a fresh review.
+        _copy_authority(root, ticket, lambda r: r.update(done_seen=True))
+        top, want = _top_of(root), _want(root, ticket)
+        if top is None:
+            return
+        if want is not None and want.exists() and not _alive_here(root, ticket):
+            if not _owned(root, want) or not _is_our_worktree(top, want):
+                return
+            ok, _ = _save_leftovers(want, ticket)
+            if not ok:
+                return
+        tip = _bb_read(top, ["rev-parse", "--verify", f"refs/heads/orch/{ticket}"])
+        _copy_authority(root, ticket, lambda r: r.update(reviewed_tip=tip, reviewed_at=tickets.now()))
+
+
 def _bb_state(root: Path, ticket: str, state: str, reason: str = "", commit: str | None = None) -> dict:
     value = {"state": state, "reason": reason, "at": tickets.now()}
     if commit:
@@ -810,12 +945,13 @@ def _bb_snapshot(top: Path) -> dict:
     # These are our own writes. The lock token changes when recovery runs in a
     # new process; neither it nor the recovery journal is a person's file.
     local_root = getattr(_ctx, "root", None) or top
-    journal_dir = (local_root / ".orch/run/bringback").relative_to(top).as_posix() + "/"
+    journal_dir = (local_root / ".orch/run").relative_to(top).as_posix() + "/"
     own_lock = (local_root / ".orch/run/tickets/_copies.lock").relative_to(top).as_posix()
     status = "\0".join(
         f for f in status.split("\0") if not f[3:].startswith(journal_dir) and f[3:] != own_lock
     )
     hashes = {}
+    kinds = {f[3:]: f[:2] for f in status.split("\0") if len(f) >= 4}
     for name in _bb_paths(status):
         p = top / name
         # Never read through a symlink, including a parent directory.
@@ -824,7 +960,16 @@ def _bb_snapshot(top: Path) -> dict:
         if p.is_symlink():
             raw = os.readlink(p).encode()
         elif p.is_file():
-            raw = p.read_bytes()
+            stat = p.stat()
+            untracked = kinds.get(name) in ("!!", "??")
+            touched = getattr(_ctx, "snapshot_touched", [])
+            overlap = any(name == t or name.startswith(t + "/") or t.startswith(name + "/") for t in touched)
+            if overlap and stat.st_size > 8 * 1024 * 1024:
+                raise Refused("a changed file is too large to check safely")
+            if (untracked and not overlap) or stat.st_size > 8 * 1024 * 1024:
+                raw = f"{stat.st_size}:{stat.st_mtime_ns}".encode()
+            else:
+                raw = p.read_bytes()
         elif p.exists():
             raise Refused("git could not inspect every changed file")
         else:
@@ -857,6 +1002,9 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
     def wait(reason):
         return _bb_state(root, ticket, "waiting", reason)
 
+    journal = None
+    journal_written = False
+    merge_started = False
     try:
         top = _top_of(root)
         if top is None:
@@ -871,6 +1019,21 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             if not ok:
                 return wait(why)
         tip = _bb_read(top, ["rev-parse", "--verify", f"refs/heads/orch/{ticket}"])
+        if _committed_conflict(top, tip):
+            return wait(CONFLICT_PENDING)
+        try:
+            authority = _copy_authority(root, ticket)
+        except (OSError, ValueError, Refused):
+            return wait(APPROVAL_NEEDED)
+        if authority.get("reviewed_tip") != tip:
+            return wait(APPROVAL_NEEDED)
+        control = _control_paths(top, tip)
+        if control and authority.get("controls_tip") != tip:
+            return wait(
+                "Your work touches files that control orch or git ("
+                + control[0]
+                + "). A person has to review that before it is brought back."
+            )
         journal = root / ".orch/run/bringback" / f"{ticket}.json"
         if any(os.path.lexists(p) and _is_link(p) for p in (journal, journal.parent, journal.parent.parent)):
             return wait("the recovery record is not safe to use")
@@ -880,7 +1043,17 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 saved = json.loads(journal.read_text())
             except (OSError, ValueError):
                 saved = {}
-            if merge_head != saved.get("tip_sha"):
+            started = _parse_at(saved.get("started_at"))
+            msg_path = _bb_read(top, ["rev-parse", "--git-path", "MERGE_MSG"])
+            message = (top / msg_path).read_text() if (top / msg_path).exists() else ""
+            if (
+                merge_head != saved.get("tip_sha")
+                or _bb_read(top, ["rev-parse", "HEAD"]) != saved.get("pre_head")
+                or not message.startswith(f"orch: {ticket} ")
+                or started is None
+                or not 0 <= time.time() - started <= 600
+            ):
+                journal.unlink(missing_ok=True)
                 return wait("a merge is in progress in your folder")
             _bb_merge(top, ["merge", "--abort"])
             snap = _bb_snapshot(top)
@@ -888,27 +1061,16 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 return wait("your folder changed while saving - nothing was removed")
             journal.unlink()
         if _git(["merge-base", "--is-ancestor", tip, "HEAD"], top, read_only=True)[0] == 0:
-            folders = (registry(root).get(ticket) or {}).get("paths") or t.get("work", {}).get("folders", [])
-            base = next((f.get("base") for f in folders if f.get("branch") == f"orch/{ticket}"), None)
-            none = bool(
-                base
-                and re.fullmatch(r"[0-9a-f]{40,64}", base)
-                and _bb_read(top, ["rev-list", "--count", f"{base}..{tip}"]) == "0"
-                and _git(["merge-base", "--is-ancestor", base, "HEAD"], top, read_only=True)[0] == 0
-            )
+            none = tip == _bb_read(top, ["rev-parse", "HEAD"])
             return _bb_state(
                 root, ticket, "none" if none else "merged", commit=_bb_read(top, ["rev-parse", "HEAD"])
             )
-        folders = (registry(root).get(ticket) or {}).get("paths") or t.get("work", {}).get("folders", [])
-        base = next((f.get("base") for f in folders if f.get("branch") == f"orch/{ticket}"), None)
-        if (
-            not base
-            or not re.fullmatch(r"[0-9a-f]{40,64}", base)
-            or _git(["merge-base", "--is-ancestor", base, "HEAD"], top, read_only=True)[0]
-        ):
+        origin = authority.get("origin_branch")
+        if not origin:
+            return wait("The original project branch was not recorded. A person needs to check it.")
+        if _bb_read(top, ["symbolic-ref", "-q", "HEAD"]) != origin:
             return wait("your project is on another branch")
-        if _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True)[0]:
-            return wait("your project is on another branch")
+        _bb_read(top, ["merge-base", "HEAD", tip])
         for marker in ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
             path = _bb_read(top, ["rev-parse", "--git-path", marker])
             if (top / path).exists():
@@ -921,17 +1083,18 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 and any(_same(runs.workdir_for(root, rec, record.stem), p) for p in (root, top))
             ):
                 return wait("an agent is still working in your folder")
-        pre = _bb_snapshot(top)
         touched = _bb_read(
             top, ["diff", "--name-only", "--no-renames", "-z", f"HEAD...{tip}"], strip=False
         ).split("\0")
         touched = [p for p in touched if p]
+        _ctx.snapshot_touched = touched
+        pre = _bb_snapshot(top)
         if any("\ufffd" in p for p in touched):
             return wait("git could not read a changed filename")
         import unicodedata
 
         def norm(p):
-            return unicodedata.normalize("NFC", p).casefold().rstrip("/")
+            return unicodedata.normalize("NFC", p.replace("\\", "/")).casefold().rstrip("/")
 
         if any(
             norm(a) == norm(b) or norm(a).startswith(norm(b) + "/") or norm(b).startswith(norm(a) + "/")
@@ -964,12 +1127,15 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 }
             ),
         )
+        journal_written = True
         if _bb_snapshot(top) != pre:
             return wait("your folder changed while saving - nothing was removed")
+        merge_started = True
         rc, _, _ = _bb_merge(
             top,
             [
                 "merge",
+                "--no-verify-signatures",
                 "--no-ff",
                 "--no-edit",
                 "--no-autostash",
@@ -990,16 +1156,30 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         parents = _bb_read(top, ["rev-list", "--parents", "-n", "1", "HEAD"]).split()
         if len(parents) != 3 or parents[1:] != [pre["head"], tip]:
             return wait("your folder changed while saving - nothing was removed")
-        after = _bb_snapshot(top)
-        if any(after[k] != pre[k] for k in ("branch", "status", "files")):
+        try:
+            after = _bb_snapshot(top)
+            compare = ("branch", "status", "files")
+        except (MemoryError, OSError):
+            status = _bb_read(top, ["status", "--porcelain=v1", "-z", "--ignored", "-uall"], strip=False)
+            run_dir = (root / ".orch/run").relative_to(top).as_posix() + "/"
+            status = "\0".join(f for f in status.split("\0") if not f[3:].startswith(run_dir))
+            after = {"branch": _bb_read(top, ["symbolic-ref", "-q", "HEAD"]), "status": status}
+            if _bb_read(top, ["rev-parse", "HEAD"]) != parents[0]:
+                return wait("your folder changed while saving - nothing was removed")
+            compare = ("branch", "status")
+        if any(after[k] != pre[k] for k in compare):
             return wait("your folder changed while saving - nothing was removed")
         if _unmerged_done_work(root, ticket):
             return wait("the agent added more changes while saving; nothing was removed")
         result = _bb_state(root, ticket, "merged", commit=parents[0])
         journal.unlink(missing_ok=True)
         return result
-    except (OSError, ValueError, Refused) as e:
-        return wait(str(e))
+    except (OSError, MemoryError, ValueError, Refused) as e:
+        return wait(str(e) or "git could not inspect your folder")
+    finally:
+        _ctx.snapshot_touched = []
+        if journal_written and not merge_started:
+            journal.unlink(missing_ok=True)
 
 
 def bring_back(root: Path, ticket: str) -> dict | None:
@@ -1020,7 +1200,19 @@ def update_copy(root: Path, ticket: str) -> str:
         if _bb_read(want, ["symbolic-ref", "-q", "HEAD"]) != f"refs/heads/orch/{ticket}":
             raise Refused("The copy is on another branch.")
         head = _bb_read(top, ["rev-parse", "HEAD"])
-        rc, _, _ = _bb_merge(want, ["merge", "--no-edit", "--no-autostash", "--no-rerere-autoupdate", head])
+        rc, _, _ = _git(
+            [
+                "merge",
+                "--no-verify-signatures",
+                "--no-edit",
+                "--no-autostash",
+                "--no-rerere-autoupdate",
+                head,
+            ],
+            want,
+            30,
+            identity=True,
+        )
     if rc:
         return (
             "Resolve the conflicts in your copy and commit, then run orch copy update " + ticket + " again."
@@ -1453,7 +1645,14 @@ def _save_leftovers(want: Path, ticket: str) -> tuple[bool, str]:
     detached
     HEAD (a detached HEAD sitting exactly on the tip is put back on the branch first). Call only after
     _is_our_worktree. Returns (saved, why not)."""
+    if _copy_conflict(want):
+        return False, CONFLICT_PENDING
     ref = f"refs/heads/orch/{ticket}"
+    main = getattr(_ctx, "root", None)
+    if main is not None:
+        top = _top_of(main)
+        if top is not None and _committed_conflict(top, ref):
+            return False, CONFLICT_PENDING
     rc, cur, _ = _git(["symbolic-ref", "-q", "HEAD"], want, read_only=True, filters=False)
     if cur != ref:
         if rc == 0:
@@ -1485,6 +1684,8 @@ def _save_leftovers(want: Path, ticket: str) -> tuple[bool, str]:
     rc2, tip, _ = _git(["rev-parse", "--verify", "-q", ref], want, read_only=True, filters=False)
     if not (rc1 == 0 and rc2 == 0 and head and head == tip) or _clean_status(want) is not True:
         return False, f"the saved changes are not on branch orch/{ticket}"
+    if main is not None and top is not None and _committed_conflict(top, head):
+        return False, CONFLICT_PENDING
     return True, ""
 
 
@@ -1672,6 +1873,13 @@ def on_closed(root: Path, ticket: str) -> None:
                     _git(["rev-parse", "--verify", f"refs/heads/orch/{ticket}"], root, read_only=True)[0] == 0
                 )
         if has_work:
+            # Existence reads precede the first Done action; never create a Need for a ticket without a copy.
+            if tickets.load(root, ticket).get("status") == "done":
+                try:
+                    _record_done_tip(root, ticket)
+                except (OSError, ValueError, Refused):
+                    _bb_state(root, ticket, "waiting", APPROVAL_NEEDED)
+                    return
             bring_back(root, ticket)
             remove(root, ticket, wait=SWEEP_WAIT)
     except Exception:  # noqa: BLE001 - keep on any failure
@@ -1679,11 +1887,7 @@ def on_closed(root: Path, ticket: str) -> None:
 
 
 def on_run_ended(root: Path, tid: str) -> None:
-    if _ticket_closed(root, tid):
-        on_closed(root, tid)
-    # The ended run may have held the main folder, blocking another Done ticket.
-    # Sweep also finds branch-only work, and takes the same single copies lock.
-    sweep(root)
+    schedule_sweep(root)
 
 
 # ---------------------------------------------------------------- the trash (saved work only)

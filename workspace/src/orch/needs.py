@@ -56,8 +56,8 @@ def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
         "reason": back.get("reason", ""),
         "tone": "needs-you",
         "since": back.get("at") or now,
-        "cli": f"orch copy ask-update {tid}",
-        "button": "Ask the agent to update",
+        "cli": f"orch copy approve {tid}",
+        "button": "Review and bring back",
     }
 
 
