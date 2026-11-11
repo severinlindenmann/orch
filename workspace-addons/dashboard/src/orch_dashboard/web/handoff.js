@@ -30,6 +30,8 @@
   }
   var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
   var TEMPLATES = {
+    "copy.remove_orphaned": function (p) { return ["Remove copies of the missing project ", plain(p.ws8), p.discard ? ", discarding changes that cannot be saved?" : ", saving changes first?"]; },
+    "copy.retry": function (p) { return ["Try cleaning up the copy for ", q(p.title), " again?"]; },
     "ticket.answer": function (p) { return ["Answer to ", q(p.question), " on ", q(p.title), "?"]; },
     "ticket.verdict": function (p) {
       if (p.status) { var w = STATUS[p.status] || STATUS.back; return [w[0], q(p.title), w[1] + (p.also && p.also.length ? " (it also changes: " + p.also.map(cap).join(", ") + ")" : "")]; }

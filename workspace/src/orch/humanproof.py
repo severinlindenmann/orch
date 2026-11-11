@@ -70,7 +70,8 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup "
+    "copy.remove_orphaned copy.retry".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -1553,6 +1554,8 @@ HANDOFF_HEADS = {
     "chat.make_ticket": (("chat", "make-ticket"),),
     "config.agents_may_finish": (("config", "set"),),
     "config.copy_setup": (("config", "set"),),
+    "copy.remove_orphaned": (("copy", "remove-orphaned"),),
+    "copy.retry": (("copy", "retry"),),
     "config.permissions": (("config", "set"),),
     "config.agent_add": (("config", "agent", "add"),),
     "private.allow": (("private", "allow"),),
