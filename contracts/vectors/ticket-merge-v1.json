@@ -11428,6 +11428,1584 @@
     ],
     "revision": 1
    }
+  },
+  {
+   "name": "new-verdict-line-attributed",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-verdict-patched-line-attributed",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Patched status (status review -> done)",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Patched status (status review -> done)",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-verdict-line-other-person-demoted",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Eve",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Eve",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-verdict-display-string-demoted",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Looks good",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Looks good",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Looks good",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-verdict-fake-early-line-genuine-kept",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T08:30:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     },
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T08:30:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Status review -> done",
+      "chat_message": false
+     },
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T08:30:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     },
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-verdict-replayed-line-one-only",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     },
+     {
+      "at": "2026-11-09T09:00:03Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     },
+     {
+      "at": "2026-11-09T09:00:03Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     },
+     {
+      "at": "2026-11-09T09:00:03Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-verdict-extra-keys-demoted",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": true,
+      "lost": "x"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Status review -> done",
+      "chat_message": true,
+      "lost": "x"
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": true,
+      "lost": "x"
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-verdict-known-in-base-binds-nothing",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   },
+   "ledger": {
+    "t_abc123": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "done",
+    "checklist": [],
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Status review -> done",
+      "chat_message": false
+     }
+    ],
+    "revision": 1,
+    "verdicts": [
+     {
+      "kind": "person",
+      "person": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "nonce": "0123456789abcdef",
+      "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ]
+   }
+  },
+  {
+   "name": "new-wont-line-attributed",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-29b21d2a466fb14e20f2"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c1": "v1-29b21d2a466fb14e20f2"
+   },
+   "convergence": true,
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-29b21d2a466fb14e20f2"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   }
+  },
+  {
+   "name": "new-wont-line-other-person-demoted",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-29b21d2a466fb14e20f2"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Mallory",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c1": "v1-29b21d2a466fb14e20f2"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c1",
+      "done": false,
+      "evidence": [],
+      "at": "2026-11-09T09:00:00Z",
+      "wont_do": true,
+      "reason": "Not needed",
+      "text": "Email finance",
+      "wont_nonce": "n1",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_mac": "v1-29b21d2a466fb14e20f2",
+      "by": "human:Ann"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-29b21d2a466fb14e20f2"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Mallory",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   }
+  },
+  {
+   "name": "new-wont-step-by-rewritten-line-demoted",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Mallory",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-29b21d2a466fb14e20f2"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Mallory",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c1": "v1-29b21d2a466fb14e20f2"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c1",
+      "done": false,
+      "evidence": [],
+      "at": "2026-11-09T09:00:00Z",
+      "wont_do": true,
+      "reason": "Not needed",
+      "text": "Email finance",
+      "wont_nonce": "n1",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_mac": "v1-29b21d2a466fb14e20f2",
+      "by": "human:Mallory"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Mallory",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_by": "human:Ann",
+      "wont_at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-29b21d2a466fb14e20f2"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Mallory",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   }
+  },
+  {
+   "name": "legacy-wont-no-person-line-demoted",
+   "rule": "person-history",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-2445a7a2b06f82ea36f3"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "ledger": {
+    "t_abc123:c1": "v1-2445a7a2b06f82ea36f3"
+   },
+   "convergence": true,
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "schema": "orch.ticket/1",
+    "title": "Invoice export",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [
+     {
+      "id": "c1",
+      "done": false,
+      "evidence": [],
+      "at": "2026-11-09T09:00:00Z",
+      "wont_do": true,
+      "reason": "Not needed",
+      "text": "Email finance",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-2445a7a2b06f82ea36f3",
+      "by": "human:Ann"
+     }
+    ],
+    "questions": [],
+    "refs": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "agent:sync",
+      "via": "cli",
+      "text": "(synced, not verified here) Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 2,
+    "updated_at": "2026-11-09T08:00:00Z"
+   },
+   "expect_reverse": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [
+     {
+      "id": "c1",
+      "text": "Email finance",
+      "done": false,
+      "evidence": [],
+      "wont_do": true,
+      "reason": "Not needed",
+      "by": "human:Ann",
+      "at": "2026-11-09T09:00:00Z",
+      "wont_nonce": "n1",
+      "wont_mac": "v1-2445a7a2b06f82ea36f3"
+     }
+    ],
+    "refs": [],
+    "questions": [],
+    "history": [
+     {
+      "at": "2026-11-09T09:00:00Z",
+      "by": "human:Ann",
+      "via": "cli",
+      "text": "Marked c1 as won't do",
+      "chat_message": false
+     }
+    ],
+    "revision": 1
+   }
   }
  ],
  "counter": [

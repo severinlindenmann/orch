@@ -119,7 +119,8 @@ def test_the_persons_looks_good_signs_the_done_and_it_lists_as_done(ws, run, mon
     t = tickets.load(ws, tid)
     assert t["status"] == "done" and "verdict_needed" not in t
     [entry] = t["verdicts"]
-    assert entry["kind"] == "person" and set(entry) == set(hp.VERDICT_FIELDS)
+    assert entry["kind"] == "person" and set(entry) == set(hp.VERDICT_FIELDS) | set(hp.VERDICT_OPTIONAL)
+    assert entry["person"] == "human:pat"
     assert hp.verdict_ledger(ws) == {tid: entry["mac"]}  # the CURRENT entry
     assert [x["status"] for x in tickets.list_all(ws) if x["id"] == tid] == ["done"]
     assert _raw(ws, tid)["status"] == "done" and "verdict_needed" not in _raw(ws, tid)
@@ -387,6 +388,86 @@ def _merge_mod():
     from orch_sync import merge
 
     return merge
+
+
+def test_the_person_and_time_are_inside_the_mac(ws, run, monkeypatch):
+    """#484: changing, adding or removing `person` or `at` makes the entry stop verifying (Review again); a
+    legacy entry (neither) still verifies Done as before but carries no author."""
+    tid = _finished(ws, run)
+    _edit(ws, tid, status="done")
+    _verdict(ws, run, monkeypatch, tid)
+    [entry] = _raw(ws, tid)["verdicts"]
+    assert entry["person"] == "human:pat" and entry["at"].endswith("Z")
+    for forged in (
+        {**entry, "person": "human:lee"},
+        {**entry, "at": "2030-01-01T00:00:00Z"},
+        {k: v for k, v in entry.items() if k != "person"},
+        {k: v for k, v in entry.items() if k != "at"},
+        {**entry, "person": None},
+    ):
+        _edit(ws, tid, verdicts=[forged])
+        t = tickets.load(ws, tid)
+        assert t["status"] == "review" and t.get("verdict_needed") is True
+    legacy = hp.verdict_sign(ws, _raw(ws, tid), "person")  # the pre-#484 shape
+    assert "person" not in legacy and "at" not in legacy
+    _edit(ws, tid, status="done", verdicts=[legacy])
+    assert tickets.load(ws, tid)["status"] == "done"
+
+
+def test_the_real_writers_lines_are_attributed_by_the_real_merge(ws, run, monkeypatch):
+    """#484: the history lines the real writers add (Looks good, Won't do) keep the person's name through the
+    real merge when the decision is NEW here and verifies (the allowed texts come from these writers)."""
+    merge = _merge_mod()
+    tid = _finished(ws, run)
+    _edit(ws, tid, status="done")
+    before = _raw(ws, tid)
+    _verdict(ws, run, monkeypatch, tid)
+    after = _raw(ws, tid)
+    new = [h for h in after["history"] if h not in before["history"]]
+    assert new and all(h["by"] == "human:pat" for h in new)
+    out = merge.merge_ticket(
+        before, after, before, "2030-01-03T00:00:00Z", hp.wont_verifier(ws), hp.verdict_verifier(ws)
+    )
+    kept = [h for h in out["history"] if h in new]
+    assert kept == [h for h in new if merge._DONE_TEXT.fullmatch(h["text"])] and kept
+    # the same decision known here (base): the same lines are demoted, a decision lends its name once
+    again = merge.merge_ticket(
+        after, after, before, "2030-01-03T00:00:00Z", hp.wont_verifier(ws), hp.verdict_verifier(ws)
+    )
+    assert all(h not in again["history"] for h in kept) or all(h["by"] == "human:pat" for h in kept)
+
+    tid2 = _new(run, "Second")
+    run("check", "add", tid2, "Optional", "--json", "--by", "agent:x")
+    pre = _raw(ws, tid2)
+    tickets.check_wont_do(ws, tid2, "c1", "human:pat", "Not needed")
+    post = _raw(ws, tid2)
+    step = post["checklist"][0]
+    assert step["wont_by"] == "human:pat" and step["wont_at"]
+    line = [h for h in post["history"] if h not in pre["history"]]
+    out = merge.merge_ticket(
+        pre, post, pre, "2030-01-03T00:00:00Z", hp.wont_verifier(ws), hp.verdict_verifier(ws)
+    )
+    assert [h["by"] for h in out["history"] if h in line] == ["human:pat"]
+    # a peer rewriting who decided breaks the MAC: nothing is attributed
+    forged = {**post, "checklist": [{**step, "wont_by": "human:eve"}]}
+    out = merge.merge_ticket(
+        pre,
+        {**forged, "history": [{**line[0], "by": "human:eve"}]},
+        pre,
+        "2030-01-03T00:00:00Z",
+        hp.wont_verifier(ws),
+        hp.verdict_verifier(ws),
+    )
+    assert all(h["by"] != "human:eve" for h in out["history"])
+    assert "wont_do" not in out["checklist"][0]
+
+
+def test_the_merges_dependency_free_copy_of_the_actor_rules_has_not_drifted():
+    merge = _merge_mod()
+    assert merge._VERDICT_OPTIONAL == hp.VERDICT_OPTIONAL
+    assert merge._ACTOR.pattern == hp.ACTOR_PATTERN
+    assert hp.bindable_actor("human:pat") and not hp.bindable_actor("agent:pat")
+    assert not hp.bindable_actor("human:" + "x" * 80) and not hp.bindable_actor("human:a\nb")
 
 
 def test_the_merges_dependency_free_copy_of_the_verdict_fields_has_not_drifted():

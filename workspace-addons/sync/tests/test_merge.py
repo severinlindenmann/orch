@@ -28,6 +28,8 @@ def vmac(ticket, step, nonce):
         str(on),
         str((step.get("reason") if on else "") or ""),
     ]
+    if on and "wont_by" in step:  # a NEW decision binds who and when (the real MAC: humanproof.wont_decision)
+        parts += [str(step["wont_by"]), str(step.get("wont_at"))]
     return "v1-" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:20]
 
 
@@ -129,7 +131,22 @@ def test_vector_key_clash(c):
 
 def test_every_rule_has_a_vector():
     rules = {c["rule"] for c in VEC["tickets"]}
-    assert {"2", "3", "4", "5", "6", "7", "8", "9", "10", "D8", "add", "wont", "verdict"} <= rules
+    assert {
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "D8",
+        "add",
+        "wont",
+        "verdict",
+        "person-history",
+    } <= rules
 
 
 # ---- hand-written expectations (so the vectors are not only the code's own output) -------------------------
@@ -1063,6 +1080,7 @@ def test_merge_verdict_fields_and_shape():
     from orch_sync import merge
 
     assert merge._VERDICT_FIELDS == ("kind", "nonce", "mac")
+    assert merge._VERDICT_OPTIONAL == ("person", "at")
     good = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
     assert merge._verdict_shape(good)
     for bad in (
@@ -1265,3 +1283,24 @@ def test_malformed_remote_history_does_not_stall_merge(malformed, by, has_base):
     assert list(SCHEMA.iter_errors(out)) == []
     assert (base, remote, local) == before
     assert merge_ticket(base, remote, out, NOW)["history"] == out["history"]
+
+
+@pytest.mark.parametrize("text", [None, 7, ["x"], {"a": 1}])
+def test_a_remote_history_line_with_non_string_text_never_raises(text):
+    peer = tk(history=[{"at": T2, "by": "human:Ann", "text": text}])
+    out = merge_ticket(tk(), peer, tk(), NOW)
+    assert out is not None and out["history"] == []  # discarded, the sync does not get stuck
+
+
+def test_a_person_line_keeps_its_name_only_for_a_new_decision_and_both_orders_agree_elsewhere():
+    entry = {"kind": "person", "person": "human:Ann", "at": T2, "nonce": "0123456789abcdef", "mac": "A" * 43}
+    line = {"at": T2, "by": "human:Ann", "via": None, "text": "Status review -> done", "chat_message": False}
+    peer = tk(status="done", verdicts=[entry], history=[line])
+    v = verdict_for({TK: entry["mac"]}, [])
+    out = merge_ticket(tk(), peer, tk(), NOW, None, v)
+    assert out["history"] == [line]
+    swapped = merge_ticket(tk(), tk(), peer, NOW, None, v)  # the peer's lines are local there
+    skip = ("revision", "updated_at")
+    assert {k: x for k, x in swapped.items() if k not in skip} == {
+        k: x for k, x in out.items() if k not in skip
+    }

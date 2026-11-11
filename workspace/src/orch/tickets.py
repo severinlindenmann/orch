@@ -974,7 +974,7 @@ def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
     else:
         raise Refused(humanproof.VERDICT_NEEDED)
     old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
-    entry = humanproof.verdict_sign(root, ticket, kind)
+    entry = humanproof.verdict_sign(root, ticket, kind, person=actor if kind == "person" else None)
     kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
     ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
 
@@ -1551,17 +1551,26 @@ def _person_only(by: str, item: dict, tid: str, cid: str) -> None:
         _refuse_if_wont_do(item, tid, cid)
 
 
-def _sign_wont(root: Path, tid: str, item: dict) -> None:
+def _sign_wont(root: Path, tid: str, item: dict, by: str | None = None) -> None:
     """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
     a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
     step as an agent's, which is the safe side)."""
     item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
+    if item.get("wont_do") and humanproof.bindable_actor(
+        by
+    ):  # who and when are inside the MAC (new decisions)
+        item["wont_by"], item["wont_at"] = by, now()
+    else:
+        item.pop("wont_by", None)
+        item.pop("wont_at", None)
     mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
     if mac:
         item["wont_mac"] = mac
     else:
         item.pop("wont_mac", None)
-        item.pop("wont_nonce", None)  # (no usable key: unsigned, so the sync treats it as an agent's)
+        item.pop("wont_nonce", None)
+        item.pop("wont_by", None)
+        item.pop("wont_at", None)  # (no usable key: unsigned, so the sync treats it as an agent's)
 
 
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
@@ -1586,7 +1595,7 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         else:
             item.pop("reason", None)
         item.update({"by": by, "at": now()})
-        _sign_wont(root, tid, item)
+        _sign_wont(root, tid, item, by)
         add_history(t, by, f"Marked {cid} as won't do")
         return item
 
@@ -1697,7 +1706,7 @@ def check_edit(
                 add_history(t, by, f"Linked {cid} to Done when")
         if item.get("wont_do"):
             _sign_wont(
-                root, tid, item
+                root, tid, item, by
             )  # a proven edit of a Won't do step re-signs it for the new text/covers
         return item
 
