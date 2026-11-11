@@ -43,7 +43,9 @@ final class GroupRoomScrollUITests: XCTestCase {
         let send = element(app, "composer-send")
         waitUntilHittable(send)
         send.tap()
-        waitUntilHittable(app.staticTexts[text], timeout: 10)
+        let sent = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        if !sent.waitForExistence(timeout: 10) { XCTFail("sent text missing; field value: \(String(describing: field.value))\n" + app.debugDescription) }
+        waitUntilHittable(sent)
     }
 
     @MainActor func testDoneGroupOpensFromHistoryReadOnly() {
