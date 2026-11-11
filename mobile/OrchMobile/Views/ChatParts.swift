@@ -14,7 +14,7 @@ struct StatusPill: View {
     let status: Ticket.Status
     let kind: String
     var text: String {
-        switch status { case .needsYou: "Needs you"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "result" ? "Done" : (kind == "stopped" ? "Stopped" : "Did not work") }
+        switch status { case .needsYou: "Needs your OK"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "result" ? "Done" : (kind == "stopped" ? "Stopped" : "Did not work") }
     }
     var color: Color { switch status { case .needsYou: Theme.warn; case .review: Theme.warn; case .paused, .backlog: Theme.muted; case .working: Theme.brand; case .done: kind == "result" ? Theme.muted : Theme.danger } }
     var body: some View {
@@ -41,7 +41,7 @@ struct AttachmentBubble: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Agent").themeFont(11, .semibold).foregroundStyle(Theme.brand)
+                Text("Helper").themeFont(11, .semibold).foregroundStyle(Theme.brand)
                 AttachmentTile(attachment: attachment, large: true)
                 Text(ChatBuilder.timeText(at)).themeFont(11).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
             }.padding(10).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
@@ -275,79 +275,82 @@ struct MessageBubble: View {
     var onReply: (() -> Void)? = nil
     /// "Try again later" next to the clock while the relay is throttling this message.
     var waitNote: String? = nil
+    var hugsContent = false
     private var mine: Bool { item.side == .me }
 
     var body: some View {
         HStack(spacing: 0) {
             if mine { Spacer(minLength: typeSize.isAccessibilitySize ? 8 : 64) }
-            VStack(alignment: .leading, spacing: 8) {
-                if let quotedText {
-                    HStack(spacing: 8) {
-                        Rectangle().fill(Theme.brand).frame(width: 3)
-                        Text(quotedText).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
-                    }.fixedSize(horizontal: false, vertical: true)
-                }
-                if let label = item.label {
-                    Text(label).themeFont(12, .semibold).foregroundStyle(label == "DID NOT WORK" ? Theme.danger : Theme.brand)
-                }
-                if !item.text.isEmpty {
-                    messageText.themeFont(17).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                }
-                ForEach(item.attachments) { attachment in
-                    if attachment.kind == .image, BlobID.isValid(attachment.blobId) {
-                        Button { onOpenArtifact(attachment.blobId) } label: {
-                            BlobImage(id: attachment.blobId).frame(height: 190).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
-                        }.buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("image-\(attachment.id)")
-                    } else if BlobID.isValid(attachment.blobId), attachment.kind == .file {
-                        Button { onOpenArtifact(attachment.blobId) } label: { fileRow(attachment.name, size: attachment.size) }
-                            .buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("file-\(attachment.id)")
-                    } else { fileRow(attachment.name, size: attachment.size) }
-                }
-                ForEach(item.queuedFiles, id: \.file) { file in
-                    if file.kind == .image, let pending = model.outbox.item(clientId: item.clientId ?? "") {
-                        QueuedConversationImage(url: model.outbox.fileURL(pending, file), name: file.name)
-                    } else { fileRow(file.name, size: file.size) }
-                }
-                ForEach(item.artifacts) { artifact in
-                    Button { onOpenArtifact(artifact.id) } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: Self.symbol(artifact.kind)).themeFont(20).foregroundStyle(Theme.brand).frame(width: 42, height: 48)
-                                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(42), style: .continuous))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(artifact.label ?? "Preview").themeFont(14, .semibold).multilineTextAlignment(.leading)
-                                Text("Open ›").themeFont(13).foregroundStyle(Theme.brand)
-                            }
-                            Spacer(minLength: 0)
-                        }.frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(PressStyle()).accessibilityLabel("Open \(artifact.label ?? "preview")")
-                        .accessibilityIdentifier("artifact-\(artifact.id)")
-                }
-                if let location = item.location {
-                    LocationCard(location: location).accessibilityIdentifier("location-\(item.id)")
-                }
-                if let feedback = item.feedback {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(feedback.verdict == .approve ? "Looks good" : "Changes asked", systemImage: feedback.verdict == .approve ? "checkmark.circle" : "pencil")
-                        Text("\(feedback.pins.count) comments").foregroundStyle(Theme.muted)
-                    }.themeFont(15)
-                }
-                if mine {
-                    ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), note: waitNote, onRetry: onRetry, onDiscard: onDiscard)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                } else {
-                    Text(ChatBuilder.timeText(item.at)).themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }.padding(12).foregroundStyle(Theme.text)
-                .background(mine ? Theme.brand.opacity(0.14) : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(mine ? Theme.brand.opacity(0.5) : Theme.border))
-                .contextMenu {
-                    Button { UIPasteboard.general.string = item.text } label: { Label("Copy", systemImage: "doc.on.doc") }.accessibilityIdentifier("copy-\(item.id)")
-                    if !mine && item.canPlay {
-                        Button { model.play(item, in: conversationId) } label: { Label("Listen", systemImage: "speaker.wave.2") }.accessibilityIdentifier("listen-\(item.id)")
+            BubbleContentLayout(hugsContent: hugsContent) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let quotedText {
+                        HStack(spacing: 8) {
+                            Rectangle().fill(Theme.brand).frame(width: 3)
+                            Text(quotedText).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
+                        }.fixedSize(horizontal: false, vertical: true)
                     }
-                }
-                .accessibilityAction(named: "Copy") { UIPasteboard.general.string = item.text }
-                .modifier(BubbleActions(item: item, conversationId: conversationId, onReply: onReply, onRetry: onRetry, onDiscard: onDiscard))
+                    if let label = item.label {
+                        Text(label).themeFont(12, .semibold).foregroundStyle(label == "DID NOT WORK" ? Theme.danger : Theme.brand)
+                    }
+                    if !item.text.isEmpty {
+                        messageText.themeFont(17).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(item.attachments) { attachment in
+                        if attachment.kind == .image, BlobID.isValid(attachment.blobId) {
+                            Button { onOpenArtifact(attachment.blobId) } label: {
+                                BlobImage(id: attachment.blobId).frame(height: 190).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+                            }.buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("image-\(attachment.id)")
+                        } else if BlobID.isValid(attachment.blobId), attachment.kind == .file {
+                            Button { onOpenArtifact(attachment.blobId) } label: { fileRow(attachment.name, size: attachment.size) }
+                                .buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("file-\(attachment.id)")
+                        } else { fileRow(attachment.name, size: attachment.size) }
+                    }
+                    ForEach(item.queuedFiles, id: \.file) { file in
+                        if file.kind == .image, let pending = model.outbox.item(clientId: item.clientId ?? "") {
+                            QueuedConversationImage(url: model.outbox.fileURL(pending, file), name: file.name)
+                        } else { fileRow(file.name, size: file.size) }
+                    }
+                    ForEach(item.artifacts) { artifact in
+                        Button { onOpenArtifact(artifact.id) } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: Self.symbol(artifact.kind)).themeFont(20).foregroundStyle(Theme.brand).frame(width: 42, height: 48)
+                                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(42), style: .continuous))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(artifact.label ?? "Preview").themeFont(14, .semibold).multilineTextAlignment(.leading)
+                                    Text("Open ›").themeFont(13).foregroundStyle(Theme.brand)
+                                }
+                                Spacer(minLength: 0)
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(PressStyle()).accessibilityLabel("Open \(artifact.label ?? "preview")")
+                            .accessibilityIdentifier("artifact-\(artifact.id)")
+                    }
+                    if let location = item.location {
+                        LocationCard(location: location).accessibilityIdentifier("location-\(item.id)")
+                    }
+                    if let feedback = item.feedback {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(feedback.verdict == .approve ? "Looks good" : "Changes asked", systemImage: feedback.verdict == .approve ? "checkmark.circle" : "pencil")
+                            Text("\(feedback.pins.count) comments").foregroundStyle(Theme.muted)
+                        }.themeFont(15)
+                    }
+                    if mine {
+                        ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), note: waitNote, onRetry: onRetry, onDiscard: onDiscard)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    } else {
+                        Text(ChatBuilder.timeText(item.at)).themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }.padding(12).foregroundStyle(Theme.text)
+                    .background(mine ? Theme.brand.opacity(0.14) : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(mine ? Theme.brand.opacity(0.5) : Theme.border))
+                    .contextMenu {
+                        Button { UIPasteboard.general.string = item.text } label: { Label("Copy", systemImage: "doc.on.doc") }.accessibilityIdentifier("copy-\(item.id)")
+                        if !mine && item.canPlay {
+                            Button { model.play(item, in: conversationId) } label: { Label("Listen", systemImage: "speaker.wave.2") }.accessibilityIdentifier("listen-\(item.id)")
+                        }
+                    }
+                    .accessibilityAction(named: "Copy") { UIPasteboard.general.string = item.text }
+                    .modifier(BubbleActions(item: item, conversationId: conversationId, onReply: onReply, onRetry: onRetry, onDiscard: onDiscard))
+            }
             if !mine { Spacer(minLength: ChatBubbleLayout.agentTrailingSpace(for: typeSize)) }
         }
     }
@@ -426,5 +429,20 @@ enum ThrottleNote {
     static func text(for item: OutboxItem?) -> String? {
         guard let item, item.sentMessageId == nil, item.failure == nil, (item.throttleCount ?? 0) > 0 || item.retryAfter != nil else { return nil }
         return "Try again later"
+    }
+}
+
+
+/// Measure the natural content width, capped by the width offered by the bubble's row.
+private struct BubbleContentLayout: Layout {
+    let hugsContent: Bool
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        guard hugsContent else { return content.sizeThatFits(proposal) }
+        let ideal = content.sizeThatFits(.unspecified)
+        return content.sizeThatFits(ProposedViewSize(width: min(ideal.width, proposal.width ?? ideal.width), height: proposal.height))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
     }
 }

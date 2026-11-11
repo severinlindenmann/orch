@@ -111,8 +111,8 @@ final class GroupViewTests: XCTestCase {
         XCTAssertEqual(target.workspace, GroupMock.home)
         XCTAssertEqual(target.ticket, "t_local")
         XCTAssertEqual(target.label, "HOME-7")
-        XCTAssertEqual(GroupRoomRules.taskHeading(target: target), "HOME-7 · Local")
-        XCTAssertEqual(GroupRoomRules.taskHeading(target: GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [update])), "HOME-8 · Local update")
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: target), "Local")
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [update])), "Local update")
         XCTAssertNil(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: []))
         XCTAssertNil(GroupRoomRules.openTarget(task: task, workspaces: [], tickets: [ticket], updates: [update]))
         XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [update])?.label, "HOME-8")
@@ -126,8 +126,8 @@ final class GroupViewTests: XCTestCase {
 
     func testTaskHeadingUsesOnlyLocalTargetKeyAndTitle() {
         XCTAssertNil(GroupRoomRules.taskHeading(target: nil))
-        XCTAssertEqual(GroupRoomRules.taskHeading(target: (GroupMock.home, "t", "HOME-7", "Local title")), "HOME-7 · Local title")
-        XCTAssertEqual(GroupRoomRules.taskHeading(target: (GroupMock.home, "t", "HOME-7", nil)), "HOME-7")
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: (GroupMock.home, "t", "HOME-7", "Local title")), "Local title")
+        XCTAssertEqual(GroupRoomRules.taskHeading(target: (GroupMock.home, "t", "HOME-7", nil)), "Task")
     }
 
     func testRowIDSeparatesHyphenatedHostAndID() throws {

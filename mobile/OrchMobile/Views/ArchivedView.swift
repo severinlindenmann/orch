@@ -104,8 +104,8 @@ struct ArchivedView: View {
 
     private func subtitle(_ chat: ArchivedChat) -> String {
         let day = ShellTime.day(chat.lastAt)
-        if !chat.byHand { return "Done · archived automatically" }
-        return day.isEmpty ? "Archived" : "Archived · last message \(day)"
+        if !chat.byHand { return [day, "Done · archived automatically"].filter { !$0.isEmpty }.joined(separator: " · ") }
+        return day.isEmpty ? "Archived" : "\(day) · Archived"
     }
 
     @ViewBuilder private func row(_ chat: ArchivedChat) -> some View {
