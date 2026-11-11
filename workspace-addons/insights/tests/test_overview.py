@@ -273,7 +273,18 @@ def test_cli_arguments_and_environment(ws, fake_orch, monkeypatch):
 
 def test_own_interpreter_and_timeout(ws, monkeypatch):
     def run(args, **kwargs):
-        assert args == [sys.executable, "-I", "-P", "-m", "orch", "record", "counts", "--days", "30", "--json"]
+        assert args == [
+            sys.executable,
+            "-I",
+            "-P",
+            "-m",
+            "orch",
+            "record",
+            "counts",
+            "--days",
+            "30",
+            "--json",
+        ]
         assert kwargs["stdin"] == subprocess.DEVNULL
         assert kwargs["timeout"] == 10
         assert kwargs["cwd"] == ws
