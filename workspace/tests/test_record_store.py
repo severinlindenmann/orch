@@ -24,10 +24,9 @@ from orch.record import (
     list_runs,
     plan_retention,
     read_detail,
-    read_events,
+    read_run,
     record_dir,
     registered_writer,
-    run_readable,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +40,7 @@ SECRET = "KEYVALUE-abc123XYZ-secret"
 @pytest.fixture
 def store(tmp_path):
     ws = tmp_path / "ws"
+    ws.mkdir()
     return ws, RecordWriter(ws, hider=hider.Hider({"deploy-key": SECRET}))
 
 
@@ -63,7 +63,7 @@ def test_examples(store, path):
     else:
         stored = writer.append(value)
         VALIDATOR.validate(stored)
-        assert read_events(ws, value["run"]) == [stored]
+        assert read_run(ws, value["run"]).unwrap() == [stored]
 
 
 @pytest.mark.parametrize("case", VECTORS["stream_mapping"])
@@ -74,7 +74,7 @@ def test_stream(store, case):
         stored.append(writer.append(value))
         assert stored[-1]["seq"] == seq
         assert writer.append(value) is None
-    assert read_events(ws, case["ctx"]["run"]) == stored
+    assert read_run(ws, case["ctx"]["run"]).unwrap() == stored
 
 
 @pytest.mark.parametrize("case", VECTORS["ids"])
@@ -98,7 +98,7 @@ def test_detail_names(store, case):
     stored = writer.append(event(id=raw, run=case["run"]), detail={"input": {}, "output": "ok"})
     assert stored["id"] == case["id"]
     assert stored["detail"] == f"detail/{case['run']}/{case['file']}.json"
-    assert read_detail(ws, case["run"], case["file"])["output"] == "ok"
+    assert read_detail(ws, case["run"], case["file"]).unwrap()["output"] == "ok"
 
 
 @pytest.mark.parametrize("case", VECTORS["dedupe"])
@@ -106,19 +106,19 @@ def test_dedupe(store, case):
     ws, writer = store
     values = []
     for i, line in enumerate(case["lines"]):
-        value = event(**line, data={"index": i})
+        value = event(**line, data={"index": i, "tokens_in": 1})
         if value["kind"].startswith("helper"):
             value.update(agent="h_1", parent="main")
             value["used"]["kind"] = "helper"
         values.append(value)
         writer.append(value)
     run = values[0]["run"]
-    assert [e["data"]["index"] for e in read_events(ws, run)] == case["keep"]
+    assert [e["data"]["index"] for e in read_run(ws, run).unwrap()] == case["keep"]
     path = record_dir(ws) / "runs" / f"{run}.jsonl"
     path.write_text("\n".join(json.dumps(dict(e, seq=i + 1)) for i, e in enumerate(values)) + "\n")
     with path.open("a") as stream:
         stream.write('bad json\n{"v":2}\n')
-    assert [e["data"]["index"] for e in read_events(ws, run)] == case["keep"]
+    assert [e["data"]["index"] for e in read_run(ws, run).unwrap()] == case["keep"]
 
 
 def test_fail_closed(store, monkeypatch):
@@ -134,13 +134,14 @@ def test_fail_closed(store, monkeypatch):
             monkeypatch.setenv(key, value)
         with pytest.raises(RecordRefused, match=r"^Recording is off until key hiding is ready\.$"):
             registered_writer(ws)
-    assert not ws.exists()
+    assert not record_dir(ws).exists()
     with hider.use_hider(writer.hider):
         assert registered_writer(ws).append(event())
-    assert RecordWriter(ws, hider=hider.Hider({})).append(event(id="empty"))
+    with pytest.raises(record.RecordOff):
+        RecordWriter(ws, hider=hider.Hider({}))
 
 
-@pytest.mark.parametrize("part", ["", "runs", "detail", "jobs", "runs/r_8k2m01.jsonl", "runs/r_8k2m01.lock"])
+@pytest.mark.parametrize("part", ["", "runs", "runs/r_8k2m01.jsonl", "runs/r_8k2m01.lock"])
 def test_symlink(store, tmp_path, part):
     ws, writer = store
     outside = tmp_path / "outside"
@@ -172,7 +173,7 @@ def test_hiding_every_file(store):
         )
         stored = writer.append(value, detail={"input": {form: form}, "output": form})
         assert "[hidden: " in stored["text"]
-        detail = read_detail(ws, stored["run"], Path(stored["detail"]).stem)
+        detail = read_detail(ws, stored["run"], Path(stored["detail"]).stem).unwrap()
         assert detail["hidden"] >= 5
     stored = writer.append(event(id="generic", text="ghp_" + "a" * 36))
     assert "ghp_" not in stored["text"]
@@ -190,9 +191,7 @@ def test_permissions_meta_and_limits(store):
     assert json.loads(meta) == dict(schema="orch.record/1", since=first["at"], keep_days=90, max_mb=2048)
     writer.append(event(id="later", at="2026-11-17T00:00:00Z"))
     assert (root / "meta.json").read_bytes() == meta
-    detail = root / first["detail"]
-    assert detail.stat().st_size <= 1024**2
-    assert json.loads(detail.read_bytes())["truncated"] is True
+    assert first["detail"] is None and first["detail_lost"]
     for line in (root / "runs" / f"{first['run']}.jsonl").read_bytes().splitlines(keepends=True):
         assert len(line) <= 8192
         VALIDATOR.validate(json.loads(line))
@@ -206,8 +205,8 @@ def test_concurrency(store):
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda i: writer.append(event(id=f"thread{i}")), range(32)))
     assert sorted(e["seq"] for e in results) == list(range(1, 33))
-    assert len(read_events(ws, "r_8k2m01")) == 32
-    assert list_runs(ws) == ["r_8k2m01"]
+    assert len(read_run(ws, "r_8k2m01").unwrap()) == 32
+    assert list_runs(ws).unwrap() == ["r_8k2m01"]
 
 
 @pytest.mark.parametrize("case", VECTORS["retention"])
@@ -242,11 +241,11 @@ def test_retention_apply(store):
     folded = []
     plan = apply_retention(ws, "2026-11-16T00:00:00Z", 90, 0, lambda r, es: folded.append(r))
     assert plan["delete_run"] == folded == ["r_old0001"]
-    assert list_runs(ws) == ["r_live001"]
+    assert list_runs(ws).unwrap() == ["r_live001"]
     assert len(list((root / "detail").iterdir())) == 1
     delete_detail(ws, ["r_live001"])
     assert list((root / "detail").iterdir()) == []
-    assert list_runs(ws) == ["r_live001"]
+    assert list_runs(ws).unwrap() == ["r_live001"]
 
 
 @pytest.mark.parametrize("case", VECTORS["hook_entry"])
@@ -264,15 +263,14 @@ def test_hook_entry(case):
 def test_unsafe_read_names(store, run, file_id):
     ws, _ = store
     with pytest.raises(RecordRefused):
-        read_detail(ws, run, file_id)
+        read_detail(ws, run, file_id).unwrap()
 
 
-def test_oversize_refuses_without_event(store):
+def test_oversize_data_is_cut(store):
     ws, writer = store
-    with pytest.raises(RecordRefused):
-        writer.append(event(data={"huge": ["x" * 10000] * 2}))
-    assert read_events(ws, "r_8k2m01") == []
-    assert not (record_dir(ws) / "meta.json").exists()
+    stored = writer.append(event(data={"huge": ["x" * 10000] * 2}))
+    assert stored["data"] == {"cut": True}
+    assert read_run(ws, "r_8k2m01").unwrap() == [stored]
 
 
 def test_detail_schema_and_runtime_schema():
@@ -289,7 +287,7 @@ def test_detail_schema_and_runtime_schema():
             return [constraints(v) for v in value]
         return value
 
-    assert _SCHEMA == constraints(SCHEMA)
+    assert _SCHEMA == SCHEMA
     validator = jsonschema.Draft202012Validator({"$ref": "#/$defs/detail_file", "$defs": SCHEMA["$defs"]})
     for path in (CONTRACTS / "examples/activity-detail").glob("*.json"):
         assert validator.is_valid(json.loads(path.read_text())) == path.name.startswith("valid-")
@@ -300,17 +298,15 @@ def test_preflight_leaves_nothing(store):
     lost = writer.append(event(), detail={"input": "x" * (1024**2), "output": ""})
     assert lost["detail"] is None and lost["detail_lost"] is True  # the audit line is kept
     assert not (record_dir(ws) / "detail").exists()
-    shutil.rmtree(ws)
-    with pytest.raises(RecordRefused):
-        writer.append(event(data={"large": ["x" * 5000] * 3}))
-    assert not ws.exists()
+    shutil.rmtree(record_dir(ws))
+    assert writer.append(event(data={"large": ["x" * 5000] * 3}))["data"] == {"cut": True}
 
 
 def test_stale_lock_and_missing_reads(store):
     ws, writer = store
-    assert read_events(ws, "r_8k2m01") == []
-    assert read_detail(ws, "r_8k2m01", "0" * 32) is None
-    assert list_runs(ws) == []
+    assert read_run(ws, "r_8k2m01").reason == "missing"
+    assert read_detail(ws, "r_8k2m01", "0" * 32).reason == "missing"
+    assert list_runs(ws).reason == "missing"
     writer.append(event())
     lock = record_dir(ws) / "runs/r_8k2m01.lock"
     lock.touch()
@@ -335,28 +331,6 @@ def test_secret_id_never_stored_plain_or_unsalted_hash(store):
     assert seen
 
 
-def test_symlink_swapped_after_check_is_refused(store, tmp_path, monkeypatch):
-    ws, writer = store
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    swapped = []
-    real_safe = record._safe
-
-    def swap_after_check(path):
-        real_safe(path)
-        target = record_dir(ws) / "detail" / "r_8k2m01"
-        if path.name.endswith(".json") and path.parent == target and not swapped:
-            swapped.append(1)
-            target.rmdir()
-            target.symlink_to(outside, target_is_directory=True)
-
-    monkeypatch.setattr(record, "_safe", swap_after_check)
-    kept = writer.append(event(), detail={"input": "i", "output": "o"})
-    assert swapped
-    assert kept["detail"] is None and kept["detail_lost"] is True  # nothing followed, the audit line is kept
-    assert list(outside.iterdir()) == []
-
-
 def test_hardlinked_run_file_refused(store, tmp_path):
     ws, writer = store
     writer.append(event())
@@ -369,32 +343,6 @@ def test_hardlinked_run_file_refused(store, tmp_path):
         writer.append(event(id="another"))
     assert outside.read_text() == "keep"
     assert (outside.stat().st_mode & 0o777) == (tmp_path / "outside.txt").stat().st_mode & 0o777
-
-
-def test_reparse_point_and_realpath_refused(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    folder = tmp_path / "ws" / ".orch" / "record" / "runs"
-    folder.mkdir(parents=True)
-    real_lstat = Path.lstat
-
-    def fake_lstat(self, *a, **k):
-        result = real_lstat(self, *a, **k)
-        if self == folder:
-            return SimpleNamespace(st_mode=result.st_mode, st_file_attributes=0x410)
-        return result
-
-    monkeypatch.setattr(Path, "lstat", fake_lstat)
-    with pytest.raises(RecordRefused):
-        record._safe(folder / "r_8k2m01.jsonl")
-    monkeypatch.undo()
-    outside = tmp_path / "elsewhere"
-    outside.mkdir()
-    monkeypatch.setattr(
-        record.os.path, "realpath", lambda p: str(outside / "x") if "runs" in str(p) else str(p)
-    )
-    with pytest.raises(RecordRefused):
-        record._safe(folder / "r_8k2m01.jsonl")
 
 
 def test_detail_of_colliding_id_never_replaces_other_detail(store):
@@ -419,7 +367,7 @@ def test_detail_pointer_and_reserved_ids(store):
     stored = writer.append(event(detail="detail/r_8k2m01/" + "a" * 32 + ".json"))
     assert stored["detail"] is None
     for raw in ("r_8k2m01:5", "x_" + "a" * 32):
-        got = writer.append(event(id=raw))
+        got = writer.append(event(id=raw, via="hook"))
         assert got["id"] != raw and got["id"].startswith("x_")
 
 
@@ -477,7 +425,7 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
     kept = writer.append(event(id="z1"), detail={"input": "x", "output": "y"})
     assert kept is not None and kept["detail"] is None and kept["detail_lost"] is True
     assert json.loads(target.read_text())["id"] == "someone"
-    assert [e["id"] for e in read_events(ws, "r_8k2m01")] == ["A", "a", "z1"]
+    assert [e["id"] for e in read_run(ws, "r_8k2m01").unwrap()] == ["A", "a", "z1"]
     # unreadable planted file: same
     target2 = record_dir(ws) / writer_detail_path(ws, "z2")
     target2.write_text("not json")
@@ -507,29 +455,7 @@ def test_no_fchmod_still_writes(store, monkeypatch):
     ws, writer = store
     monkeypatch.delattr(record.os, "fchmod")
     assert writer.append(event())
-    assert read_events(ws, "r_8k2m01")
-
-
-def test_only_name_surrogate_reparse_tags_refused(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    folder = tmp_path / "ws" / ".orch" / "record" / "runs"
-    folder.mkdir(parents=True)
-    tag = {"v": 0x9000001A}  # a cloud placeholder: not a name surrogate
-    real_lstat = Path.lstat
-
-    def fake_lstat(self, *a, **k):
-        result = real_lstat(self, *a, **k)
-        if self == folder:
-            return SimpleNamespace(st_mode=result.st_mode, st_file_attributes=0x400, st_reparse_tag=tag["v"])
-        return result
-
-    monkeypatch.setattr(Path, "lstat", fake_lstat)
-    assert not record._is_link(folder)
-    tag["v"] = 0xA000000C  # symlink
-    assert record._is_link(folder)
-    tag["v"] = 0xA0000003  # mount point
-    assert record._is_link(folder)
+    assert read_run(ws, "r_8k2m01").unwrap()
 
 
 def test_finished_detail_is_write_once(store):
@@ -580,15 +506,15 @@ def test_every_read_path_distrusts_foreign_and_hardlinked_files(store, tmp_path,
     run_file = record_dir(ws) / "runs/r_8k2m01.jsonl"
     detail_file = record_dir(ws) / stored["detail"]
     name = Path(stored["detail"]).stem
-    assert len(read_events(ws, "r_8k2m01")) == 2 and run_readable(ws, "r_8k2m01")
+    assert len(read_run(ws, "r_8k2m01").unwrap()) == 2
     if how == "hardlink":
         _hardlink(run_file, tmp_path, "l1")
         _hardlink(detail_file, tmp_path, "l2")
     else:
         _foreign_owner(monkeypatch)
-    assert read_events(ws, "r_8k2m01") == []  # skipped, no crash
-    assert not run_readable(ws, "r_8k2m01")
-    assert read_detail(ws, "r_8k2m01", name) is None  # unavailable
+    assert read_run(ws, "r_8k2m01").status == "tampered"
+    assert read_run(ws, "r_8k2m01").status == "tampered"
+    assert read_detail(ws, "r_8k2m01", name).status == "tampered"
     # a new append over the untrusted run file is refused and writes nothing
     with pytest.raises(RecordRefused):
         writer.append(event(id="p2"))

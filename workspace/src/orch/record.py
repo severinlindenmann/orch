@@ -1,6 +1,11 @@
-"""Private, hidden activity records and explicit retention."""
+"""Private, hidden activity records and explicit retention.
+
+All path I/O is confined to the core below. Windows re-lstat narrows but cannot
+close the path replacement race; POSIX walks use pinned directory descriptors.
+"""
 
 import errno
+import hashlib
 import json
 import os
 import re
@@ -8,10 +13,11 @@ import stat
 import time
 import uuid
 from collections.abc import Callable
-from contextlib import contextmanager
-from datetime import datetime, timedelta
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Generic, Literal, TypeVar
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -21,16 +27,94 @@ from orch.errors import Refused
 from orch.hider import Hider
 from orch.phone_view import redact
 
-_NOT_SAFE = "The record folder is not safe."
 _OFF = "Recording is off until key hiding is ready."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[0-9a-f]{32}"
-_RESERVED_ID = r"r_[a-z0-9_]{6,32}:[0-9]+|x_[0-9a-f]{32}"
+_PART = r"[A-Za-z0-9_.-]{1,80}"
+TAMPER_REASONS = ("link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped")
+_MESSAGES = {
+    "tampered": (
+        "Some records of this run were changed outside orch. "
+        "To be safe, orch does not show them. Nothing was deleted."
+    ),
+    "io": "The records of this run cannot be read right now. Try again later.",
+    "missing": "There are no records for this run.",
+}
 
 
 class RecordRefused(Refused):
-    """Recording cannot proceed safely."""
+    code = "refused"
+
+    def __init__(self, message=_INVALID, *, reason=None):
+        super().__init__(message)
+        self.reason = reason
+        self.alert = None
+
+
+class RecordInvalid(RecordRefused):
+    code = "invalid"
+
+
+class RecordOff(RecordRefused):
+    code = "refused"
+
+
+class RecordBusy(RecordRefused):
+    code = "busy"
+
+
+class RecordUnavailable(RecordRefused):
+    code = "not_available"
+
+    def __init__(self, reason="io"):
+        super().__init__(_MESSAGES[reason], reason=reason)
+
+
+class RecordTampered(RecordRefused):
+    code = "tampered"
+
+    def __init__(self, reason):
+        super().__init__(_MESSAGES["tampered"], reason=reason)
+
+
+T = TypeVar("T")
+Status = Literal["ok", "unavailable", "tampered"]
+
+
+@dataclass(frozen=True)
+class ReadResult(Generic[T]):
+    status: Status
+    value: T | None = None
+    reason: str | None = None
+    message: str | None = None
+    skipped: int = 0
+    alert: dict | None = None
+
+    def unwrap(self) -> T:
+        if self.status != "ok":
+            error = (
+                RecordTampered(self.reason) if self.status == "tampered" else RecordUnavailable(self.reason)
+            )
+            error.alert = self.alert
+            raise error
+        return self.value
+
+    @classmethod
+    def from_error(cls, error, workspace, target, run=None, seen_by="reader"):
+        alert = None
+        if isinstance(error, RecordTampered):
+            alert = _alert(workspace, target=target, run=run, reason=error.reason, seen_by=seen_by)
+            error.alert = alert
+        return cls(
+            "tampered" if isinstance(error, RecordTampered) else "unavailable",
+            reason=error.reason,
+            message=str(error),
+            alert=alert,
+        )
+
+
+RunRead = ReadResult[list[dict]]
 
 
 def record_dir(workspace: Path) -> Path:
@@ -41,158 +125,382 @@ def registered_writer(workspace: Path) -> "RecordWriter":
     try:
         return RecordWriter(workspace, hider=hiding.current_hider())
     except hiding.NoHiderError:
-        raise RecordRefused(_OFF) from None
+        raise RecordOff(_OFF) from None
 
 
 def _name(value: Any, pattern: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(pattern, value):
-        raise RecordRefused(_INVALID)
+        raise RecordInvalid(_INVALID)
     return value
 
 
-_SURROGATE = 0x20000000  # reparse tag bit: the point names another path
-_REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT (Windows junctions, mount points and symlinks)
+# I/O core. Only this section uses filesystem operations, including fd operations.
+# os.replace uses rename's dir_fd implementation but is absent from supports_dir_fd
+# on some Python builds; os.rename is the corresponding capability probe.
+_FD = (
+    os.name == "posix"
+    and {os.open, os.mkdir, os.unlink, os.rmdir, os.rename, os.stat} <= os.supports_dir_fd
+    and os.scandir in os.supports_fd
+)
+_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_REPARSE = 0x400
+_SURROGATE = 0x20000000
+_LOCK_WAIT = 30.0
 
 
-def _is_link(part: Path) -> bool:
-    """A symlink, junction or any other reparse point. Missing paths are not links."""
-    if part.is_symlink() or getattr(part, "is_junction", lambda: False)():
-        return True
-    try:
-        attrs = getattr(part.lstat(), "st_file_attributes", 0)
-    except OSError:
-        return False
-    if not attrs & _REPARSE:
-        return False
-    tag = getattr(part.lstat(), "st_reparse_tag", None)
-    # Name-surrogate tags (symlink, mount point/junction) redirect; others (OneDrive placeholders) do not.
-    # Unknown tag (older Python): fail closed.
-    return tag is None or bool(tag & _SURROGATE)
-
-
-def _within_record(path: Path) -> bool:
-    """The real location of a path inside .orch/record stays inside the real .orch/record."""
-    parts = Path(path).absolute().parts
-    for i in range(len(parts) - 1):
-        if parts[i] == ".orch" and parts[i + 1] == "record":
-            root = Path(os.path.realpath(Path(*parts[: i + 2])))
-            real = Path(os.path.realpath(path))
-            return real == root or root in real.parents
-    return True
-
-
-def _safe(path: Path) -> None:
-    for part in (path, *path.parents):
-        if ".orch" in part.parts:  # the workspace's own tree: every kind of link or reparse point
-            unsafe = _is_link(part)
-        else:  # above the workspace (home, drive redirects): plain symlinks only, and not on Windows
-            unsafe = os.name == "posix" and part.is_symlink()
-        if unsafe:
-            raise RecordRefused(_NOT_SAFE)
-    if not _within_record(path):
-        raise RecordRefused(_NOT_SAFE)
-
-
-def _tree(path: Path) -> None:
-    _safe(path)
-    if path.is_dir():
-        for child in path.iterdir():
-            _tree(child)
-
-
-# POSIX: every write walks the folders with directory file descriptors (O_NOFOLLOW at each step), so a symlink
-# swapped in between a check and the open is refused instead of followed. Windows has no dir_fd: there the
-# symlink check (_safe, which also covers reparse points reported as links) stays the fail-closed fallback.
-_FD = os.name == "posix" and {os.open, os.mkdir, os.unlink, os.rmdir, os.replace} <= os.supports_dir_fd
-_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+def _io_error(error):
+    if error.errno in (errno.ELOOP, errno.EMLINK):
+        return RecordTampered("link")
+    if error.errno == errno.ENOTDIR:
+        return RecordTampered("not_dir")
+    if error.errno in (errno.ENXIO, errno.EISDIR, errno.EWOULDBLOCK):
+        return RecordTampered("not_regular")
+    return RecordUnavailable("missing" if error.errno == errno.ENOENT else "io")
 
 
 @contextmanager
-def _parent(path: Path, create: bool = False):
-    """Yield (dir fd, name) of path's parent folder, walked from the root without following any symlink."""
-    parts = Path(path).absolute().parts
-    fd = os.open(parts[0], _DIR)
+def _io(target=None):
     try:
-        for part in parts[1:-1]:
-            if create:
-                try:
-                    os.mkdir(part, 0o700, dir_fd=fd)
-                    made = True
-                except FileExistsError:
-                    made = False
-            next_fd = os.open(part, _DIR, dir_fd=fd)
-            if create and made:
-                os.fchmod(next_fd, 0o700)
-            os.close(fd)
-            fd = next_fd
-        yield fd, parts[-1]
-    except OSError as error:
-        if error.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
-            raise RecordRefused(_NOT_SAFE) from None
+        yield
+    except (RecordTampered, RecordUnavailable) as error:
+        if target is not None and not hasattr(error, "target"):
+            error.target = target
         raise
-    finally:
-        os.close(fd)
+    except OSError as error:
+        converted = _io_error(error)
+        if target is not None:
+            converted.target = target
+        raise converted from None
 
 
-def _mkdir(path: Path) -> None:
-    _safe(path)
-    if _FD:
-        with _parent(Path(path) / "x", create=True):
-            pass
-    elif not path.exists():
-        _mkdir(path.parent)
-        path.mkdir(mode=0o700, exist_ok=True)
-        path.chmod(0o700)
+def _parts(rel):
+    if not isinstance(rel, tuple):
+        raise RecordInvalid()
+    for part in rel:
+        _name(part, _PART)
+        if part in (".", ".."):
+            raise RecordInvalid()
 
 
-def _open(path: Path, flags: int) -> int:
-    _safe(path)
-    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)  # a planted FIFO must not hang us
-    if _FD:
-        with _parent(path) as (pfd, name):
-            fd = os.open(name, flags, 0o600, dir_fd=pfd)
+def _check_info(info, *, want_dir=False, owner=True):
+    if want_dir:
+        if not stat.S_ISDIR(info.st_mode):
+            raise RecordTampered("not_dir")
     else:
-        fd = os.open(path, flags, 0o600)
-    info = os.fstat(fd)
-    writing = bool(flags & (os.O_WRONLY | os.O_RDWR))
-    # ONE check for every open in this module (reads, appends, detail, lock, meta): a regular file with
-    # a single link, owned by us on POSIX. A hardlink to a file elsewhere, a device or another user's file
-    # is never read or written.
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or info.st_nlink != 1
-        or (os.name == "posix" and info.st_uid != os.geteuid())
-    ):
+        if not stat.S_ISREG(info.st_mode):
+            raise RecordTampered("not_regular")
+        if info.st_nlink == 0:
+            raise RecordUnavailable("missing")
+        if info.st_nlink != 1:
+            raise RecordTampered("hardlink")
+    if owner and os.name == "posix" and info.st_uid != os.geteuid():
+        raise RecordTampered("foreign_owner")
+
+
+def _check_fd(fd, *, want_dir=False):
+    with _io():
+        _check_info(os.fstat(fd), want_dir=want_dir)
+
+
+def _reparse(info):
+    tag = getattr(info, "st_reparse_tag", None)
+    return bool(getattr(info, "st_file_attributes", 0) & _REPARSE) and (tag is None or bool(tag & _SURROGATE))
+
+
+def _path_info(path, *, want_dir=False):
+    info = os.lstat(path)
+    if _reparse(info):
+        raise RecordTampered("reparse")
+    if stat.S_ISLNK(info.st_mode):
+        raise RecordTampered("link")
+    _check_info(info, want_dir=want_dir)
+    return info
+
+
+@dataclass
+class _Dir:
+    fd: int | None
+    path: Path
+    walked: list
+
+
+@contextmanager
+def _walk(ws, rel_dir, *, create=False):
+    _parts(rel_dir)
+    fd = None
+    with _io():
+        try:
+            if _FD:
+                fd = os.open(ws, _DIR)
+            path, walked = Path(ws), []
+            for part in (".orch", "record", *rel_dir):
+                made = False
+                if create:
+                    try:
+                        os.mkdir(part if _FD else path / part, 0o700, **({"dir_fd": fd} if _FD else {}))
+                        made = True
+                    except FileExistsError:
+                        pass
+                path = path / part
+                if _FD:
+                    # lstat only classifies a failed O_DIRECTORY open; never authorizes it.
+                    try:
+                        child = os.open(part, _DIR | _NOFOLLOW, dir_fd=fd)
+                    except NotADirectoryError:
+                        if stat.S_ISLNK(os.stat(part, dir_fd=fd, follow_symlinks=False).st_mode):
+                            raise RecordTampered("link") from None
+                        raise
+                    os.close(fd)
+                    fd = child
+                    _check_fd(fd, want_dir=True)
+                    if made and hasattr(os, "fchmod"):
+                        os.fchmod(fd, 0o700)
+                else:
+                    info = _path_info(path, want_dir=True)
+                    walked.append((path, info))
+            yield _Dir(fd, path, walked)
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+
+def _verify_walk(directory):
+    for path, before in directory.walked:
+        after = os.lstat(path)
+        if (
+            _reparse(after)
+            or stat.S_ISLNK(after.st_mode)
+            or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+        ):
+            raise RecordTampered("swapped")
+
+
+def _open(ws, rel, mode, *, create_dirs=False, _directory=None):
+    _parts(rel)
+    flags = {
+        "read": os.O_RDONLY,
+        "append": os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+        "create_excl": os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        "read_append": os.O_RDWR | os.O_APPEND | os.O_CREAT,
+    }[mode]
+    flags |= _NOFOLLOW | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+    target = (
+        "lock"
+        if rel[-1].endswith(".lock")
+        else "meta"
+        if rel == ("meta.json",)
+        else {
+            "runs": "run",
+            "detail": "detail",
+            "alerts": "alerts",
+        }.get(rel[0], "folder")
+    )
+    walk = nullcontext(_directory) if _directory is not None else _walk(ws, rel[:-1], create=create_dirs)
+    with _io(target), walk as directory:
+        fd = None
+        try:
+            if not _FD:
+                try:
+                    _path_info(directory.path / rel[-1])
+                except FileNotFoundError:
+                    pass
+            try:
+                fd = os.open(
+                    rel[-1] if _FD else directory.path / rel[-1],
+                    flags,
+                    0o600,
+                    **({"dir_fd": directory.fd} if _FD else {}),
+                )
+            except FileExistsError:
+                if mode == "create_excl":
+                    return None
+                raise
+            _check_fd(fd)
+            if not _FD:
+                after = os.lstat(directory.path / rel[-1])
+                before = os.fstat(fd)
+                if _reparse(after) or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+                    raise RecordTampered("swapped")
+                _verify_walk(directory)
+            if mode != "read" and hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
+            result, fd = fd, None
+            return result
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+
+def _close(fd):
+    with _io():
         os.close(fd)
-        raise RecordRefused(_NOT_SAFE)
-    if writing and hasattr(os, "fchmod"):
-        os.fchmod(fd, 0o600)
-    return fd
 
 
-def _unlink(path: Path) -> None:
-    _safe(path)
-    if not _FD:
-        path.unlink(missing_ok=True)
-        return
+def _read_bytes(fd):
+    with _io():
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
+def _write(fd, payload):
+    with _io():
+        if os.write(fd, payload) != len(payload):
+            raise RecordUnavailable("io")
+
+
+def _entries(ws, rel_dir):
+    with _walk(ws, rel_dir) as directory:
+        with os.scandir(directory.fd if _FD else directory.path) as entries:
+            return [entry.name for entry in entries]
+
+
+def _unlink(ws, rel, *, expected=None):
+    _parts(rel)
     try:
-        with _parent(path) as (pfd, name):
-            os.unlink(name, dir_fd=pfd)
-    except FileNotFoundError:
-        pass
+        with _walk(ws, rel[:-1]) as directory:
+            name = rel[-1] if _FD else directory.path / rel[-1]
+            kw = {"dir_fd": directory.fd} if _FD else {}
+            if expected is not None:
+                current = os.stat(name, follow_symlinks=False, **kw)
+                before = os.fstat(expected)
+                if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                    return False
+            os.unlink(name, **kw)
+            return True
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return False
 
 
-def _json(obj: Any) -> str:
+def _write_new(ws, rel, payload):
+    temporary = (*rel[:-1], "tmp_" + uuid.uuid4().hex)
+    with _walk(ws, rel[:-1], create=True) as directory:
+        # Keep the same parent descriptor through creation and publication.
+        name = temporary[-1] if _FD else directory.path / temporary[-1]
+        kw = {"dir_fd": directory.fd} if _FD else {}
+        fd = _open(ws, temporary, "create_excl", _directory=directory)
+        if fd is None:
+            raise RecordUnavailable("io")
+        try:
+            _check_fd(fd)
+            _write(fd, payload)
+            _verify_walk(directory)
+            try:
+                existing = _open(ws, rel, "read", _directory=directory)
+            except RecordUnavailable as error:
+                if error.reason != "missing":
+                    raise
+            else:
+                _close(existing)
+            os.replace(
+                name,
+                rel[-1] if _FD else directory.path / rel[-1],
+                **({"src_dir_fd": directory.fd, "dst_dir_fd": directory.fd} if _FD else {}),
+            )
+        finally:
+            os.close(fd)
+            try:
+                os.unlink(name, **kw)
+            except FileNotFoundError:
+                pass
+    return True
+
+
+def _size(ws, rel):
+    try:
+        try:
+            fd = _open(ws, rel, "read")
+        except RecordTampered as error:
+            if error.reason != "not_regular":
+                raise
+            try:
+                names = _entries(ws, rel)
+            except RecordTampered as folder_error:
+                if folder_error.reason == "not_dir":
+                    raise error from None
+                raise
+            return sum(_size(ws, (*rel, name)) for name in names)
+        try:
+            with _io():
+                return os.fstat(fd).st_size
+        finally:
+            _close(fd)
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return 0
+
+
+def _rmtree(ws, rel):
+    # Preflight the entire tree before deleting anything; directory links refuse.
+    _size(ws, rel)
+    try:
+        names = _entries(ws, rel)
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return
+    except RecordTampered as error:
+        if error.reason != "not_dir":
+            raise
+        _unlink(ws, rel)
+        return
+    for name in names:
+        _rmtree(ws, (*rel, name))
+    with _walk(ws, rel[:-1]) as directory:
+        os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
+
+
+@contextmanager
+def _lock(ws, run):
+    rel = ("runs", f"{run}.lock")
+    deadline = time.monotonic() + _LOCK_WAIT
+    while True:
+        fd = _open(ws, rel, "create_excl", create_dirs=True)
+        if fd is not None:
+            break
+        try:
+            old = _open(ws, rel, "read")
+        except RecordUnavailable as error:
+            if error.reason == "missing":
+                continue
+            raise
+        try:
+            with _io():
+                stale = time.time() - os.fstat(old).st_mtime > 30
+            if stale:
+                _unlink(ws, rel, expected=old)
+        finally:
+            _close(old)
+        if time.monotonic() >= deadline:
+            raise RecordBusy("The record is busy.")
+        time.sleep(0.005)
+    try:
+        yield
+    finally:
+        try:
+            _unlink(ws, rel, expected=fd)
+        finally:
+            _close(fd)
+
+
+# Record logic: only calls the I/O core above.
+def _json(obj):
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
-def _validate(event: dict, *, detail: bool = False) -> None:
-    validator = _DETAIL_VALIDATOR if detail else _VALIDATOR
-    if not validator.is_valid(event):
-        raise RecordRefused(_INVALID)
+def _validate(event, *, detail=False):
+    if not (_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid(event):
+        raise RecordInvalid()
 
 
-def _generic(obj: Any) -> Any:
+def _generic(obj):
     if isinstance(obj, str):
         return redact(obj)
     if isinstance(obj, list):
@@ -202,205 +510,274 @@ def _generic(obj: Any) -> Any:
     return obj
 
 
-def _key(event: dict) -> tuple:
-    return event["run"], event["id"], event["kind"], event["outcome"] is not None
+def _key(event):
+    via = event["via"]
+    return (
+        event["run"],
+        event["id"],
+        event["kind"],
+        event["outcome"] is not None,
+        "hl" if via in ("hook", "log") else via,
+    )
 
 
-def _precedence(event: dict) -> int:
-    return 1 if event["via"] == "log" else 2
+def _conflict(a, b):
+    return (
+        {a["via"], b["via"]} == {"hook", "log"}
+        and a["outcome"] is not None
+        and b["outcome"] is not None
+        and any(a["outcome"][k] != b["outcome"][k] for k in ("ok", "error"))
+    )
 
 
-def _lines(path: Path) -> list[dict]:
-    _safe(path)
-    try:
-        fd = _open(path, os.O_RDONLY)
-    except (FileNotFoundError, RecordRefused):  # missing, or unsafe: reported by run_readable, never trusted
-        return []
-    result = []
-    with os.fdopen(fd, "rb") as stream:
-        for line in stream:
-            try:
-                event = json.loads(line)
-                _validate(event)
-                result.append(event)
-            except (ValueError, UnicodeError, RecordRefused, TypeError):
-                continue
-    return result
+def _decision(previous, event):
+    matching = [old for old in previous if _key(old) == _key(event)]
+    if any(old["via"] == event["via"] for old in matching):
+        return False
+    if any(_conflict(old, event) for old in matching):
+        event["conflict"] = True
+        return True
+    return not any(old["via"] == event["via"] or old["via"] == "hook" for old in matching)
 
 
-@contextmanager
-def _lock(path: Path):
-    for _ in range(200):
+def _dedupe(events, run):
+    kept = []
+    for event in events:
+        if event["run"] != run or not _decision(kept, event):
+            continue
+        kept = [old for old in kept if not (_key(old) == _key(event) and not _conflict(old, event))]
+        kept.append(event)
+    return sorted(kept, key=lambda e: e["seq"])
+
+
+def _parse(fd):
+    events, skipped = [], 0
+    for line in _read_bytes(fd).splitlines():
         try:
-            fd = _open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            break
-        except FileExistsError:
-            _safe(path)
+            event = json.loads(line)
+            _validate(event)
+            events.append(event)
+        except (ValueError, TypeError, UnicodeError, RecursionError, RecordInvalid):
+            skipped += 1
+    return events, skipped
+
+
+def _read_run_strict(ws, run, fd):
+    _check_fd(fd)
+    raw = _read_bytes(fd)
+    previous = []
+    for line in raw.splitlines():
+        try:
+            event = json.loads(line)
+            if isinstance(event, dict) and event.get("run") == run:
+                _key(event)
+                previous.append(event)
+        except (ValueError, TypeError, KeyError, RecursionError):
+            continue
+    return previous, len(raw.splitlines()), bool(raw and not raw.endswith(b"\n"))
+
+
+_ALERTED = set()
+
+
+def _alert(ws, *, target, run, reason, seen_by):
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    alert = dict(
+        v=1,
+        schema="orch.record-alert/1",
+        at=now,
+        target=target,
+        run=run,
+        reason=reason,
+        seen_by=seen_by,
+        message=_MESSAGES["tampered"],
+    )
+    key = (str(ws), now[:10], target, run, reason)
+    if key not in _ALERTED:
+        _ALERTED.add(key)
+        try:
+            fd = _open(ws, ("alerts", now[:10] + ".jsonl"), "append", create_dirs=True)
             try:
-                if time.time() - path.stat().st_mtime > 30:
-                    _unlink(path)
-                    continue
-            except FileNotFoundError:
-                continue
-            time.sleep(0.005)
-    else:
-        raise RecordRefused("The record is busy.")
-    try:
-        yield
-    finally:
-        os.close(fd)
-        _unlink(path)
+                _write(fd, (_json(alert) + "\n").encode())
+            finally:
+                _close(fd)
+        except (RecordTampered, RecordUnavailable):
+            pass  # the returned alert still reaches the caller; never recurse
+    return alert
 
 
-def _atomic(path: Path, payload: bytes) -> None:
-    _safe(path)
-    temporary = path.with_name("tmp_" + uuid.uuid4().hex)
-    fd = _open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+def _report(ws, error, target, run, seen_by):
+    return ReadResult.from_error(error, ws, getattr(error, "target", target), run, seen_by)
+
+
+def read_run(workspace, run, *, seen_by="reader") -> RunRead:
+    _name(run, _RUN)
     try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(payload)
-        if _FD:
-            with _parent(path) as (pfd, name):
-                os.replace(temporary.name, name, src_dir_fd=pfd, dst_dir_fd=pfd)
-        else:
-            _safe(path)
-            os.replace(temporary, path)
+        fd = _open(workspace, ("runs", run + ".jsonl"), "read")
+        try:
+            events, skipped = _parse(fd)
+        finally:
+            _close(fd)
+        return ReadResult("ok", _dedupe(events, run), skipped=skipped)
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "run", run, seen_by)
+
+
+def _read_json(ws, rel):
+    fd = _open(ws, rel, "read")
+    try:
+        try:
+            return json.loads(_read_bytes(fd))
+        except (ValueError, UnicodeError, RecursionError):
+            raise RecordTampered("swapped") from None
     finally:
-        _unlink(temporary)
+        _close(fd)
+
+
+def read_detail(workspace, run, file_id):
+    _name(run, _RUN)
+    _name(file_id, _FILE)
+    try:
+        value = _read_json(workspace, ("detail", run, file_id + ".json"))
+        if (
+            not _DETAIL_VALIDATOR.is_valid(value)
+            or value["run"] != run
+            or detail_name(run, value["kind"], value["id"]) != file_id
+        ):
+            raise RecordTampered("swapped")
+        return ReadResult("ok", value)
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "detail", run, "reader")
+
+
+def read_meta(workspace):
+    try:
+        value = _read_json(workspace, ("meta.json",))
+        if not _META_VALIDATOR.is_valid(value):
+            raise RecordTampered("swapped")
+        return ReadResult("ok", value)
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "meta", None, "reader")
+
+
+def list_runs(workspace):
+    try:
+        names = _entries(workspace, ("runs",))
+        return ReadResult("ok", sorted(n[:-6] for n in names if re.fullmatch(_RUN + r"\.jsonl", n)))
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", None, "reader")
+
+
+@dataclass(frozen=True)
+class _Detail:
+    created: bool = False
+    reason: str | None = None
+    alert: dict | None = None
+
+
+def _store_detail(ws, event, payload, previous):
+    rel = tuple(event["detail"].split("/"))
+    exists = False
+    try:
+        try:
+            stored = _read_json(ws, rel)
+            exists = True
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+        if exists:
+            if not isinstance(stored, dict) or (stored.get("run"), stored.get("kind"), stored.get("id")) != (
+                event["run"],
+                event["kind"],
+                event["id"],
+            ):
+                return _Detail(reason="collision")
+            finished = any(
+                old.get("detail") == event["detail"] and old.get("outcome") is not None for old in previous
+            )
+            if finished or event["outcome"] is None:
+                return _Detail()
+        _write_new(ws, rel, payload)
+        return _Detail(created=not exists)
+    except (RecordTampered, RecordUnavailable) as error:
+        result = _report(ws, error, "detail", event["run"], "writer")
+        return _Detail(reason=error.reason, alert=result.alert)
 
 
 class RecordWriter:
     def __init__(self, workspace: Path, *, hider: Hider):
-        if not isinstance(hider, Hider):
-            raise RecordRefused(_OFF)
+        try:
+            hiding._check(hider)
+        except (ValueError, TypeError):
+            raise RecordOff(_OFF) from None
         self.workspace, self.hider = Path(workspace), hider
 
-    def _serialized(self, obj: dict) -> bytes:
+    def _serialized(self, obj):
         line = _json(obj)
         if self.hider.hide_text(line) != line:
-            raise RecordRefused("This record cannot be hidden safely.")
+            raise RecordInvalid("This record cannot be hidden safely.")
         return line.encode("utf-8")
 
-    def _prepare(
-        self, event: dict, payload: dict | None, hidden: int, lost: bool = False
-    ) -> tuple[bytes, bytes | None]:
-        run = event["run"]
-        detail_bytes = None
-        event.pop("detail_lost", None)
-        event["detail"] = None  # a line never points at a file this call did not write
-        if payload is not None and lost:
-            event["detail_lost"] = True  # the audit line is always kept; only its detail is given up
-        elif payload is not None:
-            # INVARIANT: a detail file name is only ever lowercase hex of a domain-separated hash of
-            # (run, kind, id); no raw id becomes a file name. The file carries (kind, id) for verification.
-            name = detail_name(run, event["kind"], event["id"])
+    def _prepare_detail(self, event, detail, hidden=0):
+        if detail is None:
+            return None
+        try:
+            before = _json(detail).count("[hidden: ")
+            payload = self.hider.hide_json(detail)
             wrapped = dict(
                 v=1,
                 id=event["id"],
-                run=run,
+                run=event["run"],
                 kind=event["kind"],
                 input=payload["input"],
                 output=payload["output"],
                 truncated=False,
-                hidden=hidden,
+                hidden=hidden + max(0, _json(payload).count("[hidden: ") - before),
             )
-            detail_bytes = self._serialized(wrapped)
-            while len(detail_bytes) > 1024 * 1024:
-                output = wrapped["output"]
-                if not isinstance(output, str):
-                    output = _json(output)
-                if not output:
-                    detail_bytes = None
-                    break
-                wrapped["output"] = self.hider.hide_cut(output, len(output) // 2)
-                wrapped["truncated"] = True
-                detail_bytes = self._serialized(wrapped)
-            if detail_bytes is None:
+            data = self._serialized(wrapped)
+            if len(data) > 1024**2:
                 event["detail_lost"] = True
-            else:
-                _validate(wrapped, detail=True)
-                event["detail"] = f"detail/{run}/{name}.json"
-        line = self._serialized(event) + b"\n"
-        while len(line) > 8192:
-            if event["text"]:
-                event["text"] = self.hider.hide_cut(event["text"], len(event["text"]) // 2)
-            elif event.get("outcome") and event["outcome"].get("error"):
-                error = event["outcome"]["error"]
-                event["outcome"]["error"] = self.hider.hide_cut(error, len(error) // 2) or None
-            else:
-                raise RecordRefused("The record entry is too large.")
-            line = self._serialized(event) + b"\n"
-        _validate(event)
-        return line, detail_bytes
+                return None
+            _validate(wrapped, detail=True)
+            return data
+        except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+            event["detail_lost"] = True
+            return None
 
-    def _store_detail(self, root: Path, previous: list[dict], event: dict, payload: bytes) -> bool:
-        """Write the detail file; False = give the detail up (the line is still written, with detail_lost).
-
-        A file whose stored (kind, id) differs, an unreadable file or any write problem is never overwritten
-        or followed; the audit line does not depend on it."""
-        run, target = event["run"], root / event["detail"]
-        try:
-            _mkdir(target.parent)
-            if target.exists():
-                stored = read_detail(self.workspace, run, target.stem) or {}
-                if (stored.get("kind"), stored.get("id")) != (event["kind"], event["id"]):
-                    return False
-            # Write once: a finished line's detail is never replaced (hook after collector, or the reverse);
-            # only a finished line may replace the detail of a started one (which may also arrive late).
-            finished_before = any(
-                _key(old) == (run, event["id"], event["kind"], True) and old.get("detail") == event["detail"]
-                for old in previous
-            )
-            if not target.exists() or (event["outcome"] is not None and not finished_before):
-                _atomic(target, payload)
-            return True
-        except (OSError, RecordRefused):
-            return False
-
-    def append(self, event: dict, *, detail: dict | None = None) -> dict | None:
+    def append(self, event, *, detail=None):
         try:
             return self._append(event, detail)
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
-            raise RecordRefused(_INVALID) from None
-        except OSError:
-            raise RecordRefused("The record could not be written.") from None
+            raise RecordInvalid() from None
 
-    def _append(self, event: dict, detail: dict | None) -> dict | None:
+    def _append(self, event, detail):
         if not isinstance(event, dict):
-            raise RecordRefused(_INVALID)
+            raise RecordInvalid()
         run = _name(event.get("run"), _RUN)
         event = dict(event, seq=1, v=1)
         default_id = event.get("id") is None
         eid = event.get("id") if not default_id else f"{run}:1"
         if not isinstance(eid, str):
-            raise RecordRefused(_INVALID)
-        # Hide key values in the raw id BEFORE it is judged or hashed, so a secret-bearing id
-        # never leaves as an unsalted (guessable) hash;
-        # the same id still gives the same name for hook and collector (dedupe).
+            raise RecordInvalid()
         eid = self.hider.hide_text(eid)
-        if not default_id and (
-            not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) or re.fullmatch(_RESERVED_ID, eid)
-        ):
-            eid = _hash(eid)  # also ids that look like the writer's own (<run>:<n>) or a hashed id
+        if not default_id:
+            if event.get("via") == "hook" and re.fullmatch(_RUN + r":.*", eid):
+                eid = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + eid.encode()).hexdigest()[:32]
+            elif not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) or re.fullmatch(r"x_[0-9a-f]{32}", eid):
+                eid = _hash(eid)
         event["id"] = eid
-        # Reject malformed input, including controls, before normalizing display text.
         if not isinstance(event.get("text"), str) or re.search(r"[\x00-\x1f\x7f]", event["text"]):
-            raise RecordRefused(_INVALID)
-        if (
-            event.get("detail") is not None
-        ):  # a supplied pointer must at least be well formed; _prepare owns it
+            raise RecordInvalid()
+        if event.get("detail") is not None:
             _name(event["detail"], rf"detail/{_RUN}/{_FILE}\.json")
+        if detail is not None and event.get("kind") in ("key.use", "session.input"):
+            raise RecordInvalid()
         event.pop("detail_lost", None)
-        if detail is not None and (
-            not isinstance(detail, dict)
-            or not {"input", "output"} <= detail.keys()
-            or event.get("kind") in ("key.use", "session.input")
-        ):
-            raise RecordRefused(_INVALID)
-        before = _json([event, detail]).count("[hidden: ")
+        event.pop("conflict", None)
+        event["detail"] = None
+        before = _json(event).count("[hidden: ")
         event = self.hider.hide_json(event)
-        payload = self.hider.hide_json(detail) if detail is not None else None
-        hidden = max(0, _json([event, payload]).count("[hidden: ") - before)
+        hidden = max(0, _json(event).count("[hidden: ") - before)
         event["text"] = self.hider.hide_cut(" ".join(redact(event["text"]).split()), 500)
         if isinstance(event.get("outcome"), dict) and isinstance(event["outcome"].get("error"), str):
             event["outcome"]["error"] = self.hider.hide_cut(
@@ -408,83 +785,150 @@ class RecordWriter:
             )
         if "data" in event:
             event["data"] = _generic(event["data"])
+            if len(_json(event["data"]).encode()) > 7000:
+                event["data"] = {"cut": True}
         _validate(event)
-        self._prepare(event, payload, hidden)
-        root = record_dir(self.workspace)
-        _tree(root)
-        _mkdir(root / "runs")
-        with _lock(root / "runs" / f"{run}.lock"):
-            path = root / "runs" / f"{run}.jsonl"
-            previous = _lines(path)
-            event["seq"] = previous[-1]["seq"] + 1 if previous else 1
+        payload = self._prepare_detail(event, detail, hidden)
+        # Both possible line forms have passed the hider before taking the lock.
+        prepared = dict(event, seq=10**20, conflict=True)
+        if payload is not None:
+            prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+        self._line(prepared)
+        self._line(dict(prepared, detail=None, detail_lost=True))
+        self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
+        try:
+            with _lock(self.workspace, run):
+                self._drain(run)
+                return self._commit(event, payload, default_id)
+        except RecordBusy:
+            return self._spool(event, payload, default_id)
+        except (RecordTampered, RecordUnavailable) as error:
+            _report(self.workspace, error, "run", run, "writer")
+            raise
+
+    def _line(self, event):
+        line = self._serialized(event) + b"\n"
+        if len(line) > 8192:
+            raise RecordInvalid("The record entry is too large.")
+        return line
+
+    def _commit(self, event, payload, default_id):
+        run = event["run"]
+        fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
+        try:
+            previous, count, torn = _read_run_strict(self.workspace, run, fd)
+            event = dict(event, seq=count + 1)
             if default_id:
                 event["id"] = f"{run}:{event['seq']}"
-            if any(_key(old) == _key(event) and _precedence(old) >= _precedence(event) for old in previous):
+                if payload is not None:
+                    wrapped = json.loads(payload)
+                    wrapped["id"] = event["id"]
+                    payload = _json(wrapped).encode()
+            if not _decision(previous, event):
                 return None
-            line, detail_bytes = self._prepare(event, payload, hidden)
-            if detail_bytes is not None and not self._store_detail(root, previous, event, detail_bytes):
-                line, _ = self._prepare(event, payload, hidden, lost=True)
-            meta = self._serialized(
-                dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048)
-            )
-            try:
-                fd = _open(root / "meta.json", os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
-                pass
+            if payload is not None:
+                event["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+            line = (_json(event) + "\n").encode()
+            lost_line = (_json(dict(event, detail=None, detail_lost=True)) + "\n").encode()
+            meta = _open(self.workspace, ("meta.json",), "create_excl")
+            if meta is not None:
+                try:
+                    _write(
+                        meta,
+                        _json(
+                            dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048)
+                        ).encode(),
+                    )
+                finally:
+                    _close(meta)
             else:
-                with os.fdopen(fd, "wb") as stream:
-                    stream.write(meta)
-            fd = _open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY)
+                # An existing meta file is never opened for write, but must be trusted.
+                check = _open(self.workspace, ("meta.json",), "read")
+                _close(check)
+            stored = _Detail()
+            if payload is not None:
+                stored = _store_detail(self.workspace, event, payload, previous)
+                if stored.reason:
+                    event.update(detail=None, detail_lost=True)
+                    line = lost_line
             try:
-                if os.write(fd, line) != len(line):
-                    raise RecordRefused("The record could not be written.")
-            finally:
-                os.close(fd)
+                _write(fd, (b"\n" if torn else b"") + line)
+            except (RecordUnavailable, RecordTampered):
+                if stored.created:
+                    try:
+                        _unlink(self.workspace, tuple(event["detail"].split("/")))
+                    except (RecordTampered, RecordUnavailable) as cleanup:
+                        if isinstance(cleanup, RecordTampered):
+                            _report(self.workspace, cleanup, "detail", run, "writer")
+                raise
             return event
+        finally:
+            _close(fd)
 
+    def _spool(self, event, payload, default_id):
+        rel = ("pending", event["run"], f"{time.time_ns():020d}_{uuid.uuid4().hex}.json")
+        try:
+            fd = _open(self.workspace, rel, "create_excl", create_dirs=True)
+            if fd is None:
+                raise RecordUnavailable("io")
+            try:
+                _write(
+                    fd,
+                    _json(
+                        dict(
+                            event=event, payload=payload.decode() if payload else None, default_id=default_id
+                        )
+                    ).encode(),
+                )
+            finally:
+                _close(fd)
+        except (RecordTampered, RecordUnavailable) as error:
+            _report(self.workspace, error, "folder", event["run"], "writer")
+            busy = RecordBusy("The record is busy.")
+            busy.alert = error.alert
+            raise busy from None
+        return event
 
-def read_events(workspace: Path, run: str) -> list[dict]:
-    run = _name(run, _RUN)
-    kept: dict[tuple, dict] = {}
-    for event in _lines(record_dir(workspace) / "runs" / f"{run}.jsonl"):
-        if event["run"] != run:
-            continue
-        key = _key(event)
-        if key not in kept or _precedence(event) > _precedence(kept[key]):
-            kept[key] = event
-    return sorted(kept.values(), key=lambda e: e["seq"])
-
-
-def run_readable(workspace: Path, run: str) -> bool:
-    """False when the run file exists but cannot be trusted (foreign owner, hardlink, not a regular file):
-    its events are then skipped (read_events returns none) and the person sees "records unavailable"."""
-    path = record_dir(workspace) / "runs" / f"{_name(run, _RUN)}.jsonl"
-    try:
-        os.close(_open(path, os.O_RDONLY))
-    except FileNotFoundError:
-        return True
-    except (OSError, RecordRefused):
-        return False
-    return True
-
-
-def read_detail(workspace: Path, run: str, file_id: str) -> dict | None:
-    run, file_id = _name(run, _RUN), _name(file_id, _FILE)
-    path = record_dir(workspace) / "detail" / run / f"{file_id}.json"
-    _safe(path)
-    try:
-        with os.fdopen(_open(path, os.O_RDONLY), "rb") as stream:
-            value = json.load(stream)
-        _validate(value, detail=True)
-        return value if value["run"] == run else None
-    except (FileNotFoundError, ValueError, RecordRefused):
-        return None
-
-
-def list_runs(workspace: Path) -> list[str]:
-    path = record_dir(workspace) / "runs"
-    _tree(path)
-    return sorted(p.stem for p in path.glob("*.jsonl") if re.fullmatch(_RUN, p.stem) and p.is_file())
+    def _drain(self, run):
+        try:
+            names = _entries(self.workspace, ("pending", run))
+        except RecordUnavailable as error:
+            if error.reason == "missing":
+                return
+            raise
+        for name in sorted(names):
+            if not re.fullmatch(_PART, name) or name in (".", ".."):
+                _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
+                continue
+            rel = ("pending", run, name)
+            try:
+                pending = _read_json(self.workspace, rel)
+            except (RecordTampered, RecordUnavailable) as error:
+                _report(self.workspace, error, "run", run, "writer")
+                continue
+            try:
+                event = pending["event"]
+                _validate(event)
+                if event["run"] != run:
+                    raise RecordInvalid()
+                if not isinstance(pending["default_id"], bool):
+                    raise RecordInvalid()
+                payload = pending["payload"]
+                if payload is not None:
+                    wrapped = json.loads(payload)
+                    _validate(wrapped, detail=True)
+                    if any(wrapped[key] != event[key] for key in ("run", "kind", "id")):
+                        raise RecordInvalid()
+                    payload = payload.encode()
+                    if len(payload) > 1024**2:
+                        raise RecordInvalid()
+                self._serialized(pending)
+                self._line(event)
+            except (KeyError, TypeError, ValueError, RecursionError, RecordInvalid):
+                _alert(self.workspace, target="run", run=run, reason="swapped", seen_by="writer")
+                continue
+            self._commit(event, payload, pending["default_id"])
+            _unlink(self.workspace, rel)
 
 
 def hook_entry_filter(line: dict) -> dict | None:
@@ -520,86 +964,94 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
     return plan
 
 
-def _remove_in(dir_fd: int, name: str) -> None:
+def delete_detail(workspace, runs):
+    rels = [("detail", _name(run, _RUN)) for run in runs]
     try:
-        mode = os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
-    except FileNotFoundError:
-        return
-    if not stat.S_ISDIR(mode):
-        os.unlink(name, dir_fd=dir_fd)  # a link is removed itself, never followed
-        return
-    child = os.open(name, _DIR, dir_fd=dir_fd)
-    try:
-        for entry in os.listdir(child):
-            _remove_in(child, entry)
-    finally:
-        os.close(child)
-    os.rmdir(name, dir_fd=dir_fd)
+        for rel in rels:
+            _size(workspace, rel)
+        for rel in rels:
+            _rmtree(workspace, rel)
+    except (RecordTampered, RecordUnavailable) as error:
+        _report(workspace, error, "folder", rel[-1], "reader")
+        raise
 
 
-def _remove(path: Path) -> None:
-    _tree(path)
-    if _FD:
+def _ended(events):
+    states = [e for e in events if e["kind"] == "run.state"]
+    last = states[-1] if states else None
+    return last["at"] if last and last.get("data", {}).get("state") in ("done", "failed", "stopped") else None
+
+
+def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list[dict]], Any]):
+    result = dict(
+        fold_first=[], delete_detail=[], delete_run=[], status="ok", reason=None, message=None, alert=None
+    )
+
+    def failed(read):
+        if result["status"] == "ok":
+            result.update(status=read.status, reason=read.reason, message=read.message, alert=read.alert)
+
+    listed = list_runs(workspace)
+    if listed.status != "ok":
+        failed(listed)
+        return result
+    runs = []
+    for run in listed.value:
+        read = read_run(workspace, run, seen_by="retention")
+        if read.status != "ok":
+            failed(read)
+            continue
         try:
-            with _parent(path) as (pfd, name):
-                _remove_in(pfd, name)
-        except FileNotFoundError:
-            pass
-    elif path.is_dir():
-        for child in path.iterdir():
-            _remove(child)
-        path.rmdir()
-    else:
-        path.unlink(missing_ok=True)
-
-
-def delete_detail(workspace: Path, runs: list[str]) -> None:
-    paths = [record_dir(workspace) / "detail" / _name(run, _RUN) for run in runs]
-    for path in paths:
-        _tree(path)
-    for path in paths:
-        _remove(path)
-
-
-def _size(path: Path) -> int:
-    _tree(path)
-    if path.is_dir():
-        return sum(_size(p) for p in path.iterdir())
-    return path.stat().st_size if path.exists() else 0
-
-
-def apply_retention(
-    workspace: Path, now: str, keep_days: int, max_mb: int, fold: Callable[[str, list[dict]], Any]
-) -> dict:
-    root = record_dir(workspace)
-    _tree(root)
-    runs, events = [], {}
-    for run in list_runs(workspace):
-        events[run] = read_events(workspace, run)
-        states = [e for e in events[run] if e["kind"] == "run.state"]
-        last = states[-1] if states else None
-        ended = last["at"] if last and last["data"]["state"] in ("done", "failed", "stopped") else None
-        runs.append(
-            dict(
-                run=run,
-                ended=ended,
-                detail_mb=_size(root / "detail" / run) / 1024**2,
-                file_mb=(_size(root / "runs" / f"{run}.jsonl") + _size(root / "jobs" / run)) / 1024**2,
+            runs.append(
+                dict(
+                    run=run,
+                    ended=_ended(read.value),
+                    detail_mb=_size(workspace, ("detail", run)) / 1024**2,
+                    file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
+                    / 1024**2,
+                )
             )
-        )
+        except (RecordTampered, RecordUnavailable) as error:
+            failed(_report(workspace, error, "folder", run, "retention"))
     plan = plan_retention(runs, now, keep_days, max_mb)
-    # Detail-only eviction also folds first, although the public plan lists run-file folds only.
+    snapshots = {r["run"]: r["ended"] for r in runs}
     for run in dict.fromkeys(plan["fold_first"] + plan["delete_detail"]):
-        fold(run, events[run])
-    delete_detail(workspace, plan["delete_detail"])
-    for run in plan["delete_run"]:
-        _remove(root / "runs" / f"{run}.jsonl")
-        _remove(root / "jobs" / run)
-    return plan
+        try:
+            with _lock(workspace, run):
+                read = read_run(workspace, run, seen_by="retention")
+                if read.status != "ok":
+                    failed(read)
+                    continue
+                if not _ended(read.value) or _ended(read.value) != snapshots[run]:
+                    continue
+                # Check every deletion target before invoking the irreversible fold.
+                for rel in (("detail", run), ("jobs", run), ("runs", run + ".jsonl")):
+                    _size(workspace, rel)
+                fold(run, read.value)
+                if run in plan["delete_detail"]:
+                    delete_detail(workspace, [run])
+                    result["delete_detail"].append(run)
+                if run in plan["delete_run"]:
+                    _rmtree(workspace, ("jobs", run))
+                    _unlink(workspace, ("runs", run + ".jsonl"))
+                    result["delete_run"].append(run)
+                    result["fold_first"].append(run)
+        except RecordBusy:
+            continue
+        except (RecordTampered, RecordUnavailable) as error:
+            failed(_report(workspace, error, "folder", run, "retention"))
+    return result
 
 
 # Bundled contract: installed packages do not have the repository's contracts directory.
 _SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://orch.severin.io/contracts/activity.schema.json",
+    "title": "orch activity event v1 (orch.activity/1, one line of .orch/record/runs/<run>.jsonl)",
+    "description": "One thing an agent run did, the same for every agent tool. See activity.md. "
+    "Written only by the core record writer, which hides exact key values first (fail "
+    "closed). Readers skip unknown kinds and keep unknown fields. text and every "
+    "string are plain text (shown with textContent).",
     "type": "object",
     "required": [
         "v",
@@ -622,23 +1074,52 @@ _SCHEMA = {
     ],
     "properties": {
         "v": {"const": 1},
-        "id": {"$ref": "#/$defs/event_id"},
-        "seq": {"type": "integer", "minimum": 1},
+        "id": {
+            "$ref": "#/$defs/event_id",
+            "description": "The agent tool's own tool-call id when the source has one, "
+            "else '<run>:<seq>' (activity.md, Ids).",
+        },
+        "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Position in this run file, +1 per written line, set by the single writer.",
+        },
         "run": {"$ref": "#/$defs/run"},
         "session": {
             "oneOf": [
                 {"type": "null"},
                 {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:-]+$"},
-            ]
+            ],
+            "description": "The agent tool's session id, or null.",
         },
         "agent": {"$ref": "#/$defs/agent"},
-        "parent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/agent"}]},
+        "parent": {
+            "oneOf": [{"type": "null"}, {"$ref": "#/$defs/agent"}],
+            "description": "Who started this agent: null for main, else main or another helper.",
+        },
         "at": {"$ref": "#/$defs/time"},
         "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"},
-        "harness": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
-        "via": {"enum": ["hook", "log", "broker", "job", "core"]},
+        "harness": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$",
+            "description": "Adapter name of the run (agent-adapter.schema.json key "
+            "or [agents.<name>] entry); 'generic' for a user entry; "
+            "'none' for a job run without an agent.",
+        },
+        "via": {
+            "enum": ["hook", "log", "broker", "job", "core"],
+            "description": "Who wrote it: hook = the tool's own hook (instant), log = "
+            "a collector reading the tool's log or stream, broker = "
+            "orch secret, job = orch job / $ORCH_EVENTS, core = orch "
+            "itself (ticket changes, run state, take-over).",
+        },
         "kind": {"$ref": "#/$defs/kind"},
-        "text": {"type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f]*$"},
+        "text": {
+            "type": "string",
+            "maxLength": 500,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+            "description": "Short display line, one line, key values hidden.",
+        },
         "used": {
             "oneOf": [
                 {"type": "null"},
@@ -647,11 +1128,43 @@ _SCHEMA = {
                     "required": ["kind", "name", "action", "source", "version"],
                     "additionalProperties": False,
                     "properties": {
-                        "kind": {"enum": ["skill", "tool", "mcp", "key", "helper"]},
+                        "kind": {
+                            "enum": ["skill", "tool", "mcp", "key", "helper"],
+                            "description": "Shown as Skill, Tool, "
+                            "Connection, Key, "
+                            "Helper (wording: 'MCP' "
+                            "only under Details).",
+                        },
                         "name": {"$ref": "#/$defs/name"},
-                        "action": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}]},
-                        "source": {"enum": ["harness", "admin", "workspace", "builtin", "marketplace"]},
-                        "version": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/version"}]},
+                        "action": {
+                            "oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}],
+                            "description": "Tool of a connection "
+                            "(read_file), key "
+                            "delivery (env, file, "
+                            "exec, get), or "
+                            "null.",
+                        },
+                        "source": {
+                            "enum": ["harness", "admin", "workspace", "builtin", "marketplace"],
+                            "description": "harness = the agent "
+                            "tool's own settings, "
+                            "admin = shared by "
+                            "the admin, workspace "
+                            "= this workspace, "
+                            "builtin = part of "
+                            "orch or of the agent "
+                            "tool, marketplace = "
+                            "an installed "
+                            "add-on.",
+                        },
+                        "version": {
+                            "oneOf": [{"type": "null"}, {"$ref": "#/$defs/version"}],
+                            "description": "Content hash of the "
+                            "skill or connection "
+                            "config at the time "
+                            "of use "
+                            "(inventory.md).",
+                        },
                     },
                 },
             ]
@@ -664,7 +1177,10 @@ _SCHEMA = {
                     "required": ["ok", "error", "ms"],
                     "additionalProperties": False,
                     "properties": {
-                        "ok": {"type": ["boolean", "null"]},
+                        "ok": {
+                            "type": ["boolean", "null"],
+                            "description": "null = finished, result unknown to the source.",
+                        },
                         "error": {
                             "oneOf": [
                                 {"type": "null"},
@@ -679,17 +1195,39 @@ _SCHEMA = {
                         "ms": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
                     },
                 },
-            ]
+            ],
+            "description": "null = started, not finished yet. A later line with "
+            "the same id and kind carries the outcome (activity.md, "
+            "Dedupe).",
         },
         "detail": {
             "oneOf": [
                 {"type": "null"},
                 {"type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[0-9a-f]{32}\\.json$"},
-            ]
+            ],
+            "description": "Full payload file, relative to .orch/record/; null = details not available.",
         },
-        "coverage": {"enum": ["full", "partial"]},
-        "data": {"type": "object"},
-        "detail_lost": {"type": "boolean"},
+        "coverage": {
+            "enum": ["full", "partial"],
+            "description": "full = the source saw everything of this step; "
+            "partial = something is missing (no chat text, cut "
+            "output, no helper).",
+        },
+        "data": {
+            "type": "object",
+            "description": "Per-kind fields (activity.md, Kinds). Unknown fields are kept.",
+        },
+        "detail_lost": {
+            "type": "boolean",
+            "description": "true = a full payload existed but could not be "
+            "stored (name collision with another event's file, "
+            "write problem, too large); the line is kept with "
+            "detail null (activity.md, Detail files).",
+        },
+        "conflict": {
+            "type": "boolean",
+            "description": "Hook and log finished outcomes disagree; both lines are kept.",
+        },
     },
     "allOf": [
         {
@@ -713,8 +1251,18 @@ _SCHEMA = {
                 "properties": {
                     "via": {"const": "core"},
                     "data": {
-                        "required": ["check"],
-                        "properties": {"check": {"type": "string", "pattern": "^c[0-9]{1,4}$"}},
+                        "anyOf": [
+                            {
+                                "required": ["check"],
+                                "properties": {"check": {"type": "string", "pattern": "^c[0-9]{1,4}$"}},
+                            },
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
+                            },
+                        ]
                     },
                 },
             },
@@ -726,8 +1274,18 @@ _SCHEMA = {
                 "properties": {
                     "via": {"const": "core"},
                     "data": {
-                        "required": ["q"],
-                        "properties": {"q": {"type": "string", "pattern": "^q[0-9]{1,4}$"}},
+                        "anyOf": [
+                            {
+                                "required": ["q"],
+                                "properties": {"q": {"type": "string", "pattern": "^q[0-9]{1,4}$"}},
+                            },
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
+                            },
+                        ]
                     },
                 },
             },
@@ -751,20 +1309,30 @@ _SCHEMA = {
                 "required": ["data"],
                 "properties": {
                     "data": {
-                        "required": ["state"],
-                        "properties": {
-                            "state": {
-                                "enum": [
-                                    "starting",
-                                    "working",
-                                    "waiting_you",
-                                    "idle",
-                                    "done",
-                                    "failed",
-                                    "stopped",
-                                ]
-                            }
-                        },
+                        "anyOf": [
+                            {
+                                "required": ["state"],
+                                "properties": {
+                                    "state": {
+                                        "enum": [
+                                            "starting",
+                                            "working",
+                                            "waiting_you",
+                                            "idle",
+                                            "done",
+                                            "failed",
+                                            "stopped",
+                                        ]
+                                    }
+                                },
+                            },
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
+                            },
+                        ]
                     }
                 },
             },
@@ -775,14 +1343,24 @@ _SCHEMA = {
                 "required": ["data"],
                 "properties": {
                     "data": {
-                        "anyOf": [{"required": ["used"]}, {"required": ["tokens_in"]}],
-                        "properties": {
-                            "used": {"type": "number", "minimum": 0, "maximum": 1},
-                            "window": {"type": "string", "maxLength": 32},
-                            "status": {"enum": ["ok", "warning", "limited"]},
-                            "tokens_in": {"type": "integer", "minimum": 0},
-                            "tokens_out": {"type": "integer", "minimum": 0},
-                        },
+                        "anyOf": [
+                            {
+                                "anyOf": [{"required": ["used"]}, {"required": ["tokens_in"]}],
+                                "properties": {
+                                    "used": {"type": "number", "minimum": 0, "maximum": 1},
+                                    "window": {"type": "string", "maxLength": 32},
+                                    "status": {"enum": ["ok", "warning", "limited"]},
+                                    "tokens_in": {"type": "integer", "minimum": 0},
+                                    "tokens_out": {"type": "integer", "minimum": 0},
+                                },
+                            },
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
+                            },
+                        ]
                     }
                 },
             },
@@ -805,28 +1383,51 @@ _SCHEMA = {
                     },
                     "outcome": {"type": "object"},
                     "data": {
-                        "required": ["profile", "command"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "profile": {"$ref": "#/$defs/name"},
-                            "command": {
-                                "oneOf": [
-                                    {"type": "null"},
-                                    {"type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,64}$"},
-                                ]
+                        "anyOf": [
+                            {
+                                "required": ["profile", "command"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "profile": {"$ref": "#/$defs/name"},
+                                    "command": {
+                                        "oneOf": [
+                                            {"type": "null"},
+                                            {"type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,64}$"},
+                                        ],
+                                        "description": "Base "
+                                        "name "
+                                        "of "
+                                        "the "
+                                        "program "
+                                        "the "
+                                        "key "
+                                        "was "
+                                        "handed "
+                                        "to; "
+                                        "never "
+                                        "its "
+                                        "arguments.",
+                                    },
+                                    "skill": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}]},
+                                    "refused": {
+                                        "enum": [
+                                            "not_in_profile",
+                                            "get_off",
+                                            "get_to_terminal",
+                                            "missing",
+                                            "too_short",
+                                            "switched_off",
+                                        ]
+                                    },
+                                },
                             },
-                            "skill": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}]},
-                            "refused": {
-                                "enum": [
-                                    "not_in_profile",
-                                    "get_off",
-                                    "get_to_terminal",
-                                    "missing",
-                                    "too_short",
-                                    "switched_off",
-                                ]
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
                             },
-                        },
+                        ]
                     },
                 },
             },
@@ -838,25 +1439,35 @@ _SCHEMA = {
                 "properties": {
                     "via": {"const": "job"},
                     "data": {
-                        "required": ["job", "type", "state"],
-                        "properties": {
-                            "job": {"type": "string", "pattern": "^j_[a-z0-9]{6,32}$"},
-                            "type": {
-                                "enum": [
-                                    "start",
-                                    "step",
-                                    "progress",
-                                    "artifact",
-                                    "metric",
-                                    "table",
-                                    "link",
-                                    "log",
-                                    "end",
-                                    "lost",
-                                ]
+                        "anyOf": [
+                            {
+                                "required": ["job", "type", "state"],
+                                "properties": {
+                                    "job": {"type": "string", "pattern": "^j_[a-z0-9]{6,32}$"},
+                                    "type": {
+                                        "enum": [
+                                            "start",
+                                            "step",
+                                            "progress",
+                                            "artifact",
+                                            "metric",
+                                            "table",
+                                            "link",
+                                            "log",
+                                            "end",
+                                            "lost",
+                                        ]
+                                    },
+                                    "state": {"enum": ["running", "ok", "failed", "cancelled", "lost"]},
+                                },
                             },
-                            "state": {"enum": ["running", "ok", "failed", "cancelled", "lost"]},
-                        },
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
+                            },
+                        ]
                     },
                 },
             },
@@ -870,18 +1481,53 @@ _SCHEMA = {
                     "used": {"type": "null"},
                     "detail": {"type": "null"},
                     "data": {
-                        "required": ["by", "from", "since", "ended", "reason", "keys"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "by": {"type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$"},
-                            "from": {"const": "local-page"},
-                            "since": {"$ref": "#/$defs/time"},
-                            "ended": {"$ref": "#/$defs/time"},
-                            "reason": {
-                                "enum": ["released", "idle", "run-ended", "switched-off", "locked-by-admin"]
+                        "anyOf": [
+                            {
+                                "required": ["by", "from", "since", "ended", "reason", "keys"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "by": {
+                                        "type": "string",
+                                        "pattern": "^human:[^\\u0000-\\u001f]{1,58}$",
+                                        "description": "Only a person can take over.",
+                                    },
+                                    "from": {"const": "local-page"},
+                                    "since": {"$ref": "#/$defs/time"},
+                                    "ended": {"$ref": "#/$defs/time"},
+                                    "reason": {
+                                        "enum": [
+                                            "released",
+                                            "idle",
+                                            "run-ended",
+                                            "switched-off",
+                                            "locked-by-admin",
+                                        ]
+                                    },
+                                    "keys": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "description": "How "
+                                        "many "
+                                        "key "
+                                        "presses "
+                                        "were "
+                                        "sent. "
+                                        "The "
+                                        "typed "
+                                        "text "
+                                        "is "
+                                        "never "
+                                        "stored.",
+                                    },
+                                },
                             },
-                            "keys": {"type": "integer", "minimum": 0},
-                        },
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
+                            },
+                        ]
                     },
                 },
             },
@@ -919,20 +1565,98 @@ _SCHEMA = {
             "type": "object",
             "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"],
             "additionalProperties": False,
+            "description": "One file .orch/record/detail/<run>/<file name>.json: "
+            "the full payload of one event, key values hidden. The "
+            "file name is lowercase hex only (activity.md, Detail "
+            "files); id and kind are stored here so a reader can "
+            "verify the file belongs to the event.",
             "properties": {
                 "v": {"const": 1},
                 "id": {"$ref": "#/$defs/event_id"},
                 "run": {"$ref": "#/$defs/run"},
                 "kind": {"$ref": "#/$defs/kind"},
-                "input": {},
-                "output": {},
-                "truncated": {"type": "boolean"},
-                "hidden": {"type": "integer", "minimum": 0},
+                "input": {"description": "What went in (tool input, prompt, command), any JSON."},
+                "output": {"description": "What came out (tool result, chat text), any JSON."},
+                "truncated": {"type": "boolean", "description": "true = cut at the 1 MB per-file cap."},
+                "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "How many key values were hidden in this file.",
+                },
+            },
+        },
+        "record_alert": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["v", "schema", "at", "target", "run", "reason", "seen_by", "message"],
+            "properties": {
+                "v": {"const": 1},
+                "schema": {"const": "orch.record-alert/1"},
+                "at": {"$ref": "#/$defs/time"},
+                "target": {"enum": ["run", "detail", "meta", "lock", "folder", "alerts"]},
+                "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]},
+                "reason": {
+                    "enum": [
+                        "link",
+                        "reparse",
+                        "hardlink",
+                        "foreign_owner",
+                        "not_regular",
+                        "not_dir",
+                        "swapped",
+                    ]
+                },
+                "seen_by": {"enum": ["writer", "reader", "retention", "cli"]},
+                "message": {
+                    "const": "Some records of this run were "
+                    "changed outside orch. To be safe, "
+                    "orch does not show them. Nothing "
+                    "was deleted."
+                },
+            },
+        },
+        "read_status": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["run", "status", "reason", "message"],
+            "properties": {
+                "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]},
+                "status": {"enum": ["ok", "unavailable", "tampered"]},
+                "reason": {
+                    "enum": [
+                        "missing",
+                        "io",
+                        "skipped",
+                        "link",
+                        "reparse",
+                        "hardlink",
+                        "foreign_owner",
+                        "not_regular",
+                        "not_dir",
+                        "swapped",
+                    ]
+                },
+                "message": {"type": "string", "maxLength": 500},
+            },
+        },
+        "record_meta": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["schema", "since", "keep_days", "max_mb"],
+            "properties": {
+                "schema": {"const": "orch.record/1"},
+                "since": {"$ref": "#/$defs/time"},
+                "keep_days": {"type": "integer", "minimum": 0},
+                "max_mb": {"type": "integer", "minimum": 0},
             },
         },
     },
 }
+
 _VALIDATOR = Draft202012Validator(_SCHEMA, format_checker=FormatChecker())
 _DETAIL_VALIDATOR = Draft202012Validator(
     {"$ref": "#/$defs/detail_file", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
+)
+_META_VALIDATOR = Draft202012Validator(
+    {"$ref": "#/$defs/record_meta", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
 )

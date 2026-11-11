@@ -220,13 +220,25 @@ def act_detail_name(run, kind, event_id):
 
 
 def act_dedupe(lines):
-    """Indices of the lines readers keep: per (run, id, kind, finished) the highest precedence, ties -> first written."""
-    best = {}
-    for i, ln in enumerate(lines):
-        key = (ln["run"], ln["id"], ln["kind"], ln.get("outcome") is not None)
-        if key not in best or PRECEDENCE[ln["via"]] > PRECEDENCE[lines[best[key]]["via"]]:
-            best[key] = i
-    return sorted(best.values())
+    """Only hook/log share an origin; disagreeing finished outcomes both survive."""
+    kept = []
+    def key(line):
+        via = line["via"]
+        return (line["run"], line["id"], line["kind"], line.get("outcome") is not None,
+                "hl" if via in ("hook", "log") else via)
+    def conflict(a, b):
+        return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
+                and b.get("outcome") is not None
+                and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
+    for i, line in enumerate(lines):
+        matches = [j for j in kept if key(lines[j]) == key(line)]
+        if any(lines[j]["via"] == line["via"] for j in matches):
+            continue
+        if any(conflict(lines[j], line) for j in matches):
+            kept.append(i)
+        elif not any(lines[j]["via"] == line["via"] or lines[j]["via"] == "hook" for j in matches):
+            kept = [j for j in kept if j not in matches] + [i]
+    return sorted(kept)
 
 
 def _t(s):
@@ -345,8 +357,20 @@ def kind_activity():
     vd = _w("activity", "detail_file")
     _examples("activity", lambda d: _msgs(v, d))
     _examples("activity-detail", lambda d: _msgs(vd, d))
+    va = _w("activity", "record_alert")
+    _examples("activity-alert", lambda d: _msgs(va, d))
     _core_clean("activity")
     vec = _vec("activity-v1.json")
+    tamper = {"link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"}
+    for case in vec["integrity"]:
+        fixture = case["fixture"]
+        status = "tampered" if fixture in tamper else "ok" if fixture == "regular" else "unavailable"
+        _expect(f"activity integrity {fixture}", status, case["status"])
+        _expect(f"activity integrity reason {fixture}", None if fixture == "regular" else fixture, case["reason"])
+    for case in vec.get("hook_namespace", []):
+        value = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + case["id"].encode()).hexdigest()[:32]
+        _expect("activity hook namespace", value, case["stored"])
+
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:

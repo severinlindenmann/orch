@@ -209,6 +209,99 @@
    "keep": [
     0
    ]
+  },
+  {
+   "name": "denial origins kept",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "denial",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "denial",
+     "via": "core",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "usage origins kept",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "usage",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "usage",
+     "via": "core",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "finished conflict kept",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 1
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
   }
  ],
  "retention": [
@@ -1078,6 +1171,64 @@
     "id": "toolu_01X",
     "run": "r_8k2m01"
    }
+  }
+ ],
+ "integrity": [
+  {
+   "fixture": "link",
+   "status": "tampered",
+   "reason": "link"
+  },
+  {
+   "fixture": "reparse",
+   "status": "tampered",
+   "reason": "reparse"
+  },
+  {
+   "fixture": "hardlink",
+   "status": "tampered",
+   "reason": "hardlink"
+  },
+  {
+   "fixture": "foreign_owner",
+   "status": "tampered",
+   "reason": "foreign_owner"
+  },
+  {
+   "fixture": "not_regular",
+   "status": "tampered",
+   "reason": "not_regular"
+  },
+  {
+   "fixture": "not_dir",
+   "status": "tampered",
+   "reason": "not_dir"
+  },
+  {
+   "fixture": "swapped",
+   "status": "tampered",
+   "reason": "swapped"
+  },
+  {
+   "fixture": "missing",
+   "status": "unavailable",
+   "reason": "missing"
+  },
+  {
+   "fixture": "io",
+   "status": "unavailable",
+   "reason": "io"
+  },
+  {
+   "fixture": "regular",
+   "status": "ok",
+   "reason": null
+  }
+ ],
+ "hook_namespace": [
+  {
+   "id": "r_abcdef:3",
+   "stored": "x_bcd60fea08471a8c5c1552b1c17a316f"
   }
  ]
 }
