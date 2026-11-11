@@ -250,7 +250,7 @@ def _start_guard_off(request, monkeypatch):
     monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)
 
 
-REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof")
+REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_cli_secret")
 
 
 @pytest.fixture(autouse=True)

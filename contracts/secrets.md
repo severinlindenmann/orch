@@ -140,8 +140,13 @@ an argument), `orch secret remove <name>`, `orch secret profile <name> …`. The
   `agent_env`). Otherwise: `Refused: agents may only run this profile's own command. Ask the person to allow any command, or use orch secret exec <profile>.`
   (`data.refused` = `agent_command`). `exec` is unchanged; a person or script caller is not restricted. The switch counts
   only with a settings record (secret.agents_may_env.<profile>, like `allow_get`), set by a person with a `secret.profile`
-  proof, target `<profile>:agents_may_env`; `profile set` and `profile remove` turn it off. An agent that hides its
+  proof, target `<profile>:agents_may_env`; `profile set` and `profile remove` turn it off. Turning a switch **off**
+  (`profile get-disable`, `profile agents-disable`) needs no proof: anyone may lower it, and the record then says `reset`.
+  Removing a profile has its own target `<profile>:remove` (a proof for `profile set` does not remove it). An agent that hides its
   identity looks like a script (Level 1: not a sandbox).
+- **The profile's program is a full path.** `profile set` looks the program of `run` up once (the fixed system
+  folders and the caller's safe `PATH` entries, never the workspace or cwd) and stores its absolute path; `exec` and the
+  agent rule above never search `PATH` and refuse a stored name that is not a full path.
 - **Hiding the child's output.** stdout and stderr of the child go through pipes and the streaming hider (below) before they
   reach the caller. Interactive programs see pipes, not a terminal; that is accepted.
 - **No shell.** argv is run as given; orch never builds a shell line from a key.
@@ -184,7 +189,10 @@ prints a header).
 - **Error paths**: exception messages, tracebacks (exit 1), stderr of failed children, refusals and HTTP error bodies go
   through the same hider before they are printed, logged or recorded. A writer that cannot get a hider refuses
   (activity.md, Fail closed).
-- Known limits (Level 1): a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
+- **Streams are not delayed.** Only the tail of the output that could still become a key is held back; the rest is
+  passed on at once (an MCP server on stdio keeps working). A child without a terminal on stdin gets its own session.
+  Binary key files (no text form) are hidden by their hex and base64 forms.
+- Known limits (Level 1): a child can still open `/dev/tty` itself; a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
   terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences.
 
 ## Wrapper examples (a skill ships them; `orch-wrapper-maker` teaches agents to write them)

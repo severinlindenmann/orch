@@ -259,16 +259,20 @@ class Hider:
 
 
 class HidingStream:
-    """Hold undecidable suffixes until another chunk or close arrives."""
+    """Hold back only the tail that could still grow into a needle (the longest suffix of the pending text
+    that
+    is a proper prefix of some needle); everything before it is released at once, so an interactive stream
+    (an MCP server on stdio) is not delayed. The result equals hiding the whole text at once."""
 
     def __init__(self, hider: Hider, *, binary: bool = False):
         self._needles = hider._binary if binary else hider._text
         self._buf = b"" if binary else ""
         self._holdback = max((len(n) for n, _ in self._needles), default=1) - 1
         self._closed = False
-        self._parts: list[Any] = []
         self._new = 0
-        self._quantum = max(64, self._holdback // 2) if self._needles else 0
+        self._by_first: dict[Any, list[Any]] = {}
+        for needle, _ in self._needles:
+            self._by_first.setdefault(needle[:1], []).append(needle)
 
     def __repr__(self) -> str:
         return f"HidingStream(closed={self._closed})"
@@ -281,32 +285,35 @@ class HidingStream:
     def __getstate__(self) -> Any:
         raise TypeError("HidingStream cannot be serialized")
 
-    def feed(self, chunk: Any) -> Any:
+    def _held(self) -> int:
+        """Length of the longest suffix of the buffer that is a proper prefix of a needle."""
+        buf = self._buf
+        for i in range(max(0, len(buf) - self._holdback), len(buf)):
+            tail = buf[i:]
+            for needle in self._by_first.get(buf[i : i + 1], ()):
+                if len(needle) > len(tail) and needle.startswith(tail):
+                    return len(tail)
+        return 0
+
+    def feed(self, chunk: Any, *, now: bool = False) -> Any:
+        """Tiny chunks are coalesced (the output is the same); `now=True` scans at once. A live pipe reader
+        passes `now=True`, since a chunk it got is all there is for now."""
         if self._closed:
             raise ValueError("Hiding stream is closed")
         if type(chunk) is not type(self._buf):
             raise TypeError("Invalid hiding chunk")
-        # Tiny chunks are coalesced: scanning runs once enough new data has arrived, never per byte.
-        # The output is the same as scanning each chunk (the holdback already delays the tail).
-        self._parts.append(chunk)
+        self._buf += chunk
         self._new += len(chunk)
-        if self._new < self._quantum:
+        if not now and self._needles and self._new < 64:
             return self._buf[:0]
-        return self._scan()
-
-    def _scan(self) -> Any:
-        self._buf = self._buf[:0].join([self._buf, *self._parts])
-        self._parts.clear()
         self._new = 0
-        out, end = _hide_upto(self._buf, self._needles, max(0, len(self._buf) - self._holdback))
+        out, end = _hide_upto(self._buf, self._needles, len(self._buf) - self._held())
         self._buf = self._buf[end:]
         return out
 
     def close(self) -> Any:
         self._closed = True
-        buf = self._buf[:0].join([self._buf, *self._parts])
-        self._parts.clear()
-        out, _ = _hide_upto(buf, self._needles, len(buf))
+        out, _ = _hide_upto(self._buf, self._needles, len(self._buf))
         self._buf = self._buf[:0]
         return out
 

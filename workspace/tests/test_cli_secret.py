@@ -17,14 +17,6 @@ from orch.errors import Refused
 TOKEN = "tok-Q7xP2mK9vL4zR8"  # made-up values, long enough to be stored
 TOKEN2 = "tok-W3nB6cF1yH5qD0"
 PY = sys.executable
-_REAL_PERSON_BY, _REAL_PENDING_MAC = hp.person_by, hp.ENFORCE_PENDING_MAC  # before conftest's legacy shim
-
-
-@pytest.fixture(autouse=True)
-def _real_proof(monkeypatch):
-    """conftest trusts --by for modules not named test_human_proof*; this module tests the real proof."""
-    monkeypatch.setattr(hp, "person_by", _REAL_PERSON_BY)
-    monkeypatch.setattr(hp, "ENFORCE_PENDING_MAC", _REAL_PENDING_MAC)
 
 
 @pytest.fixture
@@ -395,7 +387,7 @@ OPS = {
         ["secret", "profile", "set", "fresh", "--env", "FRESH_TOKEN=other-token"],
         "",
     ),
-    "profile-remove": ("secret.profile", "plain", ["secret", "profile", "remove", "plain"], ""),
+    "profile-remove": ("secret.profile", "plain:remove", ["secret", "profile", "remove", "plain"], ""),
     "get-enable": ("secret.profile", "plain:allow_get", ["secret", "profile", "get-enable", "plain"], ""),
     "get-disable": ("secret.profile", "plain:allow_get", ["secret", "profile", "get-disable", "plain"], ""),
     "agents-enable": (
@@ -411,6 +403,9 @@ OPS = {
         "",
     ),
 }
+
+
+PROVEN = [n for n in OPS if n not in ("get-disable", "agents-disable")]  # switching off needs no proof
 
 
 def _state(ws):
@@ -431,7 +426,7 @@ def test_each_person_op_succeeds_with_a_valid_proof(store, run, ws, monkeypatch,
     assert name in ("get-disable", "agents-disable") or _state(ws) != before
 
 
-@pytest.mark.parametrize("name", OPS)
+@pytest.mark.parametrize("name", PROVEN)
 @pytest.mark.parametrize(
     "case", ["forged", "missing", "expired", "wrong_target", "wrong_op", "replay", "by_mismatch"]
 )
@@ -464,7 +459,7 @@ def test_each_person_op_refuses_a_bad_proof_and_changes_nothing(store, run, ws, 
     assert TOKEN not in out + err
 
 
-@pytest.mark.parametrize("name", OPS)
+@pytest.mark.parametrize("name", PROVEN)
 def test_each_person_op_without_a_proof_flag_is_refused_whatever_by_says(store, run, ws, name):
     op, target, argv, _ = OPS[name]
     before = _state(ws)
@@ -475,7 +470,7 @@ def test_each_person_op_without_a_proof_flag_is_refused_whatever_by_says(store, 
     assert _state(ws) == before
 
 
-@pytest.mark.parametrize("name", OPS)
+@pytest.mark.parametrize("name", PROVEN)
 def test_an_agent_with_a_valid_proof_is_still_refused(store, run, ws, monkeypatch, name):
     op, target, argv, rest = OPS[name]
     monkeypatch.setenv("CLAUDECODE", "1")
@@ -711,3 +706,124 @@ def test_profile_set_turns_the_switch_off_again(lock, run, ws, monkeypatch):
     )  # fmt: skip
     assert code == 0, out + err
     _refused(run, "/bin/sh", "-c", "echo hi")
+
+
+# --------------------------------------------------------------------------- review fixes (Opus, #459)
+
+
+def test_turning_a_switch_off_needs_no_proof_even_for_an_agent(lock, run, ws, monkeypatch):
+    _enable_agents(run, monkeypatch, ws)
+    _as_person(run, monkeypatch, ws, ("get-enable", "plain"), "plain:allow_get")
+    for sub, name in (("agents-disable", "lock"), ("get-disable", "plain")):
+        code, out, err = run("secret", "profile", sub, name, "--by", "agent:claude")
+        assert code == 0, out + err
+    _refused(run, "/bin/sh", "-c", "echo hi")
+    assert run("secret", "get", "plain", "other-token")[0] == 2
+    assert hp.effective(ws, "secret.agents_may_env.lock", True) is False  # the record says off, by "reset"
+
+
+def test_removing_a_profile_is_not_authorised_by_a_set_proof(store, run, ws, monkeypatch):
+    code, *_ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "plain"), "secret", "profile", "remove", "plain"
+    )
+    assert code == 2 and "plain" in keystore.read_profiles(ws)
+    code, *_ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "plain:remove"), "secret", "profile", "remove", "plain"
+    )
+    assert code == 0 and "plain" not in keystore.read_profiles(ws)
+
+
+def test_a_hand_edit_to_off_writes_the_off_record(store, run, ws, monkeypatch):
+    _enable_get(run, monkeypatch, ws)
+    prof = keystore.read_profiles(ws)
+    prof["plain"]["allow_get"] = False
+    keystore.write_profiles(ws, prof)
+    assert run("secret", "get", "plain", "other-token")[0] == 2  # writes the tombstone
+    prof["plain"]["allow_get"] = True
+    keystore.write_profiles(ws, prof)  # back on in the file only: the old record must not come back
+    assert run("secret", "get", "plain", "other-token")[0] == 2
+
+
+def test_profile_set_stores_the_program_as_a_full_path(store, run, ws, monkeypatch):
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "bare"), "secret", "profile", "set", "bare",
+        "--env", "T=other-token", "--run", "sh",
+    )  # fmt: skip
+    assert code == 0, out + err
+    assert os.path.isabs(keystore.read_profiles(ws)["bare"]["run"][0])
+
+
+def test_profile_set_never_finds_a_program_in_the_workspace(store, run, ws, monkeypatch):
+    planted = ws / "bin"
+    planted.mkdir()
+    (planted / "mytool").write_text("#!/bin/sh\n")
+    (planted / "mytool").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{planted}:/usr/bin:/bin")
+    code, _, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "bare"), "secret", "profile", "set", "bare",
+        "--env", "T=other-token", "--run", "mytool",
+    )  # fmt: skip
+    assert code == 2 and "not found" in err and "bare" not in keystore.read_profiles(ws)
+
+
+def test_exec_refuses_a_profile_command_that_is_not_a_full_path(store, run, ws, tmp_path, monkeypatch):
+    prof = keystore.read_profiles(ws)
+    prof["rel"] = {"env": {"T": "other-token"}, "run": ["mytool"]}
+    keystore.write_profiles(ws, prof)
+    planted = ws / "bin"
+    planted.mkdir()
+    (planted / "mytool").write_text("#!/bin/sh\necho planted\n")
+    (planted / "mytool").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{planted}:/usr/bin:/bin")
+    code, out, err = run("secret", "exec", "rel")
+    assert code == 2 and "planted" not in out and "full path" in err
+
+
+def test_output_is_released_at_once_not_when_the_command_ends(store, ws):
+    """An MCP-style server answers a short line and keeps running: the line must arrive before it exits."""
+    times = []
+
+    class Out:
+        def write(self, b):
+            if b:
+                times.append((time.monotonic(), bytes(b)))
+
+        def flush(self):
+            pass
+
+    start = time.monotonic()
+    prog = "import sys,time;print('{\"ok\":1}');sys.stdout.flush();time.sleep(1.5)"
+    code = secretrun.run(ws, "env", "plain", [PY, "-c", prog], stdout=Out(), stderr=Out())
+    assert code == 0 and times and times[0][1].startswith(b'{"ok":1}')
+    assert times[0][0] - start < 1.2
+
+
+def test_stream_releases_everything_but_a_possible_needle_start(store, ws):
+    from orch import hider
+
+    h = hider.Hider(keystore.all_needles(ws))
+    s = hider.HidingStream(h, binary=True)
+    assert s.feed(b"reply\n", now=True) == b"reply\n"
+    half = TOKEN2[:5].encode()
+    assert s.feed(b"x " + half, now=True) == b"x "  # only the start of a possible key is held
+    assert s.feed(TOKEN2[5:].encode(), now=True) == b"[hidden: other-token]"
+
+
+def test_binary_key_file_is_hidden_in_its_hex_form(ws, run):
+    blob = bytes(range(256)) * 2
+    keystore.add(ws, "blob.p12", "key-file", blob)
+    keystore.write_profiles(ws, {"bin": {"files": {"B": "blob.p12"}}})
+    prog = "import os;print(open(os.environ['B'],'rb').read().hex())"
+    code, out, _ = run("secret", "file", "bin", "--", PY, "-c", prog)
+    assert code == 0 and blob.hex() not in out and "[hidden: blob.p12]" in out
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX sessions")
+def test_the_child_runs_in_its_own_session_without_a_terminal(store, run):
+    code, out, _ = run("secret", "env", "plain", "--", PY, "-c", "import os;print(os.getsid(0)==os.getpid())")
+    assert code == 0 and "True" in out
+
+
+def test_pid_liveness():
+    assert secretrun._pid_alive(os.getpid()) is True
+    assert secretrun._pid_alive(999999999) is False

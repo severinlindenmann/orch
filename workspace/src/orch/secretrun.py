@@ -14,8 +14,8 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import threading
-import time
 from pathlib import Path
 
 from orch import hider, keystore, launchenv
@@ -61,6 +61,21 @@ class Recorder:
             except Exception:
                 if refused is None:
                     raise Refused("Refused: this use could not be recorded.") from None
+
+
+def resolve_program(root, name):
+    """The absolute path of a program, searched once and only in the safe folders (never cwd or the caller's
+    unsafe PATH entries); an absolute name must be an executable file. Used when a person saves a profile."""
+    if os.path.isabs(name):
+        path = name
+    else:
+        path = next(
+            (os.path.join(d, name) for d in safe_path_dirs(root) if os.path.isfile(os.path.join(d, name))),
+            None,
+        )
+    if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
+        raise Refused(f"Refused: the program {name} was not found.")
+    return path
 
 
 def safe_path_dirs(root):
@@ -111,6 +126,31 @@ def _program(name, dirs, h):
     raise Refused(h.hide_text(f"Refused: the program {name} was not found."))
 
 
+def _pid_alive(pid: int) -> bool:
+    """Is a process with this pid still running? Unsure counts as alive (nothing is deleted)."""
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            kernel = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return kernel.GetLastError() != 87  # 87 = invalid parameter: no such process
+            code = ctypes.c_ulong()
+            ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+            kernel.CloseHandle(handle)
+            return not ok or code.value == 259  # STILL_ACTIVE
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OverflowError):
+        return True
+    return True
+
+
 def sweep_tmp(root):
     home = hp.guarded_home(root)
     tmp = home / "keys" / "tmp"
@@ -123,17 +163,7 @@ def sweep_tmp(root):
         info = p.lstat()
         if not stat.S_ISDIR(info.st_mode):
             continue
-        if os.name == "nt":
-            dead = time.time() - info.st_mtime > 6 * 3600
-        else:
-            try:
-                os.kill(int(p.name.split("-", 1)[0]), 0)
-                dead = False
-            except ProcessLookupError:
-                dead = True
-            except (PermissionError, OverflowError):
-                dead = False
-        if dead:
+        if not _pid_alive(int(p.name.split("-", 1)[0])):
             shutil.rmtree(p)
 
 
@@ -146,7 +176,7 @@ AGENT_COMMAND = (
 def _agent_may_run(root, name, profile, command) -> bool:
     """An agent's env/file call: any command only with agents_may_env (file flag AND a person's record);
     else exactly the profile's own `run` (same argv, absolute program, no extra arguments)."""
-    if profile.get("agents_may_env") is True and hp.effective(root, f"secret.agents_may_env.{name}", True):
+    if hp.effective(root, f"secret.agents_may_env.{name}", profile.get("agents_may_env") is True):
         return True
     run = profile.get("run")
     return bool(run) and os.path.isabs(run[0]) and list(command) == list(run)
@@ -173,7 +203,7 @@ def _pump(pipe, out, h, errors):
     try:
         with pipe:
             while chunk := pipe.read1(65536):
-                out.write(stream.feed(chunk))
+                out.write(stream.feed(chunk, now=True))
                 out.flush()
             out.write(stream.close())
             out.flush()
@@ -185,16 +215,29 @@ def _child(command, env, h, stdout, stderr):
     child = None
     threads, errors = [], []
     main = threading.current_thread() is threading.main_thread()
-    old = signal.getsignal(signal.SIGTERM) if main else None
+    sigs = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP", "SIGQUIT") if hasattr(signal, n)]
+    old = {s: signal.getsignal(s) for s in sigs} if main else {}
 
     def stop(signum, frame):
         raise SystemExit(128 + signum)
 
     try:
         if main:
-            signal.signal(signal.SIGTERM, stop)
+            for s in sigs:
+                signal.signal(s, stop)
+        try:
+            interactive = sys.stdin is not None and sys.stdin.isatty()
+        except (ValueError, OSError):
+            interactive = False
+        # Own session when no terminal input is needed, so a hangup of ours does not leave it running with a
+        # key (a child can still open /dev/tty: known limit).
         child = subprocess.Popen(
-            command, env=env, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            command,
+            env=env,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=not interactive and os.name == "posix",
         )
         for pipe, out in ((child.stdout, stdout), (child.stderr, stderr)):
             thread = threading.Thread(target=_pump, args=(pipe, out, h, errors), daemon=True)
@@ -214,8 +257,8 @@ def _child(command, env, h, stdout, stderr):
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.wait()
-        if main:
-            signal.signal(signal.SIGTERM, old)
+        for s, handler in old.items():
+            signal.signal(s, handler)
 
 
 def run(root, mode, profile_name, argv, *, stdout, stderr, agent=False) -> int:
@@ -231,6 +274,11 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent=False) -> int:
         if mode == "exec":
             if not profile.get("run"):
                 raise Refused("Refused: this profile has no command to run.")
+            if not os.path.isabs(profile["run"][0]):
+                raise Refused(
+                    "Refused: this profile's command is not a full path. "
+                    "Ask the person to set the profile again."
+                )
             command = profile["run"] + command
         if not command:
             raise Refused("Refused: give a command to run.")
@@ -313,9 +361,7 @@ def _get(root, profile_name, key, *, stdout_is_tty, out) -> None:
 
     if key not in {*profile.get("env", {}).values(), *profile.get("files", {}).values()}:
         refuse("not_in_profile", f'Refused: the profile "{profile_name}" does not hold the key "{key}".')
-    if not (
-        profile.get("allow_get") is True and hp.effective(root, f"secret.allow_get.{profile_name}", True)
-    ):
+    if not hp.effective(root, f"secret.allow_get.{profile_name}", profile.get("allow_get") is True):
         refuse(
             "get_off",
             f'Refused: the profile "{profile_name}" does not allow printing keys. '

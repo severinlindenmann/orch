@@ -84,8 +84,8 @@ def _change_profile(root, args, who):
     if action == "set":
         profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
         profile.update(allow_get=False, agents_may_env=False)
-        if args.run:
-            profile["run"] = args.run
+        if args.run:  # the program is found once, here, and stored as a full path (never searched later)
+            profile["run"] = [secretrun.resolve_program(root, args.run[0]), *args.run[1:]]
         if args.skill:
             profile["skills"] = args.skill
         hp.record_set(root, setting, False, who)
@@ -140,6 +140,9 @@ def dispatch(args, root: Path) -> bool:
             target += ":allow_get"
         elif action == "profile" and args.profile_action in ("agents-enable", "agents-disable"):
             target += ":agents_may_env"
+        elif action == "profile" and args.profile_action == "remove":
+            target += ":remove"
+        lowering = action == "profile" and args.profile_action in ("get-disable", "agents-disable")
         if (
             action == "add"
             and args.type == "key-file"
@@ -149,7 +152,8 @@ def dispatch(args, root: Path) -> bool:
         ):
             # Preserve arbitrary file bytes and CRLF after the proof's text line.
             sys.stdin.reconfigure(encoding="utf-8", errors="surrogateescape", newline="")
-        who = _person(root, args, "secret." + action, target)
+        # Turning a switch OFF needs no proof (the record says "reset"); everything else does.
+        who = "reset" if lowering else _person(root, args, "secret." + action, target)
         if action == "add":
             if args.file is not None and args.type != "key-file":
                 raise Refused("Refused: --file is only for a key-file.")

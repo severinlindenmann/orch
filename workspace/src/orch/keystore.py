@@ -664,9 +664,19 @@ def all_needles(root: Path) -> dict[str, str | dict | list]:
             label = name + "#admin" if admin and name in mine else name
             if entry["type"] == "key-file":
                 try:
-                    value = _read(d / "files" / _name(name), FILE_MAX + 1).decode("utf-8")
-                except (UnicodeDecodeError, FileNotFoundError):
+                    raw = _read(d / "files" / _name(name), FILE_MAX + 1)
+                except FileNotFoundError:
                     continue
+                try:
+                    value = raw.decode("utf-8")
+                except UnicodeDecodeError:  # a binary file: its text encodings are what can show up
+                    import base64
+
+                    value = [
+                        raw.hex(),
+                        base64.b64encode(raw).decode(),
+                        base64.urlsafe_b64encode(raw).decode(),
+                    ]
             else:
                 value = entry.get("value")
                 if not isinstance(value, str):
