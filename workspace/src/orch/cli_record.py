@@ -155,15 +155,29 @@ def decode_cursor(text: str) -> dict[str, int]:
     return _positions(_unpack(text), RecordError("That position in the record is not valid."))
 
 
+_TERMINAL = ("done", "failed", "stopped")
+_STALE = timedelta(days=7)
+
+
+def _run_info(events: list[dict]) -> tuple[int, str, bool] | None:
+    """(last seq, last time, ended) of one run: ended = its last run.state is terminal."""
+    if not events:
+        return None
+    states = [(e.get("data") or {}).get("state") for e in events if e["kind"] == "run.state"]
+    return events[-1]["seq"], events[-1]["at"], bool(states) and states[-1] in _TERMINAL
+
+
 class TailCursor:
-    """Where a tail stands: a watermark (the last event sent, in (at, run, seq) order) plus a per-run
-    last seq for the runs that still have events at or after the watermark's time. Everything older
-    than the watermark is known as sent, so the cursor stays small however many runs there are."""
+    """Where a tail stands: a watermark (the last event sent, in (at, run, seq) order) plus the last
+    seq of every run that may still get events. A run leaves `seqs` only once all of its events were
+    sent AND it ended (run.state done / failed / stopped) before the watermark, or it has been quiet for
+    a week: the watermark then covers it, so the cursor stays small however many runs there are.
+    A run that is not in `seqs` and not ended is new to this cursor: its events are sent (a
+    resumed run can repeat its history once; nothing is skipped quietly)."""
 
     def __init__(self, mark=None, seqs=None):
         self.mark = mark  # (at, run, seq) or None
         self.seqs = dict(seqs or {})
-        self.last_at: dict[str, str] = {}
 
     @classmethod
     def decode(cls, text: str) -> "TailCursor":
@@ -182,32 +196,39 @@ class TailCursor:
                 raise bad
             _time(at, "at")
             mark = (at, run, seq)
-        cursor = cls(mark, _positions(value["r"], bad))
-        if mark:  # every run in `r` has its last sent event at the watermark's time (older ones were dropped)
-            cursor.last_at = dict.fromkeys(cursor.seqs, mark[0])
-        return cursor
+        return cls(mark, _positions(value["r"], bad))
 
     def encode(self) -> str:
         return _pack({"w": list(self.mark) if self.mark else None, "r": self.seqs})
 
-    def is_new(self, event: dict) -> bool:
+    def is_new(self, event: dict, live: set[str]) -> bool:
         seen = self.seqs.get(event["run"])
         if seen is not None:
             return event["seq"] > seen
-        return self.mark is None or (event["at"], event["run"], event["seq"]) > self.mark
+        if self.mark is None or event["run"] in live:
+            return True
+        return (event["at"], event["run"], event["seq"]) > self.mark
 
-    def advance(self, event: dict) -> None:
+    def advance(self, event: dict, info: dict) -> None:
         self.mark = (event["at"], event["run"], event["seq"])
         self.seqs[event["run"]] = event["seq"]
-        self.last_at[event["run"]] = event["at"]
-        for run in [r for r in self.seqs if self.last_at.get(r, event["at"]) < event["at"]]:
-            del self.seqs[run]  # all of its events are older than the watermark: the watermark covers them
-            self.last_at.pop(run, None)
+        self.settle(info)
+
+    def settle(self, info: dict) -> None:
+        """Forget the runs the watermark covers (see the class text)."""
+        if not self.mark:
+            return
+        horizon = _time(self.mark[0], "at") - _STALE
+        for run in list(self.seqs):
+            known = info.get(run)
+            if known is None or known[0] != self.seqs[run]:
+                continue  # unread, or events still to send
+            if (known[2] and known[1] < self.mark[0]) or _time(known[1], "at") < horizon:
+                del self.seqs[run]
 
     def drop_unlisted(self, known: set[str]) -> None:
         for run in [r for r in self.seqs if r not in known]:
             del self.seqs[run]
-            self.last_at.pop(run, None)
 
 
 # --- selection ---
@@ -220,6 +241,7 @@ def _check_filters(ticket, run) -> None:
 
 _SKIPPED = "Some lines of this run could not be read and are not shown."
 _RECOVERED = "The records of this run can be read again."
+_MISSING = "There are no records for this run."
 
 
 def _show_alert(alert) -> None:
@@ -330,8 +352,22 @@ def tail_lines(
     while True:
         sent = False
         runs = [run] if run else _known(root)
+        gone = (set(told) | set(cursor.seqs)) - set(runs)
+        for name in sorted(gone):  # a run that vanished (pruned) is told as missing, never as recovered
+            told.pop(name, None)
+            yield {
+                "type": "unavailable",
+                "cursor": cursor.encode(),
+                "run": name,
+                "status": "unavailable",
+                "reason": "missing",
+                "message": _MISSING,
+            }
+            sent = True
         cursor.drop_unlisted(set(runs))
         by_run, problems = _events(root, runs, ticket, explicit=run is not None, tell=False)
+        info = {r: i for r, events in by_run.items() if (i := _run_info(events))}
+        live = {r for r, i in info.items() if not i[2]}
         now_marks: dict[str, list] = {r: [] for r in told}
         for problem in problems:
             now_marks.setdefault(problem["run"], []).append(problem)
@@ -343,7 +379,7 @@ def tail_lines(
             for problem in found:
                 _show_alert(problem.alert)
                 yield {"type": "unavailable", "cursor": cursor.encode(), **problem}
-            if not found:  # it can be read again
+            if not found:  # it was read again just now
                 yield {
                     "type": "unavailable",
                     "cursor": cursor.encode(),
@@ -353,9 +389,9 @@ def tail_lines(
                     "message": _RECOVERED,
                 }
             sent = True
-        streams = [[e for e in events if cursor.is_new(e)] for _, events in sorted(by_run.items())]
+        streams = [[e for e in events if cursor.is_new(e, live)] for _, events in sorted(by_run.items())]
         for event in heapq.merge(*streams, key=lambda e: (e["at"], e["run"])):
-            cursor.advance(event)
+            cursor.advance(event, info)
             sent = True
             yield {"type": "event", "cursor": cursor.encode(), "event": event}
         if not follow:

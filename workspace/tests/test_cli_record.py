@@ -505,12 +505,20 @@ def test_cli_record_has_no_direct_file_access():
 
 # --- review fixes: small cursors, alerts once, markers follow state, detail identity ---
 def make_runs(root, count):
+    """`count` finished runs (a step, then run.state done), one second apart."""
     writer = RecordWriter(root, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
     for n in range(count):
         run = f"r_many{n:04d}"
+        when = f"2026-11-16T10:{n // 60:02d}:{n % 60:02d}Z"
+        writer.append(example(run=run, ticket=TICKET_A, id=f"toolu_m{n}", at=when))
         writer.append(
             example(
-                run=run, ticket=TICKET_A, id=f"toolu_m{n}", at=f"2026-11-16T10:{n // 60:02d}:{n % 60:02d}Z"
+                "valid-run-state-say",
+                run=run,
+                ticket=TICKET_A,
+                id=f"{run}:done",
+                at=when,
+                data={"state": "done"},
             )
         )
     return writer
@@ -519,7 +527,7 @@ def make_runs(root, count):
 def test_tail_cursor_stays_small_with_300_runs(proj, capsys):
     writer = make_runs(proj, 300)
     code, lines = cli_lines(capsys, "tail")
-    assert code == 0 and len(lines) == 300
+    assert code == 0 and len(lines) == 600
     assert max(len(ln["cursor"]) for ln in lines) < 4096
     last = lines[-1]["cursor"]
     _, rest = cli_lines(capsys, "tail", "--since", last)
@@ -529,6 +537,7 @@ def test_tail_cursor_stays_small_with_300_runs(proj, capsys):
     writer.append(example(run="r_many0007", ticket=TICKET_A, id="toolu_new", at="2026-11-16T11:00:00Z"))
     _, rest = cli_lines(capsys, "tail", "--since", last)
     assert [ln["event"]["id"] for ln in rest] == ["toolu_new"]
+    assert len(cli_record.TailCursor.decode(last).seqs) < 5  # finished runs are covered by the watermark
 
 
 def test_tail_cursor_with_unknown_shape_is_invalid(ws, capsys):
@@ -594,6 +603,9 @@ def test_follow_drops_cursor_entries_of_pruned_runs(ws):
     out = follow(ws, 25, between, since=since)
     ping = [ln for ln in out if ln["type"] == "ping"][-1]
     assert cli_record.TailCursor.decode(ping["cursor"]).seqs == {RUN_A: 4}
+    assert [(m["run"], m["status"], m["reason"]) for m in out if m["type"] == "unavailable"] == [
+        (RUN_B, "unavailable", "missing")
+    ]
 
 
 def test_detail_file_of_another_event_is_tampered(ws, capsys, monkeypatch):
@@ -606,3 +618,39 @@ def test_detail_file_of_another_event_is_tampered(ws, capsys, monkeypatch):
     monkeypatch.setattr(cli_record.record, "read_detail", other)
     code, (err,) = cli_lines(capsys, "query", "--detail", "toolu_a1", "--run", RUN_A)
     assert code == 2 and err["code"] == "tampered"
+
+
+def test_late_event_of_a_live_run_is_still_delivered(ws, capsys):
+    # run B is live (no end): its next line carries an older time than the watermark, which has moved on
+    def late(n):
+        if n == 1:
+            RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"})).append(
+                example(run=RUN_B, ticket=TICKET_B, id="toolu_late", at=at(5))
+            )
+
+    out = follow(ws, 3, late)
+    ids = [ln["event"]["id"] for ln in out if ln["type"] == "event"]
+    assert ids.count("toolu_late") == 1
+    _, lines = cli_lines(capsys, "tail")
+    assert "toolu_late" in [ln["event"]["id"] for ln in lines]
+    assert cli_lines(capsys, "tail", "--since", lines[-1]["cursor"])[1] == []
+
+
+def test_unseen_live_run_with_old_events_is_delivered_not_skipped(ws):
+    since = cli_record.TailCursor((at(30), RUN_A, 4), {RUN_A: 4}).encode()  # B was never sent, and is older
+    out = follow(ws, 1, since=since)
+    assert {ln["event"]["run"] for ln in out if ln["type"] == "event"} == {RUN_B}
+
+
+def test_vanished_tampered_run_is_missing_not_recovered(ws):
+    hardlink(ws)
+
+    def between(n):
+        run_file(ws).unlink(missing_ok=True)
+
+    out = follow(ws, 3, between)
+    marks = [(m["status"], m["reason"]) for m in out if m["type"] == "unavailable"]
+    assert marks == [("tampered", "hardlink"), ("unavailable", "missing")]
+    check(
+        validator("cli-answer", "stream_line"), [m for m in out if m["type"] == "unavailable"][-1], "marker"
+    )
