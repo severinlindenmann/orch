@@ -32,6 +32,8 @@ def test_the_copies_count_is_live_while_the_size_walk_is_cached(ws, tmp_path):
     assert first is None or first["copies"] == 2
     _wait_counted(ws)
     assert data.copies_disk(ws)["copies"] == 2
-    _register(ws, ["t_aaaaaa", "t_bbbbbb", "t_cccccc"], tmp_path / "copies2")  # a third copy appears within the TTL
+    _register(
+        ws, ["t_aaaaaa", "t_bbbbbb", "t_cccccc"], tmp_path / "copies2"
+    )  # a third copy appears within the TTL
     assert data.copies_disk(ws)["copies"] == 3  # not the cached 2
     data.copies_disk_forget(ws)
