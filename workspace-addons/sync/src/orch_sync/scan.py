@@ -30,8 +30,15 @@ _NAME_RE = re.compile(
 _ARCHIVE_EXT = (".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".jar", ".war", ".apk")
 _ARCHIVE_MAGIC = (b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b", b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", b"BZh", b"\xfd7zXZ\x00")
 _MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"OggS", b"ID3", b"\x1a\x45\xdf\xa3")
-# a signature inside a "picture" means something is hidden in it (PDFs can carry compressed text: always a click)
-_EMBEDDED = tuple(m for m in _ARCHIVE_MAGIC if m != b"\x1f\x8b") + (b"\x1f\x8b\x08",)
+# a signature inside a "picture" means something is hidden in it (PDFs can carry compressed text: always a click).
+# Fable B15: whole headers, not 3 bytes that random compressed media contains about once per 16 MB.
+_EMBEDDED = re.compile(
+    # gzip: deflate + a flag byte with the reserved bits clear; XFL and OS are not checked (decoders ignore them)
+    rb"\x1f\x8b\x08[\x00-\x1f]"
+    rb"|BZh[1-9]1AY&SY"  # bzip2: level and the first block's magic
+    rb"|PK\x03\x04[\x0a-\x3f]\x00|PK\x05\x06"  # zip: plausible version needed / end of directory
+    rb"|7z\xbc\xaf\x27\x1c|Rar!\x1a\x07|\xfd7zXZ\x00"
+)
 _TICKET_RE = re.compile(r"^tickets/t_[a-z0-9]{6,16}\.json$")
 
 
@@ -150,7 +157,7 @@ def scan_blob(path, data):
     why = "archive" if archive else None
     if not why and data.startswith(b"%PDF-"):
         why = "pdf"
-    elif not why and _is_media(data) and any(sig in data[8:] for sig in _EMBEDDED):
+    elif not why and _is_media(data) and _EMBEDDED.search(data, 8):
         why = "media-with-archive"
     elif not why and not (_is_media(data) or _is_text(data)):
         why = "unknown-format"

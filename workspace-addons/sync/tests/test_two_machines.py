@@ -8,6 +8,10 @@ from test_step import ART, NOW, TICKET, configure, run, save, success, ticket, t
 from orch_sync import repo, step
 
 
+class Crash(BaseException):  # a killed process: no `except Exception` in the step runs
+    pass
+
+
 @pytest.fixture
 def machines(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
@@ -41,6 +45,43 @@ def remote_sha(bare):
     return subprocess.run(
         ["git", "--git-dir", str(bare), "rev-parse", "orch-state"], capture_output=True, check=True
     ).stdout.strip()
+
+
+def test_hostile_local_remote_hooks_never_run(machines):
+    # Fable B1: the shared remote is a local bare repository (test install). Once a peer plants executable
+    # hooks in it, real sync rounds stop with the inspection's refusal (not "offline") before any git runs
+    # inside it; no hook ever runs.
+    a, b, bare = machines
+    both(machines)
+    canary = bare.parent / "PWNED"
+    for name in ("pre-receive", "update", "post-receive", "post-update", "reference-transaction"):
+        hook = bare / "hooks" / name
+        hook.write_text(f'#!/bin/sh\necho {name} >> "{canary}"\n')
+        hook.chmod(0o755)
+    edit(b, title="from B", updated_at="2026-11-11T13:00:00Z")
+    before = remote_sha(bare)
+    for root in (b, a):
+        assert run(root)["last_error"] == repo.LOCAL_REMOTE_REFUSED
+    assert remote_sha(bare) == before
+    assert not canary.exists()
+
+
+def test_hostile_local_remote_config_never_runs(machines):
+    # A peer writes a command-bearing key into the shared local remote's own config (and an alternate, so the
+    # command would run). The next round is refused before git runs inside it.
+    a, b, bare = machines
+    both(machines)
+    canary = bare.parent / "PWNED"
+    other = bare.parent / "other.git"
+    subprocess.run(["git", "init", "--bare", str(other)], capture_output=True, check=True)
+    (bare / "objects/info/alternates").write_text(f"{other / 'objects'}\n")
+    subprocess.run(
+        ["git", "--git-dir", str(bare), "config", "core.alternateRefsCommand", f'touch "{canary}"'],
+        check=True,
+    )
+    for root in (a, b):
+        assert run(root)["last_error"] == repo.LOCAL_REMOTE_REFUSED
+    assert not canary.exists()
 
 
 def test_two_fields_status_counter(machines):
@@ -205,11 +246,11 @@ def test_crash_before_apply_recovers(machines, monkeypatch):
     success(a)
 
     def crash(*args):
-        raise RuntimeError("crash")
+        raise Crash("crash")
 
     with monkeypatch.context() as m:
         m.setattr(step, "apply", crash)
-        with pytest.raises(RuntimeError, match="crash"):
+        with pytest.raises(Crash, match="crash"):
             run(b)
     assert (b / ".orch/run/sync/pending.json").exists()
     success(b)
@@ -226,11 +267,11 @@ def test_forged_pending_missing_merges_refuses_before_writes(machines, monkeypat
     success(a)
 
     def crash(*args):
-        raise RuntimeError("crash")
+        raise Crash("crash")
 
     with monkeypatch.context() as m:
         m.setattr(step, "apply", crash)
-        with pytest.raises(RuntimeError, match="crash"):
+        with pytest.raises(Crash, match="crash"):
             run(b)
     pending_path = b / ".orch/run/sync/pending.json"
     pending = json.loads(pending_path.read_text())
@@ -366,11 +407,11 @@ def test_partial_apply_crash_is_idempotent(machines, monkeypatch):
         write(root, path, data)
         if path.startswith("tickets/"):
             replaced.append(path)
-            raise RuntimeError("crash after replace")
+            raise Crash("crash after replace")
 
     with monkeypatch.context() as m:
         m.setattr(step, "write", crash_after_write)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(Crash):
             run(b)
     assert len(replaced) == 1
     success(b)
@@ -413,20 +454,27 @@ def test_merge_uses_checked_commit_when_remote_ref_moves(machines, monkeypatch, 
     edit(a, title="Checked update")
     success(a)
     check, merged_tree = step.incoming.check, step.merged_tree
-    checked, merged = [], []
+    checked, merged, moves = [], [], []
+
+    def commit_once(root, tree, parent, message):
+        # A commit no step ever builds itself (its own message and date), so it can never coincide with one.
+        date = "2026-11-11T09:00:00Z"
+        made = repo.git(root, "commit-tree", tree, "-p", parent, input=message.encode(), commit_date=date)
+        return made.stdout.decode().strip()
 
     def racing_check(root, ref, **kwargs):
+        # The ref moves at one exact point: right after the step's check of `ref` returned, before the step
+        # uses the result. Nothing here depends on timing or on what else the step does.
         if new_checked_commit:
             # Also enforce the Result API: the returned commit is authoritative.
-            tree = step.oid(root, ref + "^{tree}")
-            ref = step.commit(root, tree, [ref], NOW)
+            ref = commit_once(root, step.oid(root, ref + "^{tree}"), ref, "checked copy\n")
         result = check(root, ref, **kwargs)
         assert not result.problems
         checked.append(result.commit)
-        tree = step.oid(root, result.commit + "^{tree}")
-        moved = step.commit(root, tree, [result.commit], NOW)
+        moved = commit_once(root, step.oid(root, result.commit + "^{tree}"), result.commit, "moved later\n")
         repo.git(root, "update-ref", "refs/remotes/origin/orch-state", moved)
-        assert moved != result.commit
+        assert moved != result.commit and step.oid(root, "refs/remotes/origin/orch-state") == moved
+        moves.append(moved)
         return result
 
     def checked_merge(root, head, remote, index, now):
@@ -437,7 +485,8 @@ def test_merge_uses_checked_commit_when_remote_ref_moves(machines, monkeypatch, 
     monkeypatch.setattr(step.incoming, "check", racing_check)
     monkeypatch.setattr(step, "merged_tree", checked_merge)
     success(b)
-    assert merged == checked and merged
+    assert merged == checked and len(merged) == len(moves) == 1
+    assert step.oid(b, "HEAD") == checked[0] and step.oid(b, "HEAD") not in moves  # never the moved ref
     assert load(b)["title"] == "Checked update"
 
 
@@ -686,13 +735,13 @@ def test_ledger_changes_before_apply_fail_closed(machines, monkeypatch, recover,
         else:
             assert humanproof._verdict_ledger_put(root, "t_abc123", None)
         if recover:
-            raise RuntimeError("crash")
+            raise Crash("crash")
         return apply(root, old, new, state, merges)
 
     with monkeypatch.context() as m:
         m.setattr(step, "apply", revoke)
         if recover:
-            with pytest.raises(RuntimeError, match="crash"):
+            with pytest.raises(Crash, match="crash"):
                 run(b)
         else:
             assert "busy" in run(b)["last_error"]
@@ -901,3 +950,270 @@ def test_first_sync_marks_ownership_before_import(machines, monkeypatch):
     # Even if peer session metadata later arrives on disk, it cannot be adopted.
     save(b, value=load(b) | {"sessions": value["sessions"]})
     assert tickets.sessions_for(b, value["id"], load(b), "claude", runs.host()) is None
+
+
+@pytest.mark.parametrize("broken", [b'{"id":"t_abc123"}', step.encoded(ticket(note="x" * 1_000_000))])
+def test_unsyncable_local_ticket_does_not_stop_sync(machines, broken):
+    # Fable A2: a peer edit to a ticket whose live file stage keeps out made every tick "busy", after
+    # partial writes, and nothing was pushed or pulled again.
+    a, b, _ = both(machines)
+    save(b, value=broken)
+    other = "tickets/t_second.json"
+    save(a, other, ticket() | {"id": "t_second"})
+    edit(a, title="Peer edit")
+    success(a)
+    for _ in range(2):
+        state = success(b)
+    assert (b / ".orch" / TICKET).read_bytes() == broken  # the local file is never overwritten
+    assert load(a)["title"] == "Peer edit"
+    assert json.loads((b / ".orch" / other).read_text())["id"] == "t_second"  # the rest still arrives
+    assert "Ticket t_abc123 has a problem" in str(state["skipped"])
+    save(b, "tickets/t_third1.json", ticket() | {"id": "t_third1"})
+    success(b)
+    success(a)
+    assert (a / ".orch/tickets/t_third1.json").exists()  # and this machine still pushes
+    assert b"Peer edit" in repo.git(b, "show", "HEAD:" + TICKET).stdout  # the peer's edit is not reverted
+
+
+def test_unapplied_path_is_a_needs_row_until_it_applies(machines):
+    # An A2 skip is not only a notice in state.json: the person sees it in Needs, and it clears itself.
+    from pathlib import Path
+
+    from jsonschema import Draft202012Validator
+
+    from orch_sync import needs
+
+    a, b, _ = both(machines)
+    save(b, value=b'{"id":"t_abc123"}')  # a local file sync keeps out (broken)
+    edit(a, title="Peer edit")
+    success(a)
+    for _ in range(2):
+        state = success(b)
+        assert TICKET in state["unapplied"]
+        (need,) = [r for r in needs.rows(b) if r["kind"] == "sync:unapplied"]
+        assert need["text"] == "A file couldn't be updated: t_abc123.json. orch will try again."
+        assert need["cli"] == "orch sync status --json" and need["ticket"] == "t_abc123"
+        assert need["tone"] == "warn" and "answer" not in need and need["since"] == state["unapplied"][TICKET]
+        schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/needs.schema.json").read_text())
+        Draft202012Validator(schema).validate(needs.rows(b))
+    # the file can be synced again: it applies (as a local edit)
+    save(b, value=ticket() | {"title": "Fixed here"})
+    state = success(b)
+    assert "unapplied" not in state
+    assert not [r for r in needs.rows(b) if r["kind"] == "sync:unapplied"]
+    assert repo.safe(b, TICKET).read_bytes() == step.blob(b, step.entries(b, "HEAD")[TICKET])
+
+
+def test_apply_checks_every_path_before_the_first_write(machines, monkeypatch):
+    a, b, _ = both(machines)
+    save(a, ART, b"artifact")
+    success(a)
+    success(b)
+    success(a)
+    edit(a, title="Remote title")
+    save(a, ART, b"remote artifact")
+    success(a)
+    apply, writes = step.apply, []
+
+    def agent_write(root, old, new, state, merges=None):
+        save(root, ART, b"agent edit")  # sorts after the ticket path, which used to be written already
+        return apply(root, old, new, state, merges)
+
+    write = step.write
+
+    def recorded(root, path, data):
+        writes.append(path)
+        return write(root, path, data)
+
+    monkeypatch.setattr(step, "apply", agent_write)
+    monkeypatch.setattr(step, "write", recorded)
+    before = (b / ".orch" / TICKET).read_bytes()
+    assert "busy" in run(b)["last_error"]
+    assert (b / ".orch" / TICKET).read_bytes() == before
+    assert not [p for p in writes if p.startswith("tickets/")]
+
+
+def test_a_crash_of_any_kind_is_recorded_not_raised(machines, monkeypatch):
+    # Fable A4/B14: hostile data shapes raised TypeError/KeyError out of every tick, unseen.
+    a, b, _ = both(machines)
+    edit(a, title="Remote")
+    success(a)
+
+    def broken(*args, **kwargs):
+        raise TypeError("hostile shape")
+
+    monkeypatch.setattr(step, "merged_tree", broken)
+    state = run(b)
+    assert state["last_error"] == "Sync stopped: TypeError"
+    recorded = json.loads((b / ".orch/run/sync/state.json").read_text())
+    assert recorded["last_error"] == "Sync stopped: TypeError"
+
+
+def test_merge_never_moves_local_files_by_rename_detection(machines):
+    # Fable A5: git's (directory) rename detection moved a local new file into another ticket's folder.
+    a, b, _ = both(machines)
+    save(a, "tickets/t_second.json", ticket() | {"id": "t_second"})
+    for i in range(25):
+        save(a, f"tickets/t_abc123/artifacts/keep{i}.txt", f"keep {i}".encode())
+    for i in range(5):
+        save(a, f"tickets/t_abc123/artifacts/sub/f{i}.txt", f"moved file {i}\n".encode() * 20)
+    success(a)
+    success(b)
+    for i in range(5):
+        old, new = f"tickets/t_abc123/artifacts/sub/f{i}.txt", f"tickets/t_second/artifacts/sub/f{i}.txt"
+        save(a, new, (a / ".orch" / old).read_bytes())
+        (a / ".orch" / old).unlink()
+    success(a)
+    local_new = "tickets/t_abc123/artifacts/sub/new.txt"
+    save(b, local_new, b"local new file")
+    success(b)
+    assert (b / ".orch" / local_new).read_bytes() == b"local new file"
+    assert not (b / ".orch/tickets/t_second/artifacts/sub/new.txt").exists()
+    assert local_new in tracked(b)
+
+
+def test_several_merge_bases_pause_without_files(machines, tmp_path):
+    # Fable A5: with two merge bases git builds a virtual base by a text merge of the JSON. A file-less pause
+    # (its own Needs row) instead, with nothing written.
+    from orch_sync import pause
+
+    _, b, _ = both(machines)
+    head = step.oid(b, "HEAD")
+    tree = step.oid(b, "HEAD^{tree}")
+
+    def commit(message, *parents):
+        args = [v for p in parents for v in ("-p", p)]
+        return repo.git(b, "commit-tree", tree, *args, input=message.encode()).stdout.decode().strip()
+
+    left, right = commit("left\n", head), commit("right\n", head)
+    ours, theirs = commit("ours\n", left, right), commit("theirs\n", right, left)
+    assert len(repo.git(b, "merge-base", "--all", ours, theirs).stdout.split()) == 2
+    before = (b / ".orch" / TICKET).read_bytes()
+    with pytest.raises(pause.Pause) as caught:
+        step.merged_tree(b, ours, theirs, tmp_path / "index", NOW)
+    assert caught.value.kind == pause.HISTORY and caught.value.files == []
+    state = {}
+    pause.capture(b, state, caught.value, theirs, NOW)
+    assert state["paused"]["files"] == [] and state["paused"]["kind"] == pause.HISTORY
+    assert (b / ".orch" / TICKET).read_bytes() == before
+
+
+def test_case_only_rename_never_loses_the_file(machines):
+    # Fable A6/B13: on a case-insensitive disk the rename's delete half removed the only copy, and the
+    # deletion then spread to every machine. It now pauses for a person instead.
+    a, b, bare = both(machines)
+    old = "tickets/t_abc123/artifacts/report.txt"
+    new = "tickets/t_abc123/artifacts/Report.txt"
+    save(a, old, b"the report")
+    for i in range(9):  # so the deletion threshold does not hide the rename
+        save(a, f"tickets/t_abc123/artifacts/other{i}.txt", b"other")
+    success(a)
+    success(b)
+    repo.git(a, "mv", "-f", "--", old, new)
+    hostile(a, bare, ["commit", "-m", "case-only rename"])
+    tip = remote_sha(bare)
+    state = run(b)
+    assert state["paused"]
+    assert any(p.name.lower() == "report.txt" for p in (b / ".orch/tickets/t_abc123/artifacts").iterdir())
+    assert b"the report" in [p.read_bytes() for p in (b / ".orch/tickets/t_abc123/artifacts").iterdir()]
+    assert remote_sha(bare) == tip
+
+
+def test_held_ext_converges_without_churn(machines):
+    # Fable B11: a held value pushed back as a change made both machines alternate forever.
+    a, b, bare = both(machines)
+    edit(a, ext={"automation": {"enabled": True}})
+    for root in (a, b, a, b):
+        success(root)
+    tip = remote_sha(bare)
+    for _ in range(4):
+        success(a)
+        success(b)
+        assert remote_sha(bare) == tip
+    assert load(a)["ext"]["automation"] == {"enabled": True}
+    assert "automation" not in load(b).get("ext", {})  # held on B until a person allows it
+
+
+def test_incoming_truncation_counts_as_removal(machines):
+    # Fable A7: overwriting every artifact with nothing passed the deletion threshold.
+    a, b, _ = both(machines)
+    names = [f"tickets/t_abc123/artifacts/r{i}.txt" for i in range(8)]
+    for name in names:
+        save(a, name, b"real content\n" * 50)
+    success(a)
+    success(b)
+    for name in names:
+        save(a, name, b"")
+    success(a)
+    state = run(b)
+    assert state["paused"] and "removed" in state["paused"]["reason"]
+    assert all((b / ".orch" / name).read_bytes() == b"real content\n" * 50 for name in names)
+
+
+def test_fetch_takes_only_the_state_branch(machines):
+    # Fable A11/B3: every remote branch was fetched, unbounded and never validated.
+    a, b, _ = both(machines)
+    save(a, ART, b"junk " * 1000)
+    repo.git(a, "add", "--", ART)
+    repo.git(a, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-m", "junk")
+    repo.git(a, "push", "origin", "HEAD:refs/heads/junk")
+    repo.git(a, "reset", "--hard", "HEAD^")
+    success(b)
+    refs = repo.git(b, "for-each-ref", "--format=%(refname)").stdout.decode().split()
+    assert "refs/remotes/origin/junk" not in refs
+    assert "refs/remotes/origin/orch-state" in refs
+
+
+def test_first_sync_to_an_empty_remote_is_not_offline(machines):
+    a, _, _ = machines
+    save(a)
+    assert success(a)["ahead"] == 0
+
+
+def test_tree_listing_is_bounded(ready, monkeypatch):
+    from orch_sync import incoming
+
+    head = repo.git(ready, "rev-parse", "HEAD").stdout.decode().strip()
+    monkeypatch.setattr(incoming, "TREE_BYTES", 10)
+    index = ready / ".orch/run/sync/bomb-index"
+    repo.git(ready, "read-tree", "--empty", index=index)
+    obj = repo.git(ready, "hash-object", "-w", "--stdin", input=b"x").stdout.decode().strip()
+    for i in range(20):
+        repo.git(ready, "update-index", "--add", "--cacheinfo", f"100644,{obj},f{i}", index=index)
+    tree = repo.git(ready, "write-tree", index=index).stdout.decode().strip()
+    with pytest.raises(repo.Refused, match="Too many files"):
+        incoming.tree(ready, tree)
+    assert incoming.tree(ready, head) == []
+
+
+@pytest.mark.parametrize("hostile_value", ["counter", "key"])
+def test_peer_cannot_exhaust_ticket_numbers(machines, hostile_value):
+    # Fable A9/B9: the merge takes the max, so one hostile number could never come back down.
+    a, b, bare = both(machines)
+    save(b, "ticket-counter.json", {"last": 3})
+    success(b)
+    success(a)
+    if hostile_value == "counter":
+        save(a, "ticket-counter.json", {"last": 900_000_000})
+    else:
+        save(a, "tickets/t_far001.json", ticket() | {"id": "t_far001", "key": "AB-900000000"})
+    repo.git(a, "add", "--", "ticket-counter.json", "tickets")
+    hostile(a, bare, ["commit", "-m", "jump"])
+    state = run(b)
+    assert state["paused"] and "jumped" in state["paused"]["reason"]
+    assert json.loads((b / ".orch/ticket-counter.json").read_text())["last"] == 3
+
+
+@pytest.mark.parametrize(
+    "counter", [b"[]", b'{"last": "x"}', b'{"last": -1}', step.encoded({"last": 1, "pad": "x" * 5000})]
+)
+def test_counter_schema_is_strict(machines, counter):
+    a, b, bare = both(machines)
+    save(a, "ticket-counter.json", counter)
+    repo.git(a, "add", "--", "ticket-counter.json")
+    hostile(a, bare, ["commit", "-m", "counter"])
+    live = b / ".orch/ticket-counter.json"
+    before = live.read_bytes() if live.exists() else None
+    state = run(b)
+    assert state["last_error"] and "Traceback" not in state["last_error"]
+    assert (live.read_bytes() if live.exists() else None) == before
