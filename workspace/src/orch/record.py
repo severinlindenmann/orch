@@ -26,12 +26,14 @@ from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
 from orch.phone_view import redact
+from orch.record_files import MAX_INPUT, file_ok
 
 _OFF = "Recording is off until key hiding is ready."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[0-9a-f]{32}"
 _PART = r"[A-Za-z0-9_.-]{1,80}"
+_MAX_FILES = 8
 TAMPER_REASONS = (
     "link",
     "reparse",
@@ -1122,9 +1124,20 @@ class RecordWriter:
         event.pop("detail_lost", None)
         event.pop("conflict", None)
         event["detail"] = None
+        # files (activity.md, Files): only on a step; a bad entry is dropped, never the line.
+        files = event.pop("files", None)
+        if event.get("kind") != "step" or type(files) is not list:
+            files = None
+        else:
+            files = files[:MAX_INPUT]  # only the first 64 are looked at; the first 8 good ones are kept
         before = _json(event).count("[hidden: ")
         event = self.hider.hide_json(event)
         hidden = max(0, _json(event).count("[hidden: ") - before)
+        if files is not None:
+            # One shape check (record_files.file_ok, NFC included); a path that changes under the hider or the
+            # plain-text cleaner is dropped, never stored hidden.
+            good = [f for f in files if file_ok(f) and self.hider.hide_text(f) == f and redact(f) == f]
+            event["files"] = _files_in_budget(good[:_MAX_FILES])
         event["text"] = self.hider.hide_cut(" ".join(redact(event["text"]).split()), 500)
         if isinstance(event.get("outcome"), dict) and isinstance(event["outcome"].get("error"), str):
             event["outcome"]["error"] = self.hider.hide_cut(
@@ -1136,12 +1149,23 @@ class RecordWriter:
                 event["data"] = {"cut": True}
         _validate(event)
         payload = self._prepare_detail(event, detail, hidden)
-        # Both possible line forms have passed the hider before taking the lock.
-        prepared = dict(event, seq=10**20, conflict=True)
-        if payload is not None:
-            prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
-        self._line(prepared)
-        self._line(dict(prepared, detail=None, detail_lost=True))
+        # Both possible line forms have passed the hider before taking the lock. The audit line is never
+        # dropped for its optional parts (I4): a line that is too large loses `files`, then `data` (cut).
+        for trim in (None, "files", "data"):
+            if trim == "files":
+                event.pop("files", None)
+            elif trim == "data" and "data" in event:
+                event["data"] = {"cut": True}
+            prepared = dict(event, seq=10**20, conflict=True)
+            if payload is not None:
+                prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+            try:
+                self._line(prepared)
+                self._line(dict(prepared, detail=None, detail_lost=True))
+                break
+            except RecordInvalid:
+                if trim == "data":
+                    raise
         self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
         try:
             with _lock(self.workspace, run, lock_wait) as check_lock:
@@ -1239,9 +1263,7 @@ class RecordWriter:
                 _close(fd)
         except (RecordTampered, RecordUnavailable) as error:
             _report(self.workspace, error, "folder", event["run"], "writer")
-            busy = RecordBusy("The record is busy.")
-            busy.alert = error.alert
-            raise busy from None
+            raise  # the real cause (tampered / unavailable) stays visible to the caller
         result = dict(event, pending=True, seq=None)
         if default_id:
             result.pop("id", None)
@@ -1288,6 +1310,15 @@ class RecordWriter:
                 continue
             self._commit(event, payload, pending["default_id"], check_lock=check_lock)
             _unlink(self.workspace, rel)
+
+
+def _files_in_budget(files: list[str]) -> list[str]:
+    """Each entry at most 512 serialized bytes, all together at most 2048: trailing entries are dropped."""
+    sizes = [len(_json(f).encode()) + 1 for f in files]
+    keep = 0
+    while keep < len(files) and sizes[keep] <= 512 and sum(sizes[: keep + 1]) <= 2048:
+        keep += 1
+    return files[:keep]
 
 
 def hook_entry_filter(line: dict) -> dict | None:
@@ -1620,6 +1651,7 @@ _SCHEMA = {
             "type": "boolean",
             "description": "Hook and log finished outcomes disagree; both lines are kept.",
         },
+        "files": {"$ref": "#/$defs/files"},
     },
     "allOf": [
         {
@@ -1635,6 +1667,7 @@ _SCHEMA = {
                     "used": {"type": "object", "properties": {"kind": {"enum": ["skill", "tool", "mcp"]}}},
                 }
             },
+            "else": {"not": {"required": ["files"]}},
         },
         {
             "if": {"properties": {"kind": {"enum": ["task.start", "task.done"]}}},
@@ -1999,6 +2032,20 @@ _SCHEMA = {
             "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$",
         },
         "version": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "files": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {"$ref": "#/$defs/file_path"},
+            "description": "Only on kind step: the workspace files or folders the step named, display "
+            "only, never used for access decisions (activity.md, Files).",
+        },
+        "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 260,
+            "pattern": "^(?![A-Za-z]:)(?![A-Za-z][A-Za-z0-9+.-]*:)(?![~$])(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08e2\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb\\\\]+$",  # noqa: E501
+            "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash, no start with ~ $ or a scheme or drive letter (file: C:), no Unicode control or format character (Cc Cf Zl Zp: bidi overrides, zero-width), NFC. The writer enforces the full rule (record_files.file_ok); this pattern lists the BMP characters.",  # noqa: E501
+        },
         "detail_file": {
             "type": "object",
             "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"],

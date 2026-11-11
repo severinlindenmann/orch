@@ -105,6 +105,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "_json(dict(schema='orch.record/1', since=event['at'], keep_days=90, max_mb=2048)).encode",
     "_json(event).count",
     "_json(event['data']).encode",
+    "_json(f).encode",
     "_json(payload).count",
     "_json(wrapped).encode",
     "_read_bytes(fd).splitlines",
@@ -234,7 +235,8 @@ from orch import hider as hiding
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
-from orch.phone_view import redact""".splitlines()
+from orch.phone_view import redact
+from orch.record_files import MAX_INPUT, file_ok""".splitlines()
 )
 SAFE_EXCEPTIONS = {
     "ValueError",
