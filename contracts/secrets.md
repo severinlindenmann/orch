@@ -197,13 +197,13 @@ prints a header).
 - **The command's processes end with the call.** On POSIX the child runs in its own session (when stdin is not a terminal) and,
   when the call ends or is interrupted (TERM, HUP, QUIT), everything it started is ended too (TERM, then KILL).
   Further signals during that cleanup are ignored. Pipes held by a leftover process cannot hang the call.
-- **Where a use is recorded.** A use is recorded in the record of the orch run that makes it (`ORCH_RUN` +
+- **Where a use is recorded.** A use is recorded in the record of the orch run that makes it (or the unattributed run, below) (`ORCH_RUN` +
   `ORCH_TICKET`). An **agent** caller (agent tool in the environment, or `--by agent:...`) must be inside a live run
   whose run and ticket belong together (the same claim orch's own runs use); otherwise `env`, `file`, `exec` and `get`
   are refused before any key or file is touched (`Refused: an agent can use keys only inside an active orch run, where
-  the use is recorded.` / `Refused: this run is not active, so the use cannot be recorded.`). A person or script
-  **without** a run is not recorded and not refused (there is no run file to write to); a script that names a run
-  that is not live is refused. Level 1 limit: an agent that hides its identity (no agent tool in the environment, no
+  the use is recorded.` / `Refused: this run is not active, so the use cannot be recorded.`). A person or script **without** a run is
+  recorded in the workspace's unattributed run of the day (run `r_outside_<yyyymmdd>`, ticket `t_outside`, agent
+  `main`, harness `generic`) under the same fail-closed rule; a script that names a run that is not live is refused. Level 1 limit: an agent that hides its identity (no agent tool in the environment, no
   `--by agent:`, no run variables) looks like a script and is neither limited nor recorded.
 - **Streams are not delayed.** Only the tail of the output that could still become a key is held back; the rest is
   passed on at once (an MCP server on stdio keeps working). A child without a terminal on stdin gets its own session.

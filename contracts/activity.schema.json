@@ -84,7 +84,7 @@
         "data": { "anyOf": [{ "required": ["action", "profile", "by"], "additionalProperties": false, "properties": {
           "action": { "enum": ["profile.set", "profile.remove", "profile.get_enable", "profile.get_disable", "profile.agents_enable", "profile.agents_disable"] },
           "profile": { "$ref": "#/$defs/name" },
-          "by": { "$ref": "#/$defs/name", "description": "human:<name> from the proof, or reset (no proof)." }
+          "by": { "type": "string", "pattern": "^(human:.+|reset)$", "maxLength": 64, "description": "human:<name> from the proof, or reset (no proof)." }
         } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] }
       }
     } },

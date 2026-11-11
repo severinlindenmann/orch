@@ -1596,7 +1596,9 @@ _SCHEMA = {
                                     },
                                     "profile": {"$ref": "#/$defs/name"},
                                     "by": {
-                                        "$ref": "#/$defs/name",
+                                        "type": "string",
+                                        "pattern": "^(human:.+|reset)$",
+                                        "maxLength": 64,
                                         "description": "human:<name> from the proof, or reset (no proof).",
                                     },
                                 },

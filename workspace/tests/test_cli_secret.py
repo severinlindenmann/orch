@@ -1150,11 +1150,69 @@ def test_a_damaged_record_stops_the_command_but_not_a_lowering(store, run, ws, i
     assert run("secret", "profile", "get-disable", "plain")[0] == 0
 
 
-def test_outside_a_run_nothing_is_written(store, run, ws):
-    from orch.record import record_dir
+def test_outside_a_run_a_person_or_script_is_written_to_the_unattributed_run(store, run, ws):
+    from orch.record import read_run
 
     assert run("secret", "env", "plain", "--", PY, "-c", "pass")[0] == 0
-    assert not record_dir(ws).exists()
+    assert run("secret", "profile", "get-disable", "plain")[0] == 0
+    day = time.strftime("%Y%m%d", time.gmtime())
+    lines = read_run(ws, f"r_outside_{day}").unwrap()
+    assert [x["kind"] for x in lines] == ["key.use", "secret.change"]
+    assert {x["ticket"] for x in lines} == {"t_outside"} and lines[0]["harness"] == "generic"
+    assert TOKEN2 not in _record_text(ws)
+
+
+def test_an_unrecordable_call_outside_a_run_is_refused_too(store, run, ws, monkeypatch):
+    from orch import record
+
+    def boom(*a, **k):
+        raise record.RecordUnavailable("io")
+
+    monkeypatch.setattr(record.RecordWriter, "append", boom)
+    code, _, err = run(
+        "secret", "env", "plain", "--", PY, "-c", f"open({str(ws / 'started')!r}, 'w').close()"
+    )
+    assert code == 2 and "could not be recorded" in err and not (ws / "started").exists()
+
+
+def test_a_failing_record_leaves_no_key_file_behind(store, run, ws, monkeypatch):
+    def boom(root, ev):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(secretrun, "_recorder", boom)
+    code, _, err = run("secret", "file", "filesonly", "--", PY, "-c", "pass")
+    assert code == 2 and "could not be recorded" in err
+    assert not (hp.guarded_home(ws) / "keys" / "tmp").exists()
+
+
+def test_the_record_text_is_built_from_the_checked_command_name(store, run, ws, in_run):
+    from orch.record import read_run
+
+    odd = ws / "we ird;name"
+    odd.write_text("#!/bin/sh\nexit 0\n")
+    odd.chmod(0o755)
+    assert run("secret", "env", "plain", "--", str(odd))[0] == 0
+    use = next(x for x in read_run(ws, RUN).unwrap() if x["kind"] == "key.use")
+    assert use["text"] == "Key other-token handed to a command" and use["data"]["command"] is None
+
+
+def test_secret_change_by_must_be_a_person_or_reset():
+    import jsonschema
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[2] / "contracts" / "activity.schema.json").read_text()
+    )
+    v = jsonschema.Draft202012Validator(schema)
+    ev = json.loads(
+        (
+            Path(__file__).resolve().parents[2] / "contracts/examples/activity/valid-secret-change.json"
+        ).read_text()
+    )
+    assert v.is_valid(ev)
+    for by in ("human:pat", "reset"):
+        assert v.is_valid({**ev, "data": {**ev["data"], "by": by}})
+    for by in ("agent:x", "someone", "human:", ""):
+        assert not v.is_valid({**ev, "data": {**ev["data"], "by": by}}), by
 
 
 # --------------------------------------------------------------------------- agents need a live run

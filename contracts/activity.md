@@ -100,6 +100,8 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 | `job` | job | null | `job`, `type`, `state` | one line per job event that changes what people see (job-events.md); the full stream is in `jobs/` |
 | `session.input` | core | null | `by`, `from`, `since`, `ended`, `reason`, `keys` | one per take-over, written at hand-back (screen.md); the typed text is never stored |
 
+Uses by a person or script outside any run (`orch secret ...` at a terminal) are written to the unattributed run of the day: run `r_outside_<yyyymmdd>`, ticket `t_outside` (secrets.md, Where a use is recorded).
+
 A collector that cannot tell where a skill or connection comes from writes `source: harness` (the agent tool's own),
 which is hidden at the admin like a workspace name (invariant P1, usage-counts.md); it never guesses `admin` or `builtin`.
 Readers skip unknown `kind`s (they are never shown as steps or counted).

@@ -1,9 +1,10 @@
 """Deliver keys to commands and hide their output (Level 1).
 
 Every use is written to the run's record (`.orch/record`, record.py) as a key.use event BEFORE the command
-starts, without any value; a writer that cannot write (no hider, damaged record) stops the command. The record
-belongs to an orch run: a call outside a run (no ORCH_RUN / ORCH_TICKET) has no run file to write to
-and is not recorded. set_recorder() replaces the writer (tests).
+starts and before any key file is written, without any value; a writer that cannot write (no hider, damaged
+record) stops the command. A call outside a run by a person or script (no ORCH_RUN / ORCH_TICKET) goes to the
+workspace's unattributed run of the day (run r_outside_<yyyymmdd>, ticket t_outside); an agent outside a run
+is refused. set_recorder() replaces the writer (tests).
 """
 
 from __future__ import annotations
@@ -66,9 +67,7 @@ def require_run(root, agent) -> None:
 
 def _record_event(root, ev):
     """The record line for an event of this module, or None when there is no run to write it to."""
-    ids = _run_ids()
-    if ids is None:
-        return None
+    ids = _run_ids() or (f"r_outside_{time.strftime('%Y%m%d', time.gmtime())}", "t_outside")
     from orch import tickets
 
     tool = tickets.agent_tool()
@@ -102,7 +101,7 @@ def _record_event(root, ev):
         line.update(
             text=f"Key {ev['key']} not given: {refused}"
             if refused
-            else f"Key {ev['key']} handed to {cmd or 'a command'}",
+            else f"Key {ev['key']} handed to {data['command'] or 'a command'}",
             used={
                 "kind": "key",
                 "name": ev["key"],
@@ -125,10 +124,8 @@ def _write_record(root, ev):
     """The default recorder: the run's record writer with a hider built from THIS workspace's key store."""
     from orch import record
 
+    require_run(root, False)  # a named run must be live and match; no run: the unattributed run of the day
     line = _record_event(root, ev)
-    if line is None:
-        return
-    require_run(root, False)  # never write into a run that is not live and does not match
     record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root))).append(line)
 
 
@@ -526,6 +523,8 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                 if types.get(name) == "json"
                 else value
             )
+        for name in names:  # recorded BEFORE any key file is written (a failing record leaves nothing behind)
+            recorder.record(name)
         if files:
             home = hp.guarded_home(root)
             parent = home / "keys" / "tmp"
@@ -551,8 +550,6 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                 )
                 for arg in command
             ]
-        for name in names:
-            recorder.record(name)
         return _child(command, env, h, stdout, stderr)
     except Refused as exc:
         raise Refused(h.hide_text(str(exc)) if h else str(exc)) from None
