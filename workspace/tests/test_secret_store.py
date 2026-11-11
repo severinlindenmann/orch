@@ -213,10 +213,15 @@ PROFILES = {
     "databricks": {
         "env": {"DATABRICKS_TOKEN": "databricks-token"},
         "set": {"DATABRICKS_HOST": "https://adb-1234.azuredatabricks.net"},
+        "extra": ["DATABRICKS_HOST"],
         "run": ["databricks"],
         "skills": ["databricks-jobs"],
     },
-    "google": {"files": {"GOOGLE_APPLICATION_CREDENTIALS": "google-sa.json"}, "allow_get": True},
+    "google": {
+        "files": {"GOOGLE_APPLICATION_CREDENTIALS": "google-sa.json"},
+        "extra": ["GOOGLE_APPLICATION_CREDENTIALS"],
+        "allow_get": True,
+    },
 }
 
 
@@ -232,13 +237,16 @@ def test_profiles_round_trip_names_only(tws):
 def test_profiles_never_hold_a_key_value_or_a_loader_variable(tws):
     keystore.add(tws, "databricks-token", "token", TOKEN)
     with pytest.raises(Refused, match="holds a key value") as e:
-        seed_profiles(tws, {"p": {"env": {"X_TOKEN": "databricks-token"}, "set": {"X_HOST": TOKEN}}})
+        seed_profiles(
+            tws,
+            {"p": {"env": {"X_TOKEN": "databricks-token"}, "set": {"X_HOST": TOKEN}, "extra": ["X_HOST"]}},
+        )
     assert TOKEN not in str(e.value)
     for var in ("PATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "GIT_SSH_COMMAND", "ORCH_HOME", "HTTPS_PROXY"):
         with pytest.raises(Refused, match="may not set"):
             seed_profiles(tws, {"p": {"env": {var: "databricks-token"}}})
     with pytest.raises(Refused, match="at least one key"):
-        seed_profiles(tws, {"p": {"set": {"X_HOST": "h"}}})
+        seed_profiles(tws, {"p": {"set": {"X_HOST": "h"}, "extra": ["X_HOST"]}})
     with pytest.raises(Refused, match="does not know"):
         seed_profiles(tws, {"p": {"env": {"A": "k"}, "value": TOKEN}})
     assert not (hp.key_dir(tws) / "profiles.toml").exists()
@@ -473,7 +481,7 @@ def test_no_key_value_in_any_error_log_or_output(tws, capsys, caplog):
         lambda: keystore.add(tws, "j", "json", TOKEN),
         lambda: keystore.get_value(tws, TOKEN + "/x"),
         lambda: keystore.remove(tws, TOKEN + "/x"),
-        lambda: seed_profiles(tws, {"p": {"env": {"A": "k"}, "set": {"B": TOKEN}}}),
+        lambda: seed_profiles(tws, {"p": {"env": {"A": "k"}, "set": {"B": TOKEN}, "extra": ["B"]}}),
         lambda: seed_profiles(tws, {"p": {"env": {TOKEN: "k"}}}),
         lambda: seed_profiles(tws, {"p": {"env": {"A": TOKEN2 + "/x"}}}),
         lambda: keystore.record_write(tws, TOKEN, {}),
@@ -802,7 +810,7 @@ def test_a_loose_key_file_is_found_when_listing_and_when_removing(tws):
 def test_profiles_still_work_while_a_key_needs_re_entry(tws):
     d = _loose_setup(tws)
     os.chmod(d / "keys.json", 0o644)
-    seed_profiles(tws, {"p": {"env": {"A": "k1"}, "set": {"B": "plain host"}}})
+    seed_profiles(tws, {"p": {"env": {"A": "k1"}, "set": {"B": "plain host"}, "extra": ["B"]}})
     assert keystore.read_profiles(tws)["p"]["env"] == {"A": "k1"}
     assert not (d / "keys.json").exists()  # the loose file stayed set aside, never read for values
 
@@ -885,11 +893,20 @@ def test_an_unreadable_profiles_file_refuses_the_save(tws):
 )
 def test_loader_variables_are_refused_in_any_case(tws, var):
     with pytest.raises(Refused):
-        seed_profiles(tws, {"p": {"env": {"A": "k"}, "set": {var: "x"}}})
+        seed_profiles(tws, {"p": {"env": {"A": "k"}, "set": {var: "x"}, "extra": [var]}})
 
 
 def test_a_normal_setting_name_is_accepted(tws):
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}, "set": {"DATABRICKS_HOST": "https://h.test"}}})
+    keystore.write_profiles(
+        tws,
+        {
+            "p": {
+                "env": {"A": "k"},
+                "set": {"DATABRICKS_HOST": "https://h.test"},
+                "extra": ["DATABRICKS_HOST"],
+            }
+        },
+    )
 
 
 @pytest.mark.parametrize(
@@ -906,4 +923,6 @@ def test_ordinary_secret_names_are_allowed_in_env_only(tws, var):
 
 
 def test_lesson_key_is_an_ordinary_name(tws):
-    keystore.write_profiles(tws, {"p": {"env": {"LESSON_KEY": "k"}, "set": {"LESSON_HOST": "h"}}})
+    keystore.write_profiles(
+        tws, {"p": {"env": {"LESSON_KEY": "k"}, "set": {"LESSON_HOST": "h"}, "extra": ["LESSON_HOST"]}}
+    )

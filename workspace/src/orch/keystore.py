@@ -564,10 +564,20 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
     for pn, p in profiles.items():
         if not isinstance(pn, str) or not PROFILE_RE.match(pn) or not isinstance(p, dict):
             raise Refused("A profile name uses lower-case letters, digits and dashes.")
-        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills"}):
+        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills", "extra"}):
             raise Refused(f"The profile {pn} has a setting orch does not know.")
         if not (p.get("env") or p.get("files")):
             raise Refused(f"The profile {pn} needs at least one key.")
+        extra = p.get("extra", [])
+        if not isinstance(extra, list) or len(extra) > 16 or len(set(extra)) != len(extra):
+            raise Refused(f"The profile {pn} has a bad extra list.")
+        for x in extra:
+            if not set_name_ok(x):
+                raise Refused(f"The profile {pn} may not approve the variable {x}.")
+        approved = {
+            *(p.get("env") or {}),
+            *extra,
+        }  # the secret variables it declares + person-approved extras
         seen = set()
         for sect, cap in (("env", 16), ("files", 8), ("set", 16)):
             m = p.get(sect, {})
@@ -578,6 +588,10 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
                     raise Refused(f"The profile {pn} names an unusable variable.")
                 if env_denied(var, sect) or (sect == "set" and not set_name_ok(var)):
                     raise Refused(f"The profile {pn} may not set the variable {var}.")
+                if sect != "env" and var not in approved:
+                    raise Refused(
+                        f"{var} is not an approved variable for this profile; add it with --extra {var}."
+                    )
                 if var.upper() in seen:
                     raise Refused(f"The profile {pn} uses the variable {var} twice.")
                 seen.add(var.upper())
@@ -625,6 +639,8 @@ def _toml(profiles: dict) -> str:
         for sect in ("env", "files", "set"):
             if p.get(sect):
                 out.append(f"{sect} = {{ " + ", ".join(f"{k} = {_q(v)}" for k, v in p[sect].items()) + " }")
+        if p.get("extra"):
+            out.append("extra = [" + ", ".join(_q(x) for x in p["extra"]) + "]")
         if p.get("run"):
             out.append("run = [" + ", ".join(_q(x) for x in p["run"]) + "]")
         if p.get("skills"):

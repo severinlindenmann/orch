@@ -86,10 +86,11 @@ def store(ws):
                 "env": {"SVC_TOKEN": "api-token"},
                 "files": {"SVC_KEY": "sa.pem"},
                 "set": {"SVC_HOST": "https://example.test"},
+                "extra": ["SVC_KEY", "SVC_HOST"],
                 "run": [PY, "-c"],
             },
             "plain": {"env": {"PLAIN_TOKEN": "other-token"}},
-            "filesonly": {"files": {"ONLY_KEY": "sa.pem"}},
+            "filesonly": {"files": {"ONLY_KEY": "sa.pem"}, "extra": ["ONLY_KEY"]},
         },
     )
     return ws
@@ -741,6 +742,7 @@ def test_a_person_exec_with_extra_arguments_is_allowed(store, run, ws, monkeypat
 def test_all_three_modes_share_one_agent_gate(lock, run, ws, events, mode):
     prof = keystore.read_profiles(ws)
     prof["lock"]["files"] = {"F": "other-token"} if mode == "file" else {}
+    prof["lock"]["extra"] = ["F"] if mode == "file" else []
     seed_profiles(ws, prof)
     cmd = ["--eval", "x"] if mode == "exec" else ["/bin/sh", "-c", "echo $LOCK_TOKEN"]
     _refused(run, *cmd, mode=mode)
@@ -752,7 +754,7 @@ def test_all_three_modes_share_one_agent_gate(lock, run, ws, events, mode):
 
 def test_file_mode_has_the_same_limit(lock, run, ws):
     prof = keystore.read_profiles(ws)
-    prof["flock"] = {"env": {}, "files": {"F": "sa.pem"}, "run": [PY, "-c", "pass"]}
+    prof["flock"] = {"env": {}, "files": {"F": "sa.pem"}, "extra": ["F"], "run": [PY, "-c", "pass"]}
     seed_profiles(ws, prof)
     _refused(run, "/bin/sh", "-c", "cat $F", profile="flock", mode="file")
     assert run("secret", "file", "flock", "--", PY, "-c", "pass")[0] == 0
@@ -884,7 +886,7 @@ def test_stream_releases_everything_but_a_possible_needle_start(store, ws):
 def test_binary_key_file_is_hidden_in_its_hex_form(ws, run):
     blob = bytes(range(256)) * 2
     keystore.add(ws, "blob.p12", "key-file", blob)
-    seed_profiles(ws, {"bin": {"files": {"B": "blob.p12"}}})
+    seed_profiles(ws, {"bin": {"files": {"B": "blob.p12"}, "extra": ["B"]}})
     prog = "import os;print(open(os.environ['B'],'rb').read().hex())"
     code, out, _ = run("secret", "file", "bin", "--", PY, "-c", prog)
     assert code == 0 and blob.hex() not in out and "[hidden: blob.p12]" in out
@@ -1427,7 +1429,7 @@ EDITED = "changed outside orch"
 
 
 def test_profile_set_with_proof_then_exec_still_works(store, run, ws, monkeypatch):
-    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "A=b")
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "A=b", "--extra", "A")
     assert hp.profile_verified(ws, "good", keystore.read_profiles(ws)["good"])
     code, out, err = run("secret", "exec", "good", "--", "-c", "import os;print(os.environ['T'])")
     assert code == 0 and "[hidden: other-token]" in out, err
@@ -1446,8 +1448,8 @@ def test_an_edited_run_in_the_profile_file_is_refused(store, run, ws, monkeypatc
     [
         ('T = "other-token"', 'T = "api-token"'),  # another key into the same variable
         ('T = "other-token"', 'T = "other-token", U = "api-token"'),  # an extra env variable
-        ("run = [", 'files = { F = "sa.pem" }\nrun = ['),  # an added file
-        ("run = [", 'set = { X = "1" }\nrun = ['),  # an added plain setting
+        ("run = [", 'extra = ["F"]\nfiles = { F = "sa.pem" }\nrun = ['),  # an added file
+        ("run = [", 'extra = ["X"]\nset = { X = "1" }\nrun = ['),  # an added plain setting
     ],
 )
 def test_an_edited_env_files_or_set_is_refused(store, run, ws, monkeypatch, old, new):
@@ -1556,7 +1558,7 @@ def test_a_denied_variable_with_a_valid_mac_still_fails_at_run(store, run, ws, m
     # and the run-time check alone, with the reader's check out of the way
     monkeypatch.setattr(keystore, "read_profiles", lambda root: {"good": body})
     monkeypatch.setattr(hp, "profile_verified", lambda *a: True)
-    with pytest.raises(Refused, match="does not allow"):
+    with pytest.raises(Refused, match="may not set"):
         secretrun._profile(ws, "good")
 
 
@@ -1588,7 +1590,7 @@ def test_saving_one_profile_never_signs_an_edited_other_profile(store, run, ws, 
     head, sep, tail = text.partition("[profile.b]")
     f.write_text(head + sep + tail.replace('T = "other-token"', 'T = "api-token"', 1))
     assert run("secret", "env", "b", "--", PY, "-c", "pass")[0] == 2
-    _set_ok(run, monkeypatch, ws, "a", "--run", PY, "--set", "X=1")  # the person sets A
+    _set_ok(run, monkeypatch, ws, "a", "--run", PY, "--set", "X=1", "--extra", "X")  # the person sets A
     code, out, err = _cli(
         run, monkeypatch, _proof(ws, "secret.profile", "a:allow_get"), "secret", "profile", "get-enable", "a"
     )
@@ -1672,3 +1674,60 @@ def test_list_on_a_damaged_file_shows_the_keys_without_profiles(store, run, ws):
     _pfile(ws).write_text("not [ toml")
     code, out, _ = run("secret", "list", "--json")
     assert code == 0 and "api-token" in out
+
+
+# --- `extra`: person-approved variable names (W2b) ---------------------------------------------
+
+
+def test_an_undeclared_set_name_is_refused_at_set_and_when_forged(store, run, ws, monkeypatch):
+    code, _, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "u"), "secret", "profile", "set", "u",
+        "--env", "T=other-token", "--set", "SOME_HOST=x",
+    )  # fmt: skip
+    assert code == 2 and "not an approved variable" in err and "--extra" in err
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, "run = [", 'set = { SOME_HOST = "x" }\nrun = [')
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2
+
+
+def test_extra_with_proof_is_accepted_and_reaches_the_command(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "SOME_HOST=h1", "--extra", "SOME_HOST")
+    code, out, err = run("secret", "exec", "good", "--", "-c", "import os;print(os.environ['SOME_HOST'])")
+    assert code == 0 and "h1" in out, err
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["XDG_CONFIG_HOME", "VISUAL", "MANPAGER", "SSH_ASKPASS", "SUDO_ASKPASS", "LESSCLOSE", "lower", "PATH"],
+)
+def test_extra_with_a_denied_name_is_refused(store, run, ws, monkeypatch, name):
+    code, _, _ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "x"), "secret", "profile", "set", "x",
+        "--env", "T=other-token", "--set", f"{name}=v", "--extra", name,
+    )  # fmt: skip
+    assert code == 2 and "x" not in keystore.read_profiles(ws)
+
+
+def test_extra_edited_in_the_file_is_a_mac_mismatch(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "SOME_HOST=h1", "--extra", "SOME_HOST")
+    _edit_file(ws, 'extra = ["SOME_HOST"]', 'extra = ["SOME_HOST", "OTHER_HOST"]')
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_forged_extra_without_a_proof_is_refused(store, run, ws, monkeypatch):
+    args = (
+        "secret",
+        "profile",
+        "set",
+        "f",
+        "--env",
+        "T=other-token",
+        "--set",
+        "SOME_HOST=x",
+        "--extra",
+        "SOME_HOST",
+    )
+    assert run(*args)[0] == 2
+    assert "f" not in keystore.read_profiles(ws)

@@ -1221,7 +1221,7 @@ def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
 
 
 # The secret-profile BODY ledger (guarded home): keys/<ws>/profile.json holds, per profile name, the CURRENT
-# profile1 MAC of its body {env, files, set, run} (null = tombstone, the profile was removed). The file
+# profile1 MAC of its body {env, files, set, run, extra} (null = tombstone, the profile was removed). The file
 # itself is editable by anything running as the user, so it vouches for nothing: secretrun/keystore verify the
 # body against this ledger and fail closed on a missing or different MAC.
 PROFILE_LEDGER = "profile.json"
@@ -1236,12 +1236,13 @@ def profile_body(profile: dict) -> dict:
         "files": dict(profile.get("files") or {}),
         "set": dict(profile.get("set") or {}),
         "run": list(profile["run"]) if profile.get("run") else None,
+        "extra": sorted(profile.get("extra") or []),
     }
 
 
 def profile_mac(key: bytes, workspace: str, name: str, body: dict) -> str:
-    """profile1.<workspace id>.<profile name>.<canonical body {env, files, set, run}>: binds WHERE it belongs
-    (another profile or workspace) and WHAT was approved."""
+    """profile1.<workspace id>.<profile name>.<canonical body {env, files, set, run, extra}>: binds WHERE it
+    belongs (another profile or workspace) and WHAT was approved."""
     return _b64u(
         hmac.new(
             key, f"profile1.{workspace}.{name}.{_canon(profile_body(body))}".encode(), hashlib.sha256

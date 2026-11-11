@@ -38,7 +38,7 @@ def add_parsers(sub, common) -> None:
                 q = parser(actions, action)
                 q.add_argument("name")
                 if action == "set":
-                    for option in ("env", "files", "set", "run", "skill"):
+                    for option in ("env", "files", "set", "run", "skill", "extra"):
                         q.add_argument("--" + option, action="append", default=[])
 
 
@@ -106,6 +106,8 @@ def _change_profile(root, args, who):
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
             if args.skill:
                 profile["skills"] = args.skill
+            if args.extra:
+                profile["extra"] = list(args.extra)
             hp.record_set(root, setting, False, who)
             hp.record_set(root, agents, False, who)
             profiles[name] = profile
