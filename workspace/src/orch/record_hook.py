@@ -20,7 +20,7 @@ import re
 import sys
 import time
 
-from orch import hider, record
+from orch import record
 from orch.errors import Refused
 
 MAX_LINE = 256 * 1024  # a larger payload is not read further
@@ -56,17 +56,13 @@ def _ids(environ):
 
 
 def require_run(root, ids) -> None:
-    """ORCH_RUN + ORCH_TICKET must name a live claim that belong together (secretrun.require_run's rule)."""
-    from orch import runs
+    """ORCH_RUN + ORCH_TICKET must name a live claim that belong together (secretrun's check)."""
+    from orch import secretrun
 
-    run, ticket = ids
     try:
-        rec = runs.read(root, ticket)
-        ok = bool(rec) and rec.get("run") == run and runs.state(rec) in ("alive", "maybe-stale")
-    except Exception:
-        ok = False
-    if not ok:
-        raise NotRecorded("This run is not active, so nothing was recorded.")
+        secretrun.check_live_run(root, *ids)
+    except Refused:
+        raise NotRecorded("This run is not active, so nothing was recorded.") from None
 
 
 def _parse(text: str) -> dict:
@@ -117,18 +113,16 @@ def _event(raw: dict, ids, tool) -> tuple[dict, dict | None]:
 
 
 def _writer(root):
-    """The writer with a registered hider; none = recording is off (never raw)."""
+    """The writer with a registered hider, else one built from this workspace's key
+    store (secretrun's wiring); no hider = recording is off (never raw)."""
     try:
         return record.registered_writer(root)
     except record.RecordOff:
         pass
-    from orch import keystore
+    from orch import secretrun
 
-    needles = getattr(keystore, "all_needles", None)  # this workspace's own key store, in its guarded home
-    if needles is None:
-        raise record.RecordOff("Recording is off until key hiding is ready.")
     try:
-        return record.RecordWriter(root, hider=hider.Hider(needles(root)))
+        return secretrun.record_writer(root)
     except (Refused, ValueError, TypeError):
         raise record.RecordOff("Recording is off until key hiding is ready.") from None
 
