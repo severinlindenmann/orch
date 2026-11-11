@@ -12,6 +12,8 @@ class Crash(BaseException):  # a killed process: no `except Exception` in the st
     pass
 
 
+ID = ("-c", "user.name=test", "-c", "user.email=test@example.invalid")  # machines have no git identity
+
 @pytest.fixture
 def machines(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
@@ -459,7 +461,7 @@ def test_merge_uses_checked_commit_when_remote_ref_moves(machines, monkeypatch, 
     def commit_once(root, tree, parent, message):
         # A commit no step ever builds itself (its own message and date), so it can never coincide with one.
         date = "2026-11-11T09:00:00Z"
-        made = repo.git(root, "commit-tree", tree, "-p", parent, input=message.encode(), commit_date=date)
+        made = repo.git(root, *ID, "commit-tree", tree, "-p", parent, input=message.encode(), commit_date=date)
         return made.stdout.decode().strip()
 
     def racing_check(root, ref, **kwargs):
@@ -1083,7 +1085,7 @@ def test_several_merge_bases_pause_without_files(machines, tmp_path):
 
     def commit(message, *parents):
         args = [v for p in parents for v in ("-p", p)]
-        return repo.git(b, "commit-tree", tree, *args, input=message.encode()).stdout.decode().strip()
+        return repo.git(b, *ID, "commit-tree", tree, *args, input=message.encode()).stdout.decode().strip()
 
     left, right = commit("left\n", head), commit("right\n", head)
     ours, theirs = commit("ours\n", left, right), commit("theirs\n", right, left)
