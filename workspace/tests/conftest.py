@@ -282,6 +282,7 @@ def _legacy_trust(request, monkeypatch):
     if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
         return
     from orch import humanproof, tickets
+    from orch.errors import Refused
 
     def legacy(root, args, op, target, **kw):
         if tickets.agent_tool():
@@ -291,8 +292,20 @@ def _legacy_trust(request, monkeypatch):
             ensure_signing(root)  # a person's Done is signed: the key and the local id exist, as after a real proof
         return who
 
+    def test_home(root):
+        """TEST-ONLY: these tests keep the workspace in pytest's temp folder, which the real pairing refuses
+        (a test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set, so
+        a signed Done (key + ledger) works there. The pairing check itself is tested by test_human_proof*."""
+        home = Path(os.environ["ORCH_HOME"]) if os.environ.get("ORCH_HOME") else None
+        if home is None:
+            raise Refused("no test home")
+        home.mkdir(parents=True, exist_ok=True)
+        os.chmod(home, 0o700)
+        return home
+
     monkeypatch.setattr(humanproof, "person_by", legacy)
     monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
+    monkeypatch.setattr(humanproof, "guarded_home", test_home)
 
 
 _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
