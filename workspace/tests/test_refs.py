@@ -702,8 +702,9 @@ def test_ticket_json_id_cannot_read_outside_local_refs(proj, run, tid):  # noqa:
     (proj / "x.json").write_text(json.dumps([{"kind": "file", "path": "PRIVATE_MARKER"}]))
     for argv in (("ref", "list", tid), ("ticket", "show", tid)):
         code, out, err = run(*argv)
-        assert code == 0, err
-        assert "PRIVATE_MARKER" not in out
+        # a ticket whose embedded id differs from its file is refused outright (#478); never a leak
+        assert code == 0 or "id does not match its filename" in err, err
+        assert "PRIVATE_MARKER" not in out + err
 
 
 @pytest.mark.parametrize("artifact", [False, True])
