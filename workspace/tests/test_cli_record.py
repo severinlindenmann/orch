@@ -1,6 +1,8 @@
 """`orch record tail | query | counts`: the real CLI against the contract and the fake orch."""
 
+import ast
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -127,7 +129,7 @@ def test_tail_follow_picks_up_new_events_and_pings(ws):
     def sleep(_):
         seen.append(len(seen))
         if len(seen) == 1:
-            w = RecordWriter(ws, hider=hider.Hider({}))
+            w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
             w.append(example(run=RUN_B, ticket=TICKET_B, id="toolu_late", at=at(50)))
         if len(seen) > 20:
             raise KeyboardInterrupt
@@ -182,7 +184,7 @@ def test_query_filters(ws, capsys):
     assert [e["at"] for e in p["items"]] == sorted((e["at"] for e in p["items"]), reverse=True)
     assert all(at(14) <= e["at"] <= at(16) for e in p["items"]) and p["items"]
     _, (p,) = cli_lines(capsys, "query", "--ticket", "t_nothere")
-    assert p == {"items": [], "next": None}
+    assert p == {"items": [], "next": None, "unavailable": []}
 
 
 @pytest.mark.parametrize(
@@ -226,7 +228,7 @@ def test_unsafe_record_is_refused(ws, capsys, tmp_path):
     (record_dir(ws) / "runs").rename(real / "runs")
     (record_dir(ws) / "runs").symlink_to(real / "runs")
     code, (line,) = cli_lines(capsys, "query")
-    assert code == 2 and line["code"] == "refused"
+    assert code == 2 and line["code"] == "tampered"
 
 
 def test_counts_valid_and_denominators(ws, capsys):
@@ -313,8 +315,6 @@ def test_counts_denominator_vectors():
 
 # --- the real CLI against the fake orch the add-ons test with ---
 def fake_lines(*args, scenario="default"):
-    import os
-
     env = {k: v for k, v in os.environ.items() if not k.startswith("ORCH_")} | {
         "ORCH_FAKE_SCENARIO": scenario
     }
@@ -353,3 +353,150 @@ def test_same_shapes_as_the_fake(ws, capsys):
         assert set(real_err) == {"error", "code"}
     _, (fake_err,) = fake_lines("record", "query", "--json", "--limit", "0")
     assert set(fake_err) == {"error", "code"}
+
+
+# --- integrity: an unreadable run is told, never an empty answer (W2B-RECORD-IO-DESIGN 7, test 16) ---
+def run_file(ws, run=RUN_B):
+    return record_dir(ws) / "runs" / f"{run}.jsonl"
+
+
+def hardlink(ws, run=RUN_B):
+    path = run_file(ws, run)
+    outside = ws.parent / f"outside-{ws.name}-{run}"
+    outside.write_bytes(path.read_bytes())
+    path.unlink()
+    os.link(outside, path)
+    return outside
+
+
+def test_tail_single_run_tampered_is_an_error(ws, capsys):
+    hardlink(ws)
+    code, (err,) = cli_lines(capsys, "tail", "--run", RUN_B)
+    assert code == 2 and err["code"] == "tampered"
+    check(validator("cli-answer", "error"), err, "error")
+
+
+def test_tampered_alert_reaches_stderr(ws, capsys):
+    hardlink(ws)
+    cli.main(["record", "query", "--json"])
+    out = capsys.readouterr()
+    alerts = [ln for ln in out.err.splitlines() if ln.startswith("{")]
+    assert alerts and json.loads(alerts[0])["schema"] == "orch.record-alert/1"
+
+
+def test_tail_multi_run_marker_then_other_events(ws, capsys):
+    hardlink(ws)
+    code, lines = cli_lines(capsys, "tail")
+    assert code == 0
+    markers = [ln for ln in lines if ln["type"] == "unavailable"]
+    assert len(markers) == 1 and markers[0]["run"] == RUN_B
+    assert markers[0]["status"] == "tampered" and markers[0]["reason"] == "hardlink" and markers[0]["message"]
+    check(validator("cli-answer", "stream_line"), markers[0], "marker")
+    events = [ln for ln in lines if ln["type"] == "event"]
+    assert len(events) == 4 and {ln["event"]["run"] for ln in events} == {RUN_A}
+
+
+def test_tail_marker_once_per_stream_while_following(ws):
+    hardlink(ws)
+    cycles = []
+
+    def sleep(_):
+        cycles.append(1)
+        if len(cycles) > 3:
+            raise KeyboardInterrupt
+
+    ticks = iter(range(0, 10000))
+    out = []
+    try:
+        for ln in cli_record.tail_lines(ws, follow=True, sleep=sleep, clock=lambda: next(ticks)):
+            out.append(ln)
+    except KeyboardInterrupt:
+        pass
+    assert [ln["type"] for ln in out].count("unavailable") == 1
+
+
+def test_skipped_lines_are_marked_not_hidden(ws, capsys):
+    with run_file(ws).open("a") as f:
+        f.write("this is not an event\n")
+    _, lines = cli_lines(capsys, "tail")
+    (marker,) = [ln for ln in lines if ln["type"] == "unavailable"]
+    assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "skipped", RUN_B)
+    assert "could not be read" in marker["message"]
+    check(validator("cli-answer", "stream_line"), marker, "marker")
+    assert len([ln for ln in lines if ln["type"] == "event"]) == 6
+
+
+def test_pending_writes_are_marked(ws, capsys):
+    pending = record_dir(ws) / "pending" / RUN_A
+    pending.mkdir(parents=True)
+    (pending / "x.json").write_text("{}")
+    _, lines = cli_lines(capsys, "tail")
+    (marker,) = [ln for ln in lines if ln["type"] == "unavailable"]
+    assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "pending", RUN_A)
+    check(validator("cli-answer", "stream_line"), marker, "marker")
+
+
+def test_query_lists_unavailable_and_run_filter_errors(ws, capsys):
+    hardlink(ws)
+    code, (page,) = cli_lines(capsys, "query")
+    assert code == 0 and len(page["items"]) == 4
+    assert [(u["run"], u["status"], u["reason"]) for u in page["unavailable"]] == [
+        (RUN_B, "tampered", "hardlink")
+    ]
+    check(validator("cli-answer", "page"), page, "page")
+    code, (err,) = cli_lines(capsys, "query", "--run", RUN_B)
+    assert code == 2 and err["code"] == "tampered"
+    check(validator("cli-answer", "error"), err, "error")
+
+
+def test_query_run_io_error_is_not_available(ws, capsys):
+    path = run_file(ws)
+    path.chmod(0)
+    try:
+        code, (err,) = cli_lines(capsys, "query", "--run", RUN_B)
+    finally:
+        path.chmod(0o600)
+    assert code == 2 and err["code"] == "not_available"
+
+
+def test_counts_incomplete_when_a_run_is_unreadable(ws, capsys):
+    args = ("counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    _, (ok,) = cli_lines(capsys, *args)
+    assert ok["unavailable"] == [] and ok["complete"] is True
+    hardlink(ws)
+    _, (ans,) = cli_lines(capsys, *args)
+    check(validator("counts", "answer"), ans, "counts")
+    assert ans["complete"] is False and ans["runs"] == 1
+    assert [(u["run"], u["status"]) for u in ans["unavailable"]] == [(RUN_B, "tampered")]
+
+
+def test_counts_meta_unavailable_falls_back_and_is_listed(ws, capsys):
+    meta = record_dir(ws) / "meta.json"
+    outside = ws.parent / f"outside-meta-{ws.name}"
+    outside.write_bytes(meta.read_bytes())
+    meta.unlink()
+    meta.symlink_to(outside)
+    _, (ans,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    assert ans["since"] == "2026-11-16T09:00:01Z" and ans["complete"] is False
+    assert [u["run"] for u in ans["unavailable"]] == ["meta"]
+
+
+def test_detail_tampered_and_lost_codes(ws, capsys):
+    for detail in (record_dir(ws) / "detail" / RUN_A).iterdir():
+        outside = ws.parent / f"outside-{detail.name}"
+        outside.write_bytes(detail.read_bytes())
+        detail.unlink()
+        os.link(outside, detail)
+    code, (err,) = cli_lines(capsys, "query", "--detail", "toolu_a1", "--run", RUN_A)
+    assert code == 2 and err["code"] == "tampered"
+    code, (err,) = cli_lines(capsys, "query", "--detail", "toolu_b1", "--run", RUN_B)
+    assert code == 2 and err["code"] == "not_found"  # the line has no detail file
+    code, (err,) = cli_lines(capsys, "query", "--detail", "toolu_a1", "--run", RUN_B)
+    assert code == 2 and err["code"] == "not_found"
+
+
+def test_cli_record_has_no_direct_file_access():
+    tree = ast.parse(Path(cli_record.__file__).read_text())
+    names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert not names & {"read_text", "read_bytes", "open", "read_events", "run_readable", "glob", "iterdir"}
+    assert "open" not in {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}

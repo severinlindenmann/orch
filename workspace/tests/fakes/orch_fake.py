@@ -5,7 +5,7 @@ Point ORCH_BIN at `workspace/tests/fakes/orch` (the shim next to this file) or r
 It replays the contract vectors/examples, so add-on code never changes when the real commands arrive:
 
   record tail [--ticket T|--run R] [--since C|--after C] [--follow] --json   NDJSON lines (activity.md)
-  record query [--ticket T] [--run R] [--limit N] [--after C] --json   page {"items","next"}, newest first
+  record query [--ticket T] [--run R] [--limit N] [--after C] --json   page, newest first
   record counts [--days N|--from D --to D] --json   orch.counts/1 (with "not seen")
   job start|step|progress|artifact|metric|table|link|log|end ... --json   one orch.job/1 event
   run screen <ticket> --follow --json   orch.screen/1 lines (real capture)
@@ -178,7 +178,7 @@ def record_query(argv, scenario):
             fail("That page position is not valid.")
         off = int(m.group(1))
     nxt = f"o{off + limit}" if off + limit < len(rows) else None
-    out({"items": rows[off : off + limit], "next": nxt})
+    out({"items": rows[off : off + limit], "next": nxt, "unavailable": []})
 
 
 def record_counts(argv, scenario):
@@ -193,13 +193,12 @@ def record_counts(argv, scenario):
     for k in ("from", "to"):
         if k in flags and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", flags[k]):
             fail(f"--{k} must be a day like 2026-11-16.")
-    out(
-        load(
-            "examples/counts/valid-nothing-yet.json"
-            if scenario == "empty"
-            else "examples/counts/valid-answer.json"
-        )
+    answer = load(
+        "examples/counts/valid-nothing-yet.json"
+        if scenario == "empty"
+        else "examples/counts/valid-answer.json"
     )
+    out({**answer, "unavailable": [], "complete": True})
 
 
 # --- job ---

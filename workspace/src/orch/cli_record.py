@@ -17,7 +17,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from orch import record
-from orch.collect_execjson import detail_name
 from orch.errors import Refused
 
 SUBCOMMANDS = ("tail", "query", "counts", "delete-detail")
@@ -52,6 +51,7 @@ class RecordError(Refused):
 
     def __init__(self, message: str, code: str = "invalid"):
         super().__init__(message)
+        self.code = code
         self.extra = {"code": code}
 
 
@@ -100,7 +100,8 @@ def dispatch(args, root: Path) -> bool:
         else:
             _emit(counts(root, args))
     except record.RecordRefused as e:
-        raise RecordError(str(e), "refused") from None
+        _show_alert(e.alert)
+        raise RecordError(str(e), e.code) from None
     return True
 
 
@@ -147,23 +148,59 @@ def _check_filters(ticket, run) -> None:
         raise RecordError("That run is not valid.")
 
 
-def _runs(root: Path, run, *, must_exist: bool) -> list[str]:
-    known = record.list_runs(root)
-    if run is None:
-        return known
-    if run not in known:
-        if must_exist:
-            raise RecordError("That run does not exist.", "not_found")
-        return []
-    return [run]
+_SKIPPED = "Some lines of this run could not be read and are not shown."
 
 
-def _events(root: Path, runs: list[str], ticket) -> dict[str, list[dict]]:
-    out = {}
-    for run in runs:
-        events = record.read_events(root, run)
-        out[run] = [e for e in events if ticket is None or e.get("ticket") == ticket]
+def _show_alert(alert) -> None:
+    """An integrity alert reaches the person even when it could not be stored (activity.md, Integrity)."""
+    if alert:
+        print(json.dumps(alert, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
+
+
+def _known(root: Path) -> list[str]:
+    result = record.list_runs(root)
+    _show_alert(result.alert)
+    if result.status == "unavailable" and result.reason == "missing":
+        return []  # nothing has been recorded yet
+    return result.unwrap()
+
+
+def _fail(result) -> RecordError:
+    if result.status == "unavailable" and result.reason == "missing":
+        return RecordError(result.message, "not_found")
+    try:
+        result.unwrap()
+    except record.RecordRefused as e:
+        return RecordError(str(e), e.code)
+    raise AssertionError("an ok result has no error")
+
+
+def _problems(run: str, result) -> list[dict]:
+    """What a person must be told about one read: it failed, lines were skipped, writes are pending."""
+    if result.status != "ok":
+        return [{"run": run, "status": result.status, "reason": result.reason, "message": result.message}]
+    out = []
+    if result.skipped:
+        out.append({"run": run, "status": "ok", "reason": "skipped", "message": _SKIPPED})
+    if result.pending:
+        out.append({"run": run, "status": "ok", "reason": "pending", "message": result.message})
     return out
+
+
+def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False):
+    """(events per run, problems). An explicit run that cannot be read is an error, never empty."""
+    out, problems = {}, []
+    for run in runs:
+        result = record.read_run(root, run)
+        _show_alert(result.alert)
+        if result.status != "ok":
+            if explicit:
+                raise _fail(result)
+            out[run] = []
+        else:
+            out[run] = [e for e in result.value if ticket is None or e.get("ticket") == ticket]
+        problems += _problems(run, result)
+    return out, problems
 
 
 def _time(text: str, what: str) -> datetime:
@@ -193,15 +230,24 @@ def tail_lines(
     _check_filters(ticket, run)
     now = now or (lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     cursor = decode_cursor(since) if since is not None else {}
-    runs = _runs(root, run, must_exist=True)
-    known = set(record.list_runs(root))
+    known = set(_known(root))
+    if run is not None and run not in known:
+        raise RecordError("That run does not exist.", "not_found")
     if any(r not in known for r in cursor):
         yield {"type": "reset", "cursor": encode_cursor({}), "reason": "pruned"}
         cursor = {}
     last_ping = clock()
+    told: dict[tuple, bool] = {}
     while True:
         sent = False
-        by_run = _events(root, runs if run else record.list_runs(root), ticket)
+        runs = [run] if run else _known(root)
+        by_run, problems = _events(root, runs, ticket, explicit=run is not None)
+        for problem in problems:  # once per run and state; again only after it changed
+            mark = (problem["run"], problem["status"], problem["reason"])
+            if mark not in told:
+                told[mark] = True
+                yield {"type": "unavailable", "cursor": encode_cursor(cursor), **problem}
+                sent = True
         streams = [[e for e in events if e["seq"] > cursor.get(r, 0)] for r, events in sorted(by_run.items())]
         for event in heapq.merge(*streams, key=lambda e: (e["at"], e["run"])):
             cursor[event["run"]] = event["seq"]
@@ -235,7 +281,8 @@ def _tail_cli(args, root: Path) -> None:
             started = True
             _emit(line)
     except (RecordError, record.RecordRefused) as e:
-        code = e.extra["code"] if isinstance(e, RecordError) else "refused"
+        _show_alert(e.alert if isinstance(e, record.RecordRefused) else None)
+        code = e.code
         if not started:
             raise RecordError(str(e), code) from None
         _emit({"type": "error", "error": str(e), "code": code})
@@ -280,7 +327,9 @@ def query(root: Path, args) -> dict:
         if len(pos) != 1:
             raise RecordError("That page position is not valid.")
         after = next(iter(pos.items()))
-    by_run = _events(root, _runs(root, args.run, must_exist=True), args.ticket)
+    by_run, problems = _events(
+        root, [args.run] if args.run else _known(root), args.ticket, explicit=args.run is not None
+    )
     rows = [e for events in by_run.values() for e in events]
     rows = [
         e
@@ -298,7 +347,11 @@ def query(root: Path, args) -> dict:
         start = index + 1
     page = rows[start : start + limit]
     more = start + limit < len(rows)
-    return {"items": page, "next": encode_cursor({page[-1]["run"]: page[-1]["seq"]}) if more else None}
+    return {
+        "items": page,
+        "next": encode_cursor({page[-1]["run"]: page[-1]["seq"]}) if more else None,
+        "unavailable": problems,
+    }
 
 
 def _detail(root: Path, args) -> dict:
@@ -306,11 +359,22 @@ def _detail(root: Path, args) -> dict:
         raise RecordError("--detail needs --run.")
     if not _EVENT_ID.fullmatch(args.detail):
         raise RecordError("That detail is not valid.")
-    _runs(root, args.run, must_exist=True)
-    value = record.read_detail(root, args.run, detail_name(args.detail))
-    if value is None:
-        raise RecordError("The details of this step are not available.", "not_found")
-    return value
+    result = record.read_run(root, args.run)
+    _show_alert(result.alert)
+    if result.status != "ok":
+        raise _fail(result)
+    pointers = [
+        e["detail"] for e in result.value if e["id"] == args.detail and e.get("detail")
+    ]  # the line knows its detail file; the name is never rebuilt here
+    unavailable = RecordError("The details of this step are not available.", "not_found")
+    if not pointers:
+        raise unavailable
+    file_id = pointers[-1].rsplit("/", 1)[-1].removesuffix(".json")
+    detail = record.read_detail(root, args.run, file_id)
+    _show_alert(detail.alert)
+    if detail.status != "ok":
+        raise _fail(detail)
+    return detail.value
 
 
 # --- counts ---
@@ -453,16 +517,16 @@ def count_items(runs: list[dict], inventory: list[dict] = ()) -> list[dict]:
     return out
 
 
-def _since(root: Path, models: list[dict]) -> str | None:
-    try:
-        meta = json.loads((record.record_dir(root) / "meta.json").read_text())
-        value = meta.get("since")
-        if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}T[\d:]{8}(\.\d+)?Z", value):
-            return value
-    except (OSError, ValueError, AttributeError):
-        pass
+def _since(root: Path, models: list[dict]) -> tuple[str | None, list[dict]]:
+    meta = record.read_meta(root)
+    _show_alert(meta.alert)
+    if meta.status == "ok":
+        value = (meta.value or {}).get("since")
+        if isinstance(value, str):
+            return value, []
     firsts = [m["first"] for m in models if m.get("first")]
-    return min(firsts) if firsts else None
+    problem = [] if meta.status == "ok" or meta.reason == "missing" else _problems("meta", meta)
+    return (min(firsts) if firsts else None), problem
 
 
 def counts(root: Path, args) -> dict:
@@ -470,13 +534,15 @@ def counts(root: Path, args) -> dict:
     kinds = _kinds(args.kind, _USED_KINDS)
     day_from, day_to = _window(args)
     models = []
-    for run, events in _events(root, record.list_runs(root), args.ticket).items():
+    by_run, unavailable = _events(root, _known(root), args.ticket)
+    for run, events in by_run.items():
         if not events:
             continue
         model = run_model(run, events)
         model["first"] = events[0]["at"]
         models.append(model)
-    since = _since(root, models)
+    since, meta_problem = _since(root, models)
+    unavailable += meta_problem
     runs = [m for m in models if day_from <= m["day"] <= day_to]
     if kinds is not None:
         for m in runs:
@@ -501,4 +567,6 @@ def counts(root: Path, args) -> dict:
             "keys": [],
         },
         "sharing": {"counts": "not_connected", "names": False, "last_sent": None, "queued": 0},
+        "unavailable": unavailable,
+        "complete": not unavailable,
     }
