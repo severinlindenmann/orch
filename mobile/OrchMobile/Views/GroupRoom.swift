@@ -49,6 +49,13 @@ struct GroupRoomView: View {
                         .onChange(of: rows.count) { old, new in
                             if new > old { scrollToBottom(proxy) }
                         }
+                        // The bottom anchor alone lands short in a lazy list of rows with different heights: jump to the
+                        // end marker once the rows are laid out (twice, as lazy rows settle their real heights).
+                        .task(id: key) {
+                            proxy.scrollTo("group-bottom", anchor: .bottom)
+                            try? await Task.sleep(for: .milliseconds(300))
+                            proxy.scrollTo("group-bottom", anchor: .bottom)
+                        }
                         footer(group, onSent: { scrollToBottom(proxy) })
                     }
                 }
