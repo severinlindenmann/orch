@@ -268,13 +268,53 @@ def test_launch_token_is_single_use_and_expires(ws):
 def test_page_session_headers(ws):
     s = pageproof.PageSession(ws, "dashboard")
     assert s.key is not None
-    ck = {"Host": "127.0.0.1:8420", "Cookie": f"{pageproof.COOKIE}={s.cookie}"}
+    name = pageproof.cookie_name("dashboard", 8420)
+    assert name == "orch_page_dashboard_8420"
+    ck = {"Host": "127.0.0.1:8420", "Cookie": f"{name}={s.cookie}"}
     assert s.can_mint(ck, 8420)
     assert not s.can_mint({**ck, "Host": "evil.example:8420"}, 8420)
     assert not s.can_mint({**ck, "X-Forwarded-For": "1.2.3.4"}, 8420)
     assert not s.can_mint({**ck, "Forwarded": "for=1.2.3.4"}, 8420)
     assert not s.can_mint({"Host": "127.0.0.1:8420"}, 8420)  # no cookie
-    assert not s.can_mint({**ck, "Cookie": f"{pageproof.COOKIE}=nope"}, 8420)
+    assert not s.can_mint({**ck, "Cookie": f"{name}=nope"}, 8420)
+    assert not s.can_mint({**ck, "Cookie": f"orch_page={s.cookie}"}, 8420)  # the old shared name: no session
+
+
+def test_cookie_name_is_per_server_and_per_port():
+    assert pageproof.cookie_name("insights", 8433) == "orch_page_insights_8433"
+    assert pageproof.cookie_name("focus", 8420) != pageproof.cookie_name("focus", 8421)
+    for bad_server in ("Dash", "a-b", "a;b", "", "x=y", "a b", None):
+        with pytest.raises(ValueError):
+            pageproof.cookie_name(bad_server, 8420)
+    for bad_port in (0, -1, 65536, "8420", 84.2, True, None):
+        with pytest.raises(ValueError):
+            pageproof.cookie_name("focus", bad_port)
+    hdr = pageproof.set_cookie_header("focus", 8420, "v")
+    assert hdr == "orch_page_focus_8420=v; HttpOnly; SameSite=Strict; Path=/"
+
+
+def test_two_page_servers_have_independent_sessions(ws, monkeypatch):
+    """dashboard + Insights on loopback (and the same server on two ports): signing in to one does not log the
+    other out, and the cookie of one is not accepted by the other (by name or by value)."""
+    from orch import addons
+
+    monkeypatch.setattr(addons, "SHIPPED_ADDONS", (*addons.SHIPPED_ADDONS, "insights"))  # Insights shipped
+    dash, ins, dash2 = (pageproof.PageSession(ws, s) for s in ("dashboard", "insights", "dashboard"))
+    c_dash = dash.launch(hp.write_launch_token(ws, "dashboard"))
+    c_ins = ins.launch(hp.write_launch_token(ws, "insights"))
+    c_dash2 = dash2.launch(hp.write_launch_token(ws, "dashboard"))
+    assert c_dash and c_ins and c_dash2 and len({c_dash, c_ins, c_dash2}) == 3
+    n_dash, n_ins, n_dash2 = dash.cookie_name(8420), ins.cookie_name(8433), dash2.cookie_name(8421)
+    assert len({n_dash, n_ins, n_dash2}) == 3
+    jar = f"{n_dash}={c_dash}; {n_ins}={c_ins}; {n_dash2}={c_dash2}"  # the browser keeps all three
+    assert dash.authed({"Cookie": jar}, 8420) and ins.authed({"Cookie": jar}, 8433)
+    assert dash2.authed({"Cookie": jar}, 8421)
+    assert not ins.authed({"Cookie": f"{n_dash}={c_dash}"}, 8433)  # one's cookie is no session on the other
+    assert not dash.authed({"Cookie": f"{n_ins}={c_ins}"}, 8420)
+    assert not ins.authed({"Cookie": f"{n_ins}={c_dash}"}, 8433)  # nor its value under the other's name
+    assert not dash.authed({"Cookie": f"{n_dash}={c_dash2}"}, 8420)
+    assert not dash2.authed({"Cookie": f"{n_dash}={c_dash}"}, 8421)  # same server, other port
+    assert not dash.authed({"Cookie": f"{n_dash}={c_dash}"}, 8421)  # the right cookie read on the wrong port
 
 
 def test_page_session_is_watch_only_with_an_agent_in_the_environment(ws, monkeypatch):
@@ -429,7 +469,8 @@ def test_second_use_of_a_spent_token_revokes_the_session(ws, capsys):
     s = pageproof.PageSession(ws, "dashboard")
     tok = hp.write_launch_token(ws, "dashboard")
     cookie = s.launch(tok)
-    hdr = {"Host": "127.0.0.1:1", "Cookie": f"{pageproof.COOKIE}={cookie}"}
+    name = pageproof.cookie_name("dashboard", 1)
+    hdr = {"Host": "127.0.0.1:1", "Cookie": f"{name}={cookie}"}
     assert s.can_mint(hdr, 1)
     assert s.launch(tok) is None  # the same link used again
     assert s.revoked and not s.can_mint(hdr, 1)  # the session minted from it is dead
@@ -438,7 +479,7 @@ def test_second_use_of_a_spent_token_revokes_the_session(ws, capsys):
     assert "used twice" in err and tok not in err and cookie not in err  # the log line holds no secret
     # one more click on the dashboard from orch gives a new token and a working session
     cookie2 = s.launch(hp.write_launch_token(ws, "dashboard"))
-    assert cookie2 and cookie2 != cookie and s.can_mint({**hdr, "Cookie": f"{pageproof.COOKIE}={cookie2}"}, 1)
+    assert cookie2 and cookie2 != cookie and s.can_mint({**hdr, "Cookie": f"{name}={cookie2}"}, 1)
 
 
 def test_two_threads_with_the_same_token_exactly_one_session_then_revoked(ws, capsys):
@@ -458,7 +499,8 @@ def test_two_threads_with_the_same_token_exactly_one_session_then_revoked(ws, ca
     assert sorted(g is not None for g in got) == [False, True]  # exactly one request got a session
     assert s.revoked  # the other one revoked it
     first = next(g for g in got if g)
-    assert not s.can_mint({"Host": "127.0.0.1:1", "Cookie": f"{pageproof.COOKIE}={first}"}, 1)
+    name = pageproof.cookie_name("dashboard", 1)
+    assert not s.can_mint({"Host": "127.0.0.1:1", "Cookie": f"{name}={first}"}, 1)
     err = capsys.readouterr().err
     assert "used twice" in err and tok not in err and first not in err
 

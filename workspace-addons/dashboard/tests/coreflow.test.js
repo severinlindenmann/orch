@@ -8,7 +8,7 @@ const read = f => fs.readFileSync(require('node:path').join(WEB, f), 'utf8');
 const source = [read('app.js'), ...['home', 'tickets', 'ticket', 'newticket', 'settings'].map(p => read('pages/' + p + '.js'))].join('\n');
 const action = source.slice(source.indexOf('async function act('), source.indexOf('async function refresh('));
 function context(fetch, snapshot = false) {
-  const ctx = {snapshot, state:{tickets:[{id:'t_abcdef', status:'ready'}]}, starting:new Set(), writing:0, mutation:0, fetch, renders:[], toasts:[]};
+  const ctx = {snapshot, state:{tickets:[{id:'t_abcdef', status:'ready'}]}, starting:new Set(), writing:0, mutation:0, refreshAgain:false, fetch, renders:[], toasts:[]};
   ctx.ticketOf = id => ctx.state.tickets.find(t => t.id === id);
   ctx.render = () => ctx.renders.push({status:ctx.state.tickets[0].status, starting:ctx.starting.has('t_abcdef')});
   ctx.accept = next => { ctx.state = next; };

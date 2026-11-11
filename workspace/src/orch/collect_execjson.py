@@ -25,13 +25,24 @@ def _hash(text: str) -> str:
     return "x_" + hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()[:32]
 
 
-def detail_name(run: str, kind: str, event_id: str) -> str:
+def detail_name(run: str, kind: str, event_id: str, ticket: str | None) -> str | None:
     """The ONLY way a detail file name is made: 32 lowercase hex of a domain-separated sha256 over
-    (run, kind, final event id). No raw id is ever a file name (case-insensitive file systems, separators)."""
-    data = b"orch.detail/1\0" + b"\0".join(
-        x.encode("utf-8", errors="surrogatepass") for x in (run, kind, event_id)
+    (run, kind, final event id, ticket). No raw id is ever a file name (case-insensitive file systems,
+    separators). The ticket is part of the name, so details of two tickets never share a file (a line of
+    ticket B can only name a file made for B). An event with no ticket has NO detail file: None (the line
+    keeps its other fields, `detail` stays null, it is not `detail_lost`)."""
+    if not ticket:
+        return None
+    data = b"orch.detail/2\0" + b"\0".join(
+        x.encode("utf-8", errors="surrogatepass") for x in (run, kind, event_id, ticket)
     )
     return hashlib.sha256(data).hexdigest()[:32]
+
+
+def detail_path(run: str, kind: str, event_id: str, ticket: str | None) -> str | None:
+    """`detail/<run>/<file name>.json`, or None for an event with no ticket (no detail file)."""
+    name = detail_name(run, kind, event_id, ticket)
+    return None if name is None else f"detail/{run}/{name}.json"
 
 
 def hide_values(text: str, hider: Callable[[str], str]) -> str:
@@ -159,7 +170,8 @@ class ExecJsonMapper:
                 eid = _hash(eid)
         kind = "run.state" if typ == "agent_message" else "step"
         fields = dict(
-            id=eid, detail=f"detail/{self.run}/{detail_name(self.run, kind, eid)}.json" if completed else None
+            id=eid,
+            detail=detail_path(self.run, kind, eid, self.ticket) if completed else None,
         )
         if typ == "agent_message":
             say = _one_line(item.get("text", ""))

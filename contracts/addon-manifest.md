@@ -146,7 +146,9 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
 | `orch record tail [--ticket T \| --run R] [--since C] [--follow] --json` | NDJSON stream (`cli-answer.schema.json` `stream_line`) | activity.md |
 | `orch record query … [--limit N] [--after C] --json` | page of `orch.activity/1` events | activity.md |
 | `orch record counts [--days N] … --json` | `orch.counts/1` with inventory | counts.md |
-| `orch record delete-detail <ticket> --proof-stdin --json` | `{"deleted": n}` (a person only) | activity.md |
+| `orch record settings --json` | `{keep_days, max_mb, share_counts, share_names, record_mb, detail_mb, runs}` (effective values, read only) | activity.md |
+| `orch record delete-detail <ticket> --proof-stdin --json` | `{"deleted": n, "ticket": "t_…", "kept": k, "unreadable": u, "skipped": s}` (a person only; `u` > 0: show "N runs could not be read; their detail was not deleted"; `s` > 0: show "N detail files were changed outside orch; they were not deleted") | activity.md |
+| `orch config get\|set insights.share_counts\|share_names\|keep_days\|max_mb [--proof-stdin] --json` | `{"<key>": <effective value>}` (widening: a person only) | human-proof.md |
 | `orch record propose --json` (the draft on stdin, proposal.schema.json `$defs/draft`) | the stored `orch.proposal/1` (check-up runs only) | proposal.md |
 | `orch job start\|step\|progress\|artifact\|metric\|table\|link\|log\|end\|run …` | the stored `orch.job/1` event | job-events.md |
 | `orch secret env\|file\|exec\|list\|get …` | child's exit code / page of names | secrets.md |
@@ -161,7 +163,7 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
   `page`), newest first, `--limit` 1–500 (default 100), `--after <next>`. The cursor is opaque (letters, digits, `._~-`).
 - **Errors.** Exit 2, stdout `{"error": "<plain words>", "code": "<code>"}` (`cli-answer.schema.json` `error`; `code` is
   optional and new: `refused`, `invalid`, `not_found`, `not_allowed`, `switched_off`, `locked_by_admin`, `conflict`, `gone`,
-  `too_large`, `busy`, `not_available`). Error text never holds a key value (secrets.md, Hiding).
+  `too_large`, `busy`, `not_available`, `tampered`, `needs_person`, `changed`). Error text never holds a key value (secrets.md, Hiding).
 - **Streams** (`--follow`): one JSON object per line, flushed per line; `{"type": "ping"}` at least every 15 s; a line
   `{"type": "error", "error", "code"}` is the last one, then exit 2. Readers skip unknown types. The add-on restarts a
   stream with its last cursor after a drop; the core never relies on the reader keeping up (it drops a slow reader with
