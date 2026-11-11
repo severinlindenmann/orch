@@ -1555,3 +1555,25 @@ def test_remove_orphaned_does_not_nest_the_copies_state_lock(repo, monkeypatch):
     monkeypatch.setattr(worktrees.runs, "locked", spy)
     assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
     assert not d.exists()
+
+
+def test_main_folder_run_then_copy_then_done_releases_the_copy(repo, monkeypatch):
+    """Lane C D6b (#440 again): the ticket's first run was in the project folder, a later start made its
+    copy (mode Every time). Done must take the copy away, keyed on the ticket, not on the run that made it."""
+    from orch import config
+
+    t = repo.tids[0]
+    monkeypatch.setattr(config, "copies_mode", lambda root: "off")
+    rec, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    assert Path(rec["folder"]).resolve() == repo.resolve()
+    runs.release(repo, t, rec["run"])
+    monkeypatch.setattr(config, "copies_mode", lambda root: "always")
+    rec, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    copy = Path(rec["folder"])
+    assert copy.resolve() != repo.resolve() and copy.is_dir()
+    assert t in worktrees.registry(repo)
+    close(repo, t, "done")  # the person's Done while the run is still alive: kept for now
+    runs.release(repo, t, rec["run"])  # the run's end
+    assert t not in worktrees.registry(repo)
+    assert not copy.exists()
+    assert str(copy) not in git(repo, "worktree", "list", "--porcelain")
