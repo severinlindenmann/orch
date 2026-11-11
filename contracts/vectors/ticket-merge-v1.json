@@ -3524,7 +3524,7 @@
     "checklist": [
      {
       "at": "2026-11-09T09:00:00Z",
-      "by": "agent:claude",
+      "by": "human:Ann",
       "done": false,
       "id": "c1",
       "evidence": [
@@ -3955,7 +3955,8 @@
       "reason": "Not needed",
       "text": "Email finance",
       "wont_nonce": "n1",
-      "wont_mac": "v1-2445a7a2b06f82ea36f3"
+      "wont_mac": "v1-2445a7a2b06f82ea36f3",
+      "by": "human:Ann"
      }
     ],
     "questions": [],
@@ -4522,7 +4523,7 @@
     "checklist": [
      {
       "at": "2026-11-09T09:00:00Z",
-      "by": "agent:claude",
+      "by": "human:Ann",
       "done": false,
       "id": "c1",
       "evidence": [
@@ -4858,7 +4859,8 @@
       "reason": "Not needed",
       "text": "Email finance",
       "wont_nonce": "n3",
-      "wont_mac": "v1-381129a923aa0e02488a"
+      "wont_mac": "v1-381129a923aa0e02488a",
+      "by": "human:Ann"
      }
     ],
     "questions": [],
@@ -6232,7 +6234,8 @@
       "reason": "Not needed any more",
       "text": "Email finance",
       "wont_nonce": "n5",
-      "wont_mac": "v1-2e8c80b037ac8b33a128"
+      "wont_mac": "v1-2e8c80b037ac8b33a128",
+      "by": "human:Ann"
      }
     ],
     "questions": [],
@@ -6339,7 +6342,8 @@
       "reason": "Not needed any more",
       "text": "Email finance",
       "wont_nonce": "n5",
-      "wont_mac": "v1-2e8c80b037ac8b33a128"
+      "wont_mac": "v1-2e8c80b037ac8b33a128",
+      "by": "human:Ann"
      }
     ],
     "questions": [],

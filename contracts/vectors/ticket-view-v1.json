@@ -2776,6 +2776,3653 @@
      }
     }
    }
+  },
+  {
+   "name": "results-trimmed",
+   "ok": true,
+   "why": "",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000001",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-five",
+   "ok": true,
+   "why": "",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000002",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_000000000000",
+        "from": "orch",
+        "at": "2026-11-11T08:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000001",
+        "from": "orch",
+        "at": "2026-11-11T07:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000002",
+        "from": "orch",
+        "at": "2026-11-11T06:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000003",
+        "from": "orch",
+        "at": "2026-11-11T05:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000004",
+        "from": "orch",
+        "at": "2026-11-11T04:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-six",
+   "ok": false,
+   "why": "at most 5 results",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000003",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_000000000000",
+        "from": "orch",
+        "at": "2026-11-11T08:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000001",
+        "from": "orch",
+        "at": "2026-11-11T07:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000002",
+        "from": "orch",
+        "at": "2026-11-11T06:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000003",
+        "from": "orch",
+        "at": "2026-11-11T05:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000004",
+        "from": "orch",
+        "at": "2026-11-11T04:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_000000000009",
+        "from": "orch",
+        "at": "2026-11-11T02:00:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-in-light",
+   "ok": false,
+   "why": "a light update carries no results (the phone keeps the last ones)",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000004",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "light": true,
+      "title": "Invoice export",
+      "status": "review",
+      "running": false,
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-log-block",
+   "ok": false,
+   "why": "log blocks are never sent to the phone",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000005",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          },
+          {
+           "type": "log",
+           "lines": [
+            "x"
+           ]
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-table-21-rows",
+   "ok": false,
+   "why": "tables are cut to 20 rows",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000006",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            },
+            {
+             "invoice": "INV-1020",
+             "customer": "North shop 21",
+             "amount": 470.0
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-link-with-query",
+   "ok": false,
+   "why": "links go without query and fragment",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000007",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812?token=abc123",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-file-with-folder",
+   "ok": false,
+   "why": "a file block carries the base name only",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000008",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "out/exports/invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-job-checked",
+   "ok": false,
+   "why": "a job result is never a passed check",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000009",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        },
+        "checked": true
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-from-mismatch",
+   "ok": false,
+   "why": "result.from must equal doc.from (a job cannot pose as the agent's proof)",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000010",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-unknown-field",
+   "ok": false,
+   "why": "unknown fields are refused",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000011",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        },
+        "approve": true
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-unknown-schema",
+   "ok": false,
+   "why": "only orch.blocks/1",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000012",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/2",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-checked-false",
+   "ok": false,
+   "why": "checked is true or absent",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000013",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": false,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "results-link-userinfo",
+   "ok": false,
+   "why": "no user name or password in a link",
+   "message": {
+    "schema": "orch.msg/1",
+    "id": "m_tvr0000000000014",
+    "from": "ws_pilatus001",
+    "to": "phones",
+    "type": "text",
+    "created_at": "2026-11-11T09:10:00Z",
+    "ticket": "t_rslt01",
+    "body": {
+     "text": "Results are in.",
+     "update": {
+      "kind": "result",
+      "title": "Invoice export"
+     },
+     "ticket_view": {
+      "title": "Invoice export",
+      "status": "review",
+      "agent": "Claude",
+      "summary": "Export done, totals checked.",
+      "running": false,
+      "checklist": [
+       {
+        "text": "Export the invoices",
+        "done": true
+       },
+       {
+        "text": "Check the totals",
+        "done": true
+       }
+      ],
+      "done": 2,
+      "total": 2,
+      "history_tail": [
+       {
+        "at": "2026-11-11T09:05:00Z",
+        "who": "Claude",
+        "role": "agent",
+        "text": "Finished a task: Check the totals"
+       }
+      ],
+      "attachments": [
+       {
+        "kind": "image",
+        "title": "Q3 chart",
+        "blob_id": "b_0123456789abcdef",
+        "name": "q3-chart.png",
+        "size": 48213,
+        "at": "2026-11-11T09:05:00Z"
+       },
+       {
+        "kind": "file",
+        "title": "invoices-2026-11.csv",
+        "blob_id": "b_abcdef0123456789",
+        "name": "invoices-2026-11.csv",
+        "size": 18234,
+        "at": "2026-11-11T08:40:00Z"
+       }
+      ],
+      "results": [
+       {
+        "id": "a_3f2a9c0d1b7e",
+        "from": "agent",
+        "title": "Totals match the sheet",
+        "at": "2026-11-11T09:05:00Z",
+        "checked": true,
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "agent",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Q3 totals match the finance sheet."
+          },
+          {
+           "type": "kv",
+           "items": [
+            {
+             "key": "Sheet total",
+             "value": "CHF 1 204 300"
+            },
+            {
+             "key": "Report total",
+             "value": "CHF 1 204 300"
+            }
+           ]
+          },
+          {
+           "type": "file",
+           "path": "q3-chart.png",
+           "label": "Q3 chart",
+           "size": 48213,
+           "preview": "image"
+          }
+         ]
+        }
+       },
+       {
+        "id": "j_export0001",
+        "from": "job",
+        "title": "Invoice export",
+        "at": "2026-11-11T08:40:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "job",
+         "title": "Invoice export",
+         "blocks": [
+          {
+           "type": "summary",
+           "text": "Exported 45 invoices to CSV.",
+           "tone": "good"
+          },
+          {
+           "type": "steps",
+           "items": [
+            {
+             "label": "Read invoices",
+             "state": "done"
+            },
+            {
+             "label": "Write CSV",
+             "state": "done"
+            }
+           ]
+          },
+          {
+           "type": "stat",
+           "label": "Invoices",
+           "value": 45
+          },
+          {
+           "type": "table",
+           "title": "Invoices",
+           "columns": [
+            {
+             "key": "invoice",
+             "label": "Invoice"
+            },
+            {
+             "key": "customer",
+             "label": "Customer"
+            },
+            {
+             "key": "amount",
+             "label": "Amount",
+             "kind": "number"
+            }
+           ],
+           "rows": [
+            {
+             "invoice": "INV-1000",
+             "customer": "North shop 1",
+             "amount": 120.0
+            },
+            {
+             "invoice": "INV-1001",
+             "customer": "South shop 2",
+             "amount": 137.5
+            },
+            {
+             "invoice": "INV-1002",
+             "customer": "East shop 3",
+             "amount": 155.0
+            },
+            {
+             "invoice": "INV-1003",
+             "customer": "West shop 4",
+             "amount": 172.5
+            },
+            {
+             "invoice": "INV-1004",
+             "customer": "Centre shop 5",
+             "amount": 190.0
+            },
+            {
+             "invoice": "INV-1005",
+             "customer": "North shop 6",
+             "amount": 207.5
+            },
+            {
+             "invoice": "INV-1006",
+             "customer": "South shop 7",
+             "amount": 225.0
+            },
+            {
+             "invoice": "INV-1007",
+             "customer": "East shop 8",
+             "amount": 242.5
+            },
+            {
+             "invoice": "INV-1008",
+             "customer": "West shop 9",
+             "amount": 260.0
+            },
+            {
+             "invoice": "INV-1009",
+             "customer": "Centre shop 10",
+             "amount": 277.5
+            },
+            {
+             "invoice": "INV-1010",
+             "customer": "North shop 11",
+             "amount": 295.0
+            },
+            {
+             "invoice": "INV-1011",
+             "customer": "South shop 12",
+             "amount": 312.5
+            },
+            {
+             "invoice": "INV-1012",
+             "customer": "East shop 13",
+             "amount": 330.0
+            },
+            {
+             "invoice": "INV-1013",
+             "customer": "West shop 14",
+             "amount": 347.5
+            },
+            {
+             "invoice": "INV-1014",
+             "customer": "Centre shop 15",
+             "amount": 365.0
+            },
+            {
+             "invoice": "INV-1015",
+             "customer": "North shop 16",
+             "amount": 382.5
+            },
+            {
+             "invoice": "INV-1016",
+             "customer": "South shop 17",
+             "amount": 400.0
+            },
+            {
+             "invoice": "INV-1017",
+             "customer": "East shop 18",
+             "amount": 417.5
+            },
+            {
+             "invoice": "INV-1018",
+             "customer": "West shop 19",
+             "amount": 435.0
+            },
+            {
+             "invoice": "INV-1019",
+             "customer": "Centre shop 20",
+             "amount": 452.5
+            }
+           ],
+           "total_rows": 45
+          },
+          {
+           "type": "file",
+           "path": "invoices-2026-11.csv",
+           "label": "CSV file",
+           "size": 18234
+          },
+          {
+           "type": "link",
+           "url": "https://user:pw@ci.example.ch/runs/812",
+           "label": "CI run"
+          },
+          {
+           "type": "summary",
+           "text": "More on the computer"
+          }
+         ]
+        }
+       },
+       {
+        "id": "a_9b1c2d3e4f50",
+        "from": "orch",
+        "at": "2026-11-11T07:30:00Z",
+        "doc": {
+         "schema": "orch.blocks/1",
+         "from": "orch",
+         "blocks": [
+          {
+           "type": "progress",
+           "label": "Steps done",
+           "done": 2,
+           "total": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
   }
  ]
 }

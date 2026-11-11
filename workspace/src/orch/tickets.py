@@ -352,11 +352,10 @@ def _write(root: Path, ticket: dict) -> None:
 NO_WRITE = object()  # an op returns this when it changed nothing
 
 
-def _wont_view(ticket: dict) -> list:
+def _wont_view(ticket: dict) -> dict:
     """The Won't do state of every step (id, flag, reason, who, when): what only a person may change."""
-    return [
-        (
-            c.get("id"),
+    return {
+        c.get("id"): (
             c.get("wont_do"),
             c.get("reason"),
             c.get("by") if c.get("wont_do") else None,
@@ -364,7 +363,7 @@ def _wont_view(ticket: dict) -> list:
         )
         for c in ticket.get("checklist") or []
         if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
-    ]
+    }
 
 
 def _is_person(by: str) -> bool:
@@ -390,9 +389,13 @@ def apply_op(
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
-        if agent_tool() and _wont_view(ticket) != wont_before:
-            # the one structural guard: no write path run by an agent changes a person's Won't do decision
-            raise Refused("Only a person marks a step as won't do, or opens it again.")
+        if agent_tool():
+            ids = [c.get("id") for c in ticket.get("checklist") or [] if isinstance(c, dict)]
+            if len(ids) != len(set(ids)):
+                raise Refused("Duplicate checklist step ids are not allowed.")
+            if _wont_view(ticket) != wont_before:
+                # no write path run by an agent changes a person's Won't do decision
+                raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
         if was_review and ticket.get("status") != "review":
