@@ -175,10 +175,15 @@ def size_of(view: dict) -> int:
     return len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode())
 
 
+def is_agent_history_author(by) -> bool:
+    """Only explicit agent labels are safe as unverified synced attribution."""
+    return isinstance(by, str) and by.startswith("agent:") and not by.startswith("agent:relay")
+
+
 def _who(by: str) -> tuple[str, str]:
     kind, _, name = str(by).partition(":")
     name = _clip(name or kind, 64) or "Someone"
-    if kind == "agent":
+    if is_agent_history_author(by):
         return name[:1].upper() + name[1:], "agent"
     return name, "person"
 

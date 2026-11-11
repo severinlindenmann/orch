@@ -919,7 +919,7 @@ def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
     else:
         raise Refused(humanproof.VERDICT_NEEDED)
     old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
-    entry = humanproof.verdict_sign(root, ticket, kind)
+    entry = humanproof.verdict_sign(root, ticket, kind, person=actor if kind == "person" else None)
     kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
     ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
 

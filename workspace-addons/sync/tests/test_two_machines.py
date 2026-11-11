@@ -839,9 +839,17 @@ def test_remote_human_history_requires_verified_decision(machines, monkeypatch, 
         assert "human:lindenmann:" not in rendered
     success(b)
     success(a)
-    assert load(a)["history"] == load(b)["history"] == [expected]
-    if proof != "foreign":
+    assert load(a)["history"] == [expected]
+    if valid:
         assert load(a) == load(b)
+    else:
+        # B owns the original locally: a remote demotion cannot overwrite it.
+        # A keeps its demotion even when B returns the original from shared base.
+        assert line in load(b)["history"] and expected in load(b)["history"]
+        success(b)
+        success(a)
+        assert load(a)["history"] == [expected]
+        assert line in load(b)["history"]
 
 
 def test_new_remote_ticket_history_is_not_shared_history(machines):
@@ -854,4 +862,5 @@ def test_new_remote_ticket_history_is_not_shared_history(machines):
     assert load(a)["history"] == [expected]
     success(b)
     success(a)
-    assert load(a) == load(b)
+    assert load(a)["history"] == [expected]
+    assert line in load(b)["history"] and expected in load(b)["history"]

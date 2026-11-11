@@ -1313,6 +1313,7 @@ def verdict_record(ticket: dict, entry: dict) -> dict:
         "kind": entry.get("kind"),
         "checks": verdict_checks(ticket),
         "nonce": entry.get("nonce"),
+        **({"person": entry["person"]} if "person" in entry else {}),
     }
 
 
@@ -1357,7 +1358,7 @@ def _verdict_ledger_put(root: Path, tid: str, mac: str | None) -> bool:
     return _ledger_put(root, VERDICT_LEDGER, "orch.verdict-ledger/1", tid, mac)
 
 
-def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
+def verdict_sign(root: Path, ticket: dict, kind: str, person: str | None = None) -> dict:
     """A fresh verdict entry for the ticket as it is NOW (its checklist must be final), recorded as the
     CURRENT ledger entry. No key, no workspace id or a damaged ledger = Refused: never a half-signed Done."""
     from orch import addons
@@ -1373,6 +1374,8 @@ def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
     if not ws or not isinstance(tid, str):
         raise Refused(VERDICT_LEDGER_DAMAGED)
     entry = {"kind": kind, "nonce": secrets.token_hex(8)}
+    if kind == "person" and person is not None:
+        entry["person"] = person
     entry["mac"] = verdict_mac(key, ws, tid, verdict_record(ticket, entry))
     if not _verdict_ledger_put(root, tid, entry["mac"]):
         raise Refused(VERDICT_LEDGER_DAMAGED)

@@ -119,7 +119,8 @@ def test_the_persons_looks_good_signs_the_done_and_it_lists_as_done(ws, run, mon
     t = tickets.load(ws, tid)
     assert t["status"] == "done" and "verdict_needed" not in t
     [entry] = t["verdicts"]
-    assert entry["kind"] == "person" and set(entry) == set(hp.VERDICT_FIELDS)
+    assert entry["kind"] == "person" and set(entry) == set(hp.VERDICT_FIELDS) | {"person"}
+    assert entry["person"] == "human:pat"
     assert hp.verdict_ledger(ws) == {tid: entry["mac"]}  # the CURRENT entry
     assert [x["status"] for x in tickets.list_all(ws) if x["id"] == tid] == ["done"]
     assert _raw(ws, tid)["status"] == "done" and "verdict_needed" not in _raw(ws, tid)

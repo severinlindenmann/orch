@@ -247,6 +247,7 @@ def held_ticket(root, path, doc, local, remote):
 
 
 def merge_document(root, path, base, local, remote, now):
+    # Direction matters: only remote-only history needs a new verified decision.
     doc = merge.merge_ticket(
         base or None,
         remote,

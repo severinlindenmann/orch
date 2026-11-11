@@ -137,6 +137,13 @@ def test_looks_good_needs_the_proof(ws, run, monkeypatch):
     code, out, err = _cli(run, monkeypatch, _proof(ws, "ticket.verdict", tid), *args, "--json")
     assert code == 0, out + err
     assert tickets.load(ws, tid)["status"] == "done"
+    doc = tickets.load(ws, tid)
+    entry = doc["verdicts"][0]
+    assert entry["person"] == "human:pat"
+    verify = hp.verdict_verifier(ws)
+    assert verify(entry, doc) == "current"
+    assert verify({**entry, "person": "human:impostor"}, doc) is None
+    assert verify({k: v for k, v in entry.items() if k != "person"}, doc) is None
 
 
 def test_send_back_forged_and_proven(ws, run, monkeypatch):

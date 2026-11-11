@@ -99,8 +99,14 @@ def test_vector_ticket(c):
     verdict = verdict_for(c.get("ledger", {}), c.get("own", []))
     assert merge_ticket(c["base"], c["a"], c["b"], NOW, person, verdict) == c["expect"]
     assert (
-        merge_ticket(c["base"], c["b"], c["a"], NOW, person, verdict) == c["expect"]
-    )  # symmetric: two machines converge
+        merge_ticket(c["base"], c["b"], c["a"], NOW, person, verdict) == c.get("expect_reverse", c["expect"])
+    )  # attribution follows the receiving machine
+    if c.get("convergence"):
+        checked = c["expect"]
+        replay = merge_ticket(c["base"], c["a"], checked, NOW, person, verdict)
+        assert replay["history"] == checked["history"]
+        exchanged = merge_ticket(c["base"], checked, checked, NOW, person, verdict)
+        assert exchanged["history"] == checked["history"]
     assert (c["base"], c["a"], c["b"]) == before  # pure
     if c["expect"] is not None:
         assert list(SCHEMA.iter_errors(c["expect"])) == []
@@ -221,7 +227,7 @@ def test_history_and_evidence_never_lost():
         up(base, T3, history=base["history"] + [h(T2, "y")]),
         NOW,
     )
-    assert texts(m) == ["created", "(synced, not verified here) y", "(synced, not verified here) x"]
+    assert texts(m) == ["created", "y", "(synced, not verified here) x"]
 
 
 def test_sessions_cap_keeps_newest():
@@ -367,8 +373,10 @@ def test_property_symmetry_purity_and_no_loss(seed):
     b = _rand_side(rng, root, rng.choice([T1, T2, T3]))
     before = deepcopy((base, a, b))
     m = merge_ticket(base, a, b, NOW)
-    assert m == merge_ticket(base, b, a, NOW)
-    assert json.dumps(m, sort_keys=True) == json.dumps(merge_ticket(base, b, a, NOW), sort_keys=True)
+    reverse = merge_ticket(base, b, a, NOW)
+    assert {k: v for k, v in m.items() if k not in ("history", "revision", "updated_at")} == {
+        k: v for k, v in reverse.items() if k not in ("history", "revision", "updated_at")
+    }
     assert (base, a, b) == before
     assert m["schema"] != "orch.ticket/1" or list(SCHEMA.iter_errors(m)) == []
     have = {(h["at"], h["by"], h["text"]) for h in m["history"]}
@@ -1116,9 +1124,57 @@ def test_history_verifier_failure_is_closed(decision):
     def boom(*args):
         raise RuntimeError("unavailable")
 
-    for a, b in ((tk(), peer), (peer, tk())):
-        out = merge_ticket(tk(), a, b, NOW, boom, boom)
-        assert out["history"] == [
-            {**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}
-        ]
-        assert list(SCHEMA.iter_errors(out)) == []
+    out = merge_ticket(tk(), peer, tk(), NOW, boom, boom)
+    assert out["history"] == [
+        {**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}
+    ]
+    assert list(SCHEMA.iter_errors(out)) == []
+    assert merge_ticket(tk(), tk(), peer, NOW, boom, boom)["history"] == [line]
+
+
+@pytest.mark.parametrize("by", ["Human:lindenmann", " human:x", "lindenmann", ["human:x"],
+                               "agent:relay from ph_abc", "agent:relay", None])
+def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by):
+    line = {"at": T2, "by": by, "text": "Approved"}
+    peer = tk(history=[line])
+    assert merge_ticket(tk(), peer, tk(), NOW)["history"] == [
+        {**line, "by": "agent:sync", "text": "(synced, not verified here) Approved"}
+    ]
+    assert merge_ticket(tk(), tk(), peer, NOW)["history"] == [line]
+
+
+@pytest.mark.parametrize("decision", ["wont", "verdict"])
+@pytest.mark.parametrize("known", [None, "base", "local"])
+def test_history_binds_new_decision_author_and_consumes_it_once(decision, known):
+    check = signed(_step(**WONT))
+    entry = {"kind": "person", "person": "human:Ann", "nonce": "0123456789abcdef", "mac": "A" * 43}
+    peer = tk(checklist=[check]) if decision == "wont" else tk(status="done", verdicts=[entry])
+    text = "Marked c1 as won't do" if decision == "wont" else "Looks good"
+    base = deepcopy(peer) if known == "base" else tk()
+    local = deepcopy(peer) if known == "local" else tk()
+    peer["history"] = [
+        {"at": at, "by": by, "text": text}
+        for at, by in [(T1, "human:Impostor"), (T2, "human:Ann"), (T3, "human:Ann")]
+    ]
+    out = merge_ticket(base, peer, local, NOW, person_for(ledger_of(check)),
+                       verdict_for({TK: entry["mac"]}, []))
+    human = [h for h in out["history"] if h["by"] != "agent:sync"]
+    assert human == ([] if known else [peer["history"][1]])
+    # Returning the untrusted original cannot resurrect a demoted line.
+    again = merge_ticket(base, peer, out, NOW, person_for(ledger_of(check)),
+                         verdict_for({TK: entry["mac"]}, []))
+    assert again["history"] == out["history"]
+
+
+def test_returned_demotion_cannot_erase_local_unpushed_answer():
+    line = {"at": T2, "by": "human:lindenmann", "text": "Answered q1: yes"}
+    local = tk(history=[line])
+    remote = tk(history=[{**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}])
+    assert line in merge_ticket(tk(), remote, local, NOW)["history"]
+
+
+def test_phone_attribution_and_sync_share_agent_allowlist():
+    from orch.phone_view import _who, is_agent_history_author
+
+    for by in ("agent:worker", "agent:relay from ph_abc", "human:A", "Human:A", " agent:A", [], None):
+        assert is_agent_history_author(by) == (_who(by)[1] == "agent")
