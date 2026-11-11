@@ -39,3 +39,8 @@ of the daily upload (usage-counts.md): `on`, `off` (this workspace), `off_by_adm
 
 Reference: `cnt_items` in validate.py; vectors `denominators` (three runs, one tool that cannot report skills, inventory
 items never used, a connection no run could see).
+
+Record counts include `unavailable: [{run, status, reason, message}]` and
+`complete: boolean`. The list is always present, empty when all inputs were
+read. If any run is unavailable or tampered, `complete` is false and that run
+is listed with the plain-language record message (activity.md, Integrity).

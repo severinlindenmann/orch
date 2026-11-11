@@ -17,7 +17,7 @@
     "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
     "harness": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Adapter name of the run (agent-adapter.schema.json key or [agents.<name>] entry); 'generic' for a user entry; 'none' for a job run without an agent." },
     "via": { "enum": ["hook", "log", "broker", "job", "core"], "description": "Who wrote it: hook = the tool's own hook (instant), log = a collector reading the tool's log or stream, broker = orch secret, job = orch job / $ORCH_EVENTS, core = orch itself (ticket changes, run state, take-over)." },
-    "kind": { "enum": ["step", "task.start", "task.done", "ask", "denial", "helper.start", "helper.end", "run.state", "usage", "key.use", "job", "session.input"] },
+    "kind": { "$ref": "#/$defs/kind" },
     "text": { "type": "string", "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Short display line, one line, key values hidden." },
     "used": {
       "oneOf": [
@@ -48,66 +48,73 @@
       ],
       "description": "null = started, not finished yet. A later line with the same id and kind carries the outcome (activity.md, Dedupe)."
     },
-    "detail": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[A-Za-z0-9_-]{1,128}\\.json$" }], "description": "Full payload file, relative to .orch/record/; null = details not available." },
+    "detail": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[0-9a-f]{32}\\.json$" }], "description": "Full payload file, relative to .orch/record/; null = details not available." },
     "coverage": { "enum": ["full", "partial"], "description": "full = the source saw everything of this step; partial = something is missing (no chat text, cut output, no helper)." },
-    "data": { "type": "object", "description": "Per-kind fields (activity.md, Kinds). Unknown fields are kept." }
+    "data": { "type": "object", "description": "Per-kind fields (activity.md, Kinds). Unknown fields are kept." },
+    "conflict": {"type": "boolean", "description": "Hook and log finished outcomes disagree; both lines are kept."},
+    "detail_lost": { "type": "boolean", "description": "true = a full payload existed but could not be stored (name collision with another event's file, write problem, too large); the line is kept with detail null (activity.md, Detail files)." }
   },
   "allOf": [
     { "if": { "properties": { "agent": { "const": "main" } } }, "then": { "properties": { "parent": { "type": "null" } } }, "else": { "properties": { "parent": { "$ref": "#/$defs/agent" } } } },
     { "if": { "properties": { "kind": { "const": "step" } } }, "then": { "properties": { "via": { "enum": ["hook", "log"] }, "used": { "type": "object", "properties": { "kind": { "enum": ["skill", "tool", "mcp"] } } } } } },
-    { "if": { "properties": { "kind": { "enum": ["task.start", "task.done"] } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "required": ["check"], "properties": { "check": { "type": "string", "pattern": "^c[0-9]{1,4}$" } } } } } },
-    { "if": { "properties": { "kind": { "const": "ask" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "required": ["q"], "properties": { "q": { "type": "string", "pattern": "^q[0-9]{1,4}$" } } } } } },
+    { "if": { "properties": { "kind": { "enum": ["task.start", "task.done"] } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "anyOf": [{ "required": ["check"], "properties": { "check": { "type": "string", "pattern": "^c[0-9]{1,4}$" } } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } },
+    { "if": { "properties": { "kind": { "const": "ask" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "anyOf": [{ "required": ["q"], "properties": { "q": { "type": "string", "pattern": "^q[0-9]{1,4}$" } } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } },
     { "if": { "properties": { "kind": { "const": "denial" } } }, "then": { "properties": { "outcome": { "type": "object", "properties": { "ok": { "const": false } } } } } },
     { "if": { "properties": { "kind": { "enum": ["helper.start", "helper.end"] } } }, "then": { "properties": { "agent": { "pattern": "^h_[0-9]{1,4}$" }, "used": { "type": "object", "properties": { "kind": { "const": "helper" } } } } } },
-    { "if": { "properties": { "kind": { "const": "run.state" } } }, "then": { "required": ["data"], "properties": { "data": { "required": ["state"], "properties": { "state": { "enum": ["starting", "working", "waiting_you", "idle", "done", "failed", "stopped"] } } } } } },
-    { "if": { "properties": { "kind": { "const": "usage" } } }, "then": { "required": ["data"], "properties": { "data": { "anyOf": [{ "required": ["used"] }, { "required": ["tokens_in"] }], "properties": { "used": { "type": "number", "minimum": 0, "maximum": 1 }, "window": { "type": "string", "maxLength": 32 }, "status": { "enum": ["ok", "warning", "limited"] }, "tokens_in": { "type": "integer", "minimum": 0 }, "tokens_out": { "type": "integer", "minimum": 0 } } } } } },
+    { "if": { "properties": { "kind": { "const": "run.state" } } }, "then": { "required": ["data"], "properties": { "data": { "anyOf": [{ "required": ["state"], "properties": { "state": { "enum": ["starting", "working", "waiting_you", "idle", "done", "failed", "stopped"] } } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } },
+    { "if": { "properties": { "kind": { "const": "usage" } } }, "then": { "required": ["data"], "properties": { "data": { "anyOf": [{ "anyOf": [{ "required": ["used"] }, { "required": ["tokens_in"] }], "properties": { "used": { "type": "number", "minimum": 0, "maximum": 1 }, "window": { "type": "string", "maxLength": 32 }, "status": { "enum": ["ok", "warning", "limited"] }, "tokens_in": { "type": "integer", "minimum": 0 }, "tokens_out": { "type": "integer", "minimum": 0 } } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } },
     { "if": { "properties": { "kind": { "const": "key.use" } } }, "then": {
       "required": ["data"],
       "properties": {
         "via": { "const": "broker" }, "detail": { "type": "null" },
         "used": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "key" }, "action": { "enum": ["env", "file", "exec", "get"] }, "source": { "enum": ["workspace", "admin"] } } },
         "outcome": { "type": "object" },
-        "data": { "required": ["profile", "command"], "additionalProperties": false, "properties": {
+        "data": { "anyOf": [{ "required": ["profile", "command"], "additionalProperties": false, "properties": {
           "profile": { "$ref": "#/$defs/name" },
           "command": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,64}$" }], "description": "Base name of the program the key was handed to; never its arguments." },
           "skill": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/name" }] },
           "refused": { "enum": ["not_in_profile", "get_off", "get_to_terminal", "missing", "too_short", "switched_off", "agent_command"] }
-        } }
+        } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] }
       }
     } },
-    { "if": { "properties": { "kind": { "const": "job" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "job" }, "data": { "required": ["job", "type", "state"], "properties": {
+    { "if": { "properties": { "kind": { "const": "job" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "job" }, "data": { "anyOf": [{ "required": ["job", "type", "state"], "properties": {
       "job": { "type": "string", "pattern": "^j_[a-z0-9]{6,32}$" },
       "type": { "enum": ["start", "step", "progress", "artifact", "metric", "table", "link", "log", "end", "lost"] },
       "state": { "enum": ["running", "ok", "failed", "cancelled", "lost"] }
-    } } } } },
-    { "if": { "properties": { "kind": { "const": "session.input" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "used": { "type": "null" }, "detail": { "type": "null" }, "data": { "required": ["by", "from", "since", "ended", "reason", "keys"], "additionalProperties": false, "properties": {
+    } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } },
+    { "if": { "properties": { "kind": { "const": "session.input" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "used": { "type": "null" }, "detail": { "type": "null" }, "data": { "anyOf": [{ "required": ["by", "from", "since", "ended", "reason", "keys"], "additionalProperties": false, "properties": {
       "by": { "type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$", "description": "Only a person can take over." },
       "from": { "const": "local-page" },
       "since": { "$ref": "#/$defs/time" },
       "ended": { "$ref": "#/$defs/time" },
       "reason": { "enum": ["released", "idle", "run-ended", "switched-off", "locked-by-admin"] },
       "keys": { "type": "integer", "minimum": 0, "description": "How many key presses were sent. The typed text is never stored." }
-    } } } } }
+    } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } }
   ],
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "kind": { "enum": ["step", "task.start", "task.done", "ask", "denial", "helper.start", "helper.end", "run.state", "usage", "key.use", "job", "session.input"] },
     "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" },
     "agent": { "type": "string", "pattern": "^(main|h_[0-9]{1,4})$" },
     "event_id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_.:-]+$" },
     "name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$" },
     "version": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "detail_file": {
-      "type": "object", "required": ["v", "id", "run", "input", "output", "truncated", "hidden"], "additionalProperties": false,
-      "description": "One file .orch/record/detail/<run>/<file id>.json: the full payload of one event, key values hidden.",
+      "type": "object", "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"], "additionalProperties": false,
+      "description": "One file .orch/record/detail/<run>/<file name>.json: the full payload of one event, key values hidden. The file name is lowercase hex only (activity.md, Detail files); id and kind are stored here so a reader can verify the file belongs to the event.",
       "properties": {
         "v": { "const": 1 },
         "id": { "$ref": "#/$defs/event_id" },
         "run": { "$ref": "#/$defs/run" },
+        "kind": { "$ref": "#/$defs/kind" },
         "input": { "description": "What went in (tool input, prompt, command), any JSON." },
         "output": { "description": "What came out (tool result, chat text), any JSON." },
         "truncated": { "type": "boolean", "description": "true = cut at the 1 MB per-file cap." },
         "hidden": { "type": "integer", "minimum": 0, "description": "How many key values were hidden in this file." }
       }
-    }
+    },
+    "record_alert": {"type": "object", "additionalProperties": false, "required": ["v", "schema", "at", "target", "run", "reason", "seen_by", "message"], "properties": {"v": {"const": 1}, "schema": {"const": "orch.record-alert/1"}, "at": {"$ref": "#/$defs/time"}, "target": {"enum": ["run", "detail", "meta", "lock", "folder", "alerts"]}, "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]}, "reason": {"enum": ["link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"]}, "seen_by": {"enum": ["writer", "reader", "retention", "cli"]}, "message": {"const": "Some records of this run were changed outside orch. To be safe, orch does not show them. Nothing was deleted."}}},
+    "read_status": {"type": "object", "additionalProperties": false, "required": ["run", "status", "reason", "message"], "properties": {"pending": {"type": "integer", "minimum": 0}, "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]}, "status": {"enum": ["ok", "unavailable", "tampered"]}, "reason": {"enum": ["missing", "io", "skipped", "pending", "link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"]}, "message": {"type": "string", "maxLength": 500}}},
+    "record_meta": {"type": "object", "additionalProperties": false, "required": ["schema", "since", "keep_days", "max_mb"], "properties": {"schema": {"const": "orch.record/1"}, "since": {"$ref": "#/$defs/time"}, "keep_days": {"type": "integer", "minimum": 0}, "max_mb": {"type": "integer", "minimum": 0}}}
   }
 }
