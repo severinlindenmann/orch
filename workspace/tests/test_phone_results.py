@@ -357,3 +357,11 @@ def test_split_names_hide_in_stat_and_table(label):
     )  # fmt: skip
     (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
     assert "v4lu3xyz" not in json.dumps(r)
+
+
+@pytest.mark.parametrize("word", phone_view.SECRET_NAME_WORDS)
+def test_one_word_list_drives_secret_name_and_the_kv_redact(word):
+    assert phone_view.secret_name(word), word
+    for sep in (":", "="):
+        out = phone_view.redact(f"{word.replace(' ', '_')}{sep}hunter2value")  # a name has no spaces here
+        assert "hunter2value" not in out, (word, sep)

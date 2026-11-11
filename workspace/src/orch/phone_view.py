@@ -48,9 +48,37 @@ _SECRET_PATTERNS = [
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"),  # JWT
     re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"),
 ]
+# The ONE list of secret-name words: the key=value pattern of redact/_has_secret and secret_name() (labels of
+# phone results) are both built from it, so a word added here reaches both (tests/test_phone_results.py).
+SECRET_NAME_WORDS = (
+    "password", "passwd", "passphrase", "secret", "token", "credential", "bearer", "signature", "auth",
+    "api key", "access key", "private key",
+)  # fmt: skip
+SECRET_LABEL_WORDS = (
+    "key",
+    "keys",
+    "pin",
+    "pincode",
+    "pwd",
+    "otp",
+    "cookie",
+    "cookies",
+    "session",
+    "sessions",
+)
+
+
+def _words_rx(sep: str) -> str:
+    """The alternation of SECRET_NAME_WORDS; a space inside a word is `sep`. `auth` leaves Author(s) alone."""
+    parts = []
+    for w in SECRET_NAME_WORDS:
+        rx = sep.join(re.escape(x) for x in w.split(" "))
+        parts.append(rx + (r"(?!ors?\b)" if w == "auth" else ""))
+    return "|".join(parts)
+
+
 _SECRET_KV = re.compile(
-    r"(?i)\b([\w-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[\w-]*)"
-    r"(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|\S+)"
+    r"(?i)\b([\w-]*(?:" + _words_rx("[_-]?") + r")[\w-]*)(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|\S+)"
 )
 _SECRET_PARAM = re.compile(r"(?i)token|secret|key|sig|signature|password|passwd|auth|code|credential")
 HIDDEN = "[hidden]"
@@ -171,10 +199,8 @@ def safe_url(url: str) -> str | None:
     return out if len(out) <= 2000 else None
 
 
-_NAME_SUBSTR = re.compile(
-    r"token|secret|passw|passphrase|credential|bearer|signature|auth(?!ors?\b)|apikey|api key|private key"
-)
-_NAME_WORD = re.compile(r"\b(key|keys|pin|pincode|pwd|otp|cookies?|sessions?)\b")
+_NAME_SUBSTR = re.compile(_words_rx(" ?"))
+_NAME_WORD = re.compile(r"\b(" + "|".join(SECRET_LABEL_WORDS) + r")\b")
 
 
 def secret_name(name: str) -> bool:
