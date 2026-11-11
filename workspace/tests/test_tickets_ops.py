@@ -106,6 +106,27 @@ def test_agent_can_reorder_wont_do_steps_but_cannot_change_decisions(proj, new_t
         assert read(proj, tid) == moved
 
 
+@pytest.mark.parametrize("reopen_original", [False, True])
+def test_agent_cannot_duplicate_wont_do_step(proj, new_ticket, monkeypatch, reopen_original):
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    _, step = tickets.check_add(proj, tid, "Ask finance", "human:Ann")
+    tickets.check_wont_do(proj, tid, step["id"], "human:Ann", "Not needed")
+    before = read(proj, tid)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
+
+    def attack(ticket):
+        original = ticket["checklist"][0]
+        ticket["checklist"].append(original.copy())
+        if reopen_original:
+            original["wont_do"] = False
+            original.pop("reason", None)
+
+    with pytest.raises(tickets.Refused, match="Duplicate checklist step ids"):
+        tickets.apply_op(proj, tid, attack)
+    assert read(proj, tid) == before
+
+
 def test_fields_owner_due_note_summary(proj, run, validate, new_ticket):
     tid = new_ticket()
     code, out, _ = run(

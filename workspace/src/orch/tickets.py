@@ -375,9 +375,13 @@ def apply_op(
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
-        if agent_tool() and _wont_view(ticket) != wont_before:
-            # the one structural guard: no write path run by an agent changes a person's Won't do decision
-            raise Refused("Only a person marks a step as won't do, or opens it again.")
+        if agent_tool():
+            ids = [c.get("id") for c in ticket.get("checklist") or [] if isinstance(c, dict)]
+            if len(ids) != len(set(ids)):
+                raise Refused("Duplicate checklist step ids are not allowed.")
+            if _wont_view(ticket) != wont_before:
+                # no write path run by an agent changes a person's Won't do decision
+                raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
         if was_review and ticket.get("status") != "review":
