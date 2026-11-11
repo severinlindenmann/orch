@@ -49,21 +49,24 @@ enum ArtifactMentions {
 
     static func mentions(in text: String, attachments: [TicketSnapshot.Attachment]) -> [ArtifactMention] {
         let punctuation = Set(".,;:!?()[]\"'`")
+        // Nothing to point at, or a huge text: no per-word work at all.
+        let files = attachments.filter { $0.kind != "link" }
+        guard !files.isEmpty, text.utf8.count <= 20_000 else { return [] }
+        let names = files.map { attachment in
+            (id: attachment.id, names: [attachment.name, attachment.label].compactMap { $0?.lowercased() }.filter { !$0.isEmpty })
+        }
         return text.split(whereSeparator: { $0.isWhitespace }).compactMap { word in
             var start = word.startIndex
             var end = word.endIndex
             while start < end && punctuation.contains(text[start]) { start = text.index(after: start) }
             while start < end && punctuation.contains(text[text.index(before: end)]) { end = text.index(before: end) }
             let candidate = String(text[start..<end]).lowercased()
-            guard !candidate.contains("://"), !candidate.hasPrefix("//"),
+            guard candidate.contains("."), !candidate.contains("://"), !candidate.hasPrefix("//"),
                   URL(string: candidate)?.scheme == nil else { return nil }
             guard candidate.range(of: #"\.[\p{L}\p{N}]+"#, options: .regularExpression) != nil else { return nil }
-            let match = attachments.first { attachment in
-                guard attachment.kind != "link" else { return false }
-                return [attachment.name, attachment.label].compactMap { $0 }.contains { value in
-                    let name = value.lowercased()
-                    return !name.isEmpty && (candidate == name || candidate.hasSuffix("/" + name) || name.hasSuffix("/" + candidate))
-                }
+            // An exact name wins over a path-suffix match that happens to come first.
+            let match = names.first { $0.names.contains(candidate) } ?? names.first { file in
+                file.names.contains { candidate.hasSuffix("/" + $0) || $0.hasSuffix("/" + candidate) }
             }
             guard let match else { return nil }
             return ArtifactMention(range: start..<end, attachmentId: match.id)
