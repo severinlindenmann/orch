@@ -302,6 +302,77 @@
     0,
     1
    ]
+  },
+  {
+   "name": "provisional hook end replaced by the log",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_5",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_5",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": false,
+      "error": "Exit code 1",
+      "ms": 40
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_5",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    1
+   ]
+  },
+  {
+   "name": "provisional hook end after the log is dropped",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_6",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 12
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_6",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    0
+   ]
   }
  ],
  "retention": [

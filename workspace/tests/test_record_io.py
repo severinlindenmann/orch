@@ -197,6 +197,7 @@ ERROR_BOUNDARIES = {
     "note_lost",
     "_note",
     "read_run",
+    "run_lines",
     "_pending_count",
     "apply_retention",
     "read_detail",

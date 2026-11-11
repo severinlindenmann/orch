@@ -16,6 +16,10 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
   alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1)
   alerts/hook-lost-<YYYY-MM-DD>.jsonl  hook entries of a proven caller that could not be written: {v, schema
                                       "orch.record-lost/1", at, run, reason: hider_off | invalid | too_large | other_run};
+                                      the run's own wrapper adds collector_error (its collector failed on a turn; the
+                                      run goes on; optional `error` = the exception's type name, never its message),
+                                      hooks_off (the agent's folder settings switch the tool's hooks off) and
+                                      hooks_missing (a turn's log has tool calls, no hook line of them arrived);
                                       no content; 1 per run and reason per minute, 50 lines per run, then one "trimmed"
                                       line (run set), and a global "trimmed" line (run null) when the file passes 1 MB
   alerts/hook-lost-unattributed-<YYYY-MM-DD>.jsonl  the same for a caller NOT proven to be in the run (not_active |
@@ -51,7 +55,8 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   stores `id` and `kind`; a writer never overwrites a file whose stored `(kind, id)` differs.
 - **Detail lost.** When a payload exists but cannot be stored (the file name is taken by another event, a write fails, or it
   exceeds the 1 MB limit), the line is still written with `detail: null` and `detail_lost: true`. A detail problem
-  never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file.
+  never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file,
+  except the log line that replaces a provisional hook end (Precedence and dedupe), which writes its own.
 
 ## Writing (one writer per run file)
 
@@ -107,7 +112,18 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 - **Hooks win when outcomes agree.** The hook replaces the meaning of a log line by appending a line;
   readers retain the hook. Repeated lines from the same origin keep the first written.
 - When hook and log finished outcomes disagree in `ok` or `error`, both lines are kept. The later line
-  carries `conflict: true`; repeated delivery of either origin is still deduped.
+  carries `conflict: true`; repeated delivery of either origin is still deduped. A hook line never suppresses a log
+  line whose outcome differs; where the two disagree, the log line is the one to believe.
+- **Hook lines are inside the agent's trust boundary.** The hook runs as a child of the agent, and the agent can run
+  the same command itself with any payload (the process-tree proof only shows it comes from inside the run). So a hook
+  line is the agent's word, never authoritative about how a call ended. The tool-payload hook (`record_hooks`) writes a
+  finished step as **provisional**: `outcome.ok: null` (no `error`, no `ms`). A provisional hook end never replaces and
+  never conflicts with a log line: a later log end line of that call replaces it (it is written, with its own detail
+  file, and readers keep it), and a provisional hook end after a log end line is dropped (vectors `dedupe`). Without
+  a log (a live run) the call stays "finished, result unknown". Its detail keeps only an allow-list of plain result
+  fields, each text cut at 32 K characters (never the tool's internal copies such as `originalFile` or `structuredPatch`).
+  The agent can also switch the tool's hooks off from its own folder's settings; the oneshot wrapper then leaves a
+  `hooks_off` or `hooks_missing` trace (Where), and the log still records every call.
 - A finished line without a started line is fine. Readers apply the same idempotent rule (vectors `dedupe`).
 
 ## Kinds
@@ -288,7 +304,8 @@ Only hook and log origins share dedupe keys. All other origins have separate
 `r_[a-z0-9_]{6,32}:.*` become `x_` plus 32 lowercase hex characters of
 SHA-256 of `b"orch.id.hook/1\0" + hidden_id.encode("utf-8")`. When hook and log
 finished outcomes disagree in `ok` or `error`, both lines remain and the later
-line has `conflict: true`.
+line has `conflict: true`. A provisional hook end (`ok: null`) never conflicts:
+a log end line replaces it, and it is dropped after one.
 
 Lock waits cover the 30-second stale window. A timed-out write is spooled in
 `pending/<run>/` and drained in name-time order by the next append, under the

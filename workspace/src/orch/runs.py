@@ -1501,12 +1501,22 @@ def _run_turn(
 
 
 def _record_turn(root: Path, run: str, tid: str, name: str, work: Path, out: str) -> None:
-    """One turn's stdout lines to the run's record (run_record.collect_turn). Recording never stops a run: a
-    refused record (tampered, unavailable) has already left its integrity alert (record._report)."""
-    with contextlib.suppress(Exception):
+    """One turn's stdout lines (this turn's only, stderr mixed in: the collector skips what is not its
+    format) to the run's record (run_record.collect_turn). Recording never stops a run: a refused record
+    (tampered, unavailable) has already left its integrity alert (record._report); anything else (a collector
+    that breaks on a new output format, a full disk) leaves one trace under the run, `collector_error` with
+    the exception's type (never its message), and the run goes on."""
+    try:
         from orch import run_record
 
         run_record.collect_turn(root, run, tid, name, work, out.splitlines())
+    except Refused:
+        pass
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            from orch import record
+
+            record.note_lost(root, run, "collector_error", error=type(e).__name__)
 
 
 def set_process_fields(root: Path, tid: str, run: str, **fields) -> None:

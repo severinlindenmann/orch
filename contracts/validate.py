@@ -221,23 +221,28 @@ def act_detail_name(run, kind, event_id):
 
 
 def act_dedupe(lines):
-    """Only hook/log share an origin; disagreeing finished outcomes both survive."""
+    """Only hook/log share an origin; disagreeing finished outcomes both survive. A provisional hook end
+    (`ok: null`) never replaces nor conflicts with a log line: the log's end line replaces it."""
     kept = []
     def key(line):
         via = line["via"]
         return (line["run"], line["id"], line["kind"], line.get("outcome") is not None,
                 "hl" if via in ("hook", "log") else via)
+    def provisional(line):
+        return line["via"] == "hook" and line.get("outcome") is not None and line["outcome"].get("ok") is None
     def conflict(a, b):
         return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
-                and b.get("outcome") is not None
+                and b.get("outcome") is not None and not provisional(a) and not provisional(b)
                 and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
     for i, line in enumerate(lines):
         matches = [j for j in kept if key(lines[j]) == key(line)]
         if any(lines[j]["via"] == line["via"] for j in matches):
             continue
+        if provisional(line) and any(lines[j]["via"] == "log" for j in matches):
+            continue
         if any(conflict(lines[j], line) for j in matches):
             kept.append(i)
-        elif not any(lines[j]["via"] == line["via"] or lines[j]["via"] == "hook" for j in matches):
+        elif not any(lines[j]["via"] == "hook" and not provisional(lines[j]) for j in matches):
             kept = [j for j in kept if j not in matches] + [i]
     return sorted(kept)
 

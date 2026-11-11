@@ -637,11 +637,19 @@ def _key(event):
     )
 
 
+def _provisional(event):
+    """A hook's finished line that does not know how the call ended (`ok: null`). Hook lines come from inside
+    the agent's trust boundary: the log line of the same call replaces it; it never replaces a log line."""
+    return event["via"] == "hook" and event["outcome"] is not None and event["outcome"]["ok"] is None
+
+
 def _conflict(a, b):
     return (
         {a["via"], b["via"]} == {"hook", "log"}
         and a["outcome"] is not None
         and b["outcome"] is not None
+        and not _provisional(a)
+        and not _provisional(b)
         and any(a["outcome"][k] != b["outcome"][k] for k in ("ok", "error"))
     )
 
@@ -650,10 +658,12 @@ def _decision(previous, event):
     matching = [old for old in previous if _key(old) == _key(event)]
     if any(old["via"] == event["via"] for old in matching):
         return False
+    if _provisional(event) and any(old["via"] == "log" for old in matching):
+        return False  # the log already says how the call ended
     if any(_conflict(old, event) for old in matching):
         event["conflict"] = True
         return True
-    return not any(old["via"] == event["via"] or old["via"] == "hook" for old in matching)
+    return not any(old["via"] == "hook" and not _provisional(old) for old in matching)
 
 
 def _dedupe(events, run):
@@ -735,13 +745,16 @@ LOST_REASONS = (
     "too_large",
     "other_run",
     "job_activity",
+    "collector_error",  # the wrapper's collector failed on a turn (the run goes on; `error` names the type)
+    "hooks_off",  # the agent's folder settings switch the tool's hooks off (agent-writable)
+    "hooks_missing",  # a turn's log shows tool calls but no hook line of them reached the record
 )  # after the caller is proven to be in the run
 UNPROVEN_REASONS = ("not_active", "other_run", "not_provable")  # before it is: never under a run id
 _LOST_RUN_LINES = 50  # per run and day; the next one is a "trimmed" marker, then nothing
 _LOST_FILE_BYTES = 1024**2  # per file; over it only a global "trimmed" marker is written
 
 
-def _note(ws, name, run, reason, now, run_lines):
+def _note(ws, name, run, reason, now, run_lines, error=None):
     now = datetime.now(UTC) if now is None else now
     stamp = now.isoformat().replace("+00:00", "Z")
     try:
@@ -775,7 +788,7 @@ def _note(ws, name, run, reason, now, run_lines):
                         return
                     write = dict(run=run, reason="trimmed")  # loud, never a silent stop (invariant I3)
                 else:
-                    write = dict(run=run, reason=reason)
+                    write = dict(run=run, reason=reason, **({"error": error} if error else {}))
             note = dict(v=1, schema="orch.record-lost/1", at=stamp, **write)
             _write(fd, (_json(note) + "\n").encode())
         finally:
@@ -784,12 +797,15 @@ def _note(ws, name, run, reason, now, run_lines):
         pass  # a trace that cannot be stored is not worth failing the hook
 
 
-def note_lost(ws, run, reason, *, now=None):
+def note_lost(ws, run, reason, *, now=None, error=None):
     """A hook entry of a PROVEN caller (live claim, inside its process tree) that could not be written leaves
     one short trace (orch.record-lost/1, no content): alerts/hook-lost-<day>.jsonl, at most one per run and
-    reason per minute, at most 50 lines per run, then one "trimmed" line. Never raises."""
+    reason per minute, at most 50 lines per run, then one "trimmed" line. `error`: an exception's type name
+    (collector_error), kept only when it is a plain identifier; never its message. Never raises."""
     if reason in LOST_REASONS and isinstance(run, str) and re.fullmatch(_RUN, run):
-        _note(ws, "hook-lost", run, reason, now, _LOST_RUN_LINES)
+        if not (isinstance(error, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", error)):
+            error = None
+        _note(ws, "hook-lost", run, reason, now, _LOST_RUN_LINES, error)
 
 
 def note_unattributed(ws, reason, *, now=None):
@@ -942,6 +958,30 @@ def _pending_count(workspace, run):
         raise
 
 
+def run_lines(workspace, run, *, lock_wait=None) -> list[dict]:
+    """The run file's lines AS WRITTEN (no dedupe, no reader view), read under the run lock: for a writer-side
+    caller that must see every line (a collector numbering its id-less lines `<run>:<n>` past every seq and
+    every such id already used). No run file yet: []. Raises RecordBusy, RecordTampered (its alert is left)
+    or RecordUnavailable."""
+    _name(run, _RUN)
+    try:
+        with _lock(workspace, run, lock_wait) as check_lock:
+            check_lock()
+            try:
+                fd = _open(workspace, ("runs", run + ".jsonl"), "read")
+            except RecordUnavailable as error:
+                if error.reason == "missing":
+                    return []
+                raise
+            try:
+                return _read_run_strict(workspace, run, fd)[0]
+            finally:
+                _close(fd)
+    except (RecordTampered, RecordUnavailable) as error:
+        _report(workspace, error, "run", run, "writer")
+        raise
+
+
 def read_run(workspace, run, *, seen_by="reader") -> RunRead:
     _name(run, _RUN)
     pending = 0
@@ -1037,8 +1077,11 @@ def _store_detail(ws, event, payload, previous):
             ):
                 return _Detail(reason="collision")
             finished = any(
-                old.get("detail") == event["detail"] and old.get("outcome") is not None for old in previous
-            )
+                old.get("detail") == event["detail"]
+                and old.get("outcome") is not None
+                and not _provisional(old)
+                for old in previous
+            )  # a log line that replaces a provisional hook line writes its own detail
             if finished or event["outcome"] is None:
                 return _Detail()
         _write_new(ws, rel, payload)

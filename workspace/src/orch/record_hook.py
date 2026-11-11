@@ -210,9 +210,10 @@ def _event(raw: dict, ids, tool, root=None) -> tuple[dict, dict | None]:
     return event, payload
 
 
-def _writer(root):
-    """The writer with a registered hider, else one built from this workspace's key
-    store (secretrun's wiring); no hider = recording is off (never raw)."""
+def record_writer(root):
+    """The writer every out-of-core origin of a run uses (this hook entry, the oneshot wrapper's collector,
+    `orch job`): the one with a registered hider, else one built from this workspace's key store (secretrun's
+    wiring); no hider = recording is off (RecordOff; never raw)."""
     try:
         return record.registered_writer(root)
     except record.RecordOff:
@@ -255,7 +256,7 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
             event, payload = _event(_from_tool(_parse(text), tool, root), ids, tool, work)
         before_write()
         try:
-            writer = _writer(root)
+            writer = record_writer(root)
         except record.RecordOff:
             raise NotRecorded("Recording is off until key hiding is ready.", "hider_off") from None
         return writer.append(event, detail=payload, lock_wait=LOCK_WAIT)
