@@ -48,25 +48,25 @@ def feed_for(monkeypatch, tmp_path):
 
 
 def test_step_started_and_finished_become_board_steps():
-    s = to_events(example("valid-step-started.json"), TICKET)
+    s = to_events(example("valid-step-started.json"), TICKET, RUN)
     assert [e["kind"] for e in s] == ["tool.start"] and s[0]["text"] == "Read report-2025-11.pdf"
     fin = example("valid-step-started.json", outcome={"ok": False, "error": "boom", "ms": 5})
-    assert to_events(fin, TICKET)[0]["data"]["ok"] is False
+    assert to_events(fin, TICKET, RUN)[0]["data"]["ok"] is False
     b = Board.from_events(s)
     assert b.snapshot()["step"] == "Read report-2025-11.pdf"
 
 
 def test_other_kinds_and_bad_shapes_give_nothing_or_the_right_event():
-    assert to_events({"kind": "task.start", "run": RUN}, TICKET) == []  # the ticket watcher makes these
-    assert to_events({"kind": "key.use"}, TICKET) == []
-    assert to_events({"nonsense": 1}, TICKET) == [] and to_events({"kind": "step"}, TICKET) == []
-    st = to_events(example("valid-run-state-say.json"), TICKET)
+    assert to_events({"kind": "task.start", "run": RUN}, TICKET, RUN) == []  # the ticket watcher makes these
+    assert to_events({"kind": "key.use"}, TICKET, RUN) == []
+    assert to_events({"nonsense": 1}, TICKET, RUN) == [] and to_events({"kind": "step"}, TICKET, RUN) == []
+    st = to_events(example("valid-run-state-say.json"), TICKET, RUN)
     assert st and st[0]["kind"] == "run.state"
 
 
 def test_text_is_hidden_again_before_it_reaches_the_page():
     e = example("valid-step-started.json", text="Run curl -H 'Authorization: Bearer abcdefghijklmnop1234'")
-    assert "abcdefghijklmnop1234" not in json.dumps(to_events(e, TICKET))
+    assert "abcdefghijklmnop1234" not in json.dumps(to_events(e, TICKET, RUN))
 
 
 def test_feed_follows_the_fake_orch_and_keeps_the_cursor(feed_for):
@@ -90,7 +90,7 @@ def test_a_broken_orch_gives_no_steps_and_no_crash(feed_for, tmp_path):
 
 
 def test_garbled_lines_are_skipped_and_the_cursor_only_moves_on_good_lines(feed_for):
-    f = feed_for(run="r_none0001")
+    f = feed_for(run=RUN)
     f._line(b"not json")
     f._line(b"[1]")
     f._line(
@@ -159,3 +159,28 @@ def test_the_view_shows_live_steps_from_the_record(server, ws, fake_orch, monkey
             break
         time.sleep(0.2)
     assert seen == "Read the March report"
+
+
+def denial(**kw):
+    e = example("valid-step-started.json", kind="denial", text="Not allowed by this workspace", via="log")
+    e["outcome"] = {"ok": False, "error": "Not allowed by this workspace", "ms": None}
+    e.update(kw)
+    return e
+
+
+def test_a_denial_counts_only_from_a_collector_or_the_core():
+    assert [x["kind"] for x in to_events(denial(via="log"), TICKET, RUN)] == ["denial"]
+    assert [x["kind"] for x in to_events(denial(via="core"), TICKET, RUN)] == ["denial"]
+    assert (
+        to_events(denial(via="hook"), TICKET, RUN) == []
+    )  # a forged hook line must not drive a permission prompt
+    assert to_events(denial(via="job"), TICKET, RUN) == [] and to_events(denial(via=None), TICKET, RUN) == []
+
+
+def test_lines_of_another_run_or_ticket_are_ignored():
+    assert to_events(denial(run="r_other001"), TICKET, RUN) == []
+    assert to_events(denial(ticket="t_other001"), TICKET, RUN) == []
+    step = example("valid-step-started.json")
+    assert to_events({**step, "run": "r_other001"}, TICKET, RUN) == []
+    assert to_events({**step, "ticket": "t_other001"}, TICKET, RUN) == []
+    assert to_events(step, TICKET, RUN)

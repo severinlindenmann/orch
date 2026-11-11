@@ -34,10 +34,19 @@ def _data(e: dict) -> dict:
     return d if isinstance(d, dict) else {}
 
 
-def to_events(e: dict, ticket: str) -> list[dict]:
-    """One activity event -> zero or more Focus run events. Unknown kinds and odd shapes give nothing."""
+TRUSTED_DENIAL = (
+    "log",
+    "core",
+)  # a hook line can be written by anything the agent runs: it never drives a prompt
+
+
+def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
+    """One activity event -> zero or more Focus run events. Unknown kinds, odd shapes, another run or ticket give
+    nothing; a denial counts only from a collector or the core (via log/core), never from a hook."""
     try:
         kind, run, agent = e["kind"], e["run"], e.get("agent") or "main"
+        if run != want_run or e.get("ticket") != ticket:
+            return []  # not this run's line: never shown, never acted on
         text, at = str(e.get("text") or ""), e.get("at")
         done = e.get("outcome")
         eid = str(e["id"])
@@ -63,6 +72,8 @@ def to_events(e: dict, ticket: str) -> list[dict]:
                 return []
             return [make("usage", used=d["used"], window=d.get("window"), status=d.get("status", "ok"))]
         if kind == "denial":
+            if e.get("via") not in TRUSTED_DENIAL:
+                return []
             return [make("denial", tool=str(_used(e).get("name") or "a tool"))]
     except (KeyError, TypeError, AttributeError, ValueError):
         pass
@@ -128,7 +139,7 @@ class RecordFeed:
             return
         cur = doc.get("cursor")
         if doc.get("type") == "event" and isinstance(doc.get("event"), dict):
-            got = to_events(doc["event"], self.ticket)
+            got = to_events(doc["event"], self.ticket, self.run)
             with self.lock:
                 self.queue = (self.queue + got)[-MAX_QUEUE:]
         if doc.get("type") in ("event", "ping", "unavailable") and isinstance(cur, str) and cur:
