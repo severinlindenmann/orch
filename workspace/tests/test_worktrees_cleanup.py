@@ -1616,8 +1616,8 @@ def test_done_by_patch_takes_the_copy_away(repo):
 
 
 def test_copy_clean_removes_a_done_tickets_copy_without_a_claim(repo, run, monkeypatch):
-    """Lane C D6b: a done ticket's copy is registered and on disk, nothing holds it. `orch copy clean` takes it
-    away; it never says "No separate copies left" while the registry has entries."""
+    """Lane C D6b: a done ticket's copy is registered and on disk, nothing holds it. `orch copy clean`
+    takes it away; it never says "No separate copies left" while the registry has entries."""
     t = repo.tids[0]
     p = make(repo)
     with monkeypatch.context() as m:
