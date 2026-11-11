@@ -29,6 +29,39 @@ What Level 1 does:
 5. Deny rules for the key folder in the agent tools' own permission settings (agents.json data, written per run).
 6. Every use is a `key.use` event (activity.md). A refusal is one too.
 
+## Deny rules (slice 1.4, Level 1)
+
+orch adds deny rules to the agent tool's own permission flags on **every start** (fresh and resume, oneshot and live, every
+permission mode including `full`), generated for the workspace from the data in `agents/deny.json` (`deny` of the adapter).
+The deny **set** is the same for every adapter; an adapter only says how its tool can be told (`deny.format`).
+
+| root | path | agent's own file tools | agent's shell (command text naming it) |
+|---|---|---|---|
+| `home` | every guarded orch home candidate: `humanproof.guarded_home`, `ORCH_HOME`, `<account home>/.orch-tool` | no read, no write | refused |
+| `secrets` | `<workspace>/.orch/secrets/` (old key files) | no read, no write | refused |
+| `record` | `<workspace>/.orch/record/` | write refused, read allowed | refused (reading goes through `orch record ...`) |
+| `local-id` | `<workspace>/.orch/.local-id` | write refused, read allowed | refused |
+
+`home` covers the key store, key files, `profiles.toml`, `human.key`, the nonce store, `human-settings.json`,
+`proposals.json`, `permissions.json`, `agent-approvals.json` and the relay and dev records. Never denied: the workspace
+itself, `.orch/` tickets, `.orch/run/`, anything `orch ...` prints. A shell command is refused when its **text** contains
+a path form; orch commands never contain one, so `orch record query` and `orch secret env <profile> -- ...` work.
+
+**Format `patterns/1`** (tools with `--disallowedTools`, i.e. Claude Code): one comma-joined value merged into the tool's `--disallowedTools` list (an existing
+list is extended, never replaced; added when there is none):
+- file tools, per root path P (`/**` and P itself): `Read(f)`, `Edit(f)`, `Write(f)` (`Read` only for rows with read denied;
+  `Edit`/`Write` for every row) for each form f of P: absolute `//<P without its leading />`; Windows drive form
+  `//c/Users/..` and `C:/Users/..`; `~/<rest>` when P is under the account home; relative to the workspace (`../..` form).
+  Real path and as-given path (symlinked temp folders) both.
+- shell: `Bash(*<text>*)` for each text form of P: forward-slash and backslash absolute, `~/<rest>`, `$HOME/<rest>`,
+  `${HOME}/<rest>`, relative to the workspace, and for `home` the folder's own name when it starts with `.` or contains
+  `orch`. `record`/`local-id`/`secrets` also the workspace-relative text `.orch/record` (and `.orch\record`, ...).
+- characters that break a pattern (`,` `(` `)`) in a path become `?`. Nothing is read from the workspace's own settings.
+
+**Format `none`** (`codex`, generic commands): orch cannot tell the tool. codex's own `workspace-write` sandbox already keeps
+writes inside the workspace (and `store_args`), so `home` is write-protected there; **reads of `home` and writes of `.orch/record`
+are not enforced** (Level 1: stops accidents, not a tool that deliberately goes there). Vectors: `vectors/deny-v1.json`.
+
 ## Where
 
 ```

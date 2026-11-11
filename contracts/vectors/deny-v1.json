@@ -1,0 +1,45 @@
+{
+  "schema": "orch.deny-vectors/1",
+  "note": "secrets.md, Deny rules: synthetic workspace and orch home -> patterns/1 patterns that must (has) or must not (not) be in the set.",
+  "cases": [
+    {
+      "name": "posix",
+      "workspace": "/Users/bob/work/proj",
+      "homes": [
+        "/Users/bob/.orch-tool"
+      ],
+      "account_home": "/Users/bob",
+      "has": [
+        "Read(//Users/bob/.orch-tool/**)",
+        "Write(~/.orch-tool/**)",
+        "Bash(*$HOME/.orch-tool*)",
+        "Edit(//Users/bob/work/proj/.orch/record/**)",
+        "Bash(*.orch/record*)",
+        "Read(//Users/bob/work/proj/.orch/secrets/**)"
+      ],
+      "not": [
+        "Read(//Users/bob/work/proj/.orch/record/**)",
+        "Read(//Users/bob/work/proj/**)",
+        "Edit(//Users/bob/work/proj/**)"
+      ]
+    },
+    {
+      "name": "windows",
+      "workspace": "C:\\Users\\bob\\work\\proj",
+      "homes": [
+        "C:\\Users\\bob\\.orch-tool"
+      ],
+      "account_home": "C:\\Users\\bob",
+      "has": [
+        "Read(//c/Users/bob/.orch-tool/**)",
+        "Read(C:/Users/bob/.orch-tool/**)",
+        "Bash(*C:\\Users\\bob\\.orch-tool*)",
+        "Bash(*.orch\\record*)",
+        "Edit(//c/Users/bob/work/proj/.orch/record/**)"
+      ],
+      "not": [
+        "Read(C:/Users/bob/work/proj/.orch/record/**)"
+      ]
+    }
+  ]
+}

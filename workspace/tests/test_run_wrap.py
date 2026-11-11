@@ -141,7 +141,7 @@ def _fake_claude(tmp_path, monkeypatch, resume_works):
     f.write_text(
         "#!/bin/sh\n"
         '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'  # orch asks which modes it knows
-        f'echo "$*" | tr "\\n" " " >> {shlex.quote(str(out))}; echo >> {shlex.quote(str(out))}\n'
+        f'printf "%s " "$@" | tr "\\n" " " >> {shlex.quote(str(out))}; echo >> {shlex.quote(str(out))}\n'
         + (
             ""
             if resume_works
