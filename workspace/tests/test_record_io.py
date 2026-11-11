@@ -5,7 +5,6 @@ here without changing or importing that consumer.
 """
 
 import ast
-import builtins
 import errno
 import json
 import os
@@ -29,6 +28,7 @@ DETAIL = {"input": "hello", "output": "world"}
 CORE = {
     "_io_setup",
     "_try_lock",
+    "_release_lock",
     "_lock_check",
     "_io_error",
     "_io",
@@ -202,9 +202,55 @@ ERROR_BOUNDARIES = {
 }
 
 
+SAFE_IMPORTS = set(
+    """import errno
+import hashlib
+import json
+import os
+import re
+import stat
+import time
+import uuid
+from collections.abc import Callable
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Generic, Literal, TypeVar
+from jsonschema import Draft202012Validator, FormatChecker
+from orch import hider as hiding
+from orch.collect_execjson import _hash, detail_name
+from orch.errors import Refused
+from orch.hider import Hider, NoHiderError
+from orch.phone_view import redact""".splitlines()
+)
+SAFE_EXCEPTIONS = {
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "UnicodeError",
+    "RecursionError",
+    "RecordInvalid",
+    "RecordTampered",
+    "RecordUnavailable",
+    "RecordBusy",
+    "NoHiderError",
+}
+
+
 def scan_record_source(source):
     sensitive = {"os", "shutil", "io", "builtins", "pathlib", "fcntl", "msvcrt", "_FCNTL", "_MSVCRT"}
     tree = ast.parse(source)
+    names = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.append(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names.extend(n.id for target in targets for n in ast.walk(target) if isinstance(n, ast.Name))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.extend(a.asname or a.name.split(".")[0] for a in node.names)
+    assert len(names) == len(set(names)), "duplicate top-level names"
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
 
     class Scan(ast.NodeVisitor):
@@ -227,23 +273,14 @@ def scan_record_source(source):
             self.function, self.core = previous
 
         def visit_Import(self, node):
-            for alias in node.names:
-                if alias.name.split(".")[0] in sensitive:
-                    assert alias.asname is None and (
-                        self.core or (node in tree.body and alias.name == "os")
-                    ), ast.unparse(node)
+            if not self.core:
+                assert ast.unparse(node) in SAFE_IMPORTS, ast.unparse(node)
 
-        def visit_ImportFrom(self, node):
-            if (node.module or "").split(".")[0] in sensitive:
-                assert self.core or (
-                    node in tree.body
-                    and node.module == "pathlib"
-                    and [(a.name, a.asname) for a in node.names] == [("Path", None)]
-                ), ast.unparse(node)
+        visit_ImportFrom = visit_Import
 
         def visit_Name(self, node):
             if not self.core:
-                assert node.id not in sensitive, ast.unparse(node)
+                assert node.id not in sensitive | {"__builtins__"}, ast.unparse(node)
                 if node.id == "Path":
                     parent = parents[node]
                     assert (
@@ -267,7 +304,23 @@ def scan_record_source(source):
                 if isinstance(node.func, ast.Attribute):
                     assert ast.unparse(node.func) in SAFE_ATTRIBUTE_CALLS, ast.unparse(node)
                 elif isinstance(node.func, ast.Name):
-                    assert node.func.id not in {"open", "__import__", "eval", "exec"}
+                    if node.func.id in {
+                        "open",
+                        "getattr",
+                        "setattr",
+                        "vars",
+                        "globals",
+                        "locals",
+                        "compile",
+                        "breakpoint",
+                        "eval",
+                        "exec",
+                        "__import__",
+                    }:
+                        assert (
+                            self.function == "_report"
+                            and ast.unparse(node) == "getattr(error, 'target', target)"
+                        ), ast.unparse(node)
                     if node.func.id == "Path":
                         assert self.function in {"record_dir", "__init__"}
             self.generic_visit(node)
@@ -287,9 +340,8 @@ def scan_record_source(source):
                     return
                 assert isinstance(kind, ast.Name), ast.unparse(node)
                 assert kind.id not in {"Exception", "BaseException", "Refused", "RecordRefused"}
-                builtin = getattr(builtins, kind.id, None)
-                if isinstance(builtin, type) and issubclass(builtin, OSError):
-                    assert self.core, kind.id
+                if not self.core:
+                    assert kind.id in SAFE_EXCEPTIONS, kind.id
                 if kind.id in {"RecordTampered", "RecordUnavailable"}:
                     assert self.core or self.function in ERROR_BOUNDARIES, self.function
 
@@ -306,6 +358,27 @@ def test_01_io_core_is_the_only_fs_user():
 @pytest.mark.parametrize(
     "source",
     [
+        'getattr(record_dir(ws), "unlink")()',
+        'getattr(import_module("os"), "remove")(p)',
+        'operator.methodcaller("unlink")',
+        'vars(__builtins__)["open"]',
+        "E = OSError\ntry:\n    pass\nexcept E:\n    pass",
+        "def _open():\n    pass\ndef _open():\n    os.remove(p)",
+        *[
+            f"{name}()"
+            for name in (
+                "setattr",
+                "globals",
+                "locals",
+                "compile",
+                "breakpoint",
+                "eval",
+                "exec",
+                "__import__",
+            )
+        ],
+        "import operator",
+        "from importlib import import_module",
         "(path / 'x').unlink()",
         "os.remove(p)",
         "os.path.isfile(p)",
@@ -1088,6 +1161,7 @@ def test_fallback_lock_refreshes_mtime(store, monkeypatch):
 
 def test_retention_rechecks_lock_identity_after_fold(store, monkeypatch):
     ws, writer = store
+    writer.append(event(), detail=DETAIL)
     ended(writer)
     monkeypatch.setattr(record, "_FCNTL", None)
     monkeypatch.setattr(record, "_MSVCRT", None)
@@ -1099,6 +1173,7 @@ def test_retention_rechecks_lock_identity_after_fold(store, monkeypatch):
 
     result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, fold)
     assert result["status"] == "tampered" and result["reason"] == "swapped"
+    assert (record.record_dir(ws) / "detail" / RUN).exists()
     assert runfile(ws).exists()
 
 
@@ -1117,3 +1192,140 @@ def test_retention_rechecks_pending_after_preflight(store, monkeypatch):
     result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda r, es: folds.append(r))
     assert (result["status"], result["reason"]) == ("unavailable", "pending")
     assert not folds and runfile(ws).exists()
+
+
+@pytest.mark.parametrize("code", [errno.ENOLCK, errno.EOPNOTSUPP, errno.ENOTSUP])
+def test_unsupported_flock_falls_back_and_cleans_lock(store, monkeypatch, code):
+    ws, writer = store
+
+    def unsupported(*args):
+        raise OSError(code, "unsupported")
+
+    monkeypatch.setattr(record, "_FCNTL", SimpleNamespace(flock=unsupported, LOCK_EX=2, LOCK_NB=4))
+    assert writer.append(event())["seq"] == 1
+    lock = runfile(ws).with_suffix(".lock")
+    assert not lock.exists()
+    with record._lock(ws, RUN) as check_lock:
+        os.utime(lock, (1, 1))
+        check_lock()
+        assert time.time() - lock.stat().st_mtime < 2
+    assert not lock.exists()
+
+
+@pytest.mark.parametrize("step", ["_try_lock", "_lock_check", "_check_fd", "body"])
+def test_failure_after_lock_creation_removes_lock(store, monkeypatch, step):
+    ws, writer = store
+    writer.append(event())
+
+    def fail(*args, **kwargs):
+        # Directory checks happen before creation; fail only once the lock exists.
+        if runfile(ws).with_suffix(".lock").exists():
+            raise RuntimeError("injected failure")
+
+    if step != "body":
+        monkeypatch.setattr(record, step, fail)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        with record._lock(ws, RUN):
+            fail()
+    assert not runfile(ws).with_suffix(".lock").exists()
+
+
+def test_first_lock_check_retries_swapped_name(store, monkeypatch):
+    ws, _ = store
+    original = record._lock_check
+    calls = []
+
+    def check(workspace, rel, fd, **kwargs):
+        calls.append(fd)
+        if len(calls) == 1:
+            lock = runfile(ws).with_suffix(".lock")
+            lock.rename(lock.with_suffix(".old"))
+            lock.touch()
+            os.utime(lock, (1, 1))
+        return original(workspace, rel, fd, **kwargs)
+
+    monkeypatch.setattr(record, "_lock_check", check)
+    with record._lock(ws, RUN):
+        assert len(calls) == 2
+    assert not runfile(ws).with_suffix(".lock").exists()
+
+
+@pytest.mark.parametrize("counts", [(1, 0), (0, 1)])
+def test_read_run_reports_pending_before_or_after_parse(store, monkeypatch, counts):
+    ws, writer = store
+    writer.append(event())
+    values = iter(counts)
+    monkeypatch.setattr(record, "_pending_count", lambda *args: next(values))
+    read = record.read_run(ws, RUN)
+    assert (read.status, read.reason, read.pending) == ("ok", "pending", 1)
+    assert read.message == record._MESSAGES["pending"]
+
+
+def test_retention_post_fold_pending_skips_all_deletion_and_fold_is_idempotent(store):
+    ws, writer = store
+    writer.append(event(), detail=DETAIL)
+    ended(writer)
+    jobs = record.record_dir(ws) / "jobs" / RUN
+    jobs.mkdir(parents=True)
+    (jobs / "job").write_text("keep")
+    detail = record.record_dir(ws) / "detail" / RUN
+    sink, calls = {}, []
+
+    def fold(run, events):
+        calls.append(run)
+        sink[run] = len(events)  # Replace this run's contribution on retry.
+        if len(calls) == 1:
+            writer._spool(event(id="late"), None, False)
+
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, fold)
+    assert (result["status"], result["reason"]) == ("unavailable", "pending")
+    assert result["delete_run"] == result["delete_detail"] == []
+    assert runfile(ws).exists() and detail.exists() and (jobs / "job").read_text() == "keep"
+    for path in (record.record_dir(ws) / "pending" / RUN).iterdir():
+        path.unlink()
+    first_count = sum(sink.values())
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, fold)
+    assert result["delete_run"] == [RUN]
+    assert calls == [RUN, RUN] and sum(sink.values()) == first_count
+
+
+@pytest.mark.parametrize("target", ["detail", "jobs"])
+def test_retention_checks_lock_immediately_before_deletion(store, monkeypatch, target):
+    ws, writer = store
+    writer.append(event(), detail=DETAIL)
+    ended(writer)
+    original_count, original_delete = record._pending_count, record.delete_detail
+    lost = False
+
+    @contextmanager
+    def lock(*args):
+        def check():
+            if lost:
+                raise record.RecordTampered("swapped")
+
+        yield check
+
+    def count(*args):
+        nonlocal lost
+        value = original_count(*args)
+        if folded and target == "detail":
+            lost = True
+        return value
+
+    def delete(*args, **kwargs):
+        nonlocal lost
+        original_delete(*args, **kwargs)
+        if target == "jobs":
+            lost = True
+
+    folded = []
+    jobs = record.record_dir(ws) / "jobs" / RUN
+    jobs.mkdir(parents=True)
+    monkeypatch.setattr(record, "_lock", lock)
+    monkeypatch.setattr(record, "_pending_count", count)
+    monkeypatch.setattr(record, "delete_detail", delete)
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda *args: folded.append(RUN))
+    assert result["reason"] == "swapped"
+    assert jobs.exists() and runfile(ws).exists()
+    if target == "detail":
+        assert (record.record_dir(ws) / "detail" / RUN).exists()

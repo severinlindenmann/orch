@@ -347,7 +347,10 @@ def _open(ws, rel, mode, *, create_dirs=False, _directory=None):
             return result
         finally:
             if fd is not None:
-                os.close(fd)
+                if mode == "create_excl" and rel[-1].endswith(".lock"):
+                    _release_lock(ws, rel, fd, _directory=directory)
+                else:
+                    os.close(fd)
 
 
 def _close(fd):
@@ -486,10 +489,12 @@ def _try_lock(fd):
         except OSError as error:
             if error.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
                 return False
+            if error.errno in (errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOLCK):
+                return None  # This lock uses mtime and identity instead.
             raise
 
 
-def _lock_check(ws, rel, fd):
+def _lock_check(ws, rel, fd, *, fallback=False):
     with _io("lock"), _walk(ws, rel[:-1]) as directory:
         current = os.stat(
             rel[-1] if _FD else directory.path / rel[-1],
@@ -499,8 +504,30 @@ def _lock_check(ws, rel, fd):
         before = os.fstat(fd)
         if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
             raise RecordTampered("swapped")
-        if _FCNTL is None and _MSVCRT is None:
+        if fallback or (_FCNTL is None and _MSVCRT is None):
             os.utime(fd)
+
+
+def _release_lock(ws, rel, fd, *, _directory=None):
+    try:
+        before = os.fstat(fd)
+        if os.name == "nt":
+            # Windows handles lack FILE_SHARE_DELETE: capture identity, then close.
+            _close(fd)
+            fd = None
+        walk = nullcontext(_directory) if _directory is not None else _walk(ws, rel[:-1])
+        with _io("lock"), walk as directory:
+            name = rel[-1] if _FD else directory.path / rel[-1]
+            kw = {"dir_fd": directory.fd} if _FD else {}
+            try:
+                current = os.stat(name, follow_symlinks=False, **kw)
+                if (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino):
+                    os.unlink(name, **kw)
+            except FileNotFoundError:
+                pass
+    finally:
+        if fd is not None:
+            _close(fd)
 
 
 @contextmanager
@@ -510,14 +537,19 @@ def _lock(ws, run):
     while True:
         fd = _open(ws, rel, "create_excl", create_dirs=True)
         if fd is not None:
-            acquired = False
             try:
-                acquired = _try_lock(fd)
+                locked = _try_lock(fd)
+                if locked is not False:
+                    try:
+                        _lock_check(ws, rel, fd, fallback=locked is None)
+                    except RecordTampered as error:
+                        if error.reason != "swapped":
+                            raise
+                    else:
+                        yield lambda fd=fd, locked=locked: _lock_check(ws, rel, fd, fallback=locked is None)
+                        return
             finally:
-                if not acquired:
-                    _close(fd)
-            if acquired:
-                break
+                _release_lock(ws, rel, fd)
         else:
             try:
                 old = _open(ws, rel, "lock")
@@ -529,21 +561,15 @@ def _lock(ws, run):
                 with _io():
                     stale = time.time() - os.fstat(old).st_mtime > 30
                 # A live kernel lock wins over age. Keep it until unlink completes.
-                if stale and _try_lock(old):
-                    _unlink(ws, rel, expected=old)
+                if stale and _try_lock(old) is not False:
+                    closing, old = old, None
+                    _release_lock(ws, rel, closing)
             finally:
-                _close(old)
+                if old is not None:
+                    _close(old)
         if time.monotonic() >= deadline:
             raise RecordBusy("The record is busy.")
         time.sleep(0.005)
-    try:
-        _lock_check(ws, rel, fd)
-        yield lambda: _lock_check(ws, rel, fd)
-    finally:
-        try:
-            _unlink(ws, rel, expected=fd)
-        finally:
-            _close(fd)
 
 
 # Record logic: only calls the I/O core above.
@@ -693,7 +719,7 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
             events, skipped = _parse(fd, run)
         finally:
             _close(fd)
-        pending = _pending_count(workspace, run)
+        pending = max(pending, _pending_count(workspace, run))
         return ReadResult(
             "ok",
             _dedupe(events, run),
@@ -1078,6 +1104,7 @@ def _ended(events):
 
 
 def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list[dict]], Any]):
+    """Apply retention; fold must be idempotent per run because skipped runs may retry."""
     result = dict(
         fold_first=[], delete_detail=[], delete_run=[], status="ok", reason=None, message=None, alert=None
     )
@@ -1136,9 +1163,11 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
                 if run in plan["delete_detail"]:
+                    check_lock()
                     delete_detail(workspace, [run], seen_by="retention")
                     result["delete_detail"].append(run)
                 if run in plan["delete_run"]:
+                    check_lock()
                     _rmtree(workspace, ("jobs", run))
                     check_lock()
                     _unlink(workspace, ("runs", run + ".jsonl"))

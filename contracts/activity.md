@@ -111,6 +111,7 @@ text, output was cut, helpers are not visible). Capability flags per adapter (ag
 
 `[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048`. Pruning runs when a run ends and once a day:
 1. Before anything is deleted, the run is folded into `counts/<day>.json` (counts never depend on detail).
+   Fold must be idempotent per run: retention may fold again after a run was skipped.
 2. Runs that ended more than `keep_days` ago lose their detail folder and their run file (and `jobs/<run>/`).
 3. While the record is over `max_mb`: delete the detail folder of the oldest ended run, then (when no detail is left) the
    oldest ended run file. A running run is never pruned.
