@@ -34,8 +34,17 @@ def line(**kw):
     return json.dumps(value)
 
 
-def lost_notes(root):
-    return "".join(p.read_text() for p in (root / ".orch/record/alerts").glob("hook-lost-*.jsonl"))
+def lost_notes(root, unattributed=False):
+    pattern = "hook-lost-unattributed-*.jsonl" if unattributed else "hook-lost-2*.jsonl"
+    return "".join(p.read_text() for p in (root / ".orch/record/alerts").glob(pattern))
+
+
+def lost_lines(root):
+    return lost_notes(root, unattributed=True).splitlines()
+
+
+def lost_text(root):
+    return lost_notes(root) + lost_notes(root, unattributed=True)
 
 
 def events(root, run):
@@ -330,7 +339,11 @@ def test_call_from_outside_the_claims_process_tree_is_refused(proj, monkeypatch)
         other.kill()
         other.wait()
     assert not (proj / ".orch/record/runs").exists()
-    assert "other_run" in lost_notes(proj)
+    assert lost_notes(proj) == ""  # nothing under the run id the caller named
+    rows = [json.loads(x) for x in lost_lines(proj)]
+    assert [(r["run"], r["reason"]) for r in rows] == [(None, "other_run")] and rec["run"] not in lost_text(
+        proj
+    )
 
 
 def test_too_large_entry_still_leaves_an_audit_line(live, capsys):
@@ -398,3 +411,58 @@ def test_every_failure_ends_quietly_unless_strict(live, monkeypatch, capsys):
     assert capsys.readouterr().err.startswith("orch: ")
     with pytest.raises(record_hook.Refused):
         record_hook.cli(root, io.StringIO(line()), strict=True)
+
+
+@pytest.mark.parametrize("which", ["wrong_run", "unknown_ticket", "dead"])
+def test_unproven_callers_cannot_write_traces_under_a_run(live, monkeypatch, which):
+    """An unproven caller names a run id by its own word: nothing is written under it, whatever the reason."""
+    root, run, tid = live
+    if which == "wrong_run":
+        monkeypatch.setenv("ORCH_RUN", "r_zzzzzz")
+    elif which == "unknown_ticket":
+        monkeypatch.setenv("ORCH_TICKET", "t_nothere1")
+    else:
+        monkeypatch.setattr(runs, "state", lambda rec, at=None: "dead")
+    for _ in range(3):
+        with pytest.raises(record_hook.NotRecorded):
+            record_hook.hook(root, line())
+    assert lost_notes(root) == ""
+    rows = [json.loads(x) for x in lost_lines(root)]
+    assert [(r["run"], r["reason"]) for r in rows] == [(None, "not_active")]  # one per reason per minute
+    assert not (root / ".orch/record/runs").exists()
+
+
+def test_the_lost_trace_trims_loudly_never_silently(live):
+    root, run, _ = live
+    base = datetime.now(UTC)
+    for n in range(record._LOST_RUN_LINES + 20):
+        record.note_lost(root, run, "invalid", now=base + timedelta(minutes=2 * n))
+    rows = [json.loads(x) for x in lost_notes(root).splitlines()]
+    assert len(rows) == record._LOST_RUN_LINES + 1
+    assert rows[-1]["reason"] == "trimmed" and rows[-1]["run"] == run
+    # another run still gets its own lines (one run cannot suppress another's traces)
+    record.note_lost(root, "r_other0001", "invalid", now=base)
+    assert json.loads(lost_notes(root).splitlines()[-1])["run"] == "r_other0001"
+
+
+def test_the_lost_file_cap_leaves_one_global_trimmed_marker(live, monkeypatch):
+    root, run, _ = live
+    monkeypatch.setattr(record, "_LOST_FILE_BYTES", 400)
+    base = datetime.now(UTC)
+    for n in range(12):
+        record.note_lost(root, f"r_other{n:04d}", "invalid", now=base)
+    rows = [json.loads(x) for x in lost_notes(root).splitlines()]
+    assert sum(1 for r in rows if r["reason"] == "trimmed" and r["run"] is None) == 1
+    assert rows[-1]["reason"] == "trimmed"
+
+
+def test_the_tool_call_id_is_the_event_id_so_hook_and_collector_dedupe(live):
+    root, run, tid = live
+    got = record_hook.hook(root, line(id="toolu_01RawID", outcome={"ok": True, "error": None, "ms": 1}))
+    assert got["id"] == "toolu_01RawID"  # the raw tool-call id, not h_<run>:<seq>
+    unsafe = "toolu/with space&odd"
+    first = record_hook.hook(root, line(id=unsafe, outcome={"ok": True, "error": None, "ms": 1}))
+    assert first["id"].startswith("x_") and len(first["id"]) == 34
+    collector = collector_line(run, tid, 9) | {"id": unsafe, "outcome": {"ok": True, "error": None, "ms": 1}}
+    with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+        assert record.registered_writer(root).append(collector) is None  # the same hashed id: deduped

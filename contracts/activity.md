@@ -14,9 +14,12 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
 ```
 .orch/record/                         LOCAL, in .orch/.gitignore ("record/") and the .git/info/exclude block. Never committed
   alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1)
-  alerts/hook-lost-<YYYY-MM-DD>.jsonl  hook entries that could not be written: {v, schema "orch.record-lost/1", at, run,
-                                      reason: hider_off | not_active | other_run | invalid | too_large | not_provable};
-                                      no content, at most one per run and reason per minute, none when there was no run
+  alerts/hook-lost-<YYYY-MM-DD>.jsonl  hook entries of a proven caller that could not be written: {v, schema
+                                      "orch.record-lost/1", at, run, reason: hider_off | invalid | too_large | other_run};
+                                      no content; 1 per run and reason per minute, 50 lines per run, then one "trimmed"
+                                      line (run set), and a global "trimmed" line (run null) when the file passes 1 MB
+  alerts/hook-lost-unattributed-<YYYY-MM-DD>.jsonl  the same for a caller NOT proven to be in the run (not_active |
+                                      other_run | not_provable): run is null, never a run id the caller named; 1 per reason per minute
   pending/<run>/<time_uuid>.json     prepared writes waiting for the run lock
   meta.json                           {"schema": "orch.record/1", "since": "<time>", "keep_days": 90, "max_mb": 2048}
   runs/<run>.jsonl                    one file per run, one orch.activity/1 event per line
@@ -66,6 +69,8 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   run is dropped; the caller's `at` and `harness` are never kept (time of the call; the tool this process runs under).
   Where the process tree cannot be read (Windows today) nothing is written. *Follow-up:* the per-run hook file token
   (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
+  The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`) put there by the caller (this entry takes
+  event-shaped lines, not raw tool payloads); the writer hashes an unsafe one once, the same for hook and collector.
   A payload over 8 MB is not read further: a minimal `step` with `detail_lost: true` is written, never no line.
 - **Reserved ids.** `<run>:<seq>` is the default id of collector lines (and of other origins); a hook line without an id
   gets `h_<run>:<seq>` instead, so a hook line can never take the id of a collector line still to come (dedupe would

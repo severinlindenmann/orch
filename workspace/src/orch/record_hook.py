@@ -11,7 +11,10 @@ says in one plain stderr line why nothing was recorded. What it never does:
   setting the same variables; a line naming another run is dropped;
 - write when key hiding is not ready (no registered hider: nothing is written, never raw);
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
-A hook line that cannot be written leaves a short trace (record.note_lost) unless there was no run at all.
+A hook line that cannot be written leaves a short trace: under the run (record.note_lost) only for a proven
+caller, else in one global file without a run id (record.note_unattributed); none when there was no run.
+The event id is the tool's own tool-call id (Claude: tool_use_id), put in `id` by the caller; the record
+hashes an unsafe one once, the same way for hook and collector, so the two dedupe. Event-shaped lines only.
 --strict turns every "not recorded" into a refusal (exit 2) for scripts and tests.
 """
 
@@ -190,6 +193,11 @@ def hook(root, text: str, environ=None, *, too_large: bool = False) -> dict | No
         raise NotRecorded("Not inside an orch run; nothing was recorded.")
     try:
         require_run(root, ids)
+    except NotRecorded as e:  # the caller is not proven: the claimed run id is its word, so nothing under it
+        if e.reason:
+            record.note_unattributed(root, e.reason)
+        raise
+    try:
         from orch import tickets
 
         if too_large:

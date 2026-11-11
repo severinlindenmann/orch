@@ -695,36 +695,73 @@ def _alert(ws, *, target, run, reason, seen_by):
     return alert
 
 
-LOST_REASONS = ("hider_off", "not_active", "other_run", "invalid", "too_large", "not_provable")
+LOST_REASONS = (
+    "hider_off",
+    "invalid",
+    "too_large",
+    "other_run",
+)  # after the caller is proven to be in the run
+UNPROVEN_REASONS = ("not_active", "other_run", "not_provable")  # before it is: never under a run id
+_LOST_RUN_LINES = 50  # per run and day; the next one is a "trimmed" marker, then nothing
+_LOST_FILE_BYTES = 1024**2  # per file; over it only a global "trimmed" marker is written
 
 
-def note_lost(ws, run, reason, *, now=None):
-    """A hook entry that could not be written leaves one short trace (orch.record-lost/1, no content), at most
-    one per run and reason per minute, in alerts/hook-lost-<day>.jsonl. Never raises."""
-    if reason not in LOST_REASONS or not isinstance(run, str) or not re.fullmatch(_RUN, run):
-        return
+def _note(ws, name, run, reason, now, run_lines):
     now = datetime.now(UTC) if now is None else now
     stamp = now.isoformat().replace("+00:00", "Z")
     try:
-        fd = _open(ws, ("alerts", f"hook-lost-{stamp[:10]}.jsonl"), "read_append", create_dirs=True)
+        fd = _open(ws, ("alerts", f"{name}-{stamp[:10]}.jsonl"), "read_append", create_dirs=True)
         try:
             raw = _read_bytes(fd)
-            if len(raw) > 256 * 1024:
-                return
-            for line in raw.splitlines()[-200:]:
+            rows = []
+            for line in raw.splitlines():
                 try:
-                    old = json.loads(line)
-                    if old["run"] == run and old["reason"] == reason:
-                        if timedelta(0) <= now - datetime.fromisoformat(old["at"]) < timedelta(minutes=1):
-                            return
-                except (ValueError, KeyError, TypeError):
+                    rows.append(json.loads(line))
+                except (ValueError, TypeError):
                     continue
-            note = dict(v=1, schema="orch.record-lost/1", at=stamp, run=run, reason=reason)
+            rows = [r for r in rows if isinstance(r, dict)]
+            if len(raw) > _LOST_FILE_BYTES:
+                if not any(r.get("run") is None and r.get("reason") == "trimmed" for r in rows):
+                    write = dict(run=None, reason="trimmed")
+                else:
+                    return
+            else:
+                mine = [r for r in rows if r.get("run") == run]
+                for old in mine[-200:]:
+                    try:
+                        if old["reason"] == reason and (
+                            timedelta(0) <= now - datetime.fromisoformat(old["at"]) < timedelta(minutes=1)
+                        ):
+                            return
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                if run_lines and len(mine) >= run_lines:
+                    if any(r.get("reason") == "trimmed" for r in mine):
+                        return
+                    write = dict(run=run, reason="trimmed")  # loud, never a silent stop (invariant I3)
+                else:
+                    write = dict(run=run, reason=reason)
+            note = dict(v=1, schema="orch.record-lost/1", at=stamp, **write)
             _write(fd, (_json(note) + "\n").encode())
         finally:
             _close(fd)
     except (RecordTampered, RecordUnavailable):
         pass  # a trace that cannot be stored is not worth failing the hook
+
+
+def note_lost(ws, run, reason, *, now=None):
+    """A hook entry of a PROVEN caller (live claim, inside its process tree) that could not be written leaves
+    one short trace (orch.record-lost/1, no content): alerts/hook-lost-<day>.jsonl, at most one per run and
+    reason per minute, at most 50 lines per run, then one "trimmed" line. Never raises."""
+    if reason in LOST_REASONS and isinstance(run, str) and re.fullmatch(_RUN, run):
+        _note(ws, "hook-lost", run, reason, now, _LOST_RUN_LINES)
+
+
+def note_unattributed(ws, reason, *, now=None):
+    """A hook entry whose caller could not be proven to be in the run: nothing under any run id (the claimed
+    run is the caller's word), only the reason, in alerts/hook-lost-unattributed-<day>.jsonl, 1 per minute."""
+    if reason in UNPROVEN_REASONS:
+        _note(ws, "hook-lost-unattributed", None, reason, now, 0)
 
 
 def _report(ws, error, target, run, seen_by):

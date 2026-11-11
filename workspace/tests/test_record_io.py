@@ -84,6 +84,8 @@ def plant(ws, kind):
 
 # Exact call expressions keep arbitrary Path receivers out of the allowlist.
 SAFE_ATTRIBUTE_CALLS = {
+    "r.get",
+    "rows.append",
     "(_json(note) + '\\n').encode",
     "now.isoformat",
     "now.isoformat().replace",
@@ -190,6 +192,7 @@ SAFE_ATTRIBUTE_VALUES = {
 ERROR_BOUNDARIES = {
     "_alert",
     "note_lost",
+    "_note",
     "read_run",
     "_pending_count",
     "apply_retention",
