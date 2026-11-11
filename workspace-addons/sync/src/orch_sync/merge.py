@@ -26,10 +26,18 @@ _SPECIAL = {
     "history",
     "sessions",
     "ext",
+    "verdicts",
 }
 _ANSWER = ("answer", "answered_by", "via")
 MAX_DEPTH = 32
-MAX_ITEMS = {"history": 5000, "checklist": 500, "questions": 500, "refs": 500, "sessions": 200}
+MAX_ITEMS = {
+    "history": 5000,
+    "checklist": 500,
+    "questions": 500,
+    "refs": 500,
+    "sessions": 200,
+    "verdicts": 64,
+}
 MAX_BYTES = 2_000_000
 MAX_COUNTER = 999_000_000  # keys stay inside the schema pattern (9 digits)
 _IDENT = {
@@ -77,8 +85,9 @@ def _num(i):
 class _Ctx:
     """One merge: which side is newer (symmetric: updated_at, then canonical json) and the history lines."""
 
-    def __init__(self, a, b, now, person=None):
+    def __init__(self, a, b, now, person=None, verdict=None):
         self.now = now
+        self._verdict = verdict  # verdict(entry, ticket) -> "current" | "stale" | None; None = nobody
         self.ticket = a.get("id")
         self._person = person  # person(step, ticket id) -> bool, from the receiving core; None = nobody
         self.a_newer = (a.get("updated_at", ""), _canon(a)) >= (b.get("updated_at", ""), _canon(b))
@@ -91,6 +100,14 @@ class _Ctx:
             return bool(self._person and self._person(step, self.ticket))
         except Exception:  # noqa: BLE001 - a verifier that fails vouches for nobody
             return False
+
+    def verdict_state(self, entry, ticket):
+        """The receiving core's say on one verdict entry (humanproof.verdict_verifier). Never raises."""
+        try:
+            st = self._verdict(entry, ticket) if self._verdict else None
+        except Exception:  # noqa: BLE001 - a verifier that fails vouches for nobody
+            return None
+        return st if st in ("current", "stale") else None
 
     def say(self, text, lost=_MISSING):
         self.lines[("sync: " + text, "" if lost is _MISSING else _canon(lost))] = lost
@@ -364,8 +381,55 @@ def _ref_id(r):
     return _canon([r.get(k) for k in ("kind", "url", "ticket", "name", "path")])
 
 
-def _merge(base, a, b, now, person=None):
-    ctx = _Ctx(a, b, now, person)
+# The verdict entries a ticket carries (human-proof.md "Done needs a signed verdict"). The fields of a stored
+# entry: the core's humanproof.VERDICT_FIELDS (a test fails if the two drift apart). This module takes no
+# dependency on the core, so it keeps the list and the shape of the contract's ticket.schema.json.
+_VERDICT_FIELDS = ("kind", "nonce", "mac")
+VERDICT_CAP = 8
+_NONCE = re.compile(r"^[0-9a-f]{16}$")
+_MAC = re.compile(r"^[A-Za-z0-9_-]{43}$")
+
+
+def _verdict_shape(e):
+    return (
+        isinstance(e, dict)
+        and set(e) == set(_VERDICT_FIELDS)
+        and e["kind"] in ("person", "agent")
+        and isinstance(e["nonce"], str)
+        and bool(_NONCE.match(e["nonce"]))
+        and isinstance(e["mac"], str)
+        and bool(_MAC.match(e["mac"]))
+    )
+
+
+def _verdicts(ctx, base, a, b, out):
+    """The merged `verdicts`. AUTHORITY = every entry from base/a/b that the receiving core vouches for (its own
+    MAC over the merged ticket that is the CURRENT ledger entry): always kept, never changed or dropped,
+    whatever a side did. An entry that is the core's own MAC but no longer current (replayed, tombstoned,
+    superseded) is dropped. Every other entry (another machine's, or one that cannot be checked here) is merged
+    three-way by `mac`, deduplicated, and capped so the total is at most VERDICT_CAP. Sorted by mac: the same
+    bytes in either argument order. Without a verifier nothing is authority and nothing is dropped as stale."""
+    lists = [[e for e in (t.get("verdicts") or []) if _verdict_shape(e)] for t in (base, a, b)]
+    auth, others = {}, [[], [], []]
+    for i, lst in enumerate(lists):
+        for e in lst:
+            st = ctx.verdict_state(e, out)
+            if st == "current":
+                auth[e["mac"]] = min(auth.get(e["mac"], e), e, key=_canon)
+            elif st is None:
+                others[i].append(e)
+    rest = _keyed(
+        others[0], others[1], others[2], lambda e: e["mac"], lambda e0, ea, eb: min(ea, eb, key=_canon)
+    )
+    for m in auth:
+        rest.pop(m, None)
+    keep = [auth[m] for m in sorted(auth)][:VERDICT_CAP]
+    keep += [rest[m] for m in sorted(rest)][: VERDICT_CAP - len(keep)]
+    return sorted(keep, key=lambda e: e["mac"])
+
+
+def _merge(base, a, b, now, person=None, verdict=None):
+    ctx = _Ctx(a, b, now, person, verdict)
     # the same id added on both sides with different content: the newer side's item is renumbered
     ren = _renumber_clashes(
         ctx,
@@ -435,6 +499,10 @@ def _merge(base, a, b, now, person=None):
     if out["status"] == "done" and any(not (c.get("done") or c.get("wont_do")) for c in out["checklist"]):
         out["status"] = "active"
         ctx.say("reopened, a new checklist item came in")
+    if any("verdicts" in t for t in (base, a, b)):
+        vs = _verdicts(ctx, base, a, b, out)
+        if vs:
+            out["verdicts"] = vs
     qs = _keyed(
         base.get("questions", []),
         a["questions"],
@@ -521,18 +589,27 @@ def _valid(base, a, b):
     return True
 
 
-def merge_ticket(base, upstream, mine, now, person=None):
+def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
     lists): the caller pauses and keeps all three. Never raises. The inputs are not modified.
     `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
     wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so. The
     verdict reads the core's ledger when asked: the sync caller must read, merge and write under the ticket's
-    apply_op lock, so the ledger cannot move between the merge and the write."""
+    apply_op lock, so the ledger cannot move between the merge and the write.
+    `verdict(entry, ticket)` is the core's say on a verdict entry (humanproof.verdict_verifier): "current" (its own
+    MAC, the current ledger entry), "stale" (its own MAC, no longer current: dropped) or None (not provable here:
+    carried along). None = nobody verifies. The merge never decides Done: `status` follows the plain rule below
+    and a raw "done" without a current verdict is Review on the receiving core.
+    WIRING (W2a, when the sync caller uses this): pass `verdict=humanproof.verdict_verifier(root)`, run the read,
+    the merge and the write under `tickets.apply_op`'s lock, and write only through `tickets._write` (the one
+    guard that tombstones). This `verdict` hook is a stable contract: v2 builds on it (W6)."""
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
-        out = _merge({} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person)
+        out = _merge(
+            {} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person, verdict
+        )
         # Run the authority and normalization rules before reusing an input. A no-op
         # must never bypass the receiving core's verdict on signed decisions.
         matches = [t for t in (upstream, mine) if _content(t) == _content(out)]

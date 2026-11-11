@@ -490,7 +490,7 @@ def test_outcome_shown_by_show_on_done_only(proj, run, new_ticket):
     tid = new_ticket()
     assert run("ticket", "outcome", tid, "--changed", "Added CSV export.")[0] == 0
     assert "Changed: Added CSV export." not in run("ticket", "show", tid)[1]
-    t = read(proj, tid)
-    t["status"] = "done"
-    (proj / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(t), encoding="utf-8")
+    from conftest import sign_done
+
+    sign_done(proj, tid)  # Done is a signed verdict: a raw "done" in the file would read as Review
     assert "Changed: Added CSV export." in run("ticket", "show", tid)[1]

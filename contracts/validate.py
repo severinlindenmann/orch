@@ -1249,6 +1249,28 @@ def wontdo_is_human(c):
     return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["ticket"], c["decision"]))
 
 
+def verdict_checks(checklist):
+    """sha256 hex of canonical JSON [[id, text, done is true, wont_do is true], ...]: WHAT a verdict accepted."""
+    rows = [[x.get("id"), x.get("text"), x.get("done") is True, x.get("wont_do") is True] for x in checklist]
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def verdict_is_human(c):
+    """Done needs a signed verdict (human-proof.md): a ticket entry counts only when the ledger is readable, the entry's
+    MAC is the receiving core's own verdict1 MAC = HMAC-SHA256(human.key, "verdict1." + workspace id + "." + ticket id + "."
+    + canonical JSON of {status: "done", kind, checks, nonce}) over the ticket's CURRENT checklist (`checks`), AND it is the
+    CURRENT ledger entry for the ticket (a tombstone or a newer MAC makes it stale)."""
+    m, cur = c.get("mac"), c.get("ledger_current")
+    if c.get("ledger") != "ok" or not isinstance(m, str) or not m or not isinstance(cur, str):
+        return False
+    if c.get("kind") not in ("person", "agent"):
+        return False
+    record = {"status": "done", "kind": c["kind"], "checks": verdict_checks(c["checklist"]), "nonce": c["nonce"]}
+    canon = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    want = _b64u(hmac.new(bytes.fromhex(c["key"]), f"verdict1.{c['workspace']}.{c['ticket']}.{canon}".encode(), hashlib.sha256).digest())
+    return hmac.compare_digest(m, want) and hmac.compare_digest(m, cur)
+
+
 def relay_conn(c):
     """Where relay calls go: only the record in the guarded home; a differing workspace file refuses; env never used."""
     rec = c.get("record")
@@ -1307,6 +1329,8 @@ def kind_human():
         _expect(f"human deliver {c['name']}", pending_deliver(c), c["deliver"])
     for c in vec["wont_do"]:
         _expect(f"human wont_do {c['name']}", wontdo_is_human(c), c["human"])
+    for c in vec["verdict"]:
+        _expect(f"human verdict {c['name']}", verdict_is_human(c), c["human"])
     for c in vec["relay"]:
         _expect(f"human relay {c['name']}", relay_conn(c), c["expect"])
     for c in vec["dev_mark"]:
