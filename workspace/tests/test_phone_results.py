@@ -319,3 +319,24 @@ def test_secret_labels_hide_their_values():
 def test_order_parses_timestamps():
     cs = [cand(1, "2026-11-11T08:00:00.5Z"), cand(2, "2026-11-11T08:00:00Z")]
     assert [r["id"] for r in phone_results.prepare(Path("."), cs, h=NOHIDE)] == [cs[0]["id"], cs[1]["id"]]
+
+
+def test_long_title_does_not_eat_the_block_budget():
+    c = cand(1, "2026-11-11T08:00:00Z") | {"title": "T" * 2400}
+    (r,) = phone_results.prepare(Path("."), [c], h=NOHIDE)
+    assert len(r["title"]) == 200 and r["doc"]["blocks"][0]["text"] == "Totals match."
+
+
+@pytest.mark.parametrize("label", ["Password", "pwd", "OTP", "Cookie", "Session", "Access_key", "Key ID",
+                                   "Auth", "OAuth", "Authorization", "Signature", "Pincode"])  # fmt: skip
+def test_secret_names_hide(label):
+    d = doc(blocks=[{"type": "kv", "items": [{"key": label, "value": "v4lu3xyz"}]}])
+    (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
+    assert "v4lu3xyz" not in json.dumps(r)
+
+
+@pytest.mark.parametrize("label", ["Keyboard", "Monkey", "Hotkey", "Turkey", "Passed", "Passage", "Author"])
+def test_ordinary_names_stay(label):
+    d = doc(blocks=[{"type": "kv", "items": [{"key": label, "value": "v4lu3xyz"}]}])
+    (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
+    assert "v4lu3xyz" in json.dumps(r)

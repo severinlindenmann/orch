@@ -132,8 +132,9 @@ def value_hider(root: Path):
 # Known gaps (not covered by the value hider or the pattern scrub): fullwidth/NFKC forms, a value split over
 # cells, base32, host case in a URL, a token inside a URL path.
 NAME_RE = re.compile(
-    r"(?i)token|secret|passw|passphrase|credential|auth|bearer|signature|api[ _-]?key|private[ _-]?key"
-    r"|\bkey\b|\bpin\b"
+    r"(?i)token|secret|passw|passphrase|credential|bearer|api[ _-]?key|private[ _-]?key|access[ _-]?key"
+    r"|\bkey\b|\bkey[ _-]?id\b|\bpin(code)?\b|\bpwd\b|\botp\b|\bcookies?\b|\bsessions?\b"
+    r"|\bauth\b|oauth|authori[sz]ation|\bsignature\b"
 )
 CUT = "[hidden]"
 
@@ -196,17 +197,17 @@ def _one(r: dict, h) -> dict | None:
             return None
         from orch.phone_view import redact  # late: phone_view imports this module
 
-        r = trim(r)  # first: a trim never cuts a string, and the hider then sees less
         title = r.pop("title", None)
-        _hide_labelled(r["doc"])
-        for _ in range(2):  # hide (exact values), scrub (patterns), trim; twice: the second pass proves it
-            r = trim(_scrub(h.hide_json(r), redact))
         if isinstance(title, str):  # the whole title is hidden first, then cut: a cut never leaves a prefix
             t = redact(h.hide_text(title)).strip()
             t = t if len(t) <= 200 else t[:199].rstrip() + "…"
             t = "".join(ch for ch in t if ch >= " " and ch != "\x7f")
             if t:
-                r["title"] = t
+                r["title"] = t  # in place before the trim: it counts against the 2560 bytes
+        r = trim(r)  # a trim never cuts a string, and the hider then sees less
+        _hide_labelled(r["doc"])
+        for _ in range(2):  # hide (exact values), scrub (patterns), trim; twice: the second pass proves it
+            r = trim(_scrub(h.hide_json(r), redact))
         return r if phone_ok(r) and h.hide_json(r) == r and _scrub(r, redact) == r else None
     except Exception:
         return None
