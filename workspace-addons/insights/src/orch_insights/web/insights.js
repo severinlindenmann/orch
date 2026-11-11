@@ -24,11 +24,11 @@ function renderRows() {
     tile.setAttribute('aria-hidden', 'true');
     const description = node('div');
     description.append(node('div', row.name, 'name'), node('div', row.source, 'source'));
-    if (row.detail) description.append(node('div', row.detail, 'detail'));
+    const facts = [row.detail, row.health === 'unknown' ? '' : row.numbers, row.unseen].filter(Boolean);
+    if (facts.length) description.append(node('div', facts.join(' · '), 'numbers'));
     const usage = node('div', undefined, 'usage');
-    usage.append(node('div', row.uses === null ? '-' : `${row.uses} uses`),
-      node('div', row.numbers, 'numbers'));
-    if (row.unseen) usage.append(node('div', row.unseen, 'unseen'));
+    if (row.uses === null) usage.append(node('b', '-'));
+    else usage.append(node('b', String(row.uses)), document.createTextNode(' this month'));
     item.append(tile, description, node('div', row.label, `health ${row.health}`), usage);
     rows.append(item);
   }
@@ -79,7 +79,7 @@ function renderNeeds() {
   if (!overview.needs.length) needs.append(node('p', overview.empty_needs));
   for (const card of overview.needs) {
     const article = node('article', undefined, `card ${card.tone}`);
-    const button = node('button', card.button);
+    const button = node('button', card.button, card.tone === 'warn' ? 'primary' : '');
     button.addEventListener('click', () => {
       selected = card.target;
       selectTab(kinds[card.kind]);
