@@ -203,6 +203,27 @@ def _handle_attrs(h) -> int:
     return info.attrs
 
 
+def _handle_tag(h) -> int:
+    """The reparse tag of what the handle is (FileAttributeTagInfo); 0 when unknown (counts as a link)."""
+    ctypes, wintypes, adv, k32 = _api()
+
+    class _Tag(ctypes.Structure):
+        _fields_ = [("attrs", wintypes.DWORD), ("tag", wintypes.DWORD)]
+
+    info = _Tag()
+    k32.GetFileInformationByHandleEx.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    if not k32.GetFileInformationByHandleEx(
+        h, 9, ctypes.byref(info), ctypes.sizeof(info)
+    ):  # 9 = FileAttributeTagInfo
+        raise _cant("a part of its path could not be checked")
+    return info.tag
+
+
 def _handle_path(h) -> str:
     """The real path the handle points at (GetFinalPathNameByHandleW, no long-path prefix)."""
     ctypes, wintypes, adv, k32 = _api()
@@ -255,9 +276,10 @@ def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
     check_scope(path)  # the only DACL writer: the scope guard holds here too, whoever calls it (early, cheap)
     h = _open_target(path)
     try:
-        if _handle_attrs(h) & REPARSE:
+        attrs = _handle_attrs(h)
+        if attrs & REPARSE and link_reparse(attrs, _handle_tag(h)):  # other reparse points (OneDrive...) work
             raise _no("it is a link or junction")
-        check_scope(_handle_path(h))  # what was REALLY opened, not the name
+        check_scope(_handle_path(h), final=True)  # what was REALLY opened, not the name
         _set_dacl_on_handle(h, is_dir, sid)
         protected, aces = _read_dacl(path, handle=h)
         parse_aces(protected, aces, sid)
@@ -450,7 +472,12 @@ _homes: set[str] = set()  # real paths (normcase) of the guarded homes this proc
 
 
 def _real(path: str | os.PathLike) -> str:
-    return os.path.normcase(os.path.realpath(os.fspath(path)))
+    """The real path, normcased. Windows can refuse to resolve one (WinError 448, an untrusted mount point on
+    a junction made by a user): that is a refusal with nothing written, never a crash."""
+    try:
+        return os.path.normcase(os.path.realpath(os.fspath(path)))
+    except OSError as e:
+        raise _no("its real path could not be read") from e
 
 
 def _inside(child: str, parent: str) -> bool:
@@ -506,12 +533,14 @@ def allow_home(path: str | os.PathLike) -> None:
     _homes.add(rp)
 
 
-def check_scope(path: str | os.PathLike) -> None:
+def check_scope(path: str | os.PathLike, final: bool = False) -> None:
     """Refuse unless `path` (real path: links and junctions resolved) is inside a guarded home recorded by
-    allow_home, and is not a forbidden place. Called before EVERY rights write. No home recorded = refused."""
+    allow_home, and is not a forbidden place. Called before EVERY rights write. No home recorded = refused.
+    final=True: `path` is already a handle's final path (the system resolved it), so it is only normalised,
+    never resolved again by name."""
     if not _windows():
         return
-    rp = _real(path)
+    rp = os.path.normcase(os.path.normpath(os.fspath(path))) if final else _real(path)
     why = _forbidden(rp, is_home=rp in _homes)
     if why is None and not any(_inside(rp, h) for h in _homes):
         why = "it is not inside orch's own folder"

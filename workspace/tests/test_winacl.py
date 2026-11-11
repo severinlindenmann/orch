@@ -576,12 +576,13 @@ def test_install_record_is_written_with_no_rights_change_outside_any_home(win, t
     assert _writes(win) == []
 
 
-def _handle_seams(monkeypatch, *, attrs=0, final=None, log=None):
+def _handle_seams(monkeypatch, *, attrs=0, final=None, log=None, tag=0):
     log = [] if log is None else log
     monkeypatch.setattr(winacl, "_open_target", lambda p: log.append("open") or "H")
     monkeypatch.setattr(winacl, "_close_target", lambda h: log.append("close"))
     monkeypatch.setattr(winacl, "_handle_attrs", lambda h: log.append("attrs") or attrs)
     monkeypatch.setattr(winacl, "_handle_path", lambda h: log.append("final") or final)
+    monkeypatch.setattr(winacl, "_handle_tag", lambda h: log.append("tag") or tag)
     monkeypatch.setattr(winacl, "_set_dacl_on_handle", lambda h, d, s: log.append("set"))
     monkeypatch.setattr(winacl, "_read_dacl", lambda p, handle=None: log.append(("read", handle)) or FILE_OK)
     return log
@@ -613,17 +614,68 @@ def test_write_dacl_refuses_a_reparse_point_handle(win, tmp_path, monkeypatch):
     monkeypatch.setattr(winacl, "_write_dacl", _REAL_WRITE_DACL)
     f = tmp_path / "k.key"
     f.write_text("x")
-    log = _handle_seams(monkeypatch, attrs=winacl.REPARSE, final=str(f))
-    with pytest.raises(Refused, match="link or junction"):
-        winacl._write_dacl(f, False, SID)
-    assert log == ["open", "attrs", "close"]
+    for tag in (winacl.TAG_SYMLINK, winacl.TAG_MOUNT_POINT, 0):  # unknown tag: fail closed
+        log = _handle_seams(monkeypatch, attrs=winacl.REPARSE, final=str(f), tag=tag)
+        with pytest.raises(Refused, match="link or junction"):
+            winacl._write_dacl(f, False, SID)
+        assert log == ["open", "attrs", "tag", "close"]
+
+
+def test_write_dacl_allows_a_cloud_placeholder_reparse_point(win, tmp_path, monkeypatch):
+    """OneDrive and similar reparse points are not name-surrogates: ordinary files for us (L2)."""
+    monkeypatch.setattr(winacl, "_write_dacl", _REAL_WRITE_DACL)
+    f = tmp_path / "k.key"
+    f.write_text("x")
+    log = _handle_seams(monkeypatch, attrs=winacl.REPARSE, final=str(f), tag=0x9000001A)
+    winacl._write_dacl(f, False, SID)
+    assert "set" in log
+
+
+def test_final_path_is_not_resolved_by_name_again(win, tmp_path, monkeypatch):
+    """L1: the handle's final path is only normalised; os.path.realpath is never called on it."""
+    monkeypatch.setattr(winacl, "_write_dacl", _REAL_WRITE_DACL)
+    f = tmp_path / "k.key"
+    f.write_text("x")
+    _handle_seams(monkeypatch, final=str(f))
+    calls = []
+    real = os.path.realpath
+    monkeypatch.setattr(
+        os.path, "realpath", lambda p, *a, **k: calls.append(os.fspath(p)) or real(p, *a, **k)
+    )
+    winacl._write_dacl(f, False, SID)
+    assert calls.count(os.fspath(f)) == 1  # the early name check only; the final path is not re-resolved
+
+
+def test_untrusted_mount_point_error_is_a_plain_refusal(win, users, monkeypatch):
+    """WinError 448 from realpath on a user-created junction: refused, nothing written."""
+
+    def boom(p, *a, **k):
+        raise OSError(448, "The path cannot be traversed because it contains an untrusted mount point")
+
+    monkeypatch.setattr(os.path, "realpath", boom)
+    home = users["home"]
+    calls = [
+        lambda: winacl.check_scope(home / "k"),
+        lambda: winacl.set_private(home, True),
+        lambda: winacl.allow_home(home / "x"),
+    ]
+    for fn in calls:
+        with pytest.raises(Refused, match="real path could not be read"):
+            fn()
+    assert _writes(win) == []
 
 
 def test_guarded_home_raises_home_refused_not_a_winacl_refusal(tws, tmp_path, monkeypatch):
+    # independent of the install kind and of where the test runs (native Windows too): a normal install with
+    # the default home and a home that passes the pairing check, so only allow_home's refusal is under test
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    monkeypatch.setattr(hp, "home_ok", lambda *a: True)
+    monkeypatch.delenv("ORCH_HOME", raising=False)
+
     def refuse(path):
         raise winacl._no("orch would change rights outside its own folder: it is a drive root")
 
     monkeypatch.setattr(winacl, "allow_home", refuse)
     with pytest.raises(hp.HomeRefused) as e:
         hp.guarded_home(tws)
-    assert "drive root" not in str(e.value) and "orch folder" in str(e.value)
+    assert str(e.value) == hp.MSG_HOME_PLACE
