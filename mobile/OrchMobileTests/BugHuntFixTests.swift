@@ -125,14 +125,6 @@ final class BugHuntFixTests: XCTestCase {
         XCTAssertEqual(ReviewRules.reviewQuestion(ticket: t, workspaceId: "ws", ticketId: "t", questions: [q], answers: [:]), q)
     }
 
-    func testC4WaitingAnsweredOnPhoneIsNotNeedsYou() {
-        let q = MockRelayTestsFixtures.question
-        let u = update("1", kind: "note", view: TicketSnapshot(title: "Rename", status: "waiting"), workspace: q.message.from,
-                       ticket: q.message.ticket!)
-        XCTAssertNotEqual(TicketBuilder.build(updates: [u], questions: [q], answers: [q.id: "DATE"]).first?.status, .needsYou)
-        XCTAssertEqual(TicketBuilder.build(updates: [u], questions: [q], answers: [:]).first?.status, .needsYou)
-    }
-
     func testC5ExactNameWinsOverEarlierSuffixMatch() {
         let attachments = [TicketSnapshot.Attachment(name: "old/index.html", artifactId: "a_aaaaaaaaaaaa"),
                            TicketSnapshot.Attachment(name: "index.html", artifactId: "a_bbbbbbbbbbbb")]

@@ -94,9 +94,7 @@ enum TicketBuilder {
             if st == .needsYou { st = .working }   // only a real open question counts (below)
             // The ticket's own status (when the snapshot carries a known one) decides, whatever the note's kind: an agent's
             // "done" arrives as review, a person's Done as done. The update kind only decides for old snapshots without a status (failure and stopped keep their own sign when the ticket is done).
-            // "waiting" alone is not "Needs your OK": only a real open question promotes (below), so a question answered
-            // on the phone does not leave the ticket stuck without a card.
-            if var own = Ticket.Status(ticketStatus: statusView?.status) { if own == .needsYou { own = .working }; st = own }
+            if let own = Ticket.Status(ticketStatus: statusView?.status) { st = own }
             // An update without a snapshot (a plain note) does not undo a settled Review/Done the last snapshot said
             // (otherwise a review ticket turns Working and the review bar disappears). Other statuses keep the update kind.
             else if statusView == nil, let own = Ticket.Status(ticketStatus: view?.status), own == .review || own == .done { st = own }

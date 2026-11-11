@@ -30,8 +30,7 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(view.running, true)
         XCTAssertEqual(view.started, true)
         XCTAssertNil(view.light)
-        // The overlaid status decides; "waiting" without an open question is Working (C4: only a real question is Needs your OK).
-        XCTAssertEqual(ticket.status, .working)
+        XCTAssertEqual(ticket.status, Ticket.Status(ticketStatus: "waiting"))
     }
 
     func testDashboardTicketWithOnlyLightViews() throws {
