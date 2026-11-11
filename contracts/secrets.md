@@ -197,14 +197,23 @@ prints a header).
 - **The command's processes end with the call.** On POSIX the child runs in its own session (when stdin is not a terminal) and,
   when the call ends or is interrupted (TERM, HUP, QUIT), everything it started is ended too (TERM, then KILL).
   Further signals during that cleanup are ignored. Pipes held by a leftover process cannot hang the call.
-- **Where a use is recorded.** A use is recorded in the record of the orch run that makes it (or the unattributed run, below) (`ORCH_RUN` +
-  `ORCH_TICKET`). An **agent** caller (agent tool in the environment, or `--by agent:...`) must be inside a live run
-  whose run and ticket belong together (the same claim orch's own runs use); otherwise `env`, `file`, `exec` and `get`
-  are refused before any key or file is touched (`Refused: an agent can use keys only inside an active orch run, where
-  the use is recorded.` / `Refused: this run is not active, so the use cannot be recorded.`). A person or script **without** a run is
-  recorded in the workspace's unattributed run of the day (run `r_outside_<yyyymmdd>`, ticket `t_outside`, agent
-  `main`, harness `generic`) under the same fail-closed rule; a script that names a run that is not live is refused. Level 1 limit: an agent that hides its identity (no agent tool in the environment, no
-  `--by agent:`, no run variables) looks like a script and is neither limited nor recorded.
+- **Where a use is recorded.** A use is recorded in the record of the orch run that makes it (`ORCH_RUN` +
+  `ORCH_TICKET`), or in the unattributed run (below). An **agent** caller (agent tool in the environment, or
+  `--by agent:...`) must be inside a live run whose run and ticket belong together (the same claim orch's own runs
+  use); otherwise `env`, `file`, `exec` and `get` are refused before any key or file is touched (`Refused: an agent
+  can use keys only inside an active orch run, where the use is recorded.` / `Refused: this run is not active, so the
+  use cannot be recorded.`). A script that names a run that is not live is refused.
+- **The unattributed run.** A person or script **without** a run is recorded in the workspace's unattributed run of
+  the day: run `r_outside_<yyyymmdd>` (UTC), ticket `t_outside`, agent `main`, harness `generic`, same fail-closed
+  rule. The ticket id `t_outside` is **reserved** (a follow-up makes ticket creation refuse it). A record view shows
+  `r_outside_*` / `t_outside` as **"Outside a run"**. Retention ends such a run at the next 00:00Z taken from its
+  **id**, never from lines in the file, so it is deleted after the keep time like any run; a day's run takes at most
+  5000 lines, then further uses outside a run are refused until the next day.
+- **Level 1 limits of the record.** An agent that hides its identity (no agent tool in the environment, no
+  `--by agent:`, no run variables) looks like a script: its uses are recorded in the unattributed run, not limited. An
+  agent can read another ticket's claim and frame its uses into that run (the record has no MAC chain). Planting a
+  file at tomorrow's `r_outside_*` path stops terminal key use for that day. A switch turned off by a caller with a
+  stale `ORCH_RUN` may go unrecorded (best effort). No pid-ancestor check is made.
 - **Streams are not delayed.** Only the tail of the output that could still become a key is held back; the rest is
   passed on at once (an MCP server on stdio keeps working). A child without a terminal on stdin gets its own session.
   Binary key files (no text form) are hidden by the lower-case hex and the padded base64 / base64url of the

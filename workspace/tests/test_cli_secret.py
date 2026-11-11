@@ -1291,3 +1291,53 @@ def test_a_script_naming_a_run_that_is_not_live_is_refused_and_writes_nothing(st
     monkeypatch.setenv("ORCH_TICKET", TICKET)
     code, _, err = run("secret", "env", "plain", "--", PY, "-c", "pass")
     assert code == 2 and "not active" in err and not record_dir(ws).exists()
+
+
+# ----------------------------------------------------------------------- retention of the unattributed run
+
+
+def _write_line(ws, run, kind="key.use", **over):
+    from orch import record
+
+    ev = {"kind": "key.use", "key": "other-token", "action": "env", "profile": "plain", "command": "x",
+          "skill": None, "outcome": {"ok": True}, "refused": None}  # fmt: skip
+    old = os.environ.get("ORCH_RUN"), os.environ.get("ORCH_TICKET")
+    os.environ["ORCH_RUN"], os.environ["ORCH_TICKET"] = run, "t_outside"
+    try:
+        line = secretrun._record_event(ws, ev)
+    finally:
+        for k, v in zip(("ORCH_RUN", "ORCH_TICKET"), old, strict=True):
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    line.update(over, kind=kind)
+    record.RecordWriter(ws, hider=__import__("orch.hider", fromlist=["x"]).Hider({"k": TOKEN2})).append(line)
+
+
+def test_the_unattributed_run_is_deleted_by_retention_by_the_day_in_its_id(store, ws):
+    from orch import record
+
+    _write_line(ws, "r_outside_20250101")
+    day = time.strftime("%Y%m%d", time.gmtime())
+    _write_line(ws, f"r_outside_{day}")
+    # a planted run.state with an old `at` must not make today's run look old or ended
+    _write_line(ws, f"r_outside_{day}", kind="run.state", text="done", via="core", outcome=None, used=None,
+                data={"state": "done"}, at="2000-01-01T00:00:00Z")  # fmt: skip
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    result = record.apply_retention(ws, now, 90, 2048, lambda run, events: None)
+    assert result["delete_run"] == ["r_outside_20250101"], result
+    assert record.read_run(ws, f"r_outside_{day}").status == "ok"
+
+
+def test_the_unattributed_run_of_the_day_is_not_ended_until_midnight(store, ws):
+    from orch import record
+
+    _write_line(ws, "r_outside_20260101")
+    assert record.apply_retention(ws, "2026-01-01T12:00:00Z", 0, 0, lambda r, e: None)["delete_run"] == []
+    assert record.apply_retention(ws, "2026-01-02T00:00:01Z", 0, 0, lambda r, e: None)["delete_run"] == [
+        "r_outside_20260101"
+    ]
+
+
+def test_the_unattributed_run_has_a_daily_cap(store, run, ws, monkeypatch):
+    monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)
+    codes = [run("secret", "env", "plain", "--", PY, "-c", "pass")[0] for _ in range(4)]
+    assert codes == [0, 0, 0, 2]

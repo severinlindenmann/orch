@@ -39,6 +39,7 @@ def _run_ids():
     return (run, ticket) if run and ticket else None
 
 
+OUTSIDE_DAY_CAP = 5000  # lines of the unattributed run of one day
 NO_RUN = "Refused: an agent can use keys only inside an active orch run, where the use is recorded."
 BAD_RUN = "Refused: this run is not active, so the use cannot be recorded."
 
@@ -46,8 +47,8 @@ BAD_RUN = "Refused: this run is not active, so the use cannot be recorded."
 def require_run(root, agent) -> None:
     """The run a use is recorded in. An agent must have one (ORCH_RUN + ORCH_TICKET naming a live claim that
     belong together, like orch's own runs), or the call is refused before any key is read. A person or script
-    without a run is not recorded and not refused; with a run named in its environment the same check applies
-    (nothing is written into another run's record)."""
+    without a run is not refused (its uses go to the unattributed run of the day); with a run named in its
+    environment the same check applies (nothing is written into another run's record)."""
     ids = _run_ids()
     if ids is None:
         if agent:
@@ -126,6 +127,10 @@ def _write_record(root, ev):
 
     require_run(root, False)  # a named run must be live and match; no run: the unattributed run of the day
     line = _record_event(root, ev)
+    if _run_ids() is None:  # a script cannot grow the unattributed run without bound
+        read = record.read_run(root, line["run"], seen_by="writer")
+        if read.status == "ok" and len(read.value) >= OUTSIDE_DAY_CAP:
+            raise Refused("Refused: too many key uses outside a run today.")
     record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root))).append(line)
 
 

@@ -1103,6 +1103,22 @@ def _ended(events):
     return last["at"] if last and last.get("data", {}).get("state") in ("done", "failed", "stopped") else None
 
 
+def _ended_run(run, events, now):
+    """When a run ended. The unattributed run of a day (`r_outside_<yyyymmdd>`, for uses outside any run) ends
+    at the next 00:00Z, taken from its id and never from lines in the file (anything that can write the file
+    could plant a run.state); it counts as ended only once that moment has passed."""
+    m = re.fullmatch(r"r_outside_(\d{8})", run)
+    if not m:
+        return _ended(events)
+    try:
+        d = m[1]
+        end = datetime.fromisoformat(f"{d[:4]}-{d[4:6]}-{d[6:]}T00:00:00+00:00") + timedelta(days=1)
+        over = end <= datetime.fromisoformat(now)
+    except (ValueError, TypeError):
+        return None
+    return f"{end:%Y-%m-%dT%H:%M:%SZ}" if over else None
+
+
 def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list[dict]], Any]):
     """Apply retention; fold must be idempotent per run because skipped runs may retry."""
     result = dict(
@@ -1127,7 +1143,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
             runs.append(
                 dict(
                     run=run,
-                    ended=_ended(read.value),
+                    ended=_ended_run(run, read.value, now),
                     detail_mb=_size(workspace, ("detail", run)) / 1024**2,
                     file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
                     / 1024**2,
@@ -1147,7 +1163,8 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 if read.pending:
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
-                if not _ended(read.value) or _ended(read.value) != snapshots[run]:
+                ended_now = _ended_run(run, read.value, now)
+                if not ended_now or ended_now != snapshots[run]:
                     continue
                 # Check every deletion target before invoking the irreversible fold.
                 for rel in (("pending", run), ("detail", run), ("jobs", run), ("runs", run + ".jsonl")):
