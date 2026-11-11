@@ -449,6 +449,35 @@ def insights_share_names(root: Path | None) -> bool:
     return False if root is None else humanproof.effective(root, "insights.share_names", value)
 
 
+SHARE_BLOCKED_MSG = {
+    "not_connected": "Sharing counts is not available: this workspace is not connected to a relay.",
+    "off_by_admin": "Sharing counts is not available: your admin turned it off for this workspace.",
+}
+
+
+def share_counts_state(root: Path) -> str:
+    """The state of the daily counts upload (counts.md `sharing.counts`, usage-counts.md): `not_connected` (no
+    relay connection, `.orch/secrets/relay.json`), `off_by_admin` (the last relay policy said
+    `usage_counts: "off"`; kept by relay.refresh in `.orch/secrets/policy.json`), else `on` / `off` (the
+    effective `insights.share_counts`). The core and the Insights page read the same state."""
+    from orch import net
+
+    sec = net.secrets_dir(root)
+    relay = net.read_json(sec / "relay.json", None)
+    if not isinstance(relay, dict) or not {"url", "workspace", "token"} <= relay.keys():
+        return "not_connected"
+    policy = net.read_json(sec / "policy.json", None)
+    if isinstance(policy, dict) and policy.get("usage_counts") == "off":
+        return "off_by_admin"
+    return "on" if insights_share_counts(root) else "off"
+
+
+def share_counts_blocked(root: Path) -> str | None:
+    """`not_connected` / `off_by_admin` when share_counts cannot be turned on here, else None."""
+    state = share_counts_state(root)
+    return state if state in SHARE_BLOCKED_MSG else None
+
+
 INSIGHTS_KEYS = {  # setting -> ([table], key) in config.toml
     "insights.share_counts": ("insights", "share_counts"),
     "insights.share_names": ("insights", "share_names"),
@@ -523,7 +552,9 @@ def change_insights(
     classify widen / narrow / same, and only for a widening ask `person(target)` for the verified person (it
     verifies and spends the value-bound proof in this same critical section). Same value: nothing written, no
     proof. An agent caller (`agent` = the words it is refused with) asking to widen is refused
-    (`needs_person`) before any proof is read."""
+    (`needs_person`) before any proof is read. `insights.share_counts` = on is refused (`not_available`,
+    nothing written, no proof read) while the share state is off_by_admin or not_connected; off is always
+    allowed."""
     from orch import humanproof
 
     with humanproof._key_lock(humanproof.key_dir(root)):
@@ -533,6 +564,10 @@ def change_insights(
             raise InsightsRefused(agent or humanproof.AGENT_REFUSED, "needs_person")
         if if_current is not None and not _same_text(setting, if_current, current):
             raise InsightsRefused(f"This changed in the meantime: now {insights_text(current)}", "changed")
+        if setting == "insights.share_counts" and value is True:
+            blocked = share_counts_blocked(root)  # off_by_admin / not_connected: `on` is not available here
+            if blocked is not None:
+                raise InsightsRefused(SHARE_BLOCKED_MSG[blocked], "not_available")
         if value == current:
             return {setting: current, "changed": False, "widened": False}
         who = "reset"  # a lowering names no person (the record's `by` is never a claim from a flag)

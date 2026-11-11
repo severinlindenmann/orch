@@ -25,8 +25,9 @@ from orch import humanproof, tickets
 from orch.errors import Refused
 
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
-COOKIE = "orch_page"
+COOKIE_PREFIX = "orch_page"
 SERVERS = ("focus", "dashboard", "insights")
+_SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 # The ops a page server may mint, enforced in PageSession.mint. A server not named here keeps every op (focus,
 # dashboard: their behaviour before 2.11); Insights mints only its two (human-proof.md, step 3).
 SERVER_OPS = {"insights": frozenset({"insights.settings", "record.delete_detail"})}
@@ -50,6 +51,23 @@ def child_env(env: dict, orch_bin: str | None) -> dict:
     else:
         out["ORCH_BIN"] = str(orch_bin)
     return out
+
+
+def cookie_name(server: str, port: int) -> str:
+    """The session cookie of ONE page server on ONE port: `orch_page_<server>_<port>`. Cookies on 127.0.0.1
+    are shared by every loopback port (Path=/), so a single name would let one server's login replace (log
+    out) the other's and hand its value to every loopback server; a per-server, per-port name keeps them
+    apart."""
+    if not isinstance(server, str) or not _SERVER_NAME_RE.fullmatch(server):
+        raise ValueError("not a page server name")
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        raise ValueError("not a port")
+    return f"{COOKIE_PREFIX}_{server}_{port}"
+
+
+def set_cookie_header(server: str, port: int, value: str) -> str:
+    """The Set-Cookie value of a page session (HttpOnly, SameSite=Strict, Path=/)."""
+    return f"{cookie_name(server, port)}={value}; HttpOnly; SameSite=Strict; Path=/"
 
 
 def forwarded(headers) -> bool:
@@ -106,13 +124,21 @@ class PageSession:
             self.revoked = False
             return self.cookie
 
-    def authed(self, headers) -> bool:
+    def cookie_name(self, port: int) -> str:
+        return cookie_name(self.server, port)
+
+    def set_cookie(self, port: int, value: str) -> str:
+        return set_cookie_header(self.server, port, value)
+
+    def authed(self, headers, port: int) -> bool:
+        """Only THIS server's cookie on THIS port counts (another loopback server's cookie is no session)."""
         raw = headers.get("Cookie") or ""
         try:
+            name = self.cookie_name(port)
             jar = SimpleCookie(raw)
-        except Exception:  # noqa: BLE001 - a broken cookie header is no session
+        except Exception:  # noqa: BLE001 - a broken cookie header (or port) is no session
             return False
-        c = jar.get(COOKIE)
+        c = jar.get(name)
         return bool(c and hmac.compare_digest(c.value, self.cookie))
 
     def can_mint(self, headers, port: int) -> bool:
@@ -121,7 +147,7 @@ class PageSession:
             self.key is not None
             and host_ok(headers, port)
             and not forwarded(headers)
-            and self.authed(headers)
+            and self.authed(headers, port)
         )
 
     def mint(self, op: str, target: str) -> str:

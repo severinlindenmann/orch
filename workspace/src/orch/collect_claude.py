@@ -111,7 +111,7 @@ class StreamJsonMapper:
         return {"id": eid} if _valid_id(eid) else {}
 
     def _detail(self, kind: str, eid: str) -> str:
-        return f"detail/{self.run}/{detail_name(self.run, kind, eid)}.json"
+        return f"detail/{self.run}/{detail_name(self.run, kind, eid, self.ticket)}.json"
 
     def feed_with_detail(self, line: str | bytes) -> list[tuple[dict, dict | None]]:
         try:

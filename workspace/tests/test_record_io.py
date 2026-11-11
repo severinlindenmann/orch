@@ -574,7 +574,7 @@ def test_06_fifo_no_hang(store, where):
         def read():
             return record.read_meta(ws)
     else:
-        name = record.detail_name(RUN, "step", event()["id"])
+        name = record.detail_name(RUN, "step", event()["id"], event()["ticket"])
         target = root / "detail" / RUN / (name + ".json")
         target.parent.mkdir(parents=True)
         os.mkfifo(target)
@@ -784,7 +784,7 @@ def test_18_random_detail_names():
     seen = set()
     for i in range(5000):
         eid = str(i) + "".join(rng.choice("Ab/\\..é中 CON:NUL") for _ in range(20))
-        name = record.detail_name(RUN, rng.choice(["step", "usage"]), eid)
+        name = record.detail_name(RUN, rng.choice(["step", "usage"]), eid, rng.choice(["t_aaaaaa", None]))
         assert re.fullmatch(r"[0-9a-f]{32}", name) and name not in seen
         seen.add(name)
 
@@ -801,15 +801,32 @@ def test_19_case_distinct_details(store):
     assert len(paths) == 4
 
 
+def test_19b_detail_name_binds_the_ticket(store):
+    """I4: the file name covers the ticket. A file whose stored ticket was changed no longer matches its name,
+    and a read for a line of another ticket is refused: both swapped."""
+    ws, writer = store
+    stored = writer.append(event(id="t1"), detail=DETAIL)
+    name = Path(stored["detail"]).stem
+    assert name == record.detail_name(RUN, "step", "t1", event()["ticket"])
+    assert name != record.detail_name(RUN, "step", "t1", "t_other9")
+    assert record.read_detail(ws, RUN, name, ticket=event()["ticket"]).unwrap()["ticket"] == event()["ticket"]
+    other = record.read_detail(ws, RUN, name, ticket="t_other9")
+    assert (other.status, other.reason) == ("tampered", "swapped")
+    target = record.record_dir(ws) / stored["detail"]
+    target.write_text(json.dumps(dict(json.loads(target.read_text()), ticket="t_other9")))
+    changed = record.read_detail(ws, RUN, name)
+    assert (changed.status, changed.reason) == ("tampered", "swapped")
+
+
 @pytest.mark.parametrize("problem", ["collision", "link", "oversize", "io"])
 def test_20_detail_failure_keeps_line(store, monkeypatch, problem):
     ws, writer = store
     payload = DETAIL
-    name = record.detail_name(RUN, "step", event()["id"])
+    name = record.detail_name(RUN, "step", event()["id"], event()["ticket"])
     target = record.record_dir(ws) / "detail" / RUN / (name + ".json")
     if problem == "collision":
         target.parent.mkdir(parents=True)
-        target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other")))
+        target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other", ticket=event()["ticket"])))
     elif problem == "link":
         target.parent.parent.mkdir(parents=True)
         target.parent.symlink_to(ws, target_is_directory=True)

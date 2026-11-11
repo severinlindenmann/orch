@@ -39,6 +39,9 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    `http://127.0.0.1:<port>/#launch=<token>` (a URL fragment, never sent in a request line or logged). The page posts it
    once to `/session`; the server compares it with the file, deletes the file, and sets the cookie (`HttpOnly;
    SameSite=Strict; Path=/`, new on every server start). A first GET without a token gets a read-only page and no cookie.
+   The cookie is named per server AND per port, `orch_page_<server>_<port>` (`pageproof.cookie_name`; server name
+   `[a-z0-9_]`, port an integer): cookies on 127.0.0.1 reach every loopback port, so one shared name would let opening
+   Insights log the dashboard out. A server reads only its own name; another server's cookie is no session.
    **Mint routes exist only on the loopback listener**; every request, GET included, must carry `Host: 127.0.0.1:<port>` or
    `localhost:<port>`; any `X-Forwarded-*` or `Forwarded` header, or a request that arrived through a remote-access path
    (relay or any proxy, even when the peer is 127.0.0.1), never gets a proof: it is watch-only. Origin is checked on POST as today.
@@ -109,7 +112,11 @@ as the record write, so a proof for another value or key, or one already used, i
 changes. The same value succeeds without a proof and writes nothing (a given proof is not read). A narrowing needs no proof
 and writes the off / lower record. `--if-current <old>` (on/off or the number): if the current effective value is not
 `<old>` the command refuses with code `changed` ("This changed in the meantime: now <current>") and writes nothing, so a
-page that showed a stale value gets a clean refusal. A value outside the list is `invalid`. Success answers
+page that showed a stale value gets a clean refusal. `insights.share_counts on` is refused with code `not_available`
+(a plain message, nothing written, no proof read) while the share state (counts.md `sharing.counts`,
+`config.share_counts_state`) is `off_by_admin` or `not_connected`; `off` is always allowed. This check, the widening
+decision, the `--if-current` compare and the proof check are all inside the same lock; the page's own check is only a
+second layer. A value outside the list is `invalid`. Success answers
 `{"<key>": <effective value>, "changed": true|false, "widened": true|false}`.
 So an agent that edits `session_typing = true` changes nothing, and once a person switched `share_counts` or `live_session`
 off, an agent editing the file back to on changes nothing either. Reference `hp_settle`, vectors `settle`.

@@ -568,13 +568,15 @@ def _detail(root: Path, args) -> dict:
     if result.status != "ok":
         raise _fail(result)
     pointers = [
-        e["detail"] for e in result.value if e["id"] == args.detail and e.get("detail")
+        e for e in result.value if e["id"] == args.detail and e.get("detail")
     ]  # the line knows its detail file; the name is never rebuilt here
     unavailable = RecordError("The details of this step are not available.", "not_found")
     if not pointers:
         raise unavailable
-    file_id = pointers[-1].rsplit("/", 1)[-1].removesuffix(".json")
-    detail = record.read_detail(root, args.run, file_id)
+    line = pointers[-1]
+    file_id = line["detail"].rsplit("/", 1)[-1].removesuffix(".json")
+    # the file must belong to the line's own ticket (I4): a line of ticket B naming A's file is refused
+    detail = record.read_detail(root, args.run, file_id, ticket=line.get("ticket"))
     _show_alert(detail.alert)
     if detail.status != "ok":
         raise _fail(detail)
@@ -616,12 +618,13 @@ def settings(root: Path) -> dict:
 
 # --- delete-detail (a person only) ---
 def delete_detail(root: Path, args) -> dict:
-    """Delete the detail of one ticket: the detail files its own lines point at (a person's own decision, op
-    `record.delete_detail`, target the ticket id, invariant H1); `deleted` = the runs that lost detail. Lines,
-    counts and the detail of other tickets stay. Order: an agent is refused before anything else
-    (needs_person); a ticket that does not exist is not_found; then the proof (needs_person); a record that
-    cannot be read refuses with nothing deleted; the audit line is written BEFORE anything is deleted (it
-    cannot be written: not_available, nothing deleted)."""
+    """Delete the detail of one ticket: the detail files its own lines point at whose name is this ticket's
+    own (I4; a person's own decision, op `record.delete_detail`, target the ticket id, invariant H1);
+    `deleted` = the runs that lost detail, `kept` = files its lines point at that are not its own name
+    (left, reported). Lines, counts and the detail of other tickets stay. Order: an agent is refused before
+    anything else (needs_person); a ticket that does not exist is not_found; then the proof (needs_person); a
+    record that cannot be read refuses with nothing deleted; the audit line is written BEFORE anything is
+    deleted (it cannot be written: not_available, nothing deleted)."""
     from orch import humanproof, tickets
 
     agent = tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:")
@@ -647,7 +650,7 @@ def delete_detail(root: Path, args) -> dict:
     if not who.startswith("human:"):
         raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
     mine: dict[tuple[str, str], None] = {}
-    others: set[tuple[str, str]] = set()
+    pointed: dict[tuple[str, str], None] = {}
     for run in _known(root):
         result = record.read_run(root, run, seen_by="cli")
         _show_alert(result.alert)
@@ -657,13 +660,15 @@ def delete_detail(root: Path, args) -> dict:
             raise _fail(result)  # nothing is deleted when any run of the record cannot be read
         for e in result.value:
             ref = _detail_ref(run, e.get("detail"))
-            if ref is not None and e.get("ticket") == tid:
+            if ref is None or e.get("ticket") != tid:
+                continue  # lines of other tickets never veto: by I4 their files have other names
+            pointed.setdefault(ref)
+            if ref[1] == record.detail_name(run, e["kind"], e["id"], tid):
                 mine.setdefault(ref)
-            elif ref is not None:
-                others.add(ref)
-    # Only the detail this ticket's own lines point at, never one another ticket's line points at too: a run
-    # shared with other tickets keeps their detail (a planted line of this ticket erases nothing else).
-    found = record.detail_files(root, [ref for ref in mine if ref not in others])
+    # Exactly the files this ticket's own lines point at AND whose name is this ticket's own (I4). A line of
+    # this ticket naming any other file (planted or changed) is not followed: it stays, counted in `kept`.
+    kept = sum(1 for ref in pointed if ref not in mine)
+    found = record.detail_files(root, list(mine))
     _show_alert(found.alert)
     if found.status != "ok":
         raise _fail(found)
@@ -677,7 +682,7 @@ def delete_detail(root: Path, args) -> dict:
     except (OSError, record.RecordInvalid):
         # The audit line above names what was going to go; what is left can be deleted with a new proof.
         raise RecordError(DELETE_PARTLY, "not_available") from None
-    return {"deleted": deleted, "ticket": tid}
+    return {"deleted": deleted, "ticket": tid, "kept": kept}
 
 
 def prune(root: Path, fold, now: str | None = None) -> dict:
@@ -854,6 +859,8 @@ def _since(root: Path, models: list[dict]) -> tuple[str | None, list[dict]]:
 
 
 def counts(root: Path, args) -> dict:
+    from orch import config
+
     _check_filters(args.ticket, None)
     kinds = _kinds(args.kind, _USED_KINDS)
     day_from, day_to = _window(args)
@@ -890,7 +897,12 @@ def counts(root: Path, args) -> dict:
             "connections": [],
             "keys": [],
         },
-        "sharing": {"counts": "not_connected", "names": False, "last_sent": None, "queued": 0},
+        "sharing": {
+            "counts": config.share_counts_state(root),
+            "names": False,
+            "last_sent": None,
+            "queued": 0,
+        },
         "unavailable": unavailable,
         "complete": not unavailable,
     }

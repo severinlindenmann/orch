@@ -111,13 +111,14 @@
     "name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$" },
     "version": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "detail_file": {
-      "type": "object", "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"], "additionalProperties": false,
-      "description": "One file .orch/record/detail/<run>/<file name>.json: the full payload of one event, key values hidden. The file name is lowercase hex only (activity.md, Detail files); id and kind are stored here so a reader can verify the file belongs to the event.",
+      "type": "object", "required": ["v", "id", "run", "kind", "ticket", "input", "output", "truncated", "hidden"], "additionalProperties": false,
+      "description": "One file .orch/record/detail/<run>/<file name>.json: the full payload of one event, key values hidden. The file name is lowercase hex only (activity.md, Detail files); id, kind and ticket are stored here so a reader can verify the file belongs to the event.",
       "properties": {
         "v": { "const": 1 },
         "id": { "$ref": "#/$defs/event_id" },
         "run": { "$ref": "#/$defs/run" },
         "kind": { "$ref": "#/$defs/kind" },
+        "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "The ticket of the event; part of the file name (activity.md, I4)." },
         "input": { "description": "What went in (tool input, prompt, command), any JSON." },
         "output": { "description": "What came out (tool result, chat text), any JSON." },
         "truncated": { "type": "boolean", "description": "true = cut at the 1 MB per-file cap." },

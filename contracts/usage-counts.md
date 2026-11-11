@@ -18,7 +18,9 @@ relay-api.md (Usage counts and policy).
   without the person's record reads `false` (`share_counts` stays on by the owner default while no record ever existed).
   Set with `orch config set insights.share_counts|insights.share_names on|off [--proof-stdin] [--if-current <old>]`; `on`
   from off needs the proof (value-bound target, e.g. `insights.share_names=on`; the core compares with its current value,
-  human-proof.md, Settings) and an agent caller is refused (`needs_person`). On `orch relay connect`
+  human-proof.md, Settings) and an agent caller is refused (`needs_person`). `share_counts on` is refused
+  (`not_available`) while the workspace is not connected to a relay or the last relay policy said `usage_counts: "off"`
+  (`orch relay refresh` keeps the snapshot's `policy` in `.orch/secrets/policy.json`). On `orch relay connect`
   a one-time notice says: "Daily counts go to your admin: how often skills, connections and keys are used. No text, no chats.
   This workspace's own names stay hidden. Turn it off in Insights > Settings." Insights shows a chip "Sharing counts with
   your admin" while it is on.

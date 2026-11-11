@@ -976,7 +976,11 @@ def _read_json(ws, rel):
         _close(fd)
 
 
-def read_detail(workspace, run, file_id):
+def read_detail(workspace, run, file_id, *, ticket=None):
+    """The detail file `file_id` of `run`. Its name must be the one made from the payload's own (run, kind,
+    id, ticket), else it is refused as swapped. `ticket`: the ticket of the line that points at the file; a
+    file whose payload belongs to another ticket is refused as swapped too (a planted line of ticket B
+    cannot read A's detail through its own `detail` pointer)."""
     _name(run, _RUN)
     _name(file_id, _FILE)
     try:
@@ -984,7 +988,8 @@ def read_detail(workspace, run, file_id):
         if (
             not _DETAIL_VALIDATOR.is_valid(value)
             or value["run"] != run
-            or detail_name(run, value["kind"], value["id"]) != file_id
+            or detail_name(run, value["kind"], value["id"], value["ticket"]) != file_id
+            or (ticket is not None and value["ticket"] != ticket)
         ):
             raise RecordTampered("swapped")
         return ReadResult("ok", value)
@@ -1028,11 +1033,12 @@ def _store_detail(ws, event, payload, previous):
             if error.reason != "missing":
                 raise
         if exists:
-            if not isinstance(stored, dict) or (stored.get("run"), stored.get("kind"), stored.get("id")) != (
-                event["run"],
-                event["kind"],
-                event["id"],
-            ):
+            if not isinstance(stored, dict) or (
+                stored.get("run"),
+                stored.get("kind"),
+                stored.get("id"),
+                stored.get("ticket"),
+            ) != (event["run"], event["kind"], event["id"], event["ticket"]):
                 return _Detail(reason="collision")
             finished = any(
                 old.get("detail") == event["detail"] and old.get("outcome") is not None for old in previous
@@ -1071,6 +1077,7 @@ class RecordWriter:
                 id=event["id"],
                 run=event["run"],
                 kind=event["kind"],
+                ticket=event["ticket"],
                 input=payload["input"],
                 output=payload["output"],
                 truncated=False,
@@ -1139,7 +1146,9 @@ class RecordWriter:
         # Both possible line forms have passed the hider before taking the lock.
         prepared = dict(event, seq=10**20, conflict=True)
         if payload is not None:
-            prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+            prepared["detail"] = (
+                f"detail/{run}/{detail_name(run, event['kind'], event['id'], event['ticket'])}.json"
+            )
         self._line(prepared)
         self._line(dict(prepared, detail=None, detail_lost=True))
         self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
@@ -1179,7 +1188,9 @@ class RecordWriter:
             if not _decision(previous, event):
                 return None
             if payload is not None:
-                event["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+                event["detail"] = (
+                    f"detail/{run}/{detail_name(run, event['kind'], event['id'], event['ticket'])}.json"
+                )
             line = (_json(event) + "\n").encode()
             lost_line = (_json(dict(event, detail=None, detail_lost=True)) + "\n").encode()
             check_lock()
@@ -2088,18 +2099,23 @@ _SCHEMA = {
         "version": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
         "detail_file": {
             "type": "object",
-            "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"],
+            "required": ["v", "id", "run", "kind", "ticket", "input", "output", "truncated", "hidden"],
             "additionalProperties": False,
             "description": "One file .orch/record/detail/<run>/<file name>.json: "
             "the full payload of one event, key values hidden. The "
             "file name is lowercase hex only (activity.md, Detail "
-            "files); id and kind are stored here so a reader can "
+            "files); id, kind and ticket are stored here so a reader can "
             "verify the file belongs to the event.",
             "properties": {
                 "v": {"const": 1},
                 "id": {"$ref": "#/$defs/event_id"},
                 "run": {"$ref": "#/$defs/run"},
                 "kind": {"$ref": "#/$defs/kind"},
+                "ticket": {
+                    "type": "string",
+                    "pattern": "^t_[a-z0-9]{6,16}$",
+                    "description": "The ticket of the event; part of the file name (activity.md, I4).",
+                },
                 "input": {"description": "What went in (tool input, prompt, command), any JSON."},
                 "output": {"description": "What came out (tool result, chat text), any JSON."},
                 "truncated": {"type": "boolean", "description": "true = cut at the 1 MB per-file cap."},

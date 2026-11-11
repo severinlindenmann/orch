@@ -29,7 +29,22 @@ def ws(proj, monkeypatch):
     (base / "home").mkdir()
     monkeypatch.setenv("ORCH_HOME", str(base / "home"))
     monkeypatch.chdir(root)
+    _connect(root)  # share_counts on needs a relay connection (not_connected refuses it, see below)
     return root
+
+
+def _connect(root, policy=None):
+    """A relay connection (`.orch/secrets/relay.json`) and, if given, the last relay policy."""
+    sec = root / ".orch" / "secrets"
+    sec.mkdir(parents=True, exist_ok=True)
+    conn = {"url": "https://r.example", "workspace": "w_1", "token": "orn_x"}
+    (sec / "relay.json").write_text(json.dumps(conn))
+    if policy is not None:
+        (sec / "policy.json").write_text(json.dumps({"usage_counts": policy}))
+
+
+def _disconnect(root):
+    (root / ".orch" / "secrets" / "relay.json").unlink()
 
 
 def _proof(ws, op, target, by="human:pat", **kw):
@@ -364,6 +379,168 @@ def test_race_concurrent_change_with_if_current(ws, monkeypatch):
     assert _used(ws) == (1 if winner == "up" else 0)
 
 
+def test_a_change_waits_for_the_lock_held_elsewhere_and_sees_the_new_value(ws):
+    """Another thread holds keys.lock and widens keep_days to 365 inside it: a concurrent narrowing with
+    --if-current 90 and a concurrent widening with a proof both BLOCK until the lock is released, then decide
+    on the NEW value (the stale one is refused `changed`, the widening is a no-op, its proof not spent)."""
+    import threading
+
+    d = hp.key_dir(ws)
+    key = "insights.keep_days"
+    proof = _sp(ws, key, "365")
+    holding, release = threading.Event(), threading.Event()
+    results, called = {}, []
+
+    def holder():
+        with hp._key_lock(d):
+            holding.set()
+            config.set_insights(ws, key, 365, "human:other")  # the change made under the held lock
+            release.wait(10)
+
+    def narrow():
+        try:
+            results["narrow"] = config.change_insights(ws, key, 30, if_current="90")
+        except config.InsightsRefused as e:
+            results["narrow"] = (e.code, str(e))
+
+    def widen():
+        def person(t):
+            called.append(t)
+            return hp.verify_and_consume(ws, proof, "insights.settings", t)
+
+        results["widen"] = config.change_insights(ws, key, 365, person=person)
+
+    h = threading.Thread(target=holder)
+    h.start()
+    assert holding.wait(10)
+    waiters = [threading.Thread(target=narrow), threading.Thread(target=widen)]
+    for t in waiters:
+        t.start()
+    time.sleep(0.4)
+    assert all(t.is_alive() for t in waiters) and results == {} and called == []  # blocked on the lock
+    release.set()
+    h.join(10)
+    for t in waiters:
+        t.join(15)
+    assert results["narrow"] == ("changed", "This changed in the meantime: now 365")
+    assert results["widen"] == {key: 365, "changed": False, "widened": False}
+    assert called == [] and _used(ws) == 0  # the proof was never read
+    assert config.record_keep_days(ws) == 365 and _record(ws, key)["by"] == "human:other"
+
+
+def test_widening_if_current_share_state_and_proof_run_in_one_critical_section(ws, monkeypatch):
+    """The current-value read (the widening decision and the --if-current compare), the share state check and
+    the proof check all run while change_insights holds keys.lock, and the lock is taken once."""
+    d = hp.key_dir(ws)
+    key = "insights.share_counts"
+    assert config.change_insights(ws, key, False)["changed"]  # narrowing first (open)
+    proof = _sp(ws, key, "on")
+    seen = []
+    real_value, real_blocked = config.insights_value, config.share_counts_blocked
+
+    def value(root, setting):
+        seen.append(("value", hp._lock_held(d)))
+        return real_value(root, setting)
+
+    def blocked(root):
+        seen.append(("share_state", hp._lock_held(d)))
+        return real_blocked(root)
+
+    def person(t):
+        seen.append(("proof", hp._lock_held(d)))
+        return hp.verify_and_consume(ws, proof, "insights.settings", t)
+
+    monkeypatch.setattr(config, "insights_value", value)
+    monkeypatch.setattr(config, "share_counts_blocked", blocked)
+    res = config.change_insights(ws, key, True, person=person, if_current="off")
+    assert res == {key: True, "changed": True, "widened": True}
+    assert [s for s, _ in seen][:3] == ["value", "share_state", "proof"]
+    assert all(held for _, held in seen), seen
+    assert not hp._lock_held(d) and _used(ws) == 1
+
+
+# ------------------------------------------------------------------ share_counts: only where it is available
+
+
+@pytest.mark.parametrize("state", ["not_connected", "off_by_admin"])
+def test_share_counts_on_refused_when_sharing_is_not_available(ws, run, monkeypatch, state):
+    assert run("config", "set", "insights.share_counts", "off", "--json")[0] == 0
+    if state == "not_connected":
+        _disconnect(ws)
+    else:
+        _connect(ws, policy="off")
+    assert config.share_counts_state(ws) == state
+    rec, before = _record(ws, "insights.share_counts"), config.path(ws).read_text()
+    proof = _sp(ws, "insights.share_counts", "on")
+    for extra in ((), ("--if-current", "off")):
+        argv = ("config", "set", "insights.share_counts", "on", *extra, "--json")
+        code, out, _ = _cli(run, monkeypatch, proof, *argv)
+        ans = _answer(out)
+        assert code == 2 and ans["code"] == "not_available", out
+        assert ans["error"] == config.SHARE_BLOCKED_MSG[state] and "not available" in ans["error"]
+    asked = []
+    with pytest.raises(config.InsightsRefused) as e:
+        config.change_insights(
+            ws, "insights.share_counts", True, person=lambda t: asked.append(t) or "human:pat"
+        )
+    assert e.value.code == "not_available" and asked == []
+    # nothing written, the proof not consumed
+    assert _record(ws, "insights.share_counts") == rec and config.path(ws).read_text() == before
+    assert _used(ws) == 0 and _get(run, "insights.share_counts") is False
+    # off (narrowing / same value) is always allowed
+    code, out, _ = run("config", "set", "insights.share_counts", "off", "--json")
+    assert code == 0 and json.loads(out)["changed"] is False
+    # once sharing is available the same, unspent proof works
+    _connect(ws, policy="on")
+    code, out, err = _cli(run, monkeypatch, proof, "config", "set", "insights.share_counts", "on", "--json")
+    want = {"insights.share_counts": True, "changed": True, "widened": True}
+    assert code == 0 and json.loads(out) == want, out + err
+    assert _used(ws) == 1 and config.share_counts_state(ws) == "on"
+
+
+def test_share_counts_off_is_allowed_whatever_the_share_state(ws, run):
+    _connect(ws, policy="off")
+    code, out, err = run("config", "set", "insights.share_counts", "off", "--by", "agent:x", "--json")
+    assert code == 0 and json.loads(out)["changed"] is True, out + err
+    _disconnect(ws)
+    assert config.share_counts_state(ws) == "not_connected"
+    assert _get(run, "insights.share_counts") is False
+
+
+def test_share_counts_on_allowed_when_connected(ws, run, monkeypatch):
+    assert config.share_counts_state(ws) == "on"  # connected, no admin policy kept: the owner default
+    assert run("config", "set", "insights.share_counts", "off", "--json")[0] == 0
+    assert config.share_counts_state(ws) == "off"
+    _connect(ws, policy="on")
+    proof = _sp(ws, "insights.share_counts", "on")
+    code, out, err = _cli(run, monkeypatch, proof, "config", "set", "insights.share_counts", "on", "--json")
+    assert code == 0 and json.loads(out)["changed"] is True, out + err
+    assert _record(ws, "insights.share_counts")["by"] == "human:pat" and config.share_counts_state(ws) == "on"
+
+
+def test_share_state_needs_a_full_relay_connection(ws):
+    (ws / ".orch" / "secrets" / "relay.json").write_text(json.dumps({"url": "https://r.example"}))
+    assert config.share_counts_state(ws) == "not_connected"
+    (ws / ".orch" / "secrets" / "relay.json").write_text("not json")
+    assert config.share_counts_state(ws) == "not_connected"
+    _connect(ws, policy="off")
+    assert config.share_counts_state(ws) == "off_by_admin"
+
+
+def test_relay_refresh_keeps_the_admin_policy(ws):
+    from orch import relay
+
+    sec = ws / ".orch" / "secrets"
+    relay._keep_policy(ws, {"usage_counts": "off", "live_session": "allowed"})
+    assert json.loads((sec / "policy.json").read_text()) == {"usage_counts": "off"}
+    assert config.share_counts_state(ws) == "off_by_admin"
+    relay._keep_policy(ws, None)  # a snapshot without one keeps the last
+    relay._keep_policy(ws, {"usage_counts": "maybe"})
+    assert config.share_counts_state(ws) == "off_by_admin"
+    relay._keep_policy(ws, {"usage_counts": "on"})
+    assert config.share_counts_state(ws) == "on"
+
+
 def test_widening_without_proof_by_a_person_flag_is_refused(ws, run):
     code, out, err = run("config", "set", "insights.keep_days", "365", "--by", "human:pat", "--json")
     assert code == 2 and _answer(out)["code"] == "needs_person"
@@ -657,7 +834,7 @@ def test_delete_detail_with_a_proof(ws, rec, run, monkeypatch):
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 2, "ticket": a}
+    assert json.loads(out) == {"deleted": 2, "ticket": a, "kept": 0}
     assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
     assert _detail(ws, RUN_C).is_dir()  # the other ticket keeps its detail
     assert _lines(ws) == lines  # every line stays as it was
@@ -680,7 +857,7 @@ def test_delete_detail_with_a_proof(ws, rec, run, monkeypatch):
     assert code == 2 and _answer(out)["code"] == "not_found"  # details not available
     again = _proof(ws, "record.delete_detail", a)  # nothing left: 0, and a new audit line
     code, out, _ = _cli(run, monkeypatch, again, "record", "delete-detail", a, "--json")
-    assert code == 0 and json.loads(out) == {"deleted": 0, "ticket": a}
+    assert code == 0 and json.loads(out) == {"deleted": 0, "ticket": a, "kept": 0}
     assert len(_changes(ws)) == 2
 
 
@@ -1100,7 +1277,7 @@ def test_delete_detail_keeps_other_tickets_detail_in_a_shared_run(ws, rec, run, 
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 3, "ticket": a}  # RUN_A, RUN_B and A's one file in RUN_C
+    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0}  # RUN_A, RUN_B and A's one file in RUN_C
     after = sorted(p.name for p in _detail(ws, RUN_C).iterdir())
     assert len(after) == 2 and set(after) < set(before)
     for n in (1, 2):  # B's detail is still there
@@ -1108,6 +1285,113 @@ def test_delete_detail_keeps_other_tickets_detail_in_a_shared_run(ws, rec, run, 
         assert code == 0, out
     code, out, _ = run("record", "query", "--run", RUN_C, "--detail", "toolu_planted1", "--json")
     assert code == 2 and _answer(out)["code"] == "not_found"
+
+
+def _plant(ws, run_id, line):
+    """An agent with file access appends a raw line to a run file (no writer, no hider)."""
+    path = record_dir(ws) / "runs" / f"{run_id}.jsonl"
+    with path.open("a") as f:
+        f.write(json.dumps(line) + "\n")
+
+
+def _own_line(ws, run_id, n):
+    path = record_dir(ws) / "runs" / f"{run_id}.jsonl"
+    return next(
+        e for e in map(json.loads, path.read_text().splitlines()) if e["id"] == f"toolu_{run_id[2:]}{n}"
+    )
+
+
+def _planted_b_line(ws, b):
+    """A line of ticket B in A's run naming A's detail file (same id, finished, so dedupe keeps it)."""
+    victim = _own_line(ws, RUN_A, 1)
+    return dict(victim, ticket=b, seq=99, outcome={"ok": True, "error": None, "ms": 1})
+
+
+def test_detail_names_differ_per_ticket_in_one_run(ws, rec):
+    """I4: ticket A's line in B's run with the same run, kind and id gets its own detail file."""
+    from orch import record
+
+    a, b = rec
+    example = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    same = f"toolu_{RUN_C[2:]}1"
+    mine = w.append(
+        dict(
+            example,
+            run=RUN_C,
+            ticket=a,
+            id=same,
+            at="2026-11-16T09:15:00Z",
+            outcome={"ok": True, "error": None, "ms": 1},
+        ),
+        detail={"input": {"n": 9}, "output": "a's own"},
+    )
+    theirs = _own_line(ws, RUN_C, 1)
+    assert (mine["id"], mine["kind"]) == (theirs["id"], theirs["kind"]) and theirs["ticket"] == b
+    assert mine["detail"] and theirs["detail"] and mine["detail"] != theirs["detail"]
+    for line, ticket, output in ((mine, a, "a's own"), (theirs, b, "x" * 2000)):
+        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, ticket=ticket).unwrap()
+        assert (got["ticket"], got["output"]) == (ticket, output)
+
+
+def test_planted_line_of_another_ticket_does_not_block_delete(ws, rec, run, monkeypatch):
+    """A line of ticket B pointing at A's detail file does not stop A's delete (no veto by other tickets), and
+    A's delete leaves B's own detail alone, also B's file in a run A shares."""
+    a, b = rec
+    example = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(
+        dict(
+            example,
+            run=RUN_C,
+            ticket=a,
+            id=f"toolu_{RUN_C[2:]}1",
+            at="2026-11-16T09:15:00Z",
+            outcome={"ok": True, "error": None, "ms": 1},
+        ),
+        detail={"input": {"n": 9}, "output": "a's own"},
+    )
+    _plant(ws, RUN_A, _planted_b_line(ws, b))
+    b_files = sorted(p.name for p in _detail(ws, RUN_C).iterdir())
+    assert len(b_files) == 3
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0}
+    assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
+    left = sorted(p.name for p in _detail(ws, RUN_C).iterdir())
+    assert len(left) == 2 and set(left) < set(b_files)
+    from orch import record
+
+    for n in (1, 2):  # B's own detail is untouched and still readable through B's own lines
+        line = _own_line(ws, RUN_C, n)
+        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, ticket=b).unwrap()
+        assert (got["ticket"], got["output"]) == (b, "x" * 2000)
+    code, out, _ = run("record", "query", "--run", RUN_C, "--detail", f"toolu_{RUN_C[2:]}2", "--json")
+    assert code == 0 and json.loads(out)["output"] == "x" * 2000
+
+
+def test_planted_line_path_is_refused_on_read_and_counted_as_kept(ws, rec, run, monkeypatch):
+    """The planted line of B names A's file: reading it through that line is refused (the file's own ticket is
+    not the line's), and B's delete does not follow it: A's file stays, reported as kept (never silent)."""
+    a, b = rec
+    _plant(ws, RUN_A, _planted_b_line(ws, b))
+    target = _own_line(ws, RUN_A, 1)["id"]
+    code, out, _ = run("record", "query", "--run", RUN_A, "--detail", target, "--json")
+    assert code == 2 and _answer(out)["code"] == "tampered"
+    a_files = sorted(p.name for p in _detail(ws, RUN_A).iterdir())
+    assert len(a_files) == 2
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "record.delete_detail", b), "record", "delete-detail", b, "--json"
+    )
+    assert code == 0, out + err
+    # B's RUN_C goes; A's file named by B's planted line stays and is reported
+    assert json.loads(out) == {"deleted": 1, "ticket": b, "kept": 1}
+    assert not _detail(ws, RUN_C).exists()
+    assert sorted(p.name for p in _detail(ws, RUN_A).iterdir()) == a_files
+    code, out, _ = run("record", "query", "--run", RUN_A, "--detail", f"toolu_{RUN_A[2:]}2", "--json")
+    assert code == 0 and json.loads(out)["ticket"] == a
 
 
 # ------------------------------------------------------------------ prune reads the effective values

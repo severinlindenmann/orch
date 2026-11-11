@@ -2506,6 +2506,7 @@ def refresh(root: Path) -> str:
         _commit(root, stage, snap, names, skipped)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+    _keep_policy(root, snap.get("policy"))
     skillrender.refresh_skills(root)
     sync_phone_views(root)
     with locked(root):  # the refresh-hints waiting in the inbox are handled now
@@ -2524,6 +2525,13 @@ def refresh(root: Path) -> str:
     if skipped:
         msg += "\nSkipped: " + "; ".join(skipped)
     return msg
+
+
+def _keep_policy(root: Path, policy) -> None:
+    """The admin's policy from the snapshot (usage-counts.md): kept so the core knows `off_by_admin`
+    (config.share_counts_state) while the relay cannot be reached. A snapshot without one keeps the last."""
+    if isinstance(policy, dict) and policy.get("usage_counts") in ("on", "off"):
+        net.write_json(net.secrets_dir(root) / "policy.json", {"usage_counts": policy["usage_counts"]}, True)
 
 
 def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:

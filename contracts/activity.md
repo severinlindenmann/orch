@@ -45,10 +45,14 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   replaced by `x_` + the first 32 hex of its sha256, the same for hook and collector, so dedupe still works (vectors `ids`).
 - `seq` = position in the run file, 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
 - `run`, `session`, `agent` (`main` or `h_<n>`), `parent` (null for main) bind the event; `ticket` is the run's ticket.
-- **Detail file name** (invariant): always 32 lowercase hex characters, `sha256(b"orch.detail/1\0" + run + b"\0" + kind +
-  b"\0" + id)[:32]` (UTF-8, vectors `detail_names`); no raw id ever becomes a file name, so case-insensitive file systems,
-  separators and reserved names cannot make two events share a file. The path is `detail/<run>/<file name>.json`. The file
-  stores `id` and `kind`; a writer never overwrites a file whose stored `(kind, id)` differs.
+- **Detail file name** (invariant I4): always 32 lowercase hex characters, `sha256(b"orch.detail/2\0" + run + b"\0" + kind +
+  b"\0" + id + b"\0" + ticket)[:32]` (UTF-8; a missing ticket is the empty string; vectors `detail_names`); no raw id ever
+  becomes a file name, so case-insensitive file systems, separators and reserved names cannot make two events share a file.
+  The ticket is part of the name, so two tickets never share a detail file, even with the same run, kind and id: a line of
+  ticket B can only name a file made for B. The path is `detail/<run>/<file name>.json`. The file stores `id`, `kind` and
+  `ticket`; a writer never overwrites a file whose stored `(run, kind, id, ticket)` differs. A reader recomputes the name
+  from the stored `(run, kind, id, ticket)` and refuses a file whose name does not match (`swapped`); `--detail` also
+  refuses (`tampered`) a file whose stored `ticket` or `id` is not the one of the line pointing at it.
 - **Detail lost.** When a payload exists but cannot be stored (the file name is taken by another event, a write fails, or it
   exceeds the 1 MB limit), the line is still written with `detail: null` and `detail_lost: true`. A detail problem
   never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file.
@@ -183,10 +187,13 @@ Vectors `retention` fix the order.
   Settings), the size of `.orch/record/` and of `detail/` in MB (rounded up) and the number of run files, read through the
   hardened helpers (no record yet: 0). When the record cannot be read, the sizes and `runs` are `null` and the answer
   carries the read marker `status` (`unavailable` | `tampered`), `reason`, `message` (exit 0).
-- **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…"}` (a person
-  only: op `record.delete_detail`, target = the ticket id). Only the detail files the ticket's OWN lines point at go
-  (`detail/<run>/<id>.json` of a line with that `ticket`), never one a line of another ticket points at too: a run shared
-  with other tickets keeps their detail, and a run's detail folder goes only when nothing is left in it. `n` = the runs
+- **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…", "kept":
+  k}` (a person only: op `record.delete_detail`, target = the ticket id). Exactly the detail files the ticket's OWN lines
+  point at go (`detail/<run>/<file name>.json` of a line with that `ticket` whose file name is the I4 name of that line's
+  run, kind, id and ticket). Lines of other tickets never veto it: by I4 their own files have other names, so a run shared
+  with other tickets keeps their detail and a line planted elsewhere cannot block the deletion. A line of this ticket that
+  points at a file whose name is not this ticket's own (planted or changed) is not followed: that file stays and is
+  counted in `k` (never skipped silently). A run's detail folder goes only when nothing is left in it. `n` = the runs
   that lost detail. Run files, lines and counts stay; the events then show "Details not available" (`--detail` answers
   `not_found`). Before anything is deleted the core appends one `orch.record-change/1` line (`$defs/record_change`: `{v,
   schema, at, change: "record.delete_detail", by: <the proven person>, ticket, deleted: n}`, no path, no content) to

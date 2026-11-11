@@ -23,11 +23,13 @@ def _hash(text: str) -> str:
     return "x_" + hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()[:32]
 
 
-def detail_name(run: str, kind: str, event_id: str) -> str:
+def detail_name(run: str, kind: str, event_id: str, ticket: str | None) -> str:
     """The ONLY way a detail file name is made: 32 lowercase hex of a domain-separated sha256 over
-    (run, kind, final event id). No raw id is ever a file name (case-insensitive file systems, separators)."""
-    data = b"orch.detail/1\0" + b"\0".join(
-        x.encode("utf-8", errors="surrogatepass") for x in (run, kind, event_id)
+    (run, kind, final event id, ticket). No raw id is ever a file name (case-insensitive file systems,
+    separators). The ticket is part of the name, so details of two tickets never share a file (a line of
+    ticket B can only name a file made for B). A missing ticket hashes as the empty string."""
+    data = b"orch.detail/2\0" + b"\0".join(
+        x.encode("utf-8", errors="surrogatepass") for x in (run, kind, event_id, ticket or "")
     )
     return hashlib.sha256(data).hexdigest()[:32]
 
@@ -154,7 +156,10 @@ class ExecJsonMapper:
                 eid = _hash(eid)
         kind = "run.state" if typ == "agent_message" else "step"
         fields = dict(
-            id=eid, detail=f"detail/{self.run}/{detail_name(self.run, kind, eid)}.json" if completed else None
+            id=eid,
+            detail=f"detail/{self.run}/{detail_name(self.run, kind, eid, self.ticket)}.json"
+            if completed
+            else None,
         )
         if typ == "agent_message":
             say = _one_line(item.get("text", ""))
