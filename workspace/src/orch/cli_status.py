@@ -97,8 +97,6 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
 def _services_cmd(args, root: Path) -> None:
     if args.cmd == "start":
         if args.print_launch_url:  # refuse before anything starts
-            from orch import humanproof
-
             if not humanproof.is_test_workspace(root):
                 raise Refused("--print-launch-url works only on a test install, in a test folder.")
         from orch import worktrees
