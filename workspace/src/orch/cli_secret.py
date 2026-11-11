@@ -115,7 +115,7 @@ def _change_profile(root, args, who):
                 enabled = action.endswith("enable")
                 hp.record_set(root, rec, enabled, who)  # the record first, then the file
                 profiles[name][flag] = enabled
-        keystore.write_profiles(root, profiles)
+        keystore.write_profiles(root, profiles, sign=frozenset({name}) if action == "set" else frozenset())
     secretrun.record_change(root, "profile." + action.replace("-", "_"), name, who)
     return extra
 

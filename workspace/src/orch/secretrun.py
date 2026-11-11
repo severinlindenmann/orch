@@ -349,7 +349,7 @@ def _switch_on(root, name, flag) -> bool:
     again under the key lock, the same lock a person's enable holds across record and file, so a reader never
     writes an off record over an enable in progress."""
     with hp._key_lock(hp.key_dir(root)):
-        profile = keystore.read_profiles(root).get(name)
+        profile = _verified(root, name)
         return hp.effective(root, f"secret.{flag}.{name}", bool(profile and profile.get(flag) is True))
 
 
@@ -363,8 +363,23 @@ def _agent_may_run(root, name, profile, command) -> bool:
     return bool(run) and os.path.isabs(run[0]) and list(command) == list(run)
 
 
-def _profile(root, name):
+def _verified(root, name):
+    """The profile `name` with its body MAC-verified (None when there is no such profile). A body edited
+    outside orch, or without a person's MAC, is refused; the variables are re-checked too (a forged file
+    cannot inject loader/interpreter variables even if it carried a valid MAC for them)."""
     profile = keystore.read_profiles(root).get(name)
+    if profile is None:
+        return None
+    if not hp.profile_verified(root, name, profile):
+        raise Refused("Refused: " + hp.PROFILE_CHANGED + ".")
+    for sect in ("env", "files", "set"):
+        if any(keystore.env_denied(v) for v in profile.get(sect, {})):
+            raise Refused("Refused: this key profile sets a variable orch does not allow.")
+    return profile
+
+
+def _profile(root, name):
+    profile = _verified(root, name)
     if profile is None:
         raise Refused(f"Refused: there is no profile named {name}.")
     return profile
@@ -495,6 +510,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                     "Refused: this profile's command is not a full path. "
                     "Ask the person to set the profile again."
                 )
+            approve_program(root, profile["run"][0])  # still a safe, existing program at exec time
             command = profile["run"] + command
         if not command:
             raise Refused("Refused: give a command to run.")

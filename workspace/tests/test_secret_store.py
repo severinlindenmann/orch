@@ -830,3 +830,29 @@ def test_an_unknown_file_check_refuses_the_call_and_sets_nothing_aside(tws, monk
     assert not list(d.rglob("*.loose-*"))
     assert keystore.get_value(tws, "k") == TOKEN and keystore.get_value(tws, "kf") == b"filebytes"
     assert winacl.Unknown  # the exception type the refusal carries
+
+
+def test_write_profiles_signs_new_bodies_and_never_vouches_for_an_edited_one(tws):
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
+    assert [n for n in keystore.read_verified_profiles(tws)] == ["p"]
+    # a body edited in the file: refused; rewriting only a switch does not re-sign it
+    f = hp.key_dir(tws) / "profiles.toml"
+    f.write_text(f.read_text().replace('A = "k"', 'B = "k"'))
+    with pytest.raises(Refused, match="changed outside orch"):
+        keystore.read_verified_profiles(tws)
+    prof = keystore.read_profiles(tws)
+    prof["p"]["allow_get"] = True
+    keystore.write_profiles(tws, prof)
+    with pytest.raises(Refused, match="changed outside orch"):
+        keystore.read_verified_profiles(tws)
+    # a person setting it again signs the new body; removing tombstones
+    keystore.write_profiles(tws, {"p": {"env": {"B": "k"}}}, sign=frozenset({"p"}))
+    assert list(keystore.read_verified_profiles(tws)) == ["p"]
+    keystore.write_profiles(tws, {})
+    assert hp._ledger_load(tws, hp.PROFILE_LEDGER)["p"] is None
+
+
+@pytest.mark.parametrize("var", ["ld_preload", "Node_Options", "pythonpath", "SHELLOPTS", "PS4", "x_options"])
+def test_loader_variables_are_refused_in_any_case(tws, var):
+    with pytest.raises(Refused):
+        keystore.write_profiles(tws, {"p": {"env": {"A": "k"}, "set": {var: "x"}}})

@@ -1395,3 +1395,185 @@ def test_the_unattributed_run_has_a_daily_cap(store, run, ws, monkeypatch):
     monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)
     codes = [run("secret", "env", "plain", "--", PY, "-c", "pass")[0] for _ in range(4)]
     assert codes == [0, 0, 0, 2]
+
+
+# --------------------------------------------------------------------------- profile body MAC (W2b, HIGH)
+
+
+def _pfile(ws):
+    return hp.key_dir(ws) / "profiles.toml"
+
+
+def _edit_file(ws, old, new):
+    """What anything running as the user can do: edit the profile file directly (no proof, no ledger)."""
+    f = _pfile(ws)
+    text = f.read_text()
+    head, sep, tail = text.partition("[profile.good]")
+    block, sep2, rest = tail.partition("\n[")
+    assert old in block
+    f.write_text(head + sep + block.replace(old, new) + sep2 + rest)
+
+
+def _set_ok(run, monkeypatch, ws, name, *extra, proof_name=None):
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", proof_name or name), "secret", "profile", "set", name,
+        "--env", "T=other-token", *extra,
+    )  # fmt: skip
+    assert code == 0, out + err
+
+
+EDITED = "changed outside orch"
+
+
+def test_profile_set_with_proof_then_exec_still_works(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "A=b")
+    assert hp.profile_verified(ws, "good", keystore.read_profiles(ws)["good"])
+    code, out, err = run("secret", "exec", "good", "--", "-c", "import os;print(os.environ['T'])")
+    assert code == 0 and "[hidden: other-token]" in out, err
+
+
+def test_an_edited_run_in_the_profile_file_is_refused(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
+    for argv in (("exec", "good"), ("env", "good", "--", PY, "-c", "pass")):
+        code, out, err = run("secret", *argv)
+        assert code == 2 and EDITED in err, argv
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ('T = "other-token"', 'T = "api-token"'),  # another key into the same variable
+        ('T = "other-token"', 'T = "other-token", U = "api-token"'),  # an extra env variable
+        ("run = [", 'files = { F = "sa.pem" }\nrun = ['),  # an added file
+        ("run = [", 'set = { X = "1" }\nrun = ['),  # an added plain setting
+    ],
+)
+def test_an_edited_env_files_or_set_is_refused(store, run, ws, monkeypatch, old, new):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, old, new)
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_an_edited_profile_cannot_be_revived_by_a_switch_change(store, run, ws, monkeypatch):
+    """Turning a switch rewrites the file; it must not re-sign a body that was edited outside orch."""
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
+    code, out, err = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "secret.profile", "good:allow_get"),
+        "secret",
+        "profile",
+        "get-enable",
+        "good",
+    )
+    assert code == 0, out + err
+    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+    assert run("secret", "get", "good", "other-token")[0] == 2
+
+
+def test_a_profile_without_a_mac_is_refused_even_for_get(store, run, ws, monkeypatch):
+    f = _pfile(ws)
+    f.write_text(f.read_text() + '\n[profile.forged]\nenv = { T = "other-token" }\nallow_get = true\n')
+    for argv in (("env", "forged", "--", PY, "-c", "pass"), ("get", "forged", "other-token")):
+        code, _, err = run("secret", *argv)
+        assert code == 2 and EDITED in err
+
+
+def test_a_copied_mac_from_another_profile_or_workspace_is_refused(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "one", "--run", PY)
+    # same body under another name: the ledger has no entry for it
+    text = _pfile(ws).read_text()
+    block = text[text.index("[profile.one]") :].split("\n[")[0]
+    _pfile(ws).write_text(text + "\n" + block.replace("profile.one", "profile.two"))
+    assert run("secret", "env", "two", "--", PY, "-c", "pass")[0] == 2
+    # the ledger entry of one name copied to another
+    ledger = hp.key_dir(ws) / hp.PROFILE_LEDGER
+    data = json.loads(ledger.read_text())
+    data["entries"]["two"] = data["entries"]["one"]
+    ledger.write_text(json.dumps(data))
+    code, _, err = run("secret", "env", "two", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+    # a MAC made for another workspace id does not verify here
+    body = keystore.read_profiles(ws)["one"]
+    other = hp.profile_mac(hp.human_key(ws), "f" * 32, "one", body)
+    data["entries"]["one"] = other
+    ledger.write_text(json.dumps(data))
+    assert run("secret", "env", "one", "--", PY, "-c", "pass")[0] == 2
+
+
+def test_a_profile_with_a_missing_ledger_is_refused(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    (hp.key_dir(ws) / hp.PROFILE_LEDGER).unlink()
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_remove_tombstones_the_mac(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    saved = _pfile(ws).read_text()
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
+    )
+    assert code == 0, out + err
+    _pfile(ws).write_text(saved)  # the old file put back
+    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+
+
+@pytest.mark.parametrize(
+    "var",
+    [
+        "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PATH", "Path", "NODE_OPTIONS", "BASH_ENV", "GIT_SSH_COMMAND",
+        "PYTHONPATH", "PYTHONSTARTUP", "PERL5OPT", "RUBYOPT", "NODE_PATH", "IFS", "SHELLOPTS", "PS4", "ENV",
+        "JAVA_TOOL_OPTIONS", "MY_OPTIONS", "PATHEXT", "COMSPEC", "ld_preload",
+    ],
+)  # fmt: skip
+def test_loader_and_interpreter_variables_are_refused_at_set_and_at_run(store, run, ws, monkeypatch, var):
+    for sect in ("--set", "--env"):
+        value = "x" if sect == "--set" else "other-token"
+        code, _, err = _cli(
+            run, monkeypatch, _proof(ws, "secret.profile", "bad"), "secret", "profile", "set", "bad",
+            "--env", "T=other-token", sect, f"{var}={value}",
+        )  # fmt: skip
+        assert code == 2 and "bad" not in keystore.read_profiles(ws), (var, sect)
+    # forged into the file of a signed profile: refused at run time as well
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, "run = [", f'set = {{ {var} = "x" }}\nrun = [')
+    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+
+
+def test_a_denied_variable_with_a_valid_mac_still_fails_at_run(store, run, ws, monkeypatch):
+    """Defence in depth: even a body someone managed to sign is refused when it is read and when it runs."""
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, "run = [", 'set = { NODE_OPTIONS = "--require x" }\nrun = [')
+    body = {"env": {"T": "other-token"}, "set": {"NODE_OPTIONS": "--require x"}, "run": [PY]}
+    hp.profile_sign(ws, "good", body)  # a forged-but-signed body (the signer being compromised)
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and "NODE_OPTIONS" in err
+    # and the run-time check alone, with the reader's check out of the way
+    monkeypatch.setattr(keystore, "read_profiles", lambda root: {"good": body})
+    monkeypatch.setattr(hp, "profile_verified", lambda *a: True)
+    with pytest.raises(Refused, match="does not allow"):
+        secretrun._profile(ws, "good")
+
+
+def test_exec_checks_the_program_again_when_it_runs(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    monkeypatch.setattr(
+        secretrun, "approve_program", lambda root, name: (_ for _ in ()).throw(Refused("Refused: gone."))
+    )
+    code, _, err = run("secret", "exec", "good", "--", "-c", "pass")
+    assert code == 2 and "gone" in err
+
+
+def test_profile_set_without_a_proof_or_with_a_wrong_target_stores_no_mac(store, run, ws, monkeypatch):
+    before = (hp.key_dir(ws) / hp.PROFILE_LEDGER).exists()
+    args = ("secret", "profile", "set", "nope", "--env", "T=other-token")
+    assert run(*args)[0] == 2  # no proof
+    assert _cli(run, monkeypatch, _proof(ws, "secret.profile", "other"), *args)[0] == 2  # wrong target
+    assert _cli(run, monkeypatch, _proof(ws, "secret.add", "nope"), *args)[0] == 2  # wrong op
+    assert "nope" not in keystore.read_profiles(ws)
+    ent = hp._ledger_load(ws, hp.PROFILE_LEDGER) or {}
+    assert "nope" not in ent and (hp.key_dir(ws) / hp.PROFILE_LEDGER).exists() == before or "nope" not in ent

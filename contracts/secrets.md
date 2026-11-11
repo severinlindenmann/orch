@@ -108,9 +108,21 @@ run = ["pass-cli"]
 A profile maps variables to key names (`env`: the value in the variable; `files`: a temp file path in the variable), may set
 plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false), and may let agents use its keys in any command (`agents_may_env`, default false).
 Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
-ORCH_*, proxies, CA bundles, JAVA_TOOL_OPTIONS, …). Profiles are
+ORCH_*, PYTHON*, PERL5*, RUBY*, NODE_*, `*_OPTIONS`, SHELLOPTS, PS4, BASH_ENV, ENV, IFS, PATHEXT, COMSPEC, proxies, CA bundles,
+JAVA_TOOL_OPTIONS, …; matched in any letter case, at `profile set` AND again every time the profile is read or run). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
 only with a matching settings record (human-proof.md, Settings: records and tombstones), so editing the file alone does not enable `get`.
+
+**The profile body is MAC-bound (W2b).** `profiles.toml` is editable by anything running as the user, so it is not trusted for
+what a profile runs or receives. `profile set` (a `secret.profile` proof) stores `profile1.<workspace id>.<profile name>.<canonical
+{env, files, set, run}>` under the guarded human key (HMAC-SHA256, base64url) as the profile's entry in the ledger
+`<guarded orch home>/keys/<workspace>/profile.json` (human-proof.md, Ledgers; `profile remove` tombstones it with `null`).
+`run`, `env`, `file`, `exec` and `get` recompute it and **fail closed** on a missing or different MAC (and a missing or damaged
+ledger) with `Refused: this key profile was changed outside orch; set it up again.` The switches (`allow_get`, `agents_may_env`) keep their
+own settings records and are not part of the body; rewriting a switch never signs a body that was edited outside orch. `exec` also re-runs
+the `run` program approval (absolute path, outside the workspace, not changeable by others, exists) when it starts.
+**No legacy:** profiles saved before this change have no MAC and are refused until a person sets them up again (owner rule: no
+compatibility code until the pilot cut).
 
 ## Commands
 
