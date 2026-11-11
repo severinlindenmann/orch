@@ -298,7 +298,7 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
         input=json.dumps({"session_id": SID}), text=True, cwd=proj, capture_output=True,
     )  # fmt: skip
     assert proc.returncode == 0 and proc.stderr == ""
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == SID
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) == SID
     _until(lambda: _notices(typed, tid) == 1, what="notice typed")
     assert "Do the thing" not in typed.read_text()  # orch types only its notice line
     assert "Do the thing" in _take(run, tid, proj)
@@ -312,7 +312,7 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
     run("run", "status", tid)
     assert runs.read(proj, tid) is None and not runs_live.session_exists(proj, tid)
     assert not hooks.exists()
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == SID
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) == SID
     # the next start continues that conversation
     monkeypatch.delenv("ORCH_RUN_IDLE_SECONDS")
     calls.write_text("")
@@ -602,7 +602,7 @@ def test_start_can_name_the_agent_for_one_run(proj, run, lab, tmp_path, monkeypa
     assert code == 0 and r["agent"] == "claude" and runs.read(proj, tid)["agent"] == "claude"
     _until(lambda: calls.exists() and calls.read_text().strip(), what="claude ran")
     _until(lambda: runs.read(proj, tid) is None)
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host())
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host())
     assert config.agent_name(proj) == "fake"  # the folder's choice is unchanged
     code, _, err = run("run", "start", tid, "--agent", "nobody")
     assert code == 2 and "No agent called 'nobody'" in err

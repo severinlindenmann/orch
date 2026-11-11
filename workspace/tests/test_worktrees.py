@@ -780,3 +780,12 @@ def test_workdir_for_survives_odd_records_and_prefers_the_callers_ticket(repo):
         assert worktrees.workdir_for(repo, rec) == repo
     assert worktrees.workdir_for(repo, {"ticket": b, "folder": str(fa)}, a).resolve() == fa.resolve()
     assert worktrees.workdir_for(repo, {"ticket": a, "folder": str(fa)}, b) == repo
+
+
+@pytest.fixture(autouse=True)
+def _copies_test_home(monkeypatch):
+    from orch import humanproof
+
+    # Legacy proj fixtures live outside the fake account's .orch-test directory.
+    # Keep the real private-directory, file, and key checks on their isolated home.
+    monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
