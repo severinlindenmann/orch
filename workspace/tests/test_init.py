@@ -306,8 +306,8 @@ def test_recommended_without_a_terminal_asks_and_is_not_an_error(proj, run, monk
     assert "Shows things." in err and "To turn these on, run it again with --yes." in err and added == []
 
 
-def test_recommended_failure_turns_none_on(proj, monkeypatch):
-    from orch import addons, init
+def test_recommended_failure_turns_none_on(proj, run, monkeypatch):
+    from orch import addons
 
     rows = [
         {"name": "a1", "recommended": True, "active": False},
@@ -321,14 +321,59 @@ def test_recommended_failure_turns_none_on(proj, monkeypatch):
 
     def add(root, n, yes=False):
         if n == "a2":
-            raise skills.Refused("boom")
+            print("project step diagnostic")
+            raise skills.Refused("The project step failed (see above).")
         on.append(n)
 
     monkeypatch.setattr(addons, "add", add)
     monkeypatch.setattr(addons, "remove", lambda root, n, purge=False: off.append(n))
-    with pytest.raises(skills.Refused, match="Turned off again: a1"):
-        init.recommended(proj, yes=True)
+    code, out, err = run("init", "--recommended", "--yes")
+    assert code == 2 and "Turned off again: a1" in err
+    assert "project step diagnostic" not in out
+    assert err.index("project step diagnostic\n") < err.index("The project step failed (see above).")
     assert on == ["a1"] and off == ["a1"]  # turned on at once, so undone; collected ones are never installed
+
+
+@pytest.mark.parametrize("refusal", ["busy", "env-change"])
+@pytest.mark.parametrize("missing", [None, "registry", "package"])
+def test_recommended_installed_skips_install_refusals(proj, monkeypatch, refusal, missing):
+    from orch import addons, init, winfinish
+
+    rows = [{"name": n, "recommended": True, "active": False} for n in ("a1", "a2")]
+    mans = {r["name"]: {"name": r["name"]} for r in rows}
+    monkeypatch.setattr(addons, "listing", lambda root: rows[:1] if missing == "package" else rows)
+    monkeypatch.setattr(
+        addons, "shipped_recommended", lambda fetch=True: {"a2": mans["a2"]} if missing == "package" else {}
+    )
+    monkeypatch.setattr(addons, "discover", lambda: mans if missing != "package" else {"a1": mans["a1"]})
+    monkeypatch.setattr(
+        addons,
+        "registry",
+        lambda: [
+            {"name": n, "source": "built-in", "version": "1"}
+            for n in ("a1", "a2")
+            if missing != "registry" or n != "a2"
+        ],
+    )
+    monkeypatch.setattr(addons, "consent_text", lambda m, local: m["name"])
+    monkeypatch.setattr(addons, "record_consent", lambda *a: None)
+    seen = []
+    monkeypatch.setattr(addons, "reexec", lambda args: seen.append(args[2]))
+    monkeypatch.setattr(winfinish, "needed", lambda: True)
+    monkeypatch.setattr(winfinish, "pending", lambda home: True)
+
+    def env_check():
+        if refusal == "env-change":
+            raise skills.Refused("env-change refused")
+
+    monkeypatch.setattr(addons, "tool_env_change_ok", env_check)
+    if missing:
+        with pytest.raises(skills.Refused, match="still finishing|env-change refused"):
+            init.recommended(proj, yes=True)
+        assert seen == []
+    else:
+        assert init.recommended(proj, yes=True) == ["a1", "a2"]
+        assert seen == ["a1", "a2"]
 
 
 def test_recommended_also_turns_on_shipped_addons_that_are_not_installed(proj, monkeypatch):

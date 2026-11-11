@@ -130,7 +130,7 @@ actor MockRelay: RelayAPI {
     /// Work updates per (workspace, ticket), newest per ticket is what the feed returns.
     private var updateLog: [TicketUpdate] = [
         TicketUpdate(id: "m_upd0000000000001", workspace: pilatus, workspaceName: "Pilatus Workspace", ticket: "t_q3sum1", kind: "result",
-                     title: "Q3 summary", text: "Q3 summary is ready in the shared folder.", replyTo: nil, at: "2026-11-05T11:20:00Z",
+                     title: "Q3 summary", text: "artifacts/test-report.pdf\nQ3 summary is ready in the shared folder. Have a look. notes/old-plan.md is not attached.", replyTo: nil, at: "2026-11-05T11:20:00Z",
                      key: "PIL-12", ticketView: MockRelay.q3View),
         TicketUpdate(id: "m_upd0000000000002", workspace: reports, workspaceName: "Reports", ticket: "t_9k2m4q", kind: "working",
                      title: "Invoice CSV export", text: "Working on: Invoice CSV export", replyTo: nil, at: "2026-11-05T15:12:00Z",
