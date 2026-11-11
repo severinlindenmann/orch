@@ -519,6 +519,16 @@ def test_redact_property_no_secret_survives_confusables_comments_fullwidth():
 
     rnd = random.Random(1137)
     names = ["password", "passwd", "secret", "token", "api_key", "smtp_pass", "ADMIN_PASS", "Authorization"]
+    names += [
+        "smtpPass",
+        "dbPass",
+        "api.key",
+        "client-secret",
+        "authToken",
+        "x.api-key",
+        "ADMIN.PASS",
+        "apiKey",
+    ]
     full = lambda s: "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in s)  # noqa: E731
     for i in range(400):
         value = "".join(rnd.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(rnd.randint(8, 16)))
@@ -533,6 +543,8 @@ def test_redact_property_no_secret_survives_confusables_comments_fullwidth():
                 name[:cut] + "<!-- c -->" + name[cut:] + "=" + value,
                 name[:cut] + "​" + name[cut:] + ": " + value,
                 name + "=" + full(value),
+                name + "=" + value[:5] + full(value[5:]),  # mixed width
+                full(name[:cut]) + name[cut:] + "=" + value,
                 f"cfg: {name}={value}",
                 f"a=1,{name}={value}",
             ]
@@ -575,3 +587,30 @@ def test_pass_test_result_labels_stay_visible(name):
     from orch.phone_view import secret_name
 
     assert not secret_name(name)
+
+
+@pytest.mark.parametrize("name", ["smtpPass", "dbPass", "api.key", "client-secret", "authToken", "x.pass"])
+def test_redact_one_name_predicate_camel_dotted_and_dashed_names(name):
+    from orch.phone_view import redact
+
+    assert "hunter2" not in redact(f"{name}=hunter2") and "hunter2" not in redact(f"{name}: hunter2")
+
+
+def test_redact_forms_that_disagree_hide_the_whole_value(monkeypatch):
+    from orch import phone_view
+
+    real = phone_view._scrub_text
+    # a scrub that only sees the NFKC form of the text: raw and NFKC disagree -> the whole value is hidden
+    monkeypatch.setattr(phone_view, "_scrub_text", lambda t: real(t) if t.isascii() else t)
+    assert phone_view.redact("\uff50assword=hunter2") == phone_view.HIDDEN
+
+
+def test_redact_linear_on_long_name_runs():
+    import time
+
+    from orch.phone_view import redact
+
+    t0 = time.monotonic()
+    for text in ("a=" * 20000, "a.b" * 20000, "pass-" * 8000, "a: " * 15000):
+        redact(text)
+    assert time.monotonic() - t0 < 5

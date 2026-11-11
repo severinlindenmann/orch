@@ -82,35 +82,66 @@ def _words_rx(sep: str) -> str:
     return "|".join(parts)
 
 
-# `name: value` where the name holds a secret-name word (the lookahead, inside the name's own run of name
-# characters). A name without one never matches, so it never swallows a pair in its value (Config: password=x,
-# a=1,token=x, user=bob&secret=x). Linear: the lookbehind allows one start per run, the run is possessive.
-# Authorization: Bearer x takes the scheme AND the token.
-# a bare word `pass` (smtp_pass, ADMIN_PASS) but not the test-result phrases pass_rate / pass-count / passed
-_PASS_WORD = r"|(?<![a-z])pass(?![a-z])(?![_-]?(?:rate|count|total|percent))"
-_KV_RAW = re.compile(
-    r"(?<![\w-])(?=[\w-]*?(?:" + _words_rx("[_-]?") + _PASS_WORD + r"))([\w-]++)(\s*+[:=]\s*+)"
-    r"((?:(?:bearer|basic|token|digest)\s++)?(?:\"[^\"]*\"|'[^']*'|\S++))",
-    re.I,
-)
+# `name: value`. The name is captured as a whole run of name characters (letters, digits, _ - .) and
+# ONE predicate, secret_name() (NFKC, camelCase, _ - . split), decides whether it is a secret name;
+# no second regex. A name that is not secret never swallows a pair in its value: the scan goes on
+# right after its separator (Config: password=x, a=1,token=x, user=bob&secret=x). Linear: the
+# lookbehind allows one start per run, the run is possessive, and the value is only matched for a
+# secret name. Authorization: Bearer x takes scheme AND token.
+_KV_HEAD = re.compile(r"(?<![\w.-])([\w.-]++)(\s*+[:=]\s*+)")
+_KV_VAL = re.compile(r"(?:(?:bearer|basic|token|digest)\s++)?(?:\"[^\"]*\"|'[^']*'|\S++)", re.I)
+
+
+class _Hit:
+    """What callers use of a regex match: group(0..3), start(), end() (1 name, 2 separator, 3 value)."""
+
+    def __init__(self, text, head, val):
+        self._g = (text[head.start() : val.end()], head.group(1), head.group(2), val.group(0))
+        self._span = (head.start(), val.end())
+
+    def group(self, i=0):
+        return self._g[i]
+
+    def start(self):
+        return self._span[0]
+
+    def end(self):
+        return self._span[1]
 
 
 class _KV:
-    """The `name: value` pattern (the interface of a compiled regex for search/sub/finditer). finditer and
-    search look at the NFKC form (a fullwidth name is caught); sub works on the text as given (redact
-    normalizes first)."""
+    """The `name: value` scan (finditer/search/sub like a compiled regex). finditer and search look at the raw
+    AND the NFKC form (a fullwidth name is caught); sub works on the text as given (redact normalizes)."""
 
     @staticmethod
-    def finditer(text):
-        return _KV_RAW.finditer(unicodedata.normalize("NFKC", text))
+    def _hits(text):
+        pos = 0
+        while (head := _KV_HEAD.search(text, pos)) is not None:
+            pos = head.end()
+            if secret_name(head.group(1)) and (val := _KV_VAL.match(text, pos)) is not None:
+                yield _Hit(text, head, val)
+                pos = val.end()
+
+    @classmethod
+    def finditer(cls, text):
+        norm = unicodedata.normalize("NFKC", text)
+        yield from cls._hits(text)
+        if norm != text:
+            yield from cls._hits(norm)
 
     @classmethod
     def search(cls, text):
         return next(cls.finditer(text), None)
 
-    @staticmethod
-    def sub(repl, text):
-        return _KV_RAW.sub(repl, text)
+    @classmethod
+    def sub(cls, repl, text):
+        out, last = [], 0
+        for hit in cls._hits(text):
+            out.append(text[last : hit.start()])
+            out.append(repl(hit))
+            last = hit.end()
+        out.append(text[last:])
+        return "".join(out)
 
 
 _SECRET_KV = _KV()
@@ -215,20 +246,23 @@ _ROUNDS = 3
 
 
 def _round(t: str) -> str:
-    """One round: clean, NFKC, scrub the NFKC form AND the cleaned raw form. When only the raw form had a
-    secret the raw scrub is kept (the next round normalizes it again)."""
+    """One round: clean, scrub the cleaned raw form, NFKC, scrub again; out = scrub(NFKC(scrub(clean(raw)))).
+    When the raw and the NFKC form of the cleaned text do not agree on whether there is a secret, the whole
+    value is hidden (fail closed); with no secret in either the cleaned text is returned unchanged."""
     c = clean_untrusted(t, 20000)
     n = unicodedata.normalize("NFKC", c)
-    s_norm = _scrub_text(n)
-    if s_norm != n:
-        return s_norm
-    return _scrub_text(c) if c != n else n
+    raw_hit, norm_hit = _scrub_text(c) != c, _scrub_text(n) != n
+    if raw_hit != norm_hit:
+        return HIDDEN
+    if not raw_hit:
+        return c  # nothing secret in either form: shown as it is (not NFKC: … stays …)
+    return _scrub_text(unicodedata.normalize("NFKC", _scrub_text(c)))
 
 
 def redact(text: str) -> str:
     """Plain, safe text for the phone: invisible/control characters and comments go (clean_untrusted), then
     anything that looks like a key, token or password is replaced by [hidden]. One pipeline iterated to a
-    fixed point: [clean, NFKC, scrub raw, scrub NFKC] repeats until the text stops changing, because
+    fixed point: scrub(NFKC(scrub(clean(raw)))) repeats until the text stops changing, because
     cleaning or normalizing can join text into a new secret (a hidden comment between two halves, fullwidth
     names). Not stable after _ROUNDS rounds: the whole value is hidden."""
     t = str(text)
