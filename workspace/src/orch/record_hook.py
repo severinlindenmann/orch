@@ -8,7 +8,8 @@ says in one plain stderr line why nothing was recorded. What it never does:
 - trust the caller for the run, the ticket, the harness or the time: the run and ticket come from ORCH_RUN /
   ORCH_TICKET and must name a live claim that belong together AND the calling process must be a descendant of
   that claim's process (the wrapper or the agent), so a process outside the run cannot write into it by
-  setting the same variables; a line naming another run is dropped;
+  setting the same variables (the pid must match the recorded start time, never just "not different"); a line
+  naming another run is dropped;
 - write when key hiding is not ready (no registered hider: nothing is written, never raw);
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
 A hook line that cannot be written leaves a short trace: under the run (record.note_lost) only for a proven
@@ -108,8 +109,8 @@ def require_run(root, ids) -> None:
             if isinstance(pid, int) and pid in mine:
                 started = rec.get(started_key)
                 now = procs.pid_started(pid) if started else None
-                if not (started and now and not runs.same_start(now, started)):
-                    return
+                if started and now and runs.same_start(now, started):
+                    return  # only a positive match: a pid whose start time is unknown could be a reused one
         raise NotRecorded("This call is not from inside that run, so nothing was recorded.", "other_run")
     raise NotRecorded("Cannot tell where this call comes from, so nothing was recorded.", "not_provable")
 

@@ -1243,5 +1243,13 @@
    "hook": "h_r_abcdef:3",
    "about": "a hook line without an id gets h_<run>:<seq>, never <run>:<seq>, which only collectors use"
   }
+ ],
+ "reserved_ids": [
+  {
+   "via": "log",
+   "id": "h_r_abcdef:3",
+   "stored": "x_53cf797d10b9ad4f56b7dc16a7026736",
+   "about": "h_<run>:<seq> is the hook default namespace; another origin that sends such an id gets the plain sha256 form"
+  }
  ]
 }

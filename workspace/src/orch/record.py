@@ -943,7 +943,11 @@ class RecordWriter:
         if not default_id:
             if event.get("via") == "hook" and re.fullmatch(r"(?:h_)?" + _RUN + r":.*", eid):
                 eid = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + eid.encode()).hexdigest()[:32]
-            elif not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) or re.fullmatch(r"x_[0-9a-f]{32}", eid):
+            elif (
+                not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid)
+                or re.fullmatch(r"x_[0-9a-f]{32}", eid)
+                or re.fullmatch(r"h_" + _RUN + r":.*", eid)  # the hook's own default namespace: never sent
+            ):
                 eid = _hash(eid)
         event["id"] = eid
         if not isinstance(event.get("text"), str) or re.search(r"[\x00-\x1f\x7f]", event["text"]):

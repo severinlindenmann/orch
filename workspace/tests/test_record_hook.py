@@ -466,3 +466,41 @@ def test_the_tool_call_id_is_the_event_id_so_hook_and_collector_dedupe(live):
     collector = collector_line(run, tid, 9) | {"id": unsafe, "outcome": {"ok": True, "error": None, "ms": 1}}
     with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
         assert record.registered_writer(root).append(collector) is None  # the same hashed id: deduped
+
+
+def _claim_file(root):
+    return next((root / ".orch/run/tickets").glob("t_*.json"))
+
+
+def test_pid_must_match_the_recorded_start_time(live, monkeypatch):
+    """A pid is accepted only on a positive start-time match (pid reuse: unknown is not a match)."""
+    from orch import procs
+
+    root, run, tid = live
+    assert record_hook.hook(root, line(id="toolu_ok")) is not None  # stored and current start times match
+    path = _claim_file(root)
+    claim = json.loads(path.read_text())
+    assert claim.get("pid_started")
+    monkeypatch.setattr(procs, "pid_started", lambda pid: None)  # current start time unreadable
+    with pytest.raises(record_hook.NotRecorded, match="not from inside"):
+        record_hook.hook(root, line(id="toolu_a"))
+    monkeypatch.undo()
+    monkeypatch.setenv("ORCH_RUN", run)
+    monkeypatch.setenv("ORCH_TICKET", tid)
+    claim.pop("pid_started")  # claim without a recorded start time
+    path.write_text(json.dumps(claim))
+    with pytest.raises(record_hook.NotRecorded, match="not from inside"):
+        record_hook.hook(root, line(id="toolu_b"))
+    claim["pid_started"] = "Thu Jan  1 00:00:00 1970"  # a different start time: the pid was reused
+    path.write_text(json.dumps(claim))
+    with pytest.raises(record_hook.NotRecorded, match="not (from inside|active)"):
+        record_hook.hook(root, line(id="toolu_c"))
+    assert [e["id"] for e in events(root, run)] == ["toolu_ok"]
+
+
+def test_other_origins_cannot_send_the_hook_default_namespace(live):
+    root, run, tid = live
+    sent = f"h_{run}:5"
+    with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+        got = record.registered_writer(root).append(collector_line(run, tid, 1) | {"id": sent})
+    assert got["id"] == "x_" + __import__("hashlib").sha256(sent.encode()).hexdigest()[:32]

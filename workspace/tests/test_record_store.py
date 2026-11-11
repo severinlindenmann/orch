@@ -559,3 +559,10 @@ def test_store_detail_with_untrusted_existing_target_is_lost(store, tmp_path, mo
         _foreign_owner(monkeypatch)
     kept = writer.append(event(id="q1", run="r_8k2m02"), detail={"input": "x", "output": "y"})
     assert kept is not None and kept["detail"] is None and kept["detail_lost"] is True
+
+
+@pytest.mark.parametrize("case", VECTORS["reserved_ids"])
+def test_reserved_ids(store, case):
+    _, writer = store
+    value = event(id=case["id"], via=case["via"], run="r_abcdef")
+    assert writer.append(value)["id"] == case["stored"]

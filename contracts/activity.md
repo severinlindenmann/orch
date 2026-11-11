@@ -67,15 +67,19 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   together **and the calling process must be a descendant of the claim's process** (its wrapper pid or agent pid, start
   time checked), so a process outside the run cannot write into it by setting the same variables; a line naming another
   run is dropped; the caller's `at` and `harness` are never kept (time of the call; the tool this process runs under).
-  Where the process tree cannot be read (Windows today) nothing is written. *Follow-up:* the per-run hook file token
+  Where the process tree cannot be read (Windows today) nothing is written. Nested runs: the check accepts the claim's own
+  pids anywhere among the caller's ancestors, so a call from a child run's tree can still name its parent run; telling
+  them apart needs the token below. *Follow-up:* the per-run hook file token
   (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
-  The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`) put there by the caller (this entry takes
+  The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller
+  (the hook wiring of slice 1.8 must pass it; a hook line and the collector line with that id merge) (this entry takes
   event-shaped lines, not raw tool payloads); the writer hashes an unsafe one once, the same for hook and collector.
   A payload over 8 MB is not read further: a minimal `step` with `detail_lost: true` is written, never no line.
 - **Reserved ids.** `<run>:<seq>` is the default id of collector lines (and of other origins); a hook line without an id
   gets `h_<run>:<seq>` instead, so a hook line can never take the id of a collector line still to come (dedupe would
   drop it; vectors `hook_default_id`). A hook-sent id in either namespace (`<run>:…`, `h_<run>:…`) is replaced by `x_` +
-  32 hex (vectors `hook_namespace`).
+  32 hex (vectors `hook_namespace`); any other origin's `h_<run>:…` is replaced by `x_` + the first 32 hex of its
+  sha256 (vectors `reserved_ids`), so only the writer's own default can be in that namespace.
 - **Fail closed.** The writer takes a value hider as a required argument; there is no default and no pass-through. A hider is
   "registered" only when it was built from this workspace's key store in its **guarded orch home** (secrets.md, Where: a real
   workspace only with the account's default home, a test workspace only with a test home; any other pairing refuses). An empty or pass-through hider refuses; a store
