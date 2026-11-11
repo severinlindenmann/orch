@@ -24,7 +24,7 @@ CSP = "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 
 def read_counts(root, orch_bin=None):
     """Read only the CLI answer, using this interpreter's orch unless a test injects an executable."""
-    command = [str(orch_bin)] if orch_bin is not None else [sys.executable, "-I", "-m", "orch"]
+    command = [str(orch_bin)] if orch_bin is not None else [sys.executable, "-I", "-P", "-m", "orch"]
     try:
         result = subprocess.run(
             [*command, "record", "counts", "--days", "30", "--json"],
