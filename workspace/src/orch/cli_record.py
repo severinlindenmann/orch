@@ -628,7 +628,8 @@ def delete_detail(root: Path, args) -> dict:
     runs that could not be read (skipped, never a veto; their detail stays, said plainly on stderr). Lines,
     counts and the detail of other tickets stay. Order: an agent is refused before anything else
     (needs_person); a ticket that does not exist is not_found (a deleted ticket's detail goes with retention:
-    accepted); then the proof (needs_person); a detail folder that is not safe refuses with nothing deleted;
+    accepted); then the proof (needs_person); the detail folder itself not being safe refuses with nothing
+    deleted (a run's folder or file that is not safe only makes that run unreadable);
     the audit line is written BEFORE anything is deleted (it cannot be written: not_available, nothing
     deleted)."""
     from orch import humanproof, tickets
@@ -679,7 +680,10 @@ def delete_detail(root: Path, args) -> dict:
     found = record.detail_files(root, list(mine))
     _show_alert(found.alert)
     if found.status != "ok":
-        raise _fail(found)
+        raise _fail(found)  # only the detail folder itself not being safe refuses
+    pointed_files, unsafe_runs = found.value
+    for run in unsafe_runs:
+        unreadable.setdefault(run)  # a planted link or special file in one run: skipped, never a veto
     # This ticket's own files no line points at (orphans: the detail is written before its line): found by
     # their stored ticket, id and kind, which must give the file's own name (I4).
     orphans = record.ticket_detail_files(root, tid, skip=tuple(unreadable))
@@ -689,7 +693,7 @@ def delete_detail(root: Path, args) -> dict:
     own_files, unreadable_folders = orphans.value
     for run in unreadable_folders:
         unreadable.setdefault(run)
-    items = list(dict.fromkeys([*found.value, *(ref for ref in own_files if ref[0] not in unreadable)]))
+    items = list(dict.fromkeys(ref for ref in [*pointed_files, *own_files] if ref[0] not in unreadable))
     deleted = len({run for run, _ in items})
     try:
         record.note_change(root, change="record.delete_detail", by=who, ticket=tid, deleted=deleted)

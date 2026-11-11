@@ -44,10 +44,15 @@ def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
 
 
 def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str]:
+    # a (re)connection never inherits the last relay's admin policy (a stale "off" or "on"): cleared BEFORE
+    # the new relay.json is written (no moment where the new connection reads the old policy, also when it
+    # stops half-way) and again after it (a refresh of the old connection may have written one in between);
+    # refresh below writes the policy of THIS connection. While disconnected (no relay.json) it counts for
+    # nothing.
+    policy = net.secrets_dir(root) / "policy.json"
+    policy.unlink(missing_ok=True)
     who = net.connect_service(root, "relay", "orch-relay", url, workspace, token, "orn_")
-    # a (re)connection never inherits the last relay's admin policy (a stale "off" or "on"): refresh below
-    # writes the policy of THIS connection. While disconnected (no relay.json) the policy counts for nothing.
-    (net.secrets_dir(root) / "policy.json").unlink(missing_ok=True)
+    policy.unlink(missing_ok=True)
     return who, refresh(root)
 
 

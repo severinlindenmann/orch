@@ -24,6 +24,7 @@ import stat
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -852,18 +853,33 @@ def conn_grants(root: Path) -> dict:
     return out
 
 
-def effective(root: Path, setting: str, file_value: bool) -> bool:
+def _setting_record(root: Path, setting: str):
+    path, wkey = _settings_path(root)
+    data = _settings_load(root, path)
+    rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
+    return rec.get("value") if isinstance(rec, dict) else None
+
+
+def effective(root: Path, setting: str, file_value: bool, file_now: Callable[[], bool] | None = None) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
-    existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
+    existed). An unreadable home or record = off (N12).
+
+    A False in the file writes the False tombstone (`by: file`) at once, so a person's off from the file
+    stays off when an agent edits the file back to on. Like retention(), it is decided under keys.lock with
+    the record and (through `file_now`, when given) the file read AGAIN there: a person's grant writes the
+    record and then the file under the same lock, so a reader that saw the old off file in between never
+    writes its tombstone over the new grant."""
     default = SETTING_DEFAULTS.get(setting, False)
     try:
-        path, wkey = _settings_path(root)
-        data = _settings_load(root, path)
-        rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
-        rec_val = rec.get("value") if isinstance(rec, dict) else None
+        rec_val = _setting_record(root, setting)
         if file_value is False and rec_val is not False:
-            _settings_write(root, setting, False, "file")
-            rec_val = False
+            with _key_lock(key_dir(root)):  # re-entrant: _settings_write below takes it again
+                if file_now is not None:
+                    file_value = file_now() is True
+                rec_val = _setting_record(root, setting)
+                if file_value is False and rec_val is not False:
+                    _settings_write(root, setting, False, "file", lambda current: current is False)
+                    rec_val = False
     except (Refused, OSError):
         return False
     return bool(file_value and (rec_val if rec_val is not None else default))
@@ -878,7 +894,10 @@ def _retention_ok(setting: str, value) -> bool:
 
 def retention_snap(setting: str, value: int) -> int:
     """A FILE retention number as it can count: snapped DOWN to the allowed list (keep_days 100 -> 90,
-    99999 -> 365) and never below the floor (keep_days 1 -> 30, max_mb 1 -> 512)."""
+    99999 -> 365) and never below the floor (keep_days 1 -> 30, max_mb 1 -> 512). Anything but a positive
+    whole number (true, a float, 0) is the default record, whatever the caller checked before."""
+    if type(value) is not int or value <= 0:
+        return RETENTION_DEFAULTS[setting]
     allowed = RETENTION_ALLOWED[setting]
     return max((v for v in allowed if v <= value), default=RETENTION_FLOOR[setting])
 
@@ -903,12 +922,8 @@ def _retention_set(root: Path, setting: str, value, by: str) -> None:
 
 def _retention_record(root: Path, setting: str) -> int:
     """The retention record value that counts (the default record when none / unreadable / not valid)."""
-    default = RETENTION_DEFAULTS[setting]
-    path, wkey = _settings_path(root)
-    data = _settings_load(root, path)
-    rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
-    rec_val = rec.get("value") if isinstance(rec, dict) else None
-    return rec_val if _retention_ok(setting, rec_val) else default
+    rec_val = _setting_record(root, setting)
+    return rec_val if _retention_ok(setting, rec_val) else RETENTION_DEFAULTS[setting]
 
 
 def retention(root: Path, setting: str, file_value: int) -> int:

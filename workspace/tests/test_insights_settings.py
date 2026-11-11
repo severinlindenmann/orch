@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from orch import cli_record, config, hider, pageproof
 from orch import humanproof as hp
+from orch.errors import Refused
 from orch.record import RecordTampered, RecordWriter, record_dir
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -135,6 +136,34 @@ def test_share_counts_off_is_a_tombstone_the_file_cannot_undo(ws, run):
     assert _get(run, "insights.share_counts") is False
 
 
+@pytest.mark.parametrize("key,start", [("insights.share_names", None), ("insights.share_counts", "off")])
+def test_share_switch_turned_off_from_the_file_stays_off(ws, run, monkeypatch, key, start):
+    """MED-2: a person's grant, then the person turns it off FROM THE FILE (usage-counts.md: allowed): the
+    read writes the False tombstone (`by: file`), so an agent editing the file back to on gets nothing."""
+    table, name = config.INSIGHTS_KEYS[key]
+    _start(run, key, start)
+    assert _cli(run, monkeypatch, _sp(ws, key, "on"), "config", "set", key, "on", "--json")[0] == 0
+    assert _record(ws, key)["value"] is True and _get(run, key) is True
+    config.set_key(ws, table, name, False)  # the person, in config.toml
+    assert config.insights_value(ws, key) is False
+    assert _record(ws, key)["value"] is False and _record(ws, key)["by"] == "file"
+    config.set_key(ws, table, name, True)  # an agent, in config.toml
+    assert config.insights_value(ws, key) is False and _get(run, key) is False
+    assert _record(ws, key)["value"] is False
+
+
+def test_file_tombstone_is_decided_with_the_file_read_again_under_the_lock(ws, run, monkeypatch):
+    """A reader that saw the old off file never writes its tombstone over a person's grant made in between
+    (the grant writes record and file under keys.lock; the reader reads both again there)."""
+    key = "insights.share_names"
+    proof = _sp(ws, key, "on")
+    assert _cli(run, monkeypatch, proof, "config", "set", key, "on", "--json")[0] == 0
+    stale = False  # what the reader saw before the person's grant
+    assert hp.effective(ws, key, stale, lambda: config.file_value(ws, "insights", "share_names")) is True
+    assert _record(ws, key)["value"] is True and _record(ws, key)["by"] == "human:pat"
+    assert config.insights_share_names(ws) is True
+
+
 # ------------------------------------------------------------------ write: widening needs the person
 
 WIDENING = [  # (key, from: a narrowing done first, or None, value, effective value after)
@@ -176,6 +205,22 @@ def test_widening_answer_and_same_value_noop(ws, run, monkeypatch, key, start, v
     code, out, _ = run("config", "set", key, value)
     assert code == 0 and "Already" in out
     assert _used(ws) == spent and _record(ws, key) == rec
+
+
+def test_proof_stdin_is_read_once_before_the_lock(ws, run, monkeypatch):
+    """L5: with --proof-stdin the line read before keys.lock is ALWAYS passed on, so stdin is never read again
+    inside the lock (also when the read gave nothing)."""
+    calls = []
+
+    def read_once():
+        calls.append(1)
+        return None  # whatever the read gave, it is the only read
+
+    monkeypatch.setattr(hp, "read_proof_line", read_once)
+    code, out, _ = run("config", "set", "insights.share_names", "on", "--proof-stdin", "--json")
+    assert code == 2 and _answer(out)["code"] == "needs_person"
+    assert len(calls) == 1
+    assert not _granted(ws, "insights.share_names")
 
 
 @pytest.mark.parametrize("key,start,value,want", WIDENING)
@@ -1634,6 +1679,84 @@ def test_planted_line_path_is_refused_on_read_and_counted_as_kept(ws, rec, run, 
     assert code == 0 and json.loads(out)["ticket"] == a
 
 
+@pytest.mark.parametrize("how", ["fifo", "file_link", "folder_link"])
+def test_planted_unsafe_detail_of_one_run_is_no_veto(ws, rec, run, monkeypatch, tmp_path, how):
+    """MED-1: a planted line of ticket A (a made-up id) plus a FIFO or a link at the detail name it computes,
+    or a linked run detail folder: that run is skipped and counted unreadable (its detail stays), the other
+    runs lose A's detail. Never a veto of the whole delete."""
+    from orch import record
+
+    if how == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("requires FIFO")
+    a, _ = rec
+    victim, kept_run = (RUN_B, RUN_A) if how == "folder_link" else (RUN_A, RUN_B)
+    line = _own_line(ws, victim, 1)
+    name = record.detail_name(victim, line["kind"], "toolu_fake01", a)
+    _plant(ws, victim, dict(line, id="toolu_fake01", seq=99, detail=f"detail/{victim}/{name}.json"))
+    target = _detail(ws, victim) / f"{name}.json"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if how == "fifo":
+        os.mkfifo(target, 0o600)
+    elif how == "file_link":
+        (outside / "x.json").write_text("{}")
+        target.symlink_to(outside / "x.json")
+    else:
+        _detail(ws, victim).rename(outside / victim)
+        _detail(ws, victim).symlink_to(outside / victim, target_is_directory=True)
+    before = sorted(p.name for p in _detail(ws, victim).iterdir())
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out) == {"deleted": 1, "ticket": a, "kept": 0, "unreadable": 1}
+    assert "1 run could not be read; its detail was not deleted." in err
+    assert not _detail(ws, kept_run).exists()  # the other run of A lost its detail
+    assert sorted(p.name for p in _detail(ws, victim).iterdir()) == before  # the skipped run keeps it all
+    assert _detail(ws, RUN_C).is_dir()
+    assert [c["deleted"] for c in _changes(ws)] == [1]
+
+
+def test_detail_files_skips_an_unsafe_run_and_refuses_only_an_unsafe_detail_folder(ws, rec, tmp_path):
+    from orch import record
+
+    files = {r: sorted(p.stem for p in _detail(ws, r).iterdir()) for r in (RUN_A, RUN_B)}
+    items = [(r, f) for r in (RUN_A, RUN_B) for f in files[r]]
+    (_detail(ws, RUN_A) / f"{files[RUN_A][0]}.json").unlink()
+    (_detail(ws, RUN_A) / f"{files[RUN_A][0]}.json").symlink_to(tmp_path)
+    got = record.detail_files(ws, items)
+    assert got.status == "ok" and got.value == ([(RUN_B, f) for f in files[RUN_B]], [RUN_A])
+    detail = record_dir(ws) / "detail"
+    detail.rename(tmp_path / "moved")
+    detail.symlink_to(tmp_path / "moved", target_is_directory=True)
+    got = record.detail_files(ws, items)
+    assert got.status == "tampered" and got.reason == "link"
+
+
+def test_delete_detail_files_a_run_pruned_in_between_is_already_gone(ws, rec, run, monkeypatch):
+    """L4: retention pruned a run between finding the files and deleting them: already gone, not a partial
+    delete; the other run's files go."""
+    import shutil
+
+    from orch import record
+
+    a, _ = rec
+    real = record.delete_detail_files
+
+    def pruned_first(root, items, **kw):
+        shutil.rmtree(_detail(ws, RUN_B))  # retention, at the same moment
+        return real(root, items, **kw)
+
+    monkeypatch.setattr(record, "delete_detail_files", pruned_first)
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["unreadable"] == 0
+    assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
+    assert real(ws, [(RUN_B, "a" * 32), ("r_gone0001", "b" * 32)]) == 0  # nothing there: nothing fails
+
+
 # ------------------------------------------------------------------ prune reads the effective values
 
 
@@ -1711,6 +1834,32 @@ def test_relay_connect_clears_the_last_admin_policy(ws, monkeypatch):
     relay.connect(ws, "https://r2.example", "w_2", "orn_y")
     assert not (net.secrets_dir(ws) / "policy.json").exists()
     assert config.share_counts_state(ws) == "on"
+
+
+def test_relay_connect_clears_the_policy_before_the_new_connection_is_written(ws, monkeypatch):
+    """L1: the old policy is gone BEFORE relay.json of the new connection is written (a connection that stops
+    half-way never pairs with it), and once more after (a refresh of the old connection in between)."""
+    from orch import net, relay
+
+    _connect(ws, "off")
+    policy = net.secrets_dir(ws) / "policy.json"
+    seen = []
+
+    def connect_service(*a, **k):
+        seen.append(policy.exists())
+        policy.write_text(json.dumps({"usage_counts": "off"}))  # the old connection's refresh, in between
+        raise Refused("That token does not look right.")
+
+    monkeypatch.setattr(net, "connect_service", connect_service)
+    with pytest.raises(Refused):
+        relay.connect(ws, "https://r2.example", "w_2", "orn_y")
+    assert seen == [False]
+    monkeypatch.setattr(
+        net, "connect_service", lambda *a, **k: policy.write_text("{}") or {"workspace": "w_2"}
+    )
+    monkeypatch.setattr(relay, "refresh", lambda root: "refreshed")
+    relay.connect(ws, "https://r2.example", "w_2", "orn_y")
+    assert not policy.exists()
 
 
 def test_an_event_with_no_ticket_gets_no_detail_file(ws):

@@ -1405,19 +1405,34 @@ def _detail_file(run, file_id):
 
 def detail_files(workspace, items, *, seen_by="cli"):
     """Of `items` ((run, detail id) pairs), the ones whose detail file is there, through the hardened walk:
-    ReadResult of a list. A detail folder or file that is a link or not what orch wrote refuses."""
-    found = []
+    ReadResult of (pairs found, runs that cannot be read). A run whose detail folder or one of these files is
+    a link or not what orch wrote (anything with file access can plant a line and a file there) is reported,
+    returned as unreadable and every pair of it is dropped: skipped, never a veto of the others. Only the
+    detail folder itself not being safe refuses."""
+    found, unreadable = [], []
     try:
+        try:
+            _entries(workspace, ("detail",))
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+            return ReadResult("ok", ([], []))  # no detail at all: nothing to find
         for run, file_id in items:
+            if run in unreadable:
+                continue
             try:
                 fd = _open(workspace, _detail_file(run, file_id), "read")
             except RecordUnavailable as error:
                 if error.reason != "missing":
-                    raise
+                    unreadable.append(run)
+                continue
+            except RecordTampered as error:
+                _report(workspace, error, "folder", run, seen_by)
+                unreadable.append(run)
                 continue
             _close(fd)
             found.append((run, file_id))
-        return ReadResult("ok", found)
+        return ReadResult("ok", ([ref for ref in found if ref[0] not in unreadable], unreadable))
     except (RecordTampered, RecordUnavailable) as error:
         return _report(workspace, error, "folder", None, seen_by)
 
@@ -1475,19 +1490,29 @@ def delete_detail_files(workspace, items, *, seen_by="cli"):
     """Delete exactly these detail files ((run, detail id) pairs): every one is checked first (nothing is
     deleted when one is not safe), then they go run by run UNDER THE RUN'S LOCK (the writer stores detail
     under it); a run's detail folder goes only when rmdir finds it empty, so detail of other tickets in the
-    same run (also one written in between) stays. Returns how many files were deleted."""
+    same run (also one written in between) stays. A file or run folder that is missing (retention pruned it
+    since it was found) is already gone: neither the check nor the deletion fails on it. Returns how many
+    files were deleted."""
     rels = [_detail_file(run, file_id) for run, file_id in items]
     run, gone = None, 0
     try:
         for rel in rels:
             run = rel[1]
-            _size(workspace, rel)
+            try:
+                _size(workspace, rel)
+            except RecordUnavailable as error:
+                if error.reason != "missing":
+                    raise
         for run in dict.fromkeys(rel[1] for rel in rels):
             with _lock(workspace, run) as check_lock:
                 for rel in rels:
                     if rel[1] == run:
                         check_lock()
-                        gone += 1 if _unlink(workspace, rel) else 0
+                        try:
+                            gone += 1 if _unlink(workspace, rel) else 0
+                        except RecordUnavailable as error:
+                            if error.reason != "missing":
+                                raise
                 check_lock()
                 _rmdir_empty(workspace, ("detail", run))
     except (RecordTampered, RecordUnavailable) as error:

@@ -444,19 +444,29 @@ def record_max_mb(root: Path | None) -> int:
 
 def insights_share_counts(root: Path | None) -> bool:
     """A widening switch: file value AND the person's record (owner default on while no record ever
-    existed)."""
+    existed). Off in the file writes the False tombstone (humanproof.effective, under keys.lock with the file
+    read again there), so editing the file back to on later changes nothing without a proof."""
     from orch import humanproof
 
+    if root is None:
+        return False
     value = file_value(root, "insights", "share_counts")
-    return False if root is None else humanproof.effective(root, "insights.share_counts", value)
+    return humanproof.effective(
+        root, "insights.share_counts", value, lambda: file_value(root, "insights", "share_counts")
+    )
 
 
 def insights_share_names(root: Path | None) -> bool:
-    """A widening switch: true only with the person's record (a file value of true alone reads false)."""
+    """A widening switch: true only with the person's record (a file value of true alone reads false). Off in
+    the file writes the False tombstone, like share_counts."""
     from orch import humanproof
 
+    if root is None:
+        return False
     value = file_value(root, "insights", "share_names")
-    return False if root is None else humanproof.effective(root, "insights.share_names", value)
+    return humanproof.effective(
+        root, "insights.share_names", value, lambda: file_value(root, "insights", "share_names")
+    )
 
 
 SHARE_BLOCKED_MSG = {
@@ -606,8 +616,11 @@ def agents_may_finish(root: Path | None) -> bool:
 
     if root is None:
         return False
-    file_value = (read(root).get("workflow") or {}).get("agents_may_finish") is True
-    return humanproof.effective(root, "workflow.agents_may_finish", file_value)
+
+    def from_file() -> bool:
+        return (read(root).get("workflow") or {}).get("agents_may_finish") is True
+
+    return humanproof.effective(root, "workflow.agents_may_finish", from_file(), from_file)
 
 
 def set_agents_may_finish(root: Path, value: bool, by: str | None = None) -> bool:

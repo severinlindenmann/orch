@@ -251,9 +251,11 @@ def _insights_set(args, root: Path) -> None:
     agent = AGENT_ASKS.format(what=f"change {key}") if _actor(args).startswith("agent:") else None
     # The proof line is read from stdin HERE, before change_insights takes keys.lock: a caller whose stdin
     # never closes must not hold the lock. Only verify-and-consume runs inside it. An agent's stdin is never
-    # read.
-    proof = humanproof.read_proof_line() if agent is None and getattr(args, "proof_stdin", False) else None
-    extra = {} if proof is None else {"proof": proof}
+    # read. With --proof-stdin the line is ALWAYS passed on (empty when not read), so person_by never reads
+    # stdin again inside the lock.
+    proof_stdin = getattr(args, "proof_stdin", False)
+    proof = humanproof.read_proof_line() if agent is None and proof_stdin else None
+    extra = {"proof": proof or ""} if proof_stdin else {}
     res = config.change_insights(
         root,
         key,
