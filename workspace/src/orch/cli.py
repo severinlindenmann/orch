@@ -1150,10 +1150,10 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
         return
     for c, name in _TICKET_ARGS:
         if c == cmd and isinstance(getattr(args, name, None), str):
-            setattr(args, name, tickets.resolve_cli(root, getattr(args, name)))
+            setattr(args, name, tickets.resolve_cli(root, getattr(args, name), json_output=args.json))
     on = getattr(args, "on", None)
     if cmd in ("ticket", "wait") and isinstance(on, str) and on.startswith("ticket:"):
-        args.on = "ticket:" + tickets.resolve_cli(root, on[len("ticket:") :])
+        args.on = "ticket:" + tickets.resolve_cli(root, on[len("ticket:") :], json_output=args.json)
 
 
 def main(argv: list[str] | None = None, watchdog=None) -> int:

@@ -138,9 +138,9 @@ def new_id(root: Path) -> str:
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
 
 
-def resolve(root: Path, ref, *, notice=None):
+def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
     """The one place a ticket key (DM1-12, any case) becomes the ticket id. Anything else is returned as it
-    is (an id, or a word the command refuses later)."""
+    is (an id, or a word the command refuses later). Old keys require explicit opt-in."""
     if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
         return ref
     want = ref.strip().upper()
@@ -148,6 +148,17 @@ def resolve(root: Path, ref, *, notice=None):
     for t in local:
         if str(t.get("key", "")).upper() == want:
             return t["id"]
+    if follow_moved:
+        t = _moved_ticket(root, want, local)
+        if t is not None:
+            if notice is not None:
+                notice(f"{want} moved to {t.get('key') or t['id']}")
+            return t["id"]
+    raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
+
+
+def _moved_ticket(root: Path, want: str, local: list[dict]):
+    """Find a unique, locally issued old key; never follow chains or cross workspaces."""
     key = _KEY_RE.fullmatch(want)
     code = config.workspace_code(root)
     alias_allowed = (
@@ -164,17 +175,23 @@ def resolve(root: Path, ref, *, notice=None):
     if len(matches) > 1:
         keys = ", ".join(sorted(str(t.get("key") or t["id"]) for t in matches))
         raise Refused(f"{want} is an old key claimed by several tickets: {keys}. Use a current key.")
-    if matches:
-        t = matches[0]
-        if notice is not None:
-            notice(f"{want} moved to {t.get('key') or t['id']}")
-        return t["id"]
-    raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
+    return matches[0] if matches else None
 
 
-def resolve_cli(root: Path, ref):
-    """Resolve a CLI reference, showing moved-key notices without changing JSON stdout."""
-    return resolve(root, ref, notice=lambda message: print(message, file=sys.stderr))
+def resolve_cli(root: Path, ref, *, json_output: bool = False):
+    """Text CLI follows moved keys visibly; JSON callers must use the current key."""
+    if not json_output:
+        return resolve(root, ref, follow_moved=True, notice=lambda message: print(message, file=sys.stderr))
+    try:
+        return resolve(root, ref)
+    except Refused:
+        if isinstance(ref, str) and _KEY_RE.fullmatch(ref.strip()):
+            want = ref.strip().upper()
+            t = _moved_ticket(root, want, list_all(root))
+            if t is not None:
+                current = t.get("key") or t["id"]
+                raise Refused(f"{want} moved to {current}; use {current}") from None
+        raise
 
 
 def _counter_path(root: Path) -> Path:

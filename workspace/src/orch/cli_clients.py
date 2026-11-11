@@ -325,7 +325,7 @@ def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
     by, sub = tickets.current_actor(), args.gsub
-    tid = tickets.resolve_cli(root, getattr(args, "ticket", None)) if hasattr(args, "ticket") else None
+    tid = tickets.resolve_cli(root, args.ticket, json_output=args.json) if hasattr(args, "ticket") else None
     ws = relay.resolve(root, args.workspace) if hasattr(args, "workspace") else None
     if sub == "list":
         v = cg.view(root)

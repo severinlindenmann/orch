@@ -1202,3 +1202,15 @@ def test_make_ticket_across_midnight_local(proj, monkeypatch):
     result = chat.make_ticket(proj, "proposal", by="human:me")
     assert len(tickets.list_all(proj)) == 1
     assert chat.read_day(proj, "2026-11-09")["messages"][0]["moved_to"]["id"] == result["ticket"]
+
+
+def test_old_key_mentions_do_not_redirect(proj, new_ticket):
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    old = ticket["key"]
+    ticket["key"] = tickets.next_key(proj)
+    ticket["ext"] = {"sync": {"old_keys": [old]}}
+    tickets.save(proj, ticket)
+    assert chat.refs_in_text(proj, f"See {old}") == []
+    assert chat.clean_refs(proj, [{"kind": "ticket", "key": old}]) == []
+    assert chat.refs_in_text(proj, f"See {ticket['key']}")[0]["id"] == tid

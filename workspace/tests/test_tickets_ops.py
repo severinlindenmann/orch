@@ -563,7 +563,7 @@ def test_old_key_resolution(proj, new_ticket, run):
     t["ext"] = {"sync": {"old_keys": ["DM1-13"]}}
     tickets.save(proj, t)
     notices = []
-    assert tickets.resolve(proj, "dm1-13", notice=notices.append) == tid
+    assert tickets.resolve(proj, "dm1-13", follow_moved=True, notice=notices.append) == tid
     assert notices == ["DM1-13 moved to DM1-15"]
     code, _, err = run("ticket", "show", "DM1-13")
     assert code == 0
@@ -571,19 +571,28 @@ def test_old_key_resolution(proj, new_ticket, run):
     from orch.errors import Refused
 
     with pytest.raises(Refused, match="doesn't exist"):
-        tickets.resolve(proj / "other", "DM1-13")
+        tickets.resolve(proj, "DM1-13", notice=notices.append)
+    for args in [("show", "DM1-13"), ("set", "DM1-13", "title", "Must not change")]:
+        code, out, err = run("ticket", *args, "--json")
+        assert code == 2
+        assert json.loads(out)["error"] == "DM1-13 moved to DM1-15; use DM1-15"
+        assert "DM1-13 moved to DM1-15; use DM1-15" in err
+    assert tickets.load(proj, tid) == t
+
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj / "other", "DM1-13", follow_moved=True)
     other = new_ticket()
     t2 = tickets.load(proj, other)
     t2["key"] = "DM1-13"
     tickets.save(proj, t2)
     notices.clear()
-    assert tickets.resolve(proj, "DM1-13", notice=notices.append) == other
+    assert tickets.resolve(proj, "DM1-13", follow_moved=True, notice=notices.append) == other
     assert notices == []
     t2["key"] = "DM1-16"
     t2["ext"] = {"sync": {"old_keys": ["DM1-13"]}}
     tickets.save(proj, t2)
     with pytest.raises(Refused, match="DM1-15, DM1-16"):
-        tickets.resolve(proj, "DM1-13")
+        tickets.resolve(proj, "DM1-13", follow_moved=True)
 
 
 def test_sessions_cannot_cross_tickets(proj, new_ticket):
@@ -622,5 +631,5 @@ def test_old_key_unissued_or_other_prefix_refused(proj, new_ticket, alias):
     tickets.save(proj, t)
     notices = []
     with pytest.raises(Refused, match="doesn't exist"):
-        tickets.resolve(proj, alias, notice=notices.append)
+        tickets.resolve(proj, alias, follow_moved=True, notice=notices.append)
     assert notices == []
