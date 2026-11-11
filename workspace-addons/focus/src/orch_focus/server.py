@@ -582,7 +582,8 @@ class Handler(BaseHTTPRequestHandler):
             cards = livecards.cards(self.tracker)
             return self._json(200, {"cards": cards, "same_file": livecards.same_file(cards)})
         if path == "/api/areas":
-            return self._json(200, {"areas": areas.strip(self.root, livecards.cards(self.tracker))})
+            cards = livecards.cards(self.tracker)
+            return self._json(200, {"areas": areas.strip(self.root, cards), "same_file": livecards.same_file(cards)})
         if path == "/api/procs":
             return self._json(200, {"procs": self.tracker.procs()})
         if path == "/api/mobile":

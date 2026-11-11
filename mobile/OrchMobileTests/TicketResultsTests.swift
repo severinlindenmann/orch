@@ -170,12 +170,13 @@ final class TicketResultsTests: XCTestCase {
             if case .shown = result.doc { XCTFail("Unsafe link rendered: \(url)") }
         }
         let mock = MockRelay.q3View
-        XCTAssertEqual(mock.results.count, 2)
+        XCTAssertEqual(mock.results.count, 3)   // agent (checked), job, orch (trimmed: 20 of 45 rows)
         let restored = try JSONCoding.decoder.decode(TicketSnapshot.self, from: JSONCoding.encoder.encode(mock))
         XCTAssertEqual(restored.results, mock.results)
         for result in restored.results {
             guard case .shown(let doc) = result.doc else { XCTFail("Mock result invalid"); continue }
             if result.from == "job" { XCTAssertTrue(doc.texts.contains("3 of 40 rows")) }
+            if result.from == "orch" { XCTAssertTrue(doc.texts.contains("20 of 45 rows")); XCTAssertTrue(doc.texts.contains("More on the computer")) }
         }
     }
 

@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 
+from .lists import KINDS, build_list
 from .overview import build_overview
 
 DEFAULT_PORT = 8431
@@ -105,6 +106,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"pid": os.getpid(), "mac": mac})
         if path == "/api/overview":
             return self._json(build_overview(read_counts(self.root, self.orch_bin)))
+        if path.startswith("/api/list/") and path[10:] in KINDS:
+            return self._json(build_list(read_counts(self.root, self.orch_bin), path[10:]))
         if path == "/":
             prefix = self.headers.get("X-Forwarded-Prefix") or ""
             prefix = prefix if PREFIX.fullmatch(prefix) else ""

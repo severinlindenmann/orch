@@ -2232,7 +2232,7 @@ V_CG = Draft202012Validator(
     registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
     format_checker=FormatChecker(),
 )
-CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind")
+CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
 CG_MEMBER_ONLY = ("seen", "leave")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
@@ -2309,6 +2309,8 @@ def cg_rules(m, ctx=None):
             out.append("task.ws is the member that got the task, never the host")
         if isinstance(o, dict) and (str(to).startswith("ws_") or to == "phones") and m.get("id") != cg_fanout_id(host, o["id"], to):
             out.append("host copy: id must be the fan-out id of (host, origin.id, to)")
+        if "own_seq" in b and not (b["own_seq"] is True and m.get("type") == "text" and "seq" in g and isinstance(o, dict) and o.get("from") == to and str(to).startswith("ws_")):
+            out.append("own_seq: only a text to the workspace that sent origin, with group.seq")
         if to == "phones" and m.get("type") == "text" and cg_quiet(m) and (b.get("update") or {}).get("kind") != "note":
             out.append("copy to phones outside the push set must be quiet (update.kind note)")
         if str(to).startswith("ws_"):

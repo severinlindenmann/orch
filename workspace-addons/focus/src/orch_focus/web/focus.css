@@ -374,8 +374,9 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 /* fb16: "Add a task" is always visible, also at phone width where the task list is folded */
 @media(max-width:720px){
   .fx.rail-closed .fx-rail{display:flex;visibility:visible;opacity:1;pointer-events:auto;padding:8px 12px;border-bottom:1px solid var(--border);max-height:none;overflow:visible}
-  .fx.rail-closed .fx-rail>:not(.fx-add-task){display:none}
-  .fx.rail-closed .fx-add-task{margin-top:0;padding:0}
+  .fx.rail-closed .fx-rail>:not(.fx-add-wrap){display:none}
+  .fx.rail-closed .fx-add-wrap{margin-top:0}
+  .fx.rail-closed .fx-add-task{padding:0}
 }
 
 .fx-live[data-hold]{flex:0 1 auto;min-width:0;max-width:100%}
@@ -426,18 +427,20 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 /* ---- Start screen: Where work is happening (areas strip + Areas… dialog) ---- */
 .fx-areas{margin-top:32px;min-width:0}
 .fx-areas[hidden]{display:none}
-.fx-areas-h{display:flex;align-items:center;gap:8px;margin:0 0 12px}
-.fx-areas h2{font-size:15px;margin:0;min-width:0}
+.fx-areas-h{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;margin:0 0 12px;min-width:0}
+.fx-areas h2{font-size:15px;margin:0;min-width:0;flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fx-areas-btn{flex:none;white-space:nowrap}
 .fx-areas h2 .meta{font-weight:400;color:var(--text-muted)}
 .fx-areas-note{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
 .fx-areas-note .meta{color:var(--text-muted)}
-.fx-areas-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px}
+.fx-areas-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:8px}
 .fx-area{min-width:0;display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow-wrap:anywhere}
 .fx-area.busy{border-color:var(--brand)}
+.fx-area.clash{border-color:var(--warning);background:var(--warning-soft)}
 .fx-area-name{font-size:13.5px;font-weight:600}
 .fx-area-path{display:block;font:11px var(--font-mono,monospace);color:var(--text-muted)}
 .fx-area-who{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px;min-height:22px}
-.fx-area-av{width:22px;height:22px;flex:none;display:inline-grid;place-items:center;border-radius:50%;background:var(--brand-soft,var(--surface-2));color:var(--brand);border:1px solid var(--brand);font-size:11px;font-weight:600}
+.fx-area-av{width:22px;height:22px;flex:none;display:inline-grid;place-items:center;border-radius:50%;background:var(--text-muted);color:#fff;font-size:11px;font-weight:600}
 .fx-area-who .chip{font-size:11px}
 .fx-areas-dialog{width:min(520px,calc(100vw - 32px));max-width:calc(100vw - 32px);box-sizing:border-box}
 .fx-areas-dialog h2{margin:0 0 4px}
@@ -448,7 +451,6 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-areas-row .grow{flex:1 1 160px;min-width:0}
 .fx-areas-acts{display:flex;gap:6px;margin-left:auto}
 .fx-areas-dialog .actions{display:flex;justify-content:flex-end;margin-top:16px}
-@media(max-width:520px){.fx-areas-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* ---- Ticket page: step labels, "Used" tab, agents tree, "All live" back link ---- */
 .fx-used{display:inline-block;max-width:100%;box-sizing:border-box;margin-left:8px;padding:1px 7px;border:1px solid var(--border-strong);border-radius:999px;background:var(--surface-2);color:var(--text-muted);font:500 11px/16px var(--font-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:1px}
@@ -489,12 +491,68 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
   .fx-used-table th,.fx-used-table td{padding:8px 10px}
 }
 
-/* ---- same file line (1.18) ---- */
-.fx-ln-clash{margin:0 0 10px;padding:8px 12px;border:1px solid var(--warning);border-radius:8px;background:var(--warning-soft);font-size:12.5px;overflow-wrap:anywhere}
+/* ---- same file line: start screen (above the area tiles) and ticket page (top of Live) ---- */
+.fx-clash{margin:0 0 10px;padding:8px 12px;border:1px solid var(--warning);border-radius:8px;background:var(--warning-soft);font-size:12.5px;line-height:1.5;min-width:0}
+.fx-clash a{color:inherit;text-decoration:underline;white-space:nowrap}
+.fx-doc{white-space:nowrap}
+.fx-clash .fx-doc{font-weight:500}
+.fx-clash-wrap{max-width:848px;width:100%;box-sizing:border-box;margin:0 auto;padding:16px 32px 0}
+.fx-clash-wrap:empty{display:none}
+.fx-clash-wrap .fx-clash{margin:0}
+.fx-clash-wrap .fx-clash+.fx-clash{margin-top:8px}
 
-/* ---- Files tab (1.18) ---- */
+/* ---- Files tab ---- */
 .fx-files-list{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:6px}
 .fx-file{display:flex;gap:10px;align-items:baseline;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);min-width:0}
-.fx-file.changed{border-color:var(--warning)}
-.fx-file-how{flex:none;width:64px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted)}
+.fx-file.shared{border-color:var(--warning);background:var(--warning-soft)}
+.fx-file-ic{flex:none}
+.fx-file-main{flex:1;min-width:0;display:grid;gap:2px}
+.fx-file-why{font-size:12px;color:var(--warning)}
+.fx-file-how{flex:none;font-size:12px;color:var(--text-muted)}
+.fx-file-at{flex:none;font-size:12px;color:var(--text-muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .fx-file-path{font:12.5px var(--font-mono,monospace);overflow-wrap:anywhere;min-width:0}
+@media(max-width:520px){.fx-file{flex-wrap:wrap}.fx-file-main{flex-basis:calc(100% - 30px)}.fx-file-how{margin-left:26px}}
+
+/* ---- Ticket page: area chip after the title ---- */
+.fx-title-row{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.fx-title-row h1{min-width:0}
+.fx-area-chip{flex:none;font-size:11px;padding:1px 8px;white-space:nowrap}
+
+/* ---- Live tab: the plain step list under "Now: <task>" ---- */
+.fx-now-steps{list-style:none;margin:12px 0 0;padding:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);overflow:hidden}
+.fx-now-step{display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px;align-items:start;padding:7px 12px;font-size:12.5px;color:var(--text-muted)}
+.fx-now-step+.fx-now-step{border-top:1px solid var(--border)}
+.fx-now-step time{font:11px/20px var(--font-mono);color:var(--text-faint)}
+.fx-now-step.newest{background:var(--surface-2);color:var(--text)}
+.fx-now-step.bad{color:var(--danger)}
+.fx-now-step .fx-step-t{line-height:20px}
+.fx-latest{margin:0 0 20px}
+.fx-latest h3{font-size:13px}
+
+/* ---- "Working on this" (left rail) and a helper's own view ---- */
+.fx-agent-b{display:grid;gap:2px;min-width:0;flex:1}
+.fx-agent-l{display:flex;align-items:center;gap:6px;min-width:0}
+.fx-agent-s{font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fx-role{flex:none;padding:0 5px;border-radius:4px;border:1px solid var(--border-strong);font:600 9.5px/15px var(--font-ui);letter-spacing:.04em;color:var(--text-muted)}
+.fx-role.main{color:var(--brand);border-color:var(--brand)}
+.fx-role.helper{color:var(--info);border-color:var(--info)}
+.fx-worker-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.fx-worker-name{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.fx-worker-name h2{margin:0}
+.fx-worker-task{margin:8px 0 4px;color:var(--text);overflow-wrap:anywhere}
+.fx-worker-now{display:flex;gap:10px;align-items:baseline;margin:16px 0 0;padding:10px 12px;border-radius:8px;background:var(--surface-2);overflow-wrap:anywhere}
+.fx-worker-l{flex:none;font-size:10.5px;letter-spacing:.07em;color:var(--brand);font-weight:600}
+.fx-worker-now.done .fx-worker-l{color:var(--text-muted)}
+
+/* ---- Phone width: room under the last row, "+" for a new task, labelled Stop and Exit ---- */
+.fx-add-wrap{margin-top:auto;flex-shrink:0;display:grid;gap:6px}
+.fx-add-wrap .fx-add-task{margin-top:0}
+.fx-add-toggle{display:none}
+@media(max-width:720px){
+  .fx-pane{padding-bottom:calc(var(--fx-compose-h,120px) + env(safe-area-inset-bottom,0px));box-sizing:border-box}
+  .fx-add-toggle{display:inline-flex;gap:6px;justify-self:start;min-height:40px}
+  .fx:not(.fx-adding) .fx-add-task{display:none}
+  .fx-tools [data-act=stop] .opt,.fx-exit .opt{display:inline}
+  .fx-clash-wrap{padding:16px 20px 0}
+  .fx-agent-s{white-space:normal}
+}
