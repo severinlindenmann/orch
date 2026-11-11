@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, harness, runs, tickets, worktrees
+from orch import addons, harness, humanproof, runs, tickets, worktrees
 from orch.errors import Refused
+
+_REAL_GUARDED_HOME = humanproof.guarded_home  # the true pairing check, before tests/conftest.py replaces it
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="uses POSIX permissions and links")
 
@@ -1289,11 +1291,6 @@ def test_review_retry_bounds_remove_and_restores_deadline(repo, monkeypatch, rai
         worktrees.retry(repo, repo.tids[0])
     assert start + worktrees.SWEEP_BUDGET <= seen[0] <= time.monotonic() + worktrees.SWEEP_BUDGET
     assert worktrees._ctx.deadline == previous
-
-
-from orch import humanproof as _hp
-
-_REAL_GUARDED_HOME = _hp.guarded_home  # the true pairing check, before tests/conftest.py replaces it
 
 
 @pytest.fixture(autouse=True)

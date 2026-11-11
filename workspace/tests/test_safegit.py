@@ -114,8 +114,8 @@ def test_creating_preparing_and_dropping_a_copy_never_runs_repo_code(hostile, pr
     for p in marker.parent.glob(marker.name + "*"):
         p.unlink()
     monkeypatch.chdir(r)
-    # the hostile repo lives under pytest's tmp dir, not ~/.orch-test: give it the usable guarded home that the
-    # other worktree tests use (the real pairing rules are tested in test_humanproof.py)
+    # the hostile repo lives under pytest's tmp dir, not ~/.orch-test: give it the usable guarded home
+    # that the other worktree tests use (the real pairing rules are tested in test_humanproof.py)
     monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
     addons.workspace_id(r, create=True)
     e = worktrees.create(r, "t_abc123")
