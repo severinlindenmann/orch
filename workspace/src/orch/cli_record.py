@@ -86,34 +86,39 @@ def add_parsers(sub, common) -> None:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
 
 
+def _run_hook(find_root, strict: bool, before_write=lambda: None) -> int:
+    """The hook's exit-0 wrapper: ANY failure (a SystemExit from argparse or sys.exit included) ends with one
+    stderr line and exit 0; only --strict gives 2. Never re-raises."""
+    try:
+        from orch import record_hook
+
+        record_hook.cli(find_root(), strict=strict, before_write=before_write)
+        return 0
+    except BaseException as e:  # noqa: BLE001 - a tool's hook: exit 2 would block the tool call
+        note = str(e) if isinstance(e, Refused) and str(e) else "nothing was recorded."
+    if strict:
+        print(f"Refused: {note}", file=sys.stderr)
+        return 2
+    sys.stderr.write(f"orch: {note}\n")
+    return 0
+
+
 def hook_main(argv: list[str], watchdog=None) -> int:
     """`orch record hook [--strict]`, called from cli.main before the parser, the chat guard and the notices:
-    a tool's hook runs before every tool call and exit 2 would block it, so every failure (bad ORCH_ROOT,
-    anything) ends with exit 0 and one stderr line. Only --strict gives exit 2."""
-    from orch import record_hook, workcheck
+    a tool's hook runs before every tool call and exit 2 would block it. The wiring must call exactly
+    `orch record hook`; global flags before it (--json, --root) are not understood here and are ignored."""
+    from orch import workcheck
 
-    strict = "--strict" in argv
     timer = workcheck.start_watchdog()  # a hung hook ends quietly (exit 0) after the hard timeout
     if watchdog is not None:
         watchdog.cancel()
     try:
         from orch import cli
 
-        record_hook.cli(cli._find_root(), strict=strict)
-        return 0
-    except Refused as e:
-        if strict:
-            print(f"Refused: {e}", file=sys.stderr)
-            return 2
-        sys.stderr.write(f"orch: {e}\n")
-    except Exception:
-        if strict:
-            print("Refused: nothing was recorded.", file=sys.stderr)
-            return 2
-        sys.stderr.write("orch: nothing was recorded.\n")
+        # the timer is cancelled before the first write: os._exit never lands in the middle of one
+        return _run_hook(cli._find_root, "--strict" in argv, before_write=timer.cancel)
     finally:
         timer.cancel()
-    return 0
 
 
 def dispatch(args, root: Path) -> bool:
@@ -122,9 +127,9 @@ def dispatch(args, root: Path) -> bool:
     if not args.sub:
         raise Refused("`orch record` needs a subcommand. Subcommands: " + ", ".join(SUBCOMMANDS) + ".")
     if args.sub == "hook":  # one event line on stdin from a live session's tool hook; never blocks the agent
-        from orch import record_hook
-
-        record_hook.cli(root, strict=args.strict)
+        # reached only by a form hook_main does not take (a global flag before `record`): same exit-0 rule
+        if _run_hook(lambda: root, args.strict):
+            raise Refused("Nothing was recorded.")
         return True
     if args.sub not in _BUILT:
         raise Refused(f"`orch record {args.sub}` is not built yet.")
