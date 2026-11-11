@@ -161,6 +161,20 @@ def needed() -> bool:
     return sys.platform == "win32"
 
 
+def result_ok_since(home: Path, offset: object) -> bool:
+    """Did the finisher log `RESULT ok` (and no `RESULT fail`) after byte `offset` of finish.log?
+    Bounded read; a bad offset or an unreadable log counts as not ok."""
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        return False
+    try:
+        with log_path(home).open("rb") as log:
+            log.seek(offset)
+            result = log.read(1_000_000).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return False
+    return "RESULT ok:" in result and "RESULT fail:" not in result
+
+
 def log_path(home: Path) -> Path:
     return home / "finish.log"
 

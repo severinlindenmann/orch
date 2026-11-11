@@ -2250,13 +2250,7 @@ def take_update_status(root: Path) -> dict | None:
                 home = addons.home()
                 if winfinish.pending(home) or winfinish.updating(home):
                     return {"state": "running", "reason": ""}
-                try:
-                    with winfinish.log_path(home).open("rb") as log:
-                        log.seek(data["finish_offset"])
-                        result = log.read().decode("utf-8", "replace")
-                except (OSError, ValueError, TypeError):
-                    result = ""
-                ok = "RESULT ok:" in result and "RESULT fail:" not in result
+                ok = winfinish.result_ok_since(home, data["finish_offset"])
                 data = {
                     "state": "finished" if ok else "failed",
                     "reason": "" if ok else "The background update failed; see finish.log.",
