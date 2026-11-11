@@ -339,13 +339,14 @@ NO_WRITE = object()  # an op returns this when it changed nothing
 
 
 def _wont_view(ticket: dict) -> dict:
-    """The Won't do state of every step (id, flag, reason, who, when): what only a person may change."""
+    """The Won't do state (id, flag, reason, who, when, text): what only a person may change."""
     return {
         c.get("id"): (
             c.get("wont_do"),
             c.get("reason"),
             c.get("by") if c.get("wont_do") else None,
             c.get("at") if c.get("wont_do") else None,
+            c.get("text") if c.get("wont_do") else None,
         )
         for c in ticket.get("checklist") or []
         if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
