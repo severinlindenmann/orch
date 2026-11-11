@@ -1,0 +1,14 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "sync"
+version = "0.1.0"
+recommended = false
+description = "Keeps workspace tickets in a private state repository."
+run = "orch_sync"
+skill = "skills/orch-sync"
+needs = true
+background = true
+
+[dashboard]
+label = "Sync"
+icon = "link"

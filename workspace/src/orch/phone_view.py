@@ -2,7 +2,7 @@
 
 Built from the ticket file: title, status, tasks, the last 30 history lines in plain words, and
 the proof marked for the phone (evidence with role result or check: files are uploaded as relay
-blobs, URLs and PRs become links), artifacts named in questions, options or the summary, and the
+blobs, URLs and PRs become links), artifacts named in questions, options, summary or description, and the
 ticket's refs. Secrets are cut from display text before it leaves.
 
 It rides on update texts to phones (result, failure, stopped, question) and, quietly (kind note,
@@ -225,8 +225,8 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
 
 
 def named_artifacts(root: Path, ticket: dict, artifacts: list[dict] | None = None) -> list[str]:
-    """Up to 20 artifact names mentioned in questions, options or the summary, in listing order."""
-    texts = [ticket.get("summary") or ""]
+    """Up to 20 artifact names in questions, options, summary or description, in listing order."""
+    texts = [ticket.get("summary") or "", ticket.get("description") or ""]
     for question in ticket.get("questions") or []:
         texts.append(question.get("text") or "")
         texts.extend(question.get("options") or [])
