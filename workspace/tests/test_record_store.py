@@ -347,3 +347,78 @@ def test_symlink_swapped_after_check_is_refused(store, tmp_path, monkeypatch):
         writer.append(event(), detail={"input": "i", "output": "o"})
     assert swapped
     assert list(outside.iterdir()) == []
+
+
+def test_hardlinked_run_file_refused(store, tmp_path):
+    ws, writer = store
+    writer.append(event())
+    path = record_dir(ws) / "runs/r_8k2m01.jsonl"
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep")
+    path.unlink()
+    os.link(outside, path)
+    with pytest.raises(RecordRefused):
+        writer.append(event(id="another"))
+    assert outside.read_text() == "keep"
+    assert (outside.stat().st_mode & 0o777) == (tmp_path / "outside.txt").stat().st_mode & 0o777
+
+
+def test_reparse_point_and_realpath_refused(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    folder = tmp_path / "ws" / ".orch" / "record" / "runs"
+    folder.mkdir(parents=True)
+    real_lstat = Path.lstat
+
+    def fake_lstat(self, *a, **k):
+        result = real_lstat(self, *a, **k)
+        if self == folder:
+            return SimpleNamespace(st_mode=result.st_mode, st_file_attributes=0x410)
+        return result
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    with pytest.raises(RecordRefused):
+        record._safe(folder / "r_8k2m01.jsonl")
+    monkeypatch.undo()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    monkeypatch.setattr(
+        record.os.path, "realpath", lambda p: str(outside / "x") if "runs" in str(p) else str(p)
+    )
+    with pytest.raises(RecordRefused):
+        record._safe(folder / "r_8k2m01.jsonl")
+
+
+def test_detail_of_colliding_id_never_replaces_other_detail(store):
+    ws, writer = store
+    done = event(id="same", outcome={"ok": True, "error": None, "ms": 1})
+    stored = writer.append(done, detail={"input": "real", "output": "real"})
+    other = event(
+        id="same",
+        kind="helper.start",
+        agent="h_1",
+        parent="main",
+        via="hook",
+        used={"kind": "helper", "name": "h", "action": None, "source": "builtin", "version": None},
+    )
+    other2 = writer.append(other, detail={"input": "fake", "output": "fake"})
+    assert other2["detail"] != stored["detail"]
+    assert json.loads((record_dir(ws) / stored["detail"]).read_text())["input"] == "real"
+
+
+def test_detail_pointer_and_reserved_ids(store):
+    ws, writer = store
+    stored = writer.append(event(detail="detail/r_8k2m01/ghost.json"))
+    assert stored["detail"] is None
+    for raw in ("r_8k2m01:5", "x_" + "a" * 32):
+        got = writer.append(event(id=raw))
+        assert got["id"] != raw and got["id"].startswith("x_")
+
+
+def test_late_started_detail_keeps_finished_detail(store):
+    ws, writer = store
+    done = writer.append(
+        event(id="s1", outcome={"ok": True, "error": None, "ms": 1}), detail={"input": "a", "output": "final"}
+    )
+    writer.append(event(id="s1"), detail={"input": "b", "output": "early"})
+    assert json.loads((record_dir(ws) / done["detail"]).read_text())["output"] == "final"

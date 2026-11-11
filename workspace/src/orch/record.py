@@ -21,10 +21,12 @@ from orch.errors import Refused
 from orch.hider import Hider
 from orch.phone_view import redact
 
+_NOT_SAFE = "The record folder is not safe."
 _OFF = "Recording is off until key hiding is ready."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[A-Za-z0-9_-]{1,128}"
+_RESERVED_ID = r"r_[a-z0-9_]{6,32}:[0-9]+|x_[0-9a-f]{32}"
 
 
 class RecordRefused(Refused):
@@ -48,10 +50,37 @@ def _name(value: Any, pattern: str) -> str:
     return value
 
 
+_REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT (Windows junctions, mount points and symlinks)
+
+
+def _is_link(part: Path) -> bool:
+    """A symlink, junction or any other reparse point. Missing paths are not links."""
+    if part.is_symlink() or getattr(part, "is_junction", lambda: False)():
+        return True
+    try:
+        attrs = getattr(part.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attrs & _REPARSE)
+
+
+def _within_record(path: Path) -> bool:
+    """The real location of a path inside .orch/record stays inside the real .orch/record."""
+    parts = Path(path).absolute().parts
+    for i in range(len(parts) - 1):
+        if parts[i] == ".orch" and parts[i + 1] == "record":
+            root = Path(os.path.realpath(Path(*parts[: i + 2])))
+            real = Path(os.path.realpath(path))
+            return real == root or root in real.parents
+    return True
+
+
 def _safe(path: Path) -> None:
     for part in (path, *path.parents):
-        if part.is_symlink():
-            raise RecordRefused("The record folder is not safe.")
+        if _is_link(part):
+            raise RecordRefused(_NOT_SAFE)
+    if not _within_record(path):
+        raise RecordRefused(_NOT_SAFE)
 
 
 def _tree(path: Path) -> None:
@@ -66,7 +95,6 @@ def _tree(path: Path) -> None:
 # symlink check (_safe, which also covers reparse points reported as links) stays the fail-closed fallback.
 _FD = os.name == "posix" and {os.open, os.mkdir, os.unlink, os.rmdir, os.replace} <= os.supports_dir_fd
 _DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-_NOT_SAFE = "The record folder is not safe."
 
 
 @contextmanager
@@ -115,6 +143,12 @@ def _open(path: Path, flags: int) -> int:
             fd = os.open(name, flags, 0o600, dir_fd=pfd)
     else:
         fd = os.open(path, flags, 0o600)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or (
+        os.name == "posix" and (info.st_nlink != 1 or info.st_uid != os.geteuid())
+    ):
+        os.close(fd)  # a hardlink to a file elsewhere, a device or a file of another user: never written
+        raise RecordRefused(_NOT_SAFE)
     if flags & (os.O_WRONLY | os.O_RDWR):
         os.fchmod(fd, 0o600)
     return fd
@@ -234,8 +268,13 @@ class RecordWriter:
     def _prepare(self, event: dict, payload: dict | None, hidden: int) -> tuple[bytes, bytes | None]:
         run = event["run"]
         detail_bytes = None
-        if payload is not None:
-            event["detail"] = f"detail/{run}/{detail_name(event['id'])}.json"
+        if payload is None:
+            event["detail"] = None  # a line never points at a file this call did not write
+        else:
+            # A step keeps the contract name (the id); any other kind gets its own file, so an event with a
+            # colliding id can never replace another kind's detail.
+            name = event["id"] if event["kind"] == "step" else f"{event['id']}|{event['kind']}"
+            event["detail"] = f"detail/{run}/{detail_name(name)}.json"
             wrapped = dict(
                 v=1,
                 id=event["id"],
@@ -290,7 +329,11 @@ class RecordWriter:
         # never leaves as an unsalted (guessable) hash;
         # the same id still gives the same name for hook and collector (dedupe).
         eid = self.hider.hide_text(eid)
-        event["id"] = eid if re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) else _hash(eid)
+        if not default_id and (
+            not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) or re.fullmatch(_RESERVED_ID, eid)
+        ):
+            eid = _hash(eid)  # also ids that look like the writer's own (<run>:<n>) or a hashed id
+        event["id"] = eid
         # Reject malformed input, including controls, before normalizing display text.
         if not isinstance(event.get("text"), str) or re.search(r"[\x00-\x1f\x7f]", event["text"]):
             raise RecordRefused(_INVALID)
@@ -330,7 +373,9 @@ class RecordWriter:
             if detail_bytes is not None:
                 target = root / event["detail"]
                 _mkdir(target.parent)
-                _atomic(target, detail_bytes)
+                # A started step never replaces the detail of its finished line (it may arrive late).
+                if event["outcome"] is not None or not target.exists():
+                    _atomic(target, detail_bytes)
             meta = self._serialized(
                 dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048)
             )
