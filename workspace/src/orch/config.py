@@ -376,7 +376,9 @@ DEFAULT_INSIGHTS_SHARE_COUNTS = True
 DEFAULT_INSIGHTS_SHARE_NAMES = False
 
 
-def _reserved(root: Path | None, section: str, key: str, default: bool | int) -> bool | int:
+def _reserved(
+    root: Path | None, section: str, key: str, default: bool | int, positive: bool = True
+) -> bool | int:
     if root is None:
         return default
     try:
@@ -386,7 +388,7 @@ def _reserved(root: Path | None, section: str, key: str, default: bool | int) ->
     value = table.get(key) if isinstance(table, dict) else None
     if type(value) is not type(default):
         return default
-    return value if isinstance(value, bool) or value > 0 else default
+    return value if isinstance(value, bool) or not positive or value > 0 else default
 
 
 RESERVED_DEFAULTS = {
@@ -400,16 +402,29 @@ RESERVED_DEFAULTS = {
 
 
 def file_value(root: Path | None, section: str, key: str) -> bool | int:
-    """The value as the FILE says it (a wrong type, a bool for a number, or a value <= 0 is the default). A
-    retention number is snapped DOWN to its allowed list with a floor of 30 days / 512 MB
-    (humanproof.retention_snap: `keep_days = 1` counts as 30), so an edit of the file can never make pruning
-    delete nearly the whole record. Never a decision on its own: the widening ones count only through their
-    record (insights_*, record_* below)."""
+    """The value as the FILE says it (a wrong type or a bool for a number is the default). A retention number
+    is snapped DOWN to its allowed list with a floor of 30 days / 512 MB (humanproof.retention_snap:
+    `keep_days = 1`, 0 or -5 counts as 30, "as little as possible"), so an edit of the file can never make
+    pruning delete nearly the whole record; any other number <= 0 is the default. Never a decision on its own:
+    the widening ones count only through their record (insights_*, record_* below)."""
     from orch import humanproof
 
-    value = _reserved(root, section, key, RESERVED_DEFAULTS[(section, key)])
     setting = _RETENTION_SETTINGS.get((section, key))
+    value = _reserved(root, section, key, RESERVED_DEFAULTS[(section, key)], positive=setting is None)
     return value if setting is None else humanproof.retention_snap(setting, value)
+
+
+def file_switch(root: Path, section: str, key: str, default: bool) -> bool | None:
+    """A widening switch as the FILE decides it: the parsed true / false (no key: `default`), or None when the
+    file cannot be read (not valid TOML, mid-write) or the value is not true / false. None counts as off but
+    is never the person's off: humanproof.effective writes the False tombstone only on a parsed false, so a
+    transient unreadable config.toml never ends a person's grant."""
+    try:
+        table = read(root).get(section, {})
+    except (Refused, OSError):
+        return None
+    value = table.get(key, default) if isinstance(table, dict) else None
+    return value if isinstance(value, bool) else None
 
 
 _RETENTION_SETTINGS = {("record", "keep_days"): "insights.keep_days", ("record", "max_mb"): "insights.max_mb"}
@@ -445,28 +460,31 @@ def record_max_mb(root: Path | None) -> int:
 def insights_share_counts(root: Path | None) -> bool:
     """A widening switch: file value AND the person's record (owner default on while no record ever
     existed). Off in the file writes the False tombstone (humanproof.effective, under keys.lock with the file
-    read again there), so editing the file back to on later changes nothing without a proof."""
+    read again there), so editing the file back to on later changes nothing without a proof. A file that
+    cannot be read, or a value that is not true / false, is off without a tombstone (file_switch)."""
     from orch import humanproof
 
     if root is None:
         return False
-    value = file_value(root, "insights", "share_counts")
-    return humanproof.effective(
-        root, "insights.share_counts", value, lambda: file_value(root, "insights", "share_counts")
-    )
+
+    def from_file() -> bool | None:
+        return file_switch(root, "insights", "share_counts", DEFAULT_INSIGHTS_SHARE_COUNTS)
+
+    return humanproof.effective(root, "insights.share_counts", from_file(), from_file)
 
 
 def insights_share_names(root: Path | None) -> bool:
     """A widening switch: true only with the person's record (a file value of true alone reads false). Off in
-    the file writes the False tombstone, like share_counts."""
+    the file writes the False tombstone, like share_counts (an unreadable file: off, no tombstone)."""
     from orch import humanproof
 
     if root is None:
         return False
-    value = file_value(root, "insights", "share_names")
-    return humanproof.effective(
-        root, "insights.share_names", value, lambda: file_value(root, "insights", "share_names")
-    )
+
+    def from_file() -> bool | None:
+        return file_switch(root, "insights", "share_names", DEFAULT_INSIGHTS_SHARE_NAMES)
+
+    return humanproof.effective(root, "insights.share_names", from_file(), from_file)
 
 
 SHARE_BLOCKED_MSG = {
@@ -611,14 +629,15 @@ def change_insights(
 
 def agents_may_finish(root: Path | None) -> bool:
     """A widening switch (F1): the file value alone grants nothing; a person's proven "on" is recorded in the
-    orch home (humanproof.effective): appending the key to config.toml cannot let an agent finish tickets."""
+    orch home (humanproof.effective): appending the key to config.toml cannot let an agent finish tickets. An
+    unreadable config.toml or a value that is not true / false is off without a tombstone (file_switch)."""
     from orch import humanproof
 
     if root is None:
         return False
 
-    def from_file() -> bool:
-        return (read(root).get("workflow") or {}).get("agents_may_finish") is True
+    def from_file() -> bool | None:
+        return file_switch(root, "workflow", "agents_may_finish", False)
 
     return humanproof.effective(root, "workflow.agents_may_finish", from_file(), from_file)
 

@@ -860,22 +860,28 @@ def _setting_record(root: Path, setting: str):
     return rec.get("value") if isinstance(rec, dict) else None
 
 
-def effective(root: Path, setting: str, file_value: bool, file_now: Callable[[], bool] | None = None) -> bool:
+def effective(
+    root: Path, setting: str, file_value: bool | None, file_now: Callable[[], bool | None] | None = None
+) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). An unreadable home or record = off (N12).
 
-    A False in the file writes the False tombstone (`by: file`) at once, so a person's off from the file
-    stays off when an agent edits the file back to on. Like retention(), it is decided under keys.lock with
-    the record and (through `file_now`, when given) the file read AGAIN there: a person's grant writes the
-    record and then the file under the same lock, so a reader that saw the old off file in between never
-    writes its tombstone over the new grant."""
+    A parsed False in the file writes the False tombstone (`by: file`) at once, so a person's off from the
+    file stays off when an agent edits the file back to on. Like retention(), it is decided under keys.lock
+    with the record and (through `file_now`, when given) the file read AGAIN there: a person's grant writes
+    the record and then the file under the same lock, so a reader that saw the old off file in between never
+    writes its tombstone over the new grant. A file value that is not a bool (None: config.toml could not be
+    read, e.g. mid-write or not valid) is off and writes nothing: only a parsed false is the person's off."""
     default = SETTING_DEFAULTS.get(setting, False)
+    if not isinstance(file_value, bool):
+        return False
     try:
         rec_val = _setting_record(root, setting)
         if file_value is False and rec_val is not False:
             with _key_lock(key_dir(root)):  # re-entrant: _settings_write below takes it again
                 if file_now is not None:
-                    file_value = file_now() is True
+                    now = file_now()
+                    file_value = now if isinstance(now, bool) else None
                 rec_val = _setting_record(root, setting)
                 if file_value is False and rec_val is not False:
                     _settings_write(root, setting, False, "file", lambda current: current is False)
@@ -894,10 +900,13 @@ def _retention_ok(setting: str, value) -> bool:
 
 def retention_snap(setting: str, value: int) -> int:
     """A FILE retention number as it can count: snapped DOWN to the allowed list (keep_days 100 -> 90,
-    99999 -> 365) and never below the floor (keep_days 1 -> 30, max_mb 1 -> 512). Anything but a positive
-    whole number (true, a float, 0) is the default record, whatever the caller checked before."""
-    if type(value) is not int or value <= 0:
+    99999 -> 365) and never below the floor (keep_days 1, 0 or -5 -> 30, max_mb 1 -> 512: a whole number
+    <= 0 reads as "as little as possible"). Anything but a whole number (true, a float, a string) is the
+    default record, whatever the caller checked before."""
+    if type(value) is not int:
         return RETENTION_DEFAULTS[setting]
+    if value <= 0:
+        return RETENTION_FLOOR[setting]
     allowed = RETENTION_ALLOWED[setting]
     return max((v for v in allowed if v <= value), default=RETENTION_FLOOR[setting])
 

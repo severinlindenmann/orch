@@ -222,30 +222,34 @@ Vectors `retention` fix the order.
   hardened helpers (no record yet: 0). When the record cannot be read, the sizes and `runs` are `null` and the answer
   carries the read marker `status` (`unavailable` | `tampered`), `reason`, `message` (exit 0).
 - **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…", "kept":
-  k, "unreadable": u}` (a person only: op `record.delete_detail`, target = the ticket id). The detail files the ticket's
+  k, "unreadable": u, "skipped": s}` (a person only: op `record.delete_detail`, target = the ticket id). The detail files the ticket's
   OWN lines point at go (`detail/<run>/<file name>.json` of a line with that `ticket` whose file name is the I4 name of
   that line's run, kind, id and ticket), and so do this ticket's own files that no line points at (orphans, e.g. a crash
   between the detail write and its line): a file in `detail/<run>/` whose stored `ticket` is this ticket and whose stored
   `(run, kind, id, ticket)` gives its own name. Lines of other tickets never veto it: by I4 their own files have other
   names, so a run shared with other tickets keeps their detail and a line planted elsewhere cannot block the deletion. A
   line of this ticket that points at a file whose name is not this ticket's own (planted or changed) is not followed:
-  that file stays and is counted in `k` (never skipped silently). A run that cannot be read (its run file or its detail
-  folder unreadable or changed outside orch) is skipped, never a veto: its detail is not deleted, it is counted in `u`,
-  and the CLI (stderr) and the page say so plainly ("N runs could not be read; their detail was not deleted"). The files
-  of one run are deleted under that run's lock; its detail folder goes only when `rmdir` finds it empty (a file written
-  in between stays). `n` = the runs that lost detail. Run files, lines and counts stay; the events then show "Details
-  not available" (`--detail` answers `not_found`). Before anything is deleted the core appends one
-  `orch.record-change/1` line (`$defs/record_change`: `{v, schema, at, change: "record.delete_detail", by: <the proven
-  person>, ticket, deleted: n}`, no path, no content) to `alerts/<day>.jsonl`, so the deletion itself stays auditable;
-  if that line cannot be written nothing is deleted (`not_available`). The line is not authenticated (an agent can
-  append look-alike lines): it is a note, not evidence. `deleted` is what was going to go: a failure in the middle
-  answers `not_available` ("Some details could not be deleted"), the rest goes with a new proof (and a new line).
+  that file stays and is counted in `k` (never skipped silently). What is not safe is skipped at its own level, never a
+  veto (anything with file access can plant a line and a file): a run that cannot be read (its run file, or its detail
+  folder or lock a link, not a folder, unreadable) is skipped: its detail is not deleted, it is counted in `u`, and the
+  CLI (stderr) and the page say so plainly ("N runs could not be read; their detail was not deleted"); a single file
+  that is not safe (a link, FIFO or hardlink at its name, also one swapped in after it was found) stays, counted in `s`
+  ("N detail files were changed outside orch; they were not deleted"), and the run's other files go. The files of one
+  run are deleted under that run's lock; its detail folder goes only when `rmdir` finds it empty (a file written in
+  between, or a skipped one, stays). `n` = the runs that lost detail in this call. Run files, lines and counts stay; the
+  events then show "Details not available" (`--detail` answers `not_found`). Before anything is deleted the core appends
+  one `orch.record-change/1` line (`$defs/record_change`: `{v, schema, at, change: "record.delete_detail", by: <the
+  proven person>, ticket, deleted}`, no path, no content) to `alerts/<day>.jsonl`, so the deletion itself stays
+  auditable; if that line cannot be written nothing is deleted (`not_available`). The line is not authenticated (an
+  agent can append look-alike lines): it is a note, not evidence. Its `deleted` is what was going to go (the runs); the
+  answer's `n` is what went (lower when a run was pruned or a file swapped in between). A failure in the middle (the
+  run's lock busy, an I/O error) answers `not_available` ("Some details could not be deleted"), the rest goes with a
+  new proof (and a new line).
 - Refused (exit 2, `{"error", "code"}`), in this order, for `delete-detail`: an agent caller (agent tool in the
   environment, `--by agent:…`) before anything else, `needs_person`; a ticket that does not exist, `not_found` (accepted:
   the detail of a ticket deleted from disk goes with retention); no or an invalid proof (missing, expired, other
-  target, other op, replayed, a `--by` other than the proof's), `needs_person`; the record or its `detail` folder unsafe
-  (e.g. a symlink), or a file this ticket's lines point at that is not safe, `not_available` | `tampered`, with nothing
-  deleted.
+  target, other op, replayed, a `--by` other than the proof's), `needs_person`; the record or its `detail` folder itself
+  unsafe (e.g. a symlink), `not_available` | `tampered`, with nothing deleted.
 
 ## Mapping from a JSON event stream (one-shot collectors)
 
@@ -348,7 +352,10 @@ lock identity again before deleting. Retention preflights `pending/<run>` under
 the lock and skips runs with pending files without folding or deleting them.
 
 Retention skips a run that is unavailable, tampered, or has pending lines: it folds and deletes
-nothing for that run and keeps the alert; other runs proceed. The result carries
+nothing for that run and keeps the alert; other runs proceed. Inside `detail/<run>/` only the
+run's folder itself can make the run tampered: a single entry that is not safe (a planted link,
+FIFO or hardlink) is alerted and stays, the rest of the run's detail and its lines go, so a
+planted file never keeps a run's detail past retention. The result carries
 the first non-ok status, reason, and message. Under each run lock, retention
 reads again and checks the run still ended before folding or deleting.
 

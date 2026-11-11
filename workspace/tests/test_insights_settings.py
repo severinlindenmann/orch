@@ -164,6 +164,53 @@ def test_file_tombstone_is_decided_with_the_file_read_again_under_the_lock(ws, r
     assert config.insights_share_names(ws) is True
 
 
+@pytest.mark.parametrize("key,start", [("insights.share_names", None), ("insights.share_counts", "off")])
+@pytest.mark.parametrize(
+    "bad",
+    ["invalid toml [", '[insights]\nshare_names = "no"\nshare_counts = 0\n', "insights = 4\n"],
+    ids=["not_toml", "not_a_bool", "not_a_table"],
+)
+def test_unreadable_or_invalid_config_is_off_but_never_a_tombstone(ws, run, monkeypatch, key, start, bad):
+    """N6: a config.toml that cannot be read (mid-write, not valid TOML) or a value that is not true / false
+    reads off and writes nothing: only a PARSED false is the person's off, so the grant counts again once the
+    file is fixed."""
+    _start(run, key, start)
+    assert _cli(run, monkeypatch, _sp(ws, key, "on"), "config", "set", key, "on", "--json")[0] == 0
+    good = config.path(ws).read_text()
+    config.path(ws).write_text(bad)
+    assert config.insights_value(ws, key) is False
+    assert _record(ws, key)["value"] is True and _record(ws, key)["by"] == "human:pat"
+    config.path(ws).write_text(good)
+    assert config.insights_value(ws, key) is True
+
+
+def test_file_unreadable_when_read_again_under_the_lock_writes_no_tombstone(ws, run, monkeypatch):
+    """N6: the reader saw a parsed false, but under keys.lock the file cannot be read (mid-write): off, and no
+    tombstone over the person's grant."""
+    key = "insights.share_names"
+    assert _cli(run, monkeypatch, _sp(ws, key, "on"), "config", "set", key, "on", "--json")[0] == 0
+    assert hp.effective(ws, key, False, lambda: None) is False
+    assert _record(ws, key)["value"] is True and _record(ws, key)["by"] == "human:pat"
+    assert hp.effective(ws, key, None) is False  # never a tombstone, also without file_now
+    assert _record(ws, key)["by"] == "human:pat" and config.insights_share_names(ws) is True
+
+
+def test_agents_may_finish_unreadable_config_is_off_without_a_tombstone(ws):
+    """N6, the same rule for workflow.agents_may_finish: an unreadable config.toml is off (no error, no
+    tombstone); a parsed false is the tombstone."""
+    config.set_agents_may_finish(ws, True, "human:pat")
+    assert config.agents_may_finish(ws) is True
+    good = config.path(ws).read_text()
+    config.path(ws).write_text("invalid toml [")
+    assert config.agents_may_finish(ws) is False
+    assert _record(ws, "workflow.agents_may_finish")["by"] == "human:pat"
+    config.path(ws).write_text(good)
+    assert config.agents_may_finish(ws) is True
+    config.set_key(ws, "workflow", "agents_may_finish", False)  # a parsed false: the person's off
+    assert config.agents_may_finish(ws) is False
+    assert _record(ws, "workflow.agents_may_finish")["by"] == "file"
+
+
 # ------------------------------------------------------------------ write: widening needs the person
 
 WIDENING = [  # (key, from: a narrowing done first, or None, value, effective value after)
@@ -879,7 +926,7 @@ def test_delete_detail_with_a_proof(ws, rec, run, monkeypatch):
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 2, "ticket": a, "kept": 0, "unreadable": 0}
+    assert json.loads(out) == {"deleted": 2, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 0}
     assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
     assert _detail(ws, RUN_C).is_dir()  # the other ticket keeps its detail
     assert _lines(ws) == lines  # every line stays as it was
@@ -902,7 +949,8 @@ def test_delete_detail_with_a_proof(ws, rec, run, monkeypatch):
     assert code == 2 and _answer(out)["code"] == "not_found"  # details not available
     again = _proof(ws, "record.delete_detail", a)  # nothing left: 0, and a new audit line
     code, out, _ = _cli(run, monkeypatch, again, "record", "delete-detail", a, "--json")
-    assert code == 0 and json.loads(out) == {"deleted": 0, "ticket": a, "kept": 0, "unreadable": 0}
+    assert code == 0
+    assert json.loads(out) == {"deleted": 0, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 0}
     assert len(_changes(ws)) == 2
 
 
@@ -993,7 +1041,7 @@ def test_delete_detail_skips_an_unreadable_run_and_says_so(ws, rec, run, monkeyp
     )
     assert code == 0, out + err
     gone = 1 if which == RUN_B else 2  # RUN_B is A's: only RUN_A goes; RUN_C is B's: RUN_A and RUN_B go
-    assert json.loads(out) == {"deleted": gone, "ticket": a, "kept": 0, "unreadable": 1}
+    assert json.loads(out) == {"deleted": gone, "ticket": a, "kept": 0, "unreadable": 1, "skipped": 0}
     assert "1 run could not be read; its detail was not deleted." in err
     assert cli_record.delete_unreadable_text(3) == "3 runs could not be read; their detail was not deleted."
     assert not _detail(ws, RUN_A).exists()
@@ -1076,7 +1124,8 @@ def test_delete_detail_deletes_this_tickets_orphan_files(ws, rec, run, monkeypat
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 4, "ticket": a, "kept": 0, "unreadable": 0}  # A, B, C, D
+    # A, B, C, D
+    assert json.loads(out) == {"deleted": 4, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 0}
     assert not mine_in_c.exists() and not mine_alone.exists() and not _detail(ws, RUN_D).exists()
     assert theirs.exists() and renamed.exists()
     assert len(list(_detail(ws, RUN_C).iterdir())) == 4  # B's two own files, B's orphan, the renamed one
@@ -1190,8 +1239,9 @@ FILE_RETENTION = [
     ("keep_days", 29, 30),
     ("keep_days", 45, 30),  # snapped DOWN to an allowed value
     ("keep_days", 100, 90),
-    ("keep_days", 0, 90),  # <= 0: the default
-    ("keep_days", -5, 90),
+    ("keep_days", 0, 30),  # <= 0: "as little as possible", the floor (L2), never the default
+    ("keep_days", -5, 30),
+    ("max_mb", 0, 512),
     ("keep_days", 99999, 90),  # snapped to 365, then the default record (90) caps it
     ("max_mb", 1, 512),
     ("max_mb", 600, 512),
@@ -1562,7 +1612,7 @@ def test_delete_detail_keeps_other_tickets_detail_in_a_shared_run(ws, rec, run, 
     )
     assert code == 0, out + err
     # RUN_A, RUN_B and A's one file in RUN_C
-    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0, "unreadable": 0}
+    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 0}
     after = sorted(p.name for p in _detail(ws, RUN_C).iterdir())
     assert len(after) == 2 and set(after) < set(before)
     for n in (1, 2):  # B's detail is still there
@@ -1643,7 +1693,7 @@ def test_planted_line_of_another_ticket_does_not_block_delete(ws, rec, run, monk
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0, "unreadable": 0}
+    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 0}
     assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
     left = sorted(p.name for p in _detail(ws, RUN_C).iterdir())
     assert len(left) == 2 and set(left) < set(b_files)
@@ -1672,7 +1722,7 @@ def test_planted_line_path_is_refused_on_read_and_counted_as_kept(ws, rec, run, 
     )
     assert code == 0, out + err
     # B's RUN_C goes; A's file named by B's planted line stays and is reported
-    assert json.loads(out) == {"deleted": 1, "ticket": b, "kept": 1, "unreadable": 0}
+    assert json.loads(out) == {"deleted": 1, "ticket": b, "kept": 1, "unreadable": 0, "skipped": 0}
     assert not _detail(ws, RUN_C).exists()
     assert sorted(p.name for p in _detail(ws, RUN_A).iterdir()) == a_files
     code, out, _ = run("record", "query", "--run", RUN_A, "--detail", f"toolu_{RUN_A[2:]}2", "--json")
@@ -1681,9 +1731,10 @@ def test_planted_line_path_is_refused_on_read_and_counted_as_kept(ws, rec, run, 
 
 @pytest.mark.parametrize("how", ["fifo", "file_link", "folder_link"])
 def test_planted_unsafe_detail_of_one_run_is_no_veto(ws, rec, run, monkeypatch, tmp_path, how):
-    """MED-1: a planted line of ticket A (a made-up id) plus a FIFO or a link at the detail name it computes,
-    or a linked run detail folder: that run is skipped and counted unreadable (its detail stays), the other
-    runs lose A's detail. Never a veto of the whole delete."""
+    """MED-1 / R1: a planted line of ticket A (a made-up id) plus a FIFO or a link at the detail name it
+    computes: only that FILE is skipped (`skipped`), A's real detail in the same run and in the other run
+    goes. A linked run detail FOLDER: that run is skipped and counted unreadable (its detail stays), the
+    other run loses A's detail. Never a veto of the whole delete."""
     from orch import record
 
     if how == "fifo" and not hasattr(os, "mkfifo"):
@@ -1709,27 +1760,49 @@ def test_planted_unsafe_detail_of_one_run_is_no_veto(ws, rec, run, monkeypatch, 
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 1, "ticket": a, "kept": 0, "unreadable": 1}
-    assert "1 run could not be read; its detail was not deleted." in err
     assert not _detail(ws, kept_run).exists()  # the other run of A lost its detail
-    assert sorted(p.name for p in _detail(ws, victim).iterdir()) == before  # the skipped run keeps it all
     assert _detail(ws, RUN_C).is_dir()
-    assert [c["deleted"] for c in _changes(ws)] == [1]
+    if how == "folder_link":
+        assert json.loads(out) == {"deleted": 1, "ticket": a, "kept": 0, "unreadable": 1, "skipped": 0}
+        assert "1 run could not be read; its detail was not deleted." in err
+        assert sorted(p.name for p in _detail(ws, victim).iterdir()) == before  # the skipped run keeps it all
+        assert [c["deleted"] for c in _changes(ws)] == [1]
+    else:
+        assert json.loads(out) == {"deleted": 2, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 1}
+        assert "1 detail file was changed outside orch; it was not deleted." in err
+        assert "could not be read" not in err
+        # A's two real files in the victim run went; only the planted one stays (and what it points at)
+        assert [p.name for p in _detail(ws, victim).iterdir()] == [f"{name}.json"] and len(before) == 3
+        assert how == "fifo" or (outside / "x.json").read_text() == "{}"
+        assert [c["deleted"] for c in _changes(ws)] == [2]
 
 
-def test_detail_files_skips_an_unsafe_run_and_refuses_only_an_unsafe_detail_folder(ws, rec, tmp_path):
+def test_find_detail_files_skips_an_unsafe_file_or_run_and_refuses_only_an_unsafe_detail_folder(
+    ws, rec, tmp_path
+):
+    """R1: a file that is not safe skips only that pair (`kept`); a run's folder that is a link skips that run
+    (`unreadable`); only the detail folder itself refuses. N3: the answer is not a tuple (an old caller that
+    unpacks it fails loudly)."""
     from orch import record
 
     files = {r: sorted(p.stem for p in _detail(ws, r).iterdir()) for r in (RUN_A, RUN_B)}
     items = [(r, f) for r in (RUN_A, RUN_B) for f in files[r]]
-    (_detail(ws, RUN_A) / f"{files[RUN_A][0]}.json").unlink()
-    (_detail(ws, RUN_A) / f"{files[RUN_A][0]}.json").symlink_to(tmp_path)
-    got = record.detail_files(ws, items)
-    assert got.status == "ok" and got.value == ([(RUN_B, f) for f in files[RUN_B]], [RUN_A])
+    bad = (RUN_A, files[RUN_A][0])
+    (_detail(ws, RUN_A) / f"{bad[1]}.json").unlink()
+    (_detail(ws, RUN_A) / f"{bad[1]}.json").symlink_to(tmp_path)
+    got = record.find_detail_files(ws, items)
+    assert got.status == "ok" and got.alert is None
+    assert got.value == record.DetailFiles(tuple(ref for ref in items if ref != bad), (), (bad,))
+    with pytest.raises(TypeError):
+        pairs, runs = got.value
+    _detail(ws, RUN_B).rename(tmp_path / "moved_b")
+    _detail(ws, RUN_B).symlink_to(tmp_path / "moved_b", target_is_directory=True)
+    got = record.find_detail_files(ws, items)
+    assert got.value == record.DetailFiles(((RUN_A, files[RUN_A][1]),), (RUN_B,), (bad,))
     detail = record_dir(ws) / "detail"
     detail.rename(tmp_path / "moved")
     detail.symlink_to(tmp_path / "moved", target_is_directory=True)
-    got = record.detail_files(ws, items)
+    got = record.find_detail_files(ws, items)
     assert got.status == "tampered" and got.reason == "link"
 
 
@@ -1752,9 +1825,54 @@ def test_delete_detail_files_a_run_pruned_in_between_is_already_gone(ws, rec, ru
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out)["unreadable"] == 0
+    # the answer says what this call deleted (RUN_A); the audit line, written before, what was going to go
+    assert json.loads(out) == {"deleted": 1, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 0}
+    assert [c["deleted"] for c in _changes(ws)] == [2]
     assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
-    assert real(ws, [(RUN_B, "a" * 32), ("r_gone0001", "b" * 32)]) == 0  # nothing there: nothing fails
+    nothing = real(ws, [(RUN_B, "a" * 32), ("r_gone0001", "b" * 32)])  # nothing there: nothing fails
+    assert nothing == record.DetailFiles()
+
+
+@pytest.mark.parametrize("how", ["file", "folder", "lock"])
+def test_delete_detail_files_a_swap_after_finding_skips_only_that(ws, rec, run, monkeypatch, tmp_path, how):
+    """N4: after the files were found (and the audit line written), one file, the run's detail folder or the
+    run's lock is swapped for a link: only that file (or run) stays, reported; the rest goes and the answer
+    says what went. No whole refusal after the audit line."""
+    from orch import record
+
+    a, _ = rec
+    real = record.delete_detail_files
+    first = sorted(_detail(ws, RUN_A).iterdir())[0]
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_text("x")
+
+    def swapped_first(root, items, **kw):
+        if how == "file":
+            first.unlink()
+            first.symlink_to(elsewhere)
+        elif how == "folder":
+            _detail(ws, RUN_A).rename(tmp_path / "moved")
+            _detail(ws, RUN_A).symlink_to(tmp_path / "moved", target_is_directory=True)
+        else:
+            (record_dir(ws) / "runs" / f"{RUN_A}.lock").symlink_to(elsewhere)
+        return real(root, items, **kw)
+
+    monkeypatch.setattr(record, "delete_detail_files", swapped_first)
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
+    )
+    assert code == 0, out + err
+    assert [c["deleted"] for c in _changes(ws)] == [2]  # the audit line: what was going to go
+    assert not _detail(ws, RUN_B).exists() and _detail(ws, RUN_C).is_dir()
+    assert elsewhere.read_text() == "x"
+    if how == "file":
+        assert json.loads(out) == {"deleted": 2, "ticket": a, "kept": 0, "unreadable": 0, "skipped": 1}
+        assert "1 detail file was changed outside orch; it was not deleted." in err
+        assert [p.name for p in _detail(ws, RUN_A).iterdir()] == [first.name]  # only the swapped one stays
+    else:
+        assert json.loads(out) == {"deleted": 1, "ticket": a, "kept": 0, "unreadable": 1, "skipped": 0}
+        assert "1 run could not be read; its detail was not deleted." in err
+        assert len(list(_detail(ws, RUN_A).iterdir())) == 2  # the skipped run keeps all its detail
 
 
 # ------------------------------------------------------------------ prune reads the effective values
@@ -1836,24 +1954,35 @@ def test_relay_connect_clears_the_last_admin_policy(ws, monkeypatch):
     assert config.share_counts_state(ws) == "on"
 
 
-def test_relay_connect_clears_the_policy_before_the_new_connection_is_written(ws, monkeypatch):
-    """L1: the old policy is gone BEFORE relay.json of the new connection is written (a connection that stops
-    half-way never pairs with it), and once more after (a refresh of the old connection in between)."""
+def test_relay_connect_that_fails_keeps_the_current_policy(ws, monkeypatch):
+    """N7: a failed reconnect (a wrong token: nothing written) keeps the current connection's admin policy, so
+    its off_by_admin guard stays; a connection that stops half-way AFTER writing the new relay.json never
+    pairs with the old policy; a successful one clears it also when the old connection's refresh wrote one
+    in between."""
     from orch import net, relay
 
     _connect(ws, "off")
     policy = net.secrets_dir(ws) / "policy.json"
-    seen = []
+    conn = net.secrets_dir(ws) / "relay.json"
 
-    def connect_service(*a, **k):
-        seen.append(policy.exists())
-        policy.write_text(json.dumps({"usage_counts": "off"}))  # the old connection's refresh, in between
+    def wrong_token(*a, **k):
         raise Refused("That token does not look right.")
 
-    monkeypatch.setattr(net, "connect_service", connect_service)
+    monkeypatch.setattr(net, "connect_service", wrong_token)
     with pytest.raises(Refused):
         relay.connect(ws, "https://r2.example", "w_2", "orn_y")
-    assert seen == [False]
+    assert policy.is_file() and config.share_counts_state(ws) == "off_by_admin"
+
+    def half_way(*a, **k):
+        conn.write_text(json.dumps({"url": "https://r2.example", "workspace": "w_2", "token": "orn_y"}))
+        raise OSError("the skills could not be refreshed")
+
+    monkeypatch.setattr(net, "connect_service", half_way)
+    with pytest.raises(OSError):
+        relay.connect(ws, "https://r2.example", "w_2", "orn_y")
+    assert not policy.exists() and config.share_counts_state(ws) == "on"
+
+    _connect(ws, "off")
     monkeypatch.setattr(
         net, "connect_service", lambda *a, **k: policy.write_text("{}") or {"workspace": "w_2"}
     )

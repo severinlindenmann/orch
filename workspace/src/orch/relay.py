@@ -44,15 +44,21 @@ def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
 
 
 def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str]:
-    # a (re)connection never inherits the last relay's admin policy (a stale "off" or "on"): cleared BEFORE
-    # the new relay.json is written (no moment where the new connection reads the old policy, also when it
-    # stops half-way) and again after it (a refresh of the old connection may have written one in between);
-    # refresh below writes the policy of THIS connection. While disconnected (no relay.json) it counts for
-    # nothing.
-    policy = net.secrets_dir(root) / "policy.json"
-    policy.unlink(missing_ok=True)
-    who = net.connect_service(root, "relay", "orch-relay", url, workspace, token, "orn_")
-    policy.unlink(missing_ok=True)
+    # a (re)connection never inherits the last relay's admin policy (a stale "off" or "on"), and a FAILED one
+    # (a wrong token, the relay not answering) leaves the current connection's policy alone: it is cleared
+    # once connect_service succeeded, or when it stopped half-way after writing the new relay.json (written
+    # atomically: net.write_json). refresh below writes the policy of THIS connection. While disconnected (no
+    # relay.json) it counts for nothing (config.share_counts_state reads relay.json first); orch has no
+    # disconnect command that removes relay.json.
+    secrets = net.secrets_dir(root)
+    before = net.read_json(secrets / "relay.json", None)
+    connected = False
+    try:
+        who = net.connect_service(root, "relay", "orch-relay", url, workspace, token, "orn_")
+        connected = True
+    finally:
+        if connected or net.read_json(secrets / "relay.json", None) != before:
+            (secrets / "policy.json").unlink(missing_ok=True)
     return who, refresh(root)
 
 

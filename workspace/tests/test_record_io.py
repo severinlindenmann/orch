@@ -212,7 +212,8 @@ ERROR_BOUNDARIES = {
     "_read_json",
     "_store_detail",
     "delete_detail",
-    "detail_files",
+    "_detail_parts",
+    "find_detail_files",
     "ticket_detail_files",
     "delete_detail_files",
     "record_sizes",
@@ -749,6 +750,39 @@ def test_14_retention_skips_only_bad_run(store):
     assert runfile(ws).read_bytes() == before
 
 
+@pytest.mark.parametrize("how", ["fifo", "link", "hardlink"])
+def test_retention_is_not_vetoed_by_a_planted_detail_file(store, how):
+    """R1: a planted FIFO, link or hardlink in an ended run's detail folder does not make retention refuse
+    that run (its real detail would outlive retention): the real detail and the run's lines go, the planted
+    file stays (nothing outside changes) and is reported."""
+    if how == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("requires FIFO")
+    ws, writer = store
+    line = writer.append(event(), detail=DETAIL)
+    ended(writer)
+    planted = record.record_dir(ws) / "detail" / RUN / ("f" * 32 + ".json")
+    (ws / "outside").write_text("unchanged")
+    if how == "fifo":
+        os.mkfifo(planted, 0o600)
+    elif how == "link":
+        planted.symlink_to(ws / "outside")
+    else:
+        os.link(ws / "outside", planted)
+    folds = []
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda run, events: folds.append(run))
+    assert folds == [RUN] and result["delete_detail"] == [RUN] and result["delete_run"] == [RUN]
+    assert not (record.record_dir(ws) / line["detail"]).exists() and not runfile(ws).exists()
+    assert planted.is_symlink() or planted.exists()
+    assert (ws / "outside").read_text() == "unchanged"
+    alerts = [
+        json.loads(x)
+        for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
+        for x in day.read_text().splitlines()
+    ]
+    reason = {"fifo": "not_regular", "link": "link", "hardlink": "hardlink"}[how]
+    assert (reason, RUN, "retention") in {(x.get("reason"), x.get("run"), x.get("seen_by")) for x in alerts}
+
+
 def test_15_listing_keeps_symlinks(store):
     ws, _ = store
     plant(ws, "link")
@@ -1057,15 +1091,50 @@ def test_actual_unreadable_directory(store):
         directory.chmod(0o700)
 
 
-def test_detail_delete_preflights_all_runs(store):
+def test_detail_delete_preflights_all_run_folders(store):
+    """A run's detail FOLDER that is a link refuses before anything is deleted, also another run's detail."""
     ws, writer = store
     a = writer.append(event(), detail=DETAIL)
     b = writer.append(event(run="r_other1"), detail=DETAIL)
-    target = record.record_dir(ws) / b["detail"]
-    os.link(target, ws / "outside")
+    folder = record.record_dir(ws) / "detail" / "r_other1"
+    folder.rename(ws / "moved")
+    folder.symlink_to(ws / "moved", target_is_directory=True)
     with pytest.raises(record.RecordTampered):
         record.delete_detail(ws, [RUN, "r_other1"])
-    assert (record.record_dir(ws) / a["detail"]).exists() and target.exists()
+    assert (record.record_dir(ws) / a["detail"]).exists()
+    assert (ws / "moved" / Path(b["detail"]).name).exists() and folder.is_symlink()
+
+
+@pytest.mark.parametrize("how", ["hardlink", "link", "fifo"])
+def test_detail_delete_skips_only_the_unsafe_file(store, how):
+    """R1: a single detail FILE that is not safe (planted hardlink, link or FIFO) is reported and stays; the
+    run's other detail and the other runs' detail go (no veto of retention), and nothing outside changes."""
+    if how == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("requires FIFO")
+    ws, writer = store
+    a = writer.append(event(), detail=DETAIL)
+    a2 = writer.append(event(id="second"), detail=DETAIL)
+    writer.append(event(run="r_other1"), detail=DETAIL)
+    target = record.record_dir(ws) / a["detail"]
+    if how == "hardlink":
+        os.link(target, ws / "outside")
+    else:
+        target.unlink()
+        (ws / "outside").write_text("unchanged")
+        target.symlink_to(ws / "outside") if how == "link" else os.mkfifo(target, 0o600)
+    before = (ws / "outside").read_bytes()
+    record.delete_detail(ws, [RUN, "r_other1"], seen_by="retention")
+    assert target.exists() or target.is_symlink()  # the unsafe file stays
+    assert not (record.record_dir(ws) / a2["detail"]).exists()
+    assert not (record.record_dir(ws) / "detail" / "r_other1").exists()
+    assert (ws / "outside").read_bytes() == before
+    alerts = [
+        json.loads(line)
+        for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
+        for line in day.read_text().splitlines()
+    ]
+    reason = {"hardlink": "hardlink", "link": "link", "fifo": "not_regular"}[how]
+    assert {(x["reason"], x["run"], x["seen_by"]) for x in alerts} == {(reason, RUN, "retention")}
 
 
 def test_live_aged_lock_never_allows_second_writer(store, monkeypatch):
@@ -1161,8 +1230,10 @@ def test_spool_receipt_has_no_placeholder_default_id(store):
 @pytest.mark.parametrize("seen_by", [None, "retention", "writer"])
 def test_delete_detail_alert_uses_callers_role(store, seen_by):
     ws, writer = store
-    line = writer.append(event(), detail=DETAIL)
-    os.link(record.record_dir(ws) / line["detail"], ws / "outside")
+    writer.append(event(), detail=DETAIL)
+    folder = record.record_dir(ws) / "detail" / RUN  # a linked run folder refuses (a single file is skipped)
+    folder.rename(ws / "moved")
+    folder.symlink_to(ws / "moved", target_is_directory=True)
     with pytest.raises(record.RecordTampered) as caught:
         record.delete_detail(ws, [RUN], **({"seen_by": seen_by} if seen_by else {}))
     assert caught.value.alert["seen_by"] == (seen_by or "cli")

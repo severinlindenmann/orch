@@ -1387,13 +1387,46 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
     return plan
 
 
+def _detail_parts(workspace, run, seen_by):
+    """(what is in detail/<run> that is safe to delete, its size in bytes). One entry that is not safe (a
+    link, FIFO or hardlink, a name orch never writes: anything with file access can plant one) is reported
+    and left out: it stays, never a veto of the run's other detail. The run's folder itself not being safe (a
+    link, not a folder) raises; no folder has nothing."""
+    try:
+        names = _entries(workspace, ("detail", run))
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return [], 0
+    found, total = [], 0
+    for name in sorted(names):
+        try:
+            if not re.fullmatch(_PART, name):
+                raise RecordInvalid()
+            total += _size(workspace, ("detail", run, name))
+        except RecordInvalid:
+            _report(workspace, RecordTampered("swapped"), "folder", run, seen_by)
+            continue
+        except RecordTampered as error:
+            _report(workspace, error, "folder", run, seen_by)
+            continue
+        found.append(("detail", run, name))
+    return found, total
+
+
 def delete_detail(workspace, runs, *, seen_by="cli"):
+    """Retention: delete the detail of these runs. Every run's folder is checked first (nothing is deleted
+    when one is a link or not a folder); in each, what is safe goes and what is not (a planted link, FIFO or
+    hardlink) stays, reported (_detail_parts): a planted file never keeps the run's real detail past
+    retention. The run's folder goes when rmdir finds it empty."""
     rels = [("detail", _name(run, _RUN)) for run in runs]
     try:
         for rel in rels:
-            _size(workspace, rel)
+            _detail_parts(workspace, rel[-1], seen_by)
         for rel in rels:
-            _rmtree(workspace, rel)
+            for part in _detail_parts(workspace, rel[-1], seen_by)[0]:
+                _rmtree(workspace, part)
+            _rmdir_empty(workspace, rel)
     except (RecordTampered, RecordUnavailable) as error:
         _report(workspace, error, "folder", rel[-1], seen_by)
         raise
@@ -1403,36 +1436,61 @@ def _detail_file(run, file_id):
     return ("detail", _name(run, _RUN), _name(file_id, _FILE) + ".json")
 
 
-def detail_files(workspace, items, *, seen_by="cli"):
+@dataclass(frozen=True)
+class DetailFiles:
+    """What find_detail_files found, or what delete_detail_files deleted. `files`: (run, detail id) pairs
+    (found: there and safe; deleted: gone). `unreadable`: runs whose detail FOLDER is not safe (a link, not a
+    folder, cannot be read): every pair of them skipped. `kept`: pairs whose single FILE is not safe (a link,
+    FIFO or hardlink at its name): only that pair skipped, the safe files of its run are not. Not a tuple, so
+    a caller that still unpacks an older answer fails loudly."""
+
+    files: tuple = ()
+    unreadable: tuple = ()
+    kept: tuple = ()
+
+
+def find_detail_files(workspace, items, *, seen_by="cli"):
     """Of `items` ((run, detail id) pairs), the ones whose detail file is there, through the hardened walk:
-    ReadResult of (pairs found, runs that cannot be read). A run whose detail folder or one of these files is
-    a link or not what orch wrote (anything with file access can plant a line and a file there) is reported,
-    returned as unreadable and every pair of it is dropped: skipped, never a veto of the others. Only the
-    detail folder itself not being safe refuses."""
-    found, unreadable = [], []
+    ReadResult of DetailFiles. Anything with file access can plant a line and a file there, so what is not
+    safe is reported and skipped at its own level, never a veto of the others: a run whose detail folder is
+    not safe skips that run (`unreadable`); a single file that is not safe skips only that pair (`kept`). Only
+    the detail folder itself not being safe refuses."""
+    found, unreadable, kept, runs = [], [], [], []
     try:
         try:
             _entries(workspace, ("detail",))
         except RecordUnavailable as error:
             if error.reason != "missing":
                 raise
-            return ReadResult("ok", ([], []))  # no detail at all: nothing to find
+            return ReadResult("ok", DetailFiles())  # no detail at all: nothing to find
         for run, file_id in items:
             if run in unreadable:
                 continue
+            if run not in runs:
+                try:
+                    _entries(workspace, ("detail", run))  # the run's folder: a link or not a folder
+                except RecordUnavailable as error:
+                    if error.reason != "missing":
+                        unreadable.append(run)
+                        continue
+                except RecordTampered as error:
+                    _report(workspace, error, "folder", run, seen_by)
+                    unreadable.append(run)
+                    continue
+                runs.append(run)
             try:
                 fd = _open(workspace, _detail_file(run, file_id), "read")
             except RecordUnavailable as error:
                 if error.reason != "missing":
-                    unreadable.append(run)
+                    kept.append((run, file_id))
                 continue
             except RecordTampered as error:
                 _report(workspace, error, "folder", run, seen_by)
-                unreadable.append(run)
+                kept.append((run, file_id))
                 continue
             _close(fd)
             found.append((run, file_id))
-        return ReadResult("ok", ([ref for ref in found if ref[0] not in unreadable], unreadable))
+        return ReadResult("ok", DetailFiles(tuple(found), tuple(unreadable), tuple(kept)))
     except (RecordTampered, RecordUnavailable) as error:
         return _report(workspace, error, "folder", None, seen_by)
 
@@ -1487,38 +1545,53 @@ def ticket_detail_files(workspace, ticket, *, skip=(), seen_by="cli"):
 
 
 def delete_detail_files(workspace, items, *, seen_by="cli"):
-    """Delete exactly these detail files ((run, detail id) pairs): every one is checked first (nothing is
-    deleted when one is not safe), then they go run by run UNDER THE RUN'S LOCK (the writer stores detail
-    under it); a run's detail folder goes only when rmdir finds it empty, so detail of other tickets in the
-    same run (also one written in between) stays. A file or run folder that is missing (retention pruned it
-    since it was found) is already gone: neither the check nor the deletion fails on it. Returns how many
-    files were deleted."""
-    rels = [_detail_file(run, file_id) for run, file_id in items]
-    run, gone = None, 0
+    """Delete exactly these detail files ((run, detail id) pairs), run by run UNDER THE RUN'S LOCK (the writer
+    stores detail under it). Returns DetailFiles: `files` the pairs deleted by this call. A file can be
+    swapped after find_detail_files, so the same levels apply here, never a veto of the others: a run whose
+    detail folder (or lock) is not safe now is reported and skipped (`unreadable`); a single file that is not
+    safe now (a link, FIFO, hardlink) is reported and stays (`kept`), its safe siblings go. A run's detail
+    folder goes only when rmdir finds it empty, so detail of other tickets in the same run (also one written
+    in between) and a kept file stay. A file or run folder that is missing (retention pruned it since it was
+    found) is already gone: not counted, never a failure. Raises only for the detail folder itself, a busy
+    lock or an I/O error."""
+    found, unreadable, kept = [], [], []
+    run = None
     try:
-        for rel in rels:
-            run = rel[1]
+        _entries(workspace, ("detail",))  # the detail folder itself not safe: refuse with nothing deleted
+        for run in dict.fromkeys(ref[0] for ref in items):
             try:
-                _size(workspace, rel)
+                with _lock(workspace, run) as check_lock:
+                    check_lock()
+                    _entries(workspace, ("detail", run))  # the run's folder: a link or not a folder skips it
+                    for ref in items:
+                        if ref[0] != run:
+                            continue
+                        check_lock()
+                        try:
+                            _size(workspace, _detail_file(*ref))  # missing: 0, already gone
+                        except RecordTampered as error:
+                            _report(workspace, error, "folder", run, seen_by)
+                            kept.append(ref)
+                            continue
+                        check_lock()
+                        if _unlink(workspace, _detail_file(*ref)):
+                            found.append(ref)
+                    check_lock()
+                    _rmdir_empty(workspace, ("detail", run))
             except RecordUnavailable as error:
                 if error.reason != "missing":
                     raise
-        for run in dict.fromkeys(rel[1] for rel in rels):
-            with _lock(workspace, run) as check_lock:
-                for rel in rels:
-                    if rel[1] == run:
-                        check_lock()
-                        try:
-                            gone += 1 if _unlink(workspace, rel) else 0
-                        except RecordUnavailable as error:
-                            if error.reason != "missing":
-                                raise
-                check_lock()
-                _rmdir_empty(workspace, ("detail", run))
-    except (RecordTampered, RecordUnavailable) as error:
+            except RecordTampered as error:
+                _report(workspace, error, "folder", run, seen_by)
+                unreadable.append(run)
+    except RecordUnavailable as error:
+        if error.reason != "missing":  # missing: no detail at all (retention pruned it), nothing to delete
+            _report(workspace, error, "folder", run, seen_by)
+            raise
+    except RecordTampered as error:
         _report(workspace, error, "folder", run, seen_by)
         raise
-    return gone
+    return DetailFiles(tuple(found), tuple(unreadable), tuple(kept))
 
 
 def record_sizes(workspace):
@@ -1604,7 +1677,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 dict(
                     run=run,
                     ended=_ended_run(run, read.value, now),
-                    detail_mb=_size(workspace, ("detail", run)) / 1024**2,
+                    detail_mb=_detail_parts(workspace, run, "retention")[1] / 1024**2,
                     file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
                     / 1024**2,
                 )
@@ -1626,8 +1699,11 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 ended_now = _ended_run(run, read.value, now)
                 if not ended_now or ended_now != snapshots[run]:
                     continue
-                # Check every deletion target before invoking the irreversible fold.
-                for rel in (("pending", run), ("detail", run), ("jobs", run), ("runs", run + ".jsonl")):
+                # Check every deletion target before invoking the irreversible fold. In detail/<run> only the
+                # run's folder can refuse; a planted file in it is skipped (delete_detail), never a veto.
+                check_lock()
+                _detail_parts(workspace, run, "retention")
+                for rel in (("pending", run), ("jobs", run), ("runs", run + ".jsonl")):
                     check_lock()
                     _size(workspace, rel)
                 check_lock()

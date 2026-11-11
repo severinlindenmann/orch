@@ -266,11 +266,16 @@ def test_reserved_config(proj, section, key, default, valid):
     config.set_key(proj, section, key, valid)
     assert getter(proj) == valid
     wrong = ['"wrong"', "[]", "{}", "1.5", "1" if isinstance(default, bool) else "true"]
-    if not isinstance(default, bool):
-        wrong += ["0", "-1"]
     for value in wrong:
         config.path(proj).write_text(f"[{section}]\n{key} = {value}\n")
         assert getter(proj) == default
+    if not isinstance(default, bool):  # a whole number <= 0 means "as little as possible": the floor (L2)
+        from orch import humanproof
+
+        floor = humanproof.RETENTION_FLOOR[config._RETENTION_SETTINGS[(section, key)]]
+        for value in ("0", "-1"):
+            config.path(proj).write_text(f"[{section}]\n{key} = {value}\n")
+            assert getter(proj) == floor < default
     config.path(proj).write_text("invalid toml [")
     assert getter(proj) == default
     config.path(proj).write_text(f"{section} = 4\n")

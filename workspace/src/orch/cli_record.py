@@ -624,14 +624,15 @@ def delete_detail(root: Path, args) -> dict:
     """Delete the detail of one ticket: the detail files its own lines point at whose name is this ticket's
     own (I4), and its own files no line points at (orphans, found by their stored ticket/kind/id); a person's
     own decision, op `record.delete_detail`, target the ticket id, invariant H1. `deleted` = the runs that
-    lost detail, `kept` = files its lines point at that are not its own name (left, reported), `unreadable` =
-    runs that could not be read (skipped, never a veto; their detail stays, said plainly on stderr). Lines,
+    lost detail in this call, `kept` = files its lines point at that are not its own name (left, reported),
+    `unreadable` = runs that could not be read (their run file, or their detail folder a link or not a folder:
+    skipped, never a veto; their detail stays), `skipped` = single files that are not safe (a link, FIFO or
+    hardlink at the name: only that file stays, its run's other files go); both said plainly on stderr. Lines,
     counts and the detail of other tickets stay. Order: an agent is refused before anything else
     (needs_person); a ticket that does not exist is not_found (a deleted ticket's detail goes with retention:
     accepted); then the proof (needs_person); the detail folder itself not being safe refuses with nothing
-    deleted (a run's folder or file that is not safe only makes that run unreadable);
-    the audit line is written BEFORE anything is deleted (it cannot be written: not_available, nothing
-    deleted)."""
+    deleted; the audit line (`deleted`: the runs that are going to lose detail) is written BEFORE anything is
+    deleted (it cannot be written: not_available, nothing deleted)."""
     from orch import humanproof, tickets
 
     agent = tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:")
@@ -677,13 +678,13 @@ def delete_detail(root: Path, args) -> dict:
     # Exactly the files this ticket's own lines point at AND whose name is this ticket's own (I4). A line of
     # this ticket naming any other file (planted or changed) is not followed: it stays, counted in `kept`.
     kept = sum(1 for ref in pointed if ref not in mine)
-    found = record.detail_files(root, list(mine))
+    found = record.find_detail_files(root, list(mine))
     _show_alert(found.alert)
     if found.status != "ok":
         raise _fail(found)  # only the detail folder itself not being safe refuses
-    pointed_files, unsafe_runs = found.value
-    for run in unsafe_runs:
-        unreadable.setdefault(run)  # a planted link or special file in one run: skipped, never a veto
+    for run in found.value.unreadable:
+        unreadable.setdefault(run)  # the run's detail folder is a link or not a folder: the run is skipped
+    skipped = dict.fromkeys(found.value.kept)  # one planted link or special file: only that file is skipped
     # This ticket's own files no line points at (orphans: the detail is written before its line): found by
     # their stored ticket, id and kind, which must give the file's own name (I4).
     orphans = record.ticket_detail_files(root, tid, skip=tuple(unreadable))
@@ -693,20 +694,38 @@ def delete_detail(root: Path, args) -> dict:
     own_files, unreadable_folders = orphans.value
     for run in unreadable_folders:
         unreadable.setdefault(run)
-    items = list(dict.fromkeys(ref for ref in [*pointed_files, *own_files] if ref[0] not in unreadable))
-    deleted = len({run for run, _ in items})
+    items = list(
+        dict.fromkeys(
+            ref for ref in [*found.value.files, *own_files] if ref[0] not in unreadable and ref not in skipped
+        )
+    )
     try:
-        record.note_change(root, change="record.delete_detail", by=who, ticket=tid, deleted=deleted)
+        # What is going to go (the runs): written BEFORE anything is deleted; the answer says what went.
+        record.note_change(
+            root, change="record.delete_detail", by=who, ticket=tid, deleted=len({run for run, _ in items})
+        )
     except (OSError, record.RecordInvalid):
         raise RecordError(DELETE_NOT_SAVED, "not_available") from None
     try:
-        record.delete_detail_files(root, items)
+        done = record.delete_detail_files(root, items)
     except (OSError, record.RecordInvalid, record.RecordBusy):
         # The audit line above names what was going to go; what is left can be deleted with a new proof.
         raise RecordError(DELETE_PARTLY, "not_available") from None
+    # A file or run swapped for a link or special file after it was found: skipped the same way (no veto).
+    for run in done.unreadable:
+        unreadable.setdefault(run)
+    skipped.update(dict.fromkeys(done.kept))
     if unreadable:
         print(delete_unreadable_text(len(unreadable)), file=sys.stderr)
-    return {"deleted": deleted, "ticket": tid, "kept": kept, "unreadable": len(unreadable)}
+    if skipped:
+        print(delete_skipped_text(len(skipped)), file=sys.stderr)
+    return {
+        "deleted": len({run for run, _ in done.files}),
+        "ticket": tid,
+        "kept": kept,
+        "unreadable": len(unreadable),
+        "skipped": len(skipped),
+    }
 
 
 def prune(root: Path, fold, now: str | None = None) -> dict:
@@ -728,6 +747,13 @@ def delete_unreadable_text(n: int) -> str:
     if n == 1:
         return "1 run could not be read; its detail was not deleted."
     return f"{n} runs could not be read; their detail was not deleted."
+
+
+def delete_skipped_text(n: int) -> str:
+    """The plain words for `skipped` (a page shows the same sentence)."""
+    if n == 1:
+        return "1 detail file was changed outside orch; it was not deleted."
+    return f"{n} detail files were changed outside orch; they were not deleted."
 
 
 _DETAIL_REF = re.compile(r"^detail/(r_[a-z0-9_]{6,32})/([0-9a-f]{32})\.json$")

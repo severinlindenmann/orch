@@ -84,7 +84,9 @@ keyed by the workspace's real path like `permissions.json` (`$defs/settings_reco
   **tombstone** record (`value: false`) on EVERY lowering, before it touches the file (one writer, `humanproof.record_set`,
   for every key; a grant through it needs a verified `human:` by). A tombstone's `by` is `human:...`, `file`
   (the core saw a lowered file value) or `reset` (a lowering by anything that is not a verified person, or a safe reset), see `$defs/settings_record`.
-  Workspace `workflow.agents_may_finish` is one of these keys (default off).
+  Workspace `workflow.agents_may_finish` is one of these keys (default off). `by: file` is written only for a PARSED
+  false (or a missing key whose default is off): a config.toml that cannot be read (not valid TOML, mid-write) or a
+  value that is not true / false reads off and writes nothing, so a transient bad file never ends a person's grant.
 - **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
   on, `share_counts` on (owner decisions 3C, I5); everything else off.
 For list values (connection allow lists) a narrower file narrows the record (`grant ∩ file`), the list form of a
@@ -94,7 +96,7 @@ tombstone (inventory.md).
 person approved; **effective = the LOWER of the file value and the record** (the default record 90 / 2048 when none exists,
 or when the record holds anything but a whole number from the floor to the largest allowed value). A file value is first
 snapped DOWN to the allowed list with a **floor of 30 days / 512 MB** (`keep_days = 1` counts as 30, `100` as 90, `99999` as
-365; a bool, a wrong type or a value <= 0 is the default), so an edit of config.toml can never make pruning delete nearly the
+365; a whole number <= 0 means "as little as possible": the floor; a bool or a wrong type is the default), so an edit of config.toml can never make pruning delete nearly the
 whole record; a record value below the floor counts as no record. An unreadable settings record (a home or file that
 cannot be read) falls back to the lower of the file value and the default record 90 / 2048: never wider than the
 default, though it may be wider than a lowered record that can no longer be read (accepted). Raising above
