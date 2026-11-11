@@ -239,7 +239,7 @@ def test_helpers_keep_their_parent_and_stay_in_the_tree_when_finished():
     ]
 
 
-# PROVISIONAL FIXTURE SHAPE: `files` on step events (W2b decision 11 Nov; core lands later). Tests use exactly that shape.
+# Unit tests of the `files` list (shape of contracts/activity.md). The real writer and reader: test_focus_real_record.py.
 def stepf(files, name="Read", i=0, **kw):
     used = {"kind": "tool", "name": name, "action": None, "source": "builtin", "version": None}
     return example("valid-step-started.json", id=f"toolu_f{i}", used=used, files=files, **kw)
@@ -249,7 +249,7 @@ def test_files_are_kept_only_when_they_are_workspace_relative_paths():
     from orch_focus.record import clean_files
 
     good = ["src/app.py", "budget-2026.xlsx", "a b/c.txt"]
-    bad = ["/etc/passwd", "../x", "a/../b", "a\\b", "C:/x", "a\x00b", "", "x" * 261, "a//b", "./a", 5, None]
+    bad = ["/etc/passwd", "../x", "a/../b", "a\\b", "C:/x", "a\x00b", "", "x" * 261, 5, None]
     assert clean_files(good + bad) == good
     assert clean_files("src/app.py") == [] and clean_files(None) == []
     assert len(clean_files([f"f{i}.txt" for i in range(20)])) == 8
@@ -297,3 +297,13 @@ def test_the_board_remembers_each_agents_latest_step_for_the_tree():
     b = stepf([], "Bash", 2, text="Searched Slack", agent="h_1", parent="main")
     snap = Board.from_events(to_events(a, TICKET, RUN) + to_events(b, TICKET, RUN)).snapshot()
     assert snap["agent_now"] == {"main": "Read the plan", "h_1": "Searched Slack"}
+
+
+def test_focus_checks_paths_the_way_the_core_writer_does():
+    from orch.record_files import file_ok as core_ok
+
+    from orch_focus.record import file_ok
+
+    cases = ["a.txt", "a b/c.d", "ünï/x", "e\u0301.txt", "/x", "../x", "a/../b", "a\\b", "C:/x", "c:x", "~/x", "$HOME/x",
+             "file:x", "a\x00b", "a\u200bb", "", "x" * 260, "x" * 261, "a//b", ".", "a/./b", 5, None]  # fmt: skip
+    assert [file_ok(c) for c in cases] == [core_ok(c) for c in cases]

@@ -66,7 +66,7 @@
     if (!els.paneFiles || key === els.paneFiles.dataset.k) return;
     els.paneFiles.dataset.k = key;
     const content = h('div', {class: 'fx-results fx-files-page'}, h('h2', {text: 'Files this ticket touched'}));
-    if (!rows.length) content.append(h('p', {class: 'meta', text: 'No files yet.'}));
+    if (!rows.length) content.append(h('p', {class: 'meta', text: 'No files yet. A file shows up here when a step reads or changes it; some steps do not name a file.'}));
     else content.append(h('ul', {class: 'fx-files-list'}, rows.map(f => {
       const others = shared.get(f.path);
       return h('li', {class: 'fx-file' + (others ? ' shared' : '')},
