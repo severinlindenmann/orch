@@ -271,11 +271,11 @@ def result_candidates(root: Path, ticket: dict) -> list[dict]:
             if ev.get("role") not in PHONE_ROLES or ev.get("type") != "file":
                 continue
             f = _proof_file(root, tid, ev)
-            if not f or not f[0].lower().endswith(".json"):
-                continue
+            if not f or not f[0].lower().endswith(".json") or len(f[1]) > 256 * 1024:
+                continue  # a valid document is at most 64 KB
             try:
                 doc = json.loads(f[1].decode("utf-8"))
-            except (ValueError, UnicodeDecodeError):
+            except Exception:  # ValueError, UnicodeDecodeError, RecursionError: never a failed send
                 continue
             if not isinstance(doc, dict) or doc.get("schema") != "orch.blocks/1":
                 continue
@@ -286,8 +286,8 @@ def result_candidates(root: Path, ticket: dict) -> list[dict]:
                 "at": ev["at"] if _TIME.fullmatch(str(ev.get("at"))) else at0,
                 "doc": doc,
             }
-            if title := _clip(str(ev.get("title") or doc.get("title") or ""), 200):
-                r["title"] = title
+            if title := str(ev.get("title") or doc.get("title") or ""):
+                r["title"] = title  # cut only after the hider (phone_results)
             if step.get("done") and step.get("evidence"):
                 r["checked"] = True
             out.append(r)
@@ -736,7 +736,11 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         view["agent"] = agent
     if summary := shown_summary(ticket):
         view["summary"] = summary
-    if results := phone_results.prepare(root, result_candidates(root, ticket)):
+    try:
+        results = phone_results.prepare(root, result_candidates(root, ticket))
+    except Exception:  # whatever is wrong with a result: the snapshot goes without results
+        results = []
+    if results:
         view["results"] = results  # full snapshots only: light_view never has them
     return fit(view)
 

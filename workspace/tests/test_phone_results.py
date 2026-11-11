@@ -248,3 +248,74 @@ def test_pattern_secrets_in_cell_title_and_key_never_reach_the_output(proj, new_
         ]["title"]
         == "token=[hidden]"
     )
+
+
+def test_deeply_nested_or_huge_proof_file_never_fails_the_send(proj, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Nest")
+    for name, data in (("deep.json", "[" * 200_000), ("huge.json", '{"x":"' + "a" * 300_000 + '"}')):
+        p = proj / ".orch/tickets" / tid / "evidence" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(data)
+
+    def op(t):
+        t["checklist"] = [
+            {
+                "id": "c1",
+                "text": "x",
+                "done": True,
+                "evidence": [
+                    {"type": "file", "ref": f".orch/tickets/{tid}/evidence/{n}", "role": "result"}
+                    for n in ("deep.json", "huge.json")
+                ],
+            }
+        ]
+
+    tickets.apply_op(proj, tid, op)
+    assert "results" not in phone_view.view_for(proj, tid)
+
+
+def test_any_error_in_prepare_means_no_results(proj, new_ticket, conn, monkeypatch):  # noqa: F811
+    tid = _evidence_ticket(proj, new_ticket, [("a.json", doc(), "2026-11-11T08:00:00Z")])
+
+    def boom(*a, **k):
+        raise RecursionError
+
+    monkeypatch.setattr(phone_results, "prepare", boom)
+    assert "results" not in phone_view.view_for(proj, tid)
+
+
+def test_secret_cut_by_the_title_limit_leaks_nothing(proj, new_ticket, conn):  # noqa: F811
+    keystore.add(proj, "api-token", "token", SECRET)
+    d = doc()
+    d["title"] = "ok"
+    title = "t" * 190 + SECRET
+    out = phone_results.prepare(
+        proj, [cand(1, "2026-11-11T08:00:00Z") | {"title": title}], h=hider.Hider(keystore.all_needles(proj))
+    )
+    assert out and SECRET[:6] not in json.dumps(out) and len(out[0]["title"]) <= 200
+
+
+def test_secret_labels_hide_their_values():
+    d = doc(
+        blocks=[
+            {
+                "type": "kv",
+                "items": [{"key": "DB password", "value": "hunter2pass"}, {"key": "Rows", "value": "9"}],
+            },
+            {"type": "stat", "label": "API key", "value": "abc123xyz"},
+            {
+                "type": "table",
+                "columns": [{"key": "n", "label": "Name"}, {"key": "tk", "label": "Token"}],
+                "rows": [{"n": "a", "tk": "s3cr3tvalue"}],
+            },
+        ]
+    )
+    (r,) = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
+    out = json.dumps(r)
+    assert "hunter2pass" not in out and "abc123xyz" not in out and "s3cr3tvalue" not in out
+    assert '"value": "9"' in out and '"n": "a"' in out
+
+
+def test_order_parses_timestamps():
+    cs = [cand(1, "2026-11-11T08:00:00.5Z"), cand(2, "2026-11-11T08:00:00Z")]
+    assert [r["id"] for r in phone_results.prepare(Path("."), cs, h=NOHIDE)] == [cs[0]["id"], cs[1]["id"]]

@@ -129,6 +129,52 @@ def value_hider(root: Path):
         return None
 
 
+# Known gaps (not covered by the value hider or the pattern scrub): fullwidth/NFKC forms, a value split over
+# cells, base32, host case in a URL, a token inside a URL path.
+NAME_RE = re.compile(
+    r"(?i)token|secret|passw|passphrase|credential|auth|bearer|signature|api[ _-]?key|private[ _-]?key"
+    r"|\bkey\b|\bpin\b"
+)
+CUT = "[hidden]"
+
+
+def _hide_labelled(doc: dict) -> None:
+    """A secret-looking label hides its value: kv key, stat label, table column key or label (cells)."""
+    for b in doc.get("blocks", []):
+        t = b.get("type")
+        if t == "kv":
+            for it in b.get("items", []):
+                if NAME_RE.search(str(it.get("key", ""))):
+                    it["value"] = CUT
+        elif t == "stat":
+            if NAME_RE.search(str(b.get("label", ""))):
+                b["value"] = CUT
+                b.pop("unit", None)
+                b.pop("delta", None)
+        elif t == "table":
+            keys = {
+                c.get("key")
+                for c in b.get("columns", [])
+                if NAME_RE.search(str(c.get("key", ""))) or NAME_RE.search(str(c.get("label", "")))
+            }
+            for row in b.get("rows", []):
+                for k in keys:
+                    if k in row:
+                        row[k] = CUT
+
+
+def _when(r: dict):
+    from datetime import datetime
+
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?Z", str(r.get("at")))
+    if not m:
+        return 0.0
+    try:
+        return datetime.fromisoformat(m[1] + "+00:00").timestamp() + float(m[2] or 0)
+    except ValueError:
+        return 0.0
+
+
 def _scrub(o, redact):
     """Every string leaf and every dict key through the pattern scrub the other phone text gets."""
     if isinstance(o, str):
@@ -150,8 +196,17 @@ def _one(r: dict, h) -> dict | None:
             return None
         from orch.phone_view import redact  # late: phone_view imports this module
 
+        r = trim(r)  # first: a trim never cuts a string, and the hider then sees less
+        title = r.pop("title", None)
+        _hide_labelled(r["doc"])
         for _ in range(2):  # hide (exact values), scrub (patterns), trim; twice: the second pass proves it
             r = trim(_scrub(h.hide_json(r), redact))
+        if isinstance(title, str):  # the whole title is hidden first, then cut: a cut never leaves a prefix
+            t = redact(h.hide_text(title)).strip()
+            t = t if len(t) <= 200 else t[:199].rstrip() + "…"
+            t = "".join(ch for ch in t if ch >= " " and ch != "\x7f")
+            if t:
+                r["title"] = t
         return r if phone_ok(r) and h.hide_json(r) == r and _scrub(r, redact) == r else None
     except Exception:
         return None
@@ -165,13 +220,14 @@ def prepare(root: Path, candidates: list[dict], h=None) -> list[dict]:
     seen, ordered = set(), []
     for c in sorted(
         (c for c in candidates if isinstance(c, dict)),
-        key=lambda c: (str(c.get("at")), str(c.get("id"))),
+        key=lambda c: (_when(c), str(c.get("id"))),
         reverse=True,
     ):
         if c.get("id") in seen:
             continue
         seen.add(c.get("id"))
         ordered.append(c)
+    ordered = ordered[:15]  # newest few only: a ticket with a flood of proof files costs no more
     out = []
     for c in ordered:
         if len(out) == MAX_RESULTS:
