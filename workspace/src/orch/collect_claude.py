@@ -11,10 +11,14 @@ import math
 import re
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .collect_execjson import _hash, _hide, _now, _one_line, detail_name
+from .record_files import workspace_files
+
+# Tools whose input names the file or folder they touch (activity.md, Files).
+_FILE_TOOLS = ("Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep")
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -61,10 +65,13 @@ class StreamJsonMapper:
         hider: Callable[[str], str] | None = None,
         seq_start: int = 0,
         helper_start: int = 0,
+        workspace: str | Path | None = None,
     ):
         """`seq_start`: lines the run file already holds when this process starts (a resumed run), so
-        default ids `<run>:<seq>` never reuse an earlier id. `helper_start`: helpers started so far."""
+        default ids `<run>:<seq>` never reuse an earlier id. `helper_start`: helpers started so far.
+        `workspace`: the run's workspace root; `files` are made relative to it (outside ones are dropped)."""
         self.run, self.ticket, self.harness, self.now = run, ticket, harness, now
+        self.workspace = workspace
         self.hider, self.hidden = hider, hider is not None
         self.seq = seq_start
         self.session: str | None = None
@@ -225,6 +232,12 @@ class StreamJsonMapper:
                 path = next((inp[k] for k in ("file_path", "path", "pattern", "url") if inp.get(k)), "")
                 text = f"{verb} {PurePosixPath(str(path)).name}" if path else verb
         fields = dict(id=original, kind=kind, used=used, agent=agent, parent=parent, text=_one_line(text))
+        if kind == "step" and name in _FILE_TOOLS:
+            files = workspace_files(
+                [inp.get(k) for k in ("file_path", "notebook_path", "path")], self.workspace
+            )
+            if files:
+                fields["files"] = files
         self._pending[original] = dict(fields=fields, final=final, input=inp, timestamp=stamp)
         return [(self._emit(at, **fields), None)]
 
@@ -346,7 +359,9 @@ class StreamJsonMapper:
 
 def map_stream(lines: Iterable[str | bytes], ctx: dict) -> list[dict]:
     return list(
-        StreamJsonMapper(ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: ctx["at"]).events(lines)
+        StreamJsonMapper(
+            ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: ctx["at"], workspace=ctx.get("workspace")
+        ).events(lines)
     )
 
 
@@ -358,6 +373,7 @@ def collect(lines: Iterable[str | bytes], writer: Any, ctx: dict) -> dict:
         now=_now,
         seq_start=ctx.get("seq_start", 0),
         helper_start=ctx.get("helper_start", 0),
+        workspace=ctx.get("workspace"),
     )
     written = deduped = 0
     for line in lines:

@@ -32,6 +32,9 @@ _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[0-9a-f]{32}"
 _PART = r"[A-Za-z0-9_.-]{1,80}"
+# One `files` entry (activity.md, Files; $defs/file_path); NFC is checked by redact() leaving it unchanged.
+_FILE_PATH = r"(?![A-Za-z]:)(?!/)(?!(?:.*/)?\.\.(?:/|$))[^\x00-\x1f\x7f\\]{1,260}"
+_MAX_FILES = 8
 TAMPER_REASONS = ("link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped")
 _MESSAGES = {
     "tampered": (
@@ -886,9 +889,20 @@ class RecordWriter:
         event.pop("detail_lost", None)
         event.pop("conflict", None)
         event["detail"] = None
+        # files (activity.md, Files): only on a step; a bad entry is dropped, never the line.
+        files = event.pop("files", None)
+        if event.get("kind") != "step" or type(files) is not list:
+            files = None
+        else:
+            files = [f for f in files if type(f) is str and re.fullmatch(_FILE_PATH, f)]
         before = _json(event).count("[hidden: ")
         event = self.hider.hide_json(event)
         hidden = max(0, _json(event).count("[hidden: ") - before)
+        if files is not None:
+            # A path that changes under the hider or the plain-text cleaner (which also makes NFC) is dropped,
+            # never stored hidden.
+            files = [f for f in files if self.hider.hide_text(f) == f and redact(f) == f]
+            event["files"] = files[:_MAX_FILES]
         event["text"] = self.hider.hide_cut(" ".join(redact(event["text"]).split()), 500)
         if isinstance(event.get("outcome"), dict) and isinstance(event["outcome"].get("error"), str):
             event["outcome"]["error"] = self.hider.hide_cut(
@@ -1382,6 +1396,7 @@ _SCHEMA = {
             "type": "boolean",
             "description": "Hook and log finished outcomes disagree; both lines are kept.",
         },
+        "files": {"$ref": "#/$defs/files"},
     },
     "allOf": [
         {
@@ -1397,6 +1412,7 @@ _SCHEMA = {
                     "used": {"type": "object", "properties": {"kind": {"enum": ["skill", "tool", "mcp"]}}},
                 }
             },
+            "else": {"not": {"required": ["files"]}},
         },
         {
             "if": {"properties": {"kind": {"enum": ["task.start", "task.done"]}}},
@@ -1761,6 +1777,21 @@ _SCHEMA = {
             "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$",
         },
         "version": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "files": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {"$ref": "#/$defs/file_path"},
+            "description": "Only on kind step: the workspace files or folders the step named, display "
+            "only, never used for access decisions (activity.md, Files).",
+        },
+        "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 260,
+            "pattern": "^(?![A-Za-z]:)(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f\\\\]+$",
+            "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash or "
+            "drive letter, no control character, NFC (the writer checks NFC).",
+        },
         "detail_file": {
             "type": "object",
             "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"],
