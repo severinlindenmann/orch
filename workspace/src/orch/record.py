@@ -32,7 +32,16 @@ _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[0-9a-f]{32}"
 _PART = r"[A-Za-z0-9_.-]{1,80}"
-TAMPER_REASONS = ("link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped")
+TAMPER_REASONS = (
+    "link",
+    "reparse",
+    "hardlink",
+    "foreign_owner",
+    "not_regular",
+    "not_dir",
+    "swapped",
+    "content",
+)
 _MESSAGES = {
     "tampered": (
         "Some records of this run were changed outside orch. "
@@ -762,6 +771,103 @@ def note_unattributed(ws, reason, *, now=None):
     run is the caller's word), only the reason, in alerts/hook-lost-unattributed-<day>.jsonl, 1 per minute."""
     if reason in UNPROVEN_REASONS:
         _note(ws, "hook-lost-unattributed", None, reason, now, 0)
+
+
+_JOB = r"j_[a-z0-9]{6,32}"
+JOB_BYTES = 5 * 1024**2  # stored stream of one job (job-events.md caps)
+
+
+def _job_events(raw, run, job):
+    """The lines of one job stream. Strict: a line that is not a JSON object of this job and run, in order,
+    means the file was changed outside orch (tampered), never quietly skipped."""
+    events = []
+    for line in raw.splitlines():
+        try:
+            event = json.loads(line)
+            ok = (event["run"], event["job"], event["seq"]) == (run, job, len(events) + 1)
+        except (ValueError, RecursionError, KeyError, TypeError):
+            ok = False
+        if not ok:
+            raise RecordTampered("content")
+        events.append(event)
+    return events
+
+
+def read_job(workspace, run, job, *, seen_by="reader") -> ReadResult[list[dict]]:
+    """One job stream (jobs/<run>/<job>.jsonl) with the same explicit status as read_run."""
+    _name(run, _RUN)
+    _name(job, _JOB)
+    try:
+        fd = _open(workspace, ("jobs", run, job + ".jsonl"), "read")
+        try:
+            return ReadResult("ok", _job_events(_read_bytes(fd), run, job))
+        finally:
+            _close(fd)
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", run, seen_by)
+
+
+def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple[str, str]]]:
+    """(run, job) pairs that have a stream, for one run or for all runs."""
+    try:
+        runs = (
+            [_name(run, _RUN)]
+            if run
+            else [n for n in _entries(workspace, ("jobs",)) if re.fullmatch(_RUN, n)]
+        )
+        found = []
+        for name in sorted(runs):
+            try:
+                names = _entries(workspace, ("jobs", name))
+            except RecordUnavailable as error:
+                if error.reason == "missing":
+                    continue
+                raise
+            found += [(name, n[:-6]) for n in sorted(names) if re.fullmatch(_JOB + r"\.jsonl", n)]
+        return ReadResult("ok", found)
+    except RecordUnavailable as error:
+        if error.reason == "missing":
+            return ReadResult("ok", [])
+        return _report(workspace, error, "folder", run, seen_by)
+    except RecordTampered as error:
+        return _report(workspace, error, "folder", run, seen_by)
+
+
+def append_job(workspace, run, job, decide):
+    """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
+    inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
+    is stored only after the caller's own checks passed (every string already hidden). Returns result."""
+    _name(run, _RUN)
+    _name(job, _JOB)
+    rel = ("jobs", run, job + ".jsonl")
+    try:
+        with _lock(workspace, run) as check_lock:
+            check_lock()
+            fd = _open(workspace, rel, "read_append", create_dirs=True)
+            try:
+                check_lock()
+                raw = _read_bytes(fd)
+                events = _job_events(raw, run, job)
+                event, replace_last, result = decide(events, len(raw))
+                if event is None:
+                    return result
+                data = (_json(event) + "\n").encode()
+                if len(data) > 16384:
+                    raise RecordInvalid("The job entry is too large.")
+                check_lock()
+                if replace_last:
+                    rows = raw.splitlines(keepends=True)[:-1]
+                    _write_new(workspace, rel, b"".join(rows) + data)
+                else:
+                    _write(fd, (b"\n" if raw and not raw.endswith(b"\n") else b"") + data)
+                return result
+            finally:
+                _close(fd)
+    except RecordBusy:
+        raise
+    except (RecordTampered, RecordUnavailable) as error:
+        _report(workspace, error, "folder", run, "writer")
+        raise
 
 
 def _report(ws, error, target, run, seen_by):
