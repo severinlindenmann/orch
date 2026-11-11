@@ -47,7 +47,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "live-now.js", "areas.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "live-now.js", "areas.js", "used.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -579,7 +579,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tickets":
             return self._json(200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()})
         if path == "/api/live":
-            return self._json(200, {"cards": livecards.cards(self.tracker)})
+            cards = livecards.cards(self.tracker)
+            return self._json(200, {"cards": cards, "same_file": livecards.same_file(cards)})
         if path == "/api/areas":
             return self._json(200, {"areas": areas.strip(self.root, livecards.cards(self.tracker))})
         if path == "/api/procs":
