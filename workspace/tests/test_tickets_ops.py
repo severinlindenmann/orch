@@ -764,3 +764,77 @@ def test_adoption_serializes_with_record_session(proj, new_ticket, monkeypatch):
         writer.result(timeout=5)
     assert {s["id"] for s in tickets._own_sessions(proj)} == {"old", "new"}
     assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "agent", runs.host()) == "new"
+
+
+@pytest.mark.parametrize("blocked", ["tracked", "git-failure"])
+def test_adoption_checks_outer_git_per_file(proj, new_ticket, monkeypatch, blocked):
+    from orch import runs, safegit
+
+    bad, good = new_ticket(), new_ticket()
+    for tid in (bad, good):
+        ticket = tickets.load(proj, tid)
+        ticket["sessions"] = [{"id": tid, "agent": "agent", "host": runs.host()}]
+        tickets.save(proj, ticket)
+    subprocess.run(["git", "init", "-q", str(proj)], check=True)
+    if blocked == "tracked":
+        subprocess.run(["git", "add", "-f", "--", str(tickets.ticket_path(proj, bad))], cwd=proj, check=True)
+    # A nested state repo must not hide the outer team's index.
+    subprocess.run(["git", "init", "-q", str(proj / ".orch")], check=True)
+    original = safegit.run_bytes
+
+    def git(args, *a, **kw):
+        if blocked == "git-failure" and args[0] == "ls-files" and bad in args[-1]:
+            return 124, b"", "timeout"
+        return original(args, *a, **kw)
+
+    monkeypatch.setattr(safegit, "run_bytes", git)
+    assert [s["id"] for s in tickets._own_sessions(proj)] == [good]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("id", "bad.id"),
+        ("id", "bad/session"),
+        ("id", "x\n"),
+        ("id", "x" * 129),
+        ("agent", "Agent"),
+        ("agent", "a_b"),
+        ("agent", "a" * 33),
+    ],
+)
+def test_adoption_rejects_invalid_session_names(proj, new_ticket, field, value):
+    from orch import runs
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    bad = {"id": "bad", "agent": "agent", "host": runs.host(), field: value}
+    ticket["sessions"] = [bad, {"id": "Good_-123", "agent": "agent-1", "host": runs.host()}]
+    tickets.save(proj, ticket)
+    assert [s["id"] for s in tickets._own_sessions(proj)] == ["Good_-123"]
+
+
+def test_adoption_caps_and_keeps_valid_old_entries(proj, new_ticket):
+    from orch import runs
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    ticket["sessions"] = [
+        {"id": f"session-{i}", "agent": "agent", "host": runs.host()}
+        for i in range(tickets.OWN_SESSIONS_MAX + 10)
+    ]
+    tickets.save(proj, ticket)
+    old = {
+        "id": "session-0",
+        "agent": "agent",
+        "host": runs.host(),
+        "ticket_id": tid,
+        "first_seen": "before-migration",
+    }
+    path = proj / ".orch" / "run" / "own-sessions.json"
+    tickets.net.write_json(path, [None, old, {"id": "incomplete"}, old])
+    entries = tickets._own_sessions(proj)
+    assert len(entries) == tickets.OWN_SESSIONS_MAX
+    assert entries.count(old) == 1
+    assert len({s["id"] for s in entries}) == len(entries)
+    assert json.loads(path.read_text()) == entries

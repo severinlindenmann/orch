@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orch import adapters, reminder_settings, skills
+from orch import adapters, net, reminder_settings, skills
 from orch.errors import Refused
+
+
+def _ensure_workspace(root: Path) -> None:
+    """New local state has no legacy session ownership to migrate."""
+    fresh = not (root / ".orch").exists()
+    (root / ".orch" / "tickets").mkdir(parents=True, exist_ok=True)
+    if fresh:
+        net.write_json(root / ".orch" / "run" / "own-sessions.adopted", {"adopted": True})
 
 
 def init(root: Path, code: str | None = None) -> list[str]:
@@ -14,7 +22,7 @@ def init(root: Path, code: str | None = None) -> list[str]:
 
     if code is not None:
         code = config.clean_code(code)  # refused before anything is written
-    (root / ".orch" / "tickets").mkdir(parents=True, exist_ok=True)
+    _ensure_workspace(root)
     if code is not None or not config.workspace_code(root):
         code = config.set_code(root, code or config.suggest_code(root.resolve().name))
     code = config.workspace_code(root)
@@ -117,6 +125,7 @@ def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> st
     Returns one plain line to show."""
     from orch import adapters, config
 
+    _ensure_workspace(root)  # selecting an agent can write config before init() runs
     cur = config.agent_name(root)
     if cur:
         try:

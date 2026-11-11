@@ -2345,23 +2345,22 @@ def _own_sessions_locked(root: Path) -> list[dict]:
         entries = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         entries = []
-    if not isinstance(entries, list) or any(
-        not isinstance(s, dict)
-        or any(
-            not isinstance(s.get(k), str) or not s[k]
-            for k in ("id", "agent", "host", "ticket_id", "first_seen")
+    entries = [
+        s
+        for s in (entries if isinstance(entries, list) else [])
+        if isinstance(s, dict)
+        and all(
+            isinstance(s.get(k), str) and s[k] for k in ("id", "agent", "host", "ticket_id", "first_seen")
         )
-        for s in entries
-    ):
-        entries = []
+    ]
     marker = path.with_name("own-sessions.adopted")
     if not marker.exists():
-        from orch import runs
+        from orch import harness, runs
 
         host, first_seen = runs.host(), now()
         owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in entries}
-        # Sync strips incoming sessions. Host match is the adoption rule even in a state repo
-        # whose last ticket change was a sync merge; no git-history inference is needed.
+        adopted = []
+        # Shared tickets cannot establish local ownership, even when the hostname matches.
         # General/Chat tickets also use sessions_for and therefore have session semantics.
         for p in sorted(tickets_dir(root).glob("t_*.json")):
             try:
@@ -2369,18 +2368,23 @@ def _own_sessions_locked(root: Path) -> list[dict]:
             except (OSError, ValueError, Refused):
                 continue
             sessions = ticket.get("sessions")
-            if not isinstance(sessions, list):
+            if not isinstance(sessions, list) or not sessions:
                 continue
+            if harness.is_tracked(root, p.relative_to(root).as_posix()):
+                continue  # includes git failures; ask from root, outside any .orch state repo
             for s in sessions:
                 if (
                     not isinstance(s, dict)
                     or s.get("host") != host
-                    or any(not isinstance(s.get(k), str) or not s[k] for k in ("id", "agent"))
+                    or not isinstance(s.get("id"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", s["id"])
+                    or not isinstance(s.get("agent"), str)
+                    or not config.NAME_RE.fullmatch(s["agent"])
                 ):
                     continue
                 key = (s["id"], s["agent"], host, p.stem)
                 if key not in owned:
-                    entries.append(
+                    adopted.append(
                         {
                             "id": s["id"],
                             "agent": s["agent"],
@@ -2390,6 +2394,9 @@ def _own_sessions_locked(root: Path) -> list[dict]:
                         }
                     )
                     owned.add(key)
+        # Keep valid old ownership preferentially when migration reaches the cap.
+        merged = {(s["id"], s["agent"], s["host"], s["ticket_id"]): s for s in adopted + entries}
+        entries = list(merged.values())[-OWN_SESSIONS_MAX:]
         net.write_json(path, entries)
         net.write_json(marker, {"adopted": True})
     return entries
