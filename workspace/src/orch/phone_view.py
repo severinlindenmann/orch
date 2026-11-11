@@ -49,7 +49,9 @@ _SECRET_PATTERNS = [
     re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}|\bxox[abprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"),  # JWT
+    # JWT: one start per run of its characters (`-` is one of them but no word character: a \b start after
+    # every `-` made "eyJ-eyJ-..." quadratic), the parts possessive
+    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{5,}"),
     re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"),
     # Google API key, Hugging Face, npm, PyPI, SendGrid, DigitalOcean
     re.compile(r"\bAIza[0-9A-Za-z_-]{35}|\bhf_[A-Za-z0-9]{30,}|\bnpm_[A-Za-z0-9]{36}"),
@@ -85,6 +87,8 @@ SECRET_LABEL_WORDS = (
     "cookies",
     "session",
     "sessions",
+    "sig",  # an Azure SAS signature (&sig=), as in the query parameter names
+    "sid",  # connect.sid
 )
 
 
@@ -106,10 +110,11 @@ def _words_rx(sep: str) -> str:
 # secret name. Authorization: Bearer x takes scheme AND token.
 # A quoted or subscripted name counts ({"password": x}, config['token'] = x, os.environ["DB_PASSWORD"] = x):
 # one closing quote and one `]` may stand between the name and the separator (group 2 keeps them, so the
-# text around stays). Separators: : = := ?= += => (Go, Make, PHP/Ruby/Perl).
-# A `:` value (YAML, headers, `password: correct horse battery`) and any cookie value
+# text around stays); the quote may be escaped by any number of backslashes (JSON inside a JSON string,
+# a logged request body: {\"password\":\"x\"}, {\\\"token\\\": x}). Separators: : = := ?= += => (Go, Make,
+# PHP/Ruby/Perl). A `:` value (YAML, headers, `password: correct horse battery`) and any cookie value
 # (Cookie: a=1; sessionid=x) is hidden to the end of its line; an `=` value is one token or one quoted string.
-_KV_HEAD = re.compile(r"(?<![\w.-])([\w.-]++)([\"'`]?\]?\s*+(?P<sep>=>|:=|[?+]?=|:)\s*+)")
+_KV_HEAD = re.compile(r"(?<![\w.-])([\w.-]++)((?:\\*+[\"'`])?\]?\s*+(?P<sep>=>|:=|[?+]?=|:)\s*+)")
 _KV_VAL = re.compile(
     r"(?:(?:bearer|basic|token|digest)\s++)?"
     r"(?:\"(?:[^\"\\\n]|\\.)*+\"?|'(?:[^'\\\n]|\\.)*+'?|`[^`\n]*+`?|\S++)",
@@ -187,25 +192,80 @@ _SECRET_KV = _KV()
 # sshpass -p x, redis-cli -a x, curl -u user:pass, curl -su user:pass. -p 8080, ls -a, psql -p 5432 and
 # --port 8080 stay. The value stays on the flag's line, and a command's flags end where the next command on
 # the line starts. A secret long flag followed by another long flag has no value (--password --token x: x
-# is hidden). Linear: one lookbehind-guarded start per flag and per path run, possessive runs, each line
-# end is found once, and every scan goes on after the last one (nothing is scanned twice).
-_FLAG_COMMANDS = {"mysqldump": "p", "mysql": "p", "sshpass": "p", "redis-cli": "a", "curl": "u"}
-_LONG_FLAG = re.compile(r"(?<![\w.-])(?:--|[\u2013\u2014])([\w.-]++)(?:=|[ \t]++)")
-_SHORT_FLAGS = {  # the letter alone (-pX: X is the value) or last in a cluster of letters (-su x)
-    letter: re.compile(rf"(?<!\S)-(?:[A-Za-z]*+(?<={letter})|{letter})[ \t]*+")
-    for letter in set(_FLAG_COMMANDS.values())
+# is hidden). Argv lists and quoted arguments count too (subprocess.run(["mysql", "-phunter2"]),
+# command: ["redis-server", "--requirepass", "x"], "args": ["--token", "x"], sh -c 'mysql "-px"'): a flag
+# may start right after a quote, `[`, `,` or `(`, its value may be the next quoted list item, and a value
+# inside the flag's own quotes ends at the closing quote. Linear: one lookbehind-guarded start per flag
+# and per path run, possessive runs, each line end is found once, and every scan goes on after the last
+# one (nothing is scanned twice).
+_FLAG_COMMANDS = {
+    "mysqldump": "p",
+    "mysql": "p",
+    "mariadb-dump": "p",
+    "mariadb": "p",
+    "mysqladmin": "p",
+    "mysqlimport": "p",
+    "mysqlcheck": "p",
+    "sshpass": "p",
+    "redis-cli": "a",
+    "curl": "u",
+}
+_LIST_SEP = r"[\"'`]\s*+,\s*+"  # "--token", "x": the end of one quoted list item and the start of the next
+_LONG_FLAG = re.compile(rf"(?<![\w.-])(?:--|[\u2013\u2014])([\w.-]++)(?:=|[ \t]++|(?P<item>{_LIST_SEP}))")
+# The boolean (argument-less) short flags per command, which may stand before the password letter in one
+# cluster (curl -su x, mysql -sNpX). A cluster whose earlier letter is not one of them is not a cluster: the
+# text after that letter is its value (mysql -upX: the user is pX), not a password.
+_BOOL_SHORT = {
+    "mysql": "ABCEGHINTUVWbfinqrstvw",
+    "mysqldump": "acdefklnqQRtvx",
+    "mariadb": "ABCEGHINTUVWbfinqrstvw",
+    "mariadb-dump": "acdefklnqQRtvx",
+    "mysqladmin": "EfrsvV",
+    "mysqlimport": "dfiLlrsv",
+    "mysqlcheck": "1aABcCeFfgmoqrsv",
+    "sshpass": "ev",
+    "redis-cli": "cex234",
+    "curl": "sSLkvifIOJgGNZaR#",
+}
+_SHORT_FLAGS = {  # the letter alone (-pX: X is the value) or after boolean letters only (-su x)
+    cmd: re.compile(rf"(?<![^\s\"'`\[,(])-[{re.escape(bools)}]*+{letter}(?:(?P<item>{_LIST_SEP})|[ \t]*+)")
+    for cmd, letter in _FLAG_COMMANDS.items()
+    for bools in (_BOOL_SHORT[cmd],)
+}
+# the next list item after "--token", : a quoted string, an already hidden value, else up to the item's end
+_ITEM_VAL = re.compile(r"\"(?:[^\"\\\n]|\\.)*+\"?|'[^'\n]*+'?|`[^`\n]*+`?|\[hidden\]|[^\s,\])]++")
+# the rest of a value inside the flag's own quotes ("-phunter2", "--token abc"): up to the closing quote
+_IN_QUOTES = {
+    '"': re.compile(r'(?:[^"\\\n]|\\.)++'),
+    "'": re.compile(r"[^'\n]++"),
+    "`": re.compile(r"[^`\n]++"),
 }
 _SHELL_OP = re.compile(r"(?:&&?|\|\|?|;|>>?|<)(?!\S)")
 _CMD = re.compile(
-    r"(?<![\w.~/\\-])(?:[\w.~/\\-]*[/\\])?("
+    r"(?i)(?<![\w.~/\\-])(?:[\w.~/\\-]*[/\\])?("
     + "|".join(re.escape(c) for c in _FLAG_COMMANDS)
     + r")(?:\.exe)?(?![\w.-])"
-)
+)  # any case: MYSQL.EXE on Windows; the flag letters stay case-sensitive (mysql -P is the port)
 
 
 def _line_end(text: str, pos: int) -> int:
     end = text.find("\n", pos)
     return len(text) if end == -1 else end
+
+
+def _flag_value(text: str, flag, end: int):
+    """The value match after a flag match, or None: the next quoted list item ("--token", "x"), the rest
+    inside the flag's own quotes ("-px", "--token x"), else one token or one quoted string."""
+    pos = flag.end()
+    quote = text[flag.start() - 1] if flag.start() else ""
+    if flag.group("item") is not None:
+        return _ITEM_VAL.match(text, pos, end)
+    if quote in _IN_QUOTES:
+        return _IN_QUOTES[quote].match(text, pos, end)
+    return _KV_VAL.match(text, pos, end)
+
+
+_NEXT_FLAG = ("--", '"--', "'--", "`--")
 
 
 def _flag_values(text: str) -> list[tuple[int, int]]:
@@ -216,14 +276,14 @@ def _flag_values(text: str) -> list[tuple[int, int]]:
         pos = flag.end()
         if pos > eol:
             eol = _line_end(text, pos)
-        if not secret_name(flag.group(1)) or (text.startswith("--", pos) and flag.group(0)[-1] != "="):
-            continue  # a plain flag, or a secret flag without a value (--password --token x)
-        if (val := _KV_VAL.match(text, pos, eol)) is not None:
+        if not secret_name(flag.group(1)) or (text.startswith(_NEXT_FLAG, pos) and flag.group(0)[-1] != "="):
+            continue  # a plain flag, or a secret one with no value: --password --token x, "--password", "--x"
+        if (val := _flag_value(text, flag, eol)) is not None:
             spans.append(val.span())
             pos = val.end()
     cmds, eol = list(_CMD.finditer(text)), -1
     for i, cmd in enumerate(cmds):
-        flag_rx, pos = _SHORT_FLAGS[_FLAG_COMMANDS[cmd.group(1)]], cmd.end()
+        flag_rx, pos = _SHORT_FLAGS[cmd.group(1).lower()], cmd.end()
         if pos > eol:
             eol = _line_end(text, pos)
         end = min(eol, cmds[i + 1].start()) if i + 1 < len(cmds) else eol  # up to the next command
@@ -231,7 +291,7 @@ def _flag_values(text: str) -> list[tuple[int, int]]:
             pos = flag.end()
             if _SHELL_OP.match(text, pos, end):
                 continue  # mysql -p && next: no value (mysql asks for it)
-            if (val := _KV_VAL.match(text, pos, end)) is not None:
+            if (val := _flag_value(text, flag, end)) is not None:
                 spans.append(val.span())
                 pos = val.end()
     return spans
@@ -364,11 +424,17 @@ def _round(t: str) -> str:
     """One round: clean, scrub the cleaned raw form, NFKC, scrub again; out = scrub(NFKC(scrub(clean(raw)))).
     When the raw and the NFKC form of the cleaned text do not agree on whether there is a secret, the whole
     value is hidden (fail closed); with no secret in either the cleaned text is returned unchanged. A text
-    longer than TEXT_CUT is cut CUT_MARGIN before it and ends in [hidden]: a token cut in two at the limit
-    could leave a prefix that no pattern knows any more."""
+    longer than TEXT_CUT is scrubbed as cut (TEXT_CUT + 1 characters: a token inside is matched whole), then
+    its last CUT_MARGIN characters go and it ends in [hidden]: a token cut in two at the limit could leave a
+    prefix that no pattern knows any more."""
     c = clean_untrusted(t, TEXT_CUT + 1)
-    if len(c) > TEXT_CUT:
-        c = c[: TEXT_CUT - CUT_MARGIN] + HIDDEN
+    out = _scrub_round(c)
+    if len(c) > TEXT_CUT and out != HIDDEN:
+        out = out[: max(0, len(out) - CUT_MARGIN)] + HIDDEN
+    return out
+
+
+def _scrub_round(c: str) -> str:
     n = unicodedata.normalize("NFKC", c)
     raw_hit, norm_hit = _scrub_text(c) != c, _scrub_text(n) != n
     if raw_hit != norm_hit:
@@ -427,7 +493,18 @@ _SPACED_VALUES = (
 #   "unknown" and not sent, never checked as clean;
 # - HTML and SVG artifacts are active content: entities (`&#112;assword=`) or script (atob) can build any
 #   text when the file is shown; the scan sees the source only;
-# - past TEXT_CUT redact shows nothing (the text ends in [hidden]); a file is scanned whole.
+# - past TEXT_CUT redact shows nothing (the text ends in [hidden]); a file is scanned whole;
+# - attachments() clips its titles, labels and names without the value hider (a stored value across the
+#   cut leaves a prefix the final view check does not know), and _scan/_has_secret do not use it: owned by
+#   the upload-gate PR #541, not #497;
+# - a label that is not right before its separator (`The password is: x`, `DB password (staging): x`), XML
+#   and HTML element or attribute values (`<password>x</password>`, `key="DbPassword" value="x"`), and
+#   default-ignorable characters that are not Cf (CGJ U+034F, variation selectors, Hangul fillers) inside a
+#   name;
+# - URL userinfo with a raw `/`, `?`, `#` in the password or an `@` in the user (`redis://:pa#ss@h`,
+#   `https://bob@corp.ch:pw@h`) and scheme-less DSNs (`user:pw@tcp(h)/db`);
+# - other operators and languages: `password == "x"`, `||=`, `??=`, `->`, `<-`, Dockerfile `ENV PASSWORD x`,
+#   fish `set -x API_TOKEN x`, non-English labels (Kennwort, mot de passe), PuTTY `Private-Lines:`.
 # Over-redaction is accepted (fail safe): `--token-count 512`, `use --token to set it` hide the next word,
 # `bypass=1`, `compass: north` and the rest of a `token: ...` line are hidden.
 def _scrub_text(t: str) -> str:
@@ -464,7 +541,7 @@ def safe_url(url: str) -> str | None:
         return None
     if p.scheme not in ("http", "https") or not p.hostname or any(c.isspace() for c in u):
         return None
-    host = p.hostname + (f":{port}" if port else "")
+    host = (f"[{p.hostname}]" if ":" in p.hostname else p.hostname) + (f":{port}" if port else "")  # IPv6
     q = urllib.parse.parse_qsl(p.query, keep_blank_values=True)
     pairs = [
         (HIDDEN, HIDDEN) if redact(k) != k else (k, HIDDEN if _secret_param(k) else redact(v)) for k, v in q
@@ -488,20 +565,26 @@ _NAME_WORD = re.compile(
     r"(?<![a-z])(" + "|".join(SECRET_LABEL_WORDS) + r")(?![a-z])"
 )  # letters only: key2, pin1
 _NAME_PASS = re.compile(r"pass(?![a-z])")  # a word that ends in pass: SSHPASS, DBPASS, smtppass
+# a word that ends in pwd, pw or pswd (ROOTPWD, ADMINPW, pswd), or in key after a known key kind (MASTERKEY,
+# privkey, HMACKEY): a bare key suffix would take Monkey, Hotkey and Turkey too
+_NAME_TAIL = re.compile(
+    r"(?:pwd|pw|pswd)(?![a-z])|(?:master|encryption|enc|signing|sign|hmac|jwt|license|licence|app|db|crypt"
+    r"|priv|aes|rsa|ssh|gpg|pgp)keys?(?![a-z])"
+)
 
 
 def secret_name(name: str) -> bool:
     """Does a label (kv key, column key or label, stat label) name a secret? The name as given AND cleaned
     (invisible characters and comments gone: to<ZWSP>ken, tok<!---->en), each NFKC, then camelCase, _ - .
-    split into words, so basic_auth, authCode, X-Api-Key, DB_PASS, SSHPASS, PHPSESSID and session_id match;
-    Author, Keyboard, Monkey, Hotkey, Turkey, Passed and Passage do not. The one predicate for labelled
-    values in results, for key=value names in text and for long flags."""
+    split into words, so basic_auth, authCode, X-Api-Key, DB_PASS, SSHPASS, PHPSESSID, session_id, ROOTPWD
+    and MASTERKEY match; Author, Keyboard, Monkey, Hotkey, Turkey, Passed and Passage do not. The one
+    predicate for labelled values in results, for key=value names in text and for long flags."""
     raw = str(name)
     for form in dict.fromkeys((raw, _clean_full(raw))):
         t = unicodedata.normalize("NFKC", form)
         words = re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)).lower()
         words = _PASS_OK.sub(" ", words)  # test-result phrases: Pass/Fail, pass rate, pass count (not passed)
-        if _NAME_SUBSTR.search(words) or _NAME_WORD.search(words) or _NAME_PASS.search(words):
+        if any(rx.search(words) for rx in (_NAME_SUBSTR, _NAME_WORD, _NAME_PASS, _NAME_TAIL)):
             return True
     return False
 
@@ -520,9 +603,10 @@ def is_agent_history_author(by) -> bool:
     )
 
 
-def _who(by: str) -> tuple[str, str]:
+def _who(by: str, h=None) -> tuple[str, str]:
+    """(display name, role) of a history author; `h`, the value hider, hides a stored value before the cut."""
     kind, _, name = str(by).strip().partition(":")
-    name = _clip(name or kind, 64) or "Someone"
+    name = _clip(name or kind, 64, h) or "Someone"
     if unicodedata.normalize("NFKC", kind).casefold() == "agent":
         # A sender suffix or raw phone id is not an agent display name.
         label = unicodedata.normalize("NFKC", name).casefold()
@@ -544,15 +628,15 @@ def internal_wakeup(entry: dict) -> bool:
     )
 
 
-def _agent(root: Path, ticket: dict) -> tuple[str | None, bool]:
-    """(agent display name, running now)."""
+def _agent(root: Path, ticket: dict, h=None) -> tuple[str | None, bool]:
+    """(agent display name, running now); `h`: the value hider for the name."""
     rec = runs.read(root, ticket["id"])
     running = bool(rec) and runs.state(rec) != "dead"
     name = (rec or {}).get("agent") if running else None
     if not name:
         sessions = sorted(ticket.get("sessions") or [], key=lambda s: str(s.get("last_used", "")))
         name = sessions[-1].get("agent") if sessions else None
-    return (_who(f"agent:{name}")[0] if name else None), running
+    return (_who(f"agent:{name}", h)[0] if name else None), running
 
 
 def phone_proof(root: Path, ticket: dict) -> list[dict]:
@@ -969,14 +1053,15 @@ def pair_previews(atts: list[dict]) -> list[dict]:
     return out
 
 
-def artifact_title(root: Path, ticket: dict, aid: str) -> str | None:
-    """The title of the proof or link a phone feedback names (by artifact id), or None."""
+def artifact_title(root: Path, ticket: dict, aid: str, h=None) -> str | None:
+    """The title of the proof or link a phone feedback names (by artifact id), or None; `h`, the value hider,
+    hides a stored value before the cut."""
     for ev in phone_proof(root, ticket):
         if artifact_id(str(ev.get("type")), str(ev.get("ref", ""))) == aid:
-            return _clip(ev.get("title") or Path(str(ev.get("ref", ""))).name, 200) or None
+            return _clip(ev.get("title") or Path(str(ev.get("ref", ""))).name, 200, h) or None
     for ln in ticket.get("refs") or []:
         if isinstance(ln, dict) and artifact_id("link", str(ln.get("url", ""))) == aid:
-            return _clip(ln.get("title") or ln.get("url", ""), 200) or None
+            return _clip(ln.get("title") or ln.get("url", ""), 200, h) or None
     return None
 
 
@@ -1095,8 +1180,8 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     finished view: _closed_view (fail closed)."""
     checklist = _shown_checklist(ticket)
     done, wont, total = tickets.checks_split({"checklist": checklist})
-    agent, running = _agent(root, ticket)
     h = h if h is not None else phone_results.value_hider(root)
+    agent, running = _agent(root, ticket, h)
     if h is None:
         return _closed_view(ticket, running, done, total)
     hist = []
@@ -1111,7 +1196,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
         at = str(entry.get("at") or "")
         if not _TIME.fullmatch(at):
             continue
-        who, role = _who(entry.get("by", ""))
+        who, role = _who(entry.get("by", ""), h)
         hist.append({"at": at, "who": who, "role": role, "text": text})
     view: dict = {
         "title": _clip(ticket.get("title", ""), 200, h) or "Ticket",
@@ -1247,7 +1332,7 @@ def light_view(root: Path, ticket: dict) -> dict:
     h = phone_results.value_hider(root)
     if h is None:
         raise Refused("Stored key values can't be hidden right now, so no light update was sent.")
-    agent, running = _agent(root, ticket)
+    agent, running = _agent(root, ticket, h)
     view: dict = {
         "light": True,
         "title": _clip(ticket.get("title", ""), 200, h) or "Ticket",
@@ -1353,9 +1438,7 @@ def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
         if ph in bad_phones:
             continue
         try:
-            relay.send_text(
-                root, ph, f"Status: {t.get('status', 'open')}", tid, "note", view=light_view(root, t)
-            )
+            relay.send_text(root, ph, f"Status: {_status(t)}", tid, "note", view=light_view(root, t))
             sent.append((ph, tid))
             if ph in (load_state(root).get("light_phone") or {}):  # recovered: forget the backoff
                 update_state(root, lambda st, ph=ph: st.get("light_phone", {}).pop(ph, None))

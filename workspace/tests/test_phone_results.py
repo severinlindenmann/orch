@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from test_ticket_view import assert_valid, conn, views  # noqa: F401 (fixture)
 
-from orch import hider, keystore, phone_results, phone_view, tickets
+from orch import hider, keystore, phone_results, phone_view, relay, tickets
 from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -694,6 +694,10 @@ def test_redact_property_no_secret_survives_confusables_comments_fullwidth():
                 f'{{"{name}": "{value}"}}',  # JSON
                 f"cfg['{name}'] = '{value}'",  # a subscript
                 f"{name} := {value}",
+                # JSON inside a JSON string (escaped quotes, once and twice), as in logged request bodies
+                f'body={{\\"username\\":\\"bob\\",\\"{name}\\":\\"{value}\\"}}',
+                f'"payload": "{{\\"{name}\\": \\"{value}\\"}}"',
+                f'{{\\\\\\"{name}\\\\\\": \\\\\\"{value}\\\\\\"}}',
             ]
         )
         out = redact(spelled)
@@ -982,7 +986,18 @@ def test_l9_status_outside_the_contract_is_open(proj, new_ticket):
 @pytest.mark.parametrize(
     "unit",
     ["a.", "a+b://", "x://a:", "x://:a@", "login a ", "password ", "identified by ", "<!--", "<!--a-->"]
-    + ['"', "'a", "-", "a\\", "bot1:", "token: a\n", '"a": ', "/services/T", "/api/webhooks/1"],
+    + ['"', "'a", "-", "a\\", "bot1:", "token: a\n", '"a": ', "/services/T", "/api/webhooks/1"]
+    + [
+        "eyJ-",
+        "eyJaaaaaaaaaaaa.",
+        'a\\"',
+        'a\\\\\\"',
+        'token\\": ',
+        '"--a", ',
+        '"--token", "',
+        'mysql "-p", ',
+    ]
+    + ["MYSQL.EXE ", '["mysql", "-x", '],
 )
 def test_new_patterns_are_linear(unit):
     """A generous bound: a quadratic scan of 64 KiB takes minutes, the linear one milliseconds."""
@@ -1020,3 +1035,223 @@ def test_clean_untrusted_unchanged_by_the_fast_path():
     for _ in range(500):
         t = "".join(rnd.choice(alphabet) for _ in range(rnd.randint(0, 30)))
         assert text_mod.clean_untrusted(t, 10**6) == slow(t), repr(t)
+
+
+@pytest.mark.parametrize(
+    "text, want",
+    [
+        ("curl -su bob:hunter2 https://x.ch", "curl -su [hidden] https://x.ch"),
+        ("mysql -sNphunter2 db", "mysql -sNp[hidden] db"),
+        ("mysql -upX db", "mysql -upX db"),  # the user is pX: not a password
+        ("redis-cli -n 1 -a hunter2", "redis-cli -n 1 -a [hidden]"),
+        ("redis-cli -ca hunter2", "redis-cli -ca [hidden]"),
+        ("curl -Xu bob:x https://x.ch", "curl -Xu bob:x https://x.ch"),  # -X takes an argument: not a cluster
+    ],
+)
+def test_short_flag_cluster_only_of_boolean_letters(text, want):
+    assert phone_view.redact(text) == want
+
+
+def test_update_title_is_a_fixed_point_and_cleaned_first(proj, new_ticket):
+    keystore.add(proj, "db-cred", "token", "Xk93-pq7Lm-aa21")
+    tid = new_ticket("Rotate Xk93-pq7\u200bLm-aa21 and tok<!---->en=hunter2 today")
+    title = relay._update_title(proj, tid)
+    assert title is not None
+    assert "Xk93" not in title and "hunter2" not in title and "pq7Lm" not in title
+
+
+# ---- review #497 round 3 ----
+
+ESCAPED_JSON = [
+    (
+        r"body={\"username\":\"bob\",\"password\":\"hunter2\"}",
+        r"body={\"username\":\"bob\",\"password\":[hidden]",
+    ),
+    (r'"payload": "{\"api_token\": \"abc123def\"}"', r'"payload": "{\"api_token\": [hidden]'),
+    (r"{\\\"secret\\\": \\\"x\\\"}", r"{\\\"secret\\\": [hidden]"),
+]
+
+
+@pytest.mark.parametrize("text, want", ESCAPED_JSON)
+def test_r3_h1_escaped_quotes_after_a_json_key(text, want):
+    assert phone_view.redact(text) == want
+    assert phone_view.redact(want) == want
+    assert phone_view._has_secret(text.encode())
+
+
+def test_r3_m1_jwt_pattern_is_linear():
+    """One start per run: "eyJ-" * 5000 was 5000 starts each scanning to the end (seconds)."""
+    import time
+
+    text = "eyJ-" * 5000
+    took = []
+    for _ in range(3):  # the best of three: a busy machine never makes it flaky, a quadratic scan stays slow
+        t0 = time.perf_counter()
+        phone_view.redact(text)
+        took.append(time.perf_counter() - t0)
+    assert min(took) < 0.05, took
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig12345"
+    for shown in (f"jwt {jwt} ok", f"t={jwt}", f"({jwt})"):
+        assert jwt[:12] not in phone_view.redact(shown), shown
+
+
+def test_r3_m2_who_and_artifact_title_hide_a_stored_value_before_the_cut(proj):
+    keystore.add(proj, "db-cred", "token", VALUE)
+    h = phone_results.value_hider(proj)
+    by = "person:" + "x" * 50 + VALUE  # the 64 cut falls inside the value
+    assert "Xk93" in phone_view._who(by)[0], "without the hider a prefix is left (the hole)"
+    assert "Xk93" not in phone_view._who(by, h)[0]
+    url = "https://x.ch/report"
+    ticket = {
+        "id": "t_abc123",
+        "title": "Plain",
+        "checklist": [
+            {
+                "id": "c1",
+                "text": "Report",
+                "done": True,
+                "evidence": [{"type": "url", "ref": url, "role": "result", "title": "y" * 190 + VALUE}],
+            }
+        ],
+        "refs": [{"url": "https://x.ch/doc", "title": "z" * 190 + VALUE}],
+        "history": [{"at": "2026-11-09T09:00:00Z", "by": by, "text": "Approved"}],
+    }
+    for aid in (phone_view.artifact_id("url", url), phone_view.artifact_id("link", "https://x.ch/doc")):
+        title = phone_view.artifact_title(proj, ticket, aid, h)
+        assert title and "Xk93" not in title and "[hidden" in title, title
+        assert "Xk93" in phone_view.artifact_title(proj, ticket, aid), "without the hider: the hole"
+    view = phone_view.build(proj, ticket, [], h)
+    assert view["title"] == "Plain", "hidden in place, not the closed view"
+    assert "Xk93" not in json.dumps(view) and view["history_tail"][0]["who"].startswith("xxx")
+
+
+ARGV_FLAGS = [
+    (
+        'subprocess.run(["mysql", "-uroot", "-phunter2", "shop"])',
+        'subprocess.run(["mysql", "-uroot", "-p[hidden]", "shop"])',
+    ),
+    (
+        'command: ["redis-server", "--requirepass", "hunter2"]',
+        'command: ["redis-server", "--requirepass", [hidden]]',
+    ),
+    ('"args": ["--token", "hunter2"]', '"args": ["--token", [hidden]]'),
+    ("sh -c 'mysql -uroot \"-phunter2\"'", "sh -c 'mysql -uroot \"-p[hidden]\"'"),
+    ('["sshpass", "-p", "hunter2", "ssh", "me@host"]', '["sshpass", "-p", [hidden], "ssh", "me@host"]'),
+    ('["deploy", "--password", "--token", "hunter2"]', '["deploy", "--password", "--token", [hidden]]'),
+    ('run("deploy --token hunter2 now")', 'run("deploy --token [hidden] now")'),
+    ('["deploy", "--token hunter2"]', '["deploy", "--token [hidden]"]'),
+    ('args:\n  - "--token",\n    "hunter2"', 'args:\n  - "--token",\n    [hidden]'),
+]
+
+
+@pytest.mark.parametrize("text, want", ARGV_FLAGS)
+def test_r3_m3_flags_in_argv_lists_and_quoted_args(text, want):
+    out = phone_view.redact(text)
+    assert out == want and "hunter2" not in out, out
+    assert phone_view.redact(out) == out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '["docker", "run", "-p", "8080:80", "web"]',
+        '["mysql", "-u", "root", "-P", "3306", "shop"]',
+        '["psql", "-h", "db", "-p", "5432"]',
+        '["serve", "--port", "8080"]',
+        '{"flag": "--token"}',
+    ],
+)
+def test_r3_m3_plain_argv_lists_stay(text):
+    assert phone_view.redact(text) == text
+
+
+M4_TAILS = ["MASTERKEY", "ENCRYPTIONKEY", "SIGNINGKEY", "HMACKEY", "JWTKEY", "LICENSEKEY", "masterkey"]
+M4_TAILS += ["ROOTPWD", "DBPWD", "ADMINPW", "pswd", "privkey", "SSHKEYS", "db_pswd"]
+
+
+@pytest.mark.parametrize("name", M4_TAILS)
+def test_r3_m4_compound_names_ending_in_key_pwd_pw(name):
+    assert phone_view.secret_name(name)
+    assert "hunter2" not in phone_view.redact(f"{name}=hunter2")
+    assert "hunter2" not in phone_view.redact(f"{name}: hunter2")
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["Monkey", "Hotkey", "Turkey", "MONKEY", "HOTKEY", "TURKEY", "monkey", "Whiskey", "Donkey", "Upward"],
+)
+def test_r3_m4_words_ending_in_key_or_with_pw_stay(name):
+    assert not phone_view.secret_name(name)
+    assert phone_view.redact(f"{name}=v4lu3") == f"{name}=v4lu3"
+
+
+def test_r3_l1_a_token_inside_the_cut_text_is_matched_whole_before_the_cut():
+    tok = "dop_v1_" + "a" * 64
+    # the token starts 30 characters before TEXT_CUT - CUT_MARGIN and ends well inside TEXT_CUT: when it was
+    # cut first, its 30-character prefix matched no pattern any more
+    pre = ("word " * 5000)[: phone_view.TEXT_CUT - phone_view.CUT_MARGIN - 31] + " "
+    text = pre + tok + " " + "x" * 1000
+    out = phone_view.redact(text)
+    assert "dop_v1_" not in out and "aaaaaaaaaa" not in out and out.endswith("[hidden]")
+    assert phone_view.redact(out) == out
+
+
+def test_r3_l2_light_status_text_is_a_contract_status(proj, new_ticket, monkeypatch):
+    sent = []
+    monkeypatch.setattr(relay, "send_text", lambda root, ph, text, *a, **kw: sent.append(text))
+    tid = new_ticket("Odd")
+    t = tickets.load(proj, tid)
+    t["status"] = "<b>weird</b>"
+    monkeypatch.setattr(tickets, "list_all", lambda root: [t])
+    monkeypatch.setattr(relay, "_read_dir", lambda root: {"phones": [{"id": "ph_a"}]})
+
+    def put(st):
+        st.setdefault("synced", {})["ph_a"] = [tid]
+        st.setdefault("light", {})[tid] = {"ph_a": {"sig": "old", "at": 0}}
+
+    phone_view.update_state(proj, put)
+    phone_view.sync_light(proj, now=1000.0)
+    assert sent == ["Status: open"]
+
+
+def test_r3_l3_review_question_title_is_scrubbed_and_value_hidden(proj, new_ticket, conn):  # noqa: F811
+    keystore.add(proj, "db-cred", "token", VALUE)
+    tid = new_ticket(f"Rotate {VALUE} and password=hunter2")
+    msg = relay.send_review_question(proj, tickets.load(proj, tid), 1, relay.new_id())
+    title = msg["body"]["title"]
+    assert VALUE not in title and "hunter2" not in title and "[hidden: db-cred]" in title, title
+
+
+@pytest.mark.parametrize(
+    "url, want",
+    [
+        ("http://[::1]:8080/a", "http://[::1]:8080/a"),
+        ("https://[2001:db8::1]/x?page=2", "https://[2001:db8::1]/x?page=2"),
+    ],
+)
+def test_r3_l5_ipv6_hosts_keep_their_brackets(url, want):
+    assert phone_view.safe_url(url) == want
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["https://x.blob.core.windows.net/c?sv=2024&sig=AbC%2Bhunter2", "Cookie set: connect.sid=s%3Ahunter2"],
+)
+def test_r3_l6_sig_and_sid_in_free_text(text):
+    assert "hunter2" not in phone_view.redact(text)
+
+
+@pytest.mark.parametrize(
+    "text, want",
+    [
+        ("mariadb -uroot -phunter2 shop", "mariadb -uroot -p[hidden] shop"),
+        ("mariadb-dump -phunter2 shop", "mariadb-dump -p[hidden] shop"),
+        ("mysqladmin -u root -phunter2 status", "mysqladmin -u root -p[hidden] status"),
+        ("mysqlimport -phunter2 db f.csv", "mysqlimport -p[hidden] db f.csv"),
+        ("mysqlcheck -phunter2 db", "mysqlcheck -p[hidden] db"),
+        ("C:\\bin\\MYSQL.EXE -u root -phunter2", "C:\\bin\\MYSQL.EXE -u root -p[hidden]"),
+        ("mariadb -u root -P 3306 shop", "mariadb -u root -P 3306 shop"),
+    ],
+)
+def test_r3_l7_more_mysql_family_commands(text, want):
+    assert phone_view.redact(text) == want
