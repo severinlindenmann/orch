@@ -203,6 +203,13 @@ _ADMIN_NOTE = re.compile(
 )  # add-on settings notes: admin business, not for a phone chat
 
 
+def internal_wakeup(entry: dict) -> bool:
+    """Hide the legacy automation prompt that used to be logged as helper speech."""
+    return entry.get("by") != "you" and str(entry.get("text", "")).startswith(
+        "A phone text in the General conversation is waiting for you. Answer it: orch relay send "
+    )
+
+
 def _agent(root: Path, ticket: dict) -> tuple[str | None, bool]:
     """(agent display name, running now)."""
     rec = runs.read(root, ticket["id"])
@@ -668,7 +675,7 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
-        if _ADMIN_NOTE.match(str(h.get("text", ""))):
+        if internal_wakeup(h) or _ADMIN_NOTE.match(str(h.get("text", ""))):
             continue
         # Ticket history has no verified relay sender; raw labels cannot name a phone.
         raw = str(h.get("text", ""))

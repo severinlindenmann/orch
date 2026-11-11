@@ -1555,3 +1555,127 @@ def test_remove_orphaned_does_not_nest_the_copies_state_lock(repo, monkeypatch):
     monkeypatch.setattr(worktrees.runs, "locked", spy)
     assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
     assert not d.exists()
+
+
+def test_main_folder_run_then_copy_then_done_releases_the_copy(repo, monkeypatch):
+    """Lane C D6b (#440 again): the ticket's first run was in the project folder, a later start made its
+    copy (mode Every time). Done must take the copy away, keyed on the ticket, not on the run that made it."""
+    from orch import config
+
+    t = repo.tids[0]
+    monkeypatch.setattr(config, "copies_mode", lambda root: "off")
+    rec, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    assert Path(rec["folder"]).resolve() == repo.resolve()
+    runs.release(repo, t, rec["run"])
+    monkeypatch.setattr(config, "copies_mode", lambda root: "always")
+    rec, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    copy = Path(rec["folder"])
+    assert copy.resolve() != repo.resolve() and copy.is_dir()
+    assert t in worktrees.registry(repo)
+    close(repo, t, "done")  # the person's Done while the run is still alive: kept for now
+    runs.release(repo, t, rec["run"])  # the run's end
+    assert t not in worktrees.registry(repo)
+    assert not copy.exists()
+    assert str(copy) not in git(repo, "worktree", "list", "--porcelain")
+
+
+def test_a_live_claim_keeps_the_copy_wherever_the_claim_says_it_works(repo):
+    """Opus delta on #496: a claim's `folder` is not evidence of where the agent is (`orch run claim`
+    records the project folder for a session that works in the copy): ANY live claim holds the copy."""
+    t = repo.tids[0]
+    p = make(repo)
+    runs.claim(repo, t, "human:t", "claude", "oneshot", folder=repo, pid=os.getpid())
+    close(repo, t, "done")
+    assert t in worktrees.registry(repo) and p.is_dir()
+    rec = runs.read(repo, t)
+    runs.release(repo, t, rec["run"])  # the claim ends: the copy goes
+    assert t not in worktrees.registry(repo) and not p.exists()
+
+
+def test_a_live_claim_inside_the_copy_still_holds_it(repo):
+    t = repo.tids[0]
+    p = make(repo)
+    runs.claim(repo, t, "human:t", "claude", "oneshot", folder=p, pid=os.getpid())
+    close(repo, t, "done")
+    assert t in worktrees.registry(repo) and p.is_dir()
+
+
+def test_done_by_patch_takes_the_copy_away(repo):
+    """Lane C D6b rerun: the dashboard marks Done with `ticket patch` (not set_status/accept), which never
+    called on_closed, so the copy only went at some later sweep (and not at all when nothing swept).
+    apply_op is the one place a ticket becomes done: every op that does it releases the copy."""
+    t = repo.tids[0]
+    p = make(repo)
+    rev = tickets.revision(tickets.load(repo, t))
+    tickets.patch(repo, t, rev, '{"status": "done"}', "human:test")
+    assert tickets.load(repo, t)["status"] == "done"
+    assert t not in worktrees.registry(repo)
+    assert not p.exists()
+    assert str(p) not in git(repo, "worktree", "list", "--porcelain")
+    assert worktrees.count(repo) == 0
+
+
+def test_copy_clean_removes_a_done_tickets_copy_without_a_claim(repo, run, monkeypatch):
+    """Lane C D6b: a done ticket's copy is registered and on disk, nothing holds it. `orch copy clean`
+    takes it away; it never says "No separate copies left" while the registry has entries."""
+    t = repo.tids[0]
+    p = make(repo)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "on_closed", lambda *a, **k: None)  # as if Done never released it
+        close(repo, t, "done")
+    assert t in worktrees.registry(repo) and p.is_dir()
+    code, out, err = run("copy", "clean", "--json")
+    assert code == 0, err
+    doc = json.loads(out)
+    assert doc["copies"] == 0 and t not in worktrees.registry(repo) and not p.exists()
+
+
+def test_copy_clean_names_why_it_keeps_a_copy_and_does_not_say_none_left(repo, run, monkeypatch):
+    t = repo.tids[0]
+    p = make(repo)
+    runs.claim(repo, t, "human:t", "claude", "oneshot", folder=p, pid=os.getpid())
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "on_closed", lambda *a, **k: None)
+        close(repo, t, "done")
+    code, out, err = run("copy", "clean", "--json")
+    assert code == 0, err
+    doc = json.loads(out)
+    assert doc["copies"] == 1 and p.is_dir()
+    assert any(t in n and "kept" in n for n in doc["notes"]), doc["notes"]
+    code, out, _ = run("copy", "clean")
+    assert "No separate copies left" not in out
+
+
+def test_an_unrelated_op_on_an_unsigned_done_does_not_try_to_release_the_copy(repo, monkeypatch):
+    """Opus delta: a raw Done without the person's signature reads as Review; an unrelated op restores the raw
+    status but did not close the ticket, so apply_op must not call on_closed."""
+    t = repo.tids[0]
+    make(repo)
+    path = tickets.ticket_path(repo, t)
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["status"] = "done"  # raw done, no verdict
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert tickets.load(repo, t)["status"] == "review"
+    calls = []
+    monkeypatch.setattr(worktrees, "on_closed", lambda *a, **k: calls.append(a))
+    tickets.apply_op(repo, t, lambda tk: tk.setdefault("notes_probe", 1))
+    assert calls == []
+
+
+@pytest.mark.parametrize("mode", ["always", "together"])
+def test_a_reclaim_right_after_release_goes_back_into_the_tickets_copy(repo, monkeypatch, mode):
+    """Lane C D6b: release, then claim the same (not done) ticket again at once: it works in its copy again,
+    never silently in the project folder while copies are on."""
+    from orch import config
+
+    t, other = repo.tids[0], repo.tids[1]
+    monkeypatch.setattr(config, "copies_mode", lambda root: mode)
+    if mode == "together":  # another alive run in the project folder makes the first start use a copy
+        runs.claim(repo, other, "human:t", "claude", "oneshot", folder=repo, pid=os.getpid())
+    rec, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    copy = Path(rec["folder"])
+    assert copy.resolve() != repo.resolve() and copy.is_dir()
+    runs.release(repo, t, rec["run"])
+    assert t in worktrees.registry(repo) and copy.is_dir()  # not done: the copy stays
+    rec2, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
+    assert Path(rec2["folder"]).resolve() == copy.resolve()

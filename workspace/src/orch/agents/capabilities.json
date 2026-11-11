@@ -1,1 +1,8 @@
-{}
+{
+  "adapters": {
+    "claude": {
+      "capabilities": { "activity": "live" },
+      "oneshot": { "events": "claude-stream-json/1" }
+    }
+  }
+}

@@ -190,7 +190,13 @@ def _short_reason(text: str) -> str:
 
 def _runner(cmd: list[str]) -> int:
     """The detached runner: `python -I -P -m orch.pageproof '<json command>'`, the proof on its own stdin."""
+    from orch import addons, winfinish
+
     root = Path.cwd()
+    finish_home = addons.home()
+    finish_log = winfinish.log_path(finish_home)
+    windows = winfinish.needed()
+    offset = finish_log.stat().st_size if windows and finish_log.exists() else 0
     proof = sys.stdin.readline()
     humanproof.write_update_status(root, "running")
     try:
@@ -214,6 +220,10 @@ def _runner(cmd: list[str]) -> int:
         except OSError:
             humanproof.write_update_status(root, "failed", "the update could not be started")
             return 1
+    if code == 0 and windows:
+        # Exit so the finisher can rename the tool environment. The page polls its result.
+        humanproof.write_update_status(root, "running", finish_offset=offset)
+        return 0
     if code == 0:
         humanproof.write_update_status(root, "finished")
         return 0
