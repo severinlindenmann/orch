@@ -1482,8 +1482,6 @@ def _sign_wont(root: Path, tid: str, item: dict) -> None:
     """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
     a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
     step as an agent's, which is the safe side)."""
-    from orch import humanproof
-
     item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
     mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
     if mac:
@@ -1657,8 +1655,6 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
-        from orch import humanproof
-
         humanproof.wont_forget(
             root, tid, cid
         )  # tombstone (whatever the file says): no old MAC on a reused id

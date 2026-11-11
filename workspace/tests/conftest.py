@@ -250,7 +250,11 @@ def _start_guard_off(request, monkeypatch):
     monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)
 
 
-REAL_HOME_MODULES = ("test_secret_store", "test_install_kind")  # they test the home pairing itself
+REAL_HOME_MODULES = (
+    "test_secret_store",
+    "test_install_kind",
+    "test_winacl",
+)  # they test the home pairing itself
 REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_verdict_mac")
 
 
