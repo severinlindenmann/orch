@@ -58,6 +58,7 @@
 .settings .copies-max{flex:none;width:5.5rem}
 .settings .copies-max,.settings .copies-setup{font-size:13px;min-height:36px;padding:5px 10px}
 .settings .folder-details p{margin-top:4px;overflow-wrap:anywhere}
+.settings .folder-path{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 /* Review step: the shown review before a change (the .cmd-preview look of the Add your own helper review). */
 .settings .settings-review{margin:0 16px 16px;border-radius:8px}
 .settings .settings-review p{margin:0;overflow-wrap:anywhere}
