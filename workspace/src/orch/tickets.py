@@ -513,8 +513,10 @@ def apply_op(
                 raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
+        restored = False
         if ticket.get("status") == eff_status and raw_status == "done":
             ticket["status"] = "done"  # an unrelated op never rewrites a peer's Done into Review
+            restored = True  # (an unsigned Done is still Review: this op did not close the ticket)
         elif (
             ticket.get("status") == "done"
             and eff_status != "done"
@@ -530,7 +532,7 @@ def apply_op(
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
-        closed_now = ticket.get("status") in CLOSED and eff_status not in CLOSED
+        closed_now = ticket.get("status") in CLOSED and eff_status not in CLOSED and not restored
     if closed_now:
         # THE one place a ticket becomes done/dropped, whatever op did it (accept, status, patch from the
         # dashboard, ...): its separate copy goes, after the ticket lock is released (never raises)
