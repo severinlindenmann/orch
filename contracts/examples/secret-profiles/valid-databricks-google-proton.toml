@@ -2,11 +2,13 @@ schema = "orch.secret-profiles/1"
 
 [profile.databricks]
 env = { DATABRICKS_TOKEN = "databricks-token" }
+extra = ["DATABRICKS_HOST"]
 set = { DATABRICKS_HOST = "https://adb-1234.azuredatabricks.net" }
 run = ["databricks"]
 skills = ["databricks-jobs"]
 
 [profile.google]
+extra = ["GOOGLE_APPLICATION_CREDENTIALS"]
 files = { GOOGLE_APPLICATION_CREDENTIALS = "google-sa.json" }
 
 [profile.proton]

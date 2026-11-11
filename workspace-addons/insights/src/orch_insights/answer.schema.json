@@ -1,0 +1,593 @@
+{
+  "type": "object",
+  "required": [
+    "schema",
+    "generated_at",
+    "since",
+    "from",
+    "to",
+    "runs",
+    "tickets",
+    "coverage",
+    "items",
+    "inventory",
+    "sharing",
+    "unavailable",
+    "complete"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "orch.counts/1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "since": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        }
+      ],
+      "description": "Recording since (activity.md); null = nothing recorded yet."
+    },
+    "from": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "to": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "runs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tickets": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "full",
+        "partial"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "full": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "Runs whose every step had full coverage vs runs with some partial step."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "source",
+          "action",
+          "runs",
+          "uses",
+          "ok",
+          "failed",
+          "refused",
+          "unknown",
+          "seen",
+          "first_seen",
+          "last_seen",
+          "versions"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "skill",
+              "tool",
+              "mcp",
+              "key",
+              "helper",
+              "job"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$"
+          },
+          "source": {
+            "enum": [
+              "harness",
+              "admin",
+              "workspace",
+              "builtin",
+              "marketplace",
+              "none"
+            ]
+          },
+          "action": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$"
+              }
+            ]
+          },
+          "runs": {
+            "type": "object",
+            "required": [
+              "used",
+              "of",
+              "unseen"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "of": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unseen": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "uses": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ok": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "refused": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unknown": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "seen": {
+            "enum": [
+              "yes",
+              "not_seen",
+              "unknown"
+            ],
+            "description": "yes = used at least once; not_seen = in the inventory, could have been seen, never used; unknown = no run in the window could have seen it."
+          },
+          "first_seen": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$"
+              }
+            ]
+          },
+          "last_seen": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$"
+              }
+            ]
+          },
+          "versions": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": [
+                "version",
+                "uses",
+                "ok",
+                "failed",
+                "first_seen"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "uses": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "ok": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "first_seen": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$"
+                }
+              }
+            }
+          },
+          "tickets": {
+            "type": "object",
+            "required": [
+              "done",
+              "sent_back",
+              "open"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "done": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sent_back": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "open": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "description": "Outcome of the tickets whose runs used it (a join, not a cause)."
+          }
+        }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "required": [
+        "schema",
+        "generated_at",
+        "skills",
+        "connections",
+        "keys"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "orch.inventory/1"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "source",
+              "version",
+              "shadowed"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+              },
+              "source": {
+                "enum": [
+                  "harness",
+                  "admin",
+                  "workspace",
+                  "builtin",
+                  "marketplace"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "shadowed": {
+                "type": "boolean",
+                "description": "true = another source has the same name and wins (workspace > admin > marketplace > builtin > harness)."
+              }
+            }
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "source",
+              "transport",
+              "command",
+              "host",
+              "profile",
+              "actions",
+              "allow_all",
+              "state",
+              "shadowed",
+              "version"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f<>]*$",
+                "description": "Plain name for screens (Google Drive); default the name."
+              },
+              "source": {
+                "enum": [
+                  "harness",
+                  "admin",
+                  "workspace"
+                ]
+              },
+              "transport": {
+                "enum": [
+                  "stdio",
+                  "http"
+                ]
+              },
+              "command": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.+@-]{1,64}$"
+                  }
+                ],
+                "description": "Base name of the program only (stdio); never its arguments."
+              },
+              "host": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z0-9.-]{1,253}(:[0-9]{1,5})?$"
+                  }
+                ],
+                "description": "Host of an http connection; never path, query or credentials."
+              },
+              "profile": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,31}$"
+                  }
+                ],
+                "description": "Key profile it starts with (orch secret exec)."
+              },
+              "actions": {
+                "type": "array",
+                "maxItems": 200,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "allowed"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "allowed": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "description": "Actions (MCP tools) seen so far, from the server's tool list or from use."
+              },
+              "allow_all": {
+                "type": "boolean"
+              },
+              "state": {
+                "enum": [
+                  "ok",
+                  "missing-key",
+                  "not-started",
+                  "unknown"
+                ],
+                "description": "missing-key = its profile names a key that is not there; not-started = never started by orch; unknown = listed from the agent tool's settings, never seen in use."
+              },
+              "shadowed": {
+                "type": "boolean",
+                "description": "true = the same name from another source wins (workspace > admin > harness); both are listed."
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "type",
+              "source"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+              },
+              "type": {
+                "enum": [
+                  "token",
+                  "password",
+                  "key-file",
+                  "json"
+                ]
+              },
+              "source": {
+                "enum": [
+                  "workspace",
+                  "admin"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "sharing": {
+      "type": "object",
+      "required": [
+        "counts",
+        "names",
+        "last_sent",
+        "queued"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "counts": {
+          "enum": [
+            "on",
+            "off",
+            "off_by_admin",
+            "not_connected"
+          ]
+        },
+        "names": {
+          "type": "boolean"
+        },
+        "last_sent": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "date",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          ]
+        },
+        "queued": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "unavailable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run",
+          "status",
+          "reason",
+          "message"
+        ],
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "run": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "pattern": "^r_[a-z0-9_]{6,32}$"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable",
+              "tampered"
+            ]
+          },
+          "reason": {
+            "enum": [
+              "missing",
+              "io",
+              "skipped",
+              "pending",
+              "link",
+              "reparse",
+              "hardlink",
+              "foreign_owner",
+              "not_regular",
+              "not_dir",
+              "swapped"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      },
+      "description": "Runs (or the record's meta, run null) that could not be read in full (activity.md, Integrity); empty when everything was read."
+    },
+    "complete": {
+      "type": "boolean",
+      "description": "false when `unavailable` is not empty: the counts are partial."
+    }
+  }
+}

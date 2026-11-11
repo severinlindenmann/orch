@@ -108,9 +108,26 @@ run = ["pass-cli"]
 A profile maps variables to key names (`env`: the value in the variable; `files`: a temp file path in the variable), may set
 plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false), and may let agents use its keys in any command (`agents_may_env`, default false).
 Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
-ORCH_*, proxies, CA bundles, JAVA_TOOL_OPTIONS, …). Profiles are
+ORCH_*, PATH*, PYTHON*, PERL*, RUBY*, NODE_*, LUA_*, BASH*, XDG_*, SSH_*, GPG_*, SUDO_*, `*ASKPASS*`, `*_OPTIONS`, SHELLOPTS, PS4,
+ENV, IFS, HOME, EDITOR/VISUAL/PAGER/MANPAGER/BROWSER, LESS, LESSOPEN, LESSCLOSE, LESSKEY, LESSKEYIN, LESSKEYIN_SYSTEM, LESSKEY_SYSTEM, LESSKEY_CONTENT, LESSEDIT, LESSSECURE, LESSHISTFILE, PSModulePath, CLASSPATH, PHPRC, TCLLIBPATH, R_PROFILE*, GNUPG*, NPM_CONFIG*, TMPDIR, COMSPEC, proxies, CA bundles, …; see `keystore.ENV_DENY`; matched in
+any letter case; `set` names are also structural: `^[A-Z][A-Z0-9_]{0,63}$` (a `set` or `files` name must also be one the profile's own `env` declares or one a person approved in `extra`: `profile set --extra NAME`, each
+matching the structural rule and the hard-deny, part of the body MAC; else `NAME is not an approved variable for this profile; add it with --extra`, at set, on every read and at run time; ordinary secret names NPM_TOKEN, NODE_AUTH_TOKEN, CARGO_REGISTRY_TOKEN, CARGO_REGISTRIES_*_TOKEN and GPG_PASSPHRASE are allowed in `env` only, never in `files` or `set`; the deny list is not complete, and the `extra` allowlist is the real control), at `profile set` AND again every time the profile is read or run). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
 only with a matching settings record (human-proof.md, Settings: records and tombstones), so editing the file alone does not enable `get`.
+
+**The profile body is MAC-bound (W2b).** `profiles.toml` is editable by anything running as the user, so it is not trusted for
+what a profile runs or receives. `profile set` (a `secret.profile` proof) stores `profile1.<workspace id>.<profile name>.<canonical
+{env, files, set, run, extra}>` under the guarded human key (HMAC-SHA256, base64url) as the profile's entry in the ledger
+`<guarded orch home>/keys/<workspace>/profile.json` (human-proof.md, Ledgers; `profile remove` tombstones it with `null`).
+`run`, `env`, `file`, `exec` and `get` recompute it and **fail closed** on a missing or different MAC (and a missing or damaged
+ledger) with `Refused: this key profile was changed outside orch; set it up again.` The switches (`allow_get`, `agents_may_env`) keep their
+own settings records and are not part of the body; rewriting a switch never signs a body that was edited outside orch. `exec` also re-runs
+the `run` program approval (absolute path, outside the workspace, not changeable by others, exists) when it starts.
+The MAC protects against an attacker who can write `profiles.toml` but can neither read `human.key` nor write `profile.json` (same folder, same
+rights: the guard is the boundary). Only the profile a person is setting (with proof) is signed; every other profile keeps its ledger entry,
+and `profile remove` always writes the tombstone, even when the file has no such profile. A profile that fails verification is shown as unusable. `profile remove` first turns both switches off and writes the tombstone, then touches the file (a damaged file refuses after that). `skills` is outside the MAC (not used to decide anything).
+**No legacy:** profiles saved before this change have no MAC and are refused until a person sets them up again (owner rule: no
+compatibility code until the pilot cut).
 
 ## Commands
 

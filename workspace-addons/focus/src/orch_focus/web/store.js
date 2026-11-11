@@ -27,7 +27,7 @@
     return h('div', {class: 'fx-help', id: 'fx-help', hidden: true}, h('div', {class: 'fx-help-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'fx-help-t'},
       h('p', {class: 'meta', text: 'Focus help'}), h('div', {class: 'row'}, h('h2', {id: 'fx-help-t', class: 'grow', text: 'A few useful keys'}), h('button', {class: 'btn ghost icon', 'data-act': 'help', 'aria-label': 'Close', icon: 'x'})),
       h('p', {class: 'meta', text: 'Everything is also a click away.'}), h('div', {class: 'fx-help-grid'}, keys([
-        ['Move around', [['Show help', '?'], ['Close a panel', 'Esc'], ['Next control', 'Tab'], ['Show or hide tasks', '['], ['Full screen', 'F'], ['Live · Results', '1 / 2']]],
+        ['Move around', [['Show help', '?'], ['Close a panel', 'Esc'], ['Next control', 'Tab'], ['Show or hide tasks', '['], ['Full screen', 'F'], ['Live · Results · Used · Files', '1 / 2 / 3 / 4']]],
         ['Write and choose', [['Write a message', '/'], ['Send a message', 'Enter'], ['Choose a button', 'Space'], ['Stop or continue', 'S'], ['Next or previous task', 'J / K']]],
       ]))));
   }
