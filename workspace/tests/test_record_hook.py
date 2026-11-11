@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import os
+import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -728,3 +729,260 @@ def test_a_file_path_that_changes_under_the_hider_is_dropped(live):
     root, run, _ = live
     got = record_hook.hook(root, line(files=[f"{root}/src/app.py", f"{root}/{SECRET}.txt"]))
     assert got["files"] == ["src/app.py"]
+
+
+# ---------------------------------------------------------------- the tool's own hook payload (W2b 1.7)
+
+TOOL_ID = "toolu_01ReadNotes"
+SID = "7f3c2a9e-1b4d-4c6e-9a21-5d0e8f7b3c11"
+READ = {"kind": "tool", "name": "Read", "action": None, "source": "builtin", "version": None}
+
+
+def tool_hook(event, tid=TOOL_ID, name="Read", inp=None, **extra):
+    """What the tool's PreToolUse/PostToolUse hook sends on stdin; the wiring passes it on unchanged."""
+    raw = {
+        "session_id": SID,
+        "transcript_path": "/elsewhere/transcript.jsonl",
+        "cwd": "/elsewhere",
+        "permission_mode": "default",
+        "hook_event_name": event,
+        "tool_name": name,
+        "tool_input": {"file_path": "notes.txt"} if inp is None else inp,
+        "tool_use_id": tid,
+    }
+    if event == "PostToolUse":
+        raw["tool_response"] = {"type": "text", "file": {"filePath": "notes.txt", "content": "hello"}}
+    return json.dumps({**raw, **extra})
+
+
+def use_line(tid=TOOL_ID, name="Read", inp=None, uuid="u-1"):
+    block = dict(type="tool_use", id=tid, name=name, input={"file_path": "notes.txt"} if inp is None else inp)
+    return json.dumps(dict(type="assistant", session_id=SID, uuid=uuid, message=dict(content=[block])))
+
+
+def result_line(tid=TOOL_ID, content="hello", uuid="u-2"):
+    block = dict(type="tool_result", tool_use_id=tid, content=content)
+    return json.dumps(dict(type="user", session_id=SID, uuid=uuid, message=dict(content=[block])))
+
+
+def run_lines(root, run):
+    """The run file as written (not the reader's dedupe view)."""
+    return [json.loads(x) for x in (root / f".orch/record/runs/{run}.jsonl").read_text().splitlines()]
+
+
+@pytest.fixture
+def tool_run(live, monkeypatch):
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # what the wrapper sets for its agent (runs.wrap)
+    return live
+
+
+def test_pre_and_post_tool_use_of_one_call_make_one_step_with_its_detail(tool_run):
+    from orch import cli_record
+
+    root, run, tid = tool_run
+    pre = record_hook.hook(root, tool_hook("PreToolUse"))
+    post = record_hook.hook(root, tool_hook("PostToolUse"))
+    assert pre["id"] == post["id"] == TOOL_ID  # the tool's own tool_use_id, never h_<run>:<seq>
+    assert (pre["kind"], pre["outcome"], pre["detail"]) == ("step", None, None)
+    assert post["kind"] == "step" and post["outcome"] == {"ok": True, "error": None, "ms": None}
+    for got in (pre, post):
+        assert got["via"] == "hook" and got["harness"] == "claude" and got["session"] == SID
+        assert got["run"] == run and got["ticket"] == tid and got["agent"] == "main"
+        assert got["used"] == READ and got["text"] == "Read notes.txt" and got["files"] == ["notes.txt"]
+    detail = record.read_detail(root, run, post["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    assert detail["id"] == TOOL_ID and detail["input"] == {"file_path": "notes.txt"}
+    assert detail["output"]["file"]["content"] == "hello"
+    assert record_hook.hook(root, tool_hook("PostToolUse")) is None  # delivered twice: one line
+    model = cli_record.run_model(run, events(root, run))
+    assert [(u["name"], u["result"]) for u in model["uses"]] == [("Read", "ok")]  # one call, one use
+    assert "/elsewhere" not in (root / f".orch/record/runs/{run}.jsonl").read_text()  # nothing else is kept
+
+
+def test_hook_and_collector_of_one_tool_call_leave_one_record_line_each(tool_run):
+    from orch import collect_claude
+
+    root, run, tid = tool_run
+    record_hook.hook(root, tool_hook("PreToolUse"))
+    record_hook.hook(root, tool_hook("PostToolUse"))
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    stats = collect_claude.collect([use_line(), result_line()], record.registered_writer(root), ctx)
+    assert stats["written"] == 0 and stats["deduped"] == 2  # same id, kind and state: the hook's line stays
+    assert [(e["id"], e["via"], e["outcome"] is not None) for e in run_lines(root, run)] == [
+        (TOOL_ID, "hook", False),
+        (TOOL_ID, "hook", True),
+    ]
+
+
+def test_a_denied_call_is_a_started_step_and_the_logs_denial(tool_run):
+    from orch import collect_claude
+
+    root, run, tid = tool_run
+    bash = {"command": "rm -rf build"}
+    record_hook.hook(root, tool_hook("PreToolUse", tid="toolu_denied", name="Bash", inp=bash))
+    # the person said no: the tool sends no PostToolUse; its result line names the denial
+    denied = {"tool_name": "Bash", "tool_use_id": "toolu_denied", "tool_input": bash}
+    end = json.dumps({"type": "result", "uuid": "u-end", "is_error": False, "permission_denials": [denied]})
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    collect_claude.collect([use_line("toolu_denied", "Bash", bash), end], record.registered_writer(root), ctx)
+    got = [(e["kind"], e["via"], e["outcome"]) for e in events(root, run) if e["id"] == "toolu_denied"]
+    assert got == [
+        ("step", "hook", None),
+        ("denial", "log", {"ok": False, "error": "Not allowed by this workspace", "ms": None}),
+    ]
+
+
+@pytest.mark.parametrize(
+    "name, used",
+    [
+        ("mcp__files__read_doc", {"kind": "mcp", "name": "files", "action": "read_doc", "source": "harness"}),
+        ("Strange<Tool>", {"kind": "tool", "name": "StrangeTool", "action": None, "source": "builtin"}),
+        (None, {"kind": "tool", "name": "Tool", "action": None, "source": "builtin"}),
+    ],
+)
+def test_an_unknown_tool_is_still_one_step_with_its_id(tool_run, name, used):
+    root, run, _ = tool_run
+    got = record_hook.hook(root, tool_hook("PreToolUse", tid="toolu_x1", name=name, inp={}))
+    assert got["kind"] == "step" and got["id"] == "toolu_x1" and got["used"] == {**used, "version": None}
+    assert "files" not in got  # only the file tools name files
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        tool_hook("Stop"),  # not a tool call
+        tool_hook("UserPromptSubmit"),
+        tool_hook("PreToolUse", tid=""),  # no tool-call id: Pre and Post could never be put together
+        tool_hook("PostToolUse", tid=5),
+        json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read"}),
+        json.dumps({"tool_name": "Read", "tool_use_id": TOOL_ID}),
+    ],
+)
+def test_a_payload_that_is_not_a_tool_call_is_not_recorded(tool_run, payload):
+    root, run, _ = tool_run
+    with pytest.raises(record_hook.NotRecorded, match="not valid"):
+        record_hook.hook(root, payload)
+    assert record.read_run(root, run).status == "unavailable"
+    assert "invalid" in lost_notes(root)
+
+
+@pytest.mark.parametrize("agent", [None, "codex"])
+def test_a_tool_payload_needs_an_agent_whose_output_orch_reads(tool_run, monkeypatch, agent):
+    root, run, _ = tool_run
+    if agent is None:
+        monkeypatch.delenv("ORCH_AGENT")
+    else:
+        monkeypatch.setenv("ORCH_AGENT", agent)
+    with pytest.raises(record_hook.NotRecorded, match="not valid"):
+        record_hook.hook(root, tool_hook("PreToolUse"))
+    assert record.read_run(root, run).status == "unavailable"
+
+
+def test_a_helper_start_is_left_to_the_log(tool_run):
+    root, run, _ = tool_run
+    with pytest.raises(record_hook.NotRecorded, match="helper") as e:
+        record_hook.hook(root, tool_hook("PreToolUse", name="Task", inp={"description": "Look around"}))
+    assert e.value.reason is None and lost_text(root) == ""  # not a loss: the log numbers the helper
+    assert record.read_run(root, run).status == "unavailable"
+
+
+def test_the_hook_command_takes_the_tools_payload_on_stdin(tool_run, monkeypatch, capsys):
+    root, run, _ = tool_run
+    assert _main(monkeypatch, stdin=tool_hook("PreToolUse") + "\n") == 0
+    assert _main(monkeypatch, stdin=tool_hook("PostToolUse") + "\n") == 0
+    assert capsys.readouterr().err == ""
+    got = [(e["id"], e["outcome"] is not None) for e in events(root, run)]
+    assert got == [(TOOL_ID, False), (TOOL_ID, True)]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no process-tree proof on Windows yet (TODO W2b 1.7: VM proof)")
+def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(tool_run, subprocess_home):
+    """The exact line from the run's settings, run by a shell below this run's process as the tool runs it: it
+    passes the run check and stops only at the writer (a child has no registered hider and no keys here)."""
+    import subprocess
+
+    from orch import adapters
+
+    root, run, _ = tool_run
+    cmd = adapters.reminder_doc("claude", root)["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    r = subprocess.run(
+        cmd, shell=True, cwd=root, input=tool_hook("PreToolUse"), capture_output=True, text=True, timeout=60,
+        env={**os.environ, "ORCH_ROOT": str(root)},
+    )  # fmt: skip
+    assert r.returncode == 0 and r.stderr == "orch: Recording is off until key hiding is ready.\n"
+    assert "hider_off" in lost_notes(root)  # a proven caller: the trace is under the run
+    assert record.read_run(root, run).status == "unavailable"  # nothing raw, nothing at all
+
+
+# ---------------------------------------------------------------- the oneshot wrapper feeds its collector
+
+
+def _fake_agent(tmp_path, root):
+    """An agent that prints a stream-json run (init, one Read and its result, the end) and saves the ORCH_*
+    variables it was given."""
+    stream = [
+        {"type": "system", "subtype": "init", "session_id": SID, "uuid": "u-init"},
+        json.loads(use_line(inp={"file_path": f"{root}/notes.txt"})),
+        json.loads(result_line()),
+        {"type": "result", "subtype": "success", "is_error": False, "session_id": SID, "uuid": "u-end",
+         "num_turns": 1, "usage": {"input_tokens": 3, "output_tokens": 4}},
+    ]  # fmt: skip
+    out, seen = tmp_path / "stream.jsonl", tmp_path / "agent-env.json"
+    out.write_text("".join(json.dumps(x) + "\n" for x in stream))
+    script = tmp_path / "agent.py"
+    script.write_text(
+        "import json, os, sys\n"
+        "env = {k: v for k, v in os.environ.items() if k[:5] == 'ORCH_'}\n"
+        f"open({str(seen)!r}, 'w').write(json.dumps(env))\n"
+        f"sys.stdout.write(open({str(out)!r}).read())\n"
+    )
+    return [sys.executable, str(script)], seen
+
+
+def test_the_wrapper_records_the_agents_stream_and_the_hook_lines_win(tool_run, tmp_path, monkeypatch):
+    root, run, tid = tool_run
+    monkeypatch.setattr(runs, "_on_term", lambda *a: None)  # no SIGTERM handler left in the test process
+    inp = {"file_path": f"{root}/notes.txt"}
+    record_hook.hook(root, tool_hook("PreToolUse", inp=inp))  # the tool's hooks fire during the call
+    record_hook.hook(root, tool_hook("PostToolUse", inp=inp))
+    before = {k for k in os.environ if k.startswith("ORCH_") and k != "ORCH_VIA"}
+    argv, seen = _fake_agent(tmp_path, root)
+    assert runs.wrap(root, run, tid, "claude", argv) == 0
+    lines = run_lines(root, run)
+    assert [(e["via"], e["outcome"] is not None) for e in lines if e["id"] == TOOL_ID] == [
+        ("hook", False),
+        ("hook", True),
+    ]  # the collector's two lines of that call were dropped: one line each
+    from_log = [e for e in lines if e["via"] == "log"]
+    assert [e["kind"] for e in from_log] == ["run.state", "usage", "run.state"]  # what only the log says
+    assert all(e["run"] == run and e["ticket"] == tid and e["harness"] == "claude" for e in lines)
+    assert [e["files"] for e in lines if e["id"] == TOOL_ID] == [["notes.txt"], ["notes.txt"]]
+    env = json.loads(seen.read_text())
+    assert (env["ORCH_RUN"], env["ORCH_TICKET"], env["ORCH_AGENT"]) == (run, tid, "claude")
+    assert set(env) == before | {"ORCH_RUN", "ORCH_TICKET", "ORCH_AGENT", "ORCH_ROOT"}  # nothing new to forge
+
+
+def test_the_wrapper_records_nothing_while_key_hiding_is_not_ready(proj, tmp_path, monkeypatch):
+    from orch import run_record
+
+    t = tickets.create(proj, "No hider", "human:t")
+    rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=os.getpid())
+    monkeypatch.setattr(hider, "_registered", None)
+    monkeypatch.setattr(runs, "_on_term", lambda *a: None)
+    real, results = run_record.collect_turn, []
+    monkeypatch.setattr(run_record, "collect_turn", lambda *a: results.append(real(*a)))
+    argv, _ = _fake_agent(tmp_path, proj)
+    assert runs.wrap(proj, rec["run"], t["id"], "claude", argv) == 0
+    assert results == [None]  # the collector was asked and wrote nothing (never raw)
+    assert not (proj / ".orch/record/runs").exists()
+
+
+def test_a_later_turn_never_reuses_an_earlier_turns_ids(tool_run, tmp_path):
+    from orch import run_record
+
+    root, run, tid = tool_run
+    no_uuid = json.dumps({"type": "result", "is_error": False})  # default ids <run>:<seq>
+    first = run_record.collect_turn(root, run, tid, "claude", root, [no_uuid])
+    second = run_record.collect_turn(root, run, tid, "claude", root, [no_uuid])
+    assert first["written"] == second["written"] == 1  # the second turn's line is not taken for a repeat
+    assert len({e["id"] for e in run_lines(root, run)}) == 2
+    assert run_record.collect_turn(root, run, tid, "codex", root, [no_uuid]) is None  # no collector

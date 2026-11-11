@@ -1,7 +1,9 @@
 """Map the agent tool's stream-json stdout lines to activity events and full detail payloads.
 
-This is not wired into runs.py: the oneshot wrapper feeds each stdout line of
-its stream_args run to collect. An optional mapper hider transforms events only;
+The oneshot wrapper (runs.wrap, via run_record.collect_turn) feeds each stdout line of
+its stream_args run to collect. hook_line maps the tool's own hook payload for
+`orch record hook` the same way, so both lines of one tool call share the id and
+dedupe (adapters.collector picks this module). An optional mapper hider transforms events only;
 detail payloads are returned UNHIDDEN. The collector never hides: RecordWriter
 must hide both events and details and refuse writes when hiding is unavailable.
 """
@@ -20,6 +22,9 @@ from .record_files import workspace_files
 
 # Tools whose input names the file or folder they touch (activity.md, Files).
 _FILE_TOOLS = ("Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep")
+HELPER_TOOLS = ("Task", "Agent")  # a call starts a helper (helper.start/end, numbered h_<n> by the log)
+# the hook events wired to `orch record hook` (agents/reminder.json, record_hooks)
+HOOK_EVENTS = ("PreToolUse", "PostToolUse")
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -54,6 +59,61 @@ def _result_text(content: Any) -> str:
             if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
         )
     return ""
+
+
+def describe_tool(name: str, inp: dict) -> tuple[dict, Any]:
+    """(used, text) of one tool call that is not a helper start: the same for the log and the hook, so the
+    two lines of one tool call agree."""
+    if name.startswith("mcp__") and len(parts := name.split("__", 2)) == 3:
+        used = _used("mcp", parts[1], "harness", _name(parts[2]))
+    elif name == "Skill":
+        used = _used("skill", inp.get("skill"), "harness")
+    else:
+        used = _used("tool", name, "builtin")
+    if inp.get("description"):
+        return used, inp["description"]
+    if name == "Bash":
+        command = str(inp.get("command") or "").splitlines()
+        return used, "Run " + (command[0] if command else "")
+    verb = {"Grep": "Search", "Glob": "Find files"}.get(name, name)
+    path = next((inp[k] for k in ("file_path", "path", "pattern", "url") if inp.get(k)), "")
+    return used, f"{verb} {PurePosixPath(str(path)).name}" if path else verb
+
+
+def tool_paths(name: str, inp: dict) -> list | None:
+    """The raw paths a file tool names (the caller makes them workspace-relative), None for other tools."""
+    return [inp.get(k) for k in ("file_path", "notebook_path", "path")] if name in _FILE_TOOLS else None
+
+
+def hook_line(raw: dict) -> dict | None:
+    """The tool's own hook payload (hook_event_name, tool_name, tool_input, tool_use_id; PostToolUse adds
+    tool_response) as the event line `orch record hook` takes: a step whose id is the tool-call id, so the
+    hook line and the collector's line of one tool call dedupe. PreToolUse: no outcome, no detail;
+    PostToolUse (only sent for a call that worked): ok, with input and output as the detail. None: a helper
+    start (Task/Agent), left to the log (only the log knows the helper's number). ValueError: not a tool-call
+    payload."""
+    event = raw.get("hook_event_name")
+    tid = raw.get("tool_use_id")
+    if event not in HOOK_EVENTS or not isinstance(tid, str) or not tid:
+        raise ValueError("not a tool-call hook payload")
+    name = raw.get("tool_name")
+    name = name if isinstance(name, str) else "Tool"
+    if name in HELPER_TOOLS:
+        return None
+    inp = raw.get("tool_input")
+    inp = inp if isinstance(inp, dict) else {}
+    used, text = describe_tool(name, inp)
+    line = dict(kind="step", id=tid, used=used, text=_one_line(text), outcome=None)
+    session = raw.get("session_id")
+    if isinstance(session, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", session):
+        line["session"] = session
+    paths = tool_paths(name, inp)
+    if paths is not None:
+        line["files"] = paths
+    if event == "PostToolUse":
+        line["outcome"] = dict(ok=True, error=None, ms=None)
+        line["payload"] = {"input": inp, "output": raw.get("tool_response")}
+    return line
 
 
 class StreamJsonMapper:
@@ -210,33 +270,17 @@ class StreamJsonMapper:
         inp = inp if isinstance(inp, dict) else {}
         agent, parent = owner
         kind = "step"
-        if name in ("Task", "Agent") and self._helper_count < 9999:
+        if name in HELPER_TOOLS and self._helper_count < 9999:
             self._helper_count += 1
             agent, parent = f"h_{self._helper_count}", agent
             self._helpers[original] = (agent, parent)
             kind, used = "helper.start", _used("helper", "Helper", "harness")
             text = inp.get("description") or inp.get("prompt") or "Helper"
         else:
-            if name.startswith("mcp__") and len(parts := name.split("__", 2)) == 3:
-                used = _used("mcp", parts[1], "harness", _name(parts[2]))
-            elif name == "Skill":
-                used = _used("skill", inp.get("skill"), "harness")
-            else:
-                used = _used("tool", name, "builtin")
-            if inp.get("description"):
-                text = inp["description"]
-            elif name == "Bash":
-                command = str(inp.get("command") or "").splitlines()
-                text = "Run " + (command[0] if command else "")
-            else:
-                verb = {"Grep": "Search", "Glob": "Find files"}.get(name, name)
-                path = next((inp[k] for k in ("file_path", "path", "pattern", "url") if inp.get(k)), "")
-                text = f"{verb} {PurePosixPath(str(path)).name}" if path else verb
+            used, text = describe_tool(name, inp)
         fields = dict(id=original, kind=kind, used=used, agent=agent, parent=parent, text=_one_line(text))
         if kind == "step" and name in _FILE_TOOLS:
-            files = workspace_files(
-                [inp.get(k) for k in ("file_path", "notebook_path", "path")], self.workspace
-            )
+            files = workspace_files(tool_paths(name, inp), self.workspace)
             if files:
                 fields["files"] = files
         self._pending[original] = dict(fields=fields, final=final, input=inp, timestamp=stamp)

@@ -3,6 +3,7 @@
     "claude": {
       "oneshot": { "settings_args": ["--settings", "{reminder_json}"] },
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
+      "record_hooks": { "PreToolUse": "orch record hook", "PostToolUse": "orch record hook" },
       "reminder": {
         "settings_file": ".claude/settings.local.json",
         "skip": [".claude", ".agents", "CLAUDE.local.md"],
