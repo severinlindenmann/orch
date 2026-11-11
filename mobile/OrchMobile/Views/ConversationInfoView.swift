@@ -9,6 +9,7 @@ struct ConversationInfoView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var selection: InfoGroup = .photos
+    @State private var expandedResults: [String: Bool] = [:]
     @State private var viewer: ArtifactItem?
     @State private var preview: InfoPreview?
     @State private var previewFolder: URL?
@@ -93,6 +94,7 @@ struct ConversationInfoView: View {
                             .accessibilityIdentifier("info-summary")
                     }
                 }
+                resultsSection
                 VStack(spacing: 16) {
                     segments(all, referenceCount: references.count + links.count)
                     if selection == .links { referenceContent(references, links: links) }
@@ -113,6 +115,43 @@ struct ConversationInfoView: View {
         )) {
             Button("OK", role: .cancel) { fileError = nil }
         } message: { Text(fileError ?? "Please try again.") }
+    }
+
+    @ViewBuilder private var resultsSection: some View {
+        let results = ticket?.view?.results ?? []
+        if !results.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Results").themeFont(15, .semibold).accessibilityAddTraits(.isHeader)
+                ForEach(results) { result in
+                    let expanded = expandedResults[result.id] ?? (result.id == results.first?.id)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Button { expandedResults[result.id] = !expanded } label: {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(verbatim: result.label).themeFont(11).foregroundStyle(Theme.muted)
+                                    if let title = result.title { Text(verbatim: title).themeFont(15, .semibold) }
+                                    if let date = TicketResult.date(result.at) {
+                                        Text(date, style: .relative).themeFont(11).foregroundStyle(Theme.muted)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: expanded ? "chevron.up" : "chevron.down").foregroundStyle(Theme.muted)
+                            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("results-card-\(result.id)")
+                        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                        if expanded {
+                            BlocksView(result: result.doc, fromLabel: result.label, fileAttachment: { name in
+                                TicketResult.attachment(named: name, in: ticket?.view?.attachments ?? [])
+                            }, onOpenAttachment: { attachment in
+                                viewer = ArtifactItem(attachment, in: conversation)
+                            })
+                        }
+                    }.padding(14).themeCard(fill: Theme.surface2)
+                }
+            }
+        }
     }
 
     @ViewBuilder private var header: some View {

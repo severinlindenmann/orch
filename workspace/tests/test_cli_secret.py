@@ -690,9 +690,64 @@ def test_a_person_or_script_is_not_restricted(lock, run, monkeypatch):
     assert code == 0 and "hi" in out
 
 
-def test_exec_is_unchanged_for_an_agent(lock, run):
+def test_exec_without_extra_arguments_is_allowed_for_an_agent(lock, run):
     code, out, _ = run("secret", "exec", "lock")
     assert code == 0 and out.strip() == str(len(TOKEN2))
+
+
+EXTRA = [["-c", "print(1)"], ["/tmp/out.txt"], ["--eval", "x"]]
+
+
+@pytest.mark.parametrize("extra", EXTRA, ids=["-c", "path", "flag"])
+def test_agent_exec_with_extra_arguments_is_refused(lock, run, events, extra):
+    _refused(run, *extra, mode="exec")
+    assert events and {e["refused"] for e in events} == {"agent_command"}
+
+
+def test_agent_exec_extra_arguments_cannot_reach_the_keys(lock, run, ws):
+    marker = ws.parent / "exec-leak.txt"
+    # run is `python -c <prog>`: an appended argument would become sys.argv, here an output path
+    prof = keystore.read_profiles(ws)
+    prof["lock"]["run"] = [PY, "-c", "import os,sys;open(sys.argv[1],'w').write(os.environ['LOCK_TOKEN'])"]
+    keystore.write_profiles(ws, prof)
+    _refused(run, str(marker), mode="exec")
+    assert not marker.exists()
+
+
+def test_agent_exec_by_flag_with_extra_arguments_is_refused(lock, run, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE")
+    code, _, err = run("secret", "exec", "--by", "agent:codex", "lock", "--", "-c", "print(1)")
+    assert code == 2 and "own command" in err
+
+
+def test_agent_exec_with_the_switch_on_may_add_arguments(lock, run, ws, monkeypatch):
+    _enable_agents(run, monkeypatch, ws)
+    code, out, err = run("secret", "exec", "lock", "--", "--extra")
+    assert code == 0, (code, out, err)
+    assert "agents may only" not in err and out.strip().isdigit(), (code, out, err)
+
+
+def test_a_person_exec_with_extra_arguments_is_allowed(store, run, ws, monkeypatch):
+    prof = keystore.read_profiles(ws)
+    run_cmd = [PY, "-c", "import sys;print(sys.argv[1])"]
+    prof["pl"] = {"env": {"T": "other-token"}, "files": {}, "run": run_cmd}
+    keystore.write_profiles(ws, prof)
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    code, out, _ = run("secret", "exec", "pl", "--", "hello")
+    assert code == 0 and out.strip() == "hello"
+
+
+@pytest.mark.parametrize("mode", ["env", "file", "exec"])
+def test_all_three_modes_share_one_agent_gate(lock, run, ws, events, mode):
+    prof = keystore.read_profiles(ws)
+    prof["lock"]["files"] = {"F": "other-token"} if mode == "file" else {}
+    keystore.write_profiles(ws, prof)
+    cmd = ["--eval", "x"] if mode == "exec" else ["/bin/sh", "-c", "echo $LOCK_TOKEN"]
+    _refused(run, *cmd, mode=mode)
+    assert {e["refused"] for e in events} == {"agent_command"}
+    assert {e["action"] for e in events} == {mode}
+    ok = [] if mode == "exec" else list(LOCK_RUN)
+    assert run("secret", mode, "lock", "--", *ok)[0] == 0
 
 
 def test_file_mode_has_the_same_limit(lock, run, ws):
@@ -1050,6 +1105,29 @@ def test_set_warns_about_an_interpreter_and_shows_the_resolved_path(store, run, 
     assert "can run any code" in err
     code, out, err = _set(run, monkeypatch, ws, "interp2", "--run", "/bin/sh", "--json")
     assert json.loads(out)["warnings"]
+
+
+@pytest.mark.parametrize(
+    "prog,warns",
+    [
+        ("psql", True),
+        ("mysql", True),
+        ("sqlite3", True),
+        ("redis-cli", True),
+        ("mongosh", True),
+        ("mytool", False),
+    ],
+)
+def test_set_warns_about_database_clients_only(store, run, ws, monkeypatch, tmp_path, prog, warns):
+    # a link named like the client to a harmless safe-folder program: matched by the name that was approved
+    exe = tmp_path / prog
+    exe.symlink_to(os.path.realpath("/usr/bin/true"))
+    code, out, err = _set(run, monkeypatch, ws, "db", "--run", str(exe))
+    assert code == 0, (code, out, err)
+    assert ("can run any code" in err) is warns
+    code, out, err = _set(run, monkeypatch, ws, "db2", "--run", str(exe), "--json")
+    assert code == 0, (code, out, err)
+    assert bool(json.loads(out).get("warnings")) is warns
 
 
 def test_a_large_key_with_a_diverging_byte_is_not_slow(ws):
