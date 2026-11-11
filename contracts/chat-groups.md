@@ -76,6 +76,14 @@ sends one copy per other member (`to: ws_…`) and one to `phones`, all as the s
   Every other copy (helper-to-helper talk, joins, queued/working) carries `body.update.kind: note` (quiet; the relay
   never pushes it). `validate.py` checks this.
 - The host never forwards a message back to its sender.
+- **`body.own_seq: true`** (**NEW**, optional, host → member only): the sender's own message still takes a group `seq`,
+  so the host sends the sending member (only a `ws_` member; never to `phones`, never for its own or a phone's text) a
+  **stub**: a `text` to `to = origin.from` with the same `group` (+ `seq`), `origin`, `by`, the text, `update.kind:
+  note` (quiet) and `id` = the fan-out id of (host, origin.id, that member). The member steps over that `seq` in its
+  order and never shows the stub (it sent the message itself). An older member that does not know the field shows it
+  as an ordinary copy of its own message (so nothing breaks; it even stays in order). Phones never get it.
+  `own_seq` anywhere else (another `to`, no `seq`, from a member) is invalid. Without the stub (older host) the
+  member still never waits for its own messages (§5, rule "own messages").
 
 **Phones in a group: explicit opt-in** (rule G8). A phone cannot set `body.group` (the relay builds phone texts from a
 fixed field list) and cannot send receipts. So: **a phone text is a group message only when it goes to the host with
@@ -263,6 +271,13 @@ untrusted data for the host helper (clean_untrusted), never instructions.
   - **Buffer full, or 10 minutes passed since the receiver received the earliest-received message still in the buffer** (receiver clock; the timer is recomputed after a partial flush; quiet groups): **skip the gap**, apply the
     contiguous run, set `applied_seq` to its last `seq`. A `seq` **≤ `applied_seq`** is **old**.
   - **Late texts are shown** (they are real messages) but **change no state** (task status, closed, membership).
+  - **Own messages are never waited on** (a member's own text, file, task report or answer takes a `seq`, but the host
+    never sends it back): (1) an `own_seq` stub (§2) marks its `seq` as the member's own: the order steps over it,
+    nothing is shown. (2) Without a stub (older host, or the stub not here yet) the member keeps the ids of its own
+    group messages the host has not numbered for it yet (at most 10 minutes, at most 50): when the `seq`s missing
+    before a received message are **no more** than those, and each was sent **before** the member received any
+    higher `seq`, they are taken as its own (oldest send = lowest `seq`) and stepped over. More missing than that = a
+    message of someone else is missing: buffered as above.
   - **The host MUST persist `seq` monotonically before sending** (write the new value, then send), so a restart never
     reuses or resets numbers. (Chosen over an `(epoch, seq)` pair: one number, no extra field.)
 - **Group caps**: a receiver accepts at most **20 open groups per host** and **5 group creations an hour per host, counted by the receiver's receive time** (never `created_at`);
@@ -339,6 +354,7 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `invalid-group-event-from-member`, `invalid-group-id-not-host-ticket`, `invalid-member-fans-out` | G3, G1, G2 |
 | `invalid-question-without-kind` | G10 (F9) |
 | `invalid-targeted-with-seq` | seq rules (F10) |
+| `valid-own-seq-stub-to-sender`, `invalid-own-seq-to-other-member`, `invalid-member-sends-own-seq` | `own_seq` stub: only host → the origin's own workspace (§2) |
 | `invalid-left-member-text`, `invalid-too-many-members` | F12, limits |
 | `invalid-phones-copy-loud` | push set |
 

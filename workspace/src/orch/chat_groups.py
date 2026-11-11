@@ -65,7 +65,7 @@ LOG_KEEP = 200
 ORIGINS_KEEP = 3000
 COPIES_KEEP = 300
 PROCESSED_KEEP = 4000
-HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind")
+HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
 MEMBER_ONLY = ("seen", "leave")
 TASK_RANK = {
     "waiting_start": 0,
@@ -222,6 +222,15 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
             and m.get("id") != fanout_id(host, o["id"], to)
         ):
             out.append("host copy: id must be the fan-out id of (host, origin.id, to)")
+        if "own_seq" in b and not (
+            b["own_seq"] is True
+            and m.get("type") == "text"
+            and "seq" in g
+            and isinstance(o, dict)
+            and o.get("from") == to
+            and str(to).startswith("ws_")
+        ):
+            out.append("own_seq: only a text to the workspace that sent origin, with group.seq")
         if (
             to == "phones"
             and m.get("type") == "text"
@@ -1285,6 +1294,8 @@ def _publish(
                 at=at,
                 errors=errors,
             )
+        if origin_from in snap["recipients"] and origin_from not in exclude:
+            _own_seq_stub(root, g, origin_id, origin_from, at, base["group"], text, errors)
     pb = dict(base)
     if to_person:
         pb["to_person"] = True
@@ -1299,6 +1310,27 @@ def _publish(
     if g.get("pending", {}).pop(origin_id, None) is not None:
         g["msgs"] += 1  # counted when the intent completes (also after a crash), never twice
     return seq
+
+
+def _own_seq_stub(
+    root: Path, g: dict, origin_id: str, origin_from: str, at: str, gw: dict, text: str, errors: list | None
+) -> None:
+    """The sender's own group message is never fanned back to it, but it gets the seq its message took: a
+    quiet stub (`own_seq: true`, fan-out id for the sender) so its view never waits on a gap that is its own.
+    The text rides along so an older member, which does not know `own_seq`, simply shows its own message."""
+    body = {
+        "text": text or "-",
+        "group": gw,
+        "by": origin_from,
+        "via": "helper",
+        "origin": {"id": origin_id, "from": origin_from, "at": at},
+        "own_seq": True,
+        "update": {"kind": "note"},
+    }
+    _send(
+        root, origin_from, "text", body, g["ticket"], fanout_id(g["host"], origin_id, origin_from), at=at,
+        errors=errors,
+    )  # fmt: skip
 
 
 def _trim_origins(g: dict) -> None:
@@ -1601,6 +1633,8 @@ def _publish_file(
             "origin": {"id": oid, "from": origin_from, "at": at},
         }
         _send(root, ws, "file", body, g["ticket"], fanout_id(host, oid, ws), at=at, errors=errors)
+    if origin_from in snap["recipients"] and (not only or only == origin_from):
+        _own_seq_stub(root, g, oid, origin_from, at, gw, ttl, errors)
     if not only:
         pb = {
             "text": ttl,
@@ -2071,6 +2105,8 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         j["next_seq"] = (
             seq  # the first seq seen starts the order (applied_seq = seq - 1); from_seq is display only
         )
+    if b.get("own_seq") is True:
+        return _own_seq(st, j, m, me, seq)
     nxt = j["next_seq"]
     buf = j.setdefault("buf", {})
     if seq < nxt:  # late: shown, but it changes no state
@@ -2083,6 +2119,9 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
             del buf[k]
         _drain(st, j, me)
         return res
+    if seq > nxt and _own_gap(j, seq):  # the numbers before it are our own messages: never wait for them
+        _drain(st, j, me)
+        nxt = j["next_seq"]
     if seq > nxt:
         if str(seq) in buf:
             return _drop(st, m, "already waiting for this group message")
@@ -2106,9 +2145,67 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
 
 def _drain(st: dict, j: dict, me: str) -> None:
     buf = j.setdefault("buf", {})
-    while str(j["next_seq"]) in buf:
-        _member_apply(st, j, buf.pop(str(j["next_seq"]))["m"], me)
+    while True:
+        if str(j["next_seq"]) in buf:
+            _member_apply(st, j, buf.pop(str(j["next_seq"]))["m"], me)
+        elif j["next_seq"] in j.get("own_seqs", []):
+            # our own message: the host never sends it back, so there is nothing to wait for
+            j["seq_max"] = max(j["seq_max"], j["next_seq"])
+        elif not (buf and _own_gap(j, min(int(k) for k in buf))):
+            break
+        else:
+            continue  # the gap before the oldest waiting message was ours: step over it now
         j["next_seq"] += 1
+    if "own_seqs" in j:
+        j["own_seqs"] = [x for x in j["own_seqs"] if x >= j["next_seq"]]
+
+
+def _own_sent(j: dict, msg: dict | None) -> None:
+    """Remember a group message we sent to the host (its id becomes the origin.id of the seq it takes), so the
+    view never waits for it, also with a host that sends no `own_seq` stub (rule 2). Kept 10 minutes at most:
+    a message the host refused is never numbered, and after that time any gap is skipped anyway."""
+    if isinstance(msg, dict) and isinstance(msg.get("id"), str):
+        now = _now_epoch()
+        keep = [x for x in j.get("own", []) if now - x["at"] < BUF_TIMEOUT_S][-(BUF_MAX - 1) :]
+        j["own"] = [*keep, {"id": msg["id"], "at": now}]
+
+
+def _own_gap(j: dict, upto: int) -> bool:
+    """Rule 2: the seqs missing before `upto` are at most as many as our own messages the host has not yet
+    numbered for us (sent before now, under 10 minutes ago): they are ours, so they are marked as our own and
+    never waited on. More missing than that: a message of someone else is missing, so the gap is kept."""
+    now, have, buf = _now_epoch(), set(j.get("own_seqs", [])), j.get("buf", {})
+    own = [x for x in j.get("own", []) if now - x["at"] < BUF_TIMEOUT_S]
+    missing = [s for s in range(j["next_seq"], upto) if s not in have and str(s) not in buf]
+    j["own"] = own
+    if not missing or len(missing) > len(own):
+        return False
+    for s, x in zip(missing, own, strict=False):  # the oldest sends took the lowest numbers
+        # a message we sent after we already got a higher number cannot have taken this lower one
+        if x["at"] > min([e["at"] for k, e in buf.items() if int(k) > s] + [now]):
+            return False
+    j["own"] = own[len(missing) :]
+    j["own_seqs"] = sorted(have | set(missing))
+    return True
+
+
+def _own_seq(st: dict, j: dict, m: dict, me: str, seq: int) -> dict:
+    """Rule 1: the host's `own_seq` stub tells us the seq our own message took. Never shown (we sent it), no
+    state; the order only steps over it."""
+    o = m["body"].get("origin") if isinstance(m["body"].get("origin"), dict) else {}
+    if o.get("from") != me:
+        return _drop(st, m, "own_seq names a message this workspace did not send")
+    j["own"] = [x for x in j.get("own", []) if x["id"] != o.get("id")]
+    nxt = j["next_seq"]
+    if seq >= nxt and seq - (nxt - 1) <= SEQ_JUMP:
+        j["own_seqs"] = sorted({*j.get("own_seqs", []), seq})[:BUF_MAX]  # the nearest ones matter
+        _drain(st, j, me)
+    return {
+        "handled": True,
+        "auto": True,
+        "note": f"group {_host_name(j)}: own message is {seq}",
+        "applied": None,
+    }
 
 
 def _skip_gap(st: dict, j: dict, me: str, current: str | None = None) -> dict:
@@ -2436,6 +2533,7 @@ def _report(
     msg = _send(root, j["host"], "text", body, own_tid, reply_to=delegate)
     if msg:
         rec["status"], rec["ticket"] = status, own_tid
+        _own_sent(j, msg)
     return msg
 
 
@@ -2627,7 +2725,9 @@ def answer(root: Path, message_id: str, text: str) -> dict:
         }
         if not body["answer"].strip():
             raise Refused("An answer needs text.")
-        return relay._message(root, q["from"], "answer", body, q.get("ticket"), message_id)
+        msg = relay._message(root, q["from"], "answer", body, q.get("ticket"), message_id)
+        _own_sent(j, msg)  # an applied answer is fanned out with a seq of its own
+        return msg
 
 
 def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") -> dict:
@@ -2641,6 +2741,7 @@ def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") 
             raise Refused("That group is closed or not known here.")
         body = {"text": phone_view.redact(text)[:TEXT_MAX], "group": _wire_joined(j), "by": me, "via": via}
         msg = _send(root, host, "text", body, j.get("ticket"))
+        _own_sent(j, msg)
     return msg or {"sent": False}
 
 
@@ -2688,7 +2789,9 @@ def share_member(
             "via": "helper",
             "share": {"kind": "image" if mime.startswith("image/") else "file", "title": ttl, "mime": mime},
         }
-        return relay._message(root, host, "file", body, j.get("ticket"))
+        msg = relay._message(root, host, "file", body, j.get("ticket"))
+        _own_sent(j, msg)
+        return msg
 
 
 # ---- lists (CLI and dashboard) ------------------------------------------------------------------------

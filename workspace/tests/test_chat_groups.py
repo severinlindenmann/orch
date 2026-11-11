@@ -229,7 +229,12 @@ def test_fan_out_one_copy_per_member_and_phones(proj, run, rel, host):
     assert out[0]["note"].startswith("group")
     to_bank = sent(rel, to=BANK)
     to_phone = sent(rel, to="phones")
-    assert len(to_bank) == 1 and len(to_phone) == 1 and not sent(rel, to=HOME)  # never back to the sender
+    assert len(to_bank) == 1 and len(to_phone) == 1
+    # never a copy back to the sender: only the quiet own_seq stub that tells it the seq its message took
+    (stub,) = sent(rel, to=HOME)
+    assert stub["body"]["own_seq"] is True and stub["body"]["update"]["kind"] == "note"
+    assert stub["id"] == cg.fanout_id(WS, mid("talk1"), HOME) and stub["body"]["origin"]["id"] == mid("talk1")
+    assert stub["body"]["group"]["seq"] == to_bank[0]["body"]["group"]["seq"] and contract_errors(stub) == []
     assert to_bank[0]["id"] == cg.fanout_id(WS, mid("talk1"), BANK)
     assert to_phone[0]["id"] == cg.fanout_id(WS, mid("talk1"), "phones")
     assert to_bank[0]["body"]["group"]["seq"] == to_phone[0]["body"]["group"]["seq"]
@@ -897,6 +902,9 @@ def test_member_file_is_fetched_checked_and_reshared(proj, run, rel, grp):
     )  # the host's own blob
     ph = sent(rel, to="phones")[0]["body"]
     assert ph["shared_files"] == [to_bank["body"]["blob_id"]]
+    (stub,) = sent(rel, to=HOME)  # the sender gets no copy of its file, only the seq it took
+    assert stub["type"] == "text" and stub["body"]["own_seq"] is True and "blob_id" not in stub["body"]
+    assert stub["body"]["group"]["seq"] == to_bank["body"]["group"]["seq"]
     all_contract_clean(rel)
     # a member file with a secret is refused, not re-shared
     bad = b"%PDF-1.4\npassword = supersecretvalue\n%%EOF"
@@ -1500,6 +1508,114 @@ def test_a_gap_is_skipped_after_ten_minutes_and_late_messages_change_no_state(
     inbox(run, rel, late_close)
     j = _joined(proj)
     assert j["closed"] is False and j["log"][-1]["late"] is True and j["seq_max"] == 3
+
+
+# ---- own messages never stall the member's view (e2e P4.8: Reports waited forever on its own seqs) ---------
+
+
+def _say(proj, text):
+    """The member (this workspace) talks in the group; returns the id the host uses as origin.id."""
+    return cg.say_member(proj, FIN, "grp_t_fin14a", text)["id"]
+
+
+def _own_stub(own_id, seq):
+    """The host's quiet stub for our own message: never a copy back, only the seq it took."""
+    m = from_host(
+        "text",
+        {
+            "text": "mine",
+            "by": WS,
+            "origin": {"id": own_id, "from": WS, "at": "2026-11-08T10:03:00Z"},
+            "own_seq": True,
+            "update": {"kind": "note"},
+        },
+        seq=seq,
+        id=cg.fanout_id(FIN, own_id, WS),
+    )
+    assert contract_errors(m) == []
+    return m
+
+
+def _close(seq):
+    ev = {"kind": "closed", "at": "2026-11-08T10:00:00Z"}
+    return from_host("text", {"text": "closed", "group_event": ev}, seq=seq, id=mid(f"close{seq}"))
+
+
+def test_own_messages_with_the_hosts_seq_stub_keep_the_view_contiguous(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    a, b = _say(proj, "first of mine"), _say(proj, "second of mine")
+    inbox(run, rel, _own_stub(a, 2), _own_stub(b, 3))
+    inbox(run, rel, from_host("text", {"text": "host after"}, seq=4, id=mid("ha4")))
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 4] and j["log"][-1]["text"] == "host after"
+    assert j["buf"] == {} and j["next_seq"] == 5 and j["seq_max"] == 4 and j["own_seqs"] == []
+    assert all(x["text"] != "mine" for x in j["log"])  # the stub is never shown: we sent that message
+    inbox(run, rel, _close(5))
+    assert _joined(proj)["closed"] is True
+
+
+def test_hosts_close_after_own_sends_is_applied(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    a, b = _say(proj, "one"), _say(proj, "two")
+    inbox(run, rel, _own_stub(a, 2), _own_stub(b, 3), _close(4))
+    j = _joined(proj)
+    assert j["closed"] is True and j["buf"] == {} and [x["seq"] for x in j["log"]] == [1, 4]
+
+
+def test_stubs_after_the_hosts_message_change_nothing(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    a, b = _say(proj, "one"), _say(proj, "two")
+    inbox(run, rel, from_host("text", {"text": "early"}, seq=4, id=mid("e4")))  # before the stubs (rule 2)
+    inbox(run, rel, _own_stub(a, 2), _own_stub(b, 3))
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 4] and j["next_seq"] == 5 and j["buf"] == {}
+
+
+def test_old_host_without_stub_never_stalls_on_own_messages(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    _say(proj, "one")
+    _say(proj, "two")
+    inbox(run, rel, from_host("text", {"text": "host after"}, seq=4, id=mid("old4")))  # no stub: rule 2
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 4] and j["buf"] == {} and j["next_seq"] == 5
+    inbox(run, rel, _close(5))
+    assert _joined(proj)["closed"] is True
+
+
+def test_own_seq_stub_for_someone_elses_message_is_dropped(proj, run, rel, member):
+    inbox(run, rel, _added(1))
+    m = _own_stub(mid("theirs"), 2)
+    m["body"]["origin"]["from"] = FIN
+    assert "dropped" in inbox(run, rel, m)[0]["note"]
+    assert _joined(proj)["next_seq"] == 2
+
+
+def test_a_missing_foreign_message_is_still_waited_for(proj, run, rel, member, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    a = _say(proj, "mine")
+    inbox(run, rel, _own_stub(a, 2))
+    inbox(run, rel, from_host("text", {"text": "four"}, seq=4, id=mid("f4")))  # 3 (not ours) is missing
+    j = _joined(proj)
+    assert list(j["buf"]) == ["4"] and j["next_seq"] == 3 and [x["seq"] for x in j["log"]] == [1]
+    inbox(run, rel, from_host("text", {"text": "three"}, seq=3, id=mid("f3")))
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 3, 4] and j["buf"] == {} and j["next_seq"] == 5
+    # without a stub (older host): one own send cannot cover two missing seqs, so the foreign one is awaited
+    _say(proj, "mine again")  # takes 5 at the host
+    inbox(run, rel, from_host("text", {"text": "seven"}, seq=7, id=mid("f7")))
+    assert list(_joined(proj)["buf"]) == ["7"] and _joined(proj)["next_seq"] == 5
+    inbox(run, rel, from_host("text", {"text": "six"}, seq=6, id=mid("f6")))  # now only 5 (ours) is missing
+    j = _joined(proj)
+    assert [x["seq"] for x in j["log"]] == [1, 3, 4, 6, 7] and j["buf"] == {} and j["next_seq"] == 8
+    # an own message sent after a higher seq arrived cannot have taken the lower missing one
+    inbox(run, rel, from_host("text", {"text": "nine"}, seq=9, id=mid("f9")))  # 8 (not ours) missing
+    clock[0] += 5
+    _say(proj, "late of mine")  # takes 11 or later at the host
+    inbox(run, rel, from_host("text", {"text": "ten"}, seq=10, id=mid("f10")))  # only 8 missing, 1 own send
+    j = _joined(proj)
+    assert sorted(j["buf"]) == ["10", "9"] and j["next_seq"] == 8  # still waiting for 8
 
 
 @pytest.mark.parametrize(

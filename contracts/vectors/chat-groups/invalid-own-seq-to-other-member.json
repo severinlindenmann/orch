@@ -1,0 +1,47 @@
+{
+  "why": "own_seq goes only to the workspace that sent the origin: on Bank's copy of Home's text it is invalid.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_379e0eb0742c4adf",
+    "from": "ws_fin0000001",
+    "to": "ws_ban0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:06:02Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "Found it: the 2025 letter says CHF 412.",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance"
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home"
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank"
+          }
+        ],
+        "seq": 7
+      },
+      "by": "ws_hom0000001",
+      "via": "helper",
+      "origin": {
+        "id": "m_homeanswer000000",
+        "from": "ws_hom0000001",
+        "at": "2026-11-08T10:06:00Z"
+      },
+      "own_seq": true,
+      "update": {
+        "kind": "note"
+      }
+    }
+  }
+}
