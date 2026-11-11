@@ -615,7 +615,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
-    from orch.config import agents_may_finish, copies_max, copies_mode, copy_setup
+    from orch.config import COPIES_LOCKED, agents_may_finish, copies_max, copies_mode, copy_setup
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
@@ -629,6 +629,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     return {
         "agents_may_finish": agents_may_finish(root),
         "copies": copies_mode(root),
+        "copies_locked": bool(COPIES_LOCKED),
         "copies_max": copies_max(root),
         "copy_setup": copy_setup(root) or "",
         "copies_disk": copies_disk(root),

@@ -382,3 +382,14 @@ def seed_profiles(root, profiles):
         n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
     )
     keystore.write_profiles(root, profiles, sign=changed)
+
+
+@pytest.fixture(autouse=True)
+def _copies_unlocked(request, monkeypatch):
+    """Separate copies are locked Off in the product for this release (config.COPIES_LOCKED).
+    The feature's own tests keep running with the lock lifted; tests marked `copies_locked` check the lock."""
+    from orch import config
+
+    if not request.node.get_closest_marker("copies_locked"):
+        monkeypatch.setattr(config, "COPIES_LOCKED", False)
+        monkeypatch.setattr(config, "DEFAULT_COPIES", "together")  # the feature's own default when unlocked

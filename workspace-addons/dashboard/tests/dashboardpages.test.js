@@ -115,6 +115,22 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   assert.equal(nodes(c.privateCard(settings), n => n.tag === 'h3').length, 1);
 });
 
+test('Separate copies card while copies are locked: says coming soon and every control is disabled', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  const c = vm.createContext({h, array:x => Array.isArray(x) ? x : [], snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  vm.runInContext(src.slice(start, end), c);
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const card = vm.runInContext('copiesCard', c)({copies:'off', copies_locked:true});
+  assert.equal(all(card, n => n.attrs?.['data-key'] === 'settings-copies-soon').length, 1);
+  const sw = all(card, n => n.attrs?.['data-key'] === 'settings-switch-copies')[0];
+  assert.equal(sw.attrs.disabled, true);
+  assert.ok(all(card, n => n.attrs?.role === 'radio').every(n => n.attrs.disabled));
+  const open = vm.runInContext('copiesCard', c)({copies:'together', copies_locked:false});
+  assert.equal(all(open, n => n.attrs?.['data-key'] === 'settings-copies-soon').length, 0);
+});
+
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote behind Details', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');

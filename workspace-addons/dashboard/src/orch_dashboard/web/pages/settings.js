@@ -124,7 +124,7 @@ function copiesDiskText(d) {
 }
 function copiesCard(settings) {
   const mode = copiesModeOf(settings), on = mode !== 'off', busy = settingsBusy.has('copies');
-  const disk = settings.copies_disk, problems = array(disk?.stuck).length + array(disk?.orphaned).length > 0, off = snapshot || busy;
+  const disk = settings.copies_disk, problems = array(disk?.stuck).length + array(disk?.orphaned).length > 0, off = snapshot || busy || !!settings.copies_locked;
   const cap = h('select', {className:'input copies-max', 'aria-label':'Most copies at the same time', 'data-key':'settings-copies-max', disabled:off},
     [1, 2, 3, 4, 5, 6, 8, 10, 20].map(n => h('option', {value:String(n)}, String(n))));
   cap.value = String(settings.copies_max || 3);
@@ -139,6 +139,7 @@ function copiesCard(settings) {
     h('div', {className:'card'},
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers working at the same time: each gets its own copy of your files')),
         h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Each helper gets its own copy of your files', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
+      settings.copies_locked ? settingsText('p', {className:'meta', 'data-key':'settings-copies-soon'}, 'Coming soon. For now every agent works in the project folder.') : null,
       reviewPanel('copies-switch', settings),
       h('details', {className:'copies-details', 'data-key':'settings-copies-details', open:problems ? '' : null}, h('summary', {}, 'Details'),
         h('div', {className:'stack copies-more'},
