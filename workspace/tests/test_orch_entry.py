@@ -26,7 +26,7 @@ def test_paths_agree(monkeypatch, tmp_path):
 
 def _entry(tmp_path, code):
     env = dict(os.environ, ORCH_HOME=str(tmp_path))
-    return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=10)
 
 
 def test_live_marker_never_imports_orch(tmp_path):
@@ -39,16 +39,44 @@ def test_live_marker_never_imports_orch(tmp_path):
     assert r.stderr == "orch is still updating, try again in a moment.\n"
 
 
-@pytest.mark.parametrize("stale", ["age", "dead", "absent"])
+@pytest.mark.parametrize(
+    "stale",
+    ["age", "future", "dead", "absent", "text", "pid1", "invalid", "huge", "long", "fifo", "link", "dir"],
+)
 def test_stale_marker_runs_cli_and_preserves_argv_and_exit(tmp_path, stale):
     mark = orch_entry.marker_path(tmp_path)
     if stale == "dead":
         p = subprocess.Popen([sys.executable, "-c", "pass"])
         p.wait()
         mark.write_text(str(p.pid))
-    elif stale == "age":
+    elif stale in {"age", "future"}:
         mark.write_text(str(os.getpid()))
-        os.utime(mark, (time.time() - 901,) * 2)
+        os.utime(mark, (time.time() + (900 if stale == "future" else -901),) * 2)
+    elif stale in {"text", "pid1", "invalid", "huge", "long"}:
+        mark.write_bytes(
+            {
+                "text": b"starting",
+                "pid1": b"1",
+                "invalid": b"\xff",
+                "huge": b"9" * 63,
+                "long": str(os.getpid()).encode() + b" " * 64,
+            }[stale]
+        )
+    elif stale == "fifo":
+        if sys.platform == "win32":
+            pytest.skip("POSIX FIFO")
+        os.mkfifo(mark)
+    elif stale == "link":
+        target = tmp_path / "owner"
+        target.write_text(str(os.getpid()))
+        try:
+            mark.symlink_to(target)
+        except OSError:
+            if sys.platform != "win32":
+                raise
+            pytest.skip("symlinks require Windows privileges")
+    elif stale == "dir":
+        mark.mkdir()
     r = _entry(
         tmp_path,
         "import sys, types, orch_entry; "
@@ -58,6 +86,7 @@ def test_stale_marker_runs_cli_and_preserves_argv_and_exit(tmp_path, stale):
         "sys.exit(orch_entry.main())",
     )
     assert r.returncode == 17, r.stderr
+    assert not winfinish.updating(tmp_path)
 
 
 @pytest.mark.parametrize("fail", [False, True])

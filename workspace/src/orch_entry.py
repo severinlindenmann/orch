@@ -1,6 +1,7 @@
 """Stdlib-only console entry guard; never import orch until its reinstall finishes."""
 
 import os
+import stat
 import sys
 import time
 from pathlib import Path
@@ -88,12 +89,31 @@ def alive(pid: int) -> bool:
 def updating(home: Path) -> bool:
     mark = marker_path(home)
     try:
-        if time.time() - mark.stat().st_mtime >= MAX_AGE:
+        before = mark.lstat()
+        if not stat.S_ISREG(before.st_mode):
             return False
-        pid = mark.read_text(encoding="utf-8").strip()
-    except OSError:
+        flags = os.O_RDONLY
+        if sys.platform != "win32":
+            flags |= os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(mark, flags)
+        try:
+            opened = os.fstat(fd)
+            if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (
+                opened.st_dev,
+                opened.st_ino,
+            ):
+                return False
+            if not 0 <= time.time() - opened.st_mtime < MAX_AGE:
+                return False
+            data = os.read(fd, 64)
+        finally:
+            os.close(fd)
+        if len(data) == 64 or not data.strip().isdigit():
+            return False
+        pid = int(data.strip())
+        return 1 < pid <= 0xFFFFFFFF and alive(pid)
+    except (OSError, ValueError, OverflowError):
         return False
-    return not pid.isdigit() or alive(int(pid))
 
 
 def main():
