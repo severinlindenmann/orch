@@ -794,6 +794,9 @@ def test_adoption_checks_outer_git_per_file(proj, new_ticket, monkeypatch, block
 @pytest.mark.parametrize(
     "field,value",
     [
+        ("id", "-x"),
+        ("id", "--help"),
+        ("id", "_x"),
         ("id", "bad.id"),
         ("id", "bad/session"),
         ("id", "x\n"),
@@ -838,3 +841,20 @@ def test_adoption_caps_and_keeps_valid_old_entries(proj, new_ticket):
     assert entries.count(old) == 1
     assert len({s["id"] for s in entries}) == len(entries)
     assert json.loads(path.read_text()) == entries
+
+
+@pytest.mark.parametrize("sid", ["-x", "--help", "_x", "", "x\n", "x" * 129, "bad.id", None])
+def test_invalid_session_id_never_recorded_or_selected(proj, new_ticket, sid):
+    tid = new_ticket()
+    before = tickets.load(proj, tid)
+    with pytest.raises(tickets.Refused, match="Invalid session id"):
+        tickets.record_session(proj, tid, "agent", sid, "host")
+    assert tickets.load(proj, tid) == before
+    path = proj / ".orch/run/own-sessions.json"
+    assert not path.exists()
+    entry = {"id": sid, "agent": "agent", "host": "host", "ticket_id": tid, "first_seen": tickets.now()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([entry]))
+    path.with_name("own-sessions.adopted").write_text("{}")
+    assert tickets.sessions_for(proj, tid, before | {"sessions": [entry]}, "agent", "host") is None
+    assert tickets._own_sessions(proj) == []

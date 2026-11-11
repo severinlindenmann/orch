@@ -2330,6 +2330,22 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bo
 
 
 OWN_SESSIONS_MAX = 500
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
+def valid_session_id(sid: object) -> bool:
+    return isinstance(sid, str) and SESSION_ID_RE.fullmatch(sid) is not None
+
+
+def adopt_own_sessions(root: Path) -> None:
+    """Run the one-time adoption of this machine's existing sessions now (if it hasn't run yet). The sync
+    add-on calls this before its first fetch, so synced tickets can never take part in the adoption."""
+    if not tickets_dir(root).is_dir():  # nothing to adopt; don't create the folder (the lock lives there)
+        marker = root / ".orch" / "run" / "own-sessions.adopted"
+        if not marker.exists():
+            net.write_json(marker, {"adopted": True})
+        return
+    _own_sessions(root)
 
 
 def _own_sessions(root: Path) -> list[dict]:
@@ -2349,6 +2365,7 @@ def _own_sessions_locked(root: Path) -> list[dict]:
         s
         for s in (entries if isinstance(entries, list) else [])
         if isinstance(s, dict)
+        and valid_session_id(s.get("id"))
         and all(
             isinstance(s.get(k), str) and s[k] for k in ("id", "agent", "host", "ticket_id", "first_seen")
         )
@@ -2376,8 +2393,7 @@ def _own_sessions_locked(root: Path) -> list[dict]:
                 if (
                     not isinstance(s, dict)
                     or s.get("host") != host
-                    or not isinstance(s.get("id"), str)
-                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", s["id"])
+                    or not valid_session_id(s.get("id"))
                     or not isinstance(s.get("agent"), str)
                     or not config.NAME_RE.fullmatch(s["agent"])
                 ):
@@ -2421,6 +2437,11 @@ def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -
 
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
     """Remember the agent session for this agent and machine (updates last_used when it is known)."""
+    if not valid_session_id(sid):
+        raise Refused(
+            "Invalid session id: use 1-128 letters, digits, underscores or hyphens, "
+            "starting with a letter or digit."
+        )
 
     def op(t):
         sessions = t.setdefault("sessions", [])
@@ -2443,7 +2464,13 @@ def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> s
     """Resume local sessions for the trusted file/resolve id, never the peer-controlled ticket id."""
     owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
     for s in ticket.get("sessions") or []:
-        if s.get("agent") == agent and s.get("host") == host and (s.get("id"), agent, host, tid) in owned:
+        if (
+            isinstance(s, dict)
+            and valid_session_id(s.get("id"))
+            and s.get("agent") == agent
+            and s.get("host") == host
+            and (s["id"], agent, host, tid) in owned
+        ):
             return s.get("id")
     return None
 
