@@ -202,7 +202,6 @@ def _core_clean(*names):
 
 # --- activity (activity.md) ------------------------------------------------------------------------------------------
 EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
-FILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 PRECEDENCE = {"hook": 2, "broker": 2, "job": 2, "core": 2, "log": 1}
 
 
@@ -215,18 +214,32 @@ def act_event_id(tool_call_id, run, seq):
     return "x_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:32]
 
 
-def act_detail_name(event_id):
-    return event_id if FILE_ID.match(event_id) else "x_" + hashlib.sha256(event_id.encode()).hexdigest()[:32]
+def act_detail_name(run, kind, event_id):
+    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/1\\0" run \\0 kind \\0 id)."""
+    data = b"orch.detail/1\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id))
+    return hashlib.sha256(data).hexdigest()[:32]
 
 
 def act_dedupe(lines):
-    """Indices of the lines readers keep: per (run, id, kind, finished) the highest precedence, ties -> first written."""
-    best = {}
-    for i, ln in enumerate(lines):
-        key = (ln["run"], ln["id"], ln["kind"], ln.get("outcome") is not None)
-        if key not in best or PRECEDENCE[ln["via"]] > PRECEDENCE[lines[best[key]]["via"]]:
-            best[key] = i
-    return sorted(best.values())
+    """Only hook/log share an origin; disagreeing finished outcomes both survive."""
+    kept = []
+    def key(line):
+        via = line["via"]
+        return (line["run"], line["id"], line["kind"], line.get("outcome") is not None,
+                "hl" if via in ("hook", "log") else via)
+    def conflict(a, b):
+        return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
+                and b.get("outcome") is not None
+                and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
+    for i, line in enumerate(lines):
+        matches = [j for j in kept if key(lines[j]) == key(line)]
+        if any(lines[j]["via"] == line["via"] for j in matches):
+            continue
+        if any(conflict(lines[j], line) for j in matches):
+            kept.append(i)
+        elif not any(lines[j]["via"] == line["via"] or lines[j]["via"] == "hook" for j in matches):
+            kept = [j for j in kept if j not in matches] + [i]
+    return sorted(kept)
 
 
 def _t(s):
@@ -326,12 +339,12 @@ def act_map_stream(lines, ctx):
                 first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
                 err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
                 emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
-                     detail=f"detail/{run}/{act_detail_name(eid)}.json")
+                     detail=f"detail/{run}/{act_detail_name(run, 'step', eid)}.json")
         elif t == "item.completed" and item.get("type") == "agent_message":
             eid = f"{run}:{turn}:{item['id']}"
             say = _one_line(item.get("text", ""), 200)
             emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
-                 detail=f"detail/{run}/{act_detail_name(eid)}.json")
+                 detail=f"detail/{run}/{act_detail_name(run, 'run.state', eid)}.json")
         elif t == "turn.completed":
             u = m.get("usage") or {}
             emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
@@ -345,12 +358,24 @@ def kind_activity():
     vd = _w("activity", "detail_file")
     _examples("activity", lambda d: _msgs(v, d))
     _examples("activity-detail", lambda d: _msgs(vd, d))
+    va = _w("activity", "record_alert")
+    _examples("activity-alert", lambda d: _msgs(va, d))
     _core_clean("activity")
     vec = _vec("activity-v1.json")
+    tamper = {"link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"}
+    for case in vec["integrity"]:
+        fixture = case["fixture"]
+        status = "tampered" if fixture in tamper else "ok" if fixture == "regular" else "unavailable"
+        _expect(f"activity integrity {fixture}", status, case["status"])
+        _expect(f"activity integrity reason {fixture}", None if fixture == "regular" else fixture, case["reason"])
+    for case in vec.get("hook_namespace", []):
+        value = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + case["id"].encode()).hexdigest()[:32]
+        _expect("activity hook namespace", value, case["stored"])
+
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:
-        _expect(f"activity detail_names {c['id']}", act_detail_name(c["id"]), c["file"])
+        _expect(f"activity detail_names {c['kind']} {c['id']}", act_detail_name(c["run"], c["kind"], c["id"]), c["file"])
     for c in vec["dedupe"]:
         _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
     for c in vec["hook_entry"]:

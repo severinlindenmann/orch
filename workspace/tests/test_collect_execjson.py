@@ -87,7 +87,7 @@ def test_stable_ids(unsafe):
     assert first[3]["id"] == "r_cx00001:2:item_0"
     expected = "x_" + hashlib.sha256(f"r_cx00001:2:{unsafe}".encode()).hexdigest()[:32]
     assert first[4]["id"] == expected
-    assert first[4]["detail"] == f"detail/r_cx00001/{expected}.json"
+    assert first[4]["detail"] == f"detail/r_cx00001/{detail_name('r_cx00001', 'step', expected)}.json"
     assert first[5]["id"] == "r_cx00001:6"
     assert [e["seq"] for e in first] == list(range(1, 7))
     assert all(e["session"] is None for e in first)
@@ -95,7 +95,7 @@ def test_stable_ids(unsafe):
 
 @pytest.mark.parametrize("case", VECTORS["detail_names"])
 def test_detail_names(case):
-    assert detail_name(case["id"]) == case["file"]
+    assert detail_name(case["run"], case["kind"], case["id"]) == case["file"]
 
 
 @pytest.mark.parametrize("line", ["", "not json", "[]", b"\xff", "null", "42", '{"item":[]}'])

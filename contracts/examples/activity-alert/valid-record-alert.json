@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "schema": "orch.record-alert/1",
+  "at": "2026-11-11T00:00:00Z",
+  "target": "run",
+  "run": "r_abcdef",
+  "reason": "hardlink",
+  "seen_by": "reader",
+  "message": "Some records of this run were changed outside orch. To be safe, orch does not show them. Nothing was deleted."
+}

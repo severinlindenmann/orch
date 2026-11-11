@@ -2,6 +2,7 @@
  "v": 1,
  "id": "toolu_01ABcd",
  "run": "r_8k2m01",
+ "kind": "step",
  "input": {},
  "output": "",
  "truncated": false
