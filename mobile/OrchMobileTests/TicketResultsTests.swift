@@ -54,7 +54,7 @@ final class TicketResultsTests: XCTestCase {
                 let expectedLabel: String
                 switch source[index]["from"] as? String {
                 case "job": expectedLabel = "Reported by the job"
-                case "agent": expectedLabel = source[index]["checked"] as? Bool == true ? "Checked by the agent" : "From the agent"
+                case "agent": expectedLabel = source[index]["checked"] as? Bool == true ? "Checked by the helper" : "From the helper"
                 default: expectedLabel = "Worked out by orch"
                 }
                 XCTAssertEqual(result.label, expectedLabel, name)
@@ -113,7 +113,7 @@ final class TicketResultsTests: XCTestCase {
     }
 
     func testLineSeparatorTitleIsHiddenButResultKept() throws {
-        var sep = item("j_title03"); sep["title"] = "Done\u{2028}Checked by the agent"
+        var sep = item("j_title03"); sep["title"] = "Done\u{2028}Checked by the helper"
         var bidi = item("j_title04"); bidi["title"] = "abc\u{202E}def"
         var alm = item("j_title05"); alm["title"] = "abc\u{061C}def"
         let decoded = try snapshot(["results": [sep, bidi, alm]])
@@ -122,7 +122,7 @@ final class TicketResultsTests: XCTestCase {
     }
 
     func testTitleRulesAndBigNumbers() throws {
-        var lined = item("j_title01"); lined["title"] = "A\nChecked by the agent"
+        var lined = item("j_title01"); lined["title"] = "A\nChecked by the helper"
         var long = item("j_title02"); long["title"] = String(repeating: "x", count: 201)
         var big = item("j_bignum1"); big["doc"] = ["schema": "orch.blocks/1", "from": "agent", "blocks": [["type": "stat", "label": "Big", "value": 1e200]]]
         let decoded = try snapshot(["results": [lined, long, big]])
@@ -146,7 +146,7 @@ final class TicketResultsTests: XCTestCase {
         var mismatch = item(); mismatch["from"] = "job"; broken.append(mismatch)
         let decoded = try snapshot(["results": [item("j_before")] + broken + [item("j_after1")]])
         XCTAssertEqual(decoded.results.map(\.id), ["j_before", "j_after1"])
-        XCTAssertEqual(decoded.results.first?.label, "From the agent")
+        XCTAssertEqual(decoded.results.first?.label, "From the helper")
     }
 
     func testFirstDuplicateWinsThenDatesSortAndCap() throws {

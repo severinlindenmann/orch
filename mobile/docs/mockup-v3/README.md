@@ -35,3 +35,5 @@ What is simulated here: recording, transcription, replies, camera, uploads, sync
 - **Ticket · no review question** — finished work stays Ready for review with 3 of 3 tasks done and no review bar.
 
 Ticket info is also reachable through PIL-12 → Info or the existing Artifacts · Files · References entry. Back returns to the originating screen. New fixtures are local simulations; jump-list entries reset them for repeatable review.
+
+11 Nov: helper wording

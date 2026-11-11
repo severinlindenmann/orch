@@ -109,12 +109,12 @@ struct SettingsView: View {
                                 }.buttonStyle(PressStyle()).accessibilityIdentifier("auto-archive-days")
                                     .accessibilityLabel("Archive after").accessibilityValue("\(model.archive.autoDays) days")
                             }
-                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and Chat never do. A new message brings a chat back.")
+                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and Your helper never do. A new message brings a chat back.")
                                 .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
                         }
                     }
-                    Text("Tickets started from your phone send answers here, even with Mobile mode off.")
+                    Text("Tickets started from your phone send answers here, even when Send questions to my phone is off.")
                         .themeFont(13).foregroundStyle(Theme.muted)
                     Button { confirmSignOut = true } label: {
                         Text("Sign out").themeFont(17).foregroundStyle(Theme.danger).padding(.horizontal, 12)
