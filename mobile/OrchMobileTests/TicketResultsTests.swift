@@ -108,8 +108,8 @@ final class TicketResultsTests: XCTestCase {
         var block: Any = 1
         for _ in 0..<500 { block = [block] }
         let doc = try JSONSerialization.data(withJSONObject: ["schema": "orch.blocks/1", "from": "job", "blocks": [["type": "x-new", "v": block]]])
-        let result = await Task.detached { BlocksResult.decode(doc) }.value
-        if case .shown = result { XCTFail("500-deep doc must not render") }
+        let shown = await Task.detached { () -> Bool in if case .shown = BlocksResult.decode(doc) { return true }; return false }.value
+        XCTAssertFalse(shown, "500-deep doc must not render")
     }
 
     func testLineSeparatorTitleIsHiddenButResultKept() throws {
