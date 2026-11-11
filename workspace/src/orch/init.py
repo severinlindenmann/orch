@@ -123,7 +123,7 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
 def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> str:
     """Which agent does the work here: asked once (found agents + Other); --yes takes the first found.
     Returns one plain line to show."""
-    from orch import adapters, config
+    from orch import config
 
     _ensure_workspace(root)  # selecting an agent can write config before init() runs
     cur = config.agent_name(root)
@@ -161,7 +161,7 @@ def _save(root: Path, name: str) -> None:
 
 
 def _other(root: Path) -> str:
-    from orch import adapters, config
+    from orch import config
 
     name = input("Name for it [my-agent]: ").strip() or "my-agent"
     if not config.NAME_RE.match(name):

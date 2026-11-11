@@ -210,8 +210,6 @@ def _counter_last(root: Path) -> int:
 def next_key(root: Path) -> str:
     """<code>-<n> for a new ticket. n is 1 + the highest number handed out (counter file or any ticket's key),
     written to the counter under one workspace lock, so no two tickets share a number and none is reused."""
-    from orch import config
-
     code = config.workspace_code(root) or config.set_code(root, config.suggest_code(root.resolve().name))
     with _locked(root, "key"):
         p = _counter_path(root)

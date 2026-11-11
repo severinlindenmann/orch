@@ -23,21 +23,13 @@ def test_start_in_a_terminal_opens_the_launch_url(tmp_path, monkeypatch):
     assert opened == ["http://127.0.0.1:8421#launch=tok123"]
 
 
-KNOWN = {
-    "cli_clients.py:_member_parts:relay",
-    "humanproof.py:account_home:winacl",
-    "init.py:choose_agent:adapters",
-    "init.py:_other:adapters",
-    "runs.py:_pending_proof:addons",
-    "runs.py:_ws_id:addons",
-    "tickets.py:next_key:config",
-}
+KNOWN: set[str] = set()
 
 
 def test_no_function_reimports_a_module_level_orch_name():
     """A function-local `from orch import X` makes X local to the WHOLE function: any use before that line
     (or on another branch) raises UnboundLocalError; ruff F823 misses it when the use is later in the source.
-    KNOWN: existing sites, to be removed in a follow-up (see the issue linked in the PR); new ones fail."""
+    KNOWN: grandfathered sites (none left; new ones fail)."""
     src = Path(__file__).resolve().parents[1] / "src" / "orch"
     bad = []
     for f in sorted(src.rglob("*.py")):

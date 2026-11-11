@@ -400,7 +400,7 @@ def _human_author(by, via, kind, phone=None) -> bool:
 
 def _pending_proof(root: Path, tid: str):
     """(human key, workspace id) for the pending MAC, or None when this workspace has no guarded home."""
-    from orch import addons, humanproof
+    from orch import humanproof
 
     try:
         ws = addons.workspace_id(root, create=True)
@@ -481,8 +481,6 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
 
 
 def _ws_id(root: Path):
-    from orch import addons
-
     return addons.workspace_id(root, create=False)
 
 
