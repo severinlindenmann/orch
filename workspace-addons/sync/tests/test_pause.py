@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from orch import humanproof
 from orch.errors import Refused
-from test_step import ART, NOW, TICKET, run, save, success, tracked
+from test_step import ART, NOW, TICKET, run, save, success, ticket, tracked
 from test_two_machines import both, edit, hostile, load, machines, remote_sha
 
 from orch_sync import approval, cli, needs, pause, repo, step
@@ -151,6 +151,7 @@ def test_approval_is_bound_and_not_replayable(machines, monkeypatch):
     success(a)
     edit(b, ext={"automation": {"enabled": False}})  # the person changes it here later
     success(b)
+    assert "automation" not in cli.read(b, "approved").get("t_abc123", {})  # M2: the approval is used up
     success(a)
     edit(a, ext={"automation": value})  # the peer re-sends the old approved value
     repo.git(a, "add", "--", TICKET)
@@ -158,6 +159,15 @@ def test_approval_is_bound_and_not_replayable(machines, monkeypatch):
     success(b)
     assert load(b)["ext"]["automation"] == {"enabled": False}
     assert approval.held(b)
+    assert "automation" not in cli.read(b, "approved").get("t_abc123", {})
+    for p in (b / ".orch/run/sync/held").glob("*.json"):
+        p.unlink()  # M2: even without its held file, the replay never reaches the live ticket
+    edit(a, title="Peer edit after the replay")
+    success(a)
+    success(b)
+    assert load(b)["title"] == "Peer edit after the replay"
+    assert load(b)["ext"]["automation"] == {"enabled": False}
+    assert approval.held(b, waiting=True)
 
 
 @pytest.mark.parametrize("data", [b"not json", b"[]", b'{"ticket": 5}',
@@ -1020,3 +1030,100 @@ def test_a_rename_record_whose_new_file_differs_counts_as_removal(machines):
     assert state["paused"] and "Many files were removed (9)" in state["paused"]["reason"], state
     assert remote_sha(bare) == tip
     assert {f"{folder}/f{i}.txt" for i in range(9)} <= tracked(b)
+
+
+def test_a_retired_held_block_never_reverts_the_persons_own_value(machines):
+    # M1: a "done" held block outlived the revert; once the person set the proposed value here themselves, the
+    # next peer edit turned the live file back and held the person's own value as a peer change.
+    a, b, _ = both(machines)
+    mine, proposed = {"enabled": True}, {"enabled": False}
+    edit(b, ext={"automation": mine})
+    success(b)
+    success(a)
+    edit(a, ext={"automation": proposed})  # the peer proposes
+    success(a)
+    success(b)
+    assert load(b)["ext"]["automation"] == mine and approval.held(b, waiting=True)
+    edit(a, ext={"automation": mine})  # and reverts
+    success(a)
+    success(b)
+    assert not approval.held(b)  # the block is gone for good, not kept as a done block
+    edit(b, ext={"automation": proposed})  # the person sets the proposed value here
+    success(b)
+    success(a)
+    edit(a, title="Peer edit")
+    success(a)
+    success(b)
+    assert load(b)["title"] == "Peer edit"
+    assert load(b)["ext"]["automation"] == proposed
+    assert not approval.held(b, waiting=True)
+    assert not [r for r in needs.rows(b) if r["kind"] == "sync:held"]
+
+
+@pytest.mark.parametrize("damage", ["delete", "corrupt"])
+def test_held_value_stays_off_without_a_valid_held_file(machines, damage):
+    # M2: the committed copy carries the peer's value; a deleted or broken held file must never let it reach
+    # this machine's live ticket (fail closed: it is held again on the next merge).
+    a, b, _ = both(machines)
+    edit(a, ext={"automation": {"enabled": True}})
+    success(a)
+    success(b)
+    assert approval.held(b)
+    for p in (b / ".orch/run/sync/held").glob("*.json"):
+        if damage == "delete":
+            p.unlink()
+        else:
+            p.write_bytes(b"not json")
+    success(b)
+    assert "automation" not in load(b).get("ext", {})
+    edit(a, title="Peer edit")
+    success(a)
+    success(b)
+    assert load(b)["title"] == "Peer edit"
+    assert "automation" not in load(b).get("ext", {})
+    assert [r for r in needs.rows(b) if r["kind"] == "sync:held"]
+    assert step.view(b, TICKET, json.loads(repo.git(b, "show", "HEAD:" + TICKET).stdout)).get("ext", {}) == {}
+
+
+def counter_jump(machines, hostile_value):
+    a, b, bare = both(machines)
+    save(b, "ticket-counter.json", {"last": 3})
+    success(b)
+    success(a)
+    if hostile_value == "counter":
+        save(a, "ticket-counter.json", {"last": 900_000_000})
+    else:
+        save(a, "tickets/t_far001.json", ticket() | {"id": "t_far001", "key": "AB-900000000"})
+    repo.git(a, "add", "--", "ticket-counter.json", "tickets")
+    tip = hostile(a, bare, ["commit", "-m", "jump"]).decode()
+    state = run(b)
+    assert state["paused"]["reason"] == pause.JUMP and state["paused"]["files"] == ["ticket-counter.json"]
+    return a, b, tip
+
+
+@pytest.mark.parametrize("hostile_value", ["counter", "key"])
+@pytest.mark.parametrize("keep", ["mine", "theirs"])
+def test_counter_jump_needs_a_person(machines, hostile_value, keep, monkeypatch):
+    # M3: an agent cleared the jump gate with `resolve ticket-counter.json --keep theirs`; and with only a far
+    # key (small counter) neither choice ever cleared the pause.
+    _, b, tip = counter_jump(machines, hostile_value)
+    counter = repo.safe(b, "ticket-counter.json")
+    row = next(r for r in needs.rows(b) if r.get("title") == "ticket-counter.json")
+    assert row["cli"].endswith("--proof-stdin")
+    for by in ("agent:test", None):
+        with pytest.raises(Refused):
+            pause.resolve(b, "ticket-counter.json", keep, SimpleNamespace(proof_stdin=False, by=by), now=NOW)
+    other = "mine" if keep == "theirs" else "theirs"
+    with pytest.raises(Refused):  # a proof for the other choice is no proof for this one
+        args = proof(b, f"sync:keep-{other}-counter:{tip}", monkeypatch)
+        pause.resolve(b, "ticket-counter.json", keep, args, now=NOW)
+    assert json.loads(counter.read_text())["last"] == 3
+    assert cli.read(b, "state")["paused"]["reason"] == pause.JUMP
+    args = proof(b, f"sync:keep-{keep}-counter:{tip}", monkeypatch)
+    result = pause.resolve(b, "ticket-counter.json", keep, args, now=NOW)
+    assert not result.get("paused") and not result.get("last_error"), result
+    last = json.loads(counter.read_text())["last"]
+    assert last == (3 if (keep, hostile_value) == ("mine", "counter") else 900_000_000)
+    if hostile_value == "key":
+        assert json.loads(repo.safe(b, "tickets/t_far001.json").read_text())["key"] == "AB-900000000"
+    assert not success(b).get("paused")

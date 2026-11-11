@@ -121,7 +121,8 @@ def rows(root):
                     key,
                     text,
                     paused["since"],
-                    f"orch sync resolve {shlex.quote(path)} --keep mine|theirs",
+                    f"orch sync resolve {shlex.quote(path)} --keep mine|theirs"
+                    + (" --proof-stdin" if path == "ticket-counter.json" else ""),
                     ["Keep mine", "Keep theirs"],
                     title=Path(path).name,
                 )

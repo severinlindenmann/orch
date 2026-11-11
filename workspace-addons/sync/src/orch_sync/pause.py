@@ -9,6 +9,7 @@ from orch import config, humanproof, syncgate, tickets
 from . import cli, incoming, paths, repo, scan
 
 HISTORY = "history"  # the pause kind of two histories git cannot combine (no file to choose)
+JUMP = "Ticket numbers jumped far ahead on the other computer"  # a person checks the counter (Fable A9)
 
 
 class Pause(repo.Refused):
@@ -294,6 +295,18 @@ def resolve(root, path, keep, args=None, *, now=None):
                 from . import merge
 
                 docs = [step.document(path, d) for d in (mine, theirs) if d is not None]
+                jump = paused.get("reason") == JUMP
+                if keep == "theirs" or jump:
+                    # M3: numbers only go up, so their counter (or clearing a jump at all) is a person's
+                    # decision, bound to the reviewed remote commit.
+                    by = humanproof.person_by(
+                        root,
+                        args,
+                        "addon.act",
+                        f"sync:keep-{keep}-counter:{remote}",
+                        no_handoff="Choosing the ticket counter needs a person's proof over stdin.",
+                    )
+                    config.require_person(by, "choose the ticket counter")
                 if keep == "theirs" and len(docs) == 2:
                     data = step.encoded(merge.merge_counter({}, *docs))
                 step.document(path, data)
@@ -314,6 +327,9 @@ def resolve(root, path, keep, args=None, *, now=None):
                 decisions = {"remote_sha": remote, "files": {}}
             step.write(root, "run/sync/choices/" + path, data)
             decisions["files"][path] = {"keep": keep, "at": now}
+            if path == "ticket-counter.json" and paused.get("reason") == JUMP and remote:
+                # The person's proven choice covers the incoming numbers they reviewed (a far key included).
+                decisions["files"][path]["covers"] = step.top_number(root, remote)
             step.write(root, "run/sync/choices.json", step.encoded(decisions))
             step.write(root, path, step.view_bytes(root, path, data))
             paused["files"].remove(path)

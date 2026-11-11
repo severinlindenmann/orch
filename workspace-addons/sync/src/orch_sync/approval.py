@@ -50,7 +50,8 @@ def _load(p):
 
 def held(root, *, waiting=False):
     """Held blocks; waiting=True: only those still waiting for a person (not ignored, not settled). A file of
-    any other shape (not JSON, wrong types) counts for nothing: one bad file never breaks a merge or a row."""
+    any other shape (not JSON, wrong types) is no block: one bad file never breaks a merge or a row; it holds its
+    ticket's add-on blocks on the recorded live value instead (`broken`)."""
     folder = repo.safe(root, "run/sync/held")
     blocks = [(p, _load(p)) for p in sorted(folder.glob("*.json"))] if folder.exists() else []
     return [
@@ -58,6 +59,13 @@ def held(root, *, waiting=False):
         for p, b in blocks
         if _block_ok(b) and not (waiting and (b.get("ignored") is True or b.get("waiting", True) is not True))
     ]
+
+
+def broken(root):
+    """Tickets with a held file of any other shape: all their add-on blocks stay on the recorded live value."""
+    folder = repo.safe(root, "run/sync/held")
+    names = sorted(folder.glob("*.json")) if folder.exists() else []
+    return {p.name.rsplit("-", 1)[0] for p in names if "-" in p.name and not _block_ok(_load(p))}
 
 
 def holds(local, remote):
@@ -77,7 +85,8 @@ def filter_ticket(root, path, doc, local, remote):
     tid = Path(path).stem
     # Fable B12: an approval is used up where it is given: `approve` writes the value into the live ticket.
     # The merge never applies a value from the store, so a later re-send of the same value is held again.
-    # approved.json stays as the record the automation add-on checks.
+    # approved.json is the record the automation add-on checks, while the live block is the approved value
+    # (step.remember drops it once the live block moves on).
     ignored = cli.read(root, "ignored").get(tid, {})
     installed = manifests()
     old, new = local.get("ext", {}), remote.get("ext", {})
@@ -101,24 +110,21 @@ def filter_ticket(root, path, doc, local, remote):
         # Fable B11: the synced bytes keep the merged value (so both machines converge); a block is what keeps
         # this machine's live ticket on its own value for every synced value it held (`seen`).
         seen = {h for _, b in current for h in b.get("seen", []) if isinstance(h, str)}
-        prior = next((b for _, b in current if "had" in b), None)
         if (
             name == "sync"
             or installed.get(name, {}).get("ticket_ext_inert") is True
             or old.get(name) == new.get(name)
         ):
+            # The peer no longer proposes a change: nothing left to allow. The block goes for good (M1): the
+            # committed value below is the agreed one, and the live-ext record covers the copy still applied.
             for p, _ in current:
-                p.unlink(missing_ok=True)  # the peer no longer proposes a change: nothing left to allow
+                p.unlink(missing_ok=True)
             if name != "sync" and installed.get(name, {}).get("ticket_ext_inert") is not True:
                 # Both sides agree: that value, never one the ext merge synthesised (a deletion gives {}).
                 if name in old:
                     ext[name] = old[name]
                 else:
                     ext.pop(name, None)
-            if prior and seen and name != "sync":
-                # Kept, no longer waiting: the committed copy may still hold a held value until applied.
-                done = {**prior, "seen": sorted(seen), "waiting": False}
-                write(root, f"run/sync/held/{tid}-{digest(done)}.json", encoded(done))
             continue
         value = new.get(name)
         block = {"ticket": tid, "addon": name, "value": value, "hash": digest(value)}
@@ -153,7 +159,7 @@ def filter_ticket(root, path, doc, local, remote):
 
 
 def approve(root, tid, addon, args):
-    from .step import document, encoded, step_lock, write
+    from .step import document, encoded, remember, step_lock, write
 
     with step_lock(root), syncgate.hold(root), tickets.sync_apply(root, tid):
         candidates = [(p, b) for p, b in held(root, waiting=True) if b["ticket"] == tid and b["addon"] == addon]
@@ -185,5 +191,6 @@ def approve(root, tid, addon, args):
         store.setdefault(tid, {})[addon] = hashed
         write(root, "run/sync/approved.json", encoded(store))
         write(root, path, encoded(doc))
+        remember(root, tid, doc)
         p.unlink()
     return {"approved": addon, "ticket": tid}

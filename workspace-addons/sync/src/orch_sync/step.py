@@ -103,6 +103,20 @@ def counter_ok(doc):
     )
 
 
+def top_number(root, ref):
+    """The highest ticket number a tree uses: its counter, every key and every old key."""
+    rows = entries(root, ref)
+    numbers = [0]
+    if "ticket-counter.json" in rows:
+        last = document("ticket-counter.json", blob(root, rows["ticket-counter.json"])).get("last", 0)
+        numbers.append(last if type(last) is int else 0)
+    for path, entry in rows.items():
+        if paths.TICKET.fullmatch(path):
+            doc = document(path, blob(root, entry))
+            numbers.extend(merge._key_n(k) for k in [doc.get("key"), *merge.old_keys_of(doc)])
+    return max(numbers)
+
+
 def document(path, data):
     if path == "ticket-counter.json" and len(data) > COUNTER_BYTES:
         raise pause.Pause(f"Document has a problem: {path}", [path])
@@ -237,6 +251,7 @@ def stage(root, head, index, state, now):
                     if paths.TICKET.fullmatch(path):
                         head_blob = blob(root, old.get(path))  # never rebinds `head` (the commit id)
                         staged = committed(root, path, data, head_blob)
+                        remember(root, tid, doc)  # after `committed`, which compares with the previous record
                         if staged != data:
                             if staged != head_blob:
                                 put(root, index, path, staged)
@@ -329,13 +344,72 @@ def _held(root, path):
     return [b for _, b in held(root) if b.get("ticket") == Path(path).stem and "had" in b]
 
 
+def live_ext(root):
+    """{ticket: {add-on: value}}: the add-on blocks this machine's live tickets last held (stage records them).
+    A held file can be deleted or broken; this record keeps a peer's synced value off the live ticket anyway."""
+    from .approval import manifest_cache
+
+    cached = manifest_cache.get()
+    if cached is not None and "live-ext" in cached:
+        return cached["live-ext"]
+    data = cli.read(root, "live-ext")
+    if cached is not None:
+        cached["live-ext"] = data
+    return data
+
+
+def remember(root, tid, doc):
+    """Record a live ticket's add-on blocks (not ext.sync); writes only when they changed."""
+    ext = doc.get("ext") if isinstance(doc.get("ext"), dict) else {}
+    own = {k: v for k, v in ext.items() if k != "sync"}
+    record = live_ext(root)
+    if record.get(tid) != own:
+        record = {**record, tid: own}
+        write(root, "run/sync/live-ext.json", encoded(record))
+        from .approval import digest, manifest_cache
+
+        if manifest_cache.get() is not None:
+            manifest_cache.get()["live-ext"] = record
+        # An approval is used up once the live block moves on from the approved value: a later re-send of that
+        # value is never blessed by it again.
+        store = cli.read(root, "approved")
+        mine = store.get(tid) if isinstance(store.get(tid), dict) else {}
+        kept = {name: h for name, h in mine.items() if digest(own.get(name)) == h}
+        if kept != mine:
+            rest = {k: v for k, v in store.items() if k != tid}
+            write(root, "run/sync/approved.json", encoded({**rest, tid: kept} if kept else rest))
+
+
+def _unguarded(root, path, blocks):
+    """(names, recorded): the add-on names no valid held block covers (every name when a held file of this ticket
+    is broken), and this machine's recorded live values. A different synced value on such a name stays held."""
+    from .approval import broken, manifests
+
+    tid = Path(path).stem
+    # None: this ticket was never live here (nothing of a peer's is trusted)
+    recorded = live_ext(root).get(tid)
+    recorded = recorded if isinstance(recorded, dict) or recorded is None else {}
+    covered = set() if tid in broken(root) else {b.get("addon") for b in blocks}
+    installed = manifests()
+    return (
+        lambda name: (
+            name != "sync"
+            and name not in covered
+            and installed.get(name, {}).get("ticket_ext_inert") is not True
+        )
+    ), recorded
+
+
+def _differs(a, b, name):
+    return (name in a) != (name in b) or a.get(name) != b.get(name)
+
+
 def _ext_view(root, path, doc):
-    """Held add-on blocks show this machine's own value until a person allows the synced one (Fable B11)."""
+    """Held add-on blocks show this machine's own value until a person allows the synced one (Fable B11).
+    Fails closed: a synced value no valid block covers shows this machine's recorded live value instead."""
     from .approval import digest
 
     blocks = _held(root, path)
-    if not blocks:
-        return doc
     ext = doc.get("ext") if isinstance(doc.get("ext"), dict) else None
     out = dict(ext or {})
     for b in blocks:
@@ -344,6 +418,14 @@ def _ext_view(root, path, doc):
                 out[b["addon"]] = b.get("local")
             else:
                 out.pop(b["addon"], None)
+    by_record, recorded = _unguarded(root, path, blocks)
+    recorded = recorded if recorded is not None else {}
+    for name in sorted(set(out) | set(recorded)):
+        if by_record(name) and _differs(out, recorded, name):
+            if name in recorded:
+                out[name] = recorded[name]
+            else:
+                out.pop(name, None)
     if out == (ext or {}):
         return doc
     return {**doc, "ext": out} if out or ext is not None else {k: v for k, v in doc.items() if k != "ext"}
@@ -371,20 +453,33 @@ def committed(root, path, data, head):
     synced value of every add-on block still held on this machine's own value."""
     if head is not None and data != head and data == view_bytes(root, path, head):
         return head
-    blocks = _held(root, path)
-    if not blocks:
-        return data
+    from .approval import digest, held
+
     doc = incoming.strict_load(data)
+    ext = doc.get("ext") if isinstance(doc.get("ext"), dict) else {}
+    for p, b in held(root):
+        # M1: a person moved this add-on on (neither their own held-against value nor a held one): the block is
+        # done, so it can never turn their value back into the old one.
+        if b["ticket"] != Path(path).stem or "had" not in b:
+            continue
+        if not _own(ext, b) and digest(ext.get(b["addon"])) not in b.get("seen", []):
+            p.unlink(missing_ok=True)
+    blocks = _held(root, path)
     try:
         head_doc = incoming.strict_load(head) if head is not None else {}
     except (ValueError, RecursionError):
         head_doc = {}
-    promoted = _ext_committed(doc, head_doc, blocks)
+    promoted = _ext_committed(root, path, doc, head_doc, blocks)
     return data if promoted == doc else encoded(promoted)
 
 
-def _ext_committed(doc, head_doc, blocks):
-    """Reverse of _ext_view: a held block still on this machine's own value keeps HEAD's synced value."""
+def _own(ext, b):
+    return (b["addon"] in ext and ext[b["addon"]] == b.get("local")) if b["had"] else b["addon"] not in ext
+
+
+def _ext_committed(root, path, doc, head_doc, blocks):
+    """Reverse of _ext_view: a held block still on this machine's own value keeps HEAD's synced value; so does an
+    unchanged recorded live value no valid block covers."""
     from .approval import digest
 
     head_ext = head_doc.get("ext") if isinstance(head_doc.get("ext"), dict) else {}
@@ -392,8 +487,14 @@ def _ext_committed(doc, head_doc, blocks):
     out = dict(ext)
     for b in blocks:
         name = b.get("addon")
-        own = (name in ext and ext[name] == b.get("local")) if b["had"] else name not in ext
-        if own and digest(head_ext.get(name)) in b.get("seen", []):
+        if _own(ext, b) and digest(head_ext.get(name)) in b.get("seen", []):
+            if name in head_ext:
+                out[name] = head_ext[name]
+            else:
+                out.pop(name, None)
+    by_record, recorded = _unguarded(root, path, blocks)
+    for name in sorted(set(ext) | set(head_ext) | set(recorded)) if recorded is not None else ():
+        if by_record(name) and not _differs(ext, recorded, name) and _differs(head_ext, recorded, name):
             if name in head_ext:
                 out[name] = head_ext[name]
             else:
@@ -482,10 +583,14 @@ def merged_tree(root, head, remote, index, now):
     if counter_choice and counter_choice.get("keep") in ("theirs", "key"):
         chosen = document("ticket-counter.json", pause.selected(root, "ticket-counter.json")).get("last", 0)
         reach = max(reach, chosen if type(chosen) is int else 0)
+    if counter_choice and type(counter_choice.get("covers")) is int:
+        # A person's proven counter choice on a jump covers the incoming numbers they reviewed (M3: a far ticket
+        # key with a small counter would otherwise pause again for ever).
+        reach = max(reach, counter_choice["covers"])
     if (counters[1] > max([counters[0], *keys[0]]) + COUNTER_JUMP and not counter_choice) or max(
         keys[1], default=0
     ) > reach + COUNTER_JUMP:
-        raise pause.Pause("Ticket numbers jumped far ahead on the other computer", ["ticket-counter.json"])
+        raise pause.Pause(pause.JUMP, ["ticket-counter.json"])
     if changed_keys:
         clashes = {key: known[key] for key in sorted(changed_keys)}
         raise pause.Pause(
