@@ -7,6 +7,7 @@ Non-history content is symmetric; revision/updated_at may differ on no-op reuse.
 Shared vectors: contracts/vectors/ticket-merge-v1.json.
 """
 
+import hashlib
 import json
 import re
 from copy import deepcopy
@@ -285,7 +286,7 @@ def _evidence(*lists):
 #   - authority is an undo: they take the decision fields (_DECISION); text and covers are then free (an undo
 #     record does not bind them);
 #   - no authority (nothing verifies, or no verifier): no Won't do at all.
-_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_by", "wont_at", "wont_mac")
+_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_by", "wont_at", "wont_line", "wont_mac")
 _DECISION = ("wont_do", "reason", "wont_nonce", "wont_mac")
 
 
@@ -301,7 +302,7 @@ def _drop_wont(x):
     return {
         k: v
         for k, v in x.items()
-        if k not in ("wont_do", "reason", "wont_mac", "wont_nonce", "wont_by", "wont_at")
+        if k not in ("wont_do", "reason", "wont_mac", "wont_nonce", "wont_by", "wont_at", "wont_line")
     }
 
 
@@ -394,7 +395,8 @@ def _ref_id(r):
 # The verdict entries a ticket carries (human-proof.md "Done needs a signed verdict"). The fields of a stored
 # entry: the core's humanproof.VERDICT_FIELDS (parity-tested).
 _VERDICT_FIELDS = ("kind", "nonce", "mac")
-_VERDICT_OPTIONAL = ("person", "at")  # humanproof.VERDICT_OPTIONAL (drift-tested)
+_VERDICT_OPTIONAL = ("person", "at", "line")  # humanproof.VERDICT_OPTIONAL (drift-tested)
+_DIGEST = re.compile(r"[0-9a-f]{64}")
 _ACTOR = re.compile(r"human:[A-Za-z0-9_.@ -]{1,58}")  # humanproof.ACTOR_PATTERN (drift-tested)
 VERDICT_CAP = 8
 _NONCE = re.compile(r"^[0-9a-f]{16}$")
@@ -415,7 +417,8 @@ def _verdict_shape(e):
     return (
         isinstance(e, dict)
         and set(_VERDICT_FIELDS) <= set(e) <= set(_VERDICT_FIELDS) | set(_VERDICT_OPTIONAL)
-        and ("person" not in e) == ("at" not in e)
+        and ("person" in e) == ("at" in e) == ("line" in e)
+        and ("line" not in e or (isinstance(e["line"], str) and bool(_DIGEST.fullmatch(e["line"]))))
         and ("person" not in e or (isinstance(e["person"], str) and bool(_ACTOR.fullmatch(e["person"]))))
         and ("at" not in e or (isinstance(e["at"], str) and _utc(e["at"]) is not None))
         and e["kind"] in ("person", "agent")
@@ -452,23 +455,25 @@ def _verdicts(ctx, base, a, b, out):
     return sorted(keep, key=lambda e: e["mac"])
 
 
-# History lines a decision writes (tickets.py is the writer; a test runs the real writers against these).
-_WONT_TEXT = re.compile(r"Marked (c[0-9]{1,4}) as won't do")
-_DONE_TEXT = re.compile(r"Status \w+ -> done|Patched [a-z_, ]+ \(status \w+ -> done\)")
-_LINE_KEYS = {"at", "by", "via", "text", "chat_message"}
 LINE_WINDOW = 5  # seconds between a decision and the history line its writer adds in the same operation
+_LINE_KEYS = {"at", "by", "via", "text", "chat_message"}
+
+
+def history_digest(text, via):
+    """sha256 hex of the history line a decision's writer adds (humanproof.history_digest, drift-tested)."""
+    return hashlib.sha256(_canon({"text": text, "via": via}).encode()).hexdigest()
 
 
 def _decisions(ctx, ticket):
-    """Verified decisions that name their author and time (new records only): key -> (author, at, is_text)."""
+    """Verified decisions that name their author, time and exact history line (new records only):
+    key -> (author, at, line digest)."""
     found = {}
     for check in ticket.get("checklist", []):
-        if _person_wont(ctx, check) and isinstance(check.get("wont_by"), str):
-            cid = check["id"]
-            found[("wont", cid, check.get("wont_mac"))] = (
+        if _person_wont(ctx, check) and all(isinstance(check.get(k), str) for k in ("wont_by", "wont_line")):
+            found[("wont", check["id"], check.get("wont_mac"))] = (
                 check["wont_by"],
                 _utc(check.get("wont_at")),
-                lambda t, cid=cid: (m := _WONT_TEXT.fullmatch(t)) is not None and m.group(1) == cid,
+                check["wont_line"],
             )
     for entry in ticket.get("verdicts", []):
         if (
@@ -477,20 +482,21 @@ def _decisions(ctx, ticket):
             and "person" in entry
             and ctx.verdict_state(entry, ticket) == "current"
         ):
-            found[("verdict", entry["mac"])] = (
-                entry["person"],
-                _utc(entry["at"]),
-                lambda t: _DONE_TEXT.fullmatch(t) is not None,
-            )
-    return {k: v for k, v in found.items() if v[1] is not None and _ACTOR.fullmatch(v[0])}
+            found[("verdict", entry["mac"])] = (entry["person"], _utc(entry["at"]), entry["line"])
+    return {
+        k: v
+        for k, v in found.items()
+        if v[1] is not None and _ACTOR.fullmatch(v[0]) and _DIGEST.fullmatch(v[2])
+    }
 
 
 def _attributed(unique, incoming, decisions):
     """Canonical keys of the remote-only lines that stay the person's: per NEW verified decision at most ONE
-    line, whose `by` is the decision's author, whose text the decision's writer produces, whose shape is the
-    writer's exactly and whose `at` is the closest to the decision's within LINE_WINDOW seconds."""
+    line, whose `by` is the decision's author, whose {text, via} is EXACTLY the line the decision's MAC binds,
+    whose shape is the writer's and whose `at` is within LINE_WINDOW seconds of the decision's (the closest
+    wins)."""
     kept = set()
-    for _, (author, at, is_text) in sorted(decisions.items(), key=lambda kv: _canon(kv[0])):
+    for _, (author, at, digest) in sorted(decisions.items(), key=lambda kv: _canon(kv[0])):
         best = None
         for h in unique:
             key = _canon(h)
@@ -500,10 +506,9 @@ def _attributed(unique, incoming, decisions):
                 and key not in kept
                 and h.get("by") == author
                 and isinstance(h.get("text"), str)
-                and is_text(h["text"])
+                and history_digest(h["text"], h.get("via")) == digest
                 and set(h) <= _LINE_KEYS
                 and h.get("chat_message") in (False, None)
-                and (h.get("via") is None or isinstance(h["via"], str))
                 and t is not None
                 and abs(t - at) <= LINE_WINDOW
                 and (best is None or (abs(t - at), key) < best[0])

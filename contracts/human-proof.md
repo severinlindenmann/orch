@@ -236,7 +236,7 @@ re-appending a consumed line never delivers it again (reference `pending_is_huma
 here, so a step's decision counts as a person's only when the receiving core's relay client recorded it from a
 relay-authenticated sender (a phone, or a person-attributed message the relay authenticated; the hook compares the FULL decision
 record, never "this step was touched by a relay sender"), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`,
-`"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of {check, wont_do, reason, text, covers, nonce[, person, at]}`: `person` and `at` (the step fields `wont_by`, `wont_at`) only on an "on" record made from #484 on, the actor label `human:<name>` and the UTC time of the decision, inside the MAC; `humanproof.SIGNED_STEP_FIELDS` lists them) (an undo is
+`"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of {check, wont_do, reason, text, covers, nonce[, person, at, line]}`: `person`, `at` and `line` (the step fields `wont_by`, `wont_at`, `wont_line`) only on an "on" record made from #484 on, the actor label `human:<name>`, the UTC time of the decision and the digest of the history line it writes, inside the MAC; `humanproof.SIGNED_STEP_FIELDS` lists them) (an undo is
 the same record with `wont_do` false and `reason`, `text` and `covers` null, so a later rename of the reopened step cannot make the undo stop verifying; the nonce is random and fresh for every signing, so equal decisions get
 different MACs), a different prefix from the pending MAC so the two can never be confused, stored on the step as `wont_mac` (+
 `wont_nonce`). The MAC binds WHERE the decision belongs (a valid decision copied onto another ticket or step is not the person's) and
@@ -258,13 +258,13 @@ deletion carries no proof; a person's removal is proven where it is made). Anyth
 ticket's current state AND is the CURRENT entry of this core's verdict ledger; every other raw `done` (an agent wrote it into the file, a peer
 brought it in through sync) is **Review** there. It is decided in one function (`humanproof.verdict_ok`, reference `verdict_is_human`, vectors
 `verdict`), applied in ONE read path (`tickets._effective`, called by `load` and `list_all`) and ONE write guard (`tickets._write`). The record
-is HMAC-SHA256(`human.key`, `"verdict1." + workspace id + "." + ticket id + "." + canonical JSON of {status, kind, checks, nonce[, person, at]}`), base64url:
+is HMAC-SHA256(`human.key`, `"verdict1." + workspace id + "." + ticket id + "." + canonical JSON of {status, kind, checks, nonce[, person, at, line]}`), base64url:
 `status` is always `"done"`; `kind` is `"person"` (a proven verdict: page or terminal proof, the phone through the relay channel, the dev test
 human) or `"agent"` (an agent finished while the recorded grant was effective); `checks` is the sha256 hex of canonical JSON
 `[[step id, text, done is true, wont_do is true], ...]`, WHAT was accepted (a new, reworded or reopened step makes the verdict stop verifying, so
-the ticket is Review again; title, note, summary, outcome, history and evidence are not bound); `nonce` is 16 random hex, fresh per signing; `person` and `at` (only on a `kind: "person"` entry signed from #484 on, always both, otherwise absent, never `null`) are the actor (`human:<name>`, at most 64 characters, the pattern `humanproof.ACTOR_PATTERN`) and the UTC time of the signing, **inside the MAC**, so changing, adding or removing either makes the entry stop verifying. A
+the ticket is Review again; title, note, summary, outcome, history and evidence are not bound); `nonce` is 16 random hex, fresh per signing; `person`, `at` and `line` (only on a `kind: "person"` entry signed from #484 on, always all three, otherwise absent, never `null`) are the actor (`human:<name>`, at most 64 characters, the pattern `humanproof.ACTOR_PATTERN`) the UTC time of the signing and the digest of the history line the signing operation wrote, **inside the MAC**, so changing, adding or removing any makes the entry stop verifying. A
 different prefix from `pending1` and `wontdo1`, so the MACs can never be confused. The ticket stores `verdicts`: a list of at most 8
-`{kind, nonce, mac}` plus the optional `person` and `at` (`humanproof.VERDICT_FIELDS` + `VERDICT_OPTIONAL`, the single source the sync merge copies and a test drift-checks; a list, because a MAC can be checked only by the machine whose key made it: two machines that both accepted keep both
+`{kind, nonce, mac}` plus the optional `person`, `at` and `line` (`humanproof.VERDICT_FIELDS` + `VERDICT_OPTIONAL`, the single source the sync merge copies and a test drift-checks; a list, because a MAC can be checked only by the machine whose key made it: two machines that both accepted keep both
 entries, and one machine's signing never erases another's). **Freshness is the ledger's job:** `keys/<ws>/verdict.json` in the guarded home
 (`{"schema": "orch.verdict-ledger/1", "entries": {"<ticket id>": "<current mac>" | null}}`, 0600, written under the key lock, separate from
 `wont.json`) holds the CURRENT MAC per ticket; a MAC is accepted only when it IS the current entry, so replaying an older signed verdict, or the
@@ -292,11 +292,8 @@ verifies here (the grant is ours).
 in neither the base nor on this machine is **remote-only**; unless its `by` is a plain `agent:` label it is shown as `agent:sync` with the text
 prefixed "(synced, not verified here) ", EXCEPT when it is the line of a decision that is **new** in this merge. That means ALL of: (1) a decision
 THIS core verifies (a verdict entry the verdict verifier calls `current`, or a Won't do whose MAC is the current ledger entry) that carries a
-MAC-bound actor and time (`person` + `at` / `wont_by` + `wont_at`) and was not already verified in the base or on this machine; (2) the line's
-`by` equals that actor; (3) its text is what the writer produces (verdict: `Status <old> -> done` from set-status, `Status review -> done` from
-Looks good, `Patched <fields> (status <old> -> done)` from the page's patch; Won't do: `Marked <step id> as won't do` for that step; the display
-strings "Looks good" are never attributed); (4) its shape is the writer's exactly (only `at`, `by`, `via`, `text`, `chat_message` false; a `lost` field,
-`chat_message: true` or any other key means it is not the writer's line); (5) its `at` is within 5 seconds of the decision's `at`, and when several
+MAC-bound actor, time and line (`person` + `at` + `line` / `wont_by` + `wont_at` + `wont_line`) and was not already verified in the base or on this machine; (2) the line's
+`by` equals that actor; (3) its `{text, via}` is EXACTLY the line the decision's MAC binds (`line` = sha256 hex of canonical JSON `{"text", "via"}`, written by the signer from the history line its own operation adds, `humanproof.history_digest`; any other text, e.g. a "Patched <other fields> (status ... -> done)" line, or another `via` is not attributed); (4) its shape is the writer's exactly (only `at`, `by`, `via`, `text`, `chat_message` false; a `lost` field, `chat_message: true` or any other key means it is not the writer's line); (5) its `at` is within 5 seconds of the decision's `at`, and when several
 lines qualify the one closest to it is the decision's; (6) at most ONE line per decision (a replay, or a second line citing it, is demoted).
 **Legacy** decisions (no actor: signed before #484) still verify Done and Won't do exactly as before but authorise no history line. No migration:
 decisions signed from now on carry the actor. The step's plain `by` and `at` are the peer's input and never decide authorship. **Never demoted:**

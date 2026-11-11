@@ -429,7 +429,19 @@ def test_the_real_writers_lines_are_attributed_by_the_real_merge(ws, run, monkey
         before, after, before, "2030-01-03T00:00:00Z", hp.wont_verifier(ws), hp.verdict_verifier(ws)
     )
     kept = [h for h in out["history"] if h in new]
-    assert kept == [h for h in new if merge._DONE_TEXT.fullmatch(h["text"])] and kept
+    [entry] = after["verdicts"]
+    assert len(kept) == 1 and entry["line"] == hp.history_digest(kept[0]["text"], kept[0]["via"])
+    # a different "Patched ..." line riding on the real verdict (or another via) is not the bound line
+    for text, via in (
+        ("Patched title, note (status review -> done)", kept[0]["via"]),
+        (kept[0]["text"], "phone"),
+    ):
+        fake = {**kept[0], "text": text, "via": via}
+        remote = {**after, "history": [*before["history"], fake]}
+        out = merge.merge_ticket(
+            before, remote, before, "2030-01-03T00:00:00Z", hp.wont_verifier(ws), hp.verdict_verifier(ws)
+        )
+        assert fake not in out["history"] and any(h["by"] == "agent:sync" for h in out["history"])
     # the same decision known here (base): the same lines are demoted, a decision lends its name once
     again = merge.merge_ticket(
         after, after, before, "2030-01-03T00:00:00Z", hp.wont_verifier(ws), hp.verdict_verifier(ws)
@@ -465,6 +477,7 @@ def test_the_real_writers_lines_are_attributed_by_the_real_merge(ws, run, monkey
 def test_the_merges_dependency_free_copy_of_the_actor_rules_has_not_drifted():
     merge = _merge_mod()
     assert merge._VERDICT_OPTIONAL == hp.VERDICT_OPTIONAL
+    assert merge.history_digest("a", "cli") == hp.history_digest("a", "cli")
     assert merge._ACTOR.pattern == hp.ACTOR_PATTERN
     assert hp.bindable_actor("human:pat") and not hp.bindable_actor("agent:pat")
     assert not hp.bindable_actor("human:" + "x" * 80) and not hp.bindable_actor("human:a\nb")

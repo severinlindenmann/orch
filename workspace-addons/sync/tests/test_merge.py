@@ -29,7 +29,7 @@ def vmac(ticket, step, nonce):
         str((step.get("reason") if on else "") or ""),
     ]
     if on and "wont_by" in step:  # a NEW decision binds who and when (the real MAC: humanproof.wont_decision)
-        parts += [str(step["wont_by"]), str(step.get("wont_at"))]
+        parts += [str(step["wont_by"]), str(step.get("wont_at")), str(step.get("wont_line"))]
     return "v1-" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:20]
 
 
@@ -1080,7 +1080,7 @@ def test_merge_verdict_fields_and_shape():
     from orch_sync import merge
 
     assert merge._VERDICT_FIELDS == ("kind", "nonce", "mac")
-    assert merge._VERDICT_OPTIONAL == ("person", "at")
+    assert merge._VERDICT_OPTIONAL == ("person", "at", "line")
     good = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
     assert merge._verdict_shape(good)
     for bad in (
@@ -1293,8 +1293,17 @@ def test_a_remote_history_line_with_non_string_text_never_raises(text):
 
 
 def test_a_person_line_keeps_its_name_only_for_a_new_decision_and_both_orders_agree_elsewhere():
-    entry = {"kind": "person", "person": "human:Ann", "at": T2, "nonce": "0123456789abcdef", "mac": "A" * 43}
-    line = {"at": T2, "by": "human:Ann", "via": None, "text": "Status review -> done", "chat_message": False}
+    from orch_sync.merge import history_digest
+
+    line = {"at": T2, "by": "human:Ann", "via": "cli", "text": "Status review -> done", "chat_message": False}
+    entry = {
+        "kind": "person",
+        "person": "human:Ann",
+        "at": T2,
+        "line": history_digest(line["text"], "cli"),
+        "nonce": "0123456789abcdef",
+        "mac": "A" * 43,
+    }
     peer = tk(status="done", verdicts=[entry], history=[line])
     v = verdict_for({TK: entry["mac"]}, [])
     out = merge_ticket(tk(), peer, tk(), NOW, None, v)
