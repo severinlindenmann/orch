@@ -31,6 +31,9 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
     c = sub.add_parser("copy", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
+    for name in ("update", "ask-update"):
+        item = c.add_parser(name, parents=[common])
+        item.add_argument("ticket")
     cc = c.add_parser("clean", parents=[common], help="take back the separate copies nobody needs")
     cc.add_argument("--trash", action="store_true", help=argparse.SUPPRESS)  # empty the trash (detached run)
     cc.add_argument("--background", action="store_true", help=argparse.SUPPRESS)  # sweep + trash, silent
@@ -174,6 +177,13 @@ def _services_cmd(args, root: Path) -> None:
 def _copy_clean(args, root: Path) -> None:
     from orch import worktrees
 
+    if args.sub in ("update", "ask-update"):
+        from orch import tickets
+
+        tid = tickets.load(root, args.ticket)["id"]
+        message = (worktrees.update_copy if args.sub == "update" else worktrees.ask_update)(root, tid)
+        _out(args, {"message": message}, message)
+        return
     if args.sub == "remove-orphaned":
         if not isinstance(args.ws8, str) or not worktrees._WS8.fullmatch(args.ws8):
             raise Refused("That is not a copies folder.")

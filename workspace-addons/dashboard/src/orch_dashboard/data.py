@@ -18,6 +18,7 @@ from . import look, mobile, phone_delivery
 
 _run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
+
 def _me() -> str:
     from .actions import actor  # actions imports this module
 
@@ -190,6 +191,9 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         for k in ("checklist", "refs", "questions", "history"):
             if not isinstance(t.get(k), list):
                 t[k] = []
+        back = (t.get("work") or {}).get("bring_back") or {}
+        if back.get("state") == "waiting":
+            t["bring_back"] = {"state": "waiting", "reason": str(back.get("reason") or "")}
         _mark_missing_proofs(root, t)
         mobile.mark_chat_history(t)
         tickets.append(t)
@@ -592,17 +596,25 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     git_private = {
         "count": private.get("count") if type(private.get("count")) is int else 0,
         "lines": [line[:300] for line in private_lines if isinstance(line, str)][:4]
-        if isinstance(private_lines, list) else [],
+        if isinstance(private_lines, list)
+        else [],
         "agent_command_ignored": private.get("agent_command_ignored") is True,
         "pending": [
             {
                 "name": str(x.get("name")),
                 "key": str(x.get("key")),
                 "showable": x.get("showable") is True,
-                **{k: x[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(x.get(k), str)},
+                **{
+                    k: x[k]
+                    for k in ("adapter", "command", "interactive", "prompt")
+                    if isinstance(x.get(k), str)
+                },
             }
-            for x in (private.get("pending_agents") if isinstance(private.get("pending_agents"), list) else [])[:5]
-            if isinstance(x, dict) and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", str(x.get("name")))
+            for x in (
+                private.get("pending_agents") if isinstance(private.get("pending_agents"), list) else []
+            )[:5]
+            if isinstance(x, dict)
+            and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", str(x.get("name")))
             and re.fullmatch(r"[0-9a-f]{64}", str(x.get("key")))
         ],
     }

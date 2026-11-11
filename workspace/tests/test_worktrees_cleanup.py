@@ -249,11 +249,14 @@ def test_dirty_copy_is_committed_to_its_branch_first_and_reachable(repo):
     (p / "new.txt").write_text("new\n")  # untracked
     close(repo, t, "done")
     assert not p.exists() and t not in worktrees.registry(repo)
-    assert git(repo, "show", f"orch/{t}:new.txt") == "new"
-    assert git(repo, "show", f"orch/{t}:code.py") == "print(2)"
-    assert git(repo, "log", "-1", "--format=%an <%ae>", f"orch/{t}") == "orch <orch@localhost>"
-    assert [b["ticket"] for b in pending(repo)["branches"]] == [t]  # unmerged: the branch stays
-    assert git(repo, "status", "--porcelain", "--", ".", ":!.orch") == ""  # the project is untouched
+    assert git(repo, "show", "HEAD:new.txt") == "new"
+    assert git(repo, "show", "HEAD:code.py") == "print(2)"
+    assert git(repo, "log", "-1", "--format=%an <%ae>", "HEAD^2") == "orch <orch@localhost>"
+    assert pending(repo)["branches"] == []  # merged work needs no retained branch
+    assert f"orch/{t}" not in branches(repo)
+    assert (
+        git(repo, "status", "--porcelain", "--", ".", ":!.orch") == ""
+    )  # the changes are committed in the project
 
 
 def test_the_commit_never_runs_hooks_or_signs(repo):
@@ -272,7 +275,7 @@ def test_the_commit_never_runs_hooks_or_signs(repo):
     (p / "x.txt").write_text("x")
     close(repo, t, "done")
     assert not marker.exists()
-    assert git(repo, "show", f"orch/{t}:x.txt") == "x"
+    assert git(repo, "show", "HEAD:x.txt") == "x"
 
 
 def test_a_copy_whose_changes_cannot_be_saved_is_kept(repo, monkeypatch):
@@ -307,7 +310,7 @@ def test_git_timeout_or_no_git_keeps_the_copy_with_its_unsaved_work(repo, monkey
         worktrees.sweep(repo)
         assert (p / "mine.txt").read_text() == "unsaved"
     worktrees.sweep(repo)  # git is back: now it is saved and taken away
-    assert not p.exists() and git(repo, "show", f"orch/{t}:mine.txt") == "unsaved"
+    assert not p.exists() and git(repo, "show", "HEAD:mine.txt") == "unsaved"
 
 
 def test_a_folder_that_is_not_a_worktree_of_ours_is_kept_and_gets_no_git_commands(repo, monkeypatch):
@@ -338,7 +341,7 @@ def test_a_detached_head_on_the_tip_is_put_back_on_the_branch_and_saved(repo):
     (p / "w.txt").write_text("work")
     close(repo, t, "done")
     assert not p.exists()
-    assert git(repo, "show", f"orch/{t}:w.txt") == "work"  # reachable from the branch, not a dangling commit
+    assert git(repo, "show", "HEAD:w.txt") == "work"  # reachable from the branch, not a dangling commit
 
 
 def test_a_detached_head_elsewhere_or_a_persons_branch_is_never_committed_to(repo):
@@ -395,7 +398,7 @@ def test_a_rename_that_fails_keeps_the_copy_and_the_next_sweep_takes_it(repo, mo
     assert p.is_dir() and t in worktrees.registry(repo)
     assert "in use" in pending(repo)["kept"][0]["reason"] or "moved" in pending(repo)["kept"][0]["reason"]
     worktrees.sweep(repo)
-    assert not p.exists() and git(repo, "show", f"orch/{t}:w.txt") == "work"
+    assert not p.exists() and git(repo, "show", "HEAD:w.txt") == "work"
 
 
 # ---------------------------------------------------------------- closing and the sweep
@@ -408,13 +411,13 @@ def test_closing_a_ticket_removes_its_copy(repo):
     assert not p.exists() and t not in worktrees.registry(repo)
 
 
-def test_done_removes_the_copy_and_its_changes_stay_on_the_branch(repo):
+def test_done_removes_the_copy_after_its_changes_reach_main(repo):
     t = repo.tids[0]
     p = make(repo, 0)
     (p / "w.txt").write_text("work")
     close(repo, t, "done")
     assert not p.exists() and t not in worktrees.registry(repo)
-    assert git(repo, "show", f"orch/{t}:w.txt") == "work"  # B13 will add them to the project first
+    assert git(repo, "show", "HEAD:w.txt") == "work"  # brought back before removing the copy
 
 
 def test_copies_on_two_runs_done_leaves_no_copy_and_no_registry_line(repo):
@@ -596,7 +599,7 @@ def test_unmerged_branch_is_kept_14_days_after_its_last_commit_and_the_removal(r
     t = repo.tids[0]
     p = make(repo, 0)
     _commit_old(p, 20)
-    close(repo, t, "done")
+    close(repo, t, "dropped")
     assert f"orch/{t}" in branches(repo)
     worktrees.sweep(repo)
     assert f"orch/{t}" in branches(repo)  # the copy was removed just now: kept
@@ -611,7 +614,7 @@ def test_a_forged_old_date_does_not_delete_a_fresh_branch(repo):
     t = repo.tids[0]
     p = make(repo, 0)
     (p / "w.txt").write_text("work")  # saved now: the tip is fresh
-    close(repo, t, "done")
+    close(repo, t, "dropped")
     doc = pending(repo)
     doc["branches"][0]["at"] = "2000-01-01T00:00:00Z"  # forged
     worktrees._save_pending(repo, doc)
@@ -631,7 +634,7 @@ def test_a_branch_that_gets_merged_later_goes_at_the_next_sweep(repo):
     t = repo.tids[0]
     p = make(repo, 0)
     (p / "w.txt").write_text("work")
-    close(repo, t, "done")
+    close(repo, t, "dropped")
     git(repo, "merge", "--no-ff", "-q", "-m", "bring back", f"orch/{t}")
     worktrees.sweep(repo)
     assert f"orch/{t}" not in branches(repo)
@@ -982,7 +985,7 @@ def test_a_stale_index_lock_keeps_the_copy_with_a_note_and_try_again_clears_it(r
     monkeypatch.delenv("CLAUDECODE")
     worktrees.retry(repo, t)
     assert not lock.exists() and not p.exists()
-    assert git(repo, "show", f"orch/{t}:w.txt") == "work"
+    assert git(repo, "show", "HEAD:w.txt") == "work"
     assert worktrees.usage(repo)["stuck"] == []
 
 
@@ -1002,8 +1005,11 @@ def test_starts_only_schedule_a_detached_clean_and_only_when_there_is_something(
 
     monkeypatch.delenv("ORCH_NO_DETACHED_CLEAN")
     seen = []
+    real_popen = worktrees.subprocess.Popen
 
     def fake_popen(argv, **kw):
+        if Path(argv[0]).name in ("git", "git.exe"):
+            return real_popen(argv, **kw)  # branch-only discovery is read-only
         seen.append((argv, kw))
 
     with monkeypatch.context() as m:

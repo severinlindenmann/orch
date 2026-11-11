@@ -1006,7 +1006,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: boo
     result = apply_op(root, tid, op)[0]
     from orch import worktrees
 
-    worktrees.on_closed(root, tid)  # B12: the copy goes (its changes stay on branch orch/<ticket>)
+    worktrees.on_closed(root, tid)  # Done is recorded first; bring-back may keep the copy waiting.
     return result
 
 

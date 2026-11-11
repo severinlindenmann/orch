@@ -45,10 +45,31 @@ def _asked_at(t: dict, qid: str) -> str:
     return t.get("updated_at") or t.get("created_at") or _now()
 
 
+def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
+    return {
+        "id": f"core:bring-back:{tid}",
+        "source": "core",
+        "kind": "copies:bring-back",
+        "ticket": tid,
+        "title": _clip(f"Your work from {title} is on its own branch", 200),
+        "text": "Bring it back into your project?",
+        "reason": back.get("reason", ""),
+        "tone": "needs-you",
+        "since": back.get("at") or now,
+        "cli": f"orch copy ask-update {tid}",
+        "button": "Ask the agent to update",
+    }
+
+
 def core_rows(root: Path, now: str | None = None) -> list[dict]:
     now = now or _now()
     rows = []
+    seen = set()
     for t in tickets.list_all(root):
+        seen.add(t["id"])
+        back = (t.get("work") or {}).get("bring_back") or {}
+        if back.get("state") == "waiting":
+            rows.append(_bring_back_row(t["id"], t.get("title", t["id"]), back, now))
         if t.get("status") in OPEN or not isinstance(t.get("id"), str):
             continue
         title = _clip(t.get("title", t["id"]), 200)
@@ -94,6 +115,11 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
             if cli:
                 row["cli"] = cli
             rows.append(row)
+    from orch import worktrees
+
+    for item in worktrees._pending(root)["kept"]:
+        if item.get("bring_back") and item["ticket"] not in seen:
+            rows.append(_bring_back_row(item["ticket"], item["ticket"], item, now))
     for r in services.workspace_rows(root):
         if not r["running"]:
             rows.append(

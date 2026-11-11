@@ -543,6 +543,14 @@ def _copies_remove_orphaned(a):
     return ["copy", "remove-orphaned", v, "--json"], [], []
 
 
+def _copies_ask_update(a):
+    _only(a, ("ticket",))
+    v = a.get("ticket")
+    if not isinstance(v, str) or not TID.fullmatch(v):
+        raise BadRequest("That is not a ticket.")
+    return ["copy", "ask-update", v, "--json"], [], []
+
+
 def _copies_retry(a):
     """Try again (settings), for a copy kept because git was interrupted: `orch copy retry <ticket>` (core
     removes the stale lock file of that copy and cleans it; a person's click only)."""
@@ -777,6 +785,7 @@ OPS = {
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,
     "copies.retry": _copies_retry,
+    "copies.ask-update": _copies_ask_update,
     "ticket.field": _ticket_field,
 }
 

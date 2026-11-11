@@ -904,6 +904,7 @@ function detail(t) {
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id}, h('header', {className:'stack ticket-heading'},
     parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
+    t.bring_back?.state === 'waiting' ? h('div', {className:'row'}, h('span', {}, 'Done · changes waiting'), h('span', {}, clean(t.bring_back.reason)), !snapshot ? ticketButton('Ask the agent to update', 'outline sm', async () => { const r = await act('copies.ask-update', {ticket:t.id}); window.orch.toast(r.ok ? 'Asked the agent to update' : r.text || 'That did not work.', r.ok ? 'success' : 'error'); }) : null) : null,
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), planQ ? null : openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && !planQ && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t), headerProof(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,

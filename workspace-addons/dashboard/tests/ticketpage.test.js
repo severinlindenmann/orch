@@ -64,6 +64,10 @@ test('classic script loads before state and snapshot detail stays read-only insi
     const walk = n => { if (!n || typeof n !== 'object') return; assert.notEqual(n.tag, 'button'); for (const child of n.children || []) walk(child); };
     walk(tree);
   }
+  const waiting = ctx.detail({id:'t_test', title:'Test', status:'done', bring_back:{state:'waiting', reason:'Your files changed'}});
+  assert.match(JSON.stringify(waiting), /Done · changes waiting/);
+  assert.match(JSON.stringify(waiting), /Your files changed/);
+  assert.doesNotMatch(JSON.stringify(waiting), /Ask the agent to update/); // snapshots cannot send input
 });
 test('a failed change request shows a plain error; snapshot never submits notes', async () => {
   const calls = [], c = context({act:async op => { calls.push(op); return {ok:false, text:'Failed'}; }});
