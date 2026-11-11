@@ -413,3 +413,44 @@ def test_outgoing_history_scanned_before_push(machines, monkeypatch, path, paylo
     reachable = subprocess.run(['git', '--git-dir', str(bare), 'rev-list', '--objects', 'orch-state'],
                                capture_output=True, check=True).stdout
     assert path.encode() not in reachable
+
+
+@pytest.mark.parametrize('broken', [None, b'{"general": true,', b'{"id":"t_abc123"}',
+                                   step.encoded(ticket(note='x' * 1_000_000)), b'x' * 25_000_001])
+@pytest.mark.parametrize('artifact_change', ['edit', 'delete'])
+def test_broken_tracked_ticket_kept_on_remote(machines, broken, artifact_change):
+    a, b, bare = both(machines)
+    save(a, ART, b'original artifact')
+    success(a)
+    before = step.entries(a, 'HEAD')
+    original = (a / '.orch' / TICKET).read_bytes()
+    if broken is None:
+        (a / '.orch' / TICKET).unlink()
+    else:
+        save(a, value=broken)
+    if artifact_change == 'delete':
+        (a / '.orch' / ART).unlink()
+    else:
+        save(a, ART, b'local artifact change')
+    new_artifact = 'tickets/t_abc123/artifacts/new.txt'
+    save(a, new_artifact, b'not synced this round')
+    # Force a new pushed tree so preservation is checked alongside real progress.
+    other = 'tickets/t_second.json'
+    save(a, other, ticket() | {'id': 't_second'})
+    state = success(a)
+    assert 'Ticket t_abc123 has a problem and was not synced' in str(state['skipped'])
+    assert (a / '.orch' / TICKET).read_bytes() == (original if broken is None else broken)
+    for path in (TICKET, ART):
+        assert step.entries(a, 'HEAD')[path] == before[path]
+        remote_blob = subprocess.run(['git', '--git-dir', str(bare), 'show', 'orch-state:' + path],
+                                     capture_output=True, check=True).stdout
+        assert remote_blob == step.blob(a, before[path])
+    assert new_artifact not in tracked(a)
+    success(b)
+    assert tracked(b) == {TICKET, ART, other}
+    # Receiving a ticket may advance its merge revision.
+    received, expected = load(b), json.loads(original)
+    received.pop('revision', None)
+    expected.pop('revision', None)
+    assert received == expected
+    assert (b / '.orch' / ART).read_bytes() == b'original artifact'

@@ -137,8 +137,10 @@ def stage(root, head, index, state):
         dirs[:] = [d for d in dirs if not (Path(parent) / d).is_symlink()]
         names.update((Path(parent) / f).relative_to(work).as_posix() for f in files)
     names.add('ticket-counter.json')
-    generals = set()
+    generals, preserved = set(), set()
     for path in sorted(names):
+        if any(path.startswith(f'tickets/{tid}/') for tid in preserved):
+            continue  # The index already contains HEAD's artifacts.
         if not paths.allowed(path) or any(path.startswith(f'tickets/{tid}/') for tid in generals):
             if path in old:
                 repo.git(root, 'update-index', '--force-remove', '--', path, index=index)
@@ -173,7 +175,8 @@ def stage(root, head, index, state):
                 repo.git(root, 'add', '-f', '--', ':(literal)' + path, index=index)
             except FileNotFoundError:
                 if paths.TICKET.fullmatch(path):
-                    generals.add(Path(path).stem)
+                    (preserved if path in old else generals).add(Path(path).stem)
+                    state['skipped'].append(f'Ticket {Path(path).stem} has a problem and was not synced')
                 if path in old:
                     if paths.TICKET.fullmatch(path):
                         write(root, path, blob(root, old[path]))
@@ -182,10 +185,12 @@ def stage(root, head, index, state):
                         repo.git(root, 'update-index', '--force-remove', '--', path, index=index)
             except (ValueError, OSError) as e:
                 if paths.TICKET.fullmatch(path):
-                    generals.add(Path(path).stem)
+                    (preserved if path in old else generals).add(Path(path).stem)
+                    state['skipped'].append(f'Ticket {Path(path).stem} has a problem and was not synced: {e}')
                 elif isinstance(e, repo.Refused):
                     raise
-                state['skipped'].append(f'{path}: {e}')
+                else:
+                    state['skipped'].append(f'{path}: {e}')
     # Purge the whole excluded ticket, including blobs inherited from HEAD.
     excluded = {p for p in names if any(
         p == f'tickets/{tid}.json' or p.startswith(f'tickets/{tid}/') for tid in generals

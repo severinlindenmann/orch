@@ -81,7 +81,7 @@ def test_missing_ticket_restored(root):
     p.unlink()
     assert 'Restored' in str(success(root)['skipped'])
     assert p.read_bytes() == original
-    assert tracked(root) == set()
+    assert tracked(root) == {TICKET}
     success(root)
     assert tracked(root) == {TICKET}
 
@@ -228,9 +228,8 @@ def test_tree_refuses_artifact_without_valid_owner(root, owner):
         step.validate_tree(root, tree)
 
 
-@pytest.mark.parametrize('value', [b'{"general": true,', ticket(general=True, unknownfield='x'),
-                                   ticket(general=True), ticket(note='x' * 1_000_000)])
-def test_excluded_ticket_untracks_existing_folder(root, value):
+@pytest.mark.parametrize('value', [ticket(general=True, unknownfield='x'), ticket(general=True)])
+def test_general_ticket_untracks_existing_folder(root, value):
     configure(root)
     save(root)
     for n in range(7):
@@ -259,13 +258,15 @@ def test_deletion_limits_per_ticket(count, removed, blocked):
 
 
 
-def test_unreadable_ticket_excludes_folder(root, monkeypatch):
+def test_unreadable_tracked_ticket_preserves_folder(root, monkeypatch):
     from pathlib import Path
 
     configure(root)
     save(root)
     save(root, ART, b'private chat')
     success(root)
+    before = step.entries(root, 'HEAD')
+    save(root, ART, b'changed locally')
     read_bytes = Path.read_bytes
 
     def unreadable(path):
@@ -275,5 +276,5 @@ def test_unreadable_ticket_excludes_folder(root, monkeypatch):
 
     monkeypatch.setattr(Path, 'read_bytes', unreadable)
     assert 'cannot be read' in str(success(root)['skipped'])
-    assert tracked(root) == set()
-    assert not repo.git(root, 'ls-files').stdout
+    assert step.entries(root, 'HEAD') == before
+    assert set(repo.git(root, 'ls-files').stdout.decode().splitlines()) == {TICKET, ART}
