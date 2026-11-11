@@ -70,7 +70,12 @@ def test_old_server_restarts_itself_and_serves_the_new_files(tmp_path, build, mo
             assert code == 200 and b"restarting" in body  # the update is noticed on the page request
             end = time.time() + 40
             while time.time() < end:
-                code, body = get(info["port"], NEW)
+                try:
+                    code, body = get(info["port"], NEW)
+                except urllib.error.URLError as exc:
+                    if not isinstance(exc.reason, ConnectionRefusedError):
+                        raise
+                    code, body = 0, b""  # exec briefly closes the listener; keep polling until the deadline
                 if code == 200:
                     break
                 time.sleep(0.3)
