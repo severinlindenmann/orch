@@ -1,8 +1,11 @@
 """What the Insights settings page may do: one fixed table of ops, each building exactly one `orch` argv.
 
-No shell, no --by/--from/--as/--dev: who acts comes from the proof (H1, contracts/human-proof.md). Narrowing a
-setting runs without a proof; widening and delete-detail need a proof minted by the page session, handed over as
-the first line of stdin. Whether a change widens is decided here from a fresh read, never from the request.
+No shell, no --by/--from/--as/--dev: who acts comes from the proof (H1, contracts/human-proof.md).
+The core decides under its own lock whether a change widens: every click first runs WITHOUT a proof;
+only when the core answers `needs_person` and the request has the person is a proof minted (value-bound,
+op and target fixed here) and the same argv run once more with the proof as the first line of stdin.
+Settings changes are serialized here and carry `--if-current <observed>`, so a change in between is
+refused by the core (`changed`), never overwritten.
 """
 
 from __future__ import annotations
@@ -10,14 +13,38 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from pathlib import Path
 
-from .settings import KEYS, TID, current_value, needs_person
+from .overview import validated
+from .settings import KEYS, TID, current_value
 
 _run = subprocess.run  # tests may patch this name, never the global subprocess.run
 
 PERSON = "Open Insights from the dashboard on this computer to do this."
 AGENT_VARS = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_DEV", "ORCH_BY", "ORCH_VIA")
+FAILED = "That did not work."
+NOT_READ = "The record could not be read. Nothing was deleted."
+CHANGED = "This changed in the meantime. Reloaded."
+SET_TIMEOUT = "That took too long. Reload to see the current setting."
+DELETE_TIMEOUT = "That took too long. Reload to see what is still kept."
+# The only core answers shown to the person, each as a fixed plain text (never core text or stderr).
+MESSAGES = {
+    "needs_person": PERSON,
+    "invalid": "That value is not allowed.",
+    "not_found": "That ticket was not found.",
+    "unavailable": NOT_READ,
+    "not_available": NOT_READ,
+    "tampered": NOT_READ,
+    "not_allowed": "This was refused.",
+}
+SHARING_LOCKS = {
+    "off_by_admin": "Switched off by your admin.",
+    "not_connected": "Not connected to an admin.",
+}
+SHARING_UNKNOWN = "Sharing could not be read. Nothing was changed."
+WRITE_TIMEOUT = 60
+_LOCK = threading.Lock()  # one settings change at a time in this server (read, write and retry together)
 
 
 class BadRequest(Exception):
@@ -64,7 +91,7 @@ def _settings_set(args):
         raise BadRequest("That setting can not be changed here.")
     if not isinstance(value, str) or value not in KEYS[key][1]:
         raise BadRequest("That value is not allowed.")
-    return ["config", "set", key, value, "--json"]
+    return ["config", "set", key, value]
 
 
 def _delete_detail(args):
@@ -88,16 +115,6 @@ def build_argv(op, args) -> list[str]:
     return fn(args)
 
 
-def proof_for(op, args, read_settings) -> tuple[str, str] | None:
-    """(core op, target) when the click is the person's, else None. A failed read counts as widening."""
-    if op == "record.delete_detail":
-        return "record.delete_detail", args["ticket"]
-    key, value = args["key"], args["value"]
-    if needs_person(key, value, current_value(read_settings(), key)):
-        return "insights.settings", key
-    return None
-
-
 def human_env(root: Path, orch_bin) -> dict:
     """environ without the agent tools' variables (orch.adapters.human_environ); refused when that list can not
     be read, so a click never runs with an agent's variables (fail closed)."""
@@ -111,9 +128,10 @@ def human_env(root: Path, orch_bin) -> dict:
     return child_env({**env, "ORCH_ROOT": str(root)}, orch_bin)
 
 
-def orch(root: Path, orch_bin, argv: list[str], proof: str | None = None, timeout: int = 60):
+def orch(root: Path, orch_bin, argv: list[str], proof: str | None = None, timeout: int | None = None):
     orch_bin = real_bin(orch_bin)
     env = human_env(root, orch_bin)
+    timeout = WRITE_TIMEOUT if timeout is None else timeout
     try:
         if proof is not None:
             if run_with_proof is None:
@@ -125,7 +143,7 @@ def orch(root: Path, orch_bin, argv: list[str], proof: str | None = None, timeou
                 timeout=timeout, stdin=subprocess.DEVNULL, env=env,
             )  # fmt: skip
     except subprocess.TimeoutExpired:
-        return 124, "", "That took too long. Please try again."
+        return 124, "", ""
     except OSError:
         raise Unavailable("The orch command could not be started.") from None
     return r.returncode, r.stdout, r.stderr
@@ -134,27 +152,74 @@ def orch(root: Path, orch_bin, argv: list[str], proof: str | None = None, timeou
 def _parsed(stdout):
     try:
         out = json.loads(stdout)
-    except ValueError:
+    except (ValueError, TypeError, RecursionError):
         return None
     return out if isinstance(out, dict) else None
 
 
-def run_op(
-    root: Path, orch_bin, op, args, mint=None, read_settings=lambda: None
-) -> tuple[int, str, dict | None]:
-    """Run one op. Returns (http status, plain text, parsed json or None). Nothing runs without a needed proof."""
-    argv = build_argv(op, args)
-    need = proof_for(op, args, read_settings)
-    if need and mint is None:
-        raise NeedsPerson(PERSON)
-    code, stdout, stderr = orch(root, orch_bin, argv, proof=mint(*need) if need else None)
+def _code(out) -> str | None:
+    code = (out or {}).get("code")
+    return code if isinstance(code, str) else None
+
+
+def _answer(code, out, timeout_text) -> tuple[int, str, dict | None]:
+    """The HTTP answer for one core exit: fixed texts only, never the core's own words or its stderr (L7)."""
     if code == 124:
-        return 504, "That took too long. Please try again.", None
-    out = _parsed(stdout)
+        return 504, timeout_text, None  # the write may or may not have happened: say nothing about it (L8)
     if code == 0:
         return 200, "", out
-    msg = (out or {}).get("error")
-    if not isinstance(msg, str) or not msg.strip():
-        msg = (stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
-    msg = msg.strip().splitlines()[0][:300] if msg.strip() else "That did not work."
-    return (403 if (out or {}).get("code") == "needs_person" else 422), msg, None
+    why = _code(out)
+    if why == "changed":
+        return 409, CHANGED, None
+    if why == "needs_person":
+        return 403, PERSON, None
+    return 422, MESSAGES.get(why, FAILED), None
+
+
+def _with_person(root, orch_bin, argv, mint, need, timeout_text):
+    """Run without a proof; only when the core says needs_person: mint (person here) and retry once."""
+    code, stdout, _ = orch(root, orch_bin, argv)
+    out = _parsed(stdout)
+    if code != 0 and code != 124 and _code(out) == "needs_person":
+        if mint is None:
+            raise NeedsPerson(PERSON)
+        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need))
+        out = _parsed(stdout)
+    return _answer(code, out, timeout_text)
+
+
+def _sharing_refusal(read) -> str | None:
+    """Count sharing can not be turned on while the admin switched it off, there is no admin, or the
+    counts can not be read (L9)."""
+    clean = validated(read("record", "counts", "--days", "30", "--json"))
+    state = clean["sharing"]["counts"] if clean else None
+    if state in ("on", "off"):
+        return None
+    return SHARING_LOCKS.get(state, SHARING_UNKNOWN)
+
+
+def _set(root, orch_bin, args, argv, mint, read):
+    key, value = args["key"], args["value"]
+    if key == "insights.share_counts" and value == "on":
+        refusal = _sharing_refusal(read)
+        if refusal:
+            return 409, refusal, None
+    observed = current_value(read("record", "settings", "--json"), key)
+    if observed is None and mint is None:
+        raise NeedsPerson(PERSON)  # an unreadable current value counts as widening (M6)
+    guard = ["--if-current", observed] if observed is not None else []
+    need = ("insights.settings", f"{key}={value}")
+    return _with_person(root, orch_bin, [*argv, *guard, "--json"], mint, need, SET_TIMEOUT)
+
+
+def run_op(
+    root: Path, orch_bin, op, args, mint=None, read=lambda *argv: None
+) -> tuple[int, str, dict | None]:
+    """Run one op. Returns (http status, plain text, parsed json or None). `mint(op, target)` is given only when
+    the request has the person; `read(*argv)` is the server's read of a CLI answer (None when it fails)."""
+    argv = build_argv(op, args)
+    if op == "settings.set":
+        with _LOCK:
+            return _set(root, orch_bin, args, argv, mint, read)
+    need = ("record.delete_detail", args["ticket"])
+    return _with_person(root, orch_bin, argv, mint, need, DELETE_TIMEOUT)

@@ -1,13 +1,16 @@
 """Loopback HTTP server, fenced by the shared UI origin checks. Reads go through the CLI; the only writes are the
-settings page clicks of POST /api/act (fixed op table in actions.py, human proofs for widening and delete-detail)."""
+settings page clicks of POST /api/act (fixed op table in actions.py; the core decides when a human proof is
+needed, the server mints one only for a request with the session cookie AND this server's page secret)."""
 
 import hashlib
 import hmac
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
+import threading
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -35,17 +38,22 @@ def read_counts(root, orch_bin=None):
 
 
 def read_json(root, orch_bin, argv):
-    """One read-only CLI answer as JSON, or None when it fails."""
+    """One read-only CLI answer as JSON, or None when it fails. Runs with the same cleaned environment as a
+    write (M6); when that environment can not be built the read fails (and so counts as unknown)."""
     command = (
         [str(orch_bin)]
         if orch_bin not in (None, actions.SELF)
         else [sys.executable, "-I", "-P", "-m", "orch"]
     )
     try:
+        env = actions.human_env(root, actions.real_bin(orch_bin))
+    except actions.Unavailable:
+        return None
+    try:
         result = subprocess.run(
             [*command, *argv],
             cwd=root,
-            env={**os.environ, "ORCH_ROOT": str(root)},
+            env=env,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=10,
@@ -101,8 +109,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(data).encode(), "application/json")
 
     def _can_act(self):
-        """This request carries the person's page session (cookie, loopback Host, no proxy headers)."""
-        return self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+        """This request carries the person's page session: cookie, loopback Host, no proxy headers (can_mint)
+        AND this server's page secret in X-Orch-Page (H2). The cookie name is the core's and is not
+        port-scoped, so a cookie set for another page server on this computer reaches us too: the header is
+        the real guard, the cookie alone never mints."""
+        secret = getattr(self.server, "page_secret", None)
+        sent = self.headers.get("X-Orch-Page") or ""
+        return (
+            self.session is not None
+            and secret is not None
+            and hmac.compare_digest(sent.encode(), secret.encode())
+            and self.session.can_mint(self.headers, self.server.server_address[1])
+        )
 
     def _read(self, *argv):
         return read_json(self.root, self.orch_bin, list(argv))
@@ -156,20 +174,35 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = do_TRACE = do_CONNECT = _refuse
 
-    def _session_post(self):
-        """POST /session: the page hands over the one-time launch token from its URL fragment; the server spends
-        it and sets the session cookie (H1). Loopback Host, no proxy headers, same fence as an action."""
+    def _session_refusal(self):
+        """Why POST /session is refused: the action fence, plus Sec-Fetch-Site same-origin/none (absent is
+        refused too) and a JSON body (M5), loopback Host and no proxy headers."""
         why = self._fence("POST", True)
         if why:
-            return self._send(403, why.encode())
-        from orch.pageproof import COOKIE, forwarded, host_ok
+            return why
+        if self.headers.get("Sec-Fetch-Site") not in ("same-origin", "none"):
+            return "This request came from another website and was refused."
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return "forbidden"
+        from orch.pageproof import forwarded, host_ok
 
         if (
             self.session is None
             or forwarded(self.headers)
             or not host_ok(self.headers, self.server.server_address[1])
         ):
-            return self._send(403, b"forbidden")
+            return "forbidden"
+        return None
+
+    def _session_post(self):
+        """POST /session: the page hands over the one-time launch token from its URL fragment; the server spends
+        it, sets the session cookie (H1) and returns this server's page secret in the body (H2). The page keeps
+        the secret in memory only and sends it as X-Orch-Page; it is never logged."""
+        why = self._session_refusal()
+        if why:
+            return self._send(403, why.encode())
+        from orch.pageproof import COOKIE
+
         try:
             n = int(self.headers.get("Content-Length") or "")
             token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
@@ -177,8 +210,13 @@ class Handler(BaseHTTPRequestHandler):
             token = None
         cookie = self.session.launch(token)
         if not cookie:
+            if getattr(self.session, "revoked", False):
+                self.server.page_secret = None  # a reused link ended the session: the secret goes with it
             return self._send(403, RELINK.encode())
-        self._send(204, b"", extra={"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"})
+        secret = self.server.new_page_secret()
+        body = json.dumps({"secret": secret}).encode()
+        cookie_header = f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"
+        self._send(200, body, "application/json", extra={"Set-Cookie": cookie_header})
 
     def _body(self):
         """The JSON body {op, args}, or None for anything else (size, type, extra keys)."""
@@ -210,15 +248,10 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         if body is None:
             return self._send(400, b"That request could not be read.")
-        mint = self.session.mint if self._can_act() else None
+        mint = self.session.mint if self._can_act() else None  # handed over; called only on needs_person
         try:
             code, text, result = actions.run_op(
-                self.root,
-                self.orch_bin,
-                body.get("op"),
-                body.get("args", {}),
-                mint=mint,
-                read_settings=lambda: self._read("record", "settings", "--json"),
+                self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint, read=self._read
             )
         except actions.NeedsPerson as e:
             return self._send(403, str(e).encode())
@@ -252,12 +285,24 @@ def _page_session(root, orch_bin):
         return None
 
 
+class InsightsServer(ThreadingHTTPServer):
+    """The HTTP server plus this instance's page secret (H2): created only after a launch token was spent,
+    kept in memory, never logged."""
+
+    page_secret = None
+    _secret_lock = threading.Lock()
+
+    def new_page_secret(self) -> str:
+        with self._secret_lock:
+            if self.page_secret is None:
+                self.page_secret = secrets.token_urlsafe(32)
+            return self.page_secret
+
+
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin=None, session=None) -> ThreadingHTTPServer:
     """Construct the server; callers own its lifetime. Tests may inject a fake CLI path and a fake session."""
     root = root.resolve()
     session = session if session is not None else _page_session(root, orch_bin)
-    srv = ThreadingHTTPServer(
-        ("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, session=session)
-    )
+    srv = InsightsServer(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, session=session))
     srv.session = session
     return srv

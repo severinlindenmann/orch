@@ -73,7 +73,8 @@ def current_value(answer, key):
 
 
 def needs_person(key, value, current) -> bool:
-    """Widening (more detail kept, more space, sharing on) needs the person. Unknown current = widening."""
+    """Widening (more detail kept, more space, sharing on) needs the person. Unknown current = widening.
+    A hint for the page only: it authorizes nothing, the core decides widening under its own lock."""
     if current is None:
         return True
     if key in NUMBERS:

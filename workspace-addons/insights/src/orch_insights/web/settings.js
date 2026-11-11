@@ -3,7 +3,9 @@
 (() => {
   const prefix = document.documentElement.dataset.prefix || '';
   const byId = id => document.getElementById(id);
-  let view = null, busy = false, pendingTicket = null;
+  const UNLINKED = 'This page could not be linked to your session. Open Insights again from the dashboard on this computer.';
+  // The page secret of this server (H2): memory only, never storage, cookie or URL.
+  let view = null, busy = false, pendingTicket = null, pageSecret = '';
 
   function node(tag, text, className) {
     const element = document.createElement(tag);
@@ -17,14 +19,26 @@
     if (!match) return;
     history.replaceState(null, '', location.pathname + location.search);
     try {
-      await fetch(`${prefix}/session`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      const response = await fetch(`${prefix}/session`, {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({token: match[1]})});
-    } catch { /* watch-only */ }
+      if (response.status !== 200) throw new Error('not linked');
+      const secret = (await response.json()).secret;
+      if (typeof secret !== 'string' || !secret) throw new Error('not linked');
+      pageSecret = secret;
+    } catch {
+      const note = byId('session-note');
+      note.textContent = UNLINKED;
+      note.hidden = false;
+    }
+  }
+
+  function headers(extra) {
+    return pageSecret ? {...extra, 'X-Orch-Page': pageSecret} : {...extra};
   }
 
   async function act(op, args) {
     const response = await fetch(`${prefix}/api/act`, {method: 'POST', signal: AbortSignal.timeout(70000),
-      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({op, args})});
+      headers: headers({'Content-Type': 'application/json'}), body: JSON.stringify({op, args})});
     if (!response.ok) throw new Error((await response.text()) || 'That did not work.');
     return (await response.json()).result || {};
   }
@@ -36,10 +50,13 @@
     busy = true;
     say('Saving…');
     try {
-      await act('settings.set', {key: row.key, value: option.value});
+      const result = await act('settings.set', {key: row.key, value: option.value});
       await load();
-      say(option.needs_person ? 'Saved.' : `Saved. ${view && view.narrow_note ? view.narrow_note : ''}`.trim());
-    } catch (error) { say(error.message); } finally { busy = false; }
+      say(result.widened !== false ? 'Saved.' : `Saved. ${view && view.narrow_note ? view.narrow_note : ''}`.trim());
+    } catch (error) {
+      await load();  // after any refusal or timeout, show what the record says now
+      say(error.message);
+    } finally { busy = false; }
   }
 
   function segmented(row) {
@@ -130,7 +147,10 @@
       const result = await act('record.delete_detail', {ticket});
       const n = Number(result.deleted) || 0;
       say(`Deleted detail of ${n} ${n === 1 ? 'run' : 'runs'}`);
-    } catch (error) { say(error.message); } finally { busy = false; }
+    } catch (error) {
+      await load();
+      say(error.message);
+    } finally { busy = false; }
   }
 
   function render() {
@@ -141,7 +161,7 @@
 
   async function load() {
     try {
-      const response = await fetch(`${prefix}/api/settings`, {signal: AbortSignal.timeout(20000)});
+      const response = await fetch(`${prefix}/api/settings`, {signal: AbortSignal.timeout(20000), headers: headers({})});
       if (!response.ok) throw new Error('read failed');
       view = await response.json();
     } catch {
