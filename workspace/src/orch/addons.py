@@ -618,7 +618,9 @@ def _install_tool(entries: list[dict]) -> None:
     plan = _reinstall_plan()
     if plan is None and not _reinstall_anywhere():
         raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
-    with _pinned_tool_dir(Path(sys.prefix), plan is not None):
+    from orch import winfinish
+
+    with winfinish.replacing(home()), _pinned_tool_dir(Path(sys.prefix), plan is not None):
         run_uv(_tool_args(entries))
     if plan and ((plan["env"] / "bin").exists() or (plan["env"] / "Scripts").exists()):
         humanproof.write_install_record(plan["env"], plan["kind"])

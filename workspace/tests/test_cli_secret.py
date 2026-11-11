@@ -723,7 +723,8 @@ def test_agent_exec_by_flag_with_extra_arguments_is_refused(lock, run, monkeypat
 def test_agent_exec_with_the_switch_on_may_add_arguments(lock, run, ws, monkeypatch):
     _enable_agents(run, monkeypatch, ws)
     code, out, err = run("secret", "exec", "lock", "--", "--extra")
-    assert code == 0 or "agents may only" not in err, (code, out, err)
+    assert code == 0, (code, out, err)
+    assert "agents may only" not in err and out.strip().isdigit(), (code, out, err)
 
 
 def test_a_person_exec_with_extra_arguments_is_allowed(store, run, ws, monkeypatch):
@@ -1104,6 +1105,29 @@ def test_set_warns_about_an_interpreter_and_shows_the_resolved_path(store, run, 
     assert "can run any code" in err
     code, out, err = _set(run, monkeypatch, ws, "interp2", "--run", "/bin/sh", "--json")
     assert json.loads(out)["warnings"]
+
+
+@pytest.mark.parametrize(
+    "prog,warns",
+    [
+        ("psql", True),
+        ("mysql", True),
+        ("sqlite3", True),
+        ("redis-cli", True),
+        ("mongosh", True),
+        ("mytool", False),
+    ],
+)
+def test_set_warns_about_database_clients_only(store, run, ws, monkeypatch, tmp_path, prog, warns):
+    # a link named like the client to a harmless safe-folder program: matched by the name that was approved
+    exe = tmp_path / prog
+    exe.symlink_to(os.path.realpath("/usr/bin/true"))
+    code, out, err = _set(run, monkeypatch, ws, "db", "--run", str(exe))
+    assert code == 0, (code, out, err)
+    assert ("can run any code" in err) is warns
+    code, out, err = _set(run, monkeypatch, ws, "db2", "--run", str(exe), "--json")
+    assert code == 0, (code, out, err)
+    assert bool(json.loads(out).get("warnings")) is warns
 
 
 def test_a_large_key_with_a_diverging_byte_is_not_slow(ws):

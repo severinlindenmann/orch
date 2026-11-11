@@ -36,6 +36,7 @@ def _job(tmp_path, uv_code="print('uv ok')", then_code="print('then ok')"):
         "log": str(tmp_path / "finish.log"),
         "done": "dashboard installed and turned on",
         "pending": str(tmp_path / "finish.pending"),
+        "updating": str(winfinish.marker_path(tmp_path)),
     }
 
 
@@ -109,6 +110,7 @@ def test_start_writes_its_files_in_orchs_home_and_marks_pending(tmp_path, monkey
     assert (tmp_path / "finish.pending").read_text() == "4242"  # the finisher's pid
     assert calls[0][:2] == ["/base/python", "-I"] and calls[0][2] == str(tmp_path / "finish" / "finish.py")
     job = json.loads((tmp_path / "finish" / "job.json").read_text())
+    assert job["updating"] == str(winfinish.marker_path(tmp_path))
     assert job["then"][0]["argv"][1:] == ["-I", "-P", "-m", "orch", "update", "--project-only"]
 
 
@@ -391,3 +393,19 @@ def test_failed_project_step_restores_registry(tmp_path, existing, crash):
     assert _run_finisher(tmp_path, job).returncode == 1
     assert path.read_bytes() == before if existing else not path.exists()
     assert not (tmp_path / "finish.pending").exists()
+
+
+@pytest.mark.parametrize("failure", ["ok", "exit", "exception"])
+def test_updating_marker_covers_reinstall_and_followup(tmp_path, failure):
+    mark = winfinish.marker_path(tmp_path)
+    check = f"from pathlib import Path; assert Path({str(mark)!r}).read_text().isdigit(); "
+    job = _job(
+        tmp_path,
+        uv_code=check + ("raise SystemExit(2)" if failure == "exit" else "pass"),
+        then_code=check + "pass",
+    )
+    if failure == "exception":
+        job["uv"] = [str(tmp_path / "missing-uv")]
+    assert _run_finisher(tmp_path, job).returncode == (0 if failure == "ok" else 1)
+    assert not mark.exists()
+    assert f"RESULT {'ok' if failure == 'ok' else 'fail'}:" in winfinish.log_path(tmp_path).read_text()

@@ -26,7 +26,7 @@ import threading
 import time
 from pathlib import Path
 
-from orch import saferead, term, winacl
+from orch import saferead, term, winacl, winfinish
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
@@ -2214,7 +2214,9 @@ def update_target(repo: str, ref: str) -> str:
 UPDATE_TIMEOUT = 1800  # seconds: a hung install is stopped after 30 minutes
 
 
-def write_update_status(root: Path, state: str, reason: str = "") -> None:
+def write_update_status(
+    root: Path, state: str, reason: str = "", *, finish_offset: int | None = None
+) -> None:
     """running | finished | failed, with a short plain reason (no secrets): what the page shows afterwards."""
     if state not in ("running", "finished", "failed"):
         return
@@ -2223,7 +2225,14 @@ def write_update_status(root: Path, state: str, reason: str = "") -> None:
         with _key_lock(d):
             _write_private(
                 d / "update-status.json",
-                json.dumps({"state": state, "reason": reason[:200], "at": int(time.time())}),
+                json.dumps(
+                    {
+                        "state": state,
+                        "reason": reason[:200],
+                        "at": int(time.time()),
+                        **({"finish_offset": finish_offset} if finish_offset is not None else {}),
+                    }
+                ),
             )
 
 
@@ -2235,6 +2244,17 @@ def take_update_status(root: Path) -> dict | None:
         with _key_lock(d):
             f = d / "update-status.json"
             data = json.loads(_read_guarded(f).decode("utf-8"))
+            if isinstance(data, dict) and "finish_offset" in data:
+                from orch import addons
+
+                home = addons.home()
+                if winfinish.pending(home) or winfinish.updating(home):
+                    return {"state": "running", "reason": ""}
+                ok = winfinish.result_ok_since(home, data["finish_offset"])
+                data = {
+                    "state": "finished" if ok else "failed",
+                    "reason": "" if ok else "The background update failed; see finish.log.",
+                }
             if isinstance(data, dict) and data.get("state") in ("finished", "failed"):
                 with contextlib.suppress(OSError):
                     f.unlink()
