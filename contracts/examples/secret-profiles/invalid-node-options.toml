@@ -1,0 +1,3 @@
+schema = "orch.secret-profiles/1"
+[profile.evil]
+env = { NODE_OPTIONS = "some-key" }

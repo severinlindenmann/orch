@@ -284,10 +284,24 @@ def test_generic_comes_from_adapter_data_not_the_agent_name(server, ws, fake_orc
 
 
 def test_oneshot_denial_asks_and_run_send_note(server, ws, fake_orch):
-    (ws / ".orch" / "run" / "logs").mkdir(parents=True)
-    (ws / ".orch" / "run" / "logs" / f"{TID}-r_den00001.log").write_text(
-        json.dumps({"type": "result", "permission_denials": [{"tool_name": "WebFetch"}]}) + "\n"
+    import sys
+    import time
+
+    ev = {
+        "v": 1, "id": "toolu_d1", "seq": 1, "run": "r_den00001", "agent": "main", "at": "2026-11-16T09:12:05Z",
+        "ticket": TID, "via": "log", "kind": "denial", "text": "Not allowed by this workspace",
+        "used": {"kind": "tool", "name": "WebFetch", "action": None, "source": "builtin", "version": None},
+        "outcome": {"ok": False, "error": "Not allowed by this workspace", "ms": None},
+    }  # fmt: skip
+    line = json.dumps({"type": "event", "cursor": "rc1.x", "event": ev})
+    wrap = fake_orch.parent / "wrap"
+    wrap.write_text(
+        f"#!{sys.executable}\nimport os, sys, time\na = sys.argv[1:]\n"
+        f"if a[:2] == ['record', 'tail']:\n    print({line!r}, flush=True)\n    time.sleep(30)\n"
+        f"os.execv({str(fake_orch)!r}, [{str(fake_orch)!r}, *a])\n"
     )
+    wrap.chmod(0o755)
+    server.tracker.orch_bin = str(wrap)
     (fake_orch.parent / "status.json").write_text(
         json.dumps(
             {
@@ -296,7 +310,11 @@ def test_oneshot_denial_asks_and_run_send_note(server, ws, fake_orch):
             }
         )
     )
+    end = time.time() + 15
     v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    while not v["board"]["denials"] and time.time() < end:
+        time.sleep(0.2)
+        v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
     assert v["board"]["denials"][0]["tool"] == "WebFetch"
     assert [c for c in calls(fake_orch) if c[0] == "ask" and "focus:permission" in c]
     _st, body, _ = req(

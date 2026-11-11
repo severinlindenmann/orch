@@ -563,9 +563,9 @@ def _release_lock(ws, rel, fd, *, _directory=None):
 
 
 @contextmanager
-def _lock(ws, run):
+def _lock(ws, run, wait=None):
     rel = ("runs", f"{run}.lock")
-    deadline = time.monotonic() + _LOCK_WAIT
+    deadline = time.monotonic() + (_LOCK_WAIT if wait is None else wait)
     while True:
         fd = _open(ws, rel, "create_excl", create_dirs=True)
         if fd is not None:
@@ -1074,13 +1074,14 @@ class RecordWriter:
             event["detail_lost"] = True
             return None
 
-    def append(self, event, *, detail=None):
+    def append(self, event, *, detail=None, lock_wait=None):
+        """lock_wait: seconds to wait for the run lock before the write is spooled (default 30)."""
         try:
-            return self._append(event, detail)
+            return self._append(event, detail, lock_wait)
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             raise RecordInvalid() from None
 
-    def _append(self, event, detail):
+    def _append(self, event, detail, lock_wait=None):
         if not isinstance(event, dict):
             raise RecordInvalid()
         run = _name(event.get("run"), _RUN)
@@ -1131,7 +1132,7 @@ class RecordWriter:
         self._line(dict(prepared, detail=None, detail_lost=True))
         self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
         try:
-            with _lock(self.workspace, run) as check_lock:
+            with _lock(self.workspace, run, lock_wait) as check_lock:
                 check_lock()
                 self._drain(run, check_lock=check_lock)
                 check_lock()

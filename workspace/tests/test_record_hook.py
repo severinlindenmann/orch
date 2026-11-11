@@ -543,3 +543,144 @@ def test_an_exception_inside_the_hook_still_exits_zero(live, monkeypatch, capsys
     assert _main(monkeypatch, stdin=line() + "\n") == 0
     assert capsys.readouterr().err.startswith("orch: ")
     assert _main(monkeypatch, "--strict", stdin=line() + "\n") == 2
+
+
+@pytest.mark.parametrize(
+    "failure", [record_hook.Refused("x"), RuntimeError("x"), SystemExit(2), KeyboardInterrupt()]
+)
+def test_every_failure_kind_exits_zero_never_reraises(live, monkeypatch, capsys, failure):
+    """A SystemExit (sys.exit, parser.error) or KeyboardInterrupt must not leave as exit 2."""
+
+    def boom(*a, **k):
+        raise failure
+
+    monkeypatch.setattr(record_hook, "cli", boom)
+    assert _main(monkeypatch, stdin=line() + "\n") == 0
+    assert capsys.readouterr().err.startswith("orch: ")
+    assert _main(monkeypatch, "--strict", stdin=line() + "\n") == 2
+    monkeypatch.setattr("orch.cli._find_root", boom)  # the root lookup itself exits
+    assert _main(monkeypatch, stdin=line() + "\n") == 0
+
+
+def test_the_parser_route_keeps_the_exit_zero_rule(live, monkeypatch):
+    """Reached only when a global flag precedes `record` (main's early branch takes the exact form)."""
+    import argparse
+
+    from orch import cli_record
+
+    root, run, _ = live
+    args = argparse.Namespace(cmd="record", sub="hook", strict=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(line(kind="run.state") + "\n"))
+    assert cli_record.dispatch(args, root) is True  # refused line: exit 0
+    monkeypatch.setattr("sys.stdin", io.StringIO(line(kind="run.state") + "\n"))
+    with pytest.raises(record_hook.Refused):
+        cli_record.dispatch(argparse.Namespace(cmd="record", sub="hook", strict=True), root)
+    monkeypatch.setattr("sys.stdin", io.StringIO(line(id="toolu_flag") + "\n"))
+    assert cli_record.dispatch(args, root) is True
+    assert [e["id"] for e in events(root, run)] == ["toolu_flag"]
+
+
+def test_the_watchdog_is_cancelled_before_the_first_write(live, monkeypatch):
+    root, run, _ = live
+    order = []
+    real = record.RecordWriter.append
+
+    def spy(self, *a, **k):
+        order.append("append")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(record.RecordWriter, "append", spy)
+    record_hook.hook(root, line(id="toolu_w"), before_write=lambda: order.append("cancel"))
+    assert order == ["cancel", "append"]
+    order.clear()
+    with pytest.raises(record_hook.NotRecorded):  # a trace write is a write too
+        record_hook.hook(root, line(kind="run.state"), before_write=lambda: order.append("cancel"))
+    assert order[:1] == ["cancel"]
+
+
+def test_the_watchdog_ends_a_hung_hook_quietly(live, tmp_path):
+    """stdin held open: the hook process exits 0 at the hard timeout, leaving no lock or torn line."""
+    import subprocess
+    import sys
+
+    root, run, _ = live
+    code = (
+        "import sys; from orch import workcheck; workcheck.HARD_TIMEOUT = 0.5\n"
+        "from orch.cli import main; raise SystemExit(main(['record', 'hook']))"
+    )
+    env = {**os.environ, "ORCH_ROOT": str(root)}
+    p = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE, env=env, cwd=root)
+    try:
+        assert p.wait(timeout=30) == 0
+    finally:
+        if p.poll() is None:
+            p.kill()
+            p.wait()
+        p.stdin.close()
+    runs_dir = root / ".orch/record/runs"
+    assert not runs_dir.exists() or not list(runs_dir.glob("*.lock"))
+    assert record.read_run(root, run).status in ("ok", "unavailable")
+
+
+def _helper(proj, monkeypatch):
+    gid = tickets.ensure_general(proj, "phone:Marco")
+    rec = runs.claim(proj, gid, "agent:helper", "claude", pid=os.getpid())
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    return gid, rec["run"]
+
+
+def test_a_chat_helper_records_only_into_its_own_run(proj, monkeypatch):
+    from orch import chat
+
+    gid, own = _helper(proj, monkeypatch)
+    assert chat.is_helper(proj)
+    with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+        assert record_hook.hook(proj, line(id="toolu_own"))["run"] == own
+        # another run's id with the helper's ticket: not a claim that belongs together
+        other = tickets.create(proj, "Parent", "human:t")
+        parent = runs.claim(proj, other["id"], "agent:x", "claude", pid=os.getpid())
+        monkeypatch.setenv("ORCH_RUN", parent["run"])
+        with pytest.raises(record_hook.NotRecorded, match="not active"):
+            record_hook.hook(proj, line(id="toolu_forged"))
+        # the parent's own pair, from a process that is not the helper's (env changed by the helper itself)
+        monkeypatch.setenv("ORCH_TICKET", other["id"])
+        assert not chat.is_helper(
+            proj
+        )  # the env is the same-user boundary; the process-tree proof still applies
+    assert [e["id"] for e in events(proj, own)] == ["toolu_own"]
+
+
+def test_a_held_run_lock_spools_the_hook_line_within_two_seconds(live):
+    """A PreToolUse hook must never freeze the agent: a busy lock waits 1 s, then the line is spooled."""
+    root, run, _ = live
+    record_hook.hook(root, line(id="toolu_first"))  # the run file and folders exist
+    lock = root / ".orch/record/runs" / f"{run}.lock"
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)  # somebody else's fresh lock
+    try:
+        t0 = time.perf_counter()
+        got = record_hook.hook(root, line(id="toolu_busy"))
+        elapsed = time.perf_counter() - t0
+    finally:
+        os.close(fd)
+        lock.unlink()
+    assert elapsed < 2 and got["pending"] is True and got["seq"] is None
+    assert len(list((root / ".orch/record/pending" / run).glob("*.json"))) == 1
+
+
+def test_helper_env_with_the_parent_claim_among_ancestors_writes_only_its_own_run(proj, monkeypatch):
+    """The claim comes from the environment (ORCH_RUN/ORCH_TICKET), not from whatever pid is an ancestor."""
+    gid = tickets.ensure_general(proj, "phone:Marco")
+    parent_t = tickets.create(proj, "Parent", "human:t")
+    parent = runs.claim(
+        proj, parent_t["id"], "agent:x", "claude", pid=os.getpid()
+    )  # this process: an ancestor
+    helper = runs.claim(proj, gid, "agent:helper", "claude", pid=os.getpid())
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    monkeypatch.setenv("ORCH_RUN", helper["run"])
+    with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+        assert record_hook.hook(proj, line(id="toolu_h"))["run"] == helper["run"]
+    assert [e["id"] for e in events(proj, helper["run"])] == ["toolu_h"]
+    assert record.read_run(proj, parent["run"]).status == "unavailable"  # the parent's log is untouched

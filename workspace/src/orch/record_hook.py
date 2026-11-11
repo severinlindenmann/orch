@@ -14,7 +14,7 @@ says in one plain stderr line why nothing was recorded. What it never does:
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
 A hook line that cannot be written leaves a short trace: under the run (record.note_lost) only for a proven
 caller, else in one global file without a run id (record.note_unattributed); none when there was no run.
-The event id is the tool's own tool-call id (Claude: tool_use_id), put in `id` by the caller; the record
+The event id is the tool's own tool-call id (the agent's own field), put in `id` by the caller; the record
 hashes an unsafe one once, the same way for hook and collector, so the two dedupe. Event-shaped lines only.
 --strict turns every "not recorded" into a refusal (exit 2) for scripts and tests.
 """
@@ -31,6 +31,9 @@ import time
 from orch import record
 from orch.errors import Refused
 
+LOCK_WAIT = (
+    1.0  # seconds: a busy run lock spools the line at once (a PreToolUse hook must not freeze the agent)
+)
 MAX_LINE = 8 * 1024 * 1024  # a larger payload is not read further; the line is still recorded, detail lost
 _FIELDS = ("id", "kind", "text", "session", "agent", "parent", "coverage", "used", "outcome", "data")
 _HARNESS = re.compile(r"[a-z][a-z0-9-]{0,31}")
@@ -186,16 +189,20 @@ def _writer(root):
         raise record.RecordOff("Recording is off until key hiding is ready.") from None
 
 
-def hook(root, text: str, environ=None, *, too_large: bool = False) -> dict | None:
-    """Record one event line; raises NotRecorded (or a RecordRefused) when nothing was written."""
+def hook(root, text: str, environ=None, *, too_large: bool = False, before_write=lambda: None) -> dict | None:
+    """Record one event line; raises NotRecorded (or a RecordRefused) when nothing was written.
+    before_write runs after the caller is proven and the line is read, right before anything is written (the
+    hook's watchdog is cancelled there: it must never end the process in the middle of a write)."""
     environ = os.environ if environ is None else environ
     ids = _ids(environ)
     if ids is None:
         raise NotRecorded("Not inside an orch run; nothing was recorded.")
+    # require_run, _parse and _event below never write; the first write is behind before_write
     try:
         require_run(root, ids)
     except NotRecorded as e:  # the caller is not proven: the claimed run id is its word, so nothing under it
         if e.reason:
+            before_write()
             record.note_unattributed(root, e.reason)
         raise
     try:
@@ -206,32 +213,35 @@ def hook(root, text: str, environ=None, *, too_large: bool = False) -> dict | No
             payload = _TOO_BIG
         else:
             event, payload = _event(_parse(text), ids, tickets.agent_tool())
+        before_write()
         try:
             writer = _writer(root)
         except record.RecordOff:
             raise NotRecorded("Recording is off until key hiding is ready.", "hider_off") from None
-        return writer.append(event, detail=payload)
+        return writer.append(event, detail=payload, lock_wait=LOCK_WAIT)
     except NotRecorded as e:
         if e.reason:
+            before_write()
             record.note_lost(root, ids[0], e.reason)
         raise
     except record.RecordInvalid:
+        before_write()
         record.note_lost(root, ids[0], "invalid")
         raise
 
 
-def cli(root, stream=None, strict: bool = False) -> None:
+def cli(root, stream=None, strict: bool = False, before_write=lambda: None) -> None:
     """Exit 0 with one plain stderr line when nothing was recorded; with strict a Refused (exit 2) instead."""
     stream = sys.stdin if stream is None else stream
     try:
         text = stream.readline(MAX_LINE + 1)
-        hook(root, text, too_large=len(text) > MAX_LINE)
+        hook(root, text, too_large=len(text) > MAX_LINE, before_write=before_write)
         return
     except NotRecorded as e:
         note = e.note
     except record.RecordRefused as e:
         note = str(e) or "Nothing was recorded."
-    except Exception:  # never get in the agent's way, whatever went wrong
+    except BaseException:  # never get in the agent's way, whatever went wrong (a SystemExit included)
         note = "Nothing was recorded."
     if strict:
         raise Refused(note)
