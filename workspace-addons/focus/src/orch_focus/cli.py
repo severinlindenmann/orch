@@ -73,6 +73,18 @@ def main(argv: list[str] | None = None) -> int:
     op.add_argument("ticket")
     op.add_argument("--no-open", action="store_true", help="only print the address")
     op.add_argument("--json", action="store_true")
+    ar = sub.add_parser("area", help="areas: where work happens (agents suggest, you accept on the page)")
+    asub = ar.add_subparsers(dest="area_cmd", required=True)
+    for name in ("add", "suggest"):
+        x = asub.add_parser(name, help="suggest an area (a person accepts it on the Focus page)")
+        x.add_argument("name")
+        x.add_argument("path", help="a folder or file inside the workspace")
+        x.add_argument("--json", action="store_true")
+    st = asub.add_parser("set", help="put a ticket in an area")
+    st.add_argument("ticket")
+    st.add_argument("area", help="the area's name")
+    st.add_argument("--json", action="store_true")
+    asub.add_parser("list", help="the areas").add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     root = find_workspace(Path(args.dir))
     if root is None:
@@ -80,9 +92,34 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd in (None, "serve"):
         return _serve(args, root)
+    if args.cmd == "area":
+        return _area(args, root)
     if args.cmd in ("view", "needs"):
         return _data(args, root)
     return _service(args, root)
+
+
+def _area(args, root: Path) -> int:
+    from . import areas
+
+    as_json = bool(getattr(args, "json", False))
+    try:
+        if args.area_cmd in ("add", "suggest"):
+            a = areas.add(root, args.name, args.path)
+            text = f"Suggested the area {a['name']}. A person accepts it on the Focus page."
+        elif args.area_cmd == "set":
+            ref = _by_key(root, args.ticket)
+            a = areas.set_ticket(root, ref, args.area)
+            text = f"Put the ticket in the area {a['name']}."
+        else:
+            rows = areas.load(root)
+            print(json.dumps(rows) if as_json else "\n".join(f"{r['name']} ({r['state']}): {r['path']}" for r in rows) or "No areas yet.")
+            return 0
+    except areas.BadArea as e:
+        print(json.dumps({"error": str(e)}) if as_json else f"Refused: {e}", file=None if as_json else sys.stderr)
+        return 2
+    print(json.dumps(a) if as_json else text)
+    return 0
 
 
 def _data(args, root: Path) -> int:

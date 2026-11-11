@@ -19,21 +19,31 @@
     return plainNames(text);
   }
 
-  function feedItems(v) {
+  // agent: only the steps of that agent ('main' or a helper); the ticket's own lines belong to no agent.
+  function feedItems(v, agent) {
     const items = [];
-    for (const e of v.ticket.history || []) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: plainLine(String(e.text || ''), v.ticket.checklist), who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
+    if (!agent) for (const e of v.ticket.history || []) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: plainLine(String(e.text || ''), v.ticket.checklist), who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
     for (const e of v.events) {
-      if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text)});
-      else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text});
-      else if (e.kind === 'helper.start') items.push({at: e.at, icon: 'user', text: 'Helper: ' + e.text});
-      else if (e.kind === 'helper.end') items.push({at: e.at, icon: 'check', ok: true, text: 'Helper done: ' + e.text});
+      if (agent && (e.agent || 'main') !== agent) continue;
+      const used = (e.data && e.data.used) || null, by = e.agent || 'main';
+      if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text), used, agent: by});
+      else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text, used, agent: by});
+      else if (e.kind === 'helper.start') items.push({at: e.at, icon: 'user', text: 'Helper: ' + e.text, agent: by});
+      else if (e.kind === 'helper.end') items.push({at: e.at, icon: 'check', ok: true, text: 'Helper done: ' + e.text, agent: by});
     }
     items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
     return items.slice(-80);
   }
+  const usedChip = used => (used && S.views.used ? S.views.used.chip(used) : null);
+  // The step running now: the latest tool start, while the run is on.
+  function nowUsed(v) {
+    if (!v.run.running) return null;
+    for (let i = v.events.length - 1; i >= 0; i--) if (v.events[i].kind === 'tool.start') return (v.events[i].data && v.events[i].data.used) || null;
+    return null;
+  }
 
   function renderFeed(v) {
-    const key = keyOf([v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.board.step, v.events, v.ticket.history]);
+    const key = keyOf([v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null]);
     if (key === S.state.lastFeedKey) return;
     S.state.lastFeedKey = key;
     const asking = v.ticket.questions.some(q => q.answer == null);
@@ -49,13 +59,17 @@
     const heading = asking ? 'Before the question' : v.state === 'done' ? 'Work completed' : v.run.running ? 'The work is taking shape' : 'Work so far';
     const nodes = [h('h2', {text: heading})];
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
+    const used = nowUsed(v);
     for (const c of story) nodes.push(h('article', {class: 'fx-story' + (!c.done && v.run.running ? ' now' : '')},
-      h('h3', {text: (c.done ? '✓ ' : v.run.running ? 'Now: ' : '') + c.text}),
+      h('h3', {}, h('span', {text: (c.done ? '✓ ' : v.run.running ? 'Now: ' : '') + c.text}), !c.done && v.run.running ? usedChip(used) : null),
       h('p', {text: evText(c) || (!c.done && v.run.running ? v.board.step || 'Working on this task.' : '')})));
-    if (v.run.running && !story.some(c => !c.done)) nodes.push(h('article', {class: 'fx-story now'}, h('h3', {text: v.board.step || 'Waiting for the first step…'})));
+    if (v.run.running && !story.some(c => !c.done)) nodes.push(h('article', {class: 'fx-story now'}, h('h3', {}, h('span', {text: v.board.step || 'Waiting for the first step…'}), v.board.step ? usedChip(used) : null)));
     if (!v.run.running && !asking && v.state !== 'done' && v.ticket.status !== 'review' && !v.ticket.started && !v.run.run) nodes.push(h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent}));
-    const details = h('details', {class: 'fx-history'}, h('summary', {text: 'Details'}));
-    for (const it of feedItems(v)) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {text: it.text})));
+    const agent = S.state.agentFilter || null;
+    const details = h('details', {class: 'fx-history', open: !!agent}, h('summary', {text: 'Details'}));
+    const items = feedItems(v, agent);
+    for (const it of items) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used))));
+    if (agent && !items.length) details.append(h('p', {class: 'meta', text: 'No steps from this agent yet.'}));
     nodes.push(details);
     els.feed.replaceChildren(...nodes);
   }

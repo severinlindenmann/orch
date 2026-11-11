@@ -49,6 +49,7 @@
         { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
       ],
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
+      "deny": {"format": "patterns/1"},
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
     "codex": {
@@ -72,6 +73,7 @@
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
+      "deny": {"format": "none", "note": "codex cannot be told a deny list; its workspace-write sandbox keeps writes inside the workspace. Reads of orch's own folder and writes of .orch/record are not enforced."},
       "files": { "instructions": "AGENTS.md" }
     },
     "generic": {
@@ -83,6 +85,7 @@
       "hooks": null,
       "session": { "id": "none" },
       "capabilities": { "resume": false, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
+      "deny": {"format": "none", "note": "A command orch does not know cannot be told a deny list."},
       "files": { "instructions": "AGENTS.md" }
     }
   }

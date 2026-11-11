@@ -328,11 +328,14 @@ def sync_apply(root: Path, tid: str):
 
     Call on the thread holding syncgate.hold; other writers retain the normal
     gate-before-ticket ordering. The caller checks and replaces the file while
-    this context is held, without importing core lock internals.
+    this context is held, without importing core lock internals. Before each
+    write batch the holder checks that the gate still carries its identity;
+    a thread holding no gate for `root` is refused (fail closed).
     """
     if tid != "key":
         ticket_path(root, tid)
     with _locked(root, tid):
+        syncgate.ensure_held(root)
         yield
 
 

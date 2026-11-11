@@ -20,8 +20,8 @@ from pathlib import Path
 from orch import record
 from orch.errors import Refused
 
-SUBCOMMANDS = ("tail", "query", "counts", "settings", "delete-detail")
-_BUILT = ("tail", "query", "counts", "settings", "delete-detail")
+SUBCOMMANDS = ("tail", "query", "counts", "settings", "delete-detail", "hook")
+_BUILT = ("tail", "query", "counts", "settings", "delete-detail", "hook")
 _RUN = re.compile(r"^r_[a-z0-9_]{6,32}$")
 _TICKET = re.compile(r"^t_[a-z0-9]{6,16}$")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
@@ -84,6 +84,8 @@ def add_parsers(sub, common) -> None:
     q.add_argument("--limit")
     q.add_argument("--after")
     q.add_argument("--detail")
+    h = r.add_parser("hook", parents=[common], help=argparse.SUPPRESS)
+    h.add_argument("--strict", action="store_true")
     c = r.add_parser("counts", parents=[common], help=argparse.SUPPRESS)
     c.add_argument("--days")
     c.add_argument("--from", dest="from_")
@@ -98,11 +100,57 @@ def add_parsers(sub, common) -> None:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
 
 
+def _run_hook(find_root, strict: bool, before_write=lambda: None) -> int:
+    """The hook's exit-0 wrapper: ANY failure (a SystemExit from argparse or sys.exit included) ends with one
+    stderr line and exit 0; only --strict gives 2. Never re-raises."""
+    try:
+        from orch import record_hook
+
+        record_hook.cli(find_root(), strict=strict, before_write=before_write)
+        return 0
+    except BaseException as e:  # noqa: BLE001 - a tool's hook: exit 2 would block the tool call
+        note = str(e) if isinstance(e, Refused) and str(e) else "nothing was recorded."
+    if strict:
+        print(f"Refused: {note}", file=sys.stderr)
+        return 2
+    sys.stderr.write(f"orch: {note}\n")
+    return 0
+
+
+def hook_main(argv: list[str], watchdog=None) -> int:
+    """`orch record hook [--strict]`, called from cli.main before the parser, the chat guard and the notices:
+    a tool's hook runs before every tool call and exit 2 would block it. The wiring must call exactly
+    `orch record hook`; global flags before it (--json, --root) are not understood here and are ignored."""
+    from orch import workcheck
+
+    timer = workcheck.start_watchdog()  # a hung hook ends quietly (exit 0) after the hard timeout
+    if watchdog is not None:
+        watchdog.cancel()
+    try:
+        from orch import cli
+
+        # the timer is cancelled before the first write: os._exit never lands in the middle of one
+        return _run_hook(cli._find_root, "--strict" in argv, before_write=timer.cancel)
+    finally:
+        timer.cancel()
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "record":
         return False
     if not args.sub:
         raise Refused("`orch record` needs a subcommand. Subcommands: " + ", ".join(SUBCOMMANDS) + ".")
+    if args.sub == "hook":  # one event line on stdin from a live session's tool hook; never blocks the agent
+        # reached only by a form hook_main does not take (a global flag before `record`): same exit-0 rule
+        from orch import workcheck
+
+        timer = workcheck.start_watchdog()
+        try:
+            if _run_hook(lambda: root, args.strict, before_write=timer.cancel):
+                raise Refused("Nothing was recorded.")
+        finally:
+            timer.cancel()
+        return True
     if args.sub not in _BUILT:
         raise Refused(f"`orch record {args.sub}` is not built yet.")
     if not args.json:
