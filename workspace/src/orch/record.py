@@ -2,7 +2,9 @@
 
 import json
 import os
+import errno
 import re
+import stat
 import time
 import uuid
 from collections.abc import Callable
@@ -59,9 +61,47 @@ def _tree(path: Path) -> None:
             _tree(child)
 
 
+# POSIX: every write walks the folders with directory file descriptors (O_NOFOLLOW at each step), so a symlink
+# swapped in between a check and the open is refused instead of followed. Windows has no dir_fd: there the
+# symlink check (_safe, which also covers reparse points reported as links) stays the fail-closed fallback.
+_FD = os.name == "posix" and {os.open, os.mkdir, os.unlink, os.rmdir, os.replace} <= os.supports_dir_fd
+_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+_NOT_SAFE = "The record folder is not safe."
+
+
+@contextmanager
+def _parent(path: Path, create: bool = False):
+    """Yield (dir fd, name) of path's parent folder, walked from the root without following any symlink."""
+    parts = Path(path).absolute().parts
+    fd = os.open(parts[0], _DIR)
+    try:
+        for part in parts[1:-1]:
+            if create:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                    made = True
+                except FileExistsError:
+                    made = False
+            next_fd = os.open(part, _DIR, dir_fd=fd)
+            if create and made:
+                os.fchmod(next_fd, 0o700)
+            os.close(fd)
+            fd = next_fd
+        yield fd, parts[-1]
+    except OSError as error:
+        if error.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
+            raise RecordRefused(_NOT_SAFE) from None
+        raise
+    finally:
+        os.close(fd)
+
+
 def _mkdir(path: Path) -> None:
     _safe(path)
-    if not path.exists():
+    if _FD:
+        with _parent(Path(path) / "x", create=True):
+            pass
+    elif not path.exists():
         _mkdir(path.parent)
         path.mkdir(mode=0o700, exist_ok=True)
         path.chmod(0o700)
@@ -69,10 +109,27 @@ def _mkdir(path: Path) -> None:
 
 def _open(path: Path, flags: int) -> int:
     _safe(path)
-    fd = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    if _FD:
+        with _parent(path) as (pfd, name):
+            fd = os.open(name, flags, 0o600, dir_fd=pfd)
+    else:
+        fd = os.open(path, flags, 0o600)
     if flags & (os.O_WRONLY | os.O_RDWR):
         os.fchmod(fd, 0o600)
     return fd
+
+
+def _unlink(path: Path) -> None:
+    _safe(path)
+    if not _FD:
+        path.unlink(missing_ok=True)
+        return
+    try:
+        with _parent(path) as (pfd, name):
+            os.unlink(name, dir_fd=pfd)
+    except FileNotFoundError:
+        pass
 
 
 def _json(obj: Any) -> str:
@@ -131,7 +188,7 @@ def _lock(path: Path):
             _safe(path)
             try:
                 if time.time() - path.stat().st_mtime > 30:
-                    path.unlink()
+                    _unlink(path)
                     continue
             except FileNotFoundError:
                 continue
@@ -142,8 +199,7 @@ def _lock(path: Path):
         yield
     finally:
         os.close(fd)
-        _safe(path)
-        path.unlink(missing_ok=True)
+        _unlink(path)
 
 
 def _atomic(path: Path, payload: bytes) -> None:
@@ -153,10 +209,14 @@ def _atomic(path: Path, payload: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(payload)
-        _safe(path)
-        os.replace(temporary, path)
+        if _FD:
+            with _parent(path) as (pfd, name):
+                os.replace(temporary.name, name, src_dir_fd=pfd, dst_dir_fd=pfd)
+        else:
+            _safe(path)
+            os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        _unlink(temporary)
 
 
 class RecordWriter:
@@ -226,6 +286,9 @@ class RecordWriter:
         eid = event.get("id") if not default_id else f"{run}:1"
         if not isinstance(eid, str):
             raise RecordRefused(_INVALID)
+        # Hide key values in the raw id BEFORE it is judged or hashed, so a secret-bearing id can never leave as an
+        # unsalted (guessable) hash; the same id still gives the same name for hook and collector (dedupe).
+        eid = self.hider.hide_text(eid)
         event["id"] = eid if re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) else _hash(eid)
         # Reject malformed input, including controls, before normalizing display text.
         if not isinstance(event.get("text"), str) or re.search(r"[\x00-\x1f\x7f]", event["text"]):
@@ -350,9 +413,32 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
     return plan
 
 
+def _remove_in(dir_fd: int, name: str) -> None:
+    try:
+        mode = os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(mode):
+        os.unlink(name, dir_fd=dir_fd)  # a link is removed itself, never followed
+        return
+    child = os.open(name, _DIR, dir_fd=dir_fd)
+    try:
+        for entry in os.listdir(child):
+            _remove_in(child, entry)
+    finally:
+        os.close(child)
+    os.rmdir(name, dir_fd=dir_fd)
+
+
 def _remove(path: Path) -> None:
     _tree(path)
-    if path.is_dir():
+    if _FD:
+        try:
+            with _parent(path) as (pfd, name):
+                _remove_in(pfd, name)
+        except FileNotFoundError:
+            pass
+    elif path.is_dir():
         for child in path.iterdir():
             _remove(child)
         path.rmdir()

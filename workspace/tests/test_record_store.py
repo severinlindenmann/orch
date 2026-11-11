@@ -2,6 +2,7 @@
 
 import base64
 import copy
+import hashlib
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -11,7 +12,7 @@ from urllib.parse import quote
 import jsonschema
 import pytest
 
-from orch import hider
+from orch import hider, record
 from orch.record import (
     RecordRefused,
     RecordWriter,
@@ -308,3 +309,41 @@ def test_stale_lock_and_missing_reads(store):
     os.utime(lock, (1, 1))
     assert writer.append(event(id="after_stale"))["seq"] == 2
     assert not lock.exists()
+
+
+def test_secret_id_never_stored_plain_or_unsalted_hash(store):
+    ws, writer = store
+    for raw in (SECRET, "call/" + SECRET, "x y " + SECRET):
+        assert writer.append(event(id=raw, text="ok", detail=None), detail={"input": "i", "output": "o"})
+    unsalted = {
+        hashlib.sha256(raw.encode()).hexdigest()[:32] for raw in (SECRET, "call/" + SECRET, "x y " + SECRET)
+    }
+    seen = 0
+    for path in record_dir(ws).rglob("*"):
+        text = path.name + (path.read_text() if path.is_file() else "")
+        seen += 1
+        assert SECRET not in text
+        assert not any(h in text for h in unsalted)
+    assert seen
+
+
+def test_symlink_swapped_after_check_is_refused(store, tmp_path, monkeypatch):
+    ws, writer = store
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    swapped = []
+    real_safe = record._safe
+
+    def swap_after_check(path):
+        real_safe(path)
+        target = record_dir(ws) / "detail" / "r_8k2m01"
+        if path.name.endswith(".json") and path.parent == target and not swapped:
+            swapped.append(1)
+            target.rmdir()
+            target.symlink_to(outside, target_is_directory=True)
+
+    monkeypatch.setattr(record, "_safe", swap_after_check)
+    with pytest.raises(RecordRefused):
+        writer.append(event(), detail={"input": "i", "output": "o"})
+    assert swapped
+    assert list(outside.iterdir()) == []
