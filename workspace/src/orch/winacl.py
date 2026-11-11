@@ -30,6 +30,7 @@ from orch.errors import Refused
 
 REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
 TAG_SYMLINK = 0xA000000C  # IO_REPARSE_TAG_SYMLINK
+TAG_NAME_SURROGATE = 0x20000000  # IsReparseTagNameSurrogate: the tag names another file system object
 TAG_MOUNT_POINT = 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT (a junction)
 SYSTEM_SID = "S-1-5-18"
 FILE_ALL_ACCESS = 0x1F01FF
@@ -39,9 +40,10 @@ ACE_INHERITED = 0x10  # INHERITED_ACE: a copy from the parent
 
 
 def link_reparse(attrs: int, tag: int) -> bool:
-    """A symlink or junction? Other reparse points (OneDrive/cloud placeholders, dedup, WSL...) are ordinary
-    files for us. A reparse point whose tag is unknown (0) counts as a link: fail closed."""
-    return bool(attrs & REPARSE) and (tag in (TAG_SYMLINK, TAG_MOUNT_POINT) or tag == 0)
+    """A name-surrogate reparse point (symlink, junction, any tag with the name-surrogate bit)? Other
+    reparse points (OneDrive/cloud placeholders, APPEXECLINK, dedup, WSL...) are ordinary files for us.
+    A reparse point whose tag is unknown (0) counts as a link: fail closed."""
+    return bool(attrs & REPARSE) and (tag == 0 or bool(tag & TAG_NAME_SURROGATE))
 
 
 def _windows() -> bool:
@@ -203,6 +205,16 @@ def _handle_attrs(h) -> int:
     return info.attrs
 
 
+def _handle_links(h) -> int:
+    """nNumberOfLinks of the open file (BY_HANDLE_FILE_INFORMATION, offset 40). Tests replace this."""
+    ctypes, wintypes, adv, k32 = _api()
+    buf = ctypes.create_string_buffer(52)
+    k32.GetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    if not k32.GetFileInformationByHandle(h, buf):
+        raise _cant("a part of its path could not be checked")
+    return struct.unpack_from("<I", buf.raw, 40)[0]
+
+
 def _handle_tag(h) -> int:
     """The reparse tag of what the handle is (FileAttributeTagInfo); 0 when unknown (counts as a link)."""
     ctypes, wintypes, adv, k32 = _api()
@@ -280,6 +292,8 @@ def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
         if attrs & REPARSE and link_reparse(attrs, _handle_tag(h)):  # other reparse points (OneDrive...) work
             raise _no("it is a link or junction")
         check_scope(_handle_path(h), final=True)  # what was REALLY opened, not the name
+        if not is_dir and _handle_links(h) != 1:  # a hard link: the same rights would show at another name
+            raise _no("it has more than one name")
         _set_dacl_on_handle(h, is_dir, sid)
         protected, aces = _read_dacl(path, handle=h)
         parse_aces(protected, aces, sid)
@@ -486,8 +500,22 @@ def _inside(child: str, parent: str) -> bool:
         return True
     if os.path.splitdrive(child)[0] != os.path.splitdrive(parent)[0]:
         return False
-    rel = os.path.relpath(child, parent)
-    return rel != os.pardir and not rel.startswith(os.pardir + os.sep) and not os.path.isabs(rel)
+    # pure component comparison: relpath/abspath would trim a trailing dot or space ("home." is not "home")
+    seps = os.sep + (os.altsep or "")
+
+    def comps(p: str) -> list[str]:
+        out, cur = [], ""
+        for ch in os.path.splitdrive(p)[1]:
+            if ch in seps:
+                out.append(cur)
+                cur = ""
+            else:
+                cur += ch
+        out.append(cur)
+        return [c for c in out if c]
+
+    c, par = comps(child), comps(parent)
+    return c[: len(par)] == par
 
 
 def _guard_profile() -> str:
