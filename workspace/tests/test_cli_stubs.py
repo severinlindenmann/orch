@@ -5,11 +5,6 @@ import pytest
 from orch import cli
 
 PAIRS = [
-    ("secret", "env"),
-    ("secret", "file"),
-    ("secret", "exec"),
-    ("secret", "list"),
-    ("secret", "get"),
     ("record", "delete-detail"),
     ("job", "start"),
     ("job", "step"),
@@ -46,7 +41,7 @@ def test_hidden(proj, capsys, flag):
     assert not set(words) & {"secret", "record", "job", "conn"}
 
 
-@pytest.mark.parametrize("group", ["secret", "record", "job", "conn"])
+@pytest.mark.parametrize("group", ["record", "job", "conn"])
 def test_no_subcommand_lists_them(proj, capsys, group):
     assert cli.main([group]) == 2
     err = capsys.readouterr().err

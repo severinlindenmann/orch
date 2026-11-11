@@ -30,6 +30,7 @@ from orch.errors import Refused
 
 REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
 TAG_SYMLINK = 0xA000000C  # IO_REPARSE_TAG_SYMLINK
+TAG_NAME_SURROGATE = 0x20000000  # IsReparseTagNameSurrogate: the tag names another file system object
 TAG_MOUNT_POINT = 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT (a junction)
 SYSTEM_SID = "S-1-5-18"
 FILE_ALL_ACCESS = 0x1F01FF
@@ -39,9 +40,10 @@ ACE_INHERITED = 0x10  # INHERITED_ACE: a copy from the parent
 
 
 def link_reparse(attrs: int, tag: int) -> bool:
-    """A symlink or junction? Other reparse points (OneDrive/cloud placeholders, dedup, WSL...) are ordinary
-    files for us. A reparse point whose tag is unknown (0) counts as a link: fail closed."""
-    return bool(attrs & REPARSE) and (tag in (TAG_SYMLINK, TAG_MOUNT_POINT) or tag == 0)
+    """A name-surrogate reparse point (symlink, junction, any tag with the name-surrogate bit)? Other
+    reparse points (OneDrive/cloud placeholders, APPEXECLINK, dedup, WSL...) are ordinary files for us.
+    A reparse point whose tag is unknown (0) counts as a link: fail closed."""
+    return bool(attrs & REPARSE) and (tag == 0 or bool(tag & TAG_NAME_SURROGATE))
 
 
 def _windows() -> bool:
@@ -203,6 +205,37 @@ def _handle_attrs(h) -> int:
     return info.attrs
 
 
+def _handle_links(h) -> int:
+    """nNumberOfLinks of the open file (BY_HANDLE_FILE_INFORMATION, offset 40). Tests replace this."""
+    ctypes, wintypes, adv, k32 = _api()
+    buf = ctypes.create_string_buffer(52)
+    k32.GetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    if not k32.GetFileInformationByHandle(h, buf):
+        raise _cant("a part of its path could not be checked")
+    return struct.unpack_from("<I", buf.raw, 40)[0]
+
+
+def _handle_tag(h) -> int:
+    """The reparse tag of what the handle is (FileAttributeTagInfo); 0 when unknown (counts as a link)."""
+    ctypes, wintypes, adv, k32 = _api()
+
+    class _Tag(ctypes.Structure):
+        _fields_ = [("attrs", wintypes.DWORD), ("tag", wintypes.DWORD)]
+
+    info = _Tag()
+    k32.GetFileInformationByHandleEx.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    if not k32.GetFileInformationByHandleEx(
+        h, 9, ctypes.byref(info), ctypes.sizeof(info)
+    ):  # 9 = FileAttributeTagInfo
+        raise _cant("a part of its path could not be checked")
+    return info.tag
+
+
 def _handle_path(h) -> str:
     """The real path the handle points at (GetFinalPathNameByHandleW, no long-path prefix)."""
     ctypes, wintypes, adv, k32 = _api()
@@ -255,9 +288,12 @@ def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
     check_scope(path)  # the only DACL writer: the scope guard holds here too, whoever calls it (early, cheap)
     h = _open_target(path)
     try:
-        if _handle_attrs(h) & REPARSE:
+        attrs = _handle_attrs(h)
+        if attrs & REPARSE and link_reparse(attrs, _handle_tag(h)):  # other reparse points (OneDrive...) work
             raise _no("it is a link or junction")
-        check_scope(_handle_path(h))  # what was REALLY opened, not the name
+        check_scope(_handle_path(h), final=True)  # what was REALLY opened, not the name
+        if not is_dir and _handle_links(h) != 1:  # a hard link: the same rights would show at another name
+            raise _no("it has more than one name")
         _set_dacl_on_handle(h, is_dir, sid)
         protected, aces = _read_dacl(path, handle=h)
         parse_aces(protected, aces, sid)
@@ -450,7 +486,12 @@ _homes: set[str] = set()  # real paths (normcase) of the guarded homes this proc
 
 
 def _real(path: str | os.PathLike) -> str:
-    return os.path.normcase(os.path.realpath(os.fspath(path)))
+    """The real path, normcased. Windows can refuse to resolve one (WinError 448, an untrusted mount point on
+    a junction made by a user): that is a refusal with nothing written, never a crash."""
+    try:
+        return os.path.normcase(os.path.realpath(os.fspath(path)))
+    except OSError as e:
+        raise _no("its real path could not be read") from e
 
 
 def _inside(child: str, parent: str) -> bool:
@@ -459,8 +500,22 @@ def _inside(child: str, parent: str) -> bool:
         return True
     if os.path.splitdrive(child)[0] != os.path.splitdrive(parent)[0]:
         return False
-    rel = os.path.relpath(child, parent)
-    return rel != os.pardir and not rel.startswith(os.pardir + os.sep) and not os.path.isabs(rel)
+    # pure component comparison: relpath/abspath would trim a trailing dot or space ("home." is not "home")
+    seps = os.sep + (os.altsep or "")
+
+    def comps(p: str) -> list[str]:
+        out, cur = [], ""
+        for ch in os.path.splitdrive(p)[1]:
+            if ch in seps:
+                out.append(cur)
+                cur = ""
+            else:
+                cur += ch
+        out.append(cur)
+        return [c for c in out if c]
+
+    c, par = comps(child), comps(parent)
+    return c[: len(par)] == par
 
 
 def _guard_profile() -> str:
@@ -506,12 +561,14 @@ def allow_home(path: str | os.PathLike) -> None:
     _homes.add(rp)
 
 
-def check_scope(path: str | os.PathLike) -> None:
+def check_scope(path: str | os.PathLike, final: bool = False) -> None:
     """Refuse unless `path` (real path: links and junctions resolved) is inside a guarded home recorded by
-    allow_home, and is not a forbidden place. Called before EVERY rights write. No home recorded = refused."""
+    allow_home, and is not a forbidden place. Called before EVERY rights write. No home recorded = refused.
+    final=True: `path` is already a handle's final path (the system resolved it), so it is only normalised,
+    never resolved again by name."""
     if not _windows():
         return
-    rp = _real(path)
+    rp = os.path.normcase(os.path.normpath(os.fspath(path))) if final else _real(path)
     why = _forbidden(rp, is_home=rp in _homes)
     if why is None and not any(_inside(rp, h) for h in _homes):
         why = "it is not inside orch's own folder"
@@ -542,7 +599,14 @@ def check_private(path: str | os.PathLike) -> None:
     if not _windows():
         return
     p = Path(path)
-    _attrs(p)  # FileNotFoundError passes through: "not there" is not "wrong rights"
+    try:
+        _attrs(p)  # FileNotFoundError passes through: "not there" is not "wrong rights"
+    except FileNotFoundError:
+        raise
+    except Refused:
+        raise
+    except OSError as e:  # e.g. WinError 448 (untrusted mount point) on a user-made junction, elevated
+        raise _cant("a part of its path could not be checked") from e
     no_reparse(p)
     sid = user_sid()
     try:
