@@ -11,6 +11,7 @@ from orch import addons, config, humanproof, syncgate, tickets
 from . import cli, repo
 
 manifest_cache = contextvars.ContextVar("sync_manifests", default=None)
+MAX_EXT = 64  # add-on blocks per ticket (Fable B4)
 
 
 def manifests():
@@ -47,7 +48,12 @@ def filter_ticket(root, path, doc, local, remote):
         known[tid] = {name: digest(value) for name, value in old.items()}
         write(root, "run/sync/local-ext.json", encoded(known))
     ext = dict(doc.get("ext", {}))
-    for name in set(old) | set(new):
+    names = set(old) | set(new)
+    if len(names) > MAX_EXT:
+        from .pause import Pause
+
+        raise Pause(f"Ticket has too many add-on blocks: {path}", [path])
+    for name in names:
         if name == "sync" or installed.get(name, {}).get("ticket_ext_inert") is True:
             continue
         if old.get(name) == new.get(name):
@@ -94,7 +100,8 @@ def approve(root, tid, addon, args):
             raise repo.Refused("No single held change for this ticket and add-on")
         p, block = candidates[0]
         hashed = digest(block["value"])
-        target = f"sync:{tid}:{addon}:{hashed}"
+        # Fable B12: Ignore and Allow are different decisions with different proofs.
+        target = f"sync:{'ignore' if getattr(args, 'ignore', False) else 'allow'}:{tid}:{addon}:{hashed}"
         by = humanproof.person_by(
             root, args, "addon.act", target, no_handoff="This approval needs a person's proof over stdin."
         )

@@ -21,6 +21,13 @@ def commit_tree(root, entries):
     return repo.git(root, 'commit-tree', tree, '-p', 'HEAD', input=b'incoming\n').stdout.strip().decode()
 
 
+@pytest.mark.parametrize('data', [b'{"a": "\\ud800"}', b'{"\\udfff": 1}', b'{"a": ["x\\ud83d"]}'])
+def test_lone_surrogates_rejected(data):
+    # Fable A10: a lone surrogate would later fail to encode on every tick.
+    with pytest.raises(ValueError):
+        incoming.strict_load(data)
+
+
 def remote_ref(root, tmp_path, entries):
     oid = commit_tree(root, entries)
     bare = tmp_path / 'remote.git'
