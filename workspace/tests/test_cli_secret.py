@@ -695,7 +695,10 @@ def test_exec_without_extra_arguments_is_allowed_for_an_agent(lock, run):
     assert code == 0 and out.strip() == str(len(TOKEN2))
 
 
-@pytest.mark.parametrize("extra", [["-c", "print(1)"], ["/tmp/out.txt"], ["--eval", "x"]], ids=["-c", "path", "flag"])
+EXTRA = [["-c", "print(1)"], ["/tmp/out.txt"], ["--eval", "x"]]
+
+
+@pytest.mark.parametrize("extra", EXTRA, ids=["-c", "path", "flag"])
 def test_agent_exec_with_extra_arguments_is_refused(lock, run, events, extra):
     _refused(run, *extra, mode="exec")
     assert events and {e["refused"] for e in events} == {"agent_command"}
@@ -725,7 +728,8 @@ def test_agent_exec_with_the_switch_on_may_add_arguments(lock, run, ws, monkeypa
 
 def test_a_person_exec_with_extra_arguments_is_allowed(store, run, ws, monkeypatch):
     prof = keystore.read_profiles(ws)
-    prof["pl"] = {"env": {"T": "other-token"}, "files": {}, "run": [PY, "-c", "import sys;print(sys.argv[1])"]}
+    run_cmd = [PY, "-c", "import sys;print(sys.argv[1])"]
+    prof["pl"] = {"env": {"T": "other-token"}, "files": {}, "run": run_cmd}
     keystore.write_profiles(ws, prof)
     monkeypatch.delenv("CLAUDECODE", raising=False)
     code, out, _ = run("secret", "exec", "pl", "--", "hello")
