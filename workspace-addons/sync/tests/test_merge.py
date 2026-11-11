@@ -1133,7 +1133,9 @@ def test_history_verifier_failure_is_closed(decision):
 
 
 @pytest.mark.parametrize("by", ["Human:lindenmann", " human:x", "lindenmann", ["human:x"],
-                               "agent:relay from ph_abc", "agent:relay", None])
+                               "agent:relay from ph_abc", "agent:relay", "agent:\u200brelay from ph_abc",
+                               "agent:Severin Lindenmann", " Agent:Worker ", "agent:",
+                               "agent:" + "a" * 41, "agent:worker\n", "agent:ＲＥＬＡＹ", None])
 def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by, root):
     line = {"at": T2, "by": by, "text": "Approved"}
     peer = tk(history=[line])
@@ -1178,7 +1180,9 @@ def test_returned_demotion_cannot_erase_local_unpushed_answer():
     assert line in merge_ticket(tk(), remote, local, NOW)["history"]
 
 
-@pytest.mark.parametrize("by", ["agent:worker", " Agent:Worker ", "AGENT:worker"])
+@pytest.mark.parametrize("by", ["agent:worker", "AGENT:worker", "agent:claude", "agent:sync",
+                               "agent:codex", "agent:automation", "agent:focus", "agent:my-agent_1.2",
+                               "agent:" + "a" * 40, "ａｇｅｎｔ:ＣＯＤＥＸ"])
 def test_phone_attribution_and_sync_share_agent_allowlist(by):
     from orch.phone_view import _who, is_agent_history_author
 

@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -179,8 +180,10 @@ def is_agent_history_author(by) -> bool:
     """Only explicit agent labels are safe as unverified synced attribution."""
     if not isinstance(by, str):
         return False
-    label = by.strip().casefold()
-    return label.startswith("agent:") and not label[6:].lstrip().startswith(("relay", "phone", "ph_"))
+    label = unicodedata.normalize("NFKC", by).casefold()
+    return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
+        ("relay", "phone", "ph_")
+    )
 
 
 def _who(by: str) -> tuple[str, str]:
