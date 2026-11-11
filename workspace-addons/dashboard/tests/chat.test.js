@@ -3,10 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 function context() {
-  const h = (tag, attrs, ...children) => ({tag, attrs, style:{}, children:children.flat(Infinity).filter(c => c != null)});
+  const h = (tag, attrs, ...children) => ({tag, attrs, style:{}, children:children.flat(Infinity).filter(c => c != null),
+    append(...nodes){this.children.push(...nodes);}, prepend(...nodes){this.children.unshift(...nodes);},
+    addEventListener(){}, get textContent(){return this.children.map(c => typeof c === 'object' ? c.textContent : c).join('');}});
   const c = vm.createContext({h, fragment:(...children) => h('fragment', {}, children),
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), snapshot:false,
-    state:{workspace:'Fish', chat:{messages:[]}}, ticketOf:() => null, time:() => '',
+    state:{workspace:'Fish', chat:{messages:[]}}, ticketOf:() => null, time:() => '', date:v => v,
     MutationObserver:class {observe(){}}, document:{documentElement:{}}, CSS:{supports:() => false},
     iconEl:() => null, window:{addEventListener(){}}, location:{hash:''}, render(){}});
   vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/chat.js'), 'utf8'), c);
@@ -61,3 +63,39 @@ test('General phone text is rendered before the helper answer', () => {
   assert.ok(thread.indexOf('What is still open this week?') < thread.indexOf('Two tasks remain.'));
   assert.doesNotMatch(thread, /orch relay send|waiting for you\. Answer it/);
 });
+
+function nodes(node, predicate) {
+  return !node || typeof node !== 'object' ? [] : [
+    ...(predicate(node) ? [node] : []), ...node.children.flatMap(child => nodes(child, predicate)),
+  ];
+}
+
+for (const mode of ['Today', 'agent conversation', 'History day']) {
+  test(`real Pilatus day renders every phone bubble before its reply in ${mode}`, async () => {
+    const c = context();
+    const day = JSON.parse(fs.readFileSync(require('node:path').join(__dirname, 'fixtures/chat-day-pilatus-2026-11-11.json'), 'utf8'));
+    c.state = {workspace:'pilatus', chat:day};
+    if (mode === 'agent conversation') vm.runInContext('chatUi.agentConversation = true', c);
+    if (mode === 'History day') {
+      c.fetch = async url => {
+        assert.equal(url, '/api/chat/day/' + day.day);
+        return {ok:true, json:async () => day};
+      };
+      vm.runInContext('chatUi.open = "history"; chatUi.day = state.chat.day', c);
+      await c.chatLoad(day.day);
+    }
+    const page = c.chatPage();
+    const logs = nodes(page, n => n.attrs?.role === 'log' && n.attrs['aria-label'] === 'Chat messages');
+    assert.equal(logs.length, 1);
+    const bubbles = nodes(logs[0], n => n.attrs?.className?.split(' ').includes('chat-message'));
+    const ids = bubbles.map(n => n.attrs['data-message-id']);
+    const phone = bubbles.find(n => n.attrs['data-message-id'] === 'm_74jdus1swo0w0dsc');
+    assert.ok(phone, 'phone message is an ordinary Chat bubble');
+    assert.match(phone.attrs.className, /chat-out/);
+    assert.ok(nodes(phone, n => n.attrs?.className === 'chat-message-text')
+      .some(n => n.textContent === 'What is still open this week? [1203]'));
+    assert.equal(ids.indexOf('m_kudgohd14g8qumf5'), ids.indexOf('m_74jdus1swo0w0dsc') + 1);
+    const expected = mode === 'agent conversation' ? day.messages.slice(-2) : day.messages;
+    assert.deepEqual(ids, expected.map(m => m.id));
+  });
+}

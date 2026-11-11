@@ -20,6 +20,26 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 VECTORS = CONTRACTS / "vectors" / "chat-groups"
 
 
+def test_real_pilatus_day_preserves_phone_messages_in_status_and_history(proj, run):
+    fixture = CONTRACTS.parent / "workspace-addons/dashboard/tests/fixtures/chat-day-pilatus-2026-11-11.json"
+    original = fixture.read_text()
+    day = json.loads(original)
+    chat.chat_dir(proj).mkdir(parents=True, exist_ok=True)
+    (chat.chat_dir(proj) / f"{day['day']}.json").write_text(original)
+
+    status = chat.status(proj, now="2026-11-11T11:08:00Z")
+    code, output, error = run("chat", "day", day["day"], "--json")
+    assert code == 0, error
+    history = json.loads(output)
+    for result in (status, history):
+        assert result["messages"] == day["messages"]
+        phone, reply = result["messages"][-2:]
+        assert phone["id"] == "m_74jdus1swo0w0dsc"
+        assert phone["text"] == "What is still open this week? [1203]"
+        assert phone["via"] == "phone" and phone["by"] == "you"
+        assert reply["reply_to"] == phone["id"]
+
+
 def _validator():
     from referencing import Registry, Resource
 
