@@ -148,8 +148,16 @@ def resolve(root: Path, ref, *, notice=None):
     for t in local:
         if str(t.get("key", "")).upper() == want:
             return t["id"]
+    key = _KEY_RE.fullmatch(want)
+    code = config.workspace_code(root)
+    alias_allowed = (
+        key is not None
+        and code is not None
+        and key.group(1) == code.upper()
+        and int(key.group(2)) <= _counter_last(root)
+    )
     matches = []
-    for t in local:
+    for t in local if alias_allowed else []:
         old_keys = _get(t, "ext.sync.old_keys")
         if isinstance(old_keys, list) and any(isinstance(k, str) and k.upper() == want for k in old_keys):
             matches.append(t)
@@ -173,6 +181,13 @@ def _counter_path(root: Path) -> Path:
     return root / ".orch" / "ticket-counter.json"
 
 
+def _counter_last(root: Path) -> int:
+    try:
+        return int(json.loads(_counter_path(root).read_text(encoding="utf-8")).get("last", 0))
+    except (OSError, ValueError, AttributeError, TypeError):
+        return 0
+
+
 def next_key(root: Path) -> str:
     """<code>-<n> for a new ticket. n is 1 + the highest number handed out (counter file or any ticket's key),
     written to the counter under one workspace lock, so no two tickets share a number and none is reused."""
@@ -181,10 +196,7 @@ def next_key(root: Path) -> str:
     code = config.workspace_code(root) or config.set_code(root, config.suggest_code(root.resolve().name))
     with _locked(root, "key"):
         p = _counter_path(root)
-        try:
-            last = int(json.loads(p.read_text(encoding="utf-8")).get("last", 0))
-        except (OSError, ValueError, AttributeError, TypeError):
-            last = 0
+        last = _counter_last(root)
         for t in list_all(root):
             m = _KEY_RE.match(str(t.get("key", "")))
             if m:
@@ -2211,19 +2223,26 @@ def _own_sessions(root: Path) -> list[dict]:
         return []
     if not isinstance(entries, list) or any(
         not isinstance(s, dict)
-        or any(not isinstance(s.get(k), str) or not s[k] for k in ("id", "agent", "host", "first_seen"))
+        or any(
+            not isinstance(s.get(k), str) or not s[k]
+            for k in ("id", "agent", "host", "ticket_id", "first_seen")
+        )
         for s in entries
     ):
         return []
     return entries
 
 
-def _record_own_session(root: Path, agent: str, sid: str, host: str) -> None:
+def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -> None:
     with _locked(root, "own-sessions"):
         entries = _own_sessions(root)
         entry = next(
-            (s for s in entries if (s["id"], s["agent"], s["host"]) == (sid, agent, host)),
-            {"id": sid, "agent": agent, "host": host, "first_seen": now()},
+            (
+                s
+                for s in entries
+                if (s["id"], s["agent"], s["host"], s["ticket_id"]) == (sid, agent, host, tid)
+            ),
+            {"id": sid, "agent": agent, "host": host, "ticket_id": tid, "first_seen": now()},
         )
         entries = [s for s in entries if s != entry]
         entries.append(entry)
@@ -2255,15 +2274,19 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                 del sessions[0 : len(sessions) - 32]
 
     ticket = apply_op(root, tid, op)[0]
-    _record_own_session(root, agent, sid, host)
+    _record_own_session(root, tid, agent, sid, host)
     return ticket
 
 
 def sessions_for(root: Path, ticket: dict, agent: str, host: str) -> str | None:
-    """Resume only sessions recorded by this workspace on this machine. No age limit."""
-    owned = {(s["id"], s["agent"], s["host"]) for s in _own_sessions(root)}
+    """Resume only sessions recorded for this ticket by this workspace on this machine. No age limit."""
+    owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
     for s in ticket.get("sessions") or []:
-        if s.get("agent") == agent and s.get("host") == host and (s.get("id"), agent, host) in owned:
+        if (
+            s.get("agent") == agent
+            and s.get("host") == host
+            and (s.get("id"), agent, host, ticket.get("id")) in owned
+        ):
             return s.get("id")
     return None
 

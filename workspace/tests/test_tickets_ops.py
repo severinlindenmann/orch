@@ -508,7 +508,10 @@ def test_sessions_require_local_ownership(proj, new_ticket):
     # Neither the same id under another agent/host nor another workspace grants ownership.
     assert (
         tickets.sessions_for(
-            proj, {"sessions": [{"id": "local", "agent": "other", "host": "host"}]}, "other", "host"
+            proj,
+            {"id": tid, "sessions": [{"id": "local", "agent": "other", "host": "host"}]},
+            "other",
+            "host",
         )
         is None
     )
@@ -542,13 +545,18 @@ def test_own_sessions_bounded(proj, new_ticket):
     assert entries[-1]["first_seen"] == first_seen
     assert (
         tickets.sessions_for(
-            proj, {"sessions": [{"id": "s0", "agent": "agent", "host": "host"}]}, "agent", "host"
+            proj, {"id": tid, "sessions": [{"id": "s0", "agent": "agent", "host": "host"}]}, "agent", "host"
         )
         is None
     )
 
 
 def test_old_key_resolution(proj, new_ticket, run):
+    from orch import config
+
+    config.set_code(proj, "DM1")
+    for _ in range(12):
+        tickets.next_key(proj)
     tid = new_ticket()
     t = tickets.load(proj, tid)
     t["key"] = "DM1-15"
@@ -576,3 +584,43 @@ def test_old_key_resolution(proj, new_ticket, run):
     tickets.save(proj, t2)
     with pytest.raises(Refused, match="DM1-15, DM1-16"):
         tickets.resolve(proj, "DM1-13")
+
+
+def test_sessions_cannot_cross_tickets(proj, new_ticket):
+    a, b = new_ticket(), new_ticket()
+    tickets.record_session(proj, a, "agent", "local", "host")
+    original = tickets.load(proj, a)
+    copied = tickets.load(proj, b)
+    copied["sessions"] = original["sessions"]
+    tickets.save(proj, copied)
+    assert tickets.sessions_for(proj, tickets.load(proj, b), "agent", "host") is None
+    assert tickets.sessions_for(proj, original, "agent", "host") == "local"
+
+
+def test_sessions_legacy_record_fails_closed(proj, new_ticket):
+    tid = new_ticket()
+    ticket = tickets.record_session(proj, tid, "agent", "local", "host")
+    p = proj / ".orch" / "run" / "own-sessions.json"
+    entries = json.loads(p.read_text())
+    del entries[0]["ticket_id"]
+    p.write_text(json.dumps(entries))
+    assert tickets.sessions_for(proj, ticket, "agent", "host") is None
+    tickets.record_session(proj, tid, "agent", "local", "host")
+    assert tickets.sessions_for(proj, ticket, "agent", "host") == "local"
+
+
+@pytest.mark.parametrize("alias", ["DM1-2", "AB-1"])
+def test_old_key_unissued_or_other_prefix_refused(proj, new_ticket, alias):
+    from orch import config
+    from orch.errors import Refused
+
+    config.set_code(proj, "DM1")
+    tid = new_ticket()
+    t = tickets.load(proj, tid)
+    t["key"] = "DM1-15"
+    t["ext"] = {"sync": {"old_keys": [alias]}}
+    tickets.save(proj, t)
+    notices = []
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj, alias, notice=notices.append)
+    assert notices == []
