@@ -53,9 +53,7 @@ def build(root: Path, orch_bin: str | None = None, now: datetime | None = None) 
     live, work = [], []
     for rec in recs:
         attention = (rec.get("live") or {}).get("state") == "attention"
-        (live if rec.get("mode") == "live" else work).append(
-            _item(rec, titles.get(rec["ticket"]), attention, agents)
-        )
+        (live if rec.get("mode") == "live" else work).append(_item(rec, titles.get(rec["ticket"]), attention, agents))
     blocks: list[dict] = [
         {"type": "stat", "label": "Running now", "value": len(recs), "tone": "good" if recs else "neutral"}
     ]

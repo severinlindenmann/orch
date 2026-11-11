@@ -11,23 +11,14 @@ from orch_sync.merge import merge_counter, merge_ticket, old_keys_of, renumber_k
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 VEC = json.loads((CONTRACTS / "vectors" / "ticket-merge-v1.json").read_text(encoding="utf-8"))
-SCHEMA = Draft202012Validator(
-    json.loads((CONTRACTS / "ticket.schema.json").read_text(encoding="utf-8")), format_checker=FormatChecker()
-)
+SCHEMA = Draft202012Validator(json.loads((CONTRACTS / "ticket.schema.json").read_text(encoding="utf-8")),
+                              format_checker=FormatChecker())
 NOW = VEC["now"]
 
 
 def vmac(ticket, step, nonce):
     on = bool(step.get("wont_do"))  # an "on" record binds the step's text and covers; an undo record does not
-    parts = [
-        ticket,
-        str(step["id"]),
-        str(nonce),
-        str(step["text"] if on else ""),
-        str((step.get("covers") or "") if on else ""),
-        str(on),
-        str((step.get("reason") if on else "") or ""),
-    ]
+    parts = [ticket, str(step["id"]), str(nonce), str(step["text"] if on else ""), str((step.get("covers") or "") if on else ""), str(on), str((step.get("reason") if on else "") or "")]
     return "v1-" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:20]
 
 
@@ -42,25 +33,13 @@ def person_for(ledger):
 
     return person
 
-
 T1, T2, T3 = "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z", "2026-11-09T10:00:00Z"
 
 
 def tk(**kw):
-    t = {
-        "schema": "orch.ticket/1",
-        "id": "t_abc123",
-        "key": "DM1-1",
-        "title": "Invoice export",
-        "status": "open",
-        "created_at": T1,
-        "updated_at": T1,
-        "checklist": [],
-        "refs": [],
-        "questions": [],
-        "history": [],
-        "revision": 1,
-    }
+    t = {"schema": "orch.ticket/1", "id": "t_abc123", "key": "DM1-1", "title": "Invoice export", "status": "open",
+         "created_at": T1, "updated_at": T1, "checklist": [], "refs": [], "questions": [], "history": [],
+         "revision": 1}
     t.update(kw)
     return t
 
@@ -78,15 +57,12 @@ def texts(t):
 
 # ---- the shared vectors, both directions -------------------------------------------------------------------
 
-
 @pytest.mark.parametrize("c", VEC["tickets"], ids=lambda c: c["name"])
 def test_vector_ticket(c):
     before = deepcopy((c["base"], c["a"], c["b"]))
     person = person_for(c.get("ledger", {}))
     assert merge_ticket(c["base"], c["a"], c["b"], NOW, person) == c["expect"]
-    assert (
-        merge_ticket(c["base"], c["b"], c["a"], NOW, person) == c["expect"]
-    )  # symmetric: two machines converge
+    assert merge_ticket(c["base"], c["b"], c["a"], NOW, person) == c["expect"]  # symmetric: two machines converge
     assert (c["base"], c["a"], c["b"]) == before  # pure
     if c["expect"] is not None:
         assert list(SCHEMA.iter_errors(c["expect"])) == []
@@ -114,17 +90,12 @@ def test_every_rule_has_a_vector():
 
 # ---- hand-written expectations (so the vectors are not only the code's own output) -------------------------
 
-
 def test_scalar_loser_goes_to_history_and_newer_wins():
     base = tk()
     m = merge_ticket(base, up(base, T2, title="Export invoices"), up(base, T3, title="CSV export"), NOW)
     assert m["title"] == "CSV export"
-    assert m["history"][-1] == {
-        "at": NOW,
-        "by": "agent:sync",
-        "text": 'sync: title "Export invoices" was replaced',
-        "lost": {"field": "title", "value": "Export invoices"},
-    }
+    assert m["history"][-1] == {"at": NOW, "by": "agent:sync", "text": 'sync: title "Export invoices" was replaced',
+                                "lost": {"field": "title", "value": "Export invoices"}}
 
 
 def test_one_sided_change_wins_without_history():
@@ -149,20 +120,10 @@ def test_done_with_a_new_open_item_becomes_active():
 
 def test_checklist_clash_older_side_keeps_the_id_and_refs_follow():
     c = lambda t: {"id": "c1", "text": t, "done": False, "evidence": []}
-    q = {
-        "id": "q1",
-        "text": "?",
-        "options": [],
-        "recommended": None,
-        "answer": None,
-        "answered_by": None,
-        "via": None,
-        "check": "c1",
-    }
+    q = {"id": "q1", "text": "?", "options": [], "recommended": None, "answer": None, "answered_by": None,
+         "via": None, "check": "c1"}
     base = tk()
-    m = merge_ticket(
-        base, up(base, T2, checklist=[c("old")]), up(base, T3, checklist=[c("new")], questions=[q]), NOW
-    )
+    m = merge_ticket(base, up(base, T2, checklist=[c("old")]), up(base, T3, checklist=[c("new")], questions=[q]), NOW)
     assert [(x["id"], x["text"]) for x in m["checklist"]] == [("c1", "old"), ("c2", "new")]
     assert m["questions"][0]["check"] == "c2"
 
@@ -175,52 +136,27 @@ def test_done_needs_evidence_else_open():
 
 def test_both_answers_newer_wins_other_kept_in_history():
     def q(ans, by):
-        return {
-            "id": "q1",
-            "text": "?",
-            "options": [],
-            "recommended": None,
-            "answer": ans,
-            "answered_by": by,
-            "via": "cli" if ans else None,
-        }
-
+        return {"id": "q1", "text": "?", "options": [], "recommended": None, "answer": ans, "answered_by": by,
+                "via": "cli" if ans else None}
     base = tk(questions=[q(None, None)])
-    m = merge_ticket(
-        base,
-        up(base, T2, questions=[q("csv", "human:A")]),
-        up(base, T3, questions=[q("xlsx", "human:B")]),
-        NOW,
-    )
-    assert (
-        m["questions"][0]["answer"] == "xlsx"
-        and 'another answer "csv" by human:A was replaced' in texts(m)[-1]
-    )
+    m = merge_ticket(base, up(base, T2, questions=[q("csv", "human:A")]), up(base, T3, questions=[q("xlsx", "human:B")]), NOW)
+    assert m["questions"][0]["answer"] == "xlsx" and 'another answer "csv" by human:A was replaced' in texts(m)[-1]
 
 
 def test_history_and_evidence_never_lost():
     h = lambda at, t: {"at": at, "by": "human:A", "text": t}
     base = tk(history=[h(T1, "created")])
-    m = merge_ticket(
-        base,
-        up(base, T2, history=base["history"] + [h(T3, "x")]),
-        up(base, T3, history=base["history"] + [h(T2, "y")]),
-        NOW,
-    )
+    m = merge_ticket(base, up(base, T2, history=base["history"] + [h(T3, "x")]),
+                     up(base, T3, history=base["history"] + [h(T2, "y")]), NOW)
     assert texts(m) == ["created", "y", "x"]
 
 
 def test_sessions_cap_keeps_newest():
     def s(i):
         return {"agent": "a", "id": f"s{i}", "host": f"h{i}", "last_used": f"2026-11-09T08:{i:02d}:00Z"}
-
     base = tk()
-    m = merge_ticket(
-        base,
-        up(base, T2, sessions=[s(i) for i in range(20)]),
-        up(base, T3, sessions=[s(i) for i in range(20, 40)]),
-        NOW,
-    )
+    m = merge_ticket(base, up(base, T2, sessions=[s(i) for i in range(20)]),
+                     up(base, T3, sessions=[s(i) for i in range(20, 40)]), NOW)
     assert len(m["sessions"]) == 32 and m["sessions"][-1]["id"] == "s39" and m["sessions"][0]["id"] == "s8"
 
 
@@ -247,7 +183,6 @@ def test_unmergeable_gives_none(bad):
 
 # ---- counter and key clash ----------------------------------------------------------------------------------
 
-
 def test_counter_highest_wins_and_counts_old_keys():
     assert merge_counter({"last": 3}, {"last": 5}, {"last": 4})["last"] == 5
     assert merge_counter({"last": 3}, {"last": 3}, {"last": 3}, ["DM1-12", "junk"])["last"] == 12
@@ -260,37 +195,16 @@ def test_key_clash_keeps_old_key_resolvable_and_two_machines_agree():
     ch2, c2 = renumber_key_clashes({"t_bbb222": t2, "t_aaa111": t1}, {"last": 14}, NOW)
     assert (ch1, c1) == (ch2, c2) and list(ch1) == ["t_bbb222"] and c1["last"] == 15
     new = ch1["t_bbb222"]
-    assert (
-        new["key"] == "DM1-15"
-        and old_keys_of(new) == ["DM1-13"]
-        and "DM1-13 to DM1-15" in new["history"][-1]["text"]
-    )
+    assert new["key"] == "DM1-15" and old_keys_of(new) == ["DM1-13"] and "DM1-13 to DM1-15" in new["history"][-1]["text"]
     assert list(SCHEMA.iter_errors(new)) == []
 
 
 # ---- property style: random three-way inputs ---------------------------------------------------------------
 
-
 def _rand_side(rng, base, at):
     t = deepcopy(base)
     for _ in range(rng.randint(1, 4)):
-        k = rng.choice(
-            [
-                "title",
-                "status",
-                "owner",
-                "check",
-                "uncheck",
-                "q",
-                "hist",
-                "ref",
-                "ext",
-                "del",
-                "created",
-                "schema",
-                "key",
-            ]
-        )
+        k = rng.choice(["title", "status", "owner", "check", "uncheck", "q", "hist", "ref", "ext", "del", "created", "schema", "key"])
         if k == "title":
             t["title"] = rng.choice(["A", "B", "C"])
         elif k == "status":
@@ -300,36 +214,20 @@ def _rand_side(rng, base, at):
         elif k == "check":
             n = rng.randint(1, 3)
             t["checklist"] = [c for c in t["checklist"] if c["id"] != f"c{n}"] + [
-                {"id": f"c{n}", "text": rng.choice(["x", "y", "z"]), "done": False, "evidence": []}
-            ]
+                {"id": f"c{n}", "text": rng.choice(["x", "y", "z"]), "done": False, "evidence": []}]
         elif k == "uncheck" and t["checklist"]:
             t["checklist"].pop(rng.randrange(len(t["checklist"])))
         elif k == "q":
             n = rng.randint(1, 2)
             ans = rng.choice([None, "yes", "no"])
             t["questions"] = [x for x in t["questions"] if x["id"] != f"q{n}"] + [
-                {
-                    "id": f"q{n}",
-                    "text": rng.choice(["p", "r"]),
-                    "options": [],
-                    "recommended": None,
-                    "answer": ans,
-                    "answered_by": "human:A" if ans else None,
-                    "via": "cli" if ans else None,
-                }
-            ]
+                {"id": f"q{n}", "text": rng.choice(["p", "r"]), "options": [], "recommended": None, "answer": ans,
+                 "answered_by": "human:A" if ans else None, "via": "cli" if ans else None}]
         elif k == "hist":
-            t["history"].append(
-                {
-                    "at": f"2026-11-09T0{rng.randint(1, 9)}:00:00Z",
-                    "by": "human:A",
-                    "text": rng.choice(["m", "n", "o"]),
-                }
-            )
+            t["history"].append({"at": f"2026-11-09T0{rng.randint(1, 9)}:00:00Z", "by": "human:A",
+                                 "text": rng.choice(["m", "n", "o"])})
         elif k == "ref":
-            t["refs"] = [
-                {"kind": "web", "url": f"https://e.com/{rng.randint(1, 3)}", "at": T1, "by": "human:A"}
-            ]
+            t["refs"] = [{"kind": "web", "url": f"https://e.com/{rng.randint(1, 3)}", "at": T1, "by": "human:A"}]
         elif k == "ext":
             t.setdefault("ext", {})["automation"] = {"cron": rng.choice(["a", "b"])}
         elif k == "created":
@@ -361,18 +259,9 @@ def test_property_symmetry_purity_and_no_loss(seed):
     for side in (a, b):  # history is never dropped
         assert {(h["at"], h["by"], h["text"]) for h in side["history"]} <= have
     one = merge_ticket(base, a, a, NOW)  # merging a side with itself changes nothing but the revision
-
     def norm(t):  # history and the order of added items come back in a fixed order
-        return {
-            k: (
-                sorted(v, key=lambda x: json.dumps(x, sort_keys=True))
-                if k in ("history", "checklist", "questions")
-                else v
-            )
-            for k, v in t.items()
-            if k != "revision"
-        }
-
+        return {k: (sorted(v, key=lambda x: json.dumps(x, sort_keys=True)) if k in ("history", "checklist", "questions") else v)
+                for k, v in t.items() if k != "revision"}
     assert norm(one) == norm(a)
 
 
@@ -386,7 +275,6 @@ def test_ext_sync_matches_its_contract_schema():
 
 
 # ---- review fixes (Opus review of #372) ---------------------------------------------------------------------
-
 
 def _nest(n):
     d = {"leaf": 1}
@@ -414,16 +302,9 @@ def test_size_caps():
 
 def test_garbage_types_never_raise():
     base = tk()
-    for bad in (
-        {"checklist": [{"id": 1, "text": "x"}]},
-        {"checklist": [{"text": "x"}]},
-        {"refs": [[]]},
-        {"questions": "no"},
-        {"sessions": [{"agent": ["x"], "host": {}}, {"agent": ["x"], "host": {}}]},
-        {"history": [{"at": 1}, {"at": "x"}]},
-        {"ext": {"a": 5}},
-        {"updated_at": 5},
-    ):
+    for bad in ({"checklist": [{"id": 1, "text": "x"}]}, {"checklist": [{"text": "x"}]}, {"refs": [[]]},
+                {"questions": "no"}, {"sessions": [{"agent": ["x"], "host": {}}, {"agent": ["x"], "host": {}}]},
+                {"history": [{"at": 1}, {"at": "x"}]}, {"ext": {"a": 5}}, {"updated_at": 5}):
         merge_ticket(base, up(base, T2, **bad), up(base, T3, owner="A"), NOW)  # must not raise
 
 
@@ -437,10 +318,7 @@ def test_loser_is_never_truncated():
 
 def test_duplicate_ids_cannot_merge():
     base = tk()
-    dup = [
-        {"id": "c1", "text": "a", "done": False, "evidence": []},
-        {"id": "c1", "text": "b", "done": False, "evidence": []},
-    ]
+    dup = [{"id": "c1", "text": "a", "done": False, "evidence": []}, {"id": "c1", "text": "b", "done": False, "evidence": []}]
     assert merge_ticket(base, up(base, T2, checklist=dup), up(base, T3), NOW) is None
     assert merge_ticket(base, up(base, T3), up(base, T2, checklist=dup), NOW) is None
     ref = {"kind": "web", "url": "https://e.com", "at": T1, "by": "human:A"}
@@ -468,42 +346,24 @@ def test_key_loser_goes_to_old_keys_and_text_conflicts_are_logged():
 def test_key_clash_malformed_input_gives_none():
     ok = tk(id="t_aaa111", key="DM1-13")
     for bad in ({"key": [1]}, {"key": "x-1"}, {"ext": []}, {"created_at": 5}, {"ext": {"sync": []}}):
-        assert (
-            renumber_key_clashes(
-                {"t_aaa111": ok, "t_bbb222": {**tk(id="t_bbb222", key="DM1-13"), **bad}}, {"last": 1}, NOW
-            )
-            is None
-        )
-    assert (
-        renumber_key_clashes(
-            {"t_aaa111": ok, "t_bbb222": tk(id="t_bbb222", key="DM1-13")}, {"last": 999_000_000}, NOW
-        )
-        is None
-    )
+        assert renumber_key_clashes({"t_aaa111": ok, "t_bbb222": {**tk(id="t_bbb222", key="DM1-13"), **bad}},
+                                    {"last": 1}, NOW) is None
+    assert renumber_key_clashes({"t_aaa111": ok, "t_bbb222": tk(id="t_bbb222", key="DM1-13")},
+                                {"last": 999_000_000}, NOW) is None
     assert renumber_key_clashes("no", {}, NOW) is None
 
 
 def test_backdating_cannot_steal_a_key_the_local_ticket_holds():
     mine = tk(id="t_bbb222", key="DM1-13", created_at=T2)
     theirs = tk(id="t_aaa111", key="DM1-13", created_at="2001-01-01T00:00:00Z")
-    changed, _ = renumber_key_clashes(
-        {"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"]
-    )
+    changed, _ = renumber_key_clashes({"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"])
     assert list(changed) == ["t_aaa111"]
 
 
 def test_question_answered_by_differs_only_is_symmetric():
     def q(by, via):
-        return {
-            "id": "q1",
-            "text": "?",
-            "options": [],
-            "recommended": None,
-            "answer": None,
-            "answered_by": by,
-            "via": via,
-        }
-
+        return {"id": "q1", "text": "?", "options": [], "recommended": None, "answer": None, "answered_by": by,
+                "via": via}
     base = tk(questions=[q(None, None)])
     a, b = up(base, T2, questions=[q("human:A", "cli")]), up(base, T3, questions=[q("human:B", "web")])
     assert merge_ticket(base, a, b, NOW) == merge_ticket(base, b, a, NOW)
@@ -517,7 +377,6 @@ def test_counter_never_raises_on_garbage():
 
 
 # ---- Won't do: a person's decision (human `by`); done vs won't do is one side wholesale
-
 
 def _step(**kw):
     c = {"id": "c1", "text": "Email finance", "done": False, "evidence": []}
@@ -536,8 +395,6 @@ def signed(step, nonce="n1"):
 
 def ledger_of(*steps):
     return {f"{TK}:{x['id']}": x["wont_mac"] for x in steps}
-
-
 DONE = {
     "done": True,
     "evidence": [{"type": "note", "ref": "sent it", "by": "agent:claude", "at": T2}],

@@ -1,5 +1,4 @@
 """`orch automation`: run, start, stop, status, list, repeat, view. Exit 0 ok, 2 refused (plain words), like the core."""
-
 from __future__ import annotations
 
 import argparse
@@ -56,63 +55,25 @@ def describe(root: Path) -> list[dict]:
             continue
         w = t.get("waiting_on") or {}
         if w.get("kind") == "time" and w.get("until"):
-            rows.append(
-                {
-                    "ticket": t["id"],
-                    "key": t.get("key"),
-                    "title": t["title"],
-                    "kind": "wake",
-                    "at": w["until"],
-                    "local": local_text(w["until"]),
-                }
-            )
+            rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "wake", "at": w["until"],
+                         "local": local_text(w["until"])})
         s = (t.get("ext") or {}).get("automation") or {}
         if s.get("recurring") is True and s.get("cron"):
             if s.get("paused") is True:  # switched off: listed, no next time
-                rows.append(
-                    {
-                        "ticket": t["id"],
-                        "key": t.get("key"),
-                        "title": t["title"],
-                        "kind": "repeat",
-                        "cron": s["cron"],
-                        "at": None,
-                        "off": True,
-                        "when": cron_human(s["cron"], plain.zone(s.get("tz"))),
-                    }
-                )
+                rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "repeat", "cron": s["cron"], "at": None, "off": True,
+                             "when": cron_human(s["cron"], plain.zone(s.get("tz")))})
                 continue
             nxt = next_after(s["cron"], datetime.now(UTC), plain.zone(s.get("tz")))
             at = fmt(nxt) if nxt else state.get(t["id"], {}).get("next_run")
-            rows.append(
-                {
-                    "ticket": t["id"],
-                    "key": t.get("key"),
-                    "title": t["title"],
-                    "kind": "repeat",
-                    "cron": s["cron"],
-                    "at": at,
-                    "when": cron_human(s["cron"], plain.zone(s.get("tz"))),
-                    "local": local_text(at),
-                }
-            )
+            rows.append({"ticket": t["id"], "key": t.get("key"), "title": t["title"], "kind": "repeat", "cron": s["cron"],
+                         "at": at, "when": cron_human(s["cron"], plain.zone(s.get("tz"))), "local": local_text(at)})
     return sorted(rows, key=lambda r: r["at"] or "")
 
 
-def repeat(
-    root: Path,
-    tid: str,
-    phrase: str | None,
-    off: bool,
-    agent: str | None = None,
-    tz: str | None = None,
-    each_run: bool = False,
-    by: str | None = None,
-) -> dict:
+def repeat(root: Path, tid: str, phrase: str | None, off: bool, agent: str | None = None, tz: str | None = None,
+           each_run: bool = False, by: str | None = None) -> dict:
     want = tid.strip().upper()  # the ticket id, or its key (DM1-12, any case)
-    t = next(
-        (x for x in orchcli.tickets(root) if x["id"] == tid or str(x.get("key") or "").upper() == want), None
-    )
+    t = next((x for x in orchcli.tickets(root) if x["id"] == tid or str(x.get("key") or "").upper() == want), None)
     if t is None:
         raise Refused(f"There is no ticket {tid}.")
     tid = t["id"]
@@ -140,7 +101,7 @@ def repeat(
         raise Refused(f"'{zone_name}' is not a time zone. Use a name like Europe/Zurich.")
     changes = {"recurring": True, "cron": plan.cron, "tz": zone_name}
     if each_run and not plain.daily_or_slower(plan.cron):
-        raise Refused('Each run as its own ticket needs a repeat daily or slower, like "daily 07:30".')
+        raise Refused("Each run as its own ticket needs a repeat daily or slower, like \"daily 07:30\".")
     if agent:
         if not orchcli.AGENT_RE.match(agent):
             raise Refused("The agent name may only have a-z, 0-9 and -. It names an agent (orch agents).")
@@ -153,14 +114,8 @@ def repeat(
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
-        prog="orch automation", description="Starts agent runs: at a time, on a repeat, from the relay inbox."
-    )
-    ap.add_argument(
-        "--dir",
-        default=os.environ.get("ORCH_ROOT", "."),
-        help="workspace folder (default: ORCH_ROOT or current)",
-    )
+    ap = argparse.ArgumentParser(prog="orch automation", description="Starts agent runs: at a time, on a repeat, from the relay inbox.")
+    ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."), help="workspace folder (default: ORCH_ROOT or current)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true")
@@ -172,22 +127,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", parents=[common], help="next wake-ups and repeats")
     sub.add_parser("needs", parents=[common], help="rows for `orch needs`")
     sub.add_parser("view", parents=[common], help="dashboard tab data")
-    rp = sub.add_parser(
-        "repeat", parents=[common], help="repeat a ticket, or wake it once; say when in plain words"
-    )
+    rp = sub.add_parser("repeat", parents=[common], help="repeat a ticket, or wake it once; say when in plain words")
     rp.add_argument("ticket")
     rp.add_argument("when", nargs="?", help=f"for example: {plain.EXAMPLES}")
     rp.add_argument("--agent", help="name of the agent for this repeat")
     rp.add_argument("--tz", help="time zone of the times (default: this computer's, e.g. Europe/Zurich)")
-    rp.add_argument(
-        "--each-run", choices=("sub-ticket",), help="give every run its own sub-ticket (daily or slower)"
-    )
+    rp.add_argument("--each-run", choices=("sub-ticket",), help="give every run its own sub-ticket (daily or slower)")
     rp.add_argument("--off", action="store_true")
-    ac = sub.add_parser(
-        "act",
-        parents=[common],
-        help="what the dashboard buttons do: on, off, toggle, run, delete, repeat, copy",
-    )
+    ac = sub.add_parser("act", parents=[common], help="what the dashboard buttons do: on, off, toggle, run, delete, repeat, copy")
     ac.add_argument("--value", help="when to repeat, in plain words")
     ac.add_argument("verb", choices=actions.VERBS)
     ac.add_argument("target", help="ticket id")
@@ -199,10 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             raise Refused("No orch workspace here (no .orch/ folder). Run `orch init` first.")
         return _run(args, root)
     except Refused as e:
-        print(
-            json.dumps({"error": str(e)}) if args.json else f"Refused: {e}",
-            file=None if args.json else sys.stderr,
-        )
+        print(json.dumps({"error": str(e)}) if args.json else f"Refused: {e}", file=None if args.json else sys.stderr)
         return 2
 
 
@@ -232,16 +176,10 @@ def _run(args, root: Path) -> int:
         except RuntimeError as e:
             res = str(e)
         if res in ("stopped", "not running"):
-            out(
-                {"stopped": res == "stopped"},
-                "Scheduler stopped." if res == "stopped" else "Scheduler was not running.",
-            )
+            out({"stopped": res == "stopped"}, "Scheduler stopped." if res == "stopped" else "Scheduler was not running.")
         else:
-            note = (
-                "A file in .orch/run/automation/ names a process that is not this scheduler; nothing was stopped."
-                if res == "not verified"
-                else res
-            )
+            note = ("A file in .orch/run/automation/ names a process that is not this scheduler; nothing was stopped."
+                    if res == "not verified" else res)
             out({"stopped": False, "note": note}, note)
     elif args.cmd == "status":
         from . import listen
@@ -249,11 +187,7 @@ def _run(args, root: Path) -> int:
         pid = service.running_pid(root)
         ls = listen.read(root) if pid else {}
         listening = bool(pid and ls.get("listening"))
-        heard = (
-            "Listening for the phone and other workspaces."
-            if listening
-            else (ls.get("note") or NOT_LISTENING)
-        )
+        heard = "Listening for the phone and other workspaces." if listening else (ls.get("note") or NOT_LISTENING)
         line = f"Automation is running (pid {pid}). {heard}" if pid else "Automation is not running."
         out({"running": bool(pid), "pid": pid, "listening": listening}, line)
         return 0 if pid else 1
@@ -267,7 +201,6 @@ def _run(args, root: Path) -> int:
         out(rows, "\n".join(list_line(x) for x in rows) or "Nothing scheduled.")
     elif args.cmd == "view":
         from .view import build
-
         print(json.dumps(build(root)))
     elif args.cmd == "act":
         try:

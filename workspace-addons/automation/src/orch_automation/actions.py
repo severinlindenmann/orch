@@ -2,7 +2,6 @@
 
 Delete removes the whole ext.automation entry (orch ext unset) and keeps the ticket and its history: tickets are never deleted here.
 """
-
 from __future__ import annotations
 
 import re
@@ -31,7 +30,6 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         if not isinstance(value, str) or not value.strip() or len(value) > 200 or "\x00" in value:
             raise Bad("Say when in at most 200 characters.")
         from .cli import Refused, repeat
-
         try:
             return {**repeat(root, target, value, False, by=by), "text": "Schedule saved."}
         except Refused as e:
@@ -64,13 +62,8 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         if sched:  # a manual run counts as the last run (same writer as the schedule); re-read: the run bumped the revision
             fresh = next((x for x in orchcli.tickets(root) if x["id"] == target), t)
             record_last_run(root, fresh, datetime.now(UTC), by=by)
-        return {
-            "ticket": target,
-            "result": r["result"],
-            "text": "Run started."
-            if r["result"] == "started"
-            else "The ticket is busy: your request waits for the current run.",
-        }
+        return {"ticket": target, "result": r["result"],
+                "text": "Run started." if r["result"] == "started" else "The ticket is busy: your request waits for the current run."}
     if not sched:
         raise Bad("This ticket has no automation to change.")
     if verb == "delete":

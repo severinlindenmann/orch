@@ -1,5 +1,4 @@
 """Scheduler files: .orch/addons/automation/state.json and runs.jsonl. Runs themselves are started by core (`orch run start`)."""
-
 from __future__ import annotations
 
 import json
@@ -19,9 +18,7 @@ def sdir(root: Path) -> Path:
     d = root / ".orch" / "addons" / "automation"
     for p in (root / ".orch", root / ".orch" / "addons", d):
         if p.is_symlink():
-            raise RuntimeError(
-                f"{p} is a symbolic link; the scheduler does not use it. Remove it and try again."
-            )
+            raise RuntimeError(f"{p} is a symbolic link; the scheduler does not use it. Remove it and try again.")
     d.mkdir(parents=True, exist_ok=True)
     gi = d / ".gitignore"
     if not gi.exists() and not gi.is_symlink():

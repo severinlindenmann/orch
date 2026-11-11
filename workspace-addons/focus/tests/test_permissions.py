@@ -146,10 +146,7 @@ def test_chat_notes():
     assert chat.note({"delivered": 0}, False, False) == "Saved for the next run."
     assert chat.note(None, False, False) == "Saved for the next run."
     # a waiting question: no "after this step" text
-    assert (
-        chat.note({"delivered": 0}, True, True, asking=True)
-        == "Answer the question — the agent continues right after."
-    )
+    assert chat.note({"delivered": 0}, True, True, asking=True) == "Answer the question — the agent continues right after."
 
 
 def test_bad_records_in_the_state_file_are_dropped_on_load(ws, fake_orch):

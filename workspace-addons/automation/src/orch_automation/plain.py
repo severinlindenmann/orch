@@ -1,5 +1,4 @@
 """UX-05: plain-word repeats. Five phrases become a cron (read in a time zone) or a one-off time. Nothing else is accepted."""
-
 from __future__ import annotations
 
 import os
@@ -9,10 +8,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-EXAMPLES = (
-    "every monday 08:00 · daily 07:30 · every 15 minutes · every 2 hours · monthly 1 09:00 · "
-    "tomorrow 09:00 · today 17:30"
-)
+EXAMPLES = ('every monday 08:00 · daily 07:30 · every 15 minutes · every 2 hours · monthly 1 09:00 · '
+            'tomorrow 09:00 · today 17:30')
 DAYS = {"sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4, "friday": 5, "saturday": 6}
 _TIME = r"([01]?\d|2[0-3]):([0-5]\d)"
 
@@ -79,7 +76,7 @@ def parse(text: str, tz: str, now: datetime | None = None) -> Plan:
         if at <= local:
             raise Plain(f"{m[0]} is already past. Try tomorrow {m[2]}:{m[3]}.")
         return Plan(until=at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
-    raise Plain(f'I don\'t understand "{text}". Say it like: {EXAMPLES}. Monthly days go from 1 to 28.')
+    raise Plain(f"I don't understand \"{text}\". Say it like: {EXAMPLES}. Monthly days go from 1 to 28.")
 
 
 def daily_or_slower(cron: str) -> bool:

@@ -80,28 +80,20 @@ def test_nine_runs_do_not_warn(ws):
 
 def test_needs_failed_run_without_question(ws):
     add_ticket(ws, "t_nf000001", title="X")
-    add_ticket(
-        ws, "t_nf000002", title="Y", questions=[{"id": "q1", "kind": "automation:failure", "answer": None}]
-    )
+    add_ticket(ws, "t_nf000002", title="Y", questions=[{"id": "q1", "kind": "automation:failure", "answer": None}])
     d = ws / ".orch/addons/automation"
-    (d / "runs.jsonl").write_text(
-        "".join(
-            json.dumps({"ticket": t, "at": "2026-11-05T07:00:00Z", "took": 1, "exit": 1}) + "\n"
-            for t in ("t_nf000001", "t_nf000002")
-        )
-    )
+    (d / "runs.jsonl").write_text("".join(json.dumps({"ticket": t, "at": "2026-11-05T07:00:00Z", "took": 1, "exit": 1}) + "\n"
+                                         for t in ("t_nf000001", "t_nf000002")))
     (r,) = needs.rows(ws, T(8, 0, d=5))
     assert r["ticket"] == "t_nf000001" and r["tone"] == "bad" and r["kind"] == "automation:failed-run"
 
 
 def test_needs_cli_json_validates(ws, capsys):
     import re
-
     add_ticket(ws, "t_loop0003")
     update_state(ws, "t_loop0003", starts=[f"2026-11-0{5}T0{h}:00:00Z" for h in range(10)])
     from datetime import UTC, datetime
     from unittest import mock
-
     with mock.patch("orch_automation.needs.datetime") as dt:
         dt.now.return_value = datetime(2026, 11, 5, 12, tzinfo=UTC)
         assert main(["--dir", str(ws), "needs", "--json"]) == 0
@@ -118,13 +110,7 @@ def test_unreachable_relay_pauses_instead_of_spinning(ws):
 
 
 def phone_ticket(ws, tid, **kw):
-    return add_ticket(
-        ws,
-        tid,
-        created_at="2026-11-04T07:50:00Z",
-        ext={"relay": {"origin": "phone", "from": "ph_abc", "message": "m_1"}},
-        **kw,
-    )
+    return add_ticket(ws, tid, created_at="2026-11-04T07:50:00Z", ext={"relay": {"origin": "phone", "from": "ph_abc", "message": "m_1"}}, **kw)
 
 
 def test_phone_text_ticket_starts_one_run_only(ws):
@@ -135,10 +121,7 @@ def test_phone_text_ticket_starts_one_run_only(ws):
     assert s.tick(T(8)) == ["t_ph000001"]
     assert s.tick(T(8, 1)) == [] and Scheduler(ws).tick(T(8, 2)) == []  # also not after a restart
     assert runs_started(ws) == ["t_ph000001"]
-    assert (
-        json.loads((ws / ".orch/tickets/t_ph000001.json").read_text())["ext"]["automation"]["phone_started"]
-        is True
-    )
+    assert json.loads((ws / ".orch/tickets/t_ph000001.json").read_text())["ext"]["automation"]["phone_started"] is True
 
 
 def test_old_or_closed_phone_tickets_are_left_alone(ws):
@@ -154,24 +137,9 @@ def test_follow_up_text_on_a_running_ticket_starts_nothing(ws):
 
     add_ticket(ws, "t_ph000004", status="active")
     relay_on(ws)
-    (ws / "inbox.json").write_text(
-        json.dumps(
-            [
-                {
-                    "id": "m_5",
-                    "type": "text",
-                    "from": "ph_abc",
-                    "ticket": "t_ph000004",
-                    "applied": True,
-                    "note": "added to t_ph000004",
-                    "body": {"text": "and also"},
-                }
-            ]
-        )
-    )
-    assert (
-        Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
-    )  # the run is going: the relay queued the text
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_5", "type": "text", "from": "ph_abc", "ticket": "t_ph000004",
+                                                 "applied": True, "note": "added to t_ph000004", "body": {"text": "and also"}}]))
+    assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []  # the run is going: the relay queued the text
 
 
 def test_follow_up_text_on_an_idle_ticket_starts_a_run(ws):
@@ -180,21 +148,8 @@ def test_follow_up_text_on_an_idle_ticket_starts_a_run(ws):
     add_ticket(ws, "t_ph000005", status="open")
     (ws / "ended-t_ph000005").write_text("")
     relay_on(ws)
-    (ws / "inbox.json").write_text(
-        json.dumps(
-            [
-                {
-                    "id": "m_6",
-                    "type": "text",
-                    "from": "ph_abc",
-                    "ticket": "t_ph000005",
-                    "applied": True,
-                    "note": "added to t_ph000005",
-                    "body": {"text": "more"},
-                }
-            ]
-        )
-    )
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_6", "type": "text", "from": "ph_abc", "ticket": "t_ph000005",
+                                                 "applied": True, "note": "added to t_ph000005", "body": {"text": "more"}}]))
     assert Scheduler(ws).tick(T(8)) == ["t_ph000005"] and runs_started(ws) == ["t_ph000005"]
 
 
@@ -232,21 +187,9 @@ def test_a_general_text_starts_the_agent_on_the_general_ticket(ws):
     add_ticket(ws, "t_general1", status="open")
     (ws / "ended-t_general1").write_text("")
     relay_on(ws)
-    (ws / "inbox.json").write_text(
-        json.dumps(
-            [
-                {
-                    "id": "m_7",
-                    "type": "text",
-                    "from": "ph_abc",
-                    "ticket": "t_general1",
-                    "applied": True,
-                    "note": "General conversation",
-                    "body": {"text": "hello", "general": True},
-                }
-            ]
-        )
-    )
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_7", "type": "text", "from": "ph_abc", "ticket": "t_general1",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
     assert Scheduler(ws).tick(T(8)) == ["t_general1"] and runs_started(ws) == ["t_general1"]
     start = next(c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"])
     assert "--mode" not in start  # a person is waiting on the phone: a live session when the machine can
@@ -259,21 +202,9 @@ def test_a_general_text_while_the_agent_runs_starts_nothing(ws):
 
     add_ticket(ws, "t_general2", status="active")
     relay_on(ws)
-    (ws / "inbox.json").write_text(
-        json.dumps(
-            [
-                {
-                    "id": "m_8",
-                    "type": "text",
-                    "from": "ph_abc",
-                    "ticket": "t_general2",
-                    "applied": True,
-                    "note": "General conversation",
-                    "body": {"text": "hello", "general": True},
-                }
-            ]
-        )
-    )
+    (ws / "inbox.json").write_text(json.dumps([{"id": "m_8", "type": "text", "from": "ph_abc", "ticket": "t_general2",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
     assert Scheduler(ws).tick(T(8)) == [] and runs_started(ws) == []
 
 
@@ -281,21 +212,9 @@ def test_started_line_never_has_an_empty_id(ws):
     add_ticket(ws, "t_general3", status="open")
     (ws / "ended-t_general3").write_text("")
     relay_on(ws)
-    (ws / "inbox.json").write_text(
-        json.dumps(
-            [
-                {
-                    "id": "",
-                    "type": "text",
-                    "from": "ph_abc",
-                    "ticket": "t_general3",
-                    "applied": True,
-                    "note": "General conversation",
-                    "body": {"text": "hello", "general": True},
-                }
-            ]
-        )
-    )
+    (ws / "inbox.json").write_text(json.dumps([{"id": "", "type": "text", "from": "ph_abc", "ticket": "t_general3",
+                                                 "applied": True, "note": "General conversation",
+                                                 "body": {"text": "hello", "general": True}}]))
     Scheduler(ws).tick(T(8))
     texts = [h["text"] for h in json.loads((ws / ".orch/tickets/t_general3.json").read_text())["history"]]
     assert not any("()" in t or "(phone text )" in t for t in texts)
@@ -305,13 +224,8 @@ def test_answer_to_one_of_several_questions_resumes_a_stopped_phone_ticket_once(
     from conftest import runs_started
 
     # q1 answered on the dashboard, q2 is still open: the ticket keeps waiting, no run holds it
-    add_ticket(
-        ws,
-        "t_ph000009",
-        status="waiting",
-        waiting_on={"kind": "question", "ref": "q2"},
-        ext={"relay": {"origin": "phone"}, "automation": {"phone_started": True}},
-    )
+    add_ticket(ws, "t_ph000009", status="waiting", waiting_on={"kind": "question", "ref": "q2"},
+               ext={"relay": {"origin": "phone"}, "automation": {"phone_started": True}})
     (ws / "ended-t_ph000009").write_text("")
     (ws / "pending-t_ph000009").write_text(json.dumps(["p_1"]))
     s = Scheduler(ws)
@@ -325,9 +239,7 @@ def test_one_run_when_both_ready_and_waiting_rules_could_apply(ws):
 
     add_ticket(ws, "t_ph000010", status="ready")
     add_ticket(ws, "t_ph000011", status="waiting", waiting_on={"kind": "question", "ref": "q2"})
-    add_ticket(
-        ws, "t_ph000012", status="waiting", waiting_on={"kind": "time", "until": "2026-12-01T00:00:00Z"}
-    )
+    add_ticket(ws, "t_ph000012", status="waiting", waiting_on={"kind": "time", "until": "2026-12-01T00:00:00Z"})
     for tid in ("t_ph000010", "t_ph000011", "t_ph000012"):
         (ws / f"ended-{tid}").write_text("")
         (ws / f"pending-{tid}").write_text(json.dumps(["p_1"]))

@@ -53,9 +53,7 @@ def test_unwatched_work_is_counted_by_the_ticker_and_by_the_claim_age(tmp_path):
 def test_corrupt_clock_file_is_ignored_and_ticks_are_safe_in_threads(tmp_path):
     (tmp_path / ".orch").mkdir()
     c = WorkClock(tmp_path)
-    runfiles.write_json(
-        c._file(TID), {"worked": float("inf"), "paused": True, "mode": "worked", "seen": float("nan")}
-    )
+    runfiles.write_json(c._file(TID), {"worked": float("inf"), "paused": True, "mode": "worked", "seen": float("nan")})
     r = c.tick(TID, "worked", now=500)
     assert r["worked"] == 0 and r["paused"] == 0
     start = time.time()
@@ -69,42 +67,15 @@ def test_corrupt_clock_file_is_ignored_and_ticks_are_safe_in_threads(tmp_path):
 def test_context_percent_from_cached_input():
     m = ClaudeMapper("r_8k2m9z4q", TID)
     for i, (read, new) in enumerate([(0, 1000), (900, 100)]):
-        m.feed(
-            {
-                "type": "assistant",
-                "message": {
-                    "id": f"m{i}",
-                    "content": [],
-                    "usage": {
-                        "input_tokens": new // 2,
-                        "cache_creation_input_tokens": new - new // 2,
-                        "cache_read_input_tokens": read,
-                    },
-                },
-            }
-        )
-    m.feed(
-        {
-            "type": "assistant",
-            "message": {
-                "id": "m1",
-                "content": [],
-                "usage": {
-                    "input_tokens": 50,
-                    "cache_creation_input_tokens": 50,
-                    "cache_read_input_tokens": 900,
-                },
-            },
-        }
-    )  # same id twice: counted once
+        m.feed({"type": "assistant", "message": {"id": f"m{i}", "content": [], "usage": {
+            "input_tokens": new // 2, "cache_creation_input_tokens": new - new // 2, "cache_read_input_tokens": read}}})
+    m.feed({"type": "assistant", "message": {"id": "m1", "content": [], "usage": {"input_tokens": 50, "cache_creation_input_tokens": 50, "cache_read_input_tokens": 900}}})  # same id twice: counted once
     out = m.feed({"type": "result", "timestamp": "2026-11-09T10:00:00Z"})
     state = next(e for e in out if e["kind"] == "run.state")
     assert state["data"]["reused"] == 45  # 900 of 2000
     snap = Board.from_events(out).snapshot()
     assert snap["context"]["reused"] == 45
-    assert ev.make(
-        "r_8k2m9z4q", TID, "main", "run.state", "x", "adapter", state="idle"
-    )  # without the figure: fine
+    assert ev.make("r_8k2m9z4q", TID, "main", "run.state", "x", "adapter", state="idle")  # without the figure: fine
     assert Board.from_events([]).snapshot()["context"] is None
 
 

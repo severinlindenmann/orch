@@ -41,13 +41,7 @@ class TicketWatcher:
         first = not self._primed
         for c in ticket.get("checklist", []):
             cid = c["id"]
-            now = (
-                "wont"
-                if c.get("wont_do")
-                else "done"
-                if c.get("done")
-                else ("doing" if c.get("state") == "doing" else "todo")
-            )
+            now = "wont" if c.get("wont_do") else "done" if c.get("done") else ("doing" if c.get("state") == "doing" else "todo")
             old = self._state.get(cid, "todo")
             self._state[cid] = now
             if first and prime:
@@ -88,9 +82,7 @@ class Board:
         self.open_calls: dict[str, dict] = {}  # tool/helper id -> start event
         self.helpers: dict[str, dict] = {}
         self.usage: dict | None = None
-        self.context: dict | None = (
-            None  # how much of the saved conversation was reused: {reused: 0..100, at}
-        )
+        self.context: dict | None = None  # how much of the saved conversation was reused: {reused: 0..100, at}
         self.denials: list[dict] = []
         self.last_step = ""
 

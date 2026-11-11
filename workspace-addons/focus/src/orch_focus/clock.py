@@ -28,11 +28,7 @@ SAVE_EVERY = 20.0
 
 
 def _num(v) -> float:
-    return (
-        float(v)
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
-        else 0.0
-    )
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0 else 0.0
 
 
 def _age(iso: str | None, now: float) -> float:
@@ -96,9 +92,7 @@ class WorkClock:
                 rec["first"] = first or datetime.fromtimestamp(t, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                 changed = True
             rec["mode"], rec["seen"] = mode, t
-            paused = rec["paused"] + (
-                t - rec["since"] if mode == "paused" and 0 <= t - rec["since"] <= PAUSE_MAX else 0
-            )
+            paused = rec["paused"] + (t - rec["since"] if mode == "paused" and 0 <= t - rec["since"] <= PAUSE_MAX else 0)
             out = {"worked": int(rec["worked"]), "paused": int(paused), "first": rec["first"]}
             if changed or t - self.saved.get(tid, 0.0) >= SAVE_EVERY:
                 self.saved[tid] = t
