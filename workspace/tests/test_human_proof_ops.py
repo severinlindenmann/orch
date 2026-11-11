@@ -2056,3 +2056,38 @@ def test_conn_grant_keys_are_exact_and_need_a_person(ws):
     path, wkey = hp._settings_path(ws)
     assert json.loads(path.read_text())["workspaces"][wkey]["conn.allow.s"]["by"] == "reset"
     assert hp.conn_grants(ws) == {}
+
+
+@pytest.mark.parametrize(
+    "sub,target,extra",
+    [
+        ("remove-orphaned", "deadbeef", []),
+        ("remove-orphaned", "deadbeef:discard", ["--discard"]),
+        ("retry", "T-1", []),
+    ],
+)
+def test_copy_cleanup_requires_target_bound_person_proof(ws, run, monkeypatch, sub, target, extra):
+    from orch import config, worktrees
+
+    monkeypatch.setattr(config, "COPIES_LOCKED", False)
+    calls = []
+    monkeypatch.setattr(worktrees, sub.replace("-", "_"), lambda *a: calls.append(a) or [])
+    op = "copy." + sub.replace("-", "_")
+    argv = ("copy", sub, target.split(":")[0], *extra, "--json")
+    code, out, err = run(*argv)
+    assert code == 2 and "dashboard on this computer" in out + err
+    card = next(h for h in hp.handoffs(ws) if h["op"] == op)
+    assert card["target"] == target and card["parts"]
+    assert not calls
+    wrong_target = "deadbeef" if extra else ("T-2" if sub == "retry" else "cafebabe")
+    assert _cli(run, monkeypatch, _proof(ws, op, wrong_target), *argv)[0] == 2
+    assert run(*argv, "--by", "agent:x")[0] == 2
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "test-agent")
+    assert run(*argv)[0] == 2
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    assert not calls
+    proof = _proof(ws, op, target)
+    assert _cli(run, monkeypatch, proof, *argv)[0] == 0
+    assert len(calls) == 1
+    assert _cli(run, monkeypatch, proof, *argv)[0] == 2
+    assert len(calls) == 1

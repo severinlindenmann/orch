@@ -555,16 +555,21 @@ def _disk_count(root: Path, key: str) -> None:
 def copies_disk(root: Path) -> dict | None:
     """{copies, bytes, partial} for the settings line "Copies on this computer", or None while it is being
     counted (the page shows "..."). The walk runs on a thread (capped by core), never on the request."""
+    from orch import worktrees
+
+    def current(val):
+        return {**val, "copies": worktrees.count(root)} if val is not None else None
+
     key = str(root)
     with _DISK_LOCK:
         e = _DISK.get(key)
         fresh = e is not None and time.monotonic() - e["at"] < DISK_TTL
         if e is not None and (fresh or e["busy"]):
-            return e["val"]
+            return current(e["val"])
         _DISK[key] = {"at": e["at"] if e else 0.0, "val": e["val"] if e else None, "busy": True}
         old = e["val"] if e else None
     threading.Thread(target=_disk_count, args=(root, key), daemon=True).start()
-    return old
+    return current(old)
 
 
 def copies_disk_forget(root: Path) -> None:

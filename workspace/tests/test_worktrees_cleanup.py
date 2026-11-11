@@ -521,7 +521,9 @@ def test_a_living_workspaces_folder_is_not_reported_and_never_touched(repo, tmp_
 
 
 def test_remove_orphaned_is_a_persons_call_and_discard_is_explicit(repo, monkeypatch):
-    d = _gone_folder(repo)
+    main = repo.parent / "gone"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
     notes = worktrees.remove_orphaned(repo, "aaaaaaaa")  # cannot be saved (no repository): kept
     assert (d / "t_abcdef12").is_dir() and "kept" in notes[0]
     monkeypatch.setenv("CLAUDECODE", "1")
@@ -546,7 +548,9 @@ def test_remove_orphaned_saves_changes_first_when_the_repository_is_reachable(re
     other.mkdir()
     p2 = other / t
     git(repo, "worktree", "move", str(p), str(p2))
-    (other / ".owner").write_text("/old/place/of/the/project\n")
+    main = repo.parent / "old-project"
+    (other / ".owner").write_text(str(main) + "\n")
+    remember_gone(repo, other, main)
     assert worktrees.orphaned(repo)[0]["ws8"] == "bbbbbbbb"
     assert worktrees.remove_orphaned(repo, "bbbbbbbb") == []
     assert git(repo, "show", f"orch/{t}:w.txt") == "work"
@@ -1018,3 +1022,172 @@ def test_starts_only_schedule_a_detached_clean_and_only_when_there_is_something(
     assert Path(kw["cwd"]).resolve() != repo.resolve() and kw["env"]["ORCH_ROOT"] == str(repo)
     # orch distrusts an ORCH_HOME inside its cwd (e2e G1-CLEAN proves it): not the home
     assert Path(kw["cwd"]).resolve() != worktrees.addons.home(repo).resolve()
+
+
+@pytest.mark.parametrize("ended", [False, True])
+def test_lane_c_post_rename_failure_drops_closed_entry(repo, monkeypatch, ended):
+    a, b = repo.tids[:2]
+    pa, pb = make(repo, 0), make(repo, 1)
+    rec = runs.claim(repo, a, "human:t", "claude", "oneshot", folder=pa, pid=os.getpid())
+    runs.release(repo, a, rec["run"])
+    rec = runs.claim(repo, a, "human:t", "claude", "oneshot", folder=pa, pid=os.getpid())
+    close(repo, b, "done")
+    assert not pb.exists() and a in worktrees.registry(repo)
+    original = worktrees._delete_branch
+
+    def fail_after_rename(top, tid, **kw):
+        if tid == a:
+            raise OSError("post-rename failure")
+        return original(top, tid, **kw)
+
+    monkeypatch.setattr(worktrees, "_delete_branch", fail_after_rename)
+    if ended:
+        close(repo, a, "done")
+        assert pa.exists()
+        runs.release(repo, a, rec["run"])
+    else:
+        runs.release(repo, a, rec["run"])
+        close(repo, a, "done")
+    assert not pa.exists()
+    assert str(pa) not in git(repo, "worktree", "list", "--porcelain")
+    assert a not in worktrees.registry(repo)
+
+
+@pytest.mark.parametrize("action", ["remove", "sweep", "clean"])
+def test_missing_closed_copy_without_owner_is_clearable(repo, run, action):
+    t = repo.tids[0]
+    p = make(repo)
+    git(repo, "worktree", "remove", str(p))
+    (p.parent / ".owner").unlink()
+    p.parent.rmdir()
+    (p.parent.parent / ".known.json").unlink()
+    p.parent.parent.rmdir()
+    tickets.ticket_path(repo, t).unlink()
+    if action == "clean":
+        code, out, err = run("copy", "clean", "--json")
+        assert code == 0, err
+        assert json.loads(out)["copies"] == 0
+    elif action == "remove":
+        assert worktrees.remove(repo, t) == []
+    else:
+        assert worktrees.sweep(repo) == []
+    assert t not in worktrees.registry(repo)
+
+
+def test_usage_two_live_registry_paths_and_missing_path(repo, monkeypatch):
+    p, q = make(repo, 0), make(repo, 1)
+    assert worktrees.usage(repo, max_entries=0)["copies"] == 2
+    monkeypatch.setattr(worktrees, "copies_dir", lambda root: None)
+    assert worktrees.usage(repo)["copies"] == worktrees.count(repo) == 2
+    git(repo, "worktree", "remove", str(p))
+    assert q.is_dir()
+    assert worktrees.usage(repo)["copies"] == worktrees.count(repo) == 1
+
+
+def test_orphan_forged_owner_alone_cannot_authorize_removal(repo):
+    d = _gone_folder(repo)
+    with pytest.raises(Refused):
+        worktrees.remove_orphaned(repo, "aaaaaaaa", discard=True)
+    assert (d / "t_abcdef12" / "sub" / "f.txt").is_file()
+
+
+def test_retry_live_run_keeps_stale_lock(repo):
+    t = repo.tids[0]
+    p = make(repo)
+    (p / "work.txt").write_text("work")
+    lock = _stale_lock(p, 30)
+    rec = runs.claim(repo, t, "human:t", "claude", "oneshot", folder=p, pid=os.getpid())
+    close(repo, t, "done")
+    with pytest.raises(Refused, match="git was interrupted"):
+        worktrees.retry(repo, t)
+    assert lock.exists() and p.is_dir()
+    runs.release(repo, t, rec["run"])
+    assert worktrees.retry(repo, t) == []
+    assert not p.exists() and not lock.exists()
+
+
+def test_dashboard_cached_disk_count_tracks_two_live_copies(repo, monkeypatch):
+    dashboard = Path(__file__).resolve().parents[2] / "workspace-addons" / "dashboard" / "src"
+    monkeypatch.syspath_prepend(str(dashboard))
+    from orch_dashboard import data
+
+    monkeypatch.setattr(
+        data,
+        "_DISK",
+        {
+            str(repo): {
+                "at": time.monotonic(),
+                "val": {
+                    "copies": 0,
+                    "bytes": 0,
+                    "partial": False,
+                },
+                "busy": False,
+            }
+        },
+    )
+    p, q = make(repo, 0), make(repo, 1)
+    assert data.copies_disk(repo)["copies"] == 2
+    git(repo, "worktree", "remove", str(p))
+    assert data.copies_disk(repo)["copies"] == 1 and q.is_dir()
+
+
+def remember_gone(repo, folder, main):
+    """Record the identity while it exists, then simulate deletion of the workspace."""
+    (main / ".orch").mkdir(parents=True)
+    (main / ".orch" / ".local-id").write_text(folder.name + "0" * 24)
+    worktrees._remember_copies(main, folder)
+    (main / ".orch" / ".local-id").unlink()
+    (main / ".orch").rmdir()
+    main.rmdir()
+
+
+def test_known_copy_record_is_created_outside_ws8_and_owner_must_agree(repo):
+    p = make(repo)
+    known = json.loads((p.parent.parent / ".known.json").read_text())
+    assert known == {addons.workspace_id(repo)[:8]: str(repo.resolve())}
+    other = repo.parent / "gone-other"
+    d = _gone_folder(repo, owner=str(other))
+    remember_gone(repo, d, other)
+    (d / ".owner").write_text(str(repo.parent / "forged-missing"))
+    with pytest.raises(Refused):
+        worktrees.remove_orphaned(repo, d.name, discard=True)
+    assert (d / "t_abcdef12").is_dir()
+
+
+def test_known_copies_rejects_wrong_workspace_id(repo):
+    folder = addons.home(repo) / "worktrees" / "aaaaaaaa"
+    with pytest.raises(Refused, match="id"):
+        worktrees._remember_copies(repo, folder)
+
+
+def test_missing_open_copy_is_not_dropped(repo):
+    p = make(repo)
+    git(repo, "worktree", "remove", str(p))
+    worktrees.remove(repo, repo.tids[0])
+    worktrees.sweep(repo)
+    assert repo.tids[0] in worktrees.registry(repo)
+    assert worktrees.count(repo) == 0
+
+
+def test_known_orphan_removal_only_trashes_ticket_folders_without_following_links(repo, monkeypatch):
+    main = repo.parent / "gone"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    decoy = repo / "decoy"
+    decoy.mkdir()
+    (decoy / "keep").write_text("keep")
+    (d / "t_12345678").symlink_to(decoy, target_is_directory=True)
+    (d / "not-a-ticket").mkdir()
+    moved = []
+    original = worktrees._to_trash
+
+    def record(path, tid):
+        moved.append(path)
+        return original(path, tid)
+
+    monkeypatch.setattr(worktrees, "_to_trash", record)
+    assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
+    assert moved == [d / "t_abcdef12"]
+    assert (decoy / "keep").read_text() == "keep"
+    assert (d / "t_12345678").is_symlink() and (d / "not-a-ticket").is_dir()
