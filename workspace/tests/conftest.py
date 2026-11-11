@@ -240,6 +240,16 @@ def rel(proj, run):
     srv.stop()
 
 
+@pytest.fixture(autouse=True)
+def _start_guard_off(request, monkeypatch):
+    """Tests keep ORCH_HOME under pytest's temp folder, which the start-folder guard
+    (adapters.check_start_folder) refuses for every agent. It is off here; tests of the guard itself
+    ask for the real one with @pytest.mark.real_start_guard."""
+    if request.node.get_closest_marker("real_start_guard"):
+        return
+    monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)
+
+
 REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_verdict_mac")
 
 
@@ -298,3 +308,14 @@ def stray_tmux(under: str) -> list[str]:
             if (m := _TMUX.search(line)) and m.group(2).startswith(under)
         }
     )
+
+
+@pytest.fixture(autouse=True)
+def _copies_unlocked(request, monkeypatch):
+    """Separate copies are locked Off in the product for this release (config.COPIES_LOCKED).
+    The feature's own tests keep running with the lock lifted; tests marked `copies_locked` check the lock."""
+    from orch import config
+
+    if not request.node.get_closest_marker("copies_locked"):
+        monkeypatch.setattr(config, "COPIES_LOCKED", False)
+        monkeypatch.setattr(config, "DEFAULT_COPIES", "together")  # the feature's own default when unlocked

@@ -437,7 +437,7 @@ def test_no_notice_is_typed_while_a_dialog_shows(proj, run, monkeypatch):
     ],
 )
 def test_a_tool_without_its_own_dialog_rule_gets_the_generic_one(proj, run, monkeypatch, pane):
-    config.add_agent(proj, "fake", "true {prompt}", "true --interactive")
+    config.add_agent(proj, "fake", "true {prompt}", "true --interactive", approve=True)
     tid, rn, _, sent, screen = _stuck(proj, run, monkeypatch, agent="fake")
     runs_live.read_input(proj, tid, rn, True)
     runs_live._set_state(proj, tid, rn, "idle")
@@ -943,7 +943,7 @@ def _hold(proj, run, monkeypatch, pane, boxed, cy=None, alt="0", cursor="1", cx=
 
 def test_the_adapter_not_the_screen_decides_boxed_or_not(proj):
     assert runs_live._prompt_box("claude", proj) is True
-    config.add_agent(proj, "plain", "true {prompt}", "true --interactive")
+    config.add_agent(proj, "plain", "true {prompt}", "true --interactive", approve=True)
     assert runs_live._prompt_box("plain", proj) is False
 
 

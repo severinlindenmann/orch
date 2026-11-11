@@ -9,6 +9,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -16,7 +17,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import config, procs, runs, runs_live, tickets
+from orch import addons, config, procs, runs, runs_live, tickets
 
 AGENT = Path(__file__).resolve().parents[2] / "e2e" / "fixtures" / "generic-agent" / "agent.py"
 SID = "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
@@ -34,10 +35,21 @@ def lab(proj, monkeypatch):
     """Own env: the fake agents log what reaches them; the workspace's tmux server is removed at the end."""
     log = proj.parent / f"{proj.name}-agent.log"
     monkeypatch.setenv("ORCH_CMD", f"{shlex.quote(sys.executable)} -m orch")
+    # Children (the wrapper, the fake agent) must find the approval store, and they only trust an
+    # ORCH_HOME under the real account home: so this lab uses its own temp folder there (removed at the end).
+    from conftest import _REAL_HOME_FN
+
+    base = _REAL_HOME_FN() / ".orch-test"
+    base.mkdir(exist_ok=True)
+    lab_home = Path(tempfile.mkdtemp(prefix="lab-", dir=base))
+    monkeypatch.setattr(addons, "real_home", _REAL_HOME_FN)
+    monkeypatch.setenv("ORCH_HOME", str(lab_home / ".orch-tool"))
     monkeypatch.setenv("ORCH_TEST_AGENT_LOG", str(log))
     yield log
     if shutil.which("tmux"):
         runs_live.tmux(proj, "kill-server")
+    if lab_home.name.startswith("lab-") and lab_home.parent == base:  # only our own temp folder
+        shutil.rmtree(lab_home, ignore_errors=True)
 
 
 def _until(fn, timeout=20.0, what=""):
@@ -67,6 +79,7 @@ def _generic_live(proj):
         "fake",
         f"{py} {shlex.quote(str(AGENT))} {{prompt}}",
         f"{py} {shlex.quote(str(AGENT))} --interactive",
+        approve=True,
     )
     config.set_key(proj, "workspace", "agent", "fake")
 
@@ -278,7 +291,7 @@ def test_claude_live_hooks_session_idle_close_and_resume(proj, run, lab, tmp_pat
     line = calls.read_text().strip()  # the fake joins argv with spaces; the allow rules contain spaces
     argv = line.split()
     assert argv[0] == "--session-id" and argv[2] == "--allowedTools" and "--permission-mode" not in argv
-    assert "Bash(orch check:*)," in line and line.endswith(f" --settings {hooks}")
+    assert "Bash(orch check:*)," in line and f" --settings {hooks}" in line
     # the tool's SessionStart hook: records the id on the ticket and the prompt goes in
     proc = subprocess.run(
         [sys.executable, "-m", "orch", "run", "event", "--run", r["run"], "--kind", "session"],
@@ -406,7 +419,7 @@ def test_without_tmux_the_run_is_one_turn_at_a_time(proj, run, lab, monkeypatch)
 @pytest.mark.skipif(os.name == "nt", reason="signals")
 def test_sigterm_to_the_wrapper_ends_the_agent_through_kill_tree(proj, run, lab):
     py = shlex.quote(sys.executable)
-    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}")
+    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}", approve=True)
     config.set_key(proj, "workspace", "agent", "quiet")
     tid = _ticket(run)
     run("run", "start", tid, "--mode", "oneshot")
@@ -432,7 +445,7 @@ def test_sigterm_inside_the_run_lock_still_releases_the_claim(proj, run, lab, mo
 @pytest.mark.skipif(os.name == "nt", reason="signals")
 def test_stop_kills_an_agent_left_behind_by_a_killed_wrapper(proj, run, lab):
     py = shlex.quote(sys.executable)
-    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}")
+    config.add_agent(proj, "quiet", f"{py} {shlex.quote(str(AGENT))} --silent 30 {{prompt}}", approve=True)
     config.set_key(proj, "workspace", "agent", "quiet")
     tid = _ticket(run)
     run("run", "start", tid, "--mode", "oneshot")

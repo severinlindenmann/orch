@@ -60,6 +60,17 @@ def test_set_by_is_not_in_the_workspace(ws):
     assert look.read(ws)["set_by"] == "human"
 
 
+def test_unwritable_home_is_a_skippable_refusal_not_a_traceback(ws, monkeypatch):
+    # a sandboxed agent (codex workspace-write) cannot write ORCH_HOME: "optional, skip it", not a crash
+    def deny(*a, **k):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(net, "write_json", deny)
+    with pytest.raises(Refused, match="optional: skip it") as e:
+        look.set_look(ws, icon="bank", by="agent:codex", push=False)
+    assert str(ws) not in str(e.value) and "Operation not permitted" not in str(e.value)
+
+
 def test_agent_in_environment_counts_as_agent(ws, run, monkeypatch):
     run("look", "set", "--icon", "bank", "--by", "human:owner")
     monkeypatch.setenv("CLAUDECODE", "1")

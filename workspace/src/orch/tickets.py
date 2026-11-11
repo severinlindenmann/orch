@@ -925,7 +925,11 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: boo
         add_history(ticket, by, "Status review -> done", via)
         _sign_done(root, ticket, by, proven)
 
-    return apply_op(root, tid, op)[0]
+    result = apply_op(root, tid, op)[0]
+    from orch import worktrees
+
+    worktrees.on_closed(root, tid)  # B12: the copy goes (its changes stay on branch orch/<ticket>)
+    return result
 
 
 def ask_for_changes(
@@ -1083,7 +1087,12 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
         if target == "done" and old != "done":
             _sign_done(root, ticket, actor, proven)
 
-    return apply_op(root, tid, op)[0]
+    result = apply_op(root, tid, op)[0]
+    if result.get("status") in CLOSED:  # done, closed or cancelled: its separate copy goes (never raises)
+        from orch import worktrees
+
+        worktrees.on_closed(root, tid)
+    return result
 
 
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)

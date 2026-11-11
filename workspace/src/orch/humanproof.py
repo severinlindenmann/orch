@@ -1491,6 +1491,13 @@ def mint_dev(root: Path, op: str, target: str, life: int = 30) -> str:
 # ------------------------------------------------------------------------------------------- CLI gate
 
 HANDOFF = "Do this in the dashboard on this computer."
+
+
+class HandOffPending(Refused):
+    """Raised ONLY where person_by has written (or found) the hand-off card: the person is to click on the
+    page. A Refused for anything else (an agent, a bad value, no card) is not this."""
+
+
 AGENT_REFUSED = "Only a human can do this. Ask the human to run it themselves."
 HANDOFF_PER_OP = 3
 
@@ -1522,6 +1529,8 @@ HANDOFF_HEADS = {
     "config.copy_setup": (("config", "set"),),
     "config.permissions": (("config", "set"),),
     "config.agent_add": (("config", "agent", "add"),),
+    "private.allow": (("private", "allow"),),
+    "private.move": (("private", "move"),),
     "config.share": (("share", "on"),),
     "look.shared_pages": (("look", "shared-pages"),),
     "look.icon": (("look", "set"),),
@@ -1529,6 +1538,62 @@ HANDOFF_HEADS = {
     "group.remove_member": (("relay", "group", "remove"),),
     "group.share_file": (("relay", "group", "share"), ("relay", "group", "send-file")),
 }
+
+
+def agent_add_target(
+    name: str, command: str, interactive: str | None = None, prompt: str | None = None
+) -> str:
+    """The proof target of config.agent_add: the name AND a digest of every value that gets saved, so a
+    proof for one command (or live command, or prompt mode) can never save another. Same in the dashboard."""
+    doc = json.dumps([command, interactive or "", prompt or ""])
+    return f"{name}:{hashlib.sha256(doc.encode('utf-8')).hexdigest()}"
+
+
+def entry_exact(entry: dict) -> str:
+    """Every field a private.allow key approves (adapter, command, live command, prompt), one per line."""
+    rows = [
+        ("Adapter", entry.get("adapter")),
+        ("Command", entry.get("command")),
+        ("Live command", entry.get("interactive")),
+        ("Prompt via", entry.get("prompt")),
+    ]
+    return "\n".join(f"{k}: {v}" for k, v in rows if v)
+
+
+def allow_card_is_current(root: Path, target: str) -> bool:
+    """private.allow takes its values from the settings file, not argv: the card's target is name:key, so the
+    card is only good while the entry still hashes to that key."""
+    from orch import config
+
+    name, _, key = str(target).partition(":")
+    e = config._raw_entries(root).get(name)
+    return e is not None and config._entry_key(root, name, e) == key
+
+
+def agent_add_exact(command: str, interactive: str | None = None, prompt: str | None = None) -> str:
+    """Every value config.agent_add saves, one per line, for the card's exact block."""
+    rows = [("Command", command), ("Live command", interactive), ("Prompt via", prompt)]
+    return "\n".join(f"{k}: {v}" for k, v in rows if v)
+
+
+def exact_in_argv(op: str, exact: str, argv) -> bool:
+    """The full value(s) shown in the card's exact block must be part of the command that runs."""
+    if op in ("relay.connect", "addon.add_local", "group.share_file"):
+        return exact in " ".join(argv)
+    if op == "config.agent_add":
+        words = list(argv)
+        vals = [ln.split(": ", 1)[1] for ln in exact.splitlines() if ": " in ln]
+        return (
+            bool(vals)
+            and len(vals) == len(exact.splitlines())
+            and all(
+                v in words or any(w.startswith("--") and w.endswith("=" + v) for w in words) for v in vals
+            )
+        )
+    return True
+
+
+EXACT_OPS = ("relay.connect", "addon.add_local", "group.share_file", "config.agent_add", "private.allow")
 
 
 def _clean_argv(argv) -> list[str] | None:
@@ -1720,11 +1785,7 @@ def request_handoff(
     if len(value) > VALUE_MAX or (value and value not in argv):
         return False
     exact = str(exact)[:2000] if exact else ""
-    if (
-        exact
-        and op in ("relay.connect", "addon.add_local", "group.share_file")
-        and exact not in " ".join(argv)
-    ):
+    if exact and op in EXACT_OPS and not exact_in_argv(op, exact, argv):
         return False  # the shown full target must be part of the command that runs
     try:
         d = key_dir(root)
@@ -1813,8 +1874,10 @@ def handoff_take(root: Path, hid: str) -> dict | None:
         return None
     if hit.get("value") and hit["value"] not in argv:  # only the STORED, shown value may run
         return None
-    if hit.get("exact") and hit.get("op") in ("relay.connect", "addon.add_local"):
-        if hit["exact"] not in " ".join(argv):  # the full target shown must be what runs
+    if hit.get("op") == "private.allow" and not allow_card_is_current(root, hit.get("target")):
+        return None  # the entry changed after the card was made: the person never saw this one
+    if hit.get("exact") and hit.get("op") in EXACT_OPS:
+        if not exact_in_argv(hit["op"], hit["exact"], argv):  # the full target shown must be what runs
             return None
     return hit
 
@@ -1907,7 +1970,7 @@ def person_by(
     queued = request_handoff(root, op, target, label, value, clean, parts, exact)
     if not queued:
         raise Refused(HANDOFF)
-    raise Refused(_dashboard_note(root, open_ok=queued is True))
+    raise HandOffPending(_dashboard_note(root, open_ok=queued is True))
 
 
 # ------------------------------------------------------------------------------------------- launch token
