@@ -360,6 +360,8 @@ def kind_activity():
     _examples("activity-detail", lambda d: _msgs(vd, d))
     va = _w("activity", "record_alert")
     _examples("activity-alert", lambda d: _msgs(va, d))
+    vc = _w("activity", "record_change")
+    _examples("activity-change", lambda d: _msgs(vc, d))
     _core_clean("activity")
     vec = _vec("activity-v1.json")
     tamper = {"link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"}

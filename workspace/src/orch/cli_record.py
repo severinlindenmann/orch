@@ -1,7 +1,7 @@
-"""`orch record tail | query | counts` (contracts/activity.md, counts.md): read-only views of the record.
+"""`orch record tail | query | counts | settings | delete-detail` (contracts/activity.md, counts.md).
 
-Every view reads the record through these commands (add-ons never read the files). Nothing here writes, so no
-proof is needed. `delete-detail` and `propose` are not built yet.
+Every view reads the record through these commands (add-ons never read the files). The views write nothing and
+need no proof. `delete-detail` is a person's own decision (op `record.delete_detail`, invariant H1).
 """
 
 import argparse
@@ -20,8 +20,8 @@ from pathlib import Path
 from orch import record
 from orch.errors import Refused
 
-SUBCOMMANDS = ("tail", "query", "counts", "delete-detail")
-_BUILT = ("tail", "query", "counts")
+SUBCOMMANDS = ("tail", "query", "counts", "settings", "delete-detail")
+_BUILT = ("tail", "query", "counts", "settings", "delete-detail")
 _RUN = re.compile(r"^r_[a-z0-9_]{6,32}$")
 _TICKET = re.compile(r"^t_[a-z0-9]{6,16}$")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
@@ -45,6 +45,17 @@ _PREFIX = "rc1."
 _MAX_CURSOR = 4096
 POLL_SECONDS = 1.0
 PING_SECONDS = 15.0
+
+
+def _ticket_title(root, tid: str) -> str:
+    """The ticket's title for the proof card (plain text, capped; the card shows it as text only)."""
+    from orch import tickets
+
+    try:
+        t = tickets.load(root, tid).get("title")
+    except Refused:
+        return tid
+    return t[:200] if isinstance(t, str) and t.strip() else tid
 
 
 class RecordError(Refused):
@@ -79,6 +90,9 @@ def add_parsers(sub, common) -> None:
     c.add_argument("--to")
     c.add_argument("--ticket")
     c.add_argument("--kind", action="append")
+    r.add_parser("settings", parents=[common], help=argparse.SUPPRESS)
+    d = r.add_parser("delete-detail", parents=[common], help=argparse.SUPPRESS)
+    d.add_argument("ticket")
     for name in SUBCOMMANDS:
         if name not in _BUILT:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
@@ -98,6 +112,10 @@ def dispatch(args, root: Path) -> bool:
             _tail_cli(args, root)
         elif args.sub == "query":
             _emit(query(root, args))
+        elif args.sub == "settings":
+            _emit(settings(root))
+        elif args.sub == "delete-detail":
+            _emit(delete_detail(root, args))
         else:
             _emit(counts(root, args))
     except record.RecordRefused as e:
@@ -514,6 +532,86 @@ def _detail(root: Path, args) -> dict:
     if detail.value.get("id") != args.detail:  # the file must be the one this event points to
         raise RecordError(str(record.RecordTampered("swapped")), "tampered")
     return detail.value
+
+
+# --- settings (read only) ---
+_MB = 1024**2
+
+
+def settings(root: Path) -> dict:
+    """The Insights settings in effect (config.py: share_* with the person's record, retention the lower of
+    the file and the record) and how big the record is, read through the hardened helpers. A record that
+    cannot be read gives the sizes as null plus the `status`/`reason`/`message` marker of the other reads."""
+    from orch import config
+
+    out = {
+        "keep_days": config.record_keep_days(root),
+        "max_mb": config.record_max_mb(root),
+        "share_counts": config.insights_share_counts(root),
+        "share_names": config.insights_share_names(root),
+        "record_mb": None,
+        "detail_mb": None,
+        "runs": None,
+    }
+    for read in (sizes := record.record_sizes(root), runs := record.list_runs(root)):
+        _show_alert(read.alert)
+        if read.status != "ok" and not (read.status == "unavailable" and read.reason == "missing"):
+            return {**out, "status": read.status, "reason": read.reason, "message": read.message}
+    return {
+        **out,
+        "record_mb": -(-sizes.value["record"] // _MB),  # rounded up: a record that holds anything is >= 1 MB
+        "detail_mb": -(-sizes.value["detail"] // _MB),
+        "runs": len(runs.value or []),
+    }
+
+
+# --- delete-detail (a person only) ---
+def delete_detail(root: Path, args) -> dict:
+    """Delete the detail folders of one ticket's runs: a person's own decision (op `record.delete_detail`,
+    target the ticket id, invariant H1). Lines and counts stay. Order: an agent is refused before anything
+    else (needs_person); a ticket that does not exist is not_found; then the proof (needs_person); a record
+    that cannot be read refuses with nothing deleted; the audit line is written BEFORE anything is deleted."""
+    from orch import humanproof, tickets
+
+    agent = tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:")
+    if agent:
+        raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
+    try:
+        tid = tickets.resolve(root, args.ticket)
+    except Refused:
+        tid = None
+    if not isinstance(tid, str) or not _TICKET.fullmatch(tid) or not tickets.ticket_path(root, tid).is_file():
+        raise RecordError("That ticket does not exist.", "not_found")
+    try:
+        who = humanproof.person_by(
+            root,
+            args,
+            "record.delete_detail",
+            tid,
+            no_handoff=humanproof.HANDOFF,
+            parts={"title": _ticket_title(root, tid)},
+        )
+    except Refused as e:
+        raise RecordError(str(e), "needs_person") from None
+    if not who.startswith("human:"):
+        raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
+    mine = []
+    for run in _known(root):
+        result = record.read_run(root, run, seen_by="cli")
+        _show_alert(result.alert)
+        if result.status == "unavailable" and result.reason == "missing":
+            continue  # pruned since it was listed: nothing of it to delete
+        if result.status != "ok":
+            raise _fail(result)  # nothing is deleted when any run of the record cannot be read
+        if any(e.get("ticket") == tid for e in result.value):
+            mine.append(run)
+    found = record.detail_runs(root, mine)
+    _show_alert(found.alert)
+    if found.status != "ok":
+        raise _fail(found)
+    record.note_change(root, change="record.delete_detail", by=who, ticket=tid, deleted=len(found.value))
+    record.delete_detail(root, found.value)
+    return {"deleted": len(found.value), "ticket": tid}
 
 
 # --- counts ---

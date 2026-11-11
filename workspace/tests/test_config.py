@@ -254,7 +254,13 @@ RESERVED = [
 
 @pytest.mark.parametrize("section,key,default,valid", RESERVED)
 def test_reserved_config(proj, section, key, default, valid):
-    getter = getattr(config, f"{section}_{key}")
+    # the FILE parsing; record_* / insights_* are the effective values (with the person's record), tested in
+    # test_insights_settings.py
+    def getter(root):
+        if section == "focus":  # the focus getters are the file value itself
+            assert getattr(config, f"{section}_{key}")(root) == config.file_value(root, section, key)
+        return config.file_value(root, section, key)
+
     assert getter(None) == default
     assert getter(proj) == default
     config.set_key(proj, section, key, valid)

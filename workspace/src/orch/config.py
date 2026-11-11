@@ -389,6 +389,22 @@ def _reserved(root: Path | None, section: str, key: str, default: bool | int) ->
     return value if isinstance(value, bool) or value > 0 else default
 
 
+RESERVED_DEFAULTS = {
+    ("focus", "live_session"): DEFAULT_FOCUS_LIVE_SESSION,
+    ("focus", "session_typing"): DEFAULT_FOCUS_SESSION_TYPING,
+    ("record", "keep_days"): DEFAULT_RECORD_KEEP_DAYS,
+    ("record", "max_mb"): DEFAULT_RECORD_MAX_MB,
+    ("insights", "share_counts"): DEFAULT_INSIGHTS_SHARE_COUNTS,
+    ("insights", "share_names"): DEFAULT_INSIGHTS_SHARE_NAMES,
+}
+
+
+def file_value(root: Path | None, section: str, key: str) -> bool | int:
+    """The value as the FILE says it (a wrong type or a value <= 0 is the default). Never a decision on its
+    own: the widening ones count only through their record (insights_*, record_* below)."""
+    return _reserved(root, section, key, RESERVED_DEFAULTS[(section, key)])
+
+
 def focus_live_session(root: Path | None) -> bool:
     return _reserved(root, "focus", "live_session", DEFAULT_FOCUS_LIVE_SESSION)
 
@@ -398,19 +414,139 @@ def focus_session_typing(root: Path | None) -> bool:
 
 
 def record_keep_days(root: Path | None) -> int:
-    return _reserved(root, "record", "keep_days", DEFAULT_RECORD_KEEP_DAYS)
+    """Effective [record] keep_days: the LOWER of the file value and the person's record
+    (humanproof.retention; default record 90). Pruning uses this, so a file value alone never keeps records
+    longer."""
+    from orch import humanproof
+
+    value = file_value(root, "record", "keep_days")
+    return value if root is None else humanproof.retention(root, "insights.keep_days", value)
 
 
 def record_max_mb(root: Path | None) -> int:
-    return _reserved(root, "record", "max_mb", DEFAULT_RECORD_MAX_MB)
+    """Effective [record] max_mb: the LOWER of the file value and the person's record (default record
+    2048)."""
+    from orch import humanproof
+
+    value = file_value(root, "record", "max_mb")
+    return value if root is None else humanproof.retention(root, "insights.max_mb", value)
 
 
 def insights_share_counts(root: Path | None) -> bool:
-    return _reserved(root, "insights", "share_counts", DEFAULT_INSIGHTS_SHARE_COUNTS)
+    """A widening switch: file value AND the person's record (owner default on while no record ever
+    existed)."""
+    from orch import humanproof
+
+    value = file_value(root, "insights", "share_counts")
+    return False if root is None else humanproof.effective(root, "insights.share_counts", value)
 
 
 def insights_share_names(root: Path | None) -> bool:
-    return _reserved(root, "insights", "share_names", DEFAULT_INSIGHTS_SHARE_NAMES)
+    """A widening switch: true only with the person's record (a file value of true alone reads false)."""
+    from orch import humanproof
+
+    value = file_value(root, "insights", "share_names")
+    return False if root is None else humanproof.effective(root, "insights.share_names", value)
+
+
+INSIGHTS_KEYS = {  # setting -> ([table], key) in config.toml
+    "insights.share_counts": ("insights", "share_counts"),
+    "insights.share_names": ("insights", "share_names"),
+    "insights.keep_days": ("record", "keep_days"),
+    "insights.max_mb": ("record", "max_mb"),
+}
+
+
+def set_insights(root: Path, setting: str, value: bool | int, by: str | None = None) -> bool | int:
+    """An Insights setting. The record is written first, on EVERY change (humanproof.record_set: a widening
+    needs the verified person in `by`; an off is the False tombstone, a lower number the lower record), then
+    the file. Lowering retention deletes nothing now: the next pruning applies it."""
+    from orch import humanproof
+
+    table, key = INSIGHTS_KEYS[setting]
+    humanproof.record_set(root, setting, value, by or "reset")
+    set_key(root, table, key, value)
+    return value
+
+
+class InsightsRefused(Refused):
+    """A refusal of change_insights with its contract code (`{"error", "code"}`)."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+        self.extra = {"code": code}
+
+
+def insights_value(root: Path, setting: str) -> bool | int:
+    """The EFFECTIVE value of an Insights setting (share_* with the person's record, retention the lower of
+    file and record)."""
+    return {
+        "insights.share_counts": insights_share_counts,
+        "insights.share_names": insights_share_names,
+        "insights.keep_days": record_keep_days,
+        "insights.max_mb": record_max_mb,
+    }[setting](root)
+
+
+def insights_text(value: bool | int) -> str:
+    """How a value is written in a command and in a proof target: on/off, or the number."""
+    return ("on" if value else "off") if isinstance(value, bool) else str(value)
+
+
+def insights_target(setting: str, value: bool | int) -> str:
+    """The proof target of `insights.settings`: VALUE-BOUND (`insights.keep_days=365`), so a proof for one
+    value never sets another."""
+    return f"{setting}={insights_text(value)}"
+
+
+def _same_text(setting: str, text: str, current: bool | int) -> bool:
+    t = str(text).strip().lower()
+    if isinstance(current, bool):
+        t = {"true": "on", "false": "off"}.get(t, t)
+    elif t.isascii() and t.isdigit():
+        t = str(int(t))
+    return t == insights_text(current)
+
+
+def change_insights(
+    root: Path,
+    setting: str,
+    value: bool | int,
+    *,
+    agent: str | None = None,
+    person=None,
+    if_current: str | None = None,
+) -> dict:
+    """THE CORE decides (2.11 addendum): under ONE lock (keys.lock, the lock of the settings record and of the
+    proof nonce store) read the CURRENT effective value, refuse a stale `if_current` (code `changed`),
+    classify widen / narrow / same, and only for a widening ask `person(target)` for the verified person (it
+    verifies and spends the value-bound proof in this same critical section). Same value: nothing written, no
+    proof. An agent caller (`agent` = the words it is refused with) asking to widen is refused
+    (`needs_person`) before any proof is read."""
+    from orch import humanproof
+
+    with humanproof._key_lock(humanproof.key_dir(root)):
+        current = insights_value(root, setting)
+        widened = value > current
+        if widened and agent is not None:
+            raise InsightsRefused(agent or humanproof.AGENT_REFUSED, "needs_person")
+        if if_current is not None and not _same_text(setting, if_current, current):
+            raise InsightsRefused(f"This changed in the meantime: now {insights_text(current)}", "changed")
+        if value == current:
+            return {setting: current, "changed": False, "widened": False}
+        who = "reset"  # a lowering names no person (the record's `by` is never a claim from a flag)
+        if widened:
+            if person is None:
+                raise InsightsRefused(humanproof.AGENT_REFUSED, "needs_person")
+            try:
+                who = person(insights_target(setting, value))
+            except Refused as e:
+                raise InsightsRefused(str(e), "needs_person") from None
+            if not str(who).startswith("human:"):
+                raise InsightsRefused(humanproof.AGENT_REFUSED, "needs_person")
+        set_insights(root, setting, value, who)
+        return {setting: insights_value(root, setting), "changed": True, "widened": widened}
 
 
 def agents_may_finish(root: Path | None) -> bool:

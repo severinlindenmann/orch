@@ -1,4 +1,5 @@
-"""What the orch-shipped page servers (Focus, dashboard) use to mint human proofs (H1, human-proof.md).
+"""What the orch-shipped page servers (Focus, dashboard, Insights) use to mint human proofs (H1,
+human-proof.md).
 
 A page server holds the human key in memory, creates one session per start, and mints an hp1 proof only for a
 request that (1) carries the session cookie, (2) arrived on the loopback listener with a loopback Host and
@@ -25,7 +26,7 @@ from orch.errors import Refused
 
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE = "orch_page"
-SERVERS = ("focus", "dashboard")
+SERVERS = ("focus", "dashboard", "insights")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 

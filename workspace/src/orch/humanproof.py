@@ -83,7 +83,12 @@ SETTING_DEFAULTS = {
     "conn.allow": False,
     "workflow.agents_may_finish": False,
 }
-_TARGET_RE = re.compile(r"[A-Za-z0-9_.:@-]+")
+# Retention widening settings (Insights > Settings, `insights.settings`): a number, not a switch. The record
+# holds the highest value a person approved; the effective value is the LOWER of the file value and the record
+# (or the default record when none exists): a file value alone never keeps records longer or larger.
+RETENTION_DEFAULTS = {"insights.keep_days": 90, "insights.max_mb": 2048}
+RETENTION_ALLOWED = {"insights.keep_days": (30, 90, 365), "insights.max_mb": (512, 1024, 2048, 4096)}
+_TARGET_RE = re.compile(r"[A-Za-z0-9_.:@=-]+")  # `=`: the value-bound insights.settings target key=value
 _BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
 _NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22}")
 PENDING_MAC_KINDS = ("answer", "message", "text")
@@ -771,11 +776,17 @@ def _settings_load(root: Path, path: Path):
     return data
 
 
-def _settings_write(root: Path, setting: str, value, by: str) -> None:
+def _settings_write(root: Path, setting: str, value, by: str, check=None) -> None:
+    """`check(current record value or None)` runs under the lock, before the write: it may refuse (raise), or
+    answer True when the record already says this (nothing is written)."""
     path, wkey = _settings_path(root)
     d = key_dir(root)  # creates the home; the lock lives in the workspace's key folder
     with _key_lock(d):
         data = _settings_load(root, path) or {"schema": "orch.human-settings/1", "workspaces": {}}
+        if check is not None:
+            rec = (data["workspaces"].get(wkey) or {}).get(setting)
+            if check(rec.get("value") if isinstance(rec, dict) else None) is True:
+                return
         data["workspaces"].setdefault(wkey, {})[setting] = {
             "value": value,
             "by": by,
@@ -807,6 +818,9 @@ def record_set(root: Path, setting: str, value, by: str) -> None:
     but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
     an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
     moment where the file says on and the record is stale."""
+    if setting in RETENTION_DEFAULTS:
+        _retention_set(root, setting, value, by)
+        return
     if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting) and not is_secret_get_key(setting):
         raise Refused("That is not a setting a person has to allow.")
     if value is not False and not str(by).startswith("human:"):
@@ -852,9 +866,52 @@ def effective(root: Path, setting: str, file_value: bool) -> bool:
     return bool(file_value and (rec_val if rec_val is not None else default))
 
 
+def _retention_ok(setting: str, value) -> bool:
+    """A retention record value that can count: a whole number from 1 up to the largest allowed value (a lower
+    value comes from a lowered file). Anything else (a planted 99999, true, "*") counts as no record."""
+    return type(value) is int and 1 <= value <= max(RETENTION_ALLOWED[setting])
+
+
+def _retention_set(root: Path, setting: str, value, by: str) -> None:
+    """record_set for a retention number. Raising it above the current record (or the default record when
+    there is none) needs a person (`by` = the verified human:...); anyone may lower it (the record then names
+    no person), so a lowered value only rises again with a proof. Decided under the settings lock."""
+    allowed = RETENTION_ALLOWED[setting]
+    if type(value) is not int or value not in allowed:
+        raise Refused("Choose one of: " + ", ".join(str(v) for v in allowed) + ".")
+    person = str(by).startswith("human:")
+
+    def check(current) -> bool:
+        floor = current if _retention_ok(setting, current) else RETENTION_DEFAULTS[setting]
+        if value > floor and not person:
+            raise Refused(AGENT_REFUSED)
+        return not person and value == current  # the same value again keeps who approved it
+
+    _settings_write(root, setting, value, by if person else "reset", check)
+
+
+def retention(root: Path, setting: str, file_value: int) -> int:
+    """Effective retention value: the LOWER of the file value and the record (the default record when none
+    exists, or when the record is unreadable or not a valid number). A file value below the record lowers the
+    record at once (like a tombstone), so editing the file back up later changes nothing without a proof."""
+    default = RETENTION_DEFAULTS[setting]
+    try:
+        path, wkey = _settings_path(root)
+        data = _settings_load(root, path)
+        rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
+        rec_val = rec.get("value") if isinstance(rec, dict) else None
+        rec_val = rec_val if _retention_ok(setting, rec_val) else default
+        if file_value < rec_val:
+            _settings_write(root, setting, file_value, "file")
+            rec_val = file_value
+    except (Refused, OSError):
+        rec_val = default
+    return min(file_value, rec_val)
+
+
 # ------------------------------------------------------------------------------------------- launch token
 
-LAUNCH_SERVERS = ("focus", "dashboard")
+LAUNCH_SERVERS = ("focus", "dashboard", "insights")
 
 
 def is_test_workspace(root: Path) -> bool:
@@ -933,8 +990,16 @@ def reset_protection(root: Path, reason: str) -> None:
                 _write_private(nf, json.dumps(notes))
 
 
+def _lowering(setting, value) -> bool:
+    """A record a reset keeps: a tombstone (False), or a retention number at or below its default."""
+    if setting in RETENTION_DEFAULTS:
+        return _retention_ok(setting, value) and value <= RETENTION_DEFAULTS[setting]
+    return value is False
+
+
 def _reset_settings(root: Path, home: Path) -> None:
-    """A reset only ever LOWERS: every record whose value is False (a tombstone, in any workspace) is kept
+    """A reset only ever LOWERS: every record whose value is False (a tombstone, in any workspace; a lowered
+    retention number too) is kept
     whatever the file's rights, anything else is dropped, and the opening settings are written False. A
     record file that exists but cannot be read also closes live_session and share_counts (unreadable=off)."""
     path, wkey = _settings_path(root)
@@ -960,7 +1025,7 @@ def _reset_settings(root: Path, home: Path) -> None:
     out: dict = {}
     for wk, recs in prior.items():
         if isinstance(recs, dict):
-            keep = {k: v for k, v in recs.items() if isinstance(v, dict) and v.get("value") is False}
+            keep = {k: v for k, v in recs.items() if isinstance(v, dict) and _lowering(k, v.get("value"))}
             if keep:
                 out[wk] = keep
     mine = out.setdefault(wkey, {})

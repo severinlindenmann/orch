@@ -13,7 +13,7 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
 
 ```
 .orch/record/                         LOCAL, in .orch/.gitignore ("record/") and the .git/info/exclude block. Never committed
-  alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1)
+  alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1) and a person's changes (orch.record-change/1)
   pending/<run>/<time_uuid>.json     prepared writes waiting for the run lock
   meta.json                           {"schema": "orch.record/1", "since": "<time>", "keep_days": 90, "max_mb": 2048}
   runs/<run>.jsonl                    one file per run, one orch.activity/1 event per line
@@ -112,7 +112,11 @@ text, output was cut, helpers are not visible). Capability flags per adapter (ag
 
 ## Retention (owner decision R5)
 
-`[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048`. Pruning runs when a run ends and once a day:
+`[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048` (512 · 1024 · 2048 · 4096). Pruning uses the
+**effective** values (`config.record_keep_days` / `record_max_mb`): the lower of the file value and the person's settings
+record (default record 90 / 2048; human-proof.md, Settings), so a file value alone never keeps more. Raising either needs an
+`insights.settings` proof bound to the new value (target `insights.keep_days=365`); lowering does not, and deletes nothing at once (the next pruning applies it).
+Pruning runs when a run ends and once a day:
 1. Before anything is deleted, the run is folded into `counts/<day>.json` (counts never depend on detail).
    Fold must be idempotent per run: retention may fold again after a run was skipped.
 2. Runs that ended more than `keep_days` ago lose their detail folder and their run file (and `jobs/<run>/`).
@@ -125,7 +129,7 @@ Pending runs report `status: unavailable, reason: pending` to retention. Under t
 and verify the run still ended. The result retains the first non-ok status, reason, message and alert.
 Vectors `retention` fix the order.
 
-## Reading: `orch record tail | query | counts | delete-detail`
+## Reading: `orch record tail | query | counts | settings | delete-detail`
 
 - `orch record tail [--ticket T | --run R] [--since <cursor>] [--follow] --json` → NDJSON on stdout, one object per line:
   `{"type": "event", "cursor": "<c>", "event": {…}}`, `{"type": "ping", "cursor": "<c>", "at"}` every 15 s while following,
@@ -147,9 +151,24 @@ Vectors `retention` fix the order.
 - `orch record query [--ticket T] [--run R] [--kind K]… [--from <time>] [--to <time>] [--limit N] [--after <cursor>] --json`
   → a page `{"items": [event…], "next": "<cursor>" | null, "unavailable": [{run, status, reason, message}]}` (cli-answer.schema.json `page`), newest first, limit 1–500
   (default 100). `--detail <id> --run R` → one detail file.
-- `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only). `orch record delete-detail <ticket> --json` → `{"deleted": n}` (person only).
-- Refused (exit 2, `{"error", "code"}`) for `delete-detail` without a valid proof (human-proof.md), for a ticket that does not exist, and when the
-  record folder is unsafe (symlink).
+- `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only).
+- `orch record settings --json` (read only, no proof) → `{"keep_days": 90, "max_mb": 2048, "share_counts": true,
+  "share_names": false, "record_mb": <int>, "detail_mb": <int>, "runs": <int>}`: the effective settings (human-proof.md,
+  Settings), the size of `.orch/record/` and of `detail/` in MB (rounded up) and the number of run files, read through the
+  hardened helpers (no record yet: 0). When the record cannot be read, the sizes and `runs` are `null` and the answer
+  carries the read marker `status` (`unavailable` | `tampered`), `reason`, `message` (exit 0).
+- **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…"}` (a person
+  only: op `record.delete_detail`, target = the ticket id). `n` = the runs of that ticket (a run with any line for the
+  ticket) whose detail folder was removed. Only those detail folders go; run files, lines and counts stay; the events then
+  show "Details not available" (`--detail` answers `not_found`). Before anything is deleted the core appends one
+  `orch.record-change/1` line (`$defs/record_change`: `{v, schema, at, change: "record.delete_detail", by: <the proven
+  person>, ticket, deleted: n}`, no path, no content) to `alerts/<day>.jsonl`, so the deletion itself stays auditable; if
+  that line cannot be written nothing is deleted.
+- Refused (exit 2, `{"error", "code"}`), in this order, for `delete-detail`: an agent caller (agent tool in the
+  environment, `--by agent:…`) before anything else, `needs_person`; a ticket that does not exist, `not_found`; no or an
+  invalid proof (missing, expired, other target, other op, replayed, a `--by` other than the proof's), `needs_person`;
+  a record that cannot be read (any run unreadable, or the record folder unsafe, e.g. a symlink), `not_available` |
+  `tampered`, with nothing deleted.
 
 ## Mapping from a JSON event stream (one-shot collectors)
 
@@ -219,6 +238,8 @@ Integrity alerts (`orch.record-alert/1`) live at
 `.orch/record/alerts/<YYYY-MM-DD>.jsonl`. They contain no paths, user ids, or
 record contents. Each process emits one per day, target, run, and reason. If
 alert storage fails, the alert remains attached to the result or exception.
+The same daily file also holds `orch.record-change/1` lines (a person's proven
+change, e.g. Delete detail); readers tell the two apart by `schema`.
 
 Writing validates and hides the event and both detail outcomes before taking
 the run lock. A strict read of the run fd precedes meta, detail, and line writes;

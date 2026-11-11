@@ -255,7 +255,13 @@ REAL_HOME_MODULES = (
     "test_install_kind",
     "test_winacl",
 )  # they test the home pairing itself
-REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_verdict_mac", "test_cli_secret")
+REAL_PROOF_MODULES = (
+    "test_human_proof",
+    "test_humanproof",
+    "test_verdict_mac",
+    "test_cli_secret",
+    "test_insights_settings",
+)
 
 
 def ensure_signing(root):

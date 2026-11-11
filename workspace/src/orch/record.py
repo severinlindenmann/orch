@@ -1097,6 +1097,59 @@ def delete_detail(workspace, runs, *, seen_by="cli"):
         raise
 
 
+def detail_runs(workspace, runs, *, seen_by="cli"):
+    """The runs (of `runs`) that have a detail folder, through the hardened walk: ReadResult of a list."""
+    found = []
+    try:
+        for run in runs:
+            try:
+                _entries(workspace, ("detail", _name(run, _RUN)))
+            except RecordUnavailable as error:
+                if error.reason != "missing":
+                    raise
+                continue
+            found.append(run)
+        return ReadResult("ok", found)
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", None, seen_by)
+
+
+def record_sizes(workspace):
+    """ReadResult of {"record": bytes, "detail": bytes} through the hardened walk (no record yet: zeros). A
+    name orch never writes inside the record counts as changed outside orch."""
+    try:
+        try:
+            names = _entries(workspace, ())
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+            names = []
+        total = sum(_size(workspace, (name,)) for name in names)
+        return ReadResult("ok", dict(record=total, detail=_size(workspace, ("detail",))))
+    except RecordInvalid:
+        return _report(workspace, RecordTampered("swapped"), "folder", None, "reader")
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", None, "reader")
+
+
+def note_change(workspace, *, change, by, ticket, deleted):
+    """One audit line for a person's change to the record (`orch.record-change/1`, e.g.
+    record.delete_detail) in the unattributed daily file alerts/<day>.jsonl. Raises when it cannot be stored
+    (the caller then changes nothing)."""
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    line = dict(
+        v=1, schema="orch.record-change/1", at=now, change=change, by=by, ticket=ticket, deleted=deleted
+    )
+    if not _CHANGE_VALIDATOR.is_valid(line):
+        raise RecordInvalid()
+    fd = _open(workspace, ("alerts", now[:10] + ".jsonl"), "append", create_dirs=True)
+    try:
+        _write(fd, (_json(line) + "\n").encode())
+    finally:
+        _close(fd)
+    return line
+
+
 def _ended(events):
     states = [e for e in events if e["kind"] == "run.state"]
     last = states[-1] if states else None
@@ -1815,6 +1868,22 @@ _SCHEMA = {
                 },
             },
         },
+        "record_change": {
+            "type": "object",
+            "additionalProperties": False,
+            "description": "One audit line in alerts/<YYYY-MM-DD>.jsonl for a person's proven change to the "
+            "record (activity.md, Delete detail). No path, no record content.",
+            "required": ["v", "schema", "at", "change", "by", "ticket", "deleted"],
+            "properties": {
+                "v": {"const": 1},
+                "schema": {"const": "orch.record-change/1"},
+                "at": {"$ref": "#/$defs/time"},
+                "change": {"enum": ["record.delete_detail"]},
+                "by": {"type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$"},
+                "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"},
+                "deleted": {"type": "integer", "minimum": 0},
+            },
+        },
         "read_status": {
             "type": "object",
             "additionalProperties": False,
@@ -1861,4 +1930,7 @@ _DETAIL_VALIDATOR = Draft202012Validator(
 )
 _META_VALIDATOR = Draft202012Validator(
     {"$ref": "#/$defs/record_meta", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
+)
+_CHANGE_VALIDATOR = Draft202012Validator(
+    {"$ref": "#/$defs/record_change", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
 )
