@@ -1,6 +1,7 @@
 """Private, hidden activity records and explicit retention."""
 
 import errno
+import hashlib
 import json
 import os
 import re
@@ -26,7 +27,7 @@ _OFF = "Recording is off until key hiding is ready."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[A-Za-z0-9_-]{1,128}"
-_RESERVED_ID = r"r_[a-z0-9_]{6,32}:[0-9]+|x_[0-9a-f]{32}"
+_RESERVED_ID = r"r_[a-z0-9_]{6,32}:[0-9]+|[xk]_[0-9a-f]{32}"
 
 
 class RecordRefused(Refused):
@@ -273,8 +274,13 @@ class RecordWriter:
         else:
             # A step keeps the contract name (the id); any other kind gets its own file, so an event with a
             # colliding id can never replace another kind's detail.
-            name = event["id"] if event["kind"] == "step" else f"{event['id']}|{event['kind']}"
-            event["detail"] = f"detail/{run}/{detail_name(name)}.json"
+            # Non-step names live in their own "k_" domain; ids of that shape are re-hashed (_RESERVED_ID),
+            # so they can never equal a step's file name, whatever the raw ids were.
+            if event["kind"] == "step":
+                name = detail_name(event["id"])
+            else:
+                name = "k_" + hashlib.sha256(f"{event['kind']}\0{event['id']}".encode()).hexdigest()[:32]
+            event["detail"] = f"detail/{run}/{name}.json"
             wrapped = dict(
                 v=1,
                 id=event["id"],
@@ -374,6 +380,11 @@ class RecordWriter:
                 target = root / event["detail"]
                 _mkdir(target.parent)
                 # A started step never replaces the detail of its finished line (it may arrive late).
+                if (
+                    target.exists()
+                    and (read_detail(self.workspace, run, target.stem) or {}).get("id") != event["id"]
+                ):
+                    raise RecordRefused(_INVALID)  # never replace the detail of another event
                 if event["outcome"] is not None or not target.exists():
                     _atomic(target, detail_bytes)
             meta = self._serialized(

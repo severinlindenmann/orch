@@ -422,3 +422,32 @@ def test_late_started_detail_keeps_finished_detail(store):
     )
     writer.append(event(id="s1"), detail={"input": "b", "output": "early"})
     assert json.loads((record_dir(ws) / done["detail"]).read_text())["output"] == "final"
+
+
+def test_detail_name_domains_never_collide(store):
+    ws, writer = store
+    raw = "weird id|helper.start"  # unsafe step id: hashed; the same text hashed for a non-step must differ
+    step = writer.append(event(id=raw), detail={"input": "step", "output": "step"})
+    other = writer.append(
+        event(
+            id=raw,
+            kind="helper.start",
+            agent="h_1",
+            parent="main",
+            via="hook",
+            used={"kind": "helper", "name": "h", "action": None, "source": "builtin", "version": None},
+        ),
+        detail={"input": "other", "output": "other"},
+    )
+    assert step["detail"] != other["detail"]
+    assert json.loads((record_dir(ws) / step["detail"]).read_text())["input"] == "step"
+    got = writer.append(event(id="k_" + "b" * 32))
+    assert got["id"].startswith("x_")
+    # a stored file of another event under the target name is never replaced
+    target = record_dir(ws) / "detail/r_8k2m01/victim.json"
+    victim = json.loads((record_dir(ws) / step["detail"]).read_text())
+    victim["id"] = "someone-else"
+    target.write_text(json.dumps(victim))
+    with pytest.raises(RecordRefused):
+        writer.append(event(id="victim"), detail={"input": "x", "output": "y"})
+    assert json.loads(target.read_text())["id"] == "someone-else"
