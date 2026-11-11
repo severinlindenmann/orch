@@ -14,6 +14,12 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
 ```
 .orch/record/                         LOCAL, in .orch/.gitignore ("record/") and the .git/info/exclude block. Never committed
   alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1)
+  alerts/hook-lost-<YYYY-MM-DD>.jsonl  hook entries of a proven caller that could not be written: {v, schema
+                                      "orch.record-lost/1", at, run, reason: hider_off | invalid | too_large | other_run};
+                                      no content; 1 per run and reason per minute, 50 lines per run, then one "trimmed"
+                                      line (run set), and a global "trimmed" line (run null) when the file passes 1 MB
+  alerts/hook-lost-unattributed-<YYYY-MM-DD>.jsonl  the same for a caller NOT proven to be in the run (not_active |
+                                      other_run | not_provable): run is null, never a run id the caller named; 1 per reason per minute
   pending/<run>/<time_uuid>.json     prepared writes waiting for the run lock
   meta.json                           {"schema": "orch.record/1", "since": "<time>", "keep_days": 90, "max_mb": 2048}
   runs/<run>.jsonl                    one file per run, one orch.activity/1 event per line
@@ -50,15 +56,35 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
 ## Writing (one writer per run file)
 
 - The run's own orch process (the oneshot wrapper or the live run's watcher) is the only writer of `runs/<run>.jsonl`.
-  Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch run event`
+  Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch record hook`
   call that appends under the per-run lock `runs/<run>.lock`, named with O_EXCL and
   held with a kernel lock, released in a `finally`). Each event is one line, one
   `write()` of at most 8 KB (text is cut, never the line split), so lines never mix.
-- **The hook entry is narrow.** `orch run event` (the only out-of-process way in) accepts only `step`, `denial`,
+- **The hook entry is narrow.** `orch record hook` (the only out-of-process way in) accepts only `step`, `denial`,
   `helper.start`, `helper.end` and `usage`, and always writes `via: hook` whatever the caller sent. `task.*`, `ask`,
   `run.state`, `key.use`, `job` and `session.input` are written only in-process by the core, the broker and `orch job`
-  (vectors `hook_entry`). *Implementing slice 1.7 must* also bind the call to the run (`ORCH_RUN` plus the run's per-run hook
-  file token) and drop lines for another run.
+  (vectors `hook_entry`). The call is bound to the run: `ORCH_RUN` and `ORCH_TICKET` must name a live claim that belong
+  together **and the calling process must be a descendant of the claim's process** (its wrapper pid or agent pid, start
+  time checked), so a process outside the run cannot write into it by setting the same variables; a line naming another
+  run is dropped; the caller's `at` and `harness` are never kept (time of the call; the tool this process runs under).
+  Where the process tree cannot be read (**Windows today: the hook records nothing**, reason `not_provable`, until the
+  token below or a Windows process-tree proof exists) nothing is written. Nested runs: the check accepts the claim's own
+  pids anywhere among the caller's ancestors, so a call from a child run's tree can still name its parent run; telling
+  them apart needs the token below. `orch record hook` always exits 0 (a tool's hook exit 2 would block the tool call; main handles it before the
+  parser, the Chat guard and the notices) unless `--strict`. The hook wiring must call exactly `orch record hook` (optionally `--strict`): the root comes from `ORCH_ROOT` or the
+  working folder only, `--root` and other flags are ignored, and a global flag before `record` is an argparse error
+  (exit 2) that cannot be softened. The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
+  never ends the process inside a write. *Follow-up:* the per-run hook file token
+  (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
+  The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller
+  (the hook wiring of slice 1.8 must pass it; a hook line and the collector line with that id merge) (this entry takes
+  event-shaped lines, not raw tool payloads); the writer hashes an unsafe one once, the same for hook and collector.
+  A payload over 8 MB is not read further: a minimal `step` with `detail_lost: true` is written, never no line.
+- **Reserved ids.** `<run>:<seq>` is the default id of collector lines (and of other origins); a hook line without an id
+  gets `h_<run>:<seq>` instead, so a hook line can never take the id of a collector line still to come (dedupe would
+  drop it; vectors `hook_default_id`). A hook-sent id in either namespace (`<run>:…`, `h_<run>:…`) is replaced by `x_` +
+  32 hex (vectors `hook_namespace`); any other origin's `h_<run>:…` is replaced by `x_` + the first 32 hex of its
+  sha256 (vectors `reserved_ids`), so only the writer's own default can be in that namespace.
 - **Fail closed.** The writer takes a value hider as a required argument; there is no default and no pass-through. A hider is
   "registered" only when it was built from this workspace's key store in its **guarded orch home** (secrets.md, Where: a real
   workspace only with the account's default home, a test workspace only with a test home; any other pairing refuses). An empty or pass-through hider refuses; a store
