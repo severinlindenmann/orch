@@ -635,8 +635,10 @@ def transcript_exists(
     None = cannot tell (nothing declared, or the tool has no folder for this workspace at all, e.g. a path it
     names differently): orch then trusts the recorded id. False = the folder is there but not this session:
     resuming it would only fail with "no conversation found"."""
+    if not valid_session_id(sid):
+        return False  # an id orch would never record or resume: never "trust" it
     t = (load(name, root).get("session") or {}).get("transcript")
-    if not t or not valid_session_id(sid):
+    if not t:
         return None
     env = os.environ if environ is None else environ
     base = Path(env.get(t.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / t["home"])

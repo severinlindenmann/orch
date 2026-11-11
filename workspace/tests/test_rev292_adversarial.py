@@ -70,7 +70,8 @@ def test_a_start_that_hangs_twice_is_reported_and_not_started_a_third_time(
 @pytest.mark.parametrize("sid", ["../../etc/passwd", "a/b", "/abs", ".hidden", ""])
 def test_transcript_check_refuses_odd_session_ids(proj, sid, tmp_path):
     env = {"CLAUDE_CONFIG_DIR": str(tmp_path), "HOME": str(tmp_path)}
-    assert adapters.transcript_exists("claude", sid, proj, env) is None
+    # odd ids are refused outright (fresh start), never "can't tell, trust the id"
+    assert adapters.transcript_exists("claude", sid, proj, env) is False
 
 
 def test_transcript_check_stays_below_the_tool_folder(proj, tmp_path):
@@ -78,10 +79,13 @@ def test_transcript_check_stays_below_the_tool_folder(proj, tmp_path):
     folder = "".join(c if c.isalnum() else "-" for c in str(proj.resolve()))
     d = tmp_path / "cfg" / "projects" / folder
     d.mkdir(parents=True)
-    assert adapters.transcript_exists("claude", "abc..def", proj, env) is False
+    # an id with dots (or anything outside the shared session-id rule) is never resumed, file or not
     (d / "abc..def.jsonl").write_text("{}")
-    assert adapters.transcript_exists("claude", "abc..def", proj, env) is True
-    assert Path(d / "abc..def.jsonl").resolve().is_relative_to((tmp_path / "cfg").resolve())
+    assert adapters.transcript_exists("claude", "abc..def", proj, env) is False
+    assert adapters.transcript_exists("claude", "abc-def", proj, env) is False
+    (d / "abc-def.jsonl").write_text("{}")
+    assert adapters.transcript_exists("claude", "abc-def", proj, env) is True
+    assert Path(d / "abc-def.jsonl").resolve().is_relative_to((tmp_path / "cfg").resolve())
 
 
 def test_env_pointing_elsewhere_only_switches_resume_off_or_trusts_the_id(proj, tmp_path):
