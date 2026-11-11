@@ -8,11 +8,11 @@ enum MobileModeBannerState: Equatable {
 
     var text: String {
         switch self {
-        case .on(let pc): return "\(pc) · Mobile mode on"
+        case .on(let pc): return "\(pc) · Send questions to my phone · on"
         case .unreachable(let pc, let since):
             return since.map { "\(pc) · Can't reach since \($0)" }
                 ?? "\(pc) · Can't reach"
-        case .muted(let pc): return "\(pc) · Mobile mode muted"
+        case .muted(let pc): return "\(pc) · Send questions to my phone · muted"
         }
     }
     // Tints are layered over Theme.surface by the banner.

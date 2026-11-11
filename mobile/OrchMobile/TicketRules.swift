@@ -3,7 +3,7 @@ import SwiftUI
 
 extension ConversationRules {
     static func needsYouText(position n: Int, of total: Int) -> String {
-        total > 1 ? "Needs you · \(n) of \(total)" : "Needs you"
+        total > 1 ? "Needs your OK · \(n) of \(total)" : "Needs your OK"
     }
 
     static func openPosition(of id: String, in items: [ConvItem]) -> (n: Int, of: Int)? {

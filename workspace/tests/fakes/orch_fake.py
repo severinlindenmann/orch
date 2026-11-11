@@ -12,7 +12,7 @@ It replays the contract vectors/examples, so add-on code never changes when the 
   anything else   exit 2 {"error", "code": "not_available"}
 
 Scenario: env ORCH_FAKE_SCENARIO (or the flag --fake-scenario X, taken out before parsing):
-  default  the contract examples
+  default  the contract examples, then one step per valid `files` case of vectors/activity-v1.json
   paged    250 synthetic activity events (several pages of --limit)
   empty    nothing recorded yet (no events, counts "nothing yet", job refuses)
   drop     tail: the stream breaks with an error line after about half of the events (a reconnect with the
@@ -96,7 +96,7 @@ def activity_events(scenario):
     base = sorted((CONTRACTS / "examples" / "activity").glob("valid-*.json"))
     events = [load(f"examples/activity/{f.name}") for f in base]
     if scenario != "paged":
-        return events
+        return events + files_events(len(events))
     tpl = load("examples/activity/valid-step-started.json")
     res = []
     for n in range(1, 251):
@@ -105,6 +105,19 @@ def activity_events(scenario):
         e["id"] = f"toolu_fake{n:04d}"
         e["at"] = f"2026-11-16T{9 + n // 3600:02d}:{n // 60 % 60:02d}:{n % 60:02d}Z"
         e.pop("detail", None)
+        res.append(e)
+    return res
+
+
+def files_events(seq):
+    """Steps with `files` (activity.md, Files): one per valid case of the vectors, as the writer stores it."""
+    res = []
+    for n, case in enumerate(load("vectors/activity-v1.json")["files"], 1):
+        if not case["schema"] or case["stored"] != case["files"]:
+            continue
+        e = load(f"examples/activity/{case['base']}.json")
+        seq += 1
+        e.update(seq=seq, id=f"toolu_files{n:02d}", files=case["stored"])
         res.append(e)
     return res
 

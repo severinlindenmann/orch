@@ -79,7 +79,7 @@ actor MockRelay: RelayAPI {
         if UserDefaults.standard.bool(forKey: "mockDoneReview") {
             for (ticket, title) in [("t_donerev1", "Done, verdict asked"), ("t_donerev2", "Done, no question")] {
                 updateLog.append(TicketUpdate(id: "m_doneupdate_" + ticket, workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
-                    ticket: ticket, kind: "result", title: title, text: "The agent finished the work.", replyTo: nil,
+                    ticket: ticket, kind: "result", title: title, text: "The helper finished the work.", replyTo: nil,
                     at: Self.now(), ticketView: TicketSnapshot(title: title, status: "review", running: false)))
             }
             all.append(Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_donereview00001", from: Self.pilatus,
@@ -193,7 +193,7 @@ actor MockRelay: RelayAPI {
     /// Work updates per (workspace, ticket), newest per ticket is what the feed returns.
     private var updateLog: [TicketUpdate] = [
         TicketUpdate(id: "m_upd0000000000001", workspace: pilatus, workspaceName: "Pilatus Workspace", ticket: "t_q3sum1", kind: "result",
-                     title: "Q3 summary", text: "artifacts/test-report.pdf\nQ3 summary is ready in the shared folder. Have a look. notes/old-plan.md is not attached.", replyTo: nil, at: "2026-11-05T11:20:00Z",
+                     title: "Q3 summary", text: "Q3 summary is ready. Have a look at artifacts/test-report.pdf in the shared folder. notes/old-plan.md is not attached.", replyTo: nil, at: "2026-11-05T11:20:00Z",
                      key: "PIL-12", ticketView: MockRelay.q3View),
         TicketUpdate(id: "m_upd0000000000002", workspace: reports, workspaceName: "Reports", ticket: "t_9k2m4q", kind: "working",
                      title: "Invoice CSV export", text: "Working on: Invoice CSV export", replyTo: nil, at: "2026-11-05T15:12:00Z",
@@ -203,7 +203,8 @@ actor MockRelay: RelayAPI {
     /// Ready-for-review fixture enabled with -mockReview YES.
     static let reviewTicketId = "t_reviewfish"
     static let reviewView = TicketSnapshot(title: "Test HTML page about fish", status: "review",
-        checklist: ["Create page", "Add fish facts", "Review page"].map { .init(text: $0, done: true) }, running: false)
+        checklist: ["Create page", "Add fish facts", "Review page"].map { .init(text: $0, done: true) }, running: false,
+        attachments: [.init(kind: "html", title: "Fish facts", url: "https://en.wikipedia.org/wiki/Fish", name: "fish.html", artifactId: "a_f15f15f15f15", rev: "r1")])
     static var reviewQuestion: Question {
         Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_review000000001", from: pilatus, to: "phones", type: "question",
             createdAt: now(), ticket: reviewTicketId, body: QuestionBody(questionId: "review-1", title: reviewView.title,

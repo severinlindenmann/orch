@@ -65,14 +65,14 @@ extension ArchiveStore {
             // A topic the workspace has not acked yet cannot be archived.
             let key = ReadState.key(topic.id)
             if !topic.isStarting, isArchived(key: key, status: topic.status, lastAt: topic.lastAt, muted: muted, now: now) {
-                archived.append(ArchivedChat(id: topic.id, workspaceId: ws, title: [topic.key, topic.title].compactMap { $0 }.joined(separator: " · "),
+                archived.append(ArchivedChat(id: topic.id, workspaceId: ws, title: topic.title,
                                              status: topic.status, lastAt: topic.lastAt, byHand: manual[key] != nil))
             } else { shown.append(topic) }
         }
         let gKey = ReadState.key(summary.general.id)
         let generalArchived = isArchived(key: gKey, status: nil, lastAt: summary.general.lastAt, muted: muted, now: now)
         if generalArchived {
-            archived.append(ArchivedChat(id: summary.general.id, workspaceId: ws, title: "Chat", status: nil, lastAt: summary.general.lastAt, byHand: true))
+            archived.append(ArchivedChat(id: summary.general.id, workspaceId: ws, title: "Your helper", status: nil, lastAt: summary.general.lastAt, byHand: true))
         }
         return (shown, !generalArchived, archived.sorted { ($0.lastAt ?? "") > ($1.lastAt ?? "") })
     }

@@ -684,3 +684,47 @@ def test_helper_env_with_the_parent_claim_among_ancestors_writes_only_its_own_ru
         assert record_hook.hook(proj, line(id="toolu_h"))["run"] == helper["run"]
     assert [e["id"] for e in events(proj, helper["run"])] == ["toolu_h"]
     assert record.read_run(proj, parent["run"]).status == "unavailable"  # the parent's log is untouched
+
+
+def test_files_from_the_caller_are_normalised_and_kept(live):
+    root, run, _ = live
+    files = [
+        f"{root}/src/app.py",
+        "docs/readme.md",
+        f"{root}/../outside.txt",
+        "/etc/passwd",
+        "../up.txt",
+        f"{root}/src/app.py",
+        "a\\b",
+        *[f"{root}/f{n}" for n in range(1, 10)],
+    ]
+    got = record_hook.hook(root, line(files=files))
+    assert got["via"] == "hook"
+    assert got["files"] == ["src/app.py", "docs/readme.md", *[f"f{n}" for n in range(1, 7)]]
+    assert events(root, run)[0]["files"] == got["files"]
+
+
+@pytest.mark.parametrize("files", ["src/app.py", None, {"a": "b"}])
+def test_files_not_a_list_is_not_stored(live, files):
+    root, run, _ = live
+    assert "files" not in record_hook.hook(root, line(files=files))
+
+
+def test_files_on_another_hook_kind_are_not_stored(live):
+    root, run, _ = live
+    got = record_hook.hook(
+        root, line(kind="denial", outcome={"ok": False, "error": "No", "ms": None}, files=["a.py"])
+    )
+    assert got["kind"] == "denial" and "files" not in got
+
+
+def test_files_filter_keeps_them_and_refused_kinds_stay_refused():
+    assert record.hook_entry_filter({"kind": "step", "files": ["a.py", "/abs"]})["files"] == ["a.py", "/abs"]
+    with pytest.raises(record.RecordRefused):
+        record.hook_entry_filter({"kind": "run.state", "files": ["a.py"]})
+
+
+def test_a_file_path_that_changes_under_the_hider_is_dropped(live):
+    root, run, _ = live
+    got = record_hook.hook(root, line(files=[f"{root}/src/app.py", f"{root}/{SECRET}.txt"]))
+    assert got["files"] == ["src/app.py"]

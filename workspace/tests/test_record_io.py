@@ -84,6 +84,8 @@ def plant(ws, kind):
 
 # Exact call expressions keep arbitrary Path receivers out of the allowlist.
 SAFE_ATTRIBUTE_CALLS = {
+    "raw.rfind",
+    "b''.join",
     "r.get",
     "rows.append",
     "(_json(note) + '\\n').encode",
@@ -103,6 +105,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "_json(dict(schema='orch.record/1', since=event['at'], keep_days=90, max_mb=2048)).encode",
     "_json(event).count",
     "_json(event['data']).encode",
+    "_json(f).encode",
     "_json(payload).count",
     "_json(wrapped).encode",
     "_read_bytes(fd).splitlines",
@@ -206,6 +209,9 @@ ERROR_BOUNDARIES = {
     "delete_detail",
     "list_runs",
     "_spool",
+    "read_job",
+    "list_jobs",
+    "append_job",
 }
 
 
@@ -229,7 +235,8 @@ from orch import hider as hiding
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
-from orch.phone_view import redact""".splitlines()
+from orch.phone_view import redact
+from orch.record_files import MAX_INPUT, file_ok""".splitlines()
 )
 SAFE_EXCEPTIONS = {
     "ValueError",
