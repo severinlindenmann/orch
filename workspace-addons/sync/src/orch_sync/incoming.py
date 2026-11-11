@@ -47,7 +47,8 @@ def tree(root, ref):
              entry.split(b'\t', 1)[1].decode('utf-8')) for entry in raw.split(b'\0') if entry]
 
 
-def check(root, ref='origin/orch-state') -> list[Problem]:
+def check(root, ref='origin/orch-state', *, base='HEAD') -> list[Problem]:
+    # The step supplies the common ancestor: a new local-only ticket is not a remote deletion.
     problems = []
     try:
         repo.check(root)
@@ -55,7 +56,8 @@ def check(root, ref='origin/orch-state') -> list[Problem]:
             raise ValueError('Invalid ref')
         # Pin once so tree, sizes and diff all describe the same commit.
         tip = repo.git(root, 'rev-parse', '--verify', ref + '^{commit}').stdout.decode().strip()
-        head = repo.git(root, 'rev-parse', '--verify', 'HEAD^{commit}').stdout.decode().strip()
+        head = (repo.git(root, 'rev-parse', '--verify', base).stdout if base else
+                repo.git(root, 'hash-object', '-w', '-t', 'tree', '--stdin', input=b'').stdout).decode().strip()
         entries, old = tree(root, tip), tree(root, head)
         if len(entries) > 5000:
             return [Problem('', 'size', 'Too many files')]

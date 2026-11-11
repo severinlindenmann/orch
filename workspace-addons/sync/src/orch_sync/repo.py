@@ -38,7 +38,7 @@ def local_dir(root):
     return p
 
 
-def git(root, *args, input=None, timeout=60, index=None):
+def git(root, *args, input=None, timeout=60, index=None, allowed_codes=(0,), commit_date=None):
     work = safe(root, '')
     gd = safe(root, '.git')
     if not work.is_dir() or (gd.exists() and not gd.is_dir()):
@@ -49,6 +49,8 @@ def git(root, *args, input=None, timeout=60, index=None):
            if not k.startswith('GIT_') or k in ('GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_SSL_CAINFO')}
     env.update(GIT_TERMINAL_PROMPT='0', GIT_ASKPASS='', LC_ALL='C')
     env.pop('SSH_ASKPASS', None)
+    if commit_date is not None:
+        env.update(GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date)
     if index is not None:
         env['GIT_INDEX_FILE'] = str(Path(index).absolute())
     # Fresh private empty directory: never trust an existing hooks/attributes file.
@@ -58,7 +60,10 @@ def git(root, *args, input=None, timeout=60, index=None):
         opts = (*OPTIONS, f'core.hooksPath={empty}', f'core.attributesFile={attrs}')
         cmd = ['git', '-C', str(work), *[v for opt in opts for v in ('-c', opt)], *args]
         try:
-            return subprocess.run(cmd, input=input, capture_output=True, env=env, timeout=timeout, check=True)
+            result = subprocess.run(cmd, input=input, capture_output=True, env=env, timeout=timeout, check=False)
+            if result.returncode not in allowed_codes:
+                raise Refused("Git operation failed")
+            return result
         except (OSError, subprocess.SubprocessError) as e:
             raise Refused('Git operation failed') from e
 
