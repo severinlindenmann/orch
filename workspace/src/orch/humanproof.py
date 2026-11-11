@@ -288,6 +288,7 @@ _SECRET_FILES = (
     "handoffs.json",
     "wont.json",
     "verdict.json",
+    "profile.json",
 )  # the ledgers go with the key they were signed with
 
 
@@ -1221,6 +1222,65 @@ def _ledger_read(root: Path) -> dict | None:
 
 def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
     return _ledger_put(root, LEDGER, "orch.wont-ledger/1", f"{ticket}:{check}", mac)
+
+
+# The secret-profile BODY ledger (guarded home): keys/<ws>/profile.json holds, per profile name, the CURRENT
+# profile1 MAC of its body {env, files, set, run, extra} (null = tombstone, the profile was removed). The file
+# itself is editable by anything running as the user, so it vouches for nothing: secretrun/keystore verify the
+# body against this ledger and fail closed on a missing or different MAC.
+PROFILE_LEDGER = "profile.json"
+PROFILE_CHANGED = "this key profile was changed outside orch; set it up again"
+
+
+def profile_body(profile: dict) -> dict:
+    """The part of a profile the MAC covers: what runs and what it receives (the switches have their own
+    settings records)."""
+    return {
+        "env": dict(profile.get("env") or {}),
+        "files": dict(profile.get("files") or {}),
+        "set": dict(profile.get("set") or {}),
+        "run": list(profile["run"]) if profile.get("run") else None,
+        "extra": sorted(profile.get("extra") or []),
+    }
+
+
+def profile_mac(key: bytes, workspace: str, name: str, body: dict) -> str:
+    """profile1.<workspace id>.<profile name>.<canonical body {env, files, set, run, extra}>: binds WHERE it
+    belongs (another profile or workspace) and WHAT was approved."""
+    return _b64u(
+        hmac.new(
+            key, f"profile1.{workspace}.{name}.{_canon(profile_body(body))}".encode(), hashlib.sha256
+        ).digest()
+    )
+
+
+def profile_sign(root: Path, name: str, body: dict | None) -> None:
+    """Record the current MAC of profile `name` (None: tombstone). Raises Refused when it cannot be recorded
+    (the caller must not write the profile then)."""
+    from orch import addons
+
+    mac = None
+    if body is not None:
+        ws = addons.workspace_id(root, create=True)
+        mac = profile_mac(human_key(root), ws, name, body)
+    if not _ledger_put(root, PROFILE_LEDGER, "orch.profile-ledger/1", name, mac):
+        raise Refused("orch could not record this key profile. Nothing was changed.")
+
+
+def profile_verified(root: Path, name: str, body: dict) -> bool:
+    """True only when the body's MAC (this key, this workspace, this name) is the current ledger entry.
+    Never raises; no key, no workspace id or no readable ledger = False (fail closed)."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        ent = _ledger_load(root, PROFILE_LEDGER)
+        cur = ent.get(name) if ent else None
+        if not ws or not isinstance(cur, str):
+            return False
+        return hmac.compare_digest(cur, profile_mac(human_key(root, create=False), ws, name, body))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def wont_sign(root: Path, ticket: str, step: dict) -> str | None:

@@ -259,7 +259,7 @@ def test_unreadable_grant_store_means_no_grants(env):
     assert not inventory.connections(root)[0][0]["allow_all"]
 
 
-def test_profile_state_ok_when_keys_exist(env):
+def test_profile_state_ok_when_keys_exist(env, monkeypatch):
     root, _, orch_home = env
     _mcp(root, {"s": {"command": ["p"], "profile": "g"}})
     _w(
@@ -268,6 +268,8 @@ def test_profile_state_ok_when_keys_exist(env):
     )
     assert inventory.connections(root)[0][0]["state"] == "missing-key"
     _w(orch_home / "keys" / WID / "keys.json", {"keys": {"tok": {"type": "token"}}})
+    assert inventory.connections(root)[0][0]["state"] == "missing-key"  # no body MAC: changed outside orch
+    monkeypatch.setattr(inventory.humanproof, "profile_verified", lambda *a: True)
     assert inventory.connections(root)[0][0]["state"] == "not-started"
 
 
