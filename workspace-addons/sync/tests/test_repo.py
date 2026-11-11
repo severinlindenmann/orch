@@ -510,13 +510,13 @@ def test_global_credential_helper_only_for_calls_to_the_configured_remote(ready,
     # A private https remote needs the person's own git login. core safegit empties the helper; sync passes
     # back the person's GLOBAL helpers on fetch/push/ls-remote to `origin` only.
     home = Path(repo.os.environ['HOME'])
-    (home / '.gitconfig').write_text('[credential]\n\thelper =\n\thelper = store --file=/nowhere/creds\n'
+    (home / '.gitconfig').write_text('[credential]\n\thelper =\n\thelper = store\n'
                                      '\thelper = osxkeychain\n')
     repo.set_remote(ready, REMOTE)
     canary = ready / 'canary'
     with (ready / '.orch/.git/config').open('a') as f:  # what an agent could write into the repository
         f.write(f'[credential]\n\thelper = !touch {canary}\n')
-    assert repo.credential_helpers(ready) == ['', 'store --file=/nowhere/creds', 'osxkeychain']
+    assert repo.credential_helpers(ready) == ['', 'store', 'osxkeychain']
     calls = recorded(monkeypatch)
     repo.git(ready, 'push', 'origin', 'HEAD:refs/heads/orch-state')
     repo.fetch(ready)
@@ -524,7 +524,7 @@ def test_global_credential_helper_only_for_calls_to_the_configured_remote(ready,
     repo.git(ready, 'ls-remote', REMOTE)  # an address given directly is not the configured remote
     repo.git(ready, 'rev-parse', 'HEAD')
     repo.git(ready, 'commit', '--allow-empty', '-m', 'local')
-    person = ['', 'store --file=/nowhere/creds', 'osxkeychain']
+    person = ['', 'store', 'osxkeychain']
     network = [(c, e) for c, e in calls if {'push', 'fetch', 'ls-remote'} & set(c)]
     # push; fetch = its ls-remote --exit-code probe + the fetch; ls-remote origin; ls-remote <address>
     assert len(network) == 5
@@ -543,10 +543,15 @@ def test_global_credential_helper_only_for_calls_to_the_configured_remote(ready,
         repo.check(ready)
 
 
-@pytest.mark.parametrize('helper', ['!touch /tmp/x', '/usr/local/bin/evil', 'store --file=$(id)', 'evil-helper'])
+@pytest.mark.parametrize('helper', [
+    '!touch /tmp/x', '/usr/local/bin/evil', 'store --file=$(id)', 'evil-helper',
+    # no options at all: each would point git at a file or socket an agent chose
+    'store --file=/tmp/agent-creds', 'store --file /tmp/agent-creds', 'cache --socket=/tmp/agent.sock',
+    'cache --timeout=300', 'osxkeychain --x', 'store -f', 'store store', 'osxkeychain extra', 'STORE', 'store\tx',
+])
 def test_a_global_helper_that_is_not_gits_own_gives_no_login(ready, helper):
     # Opus hard3 #8: ~/.gitconfig is writable by agents too; a `!command` or a program path would run inside
-    # sync with access to the guarded home. Only git's own helpers by name, with plain options.
+    # sync with access to the guarded home. Only git's own helpers by bare name, with no option or other token.
     home = Path(repo.os.environ['HOME'])
     (home / '.gitconfig').write_text(f'[credential]\n\thelper = osxkeychain\n\thelper = {helper}\n')
     assert repo.credential_helpers(ready) == []

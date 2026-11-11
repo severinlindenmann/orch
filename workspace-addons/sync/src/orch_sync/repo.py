@@ -167,15 +167,15 @@ def credential_helpers(root):
     values = os.fsdecode(r.stdout).split('\0')[:-1]
     if any(len(v) > 4096 or '\n' in v for v in values):
         return []  # not a helper line git itself would take: no login rather than a wrong one
-    # ~/.gitconfig is writable by any process of the same user (an agent too): only git's own helpers by name,
-    # with plain options; never `!command` or a path to a program (Opus hard3 #8). Anything else: no login.
-    if not all(v == '' or HELPER_LINE.fullmatch(v) for v in values):
+    # ~/.gitconfig is writable by any process of the same user (an agent too): only git's own helpers by bare
+    # name; never `!command`, a path to a program (Opus hard3 #8) or any option (`store --file=…` or
+    # `cache --socket=…` would point git at a file an agent chose). Anything else: no login.
+    if not all(v == '' or v in HELPERS for v in values):
         return []
     return values
 
 
-HELPERS = ('osxkeychain', 'manager', 'manager-core', 'libsecret', 'cache', 'store', 'wincred')
-HELPER_LINE = re.compile('(?:' + '|'.join(HELPERS) + r')(?: --?[A-Za-z][A-Za-z-]*(?:[= ][A-Za-z0-9._~/-]+)?)*')
+HELPERS = ('osxkeychain', 'manager', 'manager-core', 'libsecret', 'cache', 'store', 'wincred')  # exact values only
 
 
 def git(root, *args, input=None, timeout=60, index=None, allowed_codes=(0,), commit_date=None, max_output=None):

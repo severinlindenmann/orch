@@ -56,7 +56,7 @@ STATE = "run/sync/state.json"
 
 
 def write(root, relative, data):
-    if relative == STATE:  # every write of the state signs its pause (pause.seal; read with verified_pause)
+    if relative == STATE:  # keeps the pause only as this core signed it, never signs one (pause.seal / pause.sign)
         data = encoded(pause.seal(root, json.loads(data)))
     p = repo.safe(root, relative)
     p.parent.mkdir(parents=True, exist_ok=True)

@@ -24,20 +24,25 @@ class Pause(repo.Refused):
 PAUSED_KIND = "sync-paused"
 
 
+def sign(root, paused):
+    """Sign a pause this core made or changed in this process (its files, reason, kind, remote, clashes) with its
+    local1 MAC. Only capture and the person's resolutions call it: an agent can write state.json, but an edited or
+    planted pause (a reason that lowers what needs a proof, a remote it never reviewed) is no pause at all."""
+    body = {k: v for k, v in paused.items() if k != "mac"}
+    mac = humanproof.local_sign(root, PAUSED_KIND, body)
+    return {**body, "mac": mac} if mac else None  # unsigned = no pause (sync looks again)
+
+
 def seal(root, state):
-    """Sign the pause (its files, reason, kind, remote, clashes) with this core's local1 MAC before state.json is
-    written: an agent can write the file, but an edited or planted pause (a reason that lowers what needs a
-    proof, a remote it never reviewed) is no pause at all (verified_pause)."""
-    paused = state.get("paused")
-    if isinstance(paused, dict):
-        body = {k: v for k, v in paused.items() if k != "mac"}
-        mac = humanproof.local_sign(root, PAUSED_KIND, body)
-        state["paused"] = {**body, "mac": mac} if mac else None  # unsigned = no pause (sync looks again)
+    """Before state.json is written: keep the pause only as this core signed it (verified_pause), else drop it.
+    Never signs: a planted pause written back by any core write would otherwise come out signed."""
+    state["paused"] = verified_pause(root, state)
     return state
 
 
 def verified_pause(root, state):
-    """The pause in `state` when this core signed it, else None."""
+    """The pause in `state` (with its mac, so writing it back unchanged keeps it) when this core signed exactly
+    it, else None. A caller that changes it signs it again (sign); a changed pause it forgets is dropped."""
     paused = state.get("paused") if isinstance(state, dict) else None
     if not isinstance(paused, dict):
         return None
@@ -46,7 +51,7 @@ def verified_pause(root, state):
         return None
     if not isinstance(body.get("files"), list) or not isinstance(body.get("reason"), str):
         return None
-    return body
+    return paused
 
 
 def capture(root, state, error, remote, now):
@@ -60,13 +65,14 @@ def capture(root, state, error, remote, now):
     else:
         files = error.files or sorted(p for p in ours.keys() | theirs.keys() if ours.get(p) != theirs.get(p))
     files = sorted({p for p in files if paths.allowed(p)})
-    state["paused"] = {"files": files, "since": now, "remote_sha": remote, "reason": str(error)}
+    paused = {"files": files, "since": now, "remote_sha": remote, "reason": str(error)}
     if kind:
-        state["paused"]["kind"] = kind
+        paused["kind"] = kind
     if error.key_clashes:
-        state["paused"]["key_clashes"] = error.key_clashes
+        paused["key_clashes"] = error.key_clashes
     if error.case_names:
-        state["paused"]["case_names"] = {p: v for p, v in error.case_names.items() if p in files}
+        paused["case_names"] = {p: v for p, v in error.case_names.items() if p in files}
+    state["paused"] = sign(root, paused)  # the one place a new pause is made (Pause raised in this process)
     # Manifest is written last by the step. Saved bytes are never used without matching its sha.
     for path in files:
         data = step.blob(root, theirs.get(path))
@@ -380,8 +386,7 @@ def resolve(root, path, keep, args=None, *, now=None):
             step.write(root, "run/sync/choices.json", step.encoded(decisions))
             step.write(root, path, data)
             paused["files"].remove(path)
-            if not paused["files"]:
-                state["paused"] = None
+            state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
             step.write(root, "run/sync/state.json", step.encoded(state))
         if state["paused"]:
             return state
@@ -538,8 +543,7 @@ def resolve_case(root, path, args, *, rename=None, now=None):
                 step.write(root, "run/sync/choices.json", step.encoded(decisions))
             paused["files"].remove(path)
             case.pop(path)
-            if not paused["files"]:
-                state["paused"] = None
+            state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
             step.write(root, "run/sync/state.json", step.encoded(state))
         if state["paused"]:
             return state
@@ -680,6 +684,6 @@ def keep_key(root, key, tid, args, *, now=None):
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
         paused["key_clashes"].pop(key)
         paused["files"] = [p for p in paused["files"] if p not in selected_docs]
-        state["paused"] = paused if paused["files"] else None
+        state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
         step.write(root, "run/sync/state.json", step.encoded(state))
     return state if state["paused"] else step._run(root, "key chosen", now, cli.remote_allowed())

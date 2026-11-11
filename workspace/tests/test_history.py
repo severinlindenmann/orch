@@ -123,6 +123,36 @@ def test_evidence_by_is_proven_by_its_own_digest(synced):
     assert "done by me   ● You" in text and "forged   ○ Agent says" in text
 
 
+@pytest.mark.parametrize("by", [None, "agent:claude", "", 7, "human:"])
+def test_synced_evidence_without_a_person_by_gets_no_author_either(synced, by):
+    """Evidence not in the own store is the sync role whether it has a `by` or not: a reader would otherwise
+    take the author of the step's own "Check c1 done" line (evidence_author) or the agent label as written."""
+    root, tid = synced
+    tickets.check_done(root, tid, "c1", ['{"type":"note","ref":"done by me"}'], "human:tester")
+    planted = {"type": "note", "ref": "planted", "at": "2026-11-09T09:00:00Z"}
+    if by is not None:
+        planted["by"] = by
+    _plant(root, tid, lambda t: t["checklist"][0]["evidence"].append(planted))
+    t = history.shown_ticket(root, _raw(root, tid))
+    c = t["checklist"][0]
+    assert c["evidence"][0]["by"] == "human:tester" and c["evidence"][1]["by"] == history.SYNC_BY
+    assert history.evidence_author(t, c, c["evidence"][0]) == "person"
+    assert history.evidence_author(t, c, c["evidence"][1]) == "agent"
+    assert history.shown_ticket(root, t) == t  # idempotent
+    assert "planted   ○ Agent says" in cli._show(_raw(root, tid), root)
+    raw = _raw(root, tid)
+    assert raw["checklist"][0]["evidence"][1] == planted  # the stored bytes never change
+    demoted = history._all_demoted(raw)["checklist"][0]["evidence"]  # the fail-closed path too
+    assert all(e["by"] == history.SYNC_BY for e in demoted)
+
+
+def test_own_evidence_without_by_and_agent_evidence_stay_as_made(synced):
+    root, tid = synced
+    tickets.check_done(root, tid, "c1", ['{"type":"note","ref":"by the agent"}'], "agent:claude")
+    shown = history.shown_ticket(root, _raw(root, tid))["checklist"][0]["evidence"]
+    assert shown[0]["by"] == "agent:claude"  # core added it here: registered, kept
+
+
 def test_every_person_field_goes_through_the_one_rule(synced):
     root, tid = synced
 

@@ -151,6 +151,57 @@ def test_an_edited_pause_is_no_pause(machines):
     assert not success(b).get("paused") and load(b)["title"] == "goes on"
 
 
+def _planted(b, **extra):
+    state = cli.read(b, "state")
+    state["paused"] = {"files": [TICKET], "since": NOW, "remote_sha": "0" * 40, "reason": "x", **extra}
+    repo.safe(b, "run/sync/state.json").write_text(json.dumps(state))  # an agent's write, not step.write
+    return state
+
+
+def _stored_pause(b):
+    return json.loads(repo.safe(b, "run/sync/state.json").read_text()).get("paused")
+
+
+def test_a_core_state_write_never_signs_a_planted_pause(machines):
+    _a, b, _ = both(machines)
+    state = _planted(b)  # unsigned
+    step.write(b, step.STATE, step.encoded(state))  # the generic core write path
+    assert _stored_pause(b) is None and pause.verified_pause(b, cli.read(b, "state")) is None
+    _planted(b, mac="forged")
+    success(b)  # a whole step writes the state too
+    stored = _stored_pause(b)  # none, or only a pause this step made itself: never the planted one
+    assert stored is None or (pause.verified_pause(b, cli.read(b, "state")) and stored["reason"] != "x")
+
+
+def test_the_deleted_notice_does_not_launder_a_planted_pause(machines):
+    _a, b, _ = both(machines)
+    state = _planted(b)
+    state["deleted"] = {"t_abc123": {"at": NOW}}
+    repo.safe(b, "run/sync/state.json").write_text(json.dumps(state))
+    assert cli.main(["--dir", str(b), "deleted", "t_abc123", "--keep", "--json"]) == 0
+    assert _stored_pause(b) is None
+
+
+def test_a_signed_pause_survives_a_write_back_and_a_changed_one_needs_signing_again(machines):
+    _a, b, _ = both(machines)
+    state = cli.read(b, "state")
+    state["paused"] = pause.sign(b, {"files": [TICKET, "ticket-counter.json"], "since": NOW,
+                                     "remote_sha": "0" * 40, "reason": "x"})
+    step.write(b, step.STATE, step.encoded(state))
+    kept = pause.verified_pause(b, cli.read(b, "state"))
+    assert kept and kept["files"] == [TICKET, "ticket-counter.json"]
+    state = cli.read(b, "state")
+    state["paused"] = pause.verified_pause(b, state)
+    step.write(b, step.STATE, step.encoded(state))  # a reader writes it back unchanged
+    assert pause.verified_pause(b, cli.read(b, "state")) == kept
+    state["paused"]["files"].remove(TICKET)  # changed but not signed again: dropped, never signed by the write
+    step.write(b, step.STATE, step.encoded(state))
+    assert _stored_pause(b) is None
+    state["paused"] = pause.sign(b, {**kept, "files": ["ticket-counter.json"]})
+    step.write(b, step.STATE, step.encoded(state))
+    assert pause.verified_pause(b, cli.read(b, "state"))["files"] == ["ticket-counter.json"]
+
+
 def test_the_local_add_on_values_record_is_signed_and_never_started_again(machines, monkeypatch):
     a, b, _ = both(machines)
     value = {"enabled": True}

@@ -186,6 +186,9 @@ def main(argv=None):
                     allowed[args.ticket] = records.make(root, "delete", args.ticket, {"ticket": args.ticket})
                     write(root, "run/sync/allow-delete.json", encoded(allowed))
                 state["deleted"].pop(args.ticket)
+                from .pause import verified_pause
+
+                state["paused"] = verified_pause(root, state)  # a planted pause is not written back
                 write(root, "run/sync/state.json", encoded(state))
             result = {"acknowledged": args.ticket}
         elif args.cmd == "start":

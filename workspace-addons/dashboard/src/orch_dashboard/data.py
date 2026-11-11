@@ -193,7 +193,7 @@ def _demote_all(t: dict) -> dict:
                 **(
                     {
                         "evidence": [
-                            {**e, "by": SYNC_BY} if isinstance(e, dict) and "by" in e and not agent(e["by"]) else e
+                            {**e, "by": SYNC_BY} if isinstance(e, dict) else e  # any author: none is proven
                             for e in c["evidence"]
                         ]
                     }

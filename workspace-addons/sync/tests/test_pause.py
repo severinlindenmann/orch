@@ -487,12 +487,15 @@ def test_key_clash_need_respects_contract_with_long_titles(root, count):
     history.ensure_key(root)  # a pause is signed with the workspace key (sync on always makes it)
     candidates = [{"id": f"t_test{i:03}", "title": "Long title " * 20} for i in range(count)]
     state = {
-        "paused": {
-            "files": [f"tickets/{t['id']}.json" for t in candidates],
-            "key_clashes": {"DM1-13": candidates},
-            "since": NOW,
-            "reason": "Key clash",
-        }
+        "paused": pause.sign(  # made as core makes it; step.write never signs a pause it is given
+            root,
+            {
+                "files": [f"tickets/{t['id']}.json" for t in candidates],
+                "key_clashes": {"DM1-13": candidates},
+                "since": NOW,
+                "reason": "Key clash",
+            },
+        )
     }
     step.write(root, "run/sync/state.json", step.encoded(state))
     rows = needs.rows(root)
@@ -827,8 +830,9 @@ def test_a_malformed_choice_store_counts_for_nothing(machines, files):
 
 def _history_pause(root, remote):
     state = cli.read(root, "state")
-    state["paused"] = {"files": [], "since": NOW, "remote_sha": remote, "kind": pause.HISTORY,
-                       "reason": "The two histories cannot be combined automatically"}
+    # made as core makes it (pause.sign); step.write never signs a pause it is given
+    state["paused"] = pause.sign(root, {"files": [], "since": NOW, "remote_sha": remote, "kind": pause.HISTORY,
+                                        "reason": "The two histories cannot be combined automatically"})
     step.write(root, "run/sync/state.json", step.encoded(state))
 
 

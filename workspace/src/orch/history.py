@@ -608,14 +608,10 @@ def _shown(proof: _Proof, t: dict) -> dict:
             nc = c
             evs = c.get("evidence") if isinstance(c.get("evidence"), list) else None
             if evs is not None:
+                # Every piece not in the own store is the sync role, with or without a `by` (an agent's too):
+                # readers would otherwise give it an author (evidence_author falls back to the step's line).
                 new_evs = [
-                    {**e, "by": SYNC_BY}
-                    if isinstance(e, dict)
-                    and "by" in e
-                    and needs_proof(e.get("by"))
-                    and not has("evidence", e)
-                    else e
-                    for e in evs
+                    {**e, "by": SYNC_BY} if isinstance(e, dict) and not has("evidence", e) else e for e in evs
                 ]
                 if new_evs != evs:
                     nc = {**nc, "evidence": new_evs}
@@ -738,8 +734,7 @@ def _all_demoted(t: dict) -> dict:
                 **c,
                 **{f: SYNC_BY for f in ("by", "wont_by") if f in c and needs_proof(c.get(f))},
                 "evidence": [
-                    {**e, "by": SYNC_BY} if isinstance(e, dict) and needs_proof(e.get("by")) else e
-                    for e in c.get("evidence") or []
+                    {**e, "by": SYNC_BY} if isinstance(e, dict) else e for e in c.get("evidence") or []
                 ],
             }
             if isinstance(c, dict)
