@@ -17,11 +17,15 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
 
 (async () => {
   const { chromium } = playwright();
-  const srv = await start();
+  const servers = { focus: await start() };
+  if (SCREENS.some(x => x.server === 'insights')) {
+    servers.insights = await start('workspace-addons/insights', 'e2e/focus_insights/insights_server.py', 'insights-shots');
+  }
   const browser = await chromium.launch();
   const problems = [];
   try {
     for (const s of SCREENS) {
+      const srv = servers[s.server || 'focus'];
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
       const note = what => problems.push(`${s.name}: ${what}`);
       page.on('console', m => { if (m.type() === 'error') note(`console error: ${m.text().slice(0, 300)}`); });
@@ -32,7 +36,7 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
         await page.goto(srv.base + s.url);
         if (s.wait) await page.waitForSelector(s.wait, { timeout: 20000 });
         await s.setup(page, srv.base);
-        for (const g of EXPECT_GLOBALS) {
+        for (const g of s.server ? [] : EXPECT_GLOBALS) { // the Focus pages' globals; Insights has its own page
           if (!(await page.evaluate(name => typeof window[name] !== 'undefined', g))) note(`window.${g} is missing`);
         }
       } catch (e) {
@@ -40,7 +44,7 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
       } finally { await page.close(); }
       console.log(`${s.name}: ${problems.some(p => p.startsWith(s.name + ':')) ? 'PROBLEM' : 'ok'}`);
     }
-  } finally { await browser.close(); srv.stop(); }
+  } finally { await browser.close(); Object.values(servers).forEach(x => x.stop()); }
   if (problems.length) {
     console.error('\nPAGE SMOKE FAILED:\n' + [...new Set(problems)].map(p => '  - ' + p).join('\n'));
     process.exit(1);
