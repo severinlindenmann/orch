@@ -13,6 +13,12 @@ fallback, still counts as live). Never a timer.
 
 The sync step must do all its writes on the thread that holds the gate: a worker thread is another thread and
 is refused like any writer.
+
+Taking over a stale gate is compare-and-swap: under a short takeover lock (`.orch/run/sync.gate.takeover`) the
+gate is read again and only renamed away when it is still the very file judged stale (same bytes and file
+identity); after the rename the taken file is checked once more and put back when it differs. So a live gate
+published meanwhile is never removed. The holder checks before each write batch (tickets.sync_apply) that the
+gate still carries its own identity (ensure_held). Step records of holders that are gone are removed.
 """
 
 from __future__ import annotations
@@ -36,17 +42,43 @@ FRESH_SECONDS = 2.0  # an unreadable gate younger than this may be a holder mid-
 REREAD_SECONDS = 0.05  # an unreadable gate is read once more after this, then counts as stale
 REPLACE_TRIES = 10  # Windows: a file open elsewhere refuses os.replace; retried inside the gate
 REPLACE_DELAY = 0.2
+TAKEOVER_WAIT = 2.0  # how long a takeover waits for another takeover's short critical section
 
 _NONCE = secrets.token_hex(8)  # per process (a forked child inherits it, but has another pid)
 _STEP_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_STEP_FILE_RE = re.compile(r"step-[A-Za-z0-9_.-]{1,64}\.json")
+_local = threading.local()  # the gates this thread holds: (gate path, gate text)
 
 
 def gate_path(root: Path) -> Path:
     return root / ".orch" / "run" / "sync.gate"
 
 
+def takeover_path(root: Path) -> Path:
+    return root / ".orch" / "run" / "sync.gate.takeover"
+
+
 def step_path(root: Path, step_id: str) -> Path:
     return root / ".orch" / "run" / "sync" / f"step-{step_id}.json"
+
+
+def _snapshot(p: Path) -> tuple[bytes, tuple] | None:
+    """The file's bytes and identity (device, inode, mtime, size); None when it is missing or unreadable."""
+    try:
+        with open(p, "rb") as f:
+            st = os.fstat(f.fileno())
+            data = f.read()
+    except OSError:
+        return None
+    return data, (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def _parse(data: bytes) -> dict | None:
+    try:
+        rec = json.loads(data.decode("utf-8"))
+    except ValueError:
+        return None
+    return rec if isinstance(rec, dict) else None
 
 
 def _read_file(p: Path) -> dict | None:
@@ -199,11 +231,12 @@ def hold(root: Path, step_id: str = "sync"):
     sid = f"{step_id}-{secrets.token_hex(4)}"
     sp = step_path(root, sid)
     sp.parent.mkdir(parents=True, exist_ok=True)
-    step_text = json.dumps({"pid": me, "step_id": sid})
+    start = procs.pid_started(me) or "-"
+    step_text = json.dumps({"pid": me, "step_id": sid, "start_time": start})
     text = json.dumps(
         {
             "pid": me,
-            "start_time": procs.pid_started(me) or "-",
+            "start_time": start,
             "nonce": _NONCE,
             "thread": threading.get_ident(),
             "step_id": sid,
@@ -216,19 +249,24 @@ def hold(root: Path, step_id: str = "sync"):
         for _ in range(5):
             if _publish(p, text):
                 break
-            other = _read(root)
-            if other is None:
-                live = _fresh_unreadable(root)
-            else:
-                live = _is_me(other) or not _stale(root, other)
+            seen, live = _judge(root)
             if live:
                 raise Refused("orch is already syncing. Try again in a moment.")
-            _take_stale(root)
+            if seen is not None:
+                _take_stale(root, seen)
         else:
             raise Refused("orch could not take the sync gate. Try again in a moment.")
+        entry = (os.path.abspath(p), text)
+        if not hasattr(_local, "held"):
+            _local.held = []
+        held = _local.held
+        held.append(entry)
+        with contextlib.suppress(OSError):
+            _clean_step_records(root)
         try:
             yield
         finally:
+            held.remove(entry)
             with contextlib.suppress(OSError):  # only a gate that is ours
                 if p.read_text(encoding="utf-8") == text:
                     procs.unlink(p)
@@ -238,33 +276,131 @@ def hold(root: Path, step_id: str = "sync"):
                 sp.unlink()
 
 
-def _take_stale(root: Path) -> bool:
-    """Remove a stale gate: rename it to a name only we know (atomic, one winner), re-check what we took,
-    put it back (no clobber) if a live holder had made it meanwhile."""
+def ensure_held(root: Path) -> None:
+    """For the gate's holder, before each write batch: Refused when the gate no longer carries this hold's
+    identity (taken over or removed meanwhile). A thread that holds no gate for `root` is not checked."""
+    p = os.path.abspath(gate_path(root))
+    for gp, text in getattr(_local, "held", ()):
+        if gp != p:
+            continue
+        try:
+            ok = Path(p).read_text(encoding="utf-8") == text
+        except OSError:
+            ok = False
+        if not ok:
+            raise Refused("orch lost the sync gate while syncing. Try again in a moment.")
+
+
+def _judge(root: Path) -> tuple[tuple[bytes, tuple] | None, bool]:
+    """(snapshot of the gate, whether a live holder stands behind it). An unreadable gate is read once more
+    after a short pause. Snapshot None = no gate right now."""
     p = gate_path(root)
-    mine = p.with_name(f"sync.gate.{secrets.token_hex(4)}.old")
+    seen = _snapshot(p)
+    if seen is not None and _parse(seen[0]) is None:
+        time.sleep(REREAD_SECONDS)
+        seen = _snapshot(p)
+    if seen is None:
+        return None, False
+    rec = _parse(seen[0])
+    if rec is None:  # a very recent unreadable one may be a no-links publisher mid-write
+        return seen, time.time() - seen[1][2] / 1e9 < FRESH_SECONDS
+    return seen, _is_me(rec) or not _stale(root, rec)
+
+
+def _take_stale(root: Path, seen: tuple[bytes, tuple]) -> bool:
+    """Remove the gate judged stale, compare-and-swap: under the takeover lock, re-read the gate and rename
+    it to a name only we know only when it is still exactly what was judged (bytes and file identity); check
+    what we took and put it back (no clobber) when it differs. A gate published meanwhile is never touched."""
+    p = gate_path(root)
+    with _takeover(root) as ok:
+        if not ok or _snapshot(p) != seen:
+            return False  # busy, gone, or another gate now (maybe a live holder's): give up this attempt
+        mine = p.with_name(f"sync.gate.{secrets.token_hex(4)}.old")
+        try:
+            os.replace(p, mine)
+        except OSError:
+            return False
+        try:
+            if _snapshot(mine) == seen:
+                return True
+            with contextlib.suppress(OSError):
+                os.link(mine, p)
+            return False
+        finally:
+            with contextlib.suppress(OSError):
+                mine.unlink()
+
+
+@contextlib.contextmanager
+def _takeover(root: Path):
+    """A short lock around a takeover (yields False when it stays busy). Every remover of a gate takes it, so
+    between a takeover's re-read and its rename only a publish into an empty place can happen. A lock whose
+    owner is gone (or an empty one that is not fresh) is broken the same compare-and-swap way."""
+    lk = takeover_path(root)
+    token = f"{procs.own_token()} {_NONCE} {threading.get_ident()}"
+    end = time.monotonic() + TAKEOVER_WAIT
+    while not _publish(lk, token):
+        held, dead = _snapshot(lk), False
+        if held is not None:
+            owner = held[0].decode("utf-8", "replace")
+            if owner.strip():
+                dead = procs.owner_dead(owner)
+            else:
+                dead = time.time() - held[1][2] / 1e9 >= FRESH_SECONDS
+            if dead:
+                _break(lk, held)
+        if time.monotonic() > end:
+            yield False
+            return
+        if not dead:
+            time.sleep(POLL_SECONDS)
     try:
-        os.replace(p, mine)
-    except OSError:
-        return False
-    try:
-        rec = _read_file(mine)
-        if rec is None:
-            if time.time() - mine.stat().st_mtime >= FRESH_SECONDS:
-                return True  # unreadable and not fresh: nobody is mid-write
-        elif _stale(root, rec):
-            return True
+        yield True
+    finally:
         with contextlib.suppress(OSError):
-            os.link(mine, p)
-        return False
+            if lk.read_text(encoding="utf-8") == token:
+                procs.unlink(lk)
+
+
+def _break(lk: Path, seen: tuple[bytes, tuple]) -> None:
+    mine = lk.with_name(f"{lk.name}.{secrets.token_hex(4)}.old")
+    try:
+        os.replace(lk, mine)
+    except OSError:
+        return
+    try:
+        if _snapshot(mine) != seen:
+            with contextlib.suppress(OSError):
+                os.link(mine, lk)  # a newer lock: no-clobber put-back
     finally:
         with contextlib.suppress(OSError):
             mine.unlink()
 
 
+def _clean_step_records(root: Path) -> None:
+    """Remove step records (`step-*.json`) whose owner process is verifiably gone: a crashed hold's
+    leftovers. Each by its exact path, and only when it still holds what was judged."""
+    d = step_path(root, "x").parent
+    for sp in d.iterdir():
+        if not _STEP_FILE_RE.fullmatch(sp.name):
+            continue
+        seen = _snapshot(sp)
+        rec = _parse(seen[0]) if seen is not None else None
+        pid = rec.get("pid") if rec is not None else None
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            continue  # not a record we can judge: left alone
+        start = rec.get("start_time")
+        if not procs.owner_dead(f"{pid} {start}" if isinstance(start, str) and start else str(pid)):
+            continue
+        with contextlib.suppress(OSError):
+            if _snapshot(sp) == seen:
+                sp.unlink()
+
+
 def clear_stale(root: Path) -> bool:
     """For a doctor-style repair: remove a gate no live sync step stands behind. True when one was removed."""
-    return gate_path(root).exists() and live_holder(root) is None and _take_stale(root)
+    seen, live = _judge(root)
+    return seen is not None and not live and _take_stale(root, seen)
 
 
 def replace(src, dst) -> None:

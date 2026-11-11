@@ -1,6 +1,7 @@
 """The sync write gate (.orch/run/sync.gate): writers wait for a live gate, a dead holder's gate is ignored,
 readers retry invalid JSON and never rewrite."""
 
+import contextlib
 import json
 import os
 import subprocess
@@ -511,6 +512,149 @@ def test_same_start_tolerates_two_seconds_for_all_values():
     assert not procs.same_start(a, "2026-11-09T15:00:03Z")
     assert not procs.same_start(a, "2026-11-09T14:59:56Z")
     assert not procs.same_start(a, None) and not procs.same_start(a, "garbage")
+
+
+def test_takeover_never_removes_a_live_gate_published_meanwhile(proj, monkeypatch):
+    """X judges gate G stale and pauses; Y takes G over and holds G2. X's takeover must not move G2 away:
+    G2 stays in place the whole time, writers never see "no gate", and X is refused."""
+    monkeypatch.setattr(syncgate, "_looks_like_orch", lambda pid: True)  # the test runner is not `orch`
+    tid = _ticket(proj)
+    _write_gate(proj, os.getpid(), "2020-01-01T00:00:00Z")  # our pid, another start time: stale
+    gate = syncgate.gate_path(proj)
+    moved = []
+    real_replace = os.replace
+
+    def spy_replace(src, dst, *a, **k):
+        if os.path.abspath(src) == os.path.abspath(gate):
+            with contextlib.suppress(OSError):
+                moved.append(gate.read_text(encoding="utf-8"))
+        return real_replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(syncgate.os, "replace", spy_replace)
+    real_take = syncgate._take_stale
+    x_judged, y_holds, go_x, y_release, stop = (threading.Event() for _ in range(5))
+    state = {}
+
+    def paused_take(*a, **k):
+        if threading.current_thread().name == "X":
+            x_judged.set()
+            go_x.wait(10)  # Y takes over and publishes G2 while X sits between judging and renaming
+        return real_take(*a, **k)
+
+    monkeypatch.setattr(syncgate, "_take_stale", paused_take)
+
+    def x():
+        try:
+            with syncgate.hold(proj, "x"):
+                state["x"] = "held"
+        except Refused as e:
+            state["x"] = str(e)
+
+    def y():
+        with syncgate.hold(proj, "y"):
+            state["g2"] = gate.read_text(encoding="utf-8")
+            y_holds.set()
+            y_release.wait(10)
+            with tickets.sync_apply(proj, tid):  # its gate is still its own: the batch may write
+                state["y_wrote"] = True
+
+    gaps = []
+
+    def watcher():
+        while not stop.is_set():
+            if syncgate.live_holder(proj) is None:
+                gaps.append(1)
+            time.sleep(0.001)
+
+    tx = threading.Thread(target=x, name="X")
+    tx.start()
+    assert x_judged.wait(10)
+    ty = threading.Thread(target=y, name="Y")
+    ty.start()
+    assert y_holds.wait(10)
+    tw = threading.Thread(target=watcher)
+    tw.start()
+    try:
+        time.sleep(0.02)  # the watcher is polling before X goes on
+        go_x.set()
+        tx.join(10)
+        assert "already syncing" in state["x"]
+        assert gate.read_text(encoding="utf-8") == state["g2"]  # Y's gate untouched
+        with pytest.raises(Refused, match="syncing"):  # a writer still waits for Y
+            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"))
+    finally:
+        stop.set()
+        tw.join(10)
+        y_release.set()
+        ty.join(10)
+    assert not gaps  # writers never saw "no gate" while Y held it
+    assert state["g2"] not in moved  # the live gate was never renamed away, not even for a moment
+    assert state.get("y_wrote") and not gate.exists()
+
+
+def test_takeover_gives_up_when_the_gate_changed_since_it_was_judged(proj, other):
+    _write_gate(proj, other.pid, "2020-01-01T00:00:00Z")
+    seen, live = syncgate._judge(proj)
+    assert seen is not None and not live
+    _live_gate(proj, other)  # replaced by a live holder's gate meanwhile
+    assert not syncgate._take_stale(proj, seen)
+    assert syncgate.live_holder(proj)["pid"] == other.pid
+    _write_gate(proj, other.pid, "2020-01-01T00:00:00Z")
+    seen, _ = syncgate._judge(proj)
+    assert syncgate._take_stale(proj, seen) and not syncgate.gate_path(proj).exists()
+
+
+def test_takeover_lock_of_a_gone_owner_is_broken_a_live_one_waited_for(proj, other, monkeypatch):
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    lk = syncgate.takeover_path(proj)
+    _write_gate(proj, other.pid, "2020-01-01T00:00:00Z")
+    lk.write_text(f"{dead.pid} 2020-01-01T00:00:00Z x 1")
+    with syncgate.hold(proj, "x"):
+        assert json.loads(syncgate.gate_path(proj).read_text())["step_id"].startswith("x-")
+    assert not lk.exists()
+    monkeypatch.setattr(syncgate, "TAKEOVER_WAIT", 0.1)
+    _write_gate(proj, other.pid, "2020-01-01T00:00:00Z")
+    lk.write_text(f"{other.pid} {procs.pid_started(other.pid)} x 1")  # a live takeover in progress
+    with pytest.raises(Refused, match="could not take"):
+        with syncgate.hold(proj, "x"):
+            pass
+    assert json.loads(syncgate.gate_path(proj).read_text())["pid"] == other.pid  # left alone
+    assert lk.exists()
+
+
+def test_holder_refuses_its_write_batch_once_the_gate_is_not_its_own(proj):
+    tid = _ticket(proj)
+    with syncgate.hold(proj, "step"):
+        with tickets.sync_apply(proj, tid):
+            pass
+        syncgate.gate_path(proj).unlink()  # taken over / removed behind its back
+        with pytest.raises(Refused, match="lost the sync gate"):
+            with tickets.sync_apply(proj, tid):
+                pytest.fail("wrote without the gate")
+    with tickets.sync_apply(proj, tid):  # holding no gate: not this check's business
+        pass
+
+
+def test_leftover_step_records_of_gone_holders_are_cleaned(proj, other):
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    d = syncgate.step_path(proj, "x").parent
+    d.mkdir(parents=True, exist_ok=True)
+    recs = {
+        "step-dead.json": {"pid": dead.pid, "step_id": "dead"},
+        "step-reused.json": {"pid": other.pid, "step_id": "reused", "start_time": "2020-01-01T00:00:00Z"},
+        "step-live.json": {"pid": other.pid, "step_id": "live", "start_time": procs.pid_started(other.pid)},
+        "step-old-live.json": {"pid": other.pid, "step_id": "old-live"},
+    }
+    for name, rec in recs.items():
+        (d / name).write_text(json.dumps(rec))
+    (d / "step-garbled.json").write_text("{ half")
+    (d / "state.json").write_text(json.dumps({"pid": dead.pid}))
+    with syncgate.hold(proj, "x"):
+        pass
+    left = sorted(p.name for p in d.iterdir())
+    assert left == ["state.json", "step-garbled.json", "step-live.json", "step-old-live.json"]
 
 
 def test_proc_boot_time_is_read_once(monkeypatch):
