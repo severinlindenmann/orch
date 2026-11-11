@@ -28,7 +28,11 @@ def test_synced_block_cannot_start_without_local_consent(tmp_path, monkeypatch):
     hashed = hashlib.sha256(
         json.dumps(block, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     ).hexdigest()
+    # A hash in approved.json is no approval (agent-writable; sync signs its records, PR B).
     (folder / "approved.json").write_text(json.dumps({tid: {"automation": hashed}}))
+    assert not syncapproval.allowed(root, ticket)
+    # A person's approval (orch sync approve) records the value as this machine's own.
+    (folder / "local-ext.json").write_text(json.dumps({tid: {"automation": hashed}}))
     assert syncapproval.allowed(root, ticket)
     block["enabled"] = False
     assert orchcli.run_start(root, tid)["result"] == "failed"

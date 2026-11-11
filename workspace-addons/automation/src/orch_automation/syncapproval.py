@@ -22,15 +22,11 @@ def allowed(root, ticket):
         hashed = hashlib.sha256(
             json.dumps(block, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
         ).hexdigest()
-        path = folder / "approved.json"
-        approved = json.loads(path.read_text()) if path.exists() else {}
+        # approved.json is not read: its entries are the sync add-on's signed records, which only the core can
+        # check. A person's approval makes the value this machine's own: sync records it in local-ext.json.
         created_path = root / ".orch/addons/automation/local-blocks.json"
         created = json.loads(created_path.read_text()) if created_path.exists() else {}
-        return hashed in (
-            local[tid].get("automation"),
-            approved.get(tid, {}).get("automation"),
-            created.get(tid),
-        )
+        return hashed in (local[tid].get("automation"), created.get(tid))
     except (OSError, ValueError, TypeError, AttributeError):
         return False
 

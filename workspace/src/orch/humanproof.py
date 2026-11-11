@@ -1224,6 +1224,140 @@ def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
     return _ledger_put(root, LEDGER, "orch.wont-ledger/1", f"{ticket}:{check}", mac)
 
 
+# ------------------------------------------------------------------------------------------- action records
+
+# A record an add-on keeps in the (agent-writable) workspace about a PERSON's decision (the sync add-on's
+# choices, approvals, ignored rows, checked files, allowed deletions): it carries this core's action1 MAC over
+# the proof target the person's verified proof was for AND the record itself, made right after person_by
+# verified the person, and checked again (action_is_human) each time the record is used. Agents can write the
+# record but not the key, so a planted or edited record verifies for nobody (contracts/human-proof.md
+# "Action records").
+
+
+def _canon_strict(obj) -> str:
+    """Canonical JSON (no NaN/Infinity: a value that cannot be written canonically raises ValueError)."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+
+def action_mac(key: bytes, workspace: str, target: str, record: dict) -> str:
+    """action1 over the canonical JSON array [domain, workspace, target, record]: no delimiter a target or a
+    record could forge."""
+    msg = _canon_strict(["action1", workspace, target, record])
+    return _b64u(hmac.new(key, msg.encode(), hashlib.sha256).digest())
+
+
+def action_sign(root: Path, target: str, record: dict) -> str | None:
+    """This core's MAC binding `record` to a person's verified action on `target`. Call only after person_by
+    returned a person for exactly `target`. None when there is no usable key or workspace id."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws or not isinstance(target, str) or not isinstance(record, dict):
+            return None
+        return action_mac(human_key(root, create=False), ws, target, record)
+    except (Refused, OSError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def action_is_human(root: Path, target, record, mac) -> bool:
+    """True only when `mac` is this core's action1 MAC for `target` and `record`. Fails closed: no key, no
+    workspace id, a damaged record or any other shape = nobody."""
+    from orch import addons
+
+    if not isinstance(mac, str) or not mac or not isinstance(target, str) or not isinstance(record, dict):
+        return False
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws:
+            return False
+        return hmac.compare_digest(mac, action_mac(human_key(root, create=False), ws, target, record))
+    except (Refused, OSError, TypeError, ValueError, RecursionError):
+        return False
+
+
+# One-time use of a signed action record: each record carries a random `id`; once the decision has been
+# applied, its id is spent here (guarded home, next to human.key) and a record with a spent id never counts
+# again, even when it is planted back. An unreadable store counts every id as spent (fail closed).
+ACTIONS_USED = "actions-used.json"
+ACTIONS_USED_MAX = 5000
+
+
+def new_action_id() -> str:
+    return _b64u(secrets.token_bytes(16))
+
+
+def action_spent(root: Path, rid) -> bool:
+    """True when `rid` was used up (or cannot be told: no key folder, a damaged store, a bad id)."""
+    if not isinstance(rid, str) or not _NONCE_RE.fullmatch(rid):
+        return True
+    used = _ledger_load(root, ACTIONS_USED)
+    return used is None or rid in used
+
+
+def action_spend(root: Path, ids) -> bool:
+    """Record these action ids as used (the newest ACTIONS_USED_MAX are kept). False when it could not be
+    written (the caller must not apply the decision then)."""
+    ids = [i for i in dict.fromkeys(ids) if isinstance(i, str) and _NONCE_RE.fullmatch(i)]
+    if not ids:
+        return True
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            used = _ledger_load(root, ACTIONS_USED)
+            if used is None:
+                return False
+            stamp = time.time_ns()
+            used.update({i: stamp + n for n, i in enumerate(ids)})
+            ordered = sorted(used.items(), key=lambda kv: kv[1] if isinstance(kv[1], int) else 0)
+            keep = dict(ordered[-ACTIONS_USED_MAX:])
+            _write_private(d / ACTIONS_USED, json.dumps({"schema": "orch.actions-used/1", "entries": keep}))
+        return True
+    except (Refused, OSError):
+        return False
+
+
+# ------------------------------------------------------------------------------------------- local records
+
+# A local integrity record that no person signs (core's own-history-lines store, the sync-enabled record, the
+# sync add-on's held add-on blocks): any process of the same user can write the file, so it carries this
+# core's local1 MAC (a domain of its own: it can never pass as a person's action1 record) and a record whose
+# MAC fails counts for nothing.
+
+
+def local_mac(key: bytes, workspace: str, kind: str, record) -> str:
+    msg = _canon_strict(["local1", workspace, kind, record])
+    return _b64u(hmac.new(key, msg.encode(), hashlib.sha256).digest())
+
+
+def local_key(root: Path) -> tuple[str, bytes] | None:
+    """(workspace id, human key) for local records, or None (no usable key or id: nothing verifies)."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        return (ws, human_key(root, create=False)) if ws else None
+    except (Refused, OSError, ValueError):
+        return None
+
+
+def local_sign(root: Path, kind: str, record, ctx=None) -> str | None:
+    ctx = ctx or local_key(root)
+    if ctx is None or not isinstance(kind, str):
+        return None
+    try:
+        return local_mac(ctx[1], ctx[0], kind, record)
+    except (TypeError, ValueError, RecursionError):
+        return None
+
+
+def local_ok(root: Path, kind: str, record, mac, ctx=None) -> bool:
+    if not isinstance(mac, str) or not mac:
+        return False
+    want = local_sign(root, kind, record, ctx)
+    return want is not None and hmac.compare_digest(want, mac)
+
+
 # The secret-profile BODY ledger (guarded home): keys/<ws>/profile.json holds, per profile name, the CURRENT
 # profile1 MAC of its body {env, files, set, run, extra} (null = tombstone, the profile was removed). The file
 # itself is editable by anything running as the user, so it vouches for nothing: secretrun/keystore verify the

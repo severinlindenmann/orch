@@ -543,6 +543,15 @@ def test_global_credential_helper_only_for_calls_to_the_configured_remote(ready,
         repo.check(ready)
 
 
+@pytest.mark.parametrize('helper', ['!touch /tmp/x', '/usr/local/bin/evil', 'store --file=$(id)', 'evil-helper'])
+def test_a_global_helper_that_is_not_gits_own_gives_no_login(ready, helper):
+    # Opus hard3 #8: ~/.gitconfig is writable by agents too; a `!command` or a program path would run inside
+    # sync with access to the guarded home. Only git's own helpers by name, with plain options.
+    home = Path(repo.os.environ['HOME'])
+    (home / '.gitconfig').write_text(f'[credential]\n\thelper = osxkeychain\n\thelper = {helper}\n')
+    assert repo.credential_helpers(ready) == []
+
+
 def test_repository_credential_helper_stops_sync_before_any_network(root, monkeypatch):
     from orch_sync import cli, step
 

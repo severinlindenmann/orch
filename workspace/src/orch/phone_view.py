@@ -24,7 +24,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import net, refs, runs, safefile, tickets
+from orch import history, net, refs, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -176,14 +176,7 @@ def size_of(view: dict) -> int:
     return len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode())
 
 
-def is_agent_history_author(by) -> bool:
-    """Only explicit agent labels are safe as unverified synced attribution."""
-    if not isinstance(by, str) or not by.isascii() or by != unicodedata.normalize("NFKC", by):
-        return False
-    label = by.casefold()
-    return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
-        ("relay", "phone", "ph_")
-    )
+is_agent_history_author = history.is_agent_history_author  # ONE rule (orch.history)
 
 
 def _who(by: str) -> tuple[str, str]:
@@ -674,7 +667,7 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     done, wont, total = tickets.checks_split({"checklist": checklist})
     agent, running = _agent(root, ticket)
     hist = []
-    for h in (ticket.get("history") or [])[-HISTORY:]:
+    for h in history.lines(root, ticket)[-HISTORY:]:  # an unproven synced author is the sync role here
         if internal_wakeup(h) or _ADMIN_NOTE.match(str(h.get("text", ""))):
             continue
         # Ticket history has no verified relay sender; raw labels cannot name a phone.

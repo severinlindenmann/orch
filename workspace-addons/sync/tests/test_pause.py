@@ -10,7 +10,7 @@ from orch.errors import Refused
 from test_step import ART, NOW, TICKET, run, save, success, ticket, tracked
 from test_two_machines import both, edit, hostile, load, machines, remote_sha
 
-from orch_sync import approval, cli, needs, pause, repo, step
+from orch_sync import approval, cli, needs, pause, records, repo, step
 
 __all__ = ["machines"]
 
@@ -124,7 +124,10 @@ def test_held_approval_and_changed_hash(machines, monkeypatch):
     args = proof(b, "sync:allow:t_abc123:automation:" + approval.digest(value), monkeypatch)
     approval.approve(b, "t_abc123", "automation", args)
     assert load(b)["ext"]["automation"] == value
-    assert cli.read(b, "approved")["t_abc123"]["automation"] == approval.digest(value)
+    entry = cli.read(b, "approved")["t_abc123"]["automation"]
+    target = "t_abc123:automation:" + approval.digest(value)
+    assert entry["hash"] == approval.digest(value) and records.ok(b, "allow", target, entry)
+    assert not records.ok(b, "allow", target, entry, single_use=True)  # #540: used once, spent at once
     success(b)
     success(a)
     edit(a, ext={"automation": {"enabled": False}})
@@ -154,7 +157,8 @@ def test_allow_and_ignore_need_distinct_proofs(machines, monkeypatch, decision):
     assert not approval.held(b)
     if ignore:
         assert "automation" not in load(b).get("ext", {})
-        assert cli.read(b, "ignored")["t_abc123"]["automation"] == approval.digest(value)
+        entry = cli.read(b, "ignored")["t_abc123"]["automation"]
+        assert records.ok(b, "ignore", "t_abc123:automation:" + approval.digest(value), entry)
     else:
         assert load(b)["ext"]["automation"] == value
 
@@ -352,11 +356,16 @@ def test_needs_commands_cannot_be_injected(machines):
     assert not approval.held(b)
     for row in needs.rows(b):
         assert "touch" not in row["cli"] and "touch" not in row["text"]
-    # Every interpolated value is quoted.
-    step.write(b, "run/sync/held/t_abc123-x.json", step.encoded(
-        {"ticket": "t_abc123", "addon": "a b;c", "value": 1, "hash": "h", "since": NOW}))
+    # A planted (unsigned) held file is no held change: no row at all.
+    block = {"ticket": "t_abc123", "addon": "a b;c", "value": 1, "hash": "h", "since": NOW}
+    step.write(b, "run/sync/held/t_abc123-x.json", step.encoded(block))
+    assert not [r for r in needs.rows(b) if r["kind"] == "sync:held"]
+    # A signed one whose name is no installed add-on's: the name never reaches the row (LOW-7); nothing to run.
+    mac = humanproof.local_sign(b, approval.HELD_KIND, block)
+    step.write(b, "run/sync/held/t_abc123-x.json", step.encoded({**block, "mac": mac}))
     held = [r for r in needs.rows(b) if r["kind"] == "sync:held"]
-    assert shlex.split(held[0]["cli"]) == ["orch", "sync", "approve", "t_abc123", "a b;c"]
+    assert "a b;c" not in held[0]["text"] and "an add-on not installed here" in held[0]["text"]
+    assert shlex.split(held[0]["cli"]) == ["orch", "sync", "needs", "--json"] and "answer" not in held[0]
 
 
 def test_saved_copy_tamper_refused(machines):
@@ -473,6 +482,9 @@ def test_counter_reserves_old_keys_without_new_clash(machines):
 def test_key_clash_need_respects_contract_with_long_titles(root, count):
     from pathlib import Path
 
+    from orch import history
+
+    history.ensure_key(root)  # a pause is signed with the workspace key (sync on always makes it)
     candidates = [{"id": f"t_test{i:03}", "title": "Long title " * 20} for i in range(count)]
     state = {
         "paused": {
@@ -821,8 +833,8 @@ def _history_pause(root, remote):
 
 
 def test_a_history_pause_has_a_row_and_clears_when_the_remote_changes(machines):
-    # No file to choose: a Needs notice (no answer to give), and the pause stays only while the remote is the
-    # commit it was about.
+    # No file to choose: a Needs row whose way out is take-remote (a person's proof, PR B), and the pause stays
+    # only while the remote is the commit it was about.
     from pathlib import Path
 
     a, b, bare = both(machines)
@@ -832,7 +844,7 @@ def test_a_history_pause_has_a_row_and_clears_when_the_remote_changes(machines):
     _history_pause(b, tip)
     rows = needs.rows(b)
     (row,) = [r for r in rows if r["kind"] == "sync:history"]
-    assert "answer" not in row and "take-remote" not in row["cli"] and row["tone"] == "warn"
+    assert row["cli"] == "orch sync take-remote --proof-stdin" and row["tone"] == "warn"
     schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/needs.schema.json").read_text())
     Draft202012Validator(schema).validate(rows)
     with pytest.raises(repo.Refused, match="not waiting"):

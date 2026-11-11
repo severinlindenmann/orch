@@ -26,6 +26,7 @@ from orch import (
     cli_secret,
     cli_status,
     fields,
+    history,
     humanproof,
     mobile_mode,
     net,
@@ -94,6 +95,8 @@ def _find_root() -> Path:
 
 
 def _out(args, data, text: str) -> None:
+    if args.json:
+        data = history.shown_json(history.args_root(args), data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -143,11 +146,8 @@ def _chip(root: Path | None, ev: dict) -> str:
 
 
 def _who_added(t: dict, c: dict, ev: dict) -> str:
-    by = ev.get("by")
-    if not by:
-        line = next((h for h in reversed(t["history"]) if h["text"] == f"Check {c['id']} done"), None)
-        by = line["by"] if line else ""
-    return "● You" if by.startswith("human:") else "○ Agent says"
+    """`t` is a SHOWN ticket (history.shown_ticket): unproven synced evidence is the sync role there."""
+    return "● You" if history.evidence_author(t, c, ev) == "person" else "○ Agent says"
 
 
 def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:
@@ -182,7 +182,8 @@ def _lookup(root: Path | None, tid: str) -> dict | None:
         return None
 
 
-def _show(t: dict, root: Path | None = None) -> str:
+def _show(t: dict, root: Path) -> str:
+    t = history.shown_ticket(root, t)  # every person field as this machine can prove it (idempotent)
     open_q = [q for q in t["questions"] if q["answer"] is None]
     head = (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  [{t['id']}]"
     out = [head]
@@ -257,11 +258,11 @@ def _show(t: dict, root: Path | None = None) -> str:
             d = refs.describe(ln, kinds, root)
             st = f" ({d['status']})" if d["status"] else ""
             out.append(f"  {n}  {d['type']}: {d['title']}{st}  {refs.one_line(refs.target(ln), 300)}")
-    if t["history"]:
+    if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
             f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
-            for h in t["history"][-3:]
+            for h in shown_lines[-3:]
         ]
     return "\n".join(out)
 
@@ -703,9 +704,10 @@ def run(args: argparse.Namespace) -> None:
     from orch import chat
 
     chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
+    args.orch_root = root  # (after the guard: not an option) JSON output shows tickets as provable here
 
     if cmd == "init":
-        root = Path.cwd()
+        root = args.orch_root = Path.cwd()
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
@@ -998,7 +1000,7 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
-        h = t["history"][-1]
+        h = history.lines(root, t)[-1]
         _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):

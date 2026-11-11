@@ -18,7 +18,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import addons, services, tickets
+from orch import addons, history, services, tickets
 
 PULL_TIMEOUT = 2
 TONES = ("needs-you", "bad", "warn")
@@ -38,8 +38,8 @@ def _clip(v: str, n: int) -> str:
     return v if len(v) <= n else v[: n - 1] + "…"
 
 
-def _asked_at(t: dict, qid: str) -> str:
-    for h in t.get("history") or []:
+def _asked_at(root: Path, t: dict, qid: str) -> str:
+    for h in history.lines(root, t):
         if isinstance(h, dict) and h.get("text", "").startswith(f"Asked {qid},") and h.get("at"):
             return h["at"]
     return t.get("updated_at") or t.get("created_at") or _now()
@@ -64,7 +64,7 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
                     "title": title,
                     "text": _clip(q.get("text", ""), 500),
                     "tone": "needs-you",
-                    "since": _asked_at(t, q["id"]),
+                    "since": _asked_at(root, t, q["id"]),
                     "answer": {
                         "question": q["id"],
                         "options": list(q.get("options") or []),

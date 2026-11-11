@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import harness, humanproof, keystore, net, runs, skillrender, skills, tickets
+from orch import harness, history, humanproof, keystore, net, runs, skillrender, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -1970,7 +1970,7 @@ def apply_allow_answers(root: Path) -> list[str]:
     notes: list[str] = []
     denied: list[str] = []
     with locked(root):
-        for t in tickets.list_all(root):
+        for t in (history.shown_ticket(root, x) for x in tickets.list_all(root)):  # answered_by: as proven
             r = t.get("ext", {}).get("relay", {})
             mid = r.get("allow_message") if isinstance(r, dict) else None
             if not mid or t.get("status") in ("done", "dropped"):

@@ -167,7 +167,15 @@ def credential_helpers(root):
     values = os.fsdecode(r.stdout).split('\0')[:-1]
     if any(len(v) > 4096 or '\n' in v for v in values):
         return []  # not a helper line git itself would take: no login rather than a wrong one
+    # ~/.gitconfig is writable by any process of the same user (an agent too): only git's own helpers by name,
+    # with plain options; never `!command` or a path to a program (Opus hard3 #8). Anything else: no login.
+    if not all(v == '' or HELPER_LINE.fullmatch(v) for v in values):
+        return []
     return values
+
+
+HELPERS = ('osxkeychain', 'manager', 'manager-core', 'libsecret', 'cache', 'store', 'wincred')
+HELPER_LINE = re.compile('(?:' + '|'.join(HELPERS) + r')(?: --?[A-Za-z][A-Za-z-]*(?:[= ][A-Za-z0-9._~/-]+)?)*')
 
 
 def git(root, *args, input=None, timeout=60, index=None, allowed_codes=(0,), commit_date=None, max_output=None):
@@ -285,7 +293,26 @@ def state(root):
 
 
 
+EARLIER = ('run/sync/state.json', 'run/sync/pending.json', 'run/sync/choices.json', 'run/sync/held')
+
+
+def _history_on(root):
+    """Sync is on here from now on: core's one rule for person fields applies (orch.history). Recorded in the
+    guarded orch home (keyed by real path and workspace id) FIRST, whatever state the repository is in and
+    before anything can refuse, so removing .git or run/sync never makes the workspace trust every line again.
+    Only a workspace that never synced (no state repository, no earlier step's state) adopts the lines already
+    in its tickets as this machine's own; core never adopts when a ticket shows sync's traces."""
+    from orch import history
+
+    fresh = not os.path.lexists(safe(root, '.git')) and not any(os.path.lexists(safe(root, p)) for p in EARLIER)
+    try:
+        history.enable_sync(Path(root), adopt=fresh)
+    except Exception as e:  # noqa: BLE001 - the guarded home refused: sync does not start
+        raise Refused(f'Sync could not be turned on here: {e}') from None
+
+
 def ensure(root):
+    _history_on(root)  # before state(): a missing marker or a damaged repository still records it
     current = state(root)
     if current in ('new', 'ready'):
         from orch import tickets  # adopt this machine's own sessions BEFORE any remote ticket can arrive

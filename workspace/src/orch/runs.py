@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, procs, runhooks, services, tickets
+from orch import adapters, addons, history, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -349,7 +349,7 @@ def _new_record(
         "pending": False,
         "stop_requested": None,
         "seen_revision": tickets.revision(ticket),
-        "seen_history": len(ticket.get("history") or []),
+        "seen_history": history.length(ticket),
     }
     if reason:
         rec["reason"] = reason[:200]
@@ -753,7 +753,7 @@ def renew(root: Path, tid: str, run: str, ticket: dict | None = None, seen: bool
         rec.pop("maybe_stale_since", None)
         if seen and ticket is not None:
             rec["seen_revision"] = tickets.revision(ticket)
-            rec["seen_history"] = len(ticket.get("history") or [])
+            rec["seen_history"] = history.length(ticket)
         _write(root, rec)
         return rec
 
@@ -1088,7 +1088,9 @@ def _plan_first_plan(ticket: dict) -> list[str]:
     ]
 
 
-def fresh_prompt(ticket: dict, items: list[dict]) -> str:
+def fresh_prompt(ticket: dict, items: list[dict], root: Path | None = None) -> str:
+    root = root if root is not None else history.here()  # never without a workspace: looked up
+    ticket = history.shown_ticket(root, ticket)  # person fields as this machine can prove them
     tid = ticket["id"]
     out = [
         f"Work on orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.",
@@ -1141,7 +1143,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
                 for c in declined[:20]
             )
         )
-    hist = (ticket.get("history") or [])[-5:]
+    hist = history.lines(root, ticket)[-5:]
     if hist:
         out.append(
             "What changed lately:\n"
@@ -1152,13 +1154,17 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     return "\n\n".join(out)[:12000]
 
 
-def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str) -> str:
+def resume_prompt(
+    ticket: dict, items: list[dict], since: str | None, agent: str, root: Path | None = None
+) -> str:
+    root = root if root is not None else history.here()  # never without a workspace: looked up
+    ticket = history.shown_ticket(root, ticket)
     tid = ticket["id"]
     news = []
-    for h in ticket.get("history") or []:
+    for h in history.lines(root, ticket):
         if since and h.get("at", "") <= since:
             continue
-        if h.get("by") == f"agent:{agent}":
+        if h.get("by") == f"agent:{agent}" and not history.is_reserved_label(h.get("by")):
             continue
         news.append(f"- {h.get('by', '?')}: {_clip(h.get('text', ''), 300)}")
     parts = _description_plan(ticket)
@@ -1226,7 +1232,7 @@ def plan(
             ),
             None,
         )
-        v["prompt"] = prompt if prompt is not None else resume_prompt(ticket, items, since, name)
+        v["prompt"] = prompt if prompt is not None else resume_prompt(ticket, items, since, name, root)
         argv = adapters.render(name, "resume", mode, v, root)
         resumed = argv is not None
     new_session = None
@@ -1240,7 +1246,7 @@ def plan(
 
                 text = chat.helper_prompt(root, ticket, items, _items_text(items) if items else "")
             else:
-                text = fresh_prompt(ticket, items)
+                text = fresh_prompt(ticket, items, root)
             if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file
                 from orch import harness
 
@@ -1746,8 +1752,8 @@ def footer(root: Path, argv_by: str | None, tid_hint: str | None = None) -> str 
     if tickets.revision(ticket) <= rec.get("seen_revision", 0):
         renew(root, tid, run)
         return None
-    own = {f"agent:{rec.get('agent')}", argv_by}
-    news = [h for h in (ticket.get("history") or [])[rec.get("seen_history", 0) :] if h.get("by") not in own]
+    own = {f"agent:{rec.get('agent')}", argv_by} - {history.SYNC_BY}  # a demoted line is never "own"
+    news = [h for h in history.lines(root, ticket)[rec.get("seen_history", 0) :] if h.get("by") not in own]
     renew(root, tid, run, ticket, seen=True)
     if not news:
         return None

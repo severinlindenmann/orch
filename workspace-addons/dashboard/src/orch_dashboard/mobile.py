@@ -358,9 +358,16 @@ def is_chat_entry(e: dict) -> bool:
     if at.tzinfo is None or at >= datetime.fromisoformat(CHAT_FLAG_SINCE):
         return False  # new lines always carry the flag: a missing one is never a message
     by, via = str(e.get("by", "")), e.get("via")
-    return (via == "dashboard" and by.startswith("human:")) or (
-        via == "phone" and by.startswith("agent:relay from ph_")
-    )
+    return (via == "dashboard" and _person(by)) or (via == "phone" and by.startswith("agent:relay from ph_"))
+
+
+def _person(by: str) -> bool:
+    """`by` of a SHOWN line (data.shown) is the person: orch.history.is_person_line. Without the core: no."""
+    try:
+        from orch.history import is_person_line
+    except ImportError:
+        return False
+    return is_person_line(by)
 
 
 def mark_chat_history(t: dict) -> None:

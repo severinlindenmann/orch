@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from orch import humanproof, procs, syncgate, tickets
 from orch.errors import Refused as CoreRefused
 
-from . import cli, incoming, merge, paths, pause, repo
+from . import cli, incoming, merge, paths, pause, records, repo
 
 MB = 1_000_000
 
@@ -52,7 +52,12 @@ def encoded(value):
     return (json.dumps(value, sort_keys=True, ensure_ascii=False) + "\n").encode()
 
 
+STATE = "run/sync/state.json"
+
+
 def write(root, relative, data):
+    if relative == STATE:  # every write of the state signs its pause (pause.seal; read with verified_pause)
+        data = encoded(pause.seal(root, json.loads(data)))
     p = repo.safe(root, relative)
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -255,7 +260,11 @@ def stage(root, head, index, state, now):
                         state["skipped"].append(f"Ticket {Path(path).stem} has a problem and was not synced")
                 if path in old:
                     if paths.TICKET.fullmatch(path):
-                        if cli.read(root, "allow-delete").get(Path(path).stem) is True:
+                        # Only a person's signed, single-use record lets a missing ticket go (a deletion is
+                        # pushed to every machine); a planted or reused one restores the file as usual.
+                        allowed = cli.read(root, "allow-delete").get(Path(path).stem)
+                        if records.ok(root, "delete", Path(path).stem, allowed, single_use=True):
+                            records.spend(root, allowed)
                             repo.git(root, "update-index", "--force-remove", "--", path, index=index)
                             continue
                         write(root, path, blob(root, old[path]))
@@ -354,7 +363,36 @@ def merge_document(root, path, base, local, remote, now):
     return held_ticket(root, path, doc, local, remote)
 
 
-def merged_tree(root, head, remote, index, now):
+def counters_of(root, local_rows, remote_rows):
+    return [
+        document("ticket-counter.json", blob(root, rows["ticket-counter.json"])).get("last", 0)
+        if "ticket-counter.json" in rows
+        else 0
+        for rows in (local_rows, remote_rows)
+    ]
+
+
+def reach_gate(root, counters, keys, decisions):
+    """Fable A9: numbers only ever go up, so a far jump would be permanent. A person checks it first. The counter
+    file's jump is settled by a person's choice of the counter; the incoming TICKET numbers are checked on their
+    own: only a counter this person chose (theirs, or a key choice) raises what counts as within reach here, so
+    "keep mine" never lets far tickets in. ONE gate for a normal merge and for take-remote. `counters` = [local,
+    incoming] counter, `keys` = [local, incoming] ticket numbers (key and old keys)."""
+    reach = max([counters[0], *keys[0]])
+    counter_choice = decisions.get("ticket-counter.json")
+    if counter_choice and counter_choice.get("keep") in ("theirs", "key"):
+        chosen = document("ticket-counter.json", pause.selected(root, "ticket-counter.json")).get("last", 0)
+        reach = max(reach, chosen if type(chosen) is int else 0)
+    if counter_choice and type(counter_choice.get("covers")) is int:
+        # A person's proven (signed) counter choice on a jump covers the incoming numbers they reviewed.
+        reach = max(reach, counter_choice["covers"])
+    if (counters[1] > max([counters[0], *keys[0]]) + COUNTER_JUMP and not counter_choice) or max(
+        keys[1], default=0
+    ) > reach + COUNTER_JUMP:
+        raise pause.Pause(pause.JUMP, ["ticket-counter.json"])
+
+
+def merged_tree(root, head, remote, index, now, first=False):
     checked_remote = pause.checked_tree(root, remote, index)
     ancestor = repo.git(root, "merge-base", head, remote, allowed_codes=(0, 1)).stdout.decode().strip()
     base_rows = entries(root, ancestor or None)
@@ -362,12 +400,7 @@ def merged_tree(root, head, remote, index, now):
     decisions = pause.choices(root, remote)
     known = {}
     changed_keys = set()
-    counters = [
-        document("ticket-counter.json", blob(root, rows["ticket-counter.json"])).get("last", 0)
-        if "ticket-counter.json" in rows
-        else 0
-        for rows in (local_rows, remote_rows)
-    ]
+    counters = counters_of(root, local_rows, remote_rows)
     keys = [[], []]  # the ticket numbers each side uses (key and old keys)
     for path in sorted(base_rows.keys() | local_rows.keys() | remote_rows.keys()):
         if not paths.TICKET.fullmatch(path):
@@ -384,23 +417,7 @@ def merged_tree(root, head, remote, index, now):
             if clash_key not in known:
                 known[clash_key] = [{"id": local["id"], "title": local["title"]}]
             changed_keys.add(clash_key)
-    # Fable A9: numbers only ever go up, so a far jump would be permanent. A person checks it first. The counter
-    # file's jump is settled by a person's choice of the counter; the incoming TICKET numbers are checked on
-    # their own: only a counter this person chose (theirs, or a key choice) raises what counts as within reach
-    # here, so "keep mine" never lets far tickets in.
-    reach = max([counters[0], *keys[0]])
-    counter_choice = decisions.get("ticket-counter.json")
-    if counter_choice and counter_choice.get("keep") in ("theirs", "key"):
-        chosen = document("ticket-counter.json", pause.selected(root, "ticket-counter.json")).get("last", 0)
-        reach = max(reach, chosen if type(chosen) is int else 0)
-    if counter_choice and type(counter_choice.get("covers")) is int:
-        # A person's proven counter choice on a jump covers the incoming numbers they reviewed (M3: a far ticket
-        # key with a small counter would otherwise pause again for ever).
-        reach = max(reach, counter_choice["covers"])
-    if (counters[1] > max([counters[0], *keys[0]]) + COUNTER_JUMP and not counter_choice) or max(
-        keys[1], default=0
-    ) > reach + COUNTER_JUMP:
-        raise pause.Pause(pause.JUMP, ["ticket-counter.json"])
+    reach_gate(root, counters, keys, decisions)
     if changed_keys:
         clashes = {key: known[key] for key in sorted(changed_keys)}
         raise pause.Pause(
@@ -420,9 +437,12 @@ def merged_tree(root, head, remote, index, now):
     if both_changed:
         raise pause.Pause("Conflicting artifact needs a person", sorted(both_changed))
     bases = repo.git(root, "merge-base", "--all", head, checked_remote, allowed_codes=(0, 1)).stdout.split()
-    if len(bases) > 1:
-        # Fable A5: several merge bases make git build a virtual base by a text merge of JSON.
-        # A file-less pause with its own Needs row; it clears by itself when the remote changes.
+    chosen_all = bool(decisions) and set(entries(root, remote)) <= set(decisions)
+    if len(bases) > 1 or (not bases and not first and not chosen_all):
+        # Fable A5: several merge bases make git build a virtual base by a text merge of JSON. None at all (a
+        # remote that started a new history; not this machine's first join, and not a rewritten history whose
+        # every file a person chose) has no base to judge changes by. A file-less pause with its own Needs row:
+        # take-remote (a person's proof), or it clears by itself when the remote changes.
         raise pause.Pause("The two histories cannot be combined automatically", [], kind=pause.HISTORY)
     result = repo.git(
         root,
@@ -511,6 +531,48 @@ def merged_tree(root, head, remote, index, now):
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
     validate_tree(root, tree)
     deletions(ours, entries(root, tree), root)
+    return tree, merges
+
+
+def taken_tree(root, head, remote, index, now):
+    """take-remote (a HISTORY pause: no usable merge base). The SAME merge authority as a normal merge, with this
+    machine's HEAD as the base: every ticket the other computer has is merge_document(head, head, theirs with
+    this machine's own decisions: key, Done, ext.sync), so the receiving core's verifiers decide every Won't do
+    and verdict, remote-only history is demoted, held add-on values stay held; the counter only goes up; the
+    reach gate, key renumbering (this machine's ids keep their keys), the tree checks and the deletion gate run
+    as for a merge. Files only this machine has stay; nothing is removed. Returns (tree, merges): the tree is
+    exactly what the person's proof covers and what apply writes (apply replays `merges` under the locks)."""
+    local_rows, remote_rows = entries(root, head), entries(root, remote)
+    keys = [[], []]
+    for side, rows in enumerate((local_rows, remote_rows)):
+        for path in sorted(rows):
+            if paths.TICKET.fullmatch(path):
+                d = document(path, blob(root, rows[path]))
+                keys[side].extend(merge._key_n(k) for k in [d.get("key"), *merge.old_keys_of(d)])
+    reach_gate(root, counters_of(root, local_rows, remote_rows), keys, {})
+    repo.git(root, "read-tree", head or "--empty", index=index)
+    merges = {}
+    for path in sorted(remote_rows):
+        if not paths.allowed(path) or remote_rows[path] == local_rows.get(path):
+            continue
+        data = blob(root, remote_rows[path])
+        if paths.TICKET.fullmatch(path):
+            theirs = document(path, data)
+            mine = document(path, blob(root, local_rows[path])) if path in local_rows else {}
+            chosen = pause.local_decisions(theirs, mine) if mine else theirs
+            doc = merge_document(root, path, mine, mine, chosen, now)
+            merges[path] = {"base": mine, "local": mine, "remote": chosen, "now": now}
+            data = data if doc == theirs else encoded(doc)
+            document(path, data)
+        elif path == "ticket-counter.json":
+            mine = document(path, blob(root, local_rows[path])) if path in local_rows else {}
+            data = encoded(merge.merge_counter({}, mine, document(path, data)))
+            document(path, data)
+        put(root, index, path, data)
+    renumber(root, index, now, merges, held={Path(p).stem for p in local_rows if paths.TICKET.fullmatch(p)})
+    tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
+    validate_tree(root, tree)
+    deletions(local_rows, entries(root, tree), root)
     return tree, merges
 
 
@@ -654,13 +716,10 @@ def _remote_moved(root, paused, remote_allowed):
 
 def _run(root, reason, now, remote_allowed):
     previous = cli.read(root, "state")
-    paused = previous.get("paused")
+    paused = pause.verified_pause(root, previous)  # a planted or edited pause is none: look again
+    previous = {**previous, "paused": paused}
     if paused:
-        if not (
-            isinstance(paused, dict)
-            and paused.get("kind") == pause.HISTORY
-            and _remote_moved(root, paused, remote_allowed)
-        ):
+        if not (paused.get("kind") == pause.HISTORY and _remote_moved(root, paused, remote_allowed)):
             return previous
         previous = {**previous, "paused": None}  # the remote changed: look again
     state = previous | {"last_error": None, "skipped": [], "notices": [], "reason": reason}
@@ -778,7 +837,7 @@ def _run(root, reason, now, remote_allowed):
                             root, "merge-base", "--is-ancestor", remote, parent, allowed_codes=(0, 1)
                         ).returncode
                     ):
-                        tree, merges = merged_tree(root, parent, remote, index, now)
+                        tree, merges = merged_tree(root, parent, remote, index, now, first=first)
                         can_forward = (
                             first
                             or not repo.git(

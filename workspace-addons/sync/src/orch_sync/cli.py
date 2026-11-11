@@ -56,6 +56,10 @@ def main(argv=None):
     p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("take-remote")  # a history pause: the other computer's history becomes the base
+    p.add_argument("--proof-stdin", action="store_true")
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("approve")
     p.add_argument("ticket")
     p.add_argument("addon")
@@ -146,6 +150,10 @@ def main(argv=None):
             from .pause import keep_key
 
             result = keep_key(root, args.key, args.ticket, args)
+        elif args.cmd == "take-remote":
+            from .pause import take_remote
+
+            result = take_remote(root, args)
         elif args.cmd == "approve":
             from .approval import approve
 
@@ -172,8 +180,10 @@ def main(argv=None):
                         no_handoff="Leaving a ticket deleted needs a person's proof.",
                     )
                     config.require_person(by, "leave this ticket deleted")
+                    from . import records
+
                     allowed = read(root, "allow-delete")
-                    allowed[args.ticket] = True
+                    allowed[args.ticket] = records.make(root, "delete", args.ticket, {"ticket": args.ticket})
                     write(root, "run/sync/allow-delete.json", encoded(allowed))
                 state["deleted"].pop(args.ticket)
                 write(root, "run/sync/state.json", encoded(state))
