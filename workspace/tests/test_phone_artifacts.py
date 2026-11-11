@@ -435,9 +435,21 @@ def test_named_jpeg_gif_and_webp_are_not_sent_yet(proj, run, new_ticket, conn, n
     assert len(lines) == 1 and "can't be checked" in lines[0]
 
 
+def jpeg(*segments: bytes, tail: bytes = b"") -> bytes:
+    """A structurally plain JPEG: SOI, the given (marker, payload) segments, a tiny SOS with entropy data, EOI."""
+    out = b"\xff\xd8"
+    for marker, payload in segments:
+        out += b"\xff" + bytes([marker]) + (len(payload) + 2).to_bytes(2, "big") + payload
+    return out + b"\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00\x12\x34\xff\xd9" + tail
+
+
+APP0 = (0xE0, b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+TOKEN = "token = sk-test-ABCDEFGHIJKLMNOPQRSTUV"
+
+
 def test_a_jpeg_marked_as_evidence_still_goes_to_the_phone(proj, run, new_ticket, conn):  # noqa: F811
     """Evidence the agent marks for the phone keeps its old behaviour; only named artifacts are strict."""
-    data = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\xff\xd9"
+    data = jpeg(APP0, (0xE1, b"Exif\x00\x00camera"))
     tid = new_ticket("Photo proof")
     run("check", "add", tid, "Take the photo")
     src = proj / "photo.jpg"
@@ -542,3 +554,61 @@ def test_preview_never_points_outside_the_list(monkeypatch):
     # the real code cuts first; mimic it: the picture is cut off, so the page has no preview
     out = phone_view.pair_previews([page, pic][: phone_view.ATTACHMENTS])
     assert out == [page] and "preview" not in page
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "sent"),
+    [
+        ("notes.txt", b"api_key = sk-test-ABCDEFGHIJKLMNOPQRSTUV", False),
+        ("notes.txt", b"password = ordinary", False),
+        ("report.pdf", b"%PDF-1.4 hello", False),  # can't be checked: not sent
+        ("shot.jpg", jpeg(APP0, (0xE1, b"Exif\x00\x00" + TOKEN.encode())), False),
+        ("clean.txt", b"nothing secret here\n", True),
+        ("x.jpg", b"PK\x03\x04 not a picture", False),  # an archive renamed to .jpg
+        ("x.jpg", jpeg(APP0, tail=b" appended data"), False),  # data after the end
+        ("x.jpg", jpeg(APP0, tail=b"PK\x03\x04zip\xff\xd9"), False),  # archive behind an extra EOI
+        ("x.jpg", jpeg(APP0, (0xFE, b"a comment segment")), False),  # COM can hide anything
+        ("x.jpg", jpeg(APP0, (0xE3, b"APP3 vendor blob")), False),
+        ("x.jpg", jpeg(APP0, (0xE1, b"Exif\x00\x00" + TOKEN.encode("utf-16-le"))), False),
+        ("x.jpg", jpeg(APP0, (0xE1, b"Exif\x00\x00x" + TOKEN.encode("utf-16-be"))), False),
+        (
+            "x.png",
+            b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + b"PK\x03\x04",
+            False,
+        ),  # no PNG shortcut under photo_ok
+        ("x.jpg", jpeg(APP0, tail=b"\x00\x00"), True),  # camera NUL padding is fine
+    ],
+)
+def test_evidence_files_go_through_the_same_secret_gate(proj, run, new_ticket, conn, name, data, sent):  # noqa: F811
+    """A proof file (evidence, type file) is scanned like a named artifact: a token in it is never uploaded
+    and is marked once in the ticket log and in state; a clean file still goes."""
+    tid = new_ticket("Proof with a secret")
+    run("check", "add", tid, "Attach the proof")
+    src = proj / name
+    src.write_bytes(data)
+    code, _, err = run("check", "done", tid, "c1", "--file", str(src), "--role", "result")
+    assert code == 0, err
+    for _ in range(2):
+        atts = phone_view.view_for(proj, tid)["attachments"]
+        assert bool(atts) is sent
+    assert bool(conn.blobs) is sent
+    marks = [
+        h["text"] for h in tickets.load(proj, tid)["history"] if "was not sent to the phone" in h["text"]
+    ]
+    assert len(marks) == (0 if sent else 1) and all(name in m for m in marks)
+    assert len(phone_view.load_state(proj).get("secret_skipped", [])) == (0 if sent else 1)
+
+
+def test_no_upload_without_the_gate(proj, run, new_ticket, conn, monkeypatch):  # noqa: F811
+    """Every attachment kind goes through _gate: with the gate closed nothing reaches the relay."""
+    tid = new_ticket("Gate closed")
+    artifact(proj, tid, "a.txt", b"fine text")
+    run("check", "add", tid, "Attach")
+    src = proj / "p.txt"
+    src.write_bytes(b"fine proof")
+    assert run("check", "done", tid, "c1", "--file", str(src), "--role", "result")[0] == 0
+    monkeypatch.setattr(phone_view, "_gate", lambda *a, **k: False)
+    ticket = tickets.load(proj, tid)
+    ticket["description"] = "See artifacts/a.txt"
+    assert phone_view.attachments(proj, ticket, phone_view.load_state(proj)) == []
+    assert not conn.blobs
