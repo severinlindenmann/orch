@@ -155,7 +155,7 @@ def test_stale_marker_runs_cli_and_preserves_argv_and_exit(tmp_path, stale):
         mark.write_text(str(p.pid))
     elif stale in {"age", "future"}:
         mark.write_text(str(os.getpid()))
-        os.utime(mark, (time.time() + (900 if stale == "future" else -901),) * 2)
+        os.utime(mark, (time.time() + (900 if stale == "future" else -(orch_entry.MAX_AGE + 1)),) * 2)
     elif stale in {"text", "pid1", "invalid", "huge", "long"}:
         mark.write_bytes(
             {

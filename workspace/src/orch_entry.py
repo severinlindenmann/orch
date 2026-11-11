@@ -6,7 +6,8 @@ import sys
 import time
 from pathlib import Path
 
-MAX_AGE = 900
+# above humanproof.UPDATE_TIMEOUT (1800 s): a long reinstall stays protected; a dead owner clears it sooner
+MAX_AGE = 2100
 
 
 def real_home() -> Path:
