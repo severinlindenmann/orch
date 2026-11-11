@@ -500,12 +500,14 @@ def sec_get(case):
 
 
 def sec_agent_env(case):
-    """`orch secret env|file` for an agent caller: allowed with agents_may_env, else only when the whole argv
-    equals the profile's `run` (absolute program, no extra arguments). Non-agent callers are not restricted."""
+    """`orch secret env|file|exec` for an agent caller (one gate): allowed with agents_may_env, else only when the
+    whole argv equals the profile's `run` (absolute program, no extra arguments). For `mode` exec the argv is the
+    extra arguments and the whole argv is `run` + them. Non-agent callers are not restricted."""
     if not case["agent"] or case["agents_may_env"]:
         return "ok"
     run = case["run"]
-    if run and run[0].startswith("/") and case["argv"] == run:
+    argv = (run or []) + case["argv"] if case.get("mode") == "exec" else case["argv"]
+    if run and run[0].startswith("/") and argv == run:
         return "ok"
     return "agent_command"
 

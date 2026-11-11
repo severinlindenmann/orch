@@ -100,7 +100,7 @@ def _read_day(root: Path, day: str) -> dict:
     if not isinstance(d, dict) or not isinstance(d.get("messages"), list):
         return {"schema": "orch.chat-day/1", "day": day, "messages": []}
     d["messages"] = [
-        m for m in d["messages"] if isinstance(m, dict)
+        m for m in d["messages"] if isinstance(m, dict) and not phone_view.internal_wakeup(m)
     ]  # a hand-edited file never crashes a read
     return d
 

@@ -60,6 +60,8 @@ final class StatusRefsUITests: XCTestCase {
         XCTAssertTrue(tab.waitForExistence(timeout: 10))
         XCTAssertTrue(tab.label.hasPrefix("References"), tab.label)
         tab.tap()
+        // The Results section (draft 02, 2.6) sits above the references and the list is lazy: scroll down to them.
+        for _ in 0..<4 where !el(app, "info-ref-ref0").exists { app.swipeUp() }
         XCTAssertTrue(el(app, "info-ref-ref0").waitForExistence(timeout: 5), "web address card")
         XCTAssertTrue(app.staticTexts["PIL-13 · Rename field X in ingestion job"].exists, "ticket row with key and title")
         for _ in 0..<3 where !app.staticTexts["docs/board/q3.md:12"].exists { app.swipeUp() }   // the list is lazy

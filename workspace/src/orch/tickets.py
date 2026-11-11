@@ -513,8 +513,10 @@ def apply_op(
                 raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
+        restored = False
         if ticket.get("status") == eff_status and raw_status == "done":
             ticket["status"] = "done"  # an unrelated op never rewrites a peer's Done into Review
+            restored = True  # (an unsigned Done is still Review: this op did not close the ticket)
         elif (
             ticket.get("status") == "done"
             and eff_status != "done"
@@ -530,7 +532,14 @@ def apply_op(
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
-        return ticket, result
+        closed_now = ticket.get("status") in CLOSED and eff_status not in CLOSED and not restored
+    if closed_now:
+        # THE one place a ticket becomes done/dropped, whatever op did it (accept, status, patch from the
+        # dashboard, ...): its separate copy goes, after the ticket lock is released (never raises)
+        from orch import worktrees
+
+        worktrees.on_closed(root, tid)
+    return ticket, result
 
 
 def save(root: Path, ticket: dict) -> None:
@@ -1003,11 +1012,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: boo
         add_history(ticket, by, "Status review -> done", via)
         _sign_done(root, ticket, by, proven)
 
-    result = apply_op(root, tid, op)[0]
-    from orch import worktrees
-
-    worktrees.on_closed(root, tid)  # Done is recorded first; bring-back may keep the copy waiting.
-    return result
+    return apply_op(root, tid, op)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
 
 def ask_for_changes(
@@ -1165,12 +1170,7 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
         if target == "done" and old != "done":
             _sign_done(root, ticket, actor, proven)
 
-    result = apply_op(root, tid, op)[0]
-    if result.get("status") in CLOSED:  # done, closed or cancelled: its separate copy goes (never raises)
-        from orch import worktrees
-
-        worktrees.on_closed(root, tid)
-    return result
+    return apply_op(root, tid, op)[0]  # apply_op takes the copy away of a done/closed ticket
 
 
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)

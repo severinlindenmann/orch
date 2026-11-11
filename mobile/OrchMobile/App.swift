@@ -19,7 +19,9 @@ struct OrchMobileApp: App {
 
     @ViewBuilder private var root: some View {
         #if DEBUG
-        if let mode = UserDefaults.standard.string(forKey: "m3Host") { M3DemoHost(mode: mode) } else { RootView() }
+        if let name = UserDefaults.standard.string(forKey: "blocksPreview") {
+            ScrollView { BlocksView(result: BlocksPreview.result(named: name)).padding() }.background(Theme.bg)
+        } else if let mode = UserDefaults.standard.string(forKey: "m3Host") { M3DemoHost(mode: mode) } else { RootView() }
         #else
         RootView()
         #endif

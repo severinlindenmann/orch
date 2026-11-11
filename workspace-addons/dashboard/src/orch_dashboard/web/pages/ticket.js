@@ -342,12 +342,13 @@ function sharedFolderLine(t) {
   const text = state.runs?.[t.id]?.shared_folder?.line;
   return typeof text === 'string' && text ? h('p', {className:'shared-folder muted', 'data-key':'shared-folder'}, clean(text)) : null;
 }
-// Draft 1b: a ticket that works in its own copy of the project says so, in one quiet line (path and branch behind a click).
+// Draft 1b: a ticket that works in its own copy of the project says so, in one quiet line (branch behind a click).
+// The ticket records branch/base/sub/host only, never the local path (it stays in the machine-local registry).
 function copyLine(t) {
-  const f = Array.isArray(t.work?.folders) ? t.work.folders.filter(x => x && typeof x.path === 'string') : [];
+  const f = Array.isArray(t.work?.folders) ? t.work.folders.filter(x => x && typeof x.branch === 'string' && x.branch) : [];
   if (!f.length) return null;
   return h('div', {className:'shared-folder muted', 'data-key':'work-copy'}, h('span', {}, 'Works in a separate copy of your project, so other agents do not change the same files.'),
-    h('details', {className:'det'}, h('summary', {}, 'Details'), h('div', {}, f.map(x => h('p', {className:'mono'}, clean(String(x.branch || '')) + ' · ' + clean(x.path))))));
+    h('details', {className:'det'}, h('summary', {}, 'Details'), h('div', {}, f.map(x => h('p', {className:'mono'}, clean(String(x.branch || '')) + (typeof x.path === 'string' && x.path ? ' · ' + clean(x.path) : ''))))));
 }
 const surface = via => clean(via === 'cli' ? 'terminal' : via);
 function proofLabel(ev) {
