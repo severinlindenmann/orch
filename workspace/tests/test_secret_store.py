@@ -11,7 +11,7 @@ import stat
 from pathlib import Path
 
 import pytest
-from conftest import turn_on
+from conftest import seed_profiles, turn_on
 from fakes import WS
 
 from orch import addons, keystore
@@ -168,7 +168,7 @@ def test_every_key_store_write_sets_the_windows_rights_before_the_secret(tws, mo
     keystore.add(tws, "k", "token", TOKEN)
     keystore.add(tws, "kf", "key-file", b"filebytes")
     keystore.set_admin(tws, {"adm": TOKEN2})
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
+    seed_profiles(tws, {"p": {"env": {"A": "k"}}})
     keystore.record_write(tws, "dev", {"a": 1})
     assert real_write
     temps = [c for c in calls if c[0].endswith(".tmp") and not c[1]]
@@ -213,17 +213,22 @@ PROFILES = {
     "databricks": {
         "env": {"DATABRICKS_TOKEN": "databricks-token"},
         "set": {"DATABRICKS_HOST": "https://adb-1234.azuredatabricks.net"},
+        "extra": ["DATABRICKS_HOST"],
         "run": ["databricks"],
         "skills": ["databricks-jobs"],
     },
-    "google": {"files": {"GOOGLE_APPLICATION_CREDENTIALS": "google-sa.json"}, "allow_get": True},
+    "google": {
+        "files": {"GOOGLE_APPLICATION_CREDENTIALS": "google-sa.json"},
+        "extra": ["GOOGLE_APPLICATION_CREDENTIALS"],
+        "allow_get": True,
+    },
 }
 
 
 def test_profiles_round_trip_names_only(tws):
     assert keystore.read_profiles(tws) == {}
     keystore.add(tws, "databricks-token", "token", TOKEN)
-    keystore.write_profiles(tws, PROFILES)
+    seed_profiles(tws, PROFILES)
     assert keystore.read_profiles(tws) == PROFILES
     text = (hp.key_dir(tws) / "profiles.toml").read_text()
     assert TOKEN not in text and 'schema = "orch.secret-profiles/1"' in text
@@ -232,17 +237,18 @@ def test_profiles_round_trip_names_only(tws):
 def test_profiles_never_hold_a_key_value_or_a_loader_variable(tws):
     keystore.add(tws, "databricks-token", "token", TOKEN)
     with pytest.raises(Refused, match="holds a key value") as e:
-        keystore.write_profiles(
-            tws, {"p": {"env": {"X_TOKEN": "databricks-token"}, "set": {"X_HOST": TOKEN}}}
+        seed_profiles(
+            tws,
+            {"p": {"env": {"X_TOKEN": "databricks-token"}, "set": {"X_HOST": TOKEN}, "extra": ["X_HOST"]}},
         )
     assert TOKEN not in str(e.value)
     for var in ("PATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "GIT_SSH_COMMAND", "ORCH_HOME", "HTTPS_PROXY"):
         with pytest.raises(Refused, match="may not set"):
-            keystore.write_profiles(tws, {"p": {"env": {var: "databricks-token"}}})
+            seed_profiles(tws, {"p": {"env": {var: "databricks-token"}}})
     with pytest.raises(Refused, match="at least one key"):
-        keystore.write_profiles(tws, {"p": {"set": {"X_HOST": "h"}}})
+        seed_profiles(tws, {"p": {"set": {"X_HOST": "h"}, "extra": ["X_HOST"]}})
     with pytest.raises(Refused, match="does not know"):
-        keystore.write_profiles(tws, {"p": {"env": {"A": "k"}, "value": TOKEN}})
+        seed_profiles(tws, {"p": {"env": {"A": "k"}, "value": TOKEN}})
     assert not (hp.key_dir(tws) / "profiles.toml").exists()
 
 
@@ -278,7 +284,7 @@ def test_records_round_trip_and_reserved_names(tws):
 def test_folders_are_0700_and_files_0600(tws):
     keystore.add(tws, "k", "token", TOKEN)
     keystore.add(tws, "f", "key-file", b"filebytes")
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
+    seed_profiles(tws, {"p": {"env": {"A": "k"}}})
     d = hp.key_dir(tws)
     for p in (d, d / "files", d.parent):
         assert _mode(p) == 0o700, p
@@ -475,9 +481,9 @@ def test_no_key_value_in_any_error_log_or_output(tws, capsys, caplog):
         lambda: keystore.add(tws, "j", "json", TOKEN),
         lambda: keystore.get_value(tws, TOKEN + "/x"),
         lambda: keystore.remove(tws, TOKEN + "/x"),
-        lambda: keystore.write_profiles(tws, {"p": {"env": {"A": "k"}, "set": {"B": TOKEN}}}),
-        lambda: keystore.write_profiles(tws, {"p": {"env": {TOKEN: "k"}}}),
-        lambda: keystore.write_profiles(tws, {"p": {"env": {"A": TOKEN2 + "/x"}}}),
+        lambda: seed_profiles(tws, {"p": {"env": {"A": "k"}, "set": {"B": TOKEN}, "extra": ["B"]}}),
+        lambda: seed_profiles(tws, {"p": {"env": {TOKEN: "k"}}}),
+        lambda: seed_profiles(tws, {"p": {"env": {"A": TOKEN2 + "/x"}}}),
         lambda: keystore.record_write(tws, TOKEN, {}),
     ):
         with pytest.raises(Refused) as e:
@@ -804,7 +810,7 @@ def test_a_loose_key_file_is_found_when_listing_and_when_removing(tws):
 def test_profiles_still_work_while_a_key_needs_re_entry(tws):
     d = _loose_setup(tws)
     os.chmod(d / "keys.json", 0o644)
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k1"}, "set": {"B": "plain host"}}})
+    seed_profiles(tws, {"p": {"env": {"A": "k1"}, "set": {"B": "plain host"}, "extra": ["B"]}})
     assert keystore.read_profiles(tws)["p"]["env"] == {"A": "k1"}
     assert not (d / "keys.json").exists()  # the loose file stayed set aside, never read for values
 
@@ -830,3 +836,101 @@ def test_an_unknown_file_check_refuses_the_call_and_sets_nothing_aside(tws, monk
     assert not list(d.rglob("*.loose-*"))
     assert keystore.get_value(tws, "k") == TOKEN and keystore.get_value(tws, "kf") == b"filebytes"
     assert winacl.Unknown  # the exception type the refusal carries
+
+
+def test_write_profiles_signs_only_the_names_it_is_told_to(tws):
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, sign=frozenset({"p"}))
+    assert list(keystore.read_verified_profiles(tws)) == ["p"]
+    # a profile that is new in the file but not in `sign` stays unsigned
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}, "q": {"env": {"A": "k"}}})
+    with pytest.raises(Refused, match="changed outside orch"):
+        keystore.read_verified_profiles(tws)
+    assert hp._ledger_load(tws, hp.PROFILE_LEDGER).get("q") is None
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, tombstone=frozenset({"q"}))
+    # a body edited in the file: refused; rewriting a switch does not re-sign it
+    f = hp.key_dir(tws) / "profiles.toml"
+    f.write_text(f.read_text().replace('A = "k"', 'B = "k"'))
+    prof = keystore.read_profiles(tws)
+    prof["p"]["allow_get"] = True
+    keystore.write_profiles(tws, prof)
+    with pytest.raises(Refused, match="changed outside orch"):
+        keystore.read_verified_profiles(tws)
+    # a person setting it again signs the new body; removing tombstones
+    keystore.write_profiles(tws, {"p": {"env": {"B": "k"}}}, sign=frozenset({"p"}))
+    assert list(keystore.read_verified_profiles(tws)) == ["p"]
+    keystore.write_profiles(tws, {}, tombstone=frozenset({"p"}))
+    assert hp._ledger_load(tws, hp.PROFILE_LEDGER)["p"] is None
+
+
+def test_an_unreadable_profiles_file_refuses_the_save(tws):
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, sign=frozenset({"p"}))
+    (hp.key_dir(tws) / "profiles.toml").write_text("not [ toml")
+    with pytest.raises(Refused):
+        keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, sign=frozenset({"p"}))
+
+
+@pytest.mark.parametrize(
+    "var",
+    [
+        "ld_preload",
+        "Node_Options",
+        "pythonpath",
+        "SHELLOPTS",
+        "PS4",
+        "x_options",
+        "GCONV_PATH",
+        "GLIBC_TUNABLES",
+        "ZDOTDIR",
+        "Home",
+        "COR_PROFILER_PATH",
+        "CORECLR_ENABLE_PROFILING",
+        "DOTNET_STARTUP_HOOKS",
+        "npm_config_script_shell",
+        "RUSTC_WRAPPER",
+        "LESSOPEN",
+        "EDITOR",
+    ],
+)
+def test_loader_variables_are_refused_in_any_case(tws, var):
+    with pytest.raises(Refused):
+        seed_profiles(tws, {"p": {"env": {"A": "k"}, "set": {var: "x"}, "extra": [var]}})
+
+
+def test_a_normal_setting_name_is_accepted(tws):
+    keystore.write_profiles(
+        tws,
+        {
+            "p": {
+                "env": {"A": "k"},
+                "set": {"DATABRICKS_HOST": "https://h.test"},
+                "extra": ["DATABRICKS_HOST"],
+            }
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "var",
+    ["NPM_TOKEN", "NODE_AUTH_TOKEN", "CARGO_REGISTRY_TOKEN", "CARGO_REGISTRIES_FOO_TOKEN", "GPG_PASSPHRASE"],
+)
+def test_ordinary_secret_names_are_allowed_in_env_only(tws, var):
+    keystore.write_profiles(tws, {"p": {"env": {var: "k"}}})
+    for sect in ("set", "files"):
+        with pytest.raises(Refused):
+            keystore.write_profiles(
+                tws, {"p": {"env": {"A": "k"}, sect: {var: "k" if sect == "files" else "x"}}}
+            )
+
+
+def test_lesson_key_is_an_ordinary_name(tws):
+    keystore.write_profiles(
+        tws, {"p": {"env": {"LESSON_KEY": "k"}, "set": {"LESSON_HOST": "h"}, "extra": ["LESSON_HOST"]}}
+    )
+
+
+@pytest.mark.parametrize(
+    "var", ["LESSKEYIN", "LESSKEYIN_SYSTEM", "LESSKEY_SYSTEM", "LESSKEY_CONTENT", "LESSEDIT", "LESSSECURE"]
+)
+def test_less_command_variables_are_refused_even_in_env(tws, var):
+    with pytest.raises(Refused):
+        keystore.write_profiles(tws, {"p": {"env": {var: "k"}}})

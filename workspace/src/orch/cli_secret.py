@@ -38,7 +38,7 @@ def add_parsers(sub, common) -> None:
                 q = parser(actions, action)
                 q.add_argument("name")
                 if action == "set":
-                    for option in ("env", "files", "set", "run", "skill"):
+                    for option in ("env", "files", "set", "run", "skill", "extra"):
                         q.add_argument("--" + option, action="append", default=[])
 
 
@@ -88,9 +88,15 @@ def _change_profile(root, args, who):
     setting = f"secret.allow_get.{name}"
     agents = f"secret.agents_may_env.{name}"
     extra: dict = {}
+    tomb: frozenset = frozenset()
     # One lock across record and file: a reader (secretrun._switch_on) never sees one without the other.
     with hp._key_lock(hp.key_dir(root)):
-        profiles = keystore.read_profiles(root)
+        if action == "remove":  # first: switches off and the tombstone, whatever state the file is in
+            tomb = frozenset({name})
+            hp.record_set(root, setting, False, who)
+            hp.record_set(root, agents, False, who)
+            hp.profile_sign(root, name, None)
+        profiles = keystore.read_profiles(root)  # a damaged file refuses here (after a remove's tombstone)
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
@@ -100,22 +106,29 @@ def _change_profile(root, args, who):
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
             if args.skill:
                 profile["skills"] = args.skill
+            if args.extra:
+                profile["extra"] = list(args.extra)
             hp.record_set(root, setting, False, who)
             hp.record_set(root, agents, False, who)
             profiles[name] = profile
         else:
-            if name not in profiles:
-                raise Refused(f"Refused: there is no profile named {name}.")
             if action == "remove":
-                hp.record_set(root, setting, False, who)
-                hp.record_set(root, agents, False, who)
+                if name not in profiles:
+                    raise Refused(f"Refused: there is no profile named {name}.")
                 del profiles[name]
+            elif name not in profiles:
+                raise Refused(f"Refused: there is no profile named {name}.")
             else:
                 flag, rec = ("allow_get", setting) if action.startswith("get") else ("agents_may_env", agents)
                 enabled = action.endswith("enable")
                 hp.record_set(root, rec, enabled, who)  # the record first, then the file
                 profiles[name][flag] = enabled
-        keystore.write_profiles(root, profiles)
+        keystore.write_profiles(
+            root,
+            profiles,
+            sign=frozenset({name}) if action == "set" else frozenset(),
+            tombstone=tomb,
+        )
     secretrun.record_change(root, "profile." + action.replace("-", "_"), name, who)
     return extra
 
