@@ -3,6 +3,7 @@
 values (single use, #540), held blocks (signed, per ticket, capped) and the pause itself."""
 
 import hashlib
+import json
 from types import SimpleNamespace
 
 from orch import humanproof
@@ -148,6 +149,44 @@ def test_an_edited_pause_is_no_pause(machines):
     edit(a, title="goes on")
     success(a)
     assert not success(b).get("paused") and load(b)["title"] == "goes on"
+
+
+def test_the_local_add_on_values_record_is_signed_and_never_started_again(machines, monkeypatch):
+    a, b, _ = both(machines)
+    value = {"enabled": True}
+    edit(a, ext={"automation": value})
+    success(a)
+    success(b)
+    known, ok = approval.local_ext(b)
+    assert ok and known["t_abc123"] == {}  # received first with no block of this machine's
+    approval.approve(
+        b,
+        "t_abc123",
+        "automation",
+        proof(b, "sync:allow:t_abc123:automation:" + approval.digest(value), monkeypatch),
+    )
+    assert approval.local_ext(b) == ({"t_abc123": {"automation": approval.digest(value)}}, True)
+    path = repo.safe(b, approval.LOCAL_EXT)
+    signed = path.read_bytes()
+    data = json.loads(signed)
+    body = {k: v for k, v in data.items() if k != "mac"}
+    assert humanproof.local_ok(b, approval.LOCAL_EXT_KIND, body, data["mac"])
+    data["tickets"]["t_other1"] = {"automation": "0" * 64}  # an agent edits the signed record
+    path.write_text(json.dumps(data))
+    assert approval.local_ext(b) == ({}, False)
+    unsigned = {"t_abc123": {"automation": approval.digest(value)}}  # the old, unsigned shape
+    path.write_text(json.dumps(unsigned))
+    assert approval.local_ext(b) == ({}, False)
+    path.write_bytes(signed)
+    assert approval.local_ext(b)[1]
+    path.unlink()  # removed: neither turning sync on again nor a merge starts a new (all-local) record
+    edit(a, title="goes on", updated_at="2026-11-11T14:00:00Z")
+    success(a)
+    success(b)
+    assert load(b)["title"] == "goes on"
+    assert not path.exists()
+    repo.ensure(b)
+    assert not path.exists()
 
 
 def test_records_need_the_workspace_key(root):

@@ -96,9 +96,9 @@ def run_start(root: Path, tid: str, text: str | None = None, agent: str | None =
     mode None lets core choose (a live session the person can open when the machine can).
     Returns {"result": "started", "run", "log"} | {"result": "pending"} (ticket busy, text queued)
     | {"result": "failed", "reason": plain words}."""
-    from .syncapproval import allowed
+    from .syncapproval import allowed, sync_on
 
-    if (root / ".orch/run/sync/local-ext.json").exists():
+    if sync_on(root):  # never the record's presence: removing it must not skip the check
         current = ticket(root, tid)
         if current is None or not allowed(root, current):
             return {"result": "failed", "reason": "This synced automation needs local approval."}

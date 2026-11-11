@@ -1261,6 +1261,63 @@ def test_allow_question_always_and_ignore(proj, run, rel):
     assert "Spam" not in run("relay", "inbox")[1], "an ignored message does not come back"
 
 
+def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
+    """Authority: once sync is on, an answered relay:allow question counts only when its answer was made on
+    this machine (history.answer_proven); a peer's synced answer allows (and ignores) nothing here."""
+    from conftest import ensure_signing
+
+    from orch import history, tickets
+
+    connect(run, rel)
+    local_mid, peer_mid, deny_mid = "m_deleg00000000011", "m_deleg00000000012", "m_deleg00000000013"
+    for mid in (local_mid, peer_mid, deny_mid):
+        rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
+    run("relay", "inbox")
+    ensure_signing(proj)
+    history.enable_sync(proj, adopt=True)  # as the sync add-on does
+    by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
+    run("answer", by_msg[local_mid]["id"], "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+
+    def peer_answer(word):
+        def plant(t):  # what a sync apply writes: the answer and its line, core made neither here
+            t["questions"][0].update(answer=word, answered_by="human:Marco", via="phone")
+            t["history"].append(
+                {
+                    "at": "2026-11-09T09:00:00Z",
+                    "by": "human:Marco",
+                    "via": "phone",
+                    "text": f"Answered q1: {word}",
+                    "chat_message": False,
+                }
+            )
+            t["waiting_on"] = None
+
+        return plant
+
+    for mid, word in ((peer_mid, "Always"), (deny_mid, "Ignore")):
+        path = tickets.ticket_path(proj, by_msg[mid]["id"])
+        doc = json.loads(path.read_text())
+        peer_answer(word)(doc)
+        path.write_text(json.dumps(doc, indent=2))
+    run("relay", "inbox")
+    run("relay", "inbox")
+    sent = [m for m in rel.sent if m["type"] == "allow"]
+    assert [m["reply_to"] for m in sent] == [local_mid] and sent[0]["body"]["mode"] == "once"
+    given = json.loads((proj / ".orch/secrets/allows.json").read_text())["given"]
+    assert [g["message_id"] for g in given] == [local_mid]
+    for mid in (peer_mid, deny_mid):
+        shown = json.loads(run("ticket", "show", by_msg[mid]["id"], "--json")[1])
+        assert shown["status"] != "dropped" and "allow_applied" not in shown["ext"]["relay"]
+        assert shown["questions"][0]["answered_by"] == history.SYNC_BY  # shown as synced, not verified
+        notes = [h["text"] for h in shown["history"] if "not applied" in h["text"]]
+        assert len(notes) == 1 and f"orch relay allow {mid}" in notes[0]
+    assert not (proj / ".orch/inbox-notes.json").exists() or deny_mid not in json.loads(
+        (proj / ".orch/inbox-notes.json").read_text()
+    )
+    local = json.loads(run("ticket", "show", by_msg[local_mid]["id"], "--json")[1])
+    assert local["ext"]["relay"]["allow_applied"] == "q1"
+
+
 def test_phone_text_added_to_a_ticket_is_acked_once_on_rerun(proj, run, rel, new_ticket, monkeypatch):
     from orch import relay
 

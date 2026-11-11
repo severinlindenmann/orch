@@ -166,6 +166,63 @@ def test_own_ref_and_answer_stay_the_persons(synced):
     assert t["questions"][-1]["answered_by"] == "human:tester"
 
 
+def test_a_doing_steps_by_is_registered_at_the_step_start_point(synced):
+    root, tid = synced
+    tickets.check_start(root, tid, "c1", "human:tester")
+    t = history.shown_ticket(root, _raw(root, tid))
+    assert t["checklist"][0]["state"] == "doing" and t["checklist"][0]["by"] == "human:tester"
+    other = tickets.check_add(root, tid, "Step two", "agent:claude")[1]["id"]
+
+    def peer_start(d):  # the same mark arriving by sync for another step: core made nothing
+        d["checklist"][1].update({"state": "doing", "by": "human:tester", "at": PEER["at"]})
+
+    _plant(root, tid, peer_start)
+    t = history.shown_ticket(root, _raw(root, tid))
+    assert t["checklist"][1]["id"] == other and t["checklist"][1]["by"] == history.SYNC_BY
+    assert t["checklist"][0]["by"] == "human:tester"
+    _plant(root, tid, lambda d: d["checklist"][0].update({"by": "human:alice"}))  # a peer rewrites my mark
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == history.SYNC_BY
+
+
+def test_a_store_written_before_steps_still_verifies(synced):
+    root, tid = synced
+    tickets.log(root, tid, "older store", "human:tester")
+    store = Path(root, *history.OWN_LINES, f"{tid}.json")
+    assert "steps" not in json.loads(store.read_text())  # nothing to record: the old shape and MAC
+    assert history.lines(root, _raw(root, tid))[-1]["by"] == "human:tester"
+
+
+def test_an_answer_counts_as_authority_only_when_made_here(synced):
+    root, tid = synced
+    tickets.ask(root, tid, "Allow?", ["Allow once", "Ignore"], None, "agent:claude")
+    tickets.answer(root, tid, "q1", "Allow once", "human:tester", "dashboard")
+    raw = _raw(root, tid)
+    assert history.answer_proven(root, raw, raw["questions"][0])
+
+    def peer_answer(d):
+        line = {**PEER, "via": "dashboard"}
+        d["questions"].append({**d["questions"][0], "id": "q2"})
+        d["history"].append({**line, "text": "Answered q2: Allow once", "by": "human:tester"})
+        d["questions"].append({**d["questions"][0], "id": "q3", "answered_by": "agent:claude"})
+        d["history"].append({**line, "text": "Answered q3: Allow once", "by": "agent:claude"})
+
+    _plant(root, tid, peer_answer)
+    raw = _raw(root, tid)
+    assert history.answer_proven(root, raw, raw["questions"][0])
+    assert not history.answer_proven(root, raw, raw["questions"][1])  # a person's name, synced
+    assert not history.answer_proven(root, raw, raw["questions"][2])  # an agent label decides nothing either
+    assert not history.answer_proven(root, raw, {**raw["questions"][0], "answer": "Always"})
+    assert not history.answer_proven(root, raw, None)
+
+
+def test_a_sync_free_answer_is_authority_as_before(proj):
+    t = tickets.create(proj, "Plain", "human:tester")
+    tickets.ask(proj, t["id"], "Allow?", ["Allow once"], None, "agent:claude")
+    tickets.answer(proj, t["id"], "q1", "Allow once", "human:tester", "cli")
+    raw = _raw(proj, t["id"])
+    assert history.answer_proven(proj, raw, raw["questions"][0])
+
+
 def test_a_verified_decision_line_is_matched_once(synced):
     """Opus hard4 #5: copies of a verified decision's line (other times) are not the person's decision."""
     root, tid = synced

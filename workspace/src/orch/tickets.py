@@ -1807,6 +1807,7 @@ def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         for c in t["checklist"]:
             _clear_doing(c)
         item.update({"state": "doing", "by": by, "at": now()})
+        history.created("steps", item)  # the step-start point: this mark is core's own (like evidence)
         return item
 
     return apply_op(root, tid, op)

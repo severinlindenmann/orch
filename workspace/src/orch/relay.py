@@ -1970,7 +1970,8 @@ def apply_allow_answers(root: Path) -> list[str]:
     notes: list[str] = []
     denied: list[str] = []
     with locked(root):
-        for t in (history.shown_ticket(root, x) for x in tickets.list_all(root)):  # answered_by: as proven
+        for raw in tickets.list_all(root):
+            t = history.shown_ticket(root, raw)  # answered_by: as proven
             r = t.get("ext", {}).get("relay", {})
             mid = r.get("allow_message") if isinstance(r, dict) else None
             if not mid or t.get("status") in ("done", "dropped"):
@@ -1980,6 +1981,25 @@ def apply_allow_answers(root: Path) -> list[str]:
                 None,
             )
             if q is None or r.get("allow_applied") == q["id"]:
+                continue
+            raw_q = next((x for x in raw["questions"] if x.get("id") == q["id"]), None)
+            given_here = any(g.get("message_id") == mid for g in allows(root)["given"])
+            if not given_here and not history.answer_proven(root, raw, raw_q):
+                # an answer this machine cannot prove (e.g. synced from another computer) decides nothing here
+                if r.get("allow_note") != q["id"]:
+
+                    def unproven(tk, qid=q["id"], mid=mid):
+                        tk["ext"]["relay"]["allow_note"] = qid
+                        tickets.add_history(
+                            tk,
+                            "agent:relay",
+                            "Answer not given on this computer, so not applied - run: "
+                            f"orch relay allow {mid} --once (or --permanent), or: orch relay done {mid} "
+                            "to ignore it",
+                            "relay",
+                        )
+
+                    tickets.apply_op(root, t["id"], unproven)
                 continue
             from orch import chat_groups
 

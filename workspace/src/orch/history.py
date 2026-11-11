@@ -6,9 +6,10 @@ checklist[].by and wont_by, verdicts[].person, questions[].answered_by, refs[].b
 description_by. Once sync is ENABLED for a workspace (sync_enabled), a field whose value is not a plain agent
 label shows as written only when this core can prove it here:
 
-  (a) core created that exact object (a history line, a piece of evidence, a reference) on this machine: the
-      ONE history-append point (tickets.add_history), the ONE evidence-append point (tickets.add_evidence) and
-      the ref-add point mark the object they create (`created`); tickets._write, the one write path, records
+  (a) core created that exact object (a history line, a piece of evidence, a reference, a step's "doing" mark)
+      on this machine: the ONE history-append point (tickets.add_history), the ONE evidence-append point
+      (tickets.add_evidence), the ref-add point and the step-start point (tickets.check_start: the step's id,
+      state, by and at) mark the object they create (`created`); tickets._write, the one write path, records
       the canonical digest of every marked object that is in the ticket it writes (`register_written`) in a
       local store, .orch/run/own-lines/<ticket id>.json (never synced), carrying this core's local1 MAC. The
       old file is never diffed against the new one: a line core did not create in this process is never
@@ -57,8 +58,9 @@ OWN_BYTES = 4 * 1024 * 1024  # a larger store file verifies nothing for THAT tic
 DECISION_SECONDS = 5
 _TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
-KINDS = ("lines", "evidence", "refs")
+KINDS = ("lines", "evidence", "refs", "steps")
 _REF_LOOSE = ("title", "status", "thumb")  # an add-on or a person edits these later; not part of the digest
+_STEP_MARK = ("id", "state", "by", "at")  # a step's "doing" mark (tickets.check_start); the rest changes
 
 
 def is_agent_history_author(by) -> bool:
@@ -98,6 +100,8 @@ def _digest(kind: str, obj) -> str | None:
     try:
         if kind == "refs" and isinstance(obj, dict):
             obj = {k: v for k, v in obj.items() if k not in _REF_LOOSE}
+        if kind == "steps" and isinstance(obj, dict):
+            obj = {k: obj.get(k) for k in _STEP_MARK}
         return hashlib.sha256(_canon([kind, obj]).encode("utf-8")).hexdigest()
     except (TypeError, ValueError, RecursionError):
         return None
@@ -115,8 +119,9 @@ _CREATED_MAX = 4096
 
 
 def created(kind: str, obj) -> None:
-    """Called by core's append points ONLY (tickets.add_history, tickets.add_evidence, tickets.ref_add): this
-    exact object was made by core in this call. It is recorded when the ticket holding it is written."""
+    """Called by core's append points ONLY (tickets.add_history, tickets.add_evidence, tickets.ref_add and the
+    step-start point tickets.check_start): this exact object was made by core in this call. It is recorded
+    when the ticket holding it is written."""
     if kind not in KINDS or not isinstance(obj, dict):
         return
     with _CREATED_LOCK:
@@ -142,6 +147,8 @@ def _take_created(ticket: dict) -> dict[str, list]:
         for h in ticket.get("history") if isinstance(ticket.get("history"), list) else []:
             take("lines", h)
         for c in ticket.get("checklist") if isinstance(ticket.get("checklist"), list) else []:
+            if isinstance(c, dict):
+                take("steps", c)
             for ev in (c.get("evidence") if isinstance(c, dict) else None) or []:
                 take("evidence", ev)
         for r in ticket.get("refs") if isinstance(ticket.get("refs"), list) else []:
@@ -330,7 +337,8 @@ def _own_path(root: Path, tid: str) -> Path:
 
 
 def _own_record(tid: str, have: dict) -> dict:
-    return {"ticket": tid, **{k: have[k] for k in KINDS}}
+    # "steps" is in the record (and the file) only once it holds a digest: a store written before it verifies
+    return {"ticket": tid, **{k: have[k] for k in KINDS if k != "steps" or have.get(k)}}
 
 
 def _parse_own(raw: bytes, tid: str, root: Path, ctx) -> dict | None:
@@ -342,7 +350,7 @@ def _parse_own(raw: bytes, tid: str, root: Path, ctx) -> dict | None:
         return None
     have = {}
     for k in KINDS:
-        v = data.get(k)
+        v = data.get(k, [] if k == "steps" else None)
         if not isinstance(v, list) or len(v) > OWN_MAX:
             return None
         if not all(isinstance(d, str) and _DIGEST_RE.fullmatch(d) for d in v):
@@ -406,7 +414,7 @@ def remember(root: Path, tid, found: dict[str, list]) -> bool:
     mac = humanproof.local_sign(root, "own-lines", _own_record(tid, merged), ctx)
     if not mac:
         return False
-    body = {"schema": "orch.own-lines/2", "ticket": tid, **merged, "mac": mac}
+    body = {"schema": "orch.own-lines/2", **_own_record(tid, merged), "mac": mac}
     p = _own_path(root, tid)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -454,6 +462,7 @@ def adopt_local_objects(root: Path) -> int:
                         if isinstance(e, dict)
                     ],
                     "refs": [r for r in doc.get("refs") or [] if isinstance(r, dict)],
+                    "steps": [c for c in doc.get("checklist") or [] if isinstance(c, dict) and "by" in c],
                 }
                 if remember(root, tid, found):
                     n += 1
@@ -612,6 +621,8 @@ def _shown(proof: _Proof, t: dict) -> dict:
                     nc = {**nc, "evidence": new_evs}
             wont_proven = None
             for field in ("wont_by", "by"):
+                if field == "by" and has("steps", c):  # a "doing" mark core made here (tickets.check_start)
+                    continue
                 if field in c and needs_proof(c.get(field)):
                     if wont_proven is None:
                         wont_proven = c.get("wont_do") is True and proof.wont_ok(c, tid)
@@ -664,6 +675,36 @@ def _shown(proof: _Proof, t: dict) -> dict:
     if isinstance(t.get("plan"), dict) and "by" in t["plan"] and needs_proof(t["plan"].get("by")):
         out["plan"], changed = {**t["plan"], "by": SYNC_BY}, True
     return out if changed else t
+
+
+def answer_proven(root: Path, ticket, question) -> bool:
+    """May an answer act as an AUTHORITY here (relay.apply_allow_answers)? Sync never enabled: yes, as before.
+    Otherwise only when this core made the answer's own line here: the "Answered <id>: <answer>" line of
+    exactly `answered_by` (and `via`) in this machine's own-lines store (tickets.answer registers it at core's
+    append point; the phone and relay answer through it too). Any label counts only so, an agent's too: a
+    peer's synced answer never decides on this machine. Never raises (an error is no proof)."""
+    root = _need_root(root)
+    try:
+        if not sync_enabled(root):
+            return True
+        if not isinstance(ticket, dict) or not isinstance(question, dict):
+            return False
+        by, ans = question.get("answered_by"), question.get("answer")
+        if not isinstance(by, str) or ans is None or is_reserved_label(by):
+            return False
+        own = _own(root, ticket.get("id"), _ctx_key(root)) or {}
+        text = f"Answered {question.get('id')}: {ans}"
+        hist = ticket.get("history") if isinstance(ticket.get("history"), list) else []
+        return any(
+            isinstance(h, dict)
+            and h.get("by") == by
+            and h.get("text") == text
+            and ("via" not in question or h.get("via") == question.get("via"))
+            and line_digest(h) in own.get("lines", ())
+            for h in hist
+        )
+    except Exception:  # noqa: BLE001 - fail closed
+        return False
 
 
 def _need_root(root) -> Path:

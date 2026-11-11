@@ -3,6 +3,7 @@
 import contextvars
 import hashlib
 import json
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,6 +44,49 @@ def _block_ok(root, tid, data):
     return humanproof.local_ok(root, HELD_KIND, body, data.get("mac"))
 
 
+LOCAL_EXT = "run/sync/local-ext.json"
+LOCAL_EXT_KIND = "sync-local-ext"
+LOCAL_EXT_SCHEMA = "orch.sync-local-ext/1"
+LOCAL_EXT_BYTES = 16 * 1024 * 1024
+
+
+def local_ext(root):
+    """(this machine's own add-on value digests per ticket, True) from the local1-signed record this core wrote;
+    ({}, False) when it is missing, edited, planted or unreadable. The automation add-on reads the same record
+    and refuses every add-on value of a ticket while it does not verify (fail closed)."""
+    p = repo.safe(root, LOCAL_EXT)
+    try:
+        data = json.loads(p.read_text()) if p.is_file() and p.stat().st_size <= LOCAL_EXT_BYTES else None
+    except (OSError, ValueError, RecursionError):
+        data = None
+    if not isinstance(data, dict) or data.get("schema") != LOCAL_EXT_SCHEMA:
+        return {}, False
+    known = data.get("tickets")
+    body = {k: v for k, v in data.items() if k != "mac"}
+    if not isinstance(known, dict) or not humanproof.local_ok(root, LOCAL_EXT_KIND, body, data.get("mac")):
+        return {}, False
+    return known, True
+
+
+def write_local_ext(root, known):
+    """Sign and write the record. False (nothing written) without a key: automation then refuses."""
+    from .step import encoded, write
+
+    body = {"schema": LOCAL_EXT_SCHEMA, "tickets": known}
+    mac = humanproof.local_sign(root, LOCAL_EXT_KIND, body)
+    if not mac:
+        return False
+    write(root, LOCAL_EXT, encoded({**body, "mac": mac}))
+    return True
+
+
+def start_local_ext(root):
+    """Only when sync is first turned on here (core adopted this machine's tickets): an empty record. A record
+    that is later removed or broken is never started again (every synced ticket would look local)."""
+    if not os.path.lexists(repo.safe(root, LOCAL_EXT)):
+        write_local_ext(root, {})
+
+
 def held(root, tid=None):
     """The held add-on changes this core wrote: of one ticket (its files only, never a scan of every block),
     or of all. A planted, edited or unreadable file is no held change (it is removed: it can only be stale)."""
@@ -78,11 +122,12 @@ def filter_ticket(root, path, doc, local, remote):
     ignored = ignored if isinstance(ignored, dict) else {}
     installed = manifests()
     old, new = local.get("ext", {}), remote.get("ext", {})
-    known = cli.read(root, "local-ext")
-    # Record provenance BEFORE publishing any incoming ticket. A crash can only refuse more work.
-    if tid not in known:
+    known, known_ok = local_ext(root)
+    # Record provenance BEFORE publishing any incoming ticket. A crash can only refuse more work. A missing or
+    # broken record is never started again here: automation refuses every add-on value while it is broken.
+    if known_ok and tid not in known:
         known[tid] = {name: digest(value) for name, value in old.items()}
-        write(root, "run/sync/local-ext.json", encoded(known))
+        write_local_ext(root, known)
     ext = dict(doc.get("ext", {}))
     names = set(old) | set(new)
     if len(names) > MAX_EXT:
@@ -176,10 +221,10 @@ def approve(root, tid, addon, args):
             store[tid] = {}
         store[tid][addon] = entry
         write(root, "run/sync/approved.json", encoded(store))
-        known = cli.read(root, "local-ext")  # this machine's own value now (the automation add-on reads it)
-        if isinstance(known.get(tid), dict):
+        known, known_ok = local_ext(root)  # this machine's own value now (the automation add-on reads it)
+        if known_ok and isinstance(known.get(tid), dict):
             known[tid][addon] = hashed
-            write(root, "run/sync/local-ext.json", encoded(known))
+            write_local_ext(root, known)
         write(root, path, encoded(doc))
         p.unlink()
     return {"approved": addon, "ticket": tid}

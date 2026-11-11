@@ -306,9 +306,13 @@ def _history_on(root):
 
     fresh = not os.path.lexists(safe(root, '.git')) and not any(os.path.lexists(safe(root, p)) for p in EARLIER)
     try:
-        history.enable_sync(Path(root), adopt=fresh)
+        adopted = history.enable_sync(Path(root), adopt=fresh)
     except Exception as e:  # noqa: BLE001 - the guarded home refused: sync does not start
         raise Refused(f'Sync could not be turned on here: {e}') from None
+    if adopted:  # once per workspace: the signed record of this machine's own add-on values starts empty
+        from .approval import start_local_ext
+
+        start_local_ext(root)
 
 
 def ensure(root):

@@ -17,12 +17,15 @@ proof. Every other value is shown as written only when this core proves it **her
 ## Proof
 
 1. **Own objects.** Core has ONE history-append point (`tickets.add_history`; ticket creation goes through it too),
-   ONE evidence-append point (`tickets.add_evidence`) and the ref-add point (`tickets.ref_add`). Each marks the exact
+   ONE evidence-append point (`tickets.add_evidence`), the ref-add point (`tickets.ref_add`) and the step-start point
+   (`tickets.check_start`: a step's "doing" mark, so its `by` stays attributed). Each marks the exact
    object it creates (`history.created`). `tickets._write`, the one write path, records the canonical digest
-   (sha256 of canonical JSON of `[kind, object]`; a ref without `title`, `status`, `thumb`) of every marked object
-   that is in the ticket it writes, in `.orch/run/own-lines/<ticket id>.json`
-   (`{"schema": "orch.own-lines/2", "ticket", "lines", "evidence", "refs", "mac"}`, `mac` = the core's local1 MAC,
-   human-proof.md "Local records"). The old file is NEVER diffed against the new one: an object core did not create
+   (sha256 of canonical JSON of `[kind, object]`; a ref without `title`, `status`, `thumb`; a step only as
+   `{id, state, by, at}`) of every marked object that is in the ticket it writes, in
+   `.orch/run/own-lines/<ticket id>.json`
+   (`{"schema": "orch.own-lines/2", "ticket", "lines", "evidence", "refs", "steps", "mac"}`, `steps` only once it
+   holds a digest, `mac` = the core's local1 MAC over the file but `schema` and `mac`, human-proof.md "Local
+   records"). The old file is NEVER diffed against the new one: an object core did not create
    in this process is never recorded, whatever the file's encoding or form. A store that cannot be written, read or
    verified proves nothing (fail closed).
 2. **Decisions.** A current verdict (`verdicts[].person`, its line) and a Won't do this core's ledger vouches for
@@ -31,7 +34,9 @@ proof. Every other value is shown as written only when this core proves it **her
    digest, the writer's shape and the `at` closest to the decision's (within 5 s). Other copies are not the
    decision's.
 3. **Answers.** `answered_by` is proven when a proven history line of that actor reads exactly
-   `Answered <question id>: <answer>`.
+   `Answered <question id>: <answer>`. An answer ACTS on this machine (a relay:allow question) only when that line
+   is in this machine's own store (`history.answer_proven`, any label, an agent's too); human-proof.md "Answers as
+   authority".
 
 The verdict checker and the Won't do ledger are read once per call (`shown_json` over many tickets shares them).
 
