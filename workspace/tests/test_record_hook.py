@@ -504,3 +504,42 @@ def test_other_origins_cannot_send_the_hook_default_namespace(live):
     with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
         got = record.registered_writer(root).append(collector_line(run, tid, 1) | {"id": sent})
     assert got["id"] == "x_" + __import__("hashlib").sha256(sent.encode()).hexdigest()[:32]
+
+
+def _main(monkeypatch, *argv, stdin=""):
+    from orch import cli
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
+    return cli.main(["record", "hook", *argv])
+
+
+def test_exit_zero_before_the_parser_the_guard_and_the_notices(live, monkeypatch, capsys):
+    """Exit 2 from a PreToolUse hook blocks the tool call: nothing may refuse before record_hook runs."""
+    from orch import chat, humanproof
+
+    root, run, _ = live
+
+    def refuse_all(*a, **k):
+        raise record_hook.Refused("The Chat helper cannot do that.")
+
+    monkeypatch.setattr(chat, "guard", refuse_all)  # a Chat helper run: the guard would refuse the command
+    monkeypatch.setattr(humanproof, "cli_notices", lambda root: ["ONE-TIME NOTICE"])
+    assert _main(monkeypatch, stdin=line(id="toolu_guard") + "\n") == 0
+    cap = capsys.readouterr()
+    assert "ONE-TIME NOTICE" not in cap.err + cap.out
+    assert [e["id"] for e in events(root, run)] == ["toolu_guard"]
+    assert _main(monkeypatch, "--bogus-option", "x", stdin=line() + "\n") == 0  # no argparse error
+    monkeypatch.setenv("ORCH_ROOT", str(root / "does" / "not" / "exist"))  # a bad ORCH_ROOT
+    assert _main(monkeypatch, stdin=line() + "\n") == 0
+    assert capsys.readouterr().err.startswith("orch: ")
+    assert _main(monkeypatch, "--strict", stdin=line() + "\n") == 2
+
+
+def test_an_exception_inside_the_hook_still_exits_zero(live, monkeypatch, capsys):
+    def boom(*a, **k):
+        raise OSError("disk exploded")
+
+    monkeypatch.setattr(record_hook, "cli", boom)
+    assert _main(monkeypatch, stdin=line() + "\n") == 0
+    assert capsys.readouterr().err.startswith("orch: ")
+    assert _main(monkeypatch, "--strict", stdin=line() + "\n") == 2

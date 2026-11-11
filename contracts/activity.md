@@ -67,9 +67,11 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   together **and the calling process must be a descendant of the claim's process** (its wrapper pid or agent pid, start
   time checked), so a process outside the run cannot write into it by setting the same variables; a line naming another
   run is dropped; the caller's `at` and `harness` are never kept (time of the call; the tool this process runs under).
-  Where the process tree cannot be read (Windows today) nothing is written. Nested runs: the check accepts the claim's own
+  Where the process tree cannot be read (**Windows today: the hook records nothing**, reason `not_provable`, until the
+  token below or a Windows process-tree proof exists) nothing is written. Nested runs: the check accepts the claim's own
   pids anywhere among the caller's ancestors, so a call from a child run's tree can still name its parent run; telling
-  them apart needs the token below. *Follow-up:* the per-run hook file token
+  them apart needs the token below. `orch record hook` always exits 0 (a tool's hook exit 2 would block the tool call; main handles it before the
+  parser, the Chat guard and the notices) unless `--strict`. *Follow-up:* the per-run hook file token
   (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
   The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller
   (the hook wiring of slice 1.8 must pass it; a hook line and the collector line with that id merge) (this entry takes

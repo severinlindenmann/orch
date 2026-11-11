@@ -86,6 +86,36 @@ def add_parsers(sub, common) -> None:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
 
 
+def hook_main(argv: list[str], watchdog=None) -> int:
+    """`orch record hook [--strict]`, called from cli.main before the parser, the chat guard and the notices:
+    a tool's hook runs before every tool call and exit 2 would block it, so every failure (bad ORCH_ROOT,
+    anything) ends with exit 0 and one stderr line. Only --strict gives exit 2."""
+    from orch import record_hook, workcheck
+
+    strict = "--strict" in argv
+    timer = workcheck.start_watchdog()  # a hung hook ends quietly (exit 0) after the hard timeout
+    if watchdog is not None:
+        watchdog.cancel()
+    try:
+        from orch import cli
+
+        record_hook.cli(cli._find_root(), strict=strict)
+        return 0
+    except Refused as e:
+        if strict:
+            print(f"Refused: {e}", file=sys.stderr)
+            return 2
+        sys.stderr.write(f"orch: {e}\n")
+    except Exception:
+        if strict:
+            print("Refused: nothing was recorded.", file=sys.stderr)
+            return 2
+        sys.stderr.write("orch: nothing was recorded.\n")
+    finally:
+        timer.cancel()
+    return 0
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "record":
         return False
