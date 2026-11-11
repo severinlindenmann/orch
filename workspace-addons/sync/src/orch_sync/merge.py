@@ -583,7 +583,7 @@ def _valid(base, a, b):
         return False
     if not isinstance(a.get("id"), str):
         return False
-    for t in (base, a, b):
+    for side, t in enumerate((base, a, b)):
         if _too_deep(t):
             return False
         for f, cap in MAX_ITEMS.items():
@@ -591,6 +591,10 @@ def _valid(base, a, b):
             if not isinstance(lst, list) or len(lst) > cap or not all(isinstance(i, dict) for i in lst):
                 return False
         if len(_canon(t)) > MAX_BYTES:
+            return False
+        # Remote malformed text is discarded below; malformed local/base data
+        # still pauses the merge rather than silently deleting local history.
+        if side != 1 and any(not isinstance(h.get("text"), str) for h in t.get("history", [])):
             return False
         if not all(isinstance(x.get("id"), str) for f in ("checklist", "questions") for x in t.get(f, [])):
             return False
@@ -609,7 +613,8 @@ def _valid(base, a, b):
 def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
-    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified.
+    lists): the caller pauses and keeps all three. Remote history lines with missing or non-string text are
+    discarded. Never raises. The inputs are not modified.
     `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
     wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so. The
     verdict reads the core's ledger when asked: the sync caller must read, merge and write under the ticket's
@@ -624,9 +629,9 @@ def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
-        out = _merge(
-            {} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person, verdict
-        )
+        remote = deepcopy(upstream)
+        remote["history"] = [h for h in remote.get("history", []) if isinstance(h.get("text"), str)]
+        out = _merge({} if base is None else deepcopy(base), remote, deepcopy(mine), now, person, verdict)
         # Run the authority and normalization rules before reusing an input. A no-op
         # must never bypass the receiving core's verdict on signed decisions.
         matches = [t for t in (upstream, mine) if _content(t) == _content(out)]

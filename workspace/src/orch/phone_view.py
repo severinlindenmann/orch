@@ -189,10 +189,12 @@ def is_agent_history_author(by) -> bool:
 def _who(by: str) -> tuple[str, str]:
     kind, _, name = str(by).strip().partition(":")
     name = _clip(name or kind, 64) or "Someone"
-    if is_agent_history_author(by):
+    if unicodedata.normalize("NFKC", kind).casefold() == "agent":
+        # A sender suffix or raw phone id is not an agent display name.
+        label = unicodedata.normalize("NFKC", name).casefold()
+        if not re.fullmatch(r"[a-z0-9._-]{1,64}", label) or label.startswith("ph_"):
+            return "orch", "agent"
         return name[:1].upper() + name[1:], "agent"
-    if kind.casefold() == "agent":
-        return "orch", "agent"
     return name, "person"
 
 
