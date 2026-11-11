@@ -14,7 +14,7 @@ says in one plain stderr line why nothing was recorded. What it never does:
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
 A hook line that cannot be written leaves a short trace: under the run (record.note_lost) only for a proven
 caller, else in one global file without a run id (record.note_unattributed); none when there was no run.
-The event id is the tool's own tool-call id (Claude: tool_use_id), put in `id` by the caller; the record
+The event id is the tool's own tool-call id (the agent's own field), put in `id` by the caller; the record
 hashes an unsafe one once, the same way for hook and collector, so the two dedupe. Event-shaped lines only.
 --strict turns every "not recorded" into a refusal (exit 2) for scripts and tests.
 """
