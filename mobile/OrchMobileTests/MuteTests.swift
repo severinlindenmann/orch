@@ -101,3 +101,89 @@ final class MuteTests: XCTestCase {
         XCTAssertEqual(cleared.groupMutes, [])
     }
 }
+
+@MainActor
+final class AppModelMuteTests: XCTestCase {
+    private var model: AppModel!
+    private var directory: URL!
+    private var suiteName: String!
+
+    override func setUp() async throws {
+        Keychain.delete()
+        suiteName = "mute-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
+        model = AppModel(useMock: true, voiceMode: .scripted, outboxDirectory: directory,
+                         speechCache: directory.appendingPathComponent("speech"),
+                         systemAudioControls: false, defaults: defaults)
+        model.openSampleInvite()
+        await model.connect(phoneName: "Mute tests")
+        await model.finishSetup(allowNotifications: false)
+        XCTAssertEqual(model.phase, .ready)
+        XCTAssertNotNil(model.workspace(MockRelay.reports))
+    }
+
+    override func tearDown() async throws {
+        model = nil
+        Keychain.delete()
+        if let suiteName { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
+        if let directory, FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    func testMuteExpiryWithoutSleeping() async throws {
+        // A future reference clock keeps the mock's real-time pruning out of the test.
+        // Relative to this clock each mute expires exactly one second ahead.
+        let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down) + 3600)
+        let end = now.addingTimeInterval(1)
+        let after = end.addingTimeInterval(1)
+        let group = GroupKey(host: MockRelay.pilatus, id: "grp_t_7k3f9q")
+
+        await model.setMute(MockRelay.reports, .until(end))
+        await model.setGroupMute(group, .until(end))
+        XCTAssertNil(model.message)
+        let workspace = try XCTUnwrap(model.workspace(MockRelay.reports))
+        XCTAssertTrue(workspace.isMuted(now: now))
+        XCTAssertTrue(model.notificationsMuted(workspace: MockRelay.reports, now: now))
+        XCTAssertTrue(model.isGroupMuted(group, now: now))
+        XCTAssertTrue(model.notificationsMuted(workspace: group.host, group: group, now: now))
+        for clock in [end, after] {
+            XCTAssertFalse(workspace.isMuted(now: clock))
+            XCTAssertFalse(model.notificationsMuted(workspace: MockRelay.reports, now: clock))
+            XCTAssertFalse(model.isGroupMuted(group, now: clock))
+            XCTAssertFalse(model.notificationsMuted(workspace: group.host, group: group, now: clock))
+        }
+
+        await model.muteAll(.until(end))
+        XCTAssertNil(model.message)
+        XCTAssertTrue(model.isMutedAll(now: now))
+        for clock in [end, after] {
+            XCTAssertFalse(model.isMutedAll(now: clock))
+            XCTAssertFalse(model.notificationsMuted(workspace: MockRelay.reports, now: clock))
+        }
+    }
+
+    func testSignOutClearsAllMuteState() async throws {
+        let group = GroupKey(host: MockRelay.pilatus, id: "grp_t_7k3f9q")
+        await model.muteAll(.forever)
+        await model.setMute(MockRelay.reports, .forever)
+        await model.setGroupMute(group, .forever)
+        XCTAssertNil(model.message)
+        XCTAssertTrue(model.isMutedAll())
+        XCTAssertTrue(try XCTUnwrap(model.workspace(MockRelay.reports)).isMuted())
+        XCTAssertTrue(model.isGroupMuted(group))
+
+        await model.signOut()
+
+        XCTAssertEqual(model.phase, .onboarding)
+        XCTAssertNil(model.credentials)
+        XCTAssertNil(model.settings.muteAllUntil)
+        XCTAssertTrue((model.settings.groupMutes ?? []).isEmpty)
+        XCTAssertTrue(model.workspaces.isEmpty)
+        XCTAssertFalse(model.isMutedAll())
+        XCTAssertFalse(model.isGroupMuted(group))
+        XCTAssertFalse(model.notificationsMuted(workspace: MockRelay.reports))
+        XCTAssertFalse(model.notificationsMuted(workspace: group.host, group: group))
+    }
+}
