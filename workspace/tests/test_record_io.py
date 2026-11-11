@@ -202,6 +202,7 @@ ERROR_BOUNDARIES = {
     "note_lost",
     "_note",
     "read_run",
+    "run_lines",
     "_pending_count",
     "apply_retention",
     "read_detail",
@@ -918,6 +919,12 @@ def test_23_hook_namespace_and_conflict(store):
     assert writer.append(event(id="same", via="log", outcome=dict(ok=False, error="failed", ms=1))) is None
     assert writer.append(event(id="same", via="hook", outcome=dict(ok=True, error=None, ms=1))) is None
     assert len(record.read_run(ws, RUN).unwrap()) == 4
+    # agreeing lines of one call: the log line replaces the hook line, a later hook line is dropped
+    writer.append(event(id="agree", via="hook"))
+    replacing = writer.append(event(id="agree", via="log"))
+    assert replacing["replaced_hook"] is True and "conflict" not in replacing
+    assert writer.append(event(id="agree", via="hook", text="Something else")) is None
+    assert [e["via"] for e in record.read_run(ws, RUN).unwrap() if e["id"] == "agree"] == ["log"]
 
 
 @pytest.mark.parametrize("kind", ["denial", "usage"])

@@ -229,24 +229,33 @@ def act_detail_path(run, kind, event_id, ticket):
 
 
 def act_dedupe(lines):
-    """Only hook/log share an origin; disagreeing finished outcomes both survive."""
+    """Only hook/log share an origin. For one key the log line wins, started and finished alike: it replaces
+    the hook line, and a hook line after any log line of that call (run, id, kind; started or finished) is
+    dropped. When the two disagree (`used`, `text`, `files`, or both finished and the hook's not provisional:
+    `ok`/`error`) both are kept (the log line carries `conflict`). Repeats of one origin keep the first."""
     kept = []
     def key(line):
         via = line["via"]
         return (line["run"], line["id"], line["kind"], line.get("outcome") is not None,
                 "hl" if via in ("hook", "log") else via)
-    def conflict(a, b):
-        return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
-                and b.get("outcome") is not None
-                and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
+    def provisional(line):
+        return line["via"] == "hook" and line.get("outcome") is not None and line["outcome"].get("ok") is None
+    def agree(hook, log):
+        if (any(hook.get(k) != log.get(k) for k in ("used", "text"))
+                or (hook.get("files") or []) != (log.get("files") or [])):
+            return False
+        if hook.get("outcome") is None or log.get("outcome") is None or provisional(hook):
+            return True
+        return all(hook["outcome"].get(k) == log["outcome"].get(k) for k in ("ok", "error"))
     for i, line in enumerate(lines):
         matches = [j for j in kept if key(lines[j]) == key(line)]
         if any(lines[j]["via"] == line["via"] for j in matches):
             continue
-        if any(conflict(lines[j], line) for j in matches):
-            kept.append(i)
-        elif not any(lines[j]["via"] == line["via"] or lines[j]["via"] == "hook" for j in matches):
-            kept = [j for j in kept if j not in matches] + [i]
+        if line["via"] == "hook" and any(
+            lines[j]["via"] == "log" and all(lines[j][k] == line[k] for k in ("run", "id", "kind")) for j in kept
+        ):
+            continue
+        kept = [j for j in kept if not (j in matches and line["via"] == "log" and agree(lines[j], line))] + [i]
     return sorted(kept)
 
 
@@ -254,7 +263,7 @@ def _t(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
 
 
-HOOK_KINDS = ("step", "denial", "helper.start", "helper.end", "usage")
+HOOK_KINDS = ("step", "helper.start", "helper.end")  # only kinds whose line can be provisional
 
 
 def act_hook_accept(line):
