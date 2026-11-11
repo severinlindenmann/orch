@@ -139,7 +139,7 @@ def _unpack(text, *, compress: bool = False) -> dict:
             if inflater.unconsumed_tail or not inflater.eof:
                 raise bad
         value = json.loads(raw)
-    except (binascii.Error, ValueError, UnicodeError, zlib.error):
+    except (binascii.Error, ValueError, UnicodeError, zlib.error, RecursionError):
         raise bad from None
     if not isinstance(value, dict):
         raise bad
@@ -167,19 +167,16 @@ def decode_cursor(text: str) -> dict[str, int]:
 _TERMINAL = ("done", "failed", "stopped")
 
 
-def _run_info(events: list[dict], clean: bool) -> tuple[int, str, bool]:
-    """(last seq, last time, trimmable): trimmable = nothing is pending or skipped and the LAST line of the
-    run (by seq) is a terminal run.state. Any later line makes the run live again."""
-    last = events[-1]
-    ended = last["kind"] == "run.state" and (last.get("data") or {}).get("state") in _TERMINAL
-    return last["seq"], last["at"], ended and clean
+def _run_info(events: list[dict]) -> tuple[int, str]:
+    """(last seq, last time) of one run."""
+    return events[-1]["seq"], events[-1]["at"]
 
 
 class TailCursor:
     """Where a tail stands: the last seq sent of every run (`{run: seq}`, compressed). Nothing else, so a
-    run can never be skipped quietly. When that gets too big for a cursor, the oldest finished runs are
-    left out with a loud marker (`trimmed`); they are not repeated while this stream lives, and a
-    reconnect may send them again (duplicates are chosen over losses)."""
+    run can never be skipped quietly. When that gets too big for a cursor, the runs whose events were all
+    sent (oldest last event first) are left out with a loud marker (`trimmed`); they are not repeated
+    while this stream lives, and a reconnect may send them again (duplicates are chosen over losses)."""
 
     def __init__(self, seqs=None):
         self.seqs = dict(seqs or {})
@@ -200,7 +197,7 @@ class TailCursor:
         return event["seq"] > floor
 
     def advance(self, event: dict, info: dict) -> list[str]:
-        """Record a sent event; returns the runs trimmed to make the cursor fit."""
+        """Record a sent event; returns the runs trimmed to make the cursor fit (none: too_large)."""
         self.seqs[event["run"]] = event["seq"]
         self.trimmed.pop(event["run"], None)
         out = []
@@ -212,7 +209,7 @@ class TailCursor:
                 old = sorted(
                     (info[r][1], r)
                     for r in self.seqs
-                    if r != event["run"] and r in info and info[r][2] and info[r][0] == self.seqs[r]
+                    if r != event["run"] and r in info and info[r][0] == self.seqs[r]
                 )
                 if not old:
                     raise
@@ -233,7 +230,7 @@ _SKIPPED = "Some lines of this run could not be read and are not shown."
 _RECOVERED = "The records of this run can be read again."
 _MISSING = "There are no records for this run."
 _REWOUND = "The records of this run were rewritten. Its steps are sent again from the start."
-_TRIMMED = "Too many runs to follow from one position. This finished run may be sent again after a reconnect."
+_TRIMMED = "Too many runs to follow from one position. This run may be sent again after a reconnect."
 
 
 def _show_alert(alert) -> None:
@@ -365,14 +362,14 @@ def tail_lines(
                 sent = True
         by_run, problems = _events(root, runs, ticket, explicit=run is not None, tell=False)
         bad = {p["run"] for p in problems if p["status"] != "ok"}
-        unclean = {p["run"] for p in problems}
         for name, events in sorted(by_run.items()):  # a run file shorter than the cursor: resend it, loudly
-            if name not in bad and cursor.seqs.get(name, 0) > (events[-1]["seq"] if events else 0):
+            floor = cursor.trimmed.get(name, cursor.seqs.get(name, 0))
+            if name not in bad and floor > (events[-1]["seq"] if events else 0):
                 cursor.seqs[name] = 0
                 cursor.trimmed.pop(name, None)
                 yield marker(name, "ok", "rewound", _REWOUND)
                 sent = True
-        info = {r: _run_info(ev, r not in unclean) for r, ev in by_run.items() if ev}
+        info = {r: _run_info(ev) for r, ev in by_run.items() if ev}
         now_marks: dict[str, list] = {r: [] for r in told if r in listed}
         for problem in problems:
             now_marks.setdefault(problem["run"], []).append(problem)

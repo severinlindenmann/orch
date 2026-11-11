@@ -740,19 +740,46 @@ def test_med_too_large_trims_finished_runs_loudly(proj, capsys, monkeypatch):
     assert len(ids) == len(set(ids)) == 80
 
 
-def test_med_too_large_with_live_runs_is_an_error(proj, capsys, monkeypatch):
+def test_high_600_unfinished_runs_are_trimmed_not_fatal(proj, capsys):
+    import random
+
+    rng = random.Random(7)
     w = RecordWriter(proj, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
-    for n in range(40):
-        w.append(example(run=f"r_live{n:04d}", ticket=TICKET_A, id=f"toolu_l{n}", at=at(n)))
-    monkeypatch.setattr(cli_record, "_MAX_CURSOR", 100)
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["record", "tail", "--json"])
-    lines = [json.loads(x) for x in capsys.readouterr().out.splitlines()]
-    assert exc.value.code == 2 and lines[-1] == {
-        "type": "error",
-        "error": lines[-1]["error"],
-        "code": "too_large",
-    }
+    for n in range(600):  # crashed runs: no terminal run.state
+        run = "r_" + "".join(rng.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(12))
+        w.append(
+            example(
+                run=run, ticket=TICKET_A, id=f"toolu_c{n}", at=f"2026-11-16T10:{n // 60:02d}:{n % 60:02d}Z"
+            )
+        )
+    code, lines = cli_lines(capsys, "tail")
+    assert code == 0 and len([ln for ln in lines if ln["type"] == "event"]) == 600
+    assert any(ln["type"] == "unavailable" and ln["reason"] == "trimmed" for ln in lines)
+    assert max(len(ln["cursor"]) for ln in lines) <= 4096
+
+
+def test_nothing_to_trim_is_too_large(proj, capsys, monkeypatch):
+    w = RecordWriter(proj, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(example(run="r_onlyone1", ticket=TICKET_A, id="toolu_1", at=at(1)))
+    monkeypatch.setattr(cli_record, "_MAX_CURSOR", 20)
+    code, (line,) = cli_lines(capsys, "tail")  # nothing was sent yet: a plain error
+    assert code == 2 and line["code"] == "too_large"
+
+
+def test_med_a_trimmed_run_rewritten_shorter_is_rewound(ws, monkeypatch):
+    cursor = cli_record.TailCursor({RUN_A: 4})
+    cursor.trimmed[RUN_B] = 2  # as if B had been trimmed from this stream
+
+    def decode(text):
+        return cursor
+
+    monkeypatch.setattr(cli_record.TailCursor, "decode", staticmethod(decode))
+    path = run_file(ws, RUN_B)
+    path.write_text(raw_line(ws, RUN_B, 0) + "\n")
+    out = follow(ws, 1, since="rc1.x")
+    marks = [(m["run"], m["reason"]) for m in out if m["type"] == "unavailable"]
+    assert marks == [(RUN_B, "rewound")]
+    assert [ln["event"]["seq"] for ln in out if ln["type"] == "event"] == [1]
 
 
 def test_zlib_bomb_cursor_is_invalid(ws, capsys):
@@ -764,3 +791,17 @@ def test_zlib_bomb_cursor_is_invalid(ws, capsys):
     )
     code, (line,) = cli_lines(capsys, "tail", "--since", bomb)
     assert code == 2 and line["code"] == "invalid"
+
+
+def test_deeply_nested_cursors_are_invalid(ws, capsys):
+    import base64
+
+    nested = "[" * 100000
+    for body in (
+        zlib.compress(nested.encode()),  # tail path (compressed)
+        nested.encode(),  # query path
+    ):
+        cursor = "rc1." + base64.urlsafe_b64encode(body).rstrip(b"=").decode()
+        for args in (("tail", "--since", cursor), ("query", "--after", cursor)):
+            code, (line,) = cli_lines(capsys, *args)
+            assert code == 2 and line["code"] == "invalid"
