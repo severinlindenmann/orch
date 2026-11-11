@@ -295,3 +295,176 @@ def test_resume_process_does_not_collide_and_uuid_ids_are_stable():
     assert first.feed(say)[0]["id"] == second.feed(say)[0]["id"] == f"{CTX['run']}:u-1:0"
     assert first.feed(done)[0]["id"] == f"{CTX['run']}:2"
     assert second.feed(done)[0]["id"] == f"{CTX['run']}:42"
+
+
+# --- files (activity.md, Files) ---
+def test_real_capture_files_relative_to_the_workspace():
+    events = map_stream(lines("read-and-fail.jsonl"), dict(CTX, workspace="/work/proj"))
+    read_start, read_end, bash_start, bash_end = steps(events)
+    assert read_start["files"] == read_end["files"] == ["notes.txt"]
+    assert "files" not in bash_start and "files" not in bash_end
+    for event in events:
+        VALIDATOR.validate(event)
+    # without a workspace root an absolute path cannot be placed: dropped, nothing else changes
+    plain = map_stream(lines("read-and-fail.jsonl"), CTX)
+    assert not any("files" in e for e in plain)
+    assert plain == [{k: v for k, v in e.items() if k != "files"} for e in events]
+
+
+@pytest.mark.parametrize(
+    "name,inp,files",
+    [
+        ("Read", {"file_path": "/ws/src/a.py"}, ["src/a.py"]),
+        ("Edit", {"file_path": "/ws/src/a.py", "old_string": "x", "new_string": "y"}, ["src/a.py"]),
+        ("Write", {"file_path": "/ws/out/new.md", "content": "/ws/other.md"}, ["out/new.md"]),
+        ("NotebookEdit", {"notebook_path": "/ws/nb/a.ipynb"}, ["nb/a.ipynb"]),
+        ("Glob", {"pattern": "**/*.py", "path": "/ws/src"}, ["src"]),
+        ("Grep", {"pattern": "TODO", "path": "/ws/src/x/"}, ["src/x"]),
+        ("Grep", {"pattern": "TODO", "path": "src"}, ["src"]),
+        ("Read", {"file_path": "/etc/passwd"}, None),
+        ("Read", {"file_path": "/ws/../secret.txt"}, None),
+        ("Read", {"file_path": "/wsx/a.py"}, None),
+        ("Read", {"file_path": "/ws"}, None),
+        ("Read", {"file_path": 42}, None),
+        ("Glob", {"pattern": "**/*.py"}, None),
+        ("Bash", {"command": "cat /ws/a.py", "file_path": "/ws/a.py"}, None),
+        ("mcp__fs__read", {"path": "/ws/a.py"}, None),
+        ("Skill", {"skill": "x", "path": "/ws/a.py"}, None),
+    ],
+)
+def test_file_tools_fill_files(name, inp, files):
+    m = mapper(workspace="/ws")
+    started = m.feed(use("t1", name, inp))[0]
+    finished = m.feed(result("t1"))[0]
+    for event in (started, finished):
+        assert event.get("files") == files
+        VALIDATOR.validate(event)
+
+
+def test_helper_never_gets_files():
+    m = mapper(workspace="/ws")
+    started = m.feed(use("t1", "Task", {"description": "x", "file_path": "/ws/a.py"}))[0]
+    assert started["kind"] == "helper.start" and "files" not in started
+
+
+def test_collect_passes_the_workspace_to_the_writer(store):
+    ws, writer = store
+    stream = [
+        use("t1", "Read", {"file_path": f"{ws}/src/app.py"}),
+        result("t1"),
+        use("t2", "Read", {"file_path": f"{ws}/keys/{SECRET}"}),
+        result("t2"),
+    ]
+    collect(stream, writer, dict(CTX, workspace=str(ws)))
+    events = steps(read_run(ws, CTX["run"]).unwrap())
+    assert [e["files"] for e in events] == [["src/app.py"], ["src/app.py"], [], []]
+    assert SECRET not in json.dumps(events)
+
+
+STREAM2 = [use("toolu_a", "Read", {"file_path": "a.py"}), use("toolu_b", "Read", {"file_path": "b.py"})]
+
+
+def test_collect_counts_and_skips_an_invalid_event(store, monkeypatch):
+    from orch import record
+
+    ws, writer = store
+    real = RecordWriter._commit
+    calls = []
+
+    def commit(self, event, *a, **k):
+        calls.append(event["id"])
+        if len(calls) == 1:
+            raise record.RecordInvalid("too large")
+        return real(self, event, *a, **k)
+
+    monkeypatch.setattr(RecordWriter, "_commit", commit)
+    stats = collect(STREAM2, writer, CTX)
+    assert stats["invalid"] == 1 and stats["written"] == 1
+
+
+@pytest.mark.parametrize("error", ["tampered", "unavailable"])
+def test_collect_stops_loudly_on_tampered_or_unavailable(store, monkeypatch, error):
+    from orch import record
+
+    ws, writer = store
+    exc = record.RecordTampered("swapped") if error == "tampered" else record.RecordUnavailable("io")
+
+    def commit(self, *a, **k):
+        raise exc
+
+    monkeypatch.setattr(RecordWriter, "_commit", commit)
+    with pytest.raises(type(exc)):
+        collect(STREAM2, writer, CTX)
+
+
+def test_collect_busy_goes_to_the_spool_and_the_run_continues(store, monkeypatch):
+    from orch import record
+
+    ws, writer = store
+
+    def busy(*a, **k):
+        raise record.RecordBusy("busy")
+
+    monkeypatch.setattr(record, "_lock", busy)
+    stats = collect(STREAM2, writer, CTX)
+    assert stats["invalid"] == 0 and stats["written"] == 2
+    assert len(list((record.record_dir(ws) / "pending" / CTX["run"]).iterdir())) == 2
+
+
+def test_collect_spool_failure_keeps_the_real_cause(store, monkeypatch):
+    from orch import record
+
+    ws, writer = store
+    monkeypatch.setattr(record, "_lock", lambda *a, **k: (_ for _ in ()).throw(record.RecordBusy("busy")))
+    monkeypatch.setattr(
+        record, "_open", lambda *a, **k: (_ for _ in ()).throw(record.RecordUnavailable("io"))
+    )
+    with pytest.raises(record.RecordUnavailable):
+        collect(STREAM2, writer, CTX)
+
+
+def _seed(ws, writer):
+    collect([use("t0", "Read", {"file_path": "seed.py"})], writer, CTX)
+    return ws / ".orch" / "record" / "runs" / f"{CTX['run']}.jsonl"
+
+
+def _alerts(ws):
+    return "".join(p.read_text() for p in (ws / ".orch" / "record" / "alerts").glob("*") if p.is_file())
+
+
+def test_collect_real_hardlinked_run_file_raises_tampered(store):
+    import os
+
+    from orch.record import RecordTampered
+
+    ws, writer = store
+    run_file = _seed(ws, writer)
+    twin = run_file.with_name("twin.copy")
+    try:
+        os.link(run_file, twin)
+    except (OSError, NotImplementedError, AttributeError):
+        pytest.skip("no hardlinks here")
+    before = twin.read_bytes()
+    with pytest.raises(RecordTampered) as caught:
+        collect(STREAM2, writer, CTX)
+    assert caught.value.reason == "hardlink"
+    assert twin.read_bytes() == before and run_file.read_bytes() == before  # nothing written through the link
+    assert '"reason":"hardlink"' in _alerts(ws)
+
+
+def test_collect_real_symlinked_run_file_raises_tampered(store, tmp_path):
+    from orch.record import RecordTampered
+
+    ws, writer = store
+    run_file = _seed(ws, writer)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("")
+    run_file.unlink()
+    try:
+        run_file.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("no symlinks here")
+    with pytest.raises(RecordTampered):
+        collect(STREAM2, writer, CTX)
+    assert outside.read_text() == ""
+    assert '"schema":"orch.record-alert/1"' in _alerts(ws) and '"reason":"link"' in _alerts(ws)

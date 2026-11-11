@@ -1,7 +1,6 @@
 """One conservative sync transaction. Only repo.git executes git; live writes are gated."""
 
 import contextlib
-import hashlib
 import json
 import os
 import stat
@@ -13,7 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from orch import humanproof, procs, syncgate, tickets
 from orch.errors import Refused as CoreRefused
 
-from . import cli, incoming, merge, paths, repo, scan
+from . import cli, incoming, merge, paths, pause, repo
 
 MB = 1_000_000
 
@@ -57,14 +56,14 @@ def document(path, data):
     try:
         doc = incoming.strict_load(data)
     except (ValueError, RecursionError):
-        raise repo.Refused(f"Document has a problem: {path}") from None
+        raise pause.Pause(f"Document has a problem: {path}", [path]) from None
     if paths.TICKET.fullmatch(path):
         if not isinstance(doc.get("ext", {}), dict):
-            raise repo.Refused(f"Ticket has a problem: {path}")
+            raise pause.Pause(f"Ticket has a problem: {path}", [path])
         checks = [("ticket", doc)] + [
             (f"addons/{name}/ext", value)
             for name, value in doc.get("ext", {}).items()
-            if name in ("automation", "focus")
+            if name in ("automation", "focus", "sync")
         ]
         for name, value in checks:
             schema = Path(__file__).parent / "schemas" / f"{name}.schema.json"
@@ -72,12 +71,12 @@ def document(path, data):
                 schema = Path(__file__).resolve().parents[4] / "contracts" / f"{name}.schema.json"
             validator = Draft202012Validator(json.loads(schema.read_text()), format_checker=FormatChecker())
             if not validator.is_valid(value) or doc.get("id") != Path(path).stem:
-                raise repo.Refused(f"Ticket has a problem: {path}")
+                raise pause.Pause(f"Ticket has a problem: {path}", [path])
     return doc
 
 
 def validate_tree(root, tree):
-    seen, total, folders, keys = {}, 0, {}, {}
+    seen, total, folders = {}, 0, {}
     rows = entries(root, tree)
     if len(rows) > 5000:
         raise repo.Refused("Too many files")
@@ -97,15 +96,13 @@ def validate_tree(root, tree):
             count, used = folders.get(folder, (0, 0))
             folders[folder] = count + 1, used + size
         data = blob(root, entry)
-        findings = scan.scan_blob(path, data)
+        findings = pause.findings(root, path, data)
         if findings:
-            raise repo.Refused(f"Not synced: {path}: {findings[0].code}")
+            raise pause.Pause(f"Not synced: {path}: {findings[0].code}", [path])
         if paths.TICKET.fullmatch(path) or path == "ticket-counter.json":
             doc = document(path, data)
             if doc.get("general") is True:
                 raise repo.Refused("General ticket stays local")
-            if paths.TICKET.fullmatch(path) and doc.get("key") and keys.setdefault(doc["key"], path) != path:
-                raise repo.Refused("Ticket key clash needs a person")
     for path in rows:
         if paths.ARTIFACT.fullmatch(path):
             owner = "/".join(path.split("/")[:2]) + ".json"
@@ -120,17 +117,18 @@ def validate_tree(root, tree):
 
 def deletions(old, new):
     gone = [p for p in old.keys() - new.keys() if paths.ARTIFACT.fullmatch(p)]
+    count = sum(bool(paths.ARTIFACT.fullmatch(p)) for p in old)
     folders = {p.split("/")[1] for p in gone}
-    too_many = any(
-        (count := sum(paths.ARTIFACT.fullmatch(p) is not None and p.split("/")[1] == tid for p in old)) > 5
-        and sum(p.split("/")[1] == tid for p in gone) > count * 0.2
+    concentrated = any(
+        (n := sum(bool(paths.ARTIFACT.fullmatch(p)) and p.split("/")[1] == tid for p in old)) > 5
+        and sum(p.split("/")[1] == tid for p in gone) > n * 0.2
         for tid in folders
     )
-    if len(gone) > 5 or too_many:
-        raise repo.Refused(f"Many files were removed ({len(gone)}). Apply?")
+    if len(gone) > 5 or len(gone) > count * 0.2 or concentrated:
+        raise pause.Pause(f"Many files were removed ({len(gone)}). Apply?", gone)
 
 
-def stage(root, head, index, state):
+def stage(root, head, index, state, now):
     old = entries(root, head)
     repo.git(root, "read-tree", head or "--empty")
     repo.git(root, "read-tree", head or "--empty", index=index)
@@ -171,16 +169,24 @@ def stage(root, head, index, state):
                     except (ValueError, RecursionError):
                         raise ValueError("Ticket has a problem") from None
                     if doc.get("general") is True:
-                        raise ValueError("General ticket stays local")
+                        (preserved if path in old else generals).add(Path(path).stem)
+                        continue
                 repo.git(root, "add", "-f", "--", ":(literal)" + path, index=index)
             except FileNotFoundError:
                 if paths.TICKET.fullmatch(path):
                     (preserved if path in old else generals).add(Path(path).stem)
-                    state["skipped"].append(f"Ticket {Path(path).stem} has a problem and was not synced")
+                    if path not in old:
+                        state["skipped"].append(f"Ticket {Path(path).stem} has a problem and was not synced")
                 if path in old:
                     if paths.TICKET.fullmatch(path):
+                        if cli.read(root, "allow-delete").get(Path(path).stem) is True:
+                            repo.git(root, "update-index", "--force-remove", "--", path, index=index)
+                            continue
                         write(root, path, blob(root, old[path]))
-                        state["skipped"].append(f"A ticket file is missing: {path}. Restored it.")
+                        state["notices"].append(f"Restored a missing ticket file: {path}")
+                        state.setdefault("deleted", {})[Path(path).stem] = (
+                            datetime.now(UTC).isoformat().replace("+00:00", "Z")
+                        )
                     else:
                         repo.git(root, "update-index", "--force-remove", "--", path, index=index)
             except (ValueError, OSError) as e:
@@ -203,7 +209,9 @@ def stage(root, head, index, state):
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
     deletions({p: e for p, e in old.items() if p not in excluded}, entries(root, tree))
     validate_tree(root, tree)  # every byte, including unchanged staged blobs
-    return tree
+    held = {Path(p).stem for p in entries(root, tree) if paths.TICKET.fullmatch(p)}
+    renumber(root, index, now, held=held, live=True)
+    return repo.git(root, "write-tree", index=index).stdout.decode().strip()
 
 
 def commit(root, tree, parents, now):
@@ -227,41 +235,68 @@ def commit(root, tree, parents, now):
 
 
 def held_ticket(root, path, doc, local, remote):
-    # No manifest inert declaration is shipped yet: default every add-on to non-inert.
-    ext, theirs = local.get("ext", {}), remote.get("ext", {})
-    for addon in set(ext) | set(theirs):
-        if ext.get(addon) != theirs.get(addon):
-            block = {"ticket": Path(path).stem, "addon": addon, "value": theirs.get(addon)}
-            raw = encoded(block)
-            name = f"{Path(path).stem}-{hashlib.sha256(raw).hexdigest()}.json"
-            write(root, "run/sync/held/" + name, raw)
-    if "ext" in local:
-        doc["ext"] = ext
-    else:
-        doc.pop("ext", None)
-    if "sessions" in local:
-        doc["sessions"] = local["sessions"]
-    else:
-        doc.pop("sessions", None)
-    return doc
+    from .approval import filter_ticket
+
+    return filter_ticket(root, path, doc, local, remote)
 
 
 def merge_document(root, path, base, local, remote, now):
     # Direction matters: only remote-only history attribution is demoted.
-    doc = merge.merge_ticket(
-        base or None,
-        remote,
-        local or {"id": remote["id"]},
-        now=now,
-        person=humanproof.wont_verifier(root),
-        verdict=humanproof.verdict_verifier(root),
-    )
+    try:
+        doc = merge.merge_ticket(
+            base or None,
+            remote,
+            local or {"id": remote["id"]},
+            now=now,
+            person=humanproof.wont_verifier(root),
+            verdict=humanproof.verdict_verifier(root),
+        )
+    except Exception:  # noqa: BLE001 - an invalid merge always keeps both versions
+        raise pause.Pause(f"Ticket cannot be merged: {path}", [path]) from None
     if doc is None:
-        raise repo.Refused(f"Ticket cannot be merged: {path}")
+        raise pause.Pause(f"Ticket cannot be merged: {path}", [path])
     return held_ticket(root, path, doc, local, remote)
 
 
 def merged_tree(root, head, remote, index, now):
+    checked_remote = pause.checked_tree(root, remote, index)
+    ancestor = repo.git(root, "merge-base", head, remote, allowed_codes=(0, 1)).stdout.decode().strip()
+    base_rows = entries(root, ancestor or None)
+    local_rows, remote_rows = entries(root, head), entries(root, checked_remote)
+    decisions = pause.choices(root, remote)
+    known = {}
+    changed_keys = set()
+    for path in sorted(base_rows.keys() | local_rows.keys() | remote_rows.keys()):
+        if not paths.TICKET.fullmatch(path):
+            continue
+        local = document(path, blob(root, local_rows.get(path) or base_rows.get(path))) if path in local_rows or path in base_rows else {}
+        incoming_doc = document(path, blob(root, remote_rows[path])) if path in remote_rows else {}
+        doc = local or incoming_doc
+        if doc.get("key"):
+            known.setdefault(doc["key"], []).append({"id": doc["id"], "title": doc["title"]})
+        if local and incoming_doc and local.get("key") != incoming_doc.get("key") and path not in decisions:
+            clash_key = local.get("key") or incoming_doc.get("key")
+            if clash_key not in known:
+                known[clash_key] = [{"id": local["id"], "title": local["title"]}]
+            changed_keys.add(clash_key)
+    if changed_keys:
+        clashes = {key: known[key] for key in sorted(changed_keys)}
+        raise pause.Pause(
+            "Ticket numbers need a person's choice",
+            [f"tickets/{t['id']}.json" for group in clashes.values() for t in group],
+            key_clashes=clashes,
+        )
+    both_changed = [
+        p
+        for p in local_rows.keys() | remote_rows.keys()
+        if paths.ARTIFACT.fullmatch(p)
+        and p not in decisions
+        and local_rows.get(p) != remote_rows.get(p)
+        and local_rows.get(p) != base_rows.get(p)
+        and remote_rows.get(p) != base_rows.get(p)
+    ]
+    if both_changed:
+        raise pause.Pause("Conflicting artifact needs a person", sorted(both_changed))
     result = repo.git(
         root,
         "merge-tree",
@@ -270,7 +305,7 @@ def merged_tree(root, head, remote, index, now):
         "-z",
         "--allow-unrelated-histories",
         head,
-        remote,
+        checked_remote,
         allowed_codes=(0, 1),
     )
     fields = result.stdout.split(b"\0")
@@ -282,12 +317,18 @@ def merged_tree(root, head, remote, index, now):
         meta, path = field.split(b"\t", 1)
         mode, obj, stage_no = meta.decode().split()
         conflicts.setdefault(path.decode(), {})[int(stage_no)] = (mode, obj)
-    if any(not paths.TICKET.fullmatch(p) and p != "ticket-counter.json" for p in conflicts):
-        raise repo.Refused("Conflicting artifact needs a person")
+    decisions = pause.choices(root, remote)
+    unresolved = [
+        p
+        for p in conflicts
+        if not paths.TICKET.fullmatch(p) and p != "ticket-counter.json" and p not in decisions
+    ]
+    if unresolved:
+        raise pause.Pause("Conflicting artifact needs a person", unresolved)
     repo.git(root, "read-tree", tree, index=index)
     base_result = repo.git(root, "merge-base", head, remote, allowed_codes=(0, 1))
     base = entries(root, base_result.stdout.decode().strip() or None)
-    ours, theirs = entries(root, head), entries(root, remote)
+    ours, theirs = entries(root, head), entries(root, checked_remote)
     merges = {}
     for path in sorted(theirs):
         if not (paths.TICKET.fullmatch(path) or path == "ticket-counter.json"):
@@ -310,10 +351,56 @@ def merged_tree(root, head, remote, index, now):
                 break
         document(path, data)
         put(root, index, path, data)
+    for path in decisions:
+        if decisions[path].get("incoming") and paths.TICKET.fullmatch(path):
+            continue  # Incoming key choices must retain the verified normal merge.
+        data = pause.selected(root, path)
+        put(root, index, path, data)
+        if paths.TICKET.fullmatch(path):
+            merges[path] = {"selected": incoming.strict_load(data), "now": now}
+    renumber(root, index, now, merges, held={Path(p).stem for p in ours if paths.TICKET.fullmatch(p)})
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
     validate_tree(root, tree)
     deletions(ours, entries(root, tree))
     return tree, merges
+
+
+def renumber(root, index, now, merges=None, *, held, live=False):
+    tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
+    rows = entries(root, tree)
+    docs = {Path(p).stem: document(p, blob(root, e)) for p, e in rows.items() if paths.TICKET.fullmatch(p)}
+    counter = incoming.strict_load(blob(root, rows.get("ticket-counter.json")) or b"{}")
+    previous_counter = counter
+    result = merge.renumber_key_clashes(docs, counter, now, held=held)
+    if result is None:
+        groups = {}
+        for tid, doc in sorted(docs.items()):
+            if doc.get("key"):
+                groups.setdefault(doc["key"], []).append({"id": tid, "title": doc["title"]})
+        clashes = {key: group for key, group in sorted(groups.items()) if len(group) > 1}
+        if clashes:
+            raise pause.Pause(
+                "Ticket numbers need a person's choice",
+                [f"tickets/{t['id']}.json" for group in clashes.values() for t in group],
+                key_clashes=clashes,
+            )
+        raise pause.Pause("Ticket keys could not be combined", [f"tickets/{tid}.json" for tid in docs])
+    changed, counter = result
+    for tid, doc in changed.items():
+        path = f"tickets/{tid}.json"
+        if live:
+            with tickets.sync_apply(root, tid):
+                if repo.safe(root, path).read_bytes() != blob(root, rows[path]):
+                    raise repo.Refused(f"{path}: busy")
+                write(root, path, encoded(doc))
+        else:
+            merges[path] = {"selected": doc, "now": now}
+        put(root, index, path, encoded(doc))
+    if changed or counter.get("last", 0) > previous_counter.get("last", 0):
+        put(root, index, "ticket-counter.json", encoded(counter))
+        if live:
+            with tickets.sync_apply(root, "key"):
+                write(root, "ticket-counter.json", encoded(counter))
 
 
 def apply(root, old, new, state, merges=None):
@@ -337,8 +424,17 @@ def apply(root, old, new, state, merges=None):
             if path in (merges or {}):
                 inputs = merges[path]
                 # On recovery an already-applied file uses the original local input.
-                local = incoming.strict_load(current or b"{}") if current == previous else inputs["local"]
-                checked = merge_document(root, path, inputs["base"], local, inputs["remote"], inputs["now"])
+                local = (
+                    incoming.strict_load(current or b"{}") if current == previous else inputs.get("local", {})
+                )
+                if "selected" in inputs:
+                    checked = merge_document(
+                        root, path, {}, inputs["selected"], inputs["selected"], inputs["now"]
+                    )
+                else:
+                    checked = merge_document(
+                        root, path, inputs["base"], local, inputs["remote"], inputs["now"]
+                    )
                 if checked != incoming.strict_load(data):
                     raise repo.Refused(f"{path}: busy")
             if current == data:
@@ -368,14 +464,22 @@ def step_lock(root):
             fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(procs.own_token())
+    from .approval import manifest_cache
+
+    token = manifest_cache.set({})
     try:
         yield
     finally:
+        manifest_cache.reset(token)
         p.unlink()
 
 
 def _run(root, reason, now, remote_allowed):
-    state = cli.read(root, "state") | {"last_error": None, "skipped": [], "reason": reason}
+    previous = cli.read(root, "state")
+    if previous.get("paused"):
+        return previous
+    state = previous | {"last_error": None, "skipped": [], "notices": [], "reason": reason}
+    remote = None
     try:
         repo.local_dir(root)
         settings = cli.DEFAULTS | cli.read(root, "settings")
@@ -410,26 +514,48 @@ def _run(root, reason, now, remote_allowed):
                 if not offline:
                     remote = oid(root, "refs/remotes/origin/orch-state")
                     last = state.get("remote_sha") if state.get("remote_url") == url else None
-                    if last and (
-                        not remote
-                        or repo.git(
-                            root, "merge-base", "--is-ancestor", last, remote, allowed_codes=(0, 1)
-                        ).returncode
+                    if (
+                        last
+                        and not pause.choices(root, remote)
+                        and (
+                            not remote
+                            or repo.git(
+                                root, "merge-base", "--is-ancestor", last, remote, allowed_codes=(0, 1)
+                            ).returncode
+                        )
                     ):
-                        raise repo.Refused("The remote history was rewritten")
+                        raise pause.Pause("The remote history was rewritten", sorted(entries(root, remote)))
                     if remote:
                         common = (
                             repo.git(root, "merge-base", head, remote, allowed_codes=(0, 1)) if head else None
                         )
                         base = (common.stdout.decode().strip() or None) if common else None
-                        result = incoming.check(root, remote, base=base)
-                        problems = [p for p in result.problems if p.code != "held-ext"]
+                        checked_ref = remote
+                        if pause.choices(root, remote):
+                            with tempfile.TemporaryDirectory(dir=repo.local_dir(root)) as folder:
+                                checked_ref = pause.checked_tree(root, remote, Path(folder) / "index")
+                        result = incoming.check(root, checked_ref, base=base)
+                        problems = [
+                            p
+                            for p in result.problems
+                            if p.code != "held-ext"
+                            and not (
+                                p.code == "cannot-check"
+                                and not pause.findings(
+                                    root, p.path, blob(root, entries(root, checked_ref)[p.path])
+                                )
+                            )
+                        ]
                         if problems:
-                            raise repo.Refused(problems[0].message)
+                            files = [p.path for p in problems if p.path]
+                            if any(p.code == "needs-confirm" for p in problems):
+                                files.extend(p for p in entries(root, base) if p not in entries(root, remote))
+                            raise pause.Pause(problems[0].message, files)
                         if not result.commit:
                             raise repo.Refused("Incoming state has no checked commit")
-                        remote = result.commit
-                        validate_tree(root, remote)
+                        if checked_ref == remote:
+                            remote = result.commit
+                        validate_tree(root, result.commit)
             scratch_root = repo.safe(root, "run/tmp-sync")
             scratch_root.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(dir=scratch_root) as scratch:
@@ -448,7 +574,7 @@ def _run(root, reason, now, remote_allowed):
                             apply(root, head, pending["new"], state, pending["merges"])
                             head = pending["new"]
                         repo.safe(root, "run/sync/pending.json").unlink()
-                    tree = stage(root, head, index, state)
+                    tree = stage(root, head, index, state, now)
                     if not head or tree != oid(root, head + "^{tree}"):
                         new = commit(root, tree, [head], now)
                         repo.git(root, "update-ref", "refs/heads/orch-state", new, head or "0" * 40)
@@ -525,6 +651,8 @@ def _run(root, reason, now, remote_allowed):
         state["last_ok"] = now
     except (ValueError, OSError, CoreRefused) as e:
         state["last_error"] = str(e)
+        if isinstance(e, pause.Pause):
+            pause.capture(root, state, e, remote, now)
         if "busy" in str(e):
             repo.safe(root, "run/sync/pending.json").unlink(missing_ok=True)
     head, remote = oid(root, "HEAD") if repo.safe(root, ".git").is_dir() else None, None

@@ -153,7 +153,7 @@ struct WorkspaceView: View {
                 WorkspaceBadge(name: name, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 50)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
-                        Text("Chat").themeFont(17, .semibold)
+                        Text("Your helper").themeFont(17, .semibold)
                         Image(systemName: "bubble.right").themeFont(12).foregroundStyle(Theme.muted).accessibilityHidden(true)
                     }
                     let preview = summary?.general.lastLine ?? ""
@@ -188,7 +188,7 @@ struct WorkspaceView: View {
             Image(systemName: topic.isStarting ? "clock" : symbol(topic.status))
                 .themeFont(20).foregroundStyle(color(topic.status)).frame(width: 24).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text([topic.key, topic.title].compactMap { $0 }.joined(separator: " · "))
+                Text(topic.title)
                     .themeFont(17, .semibold).lineLimit(3).multilineTextAlignment(.leading)
                 Text(subtitle(topic)).themeFont(13).foregroundStyle(Theme.muted)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -199,8 +199,7 @@ struct WorkspaceView: View {
     private func subtitle(_ topic: TopicSummary) -> String {
         if topic.isStarting { return "Getting started…" }
         let day = ShellTime.day(topic.lastAt)
-        let finished = [TopicStatus.done, .dropped, .stopped, .didntWork].contains(topic.status)
-        return topic.status.chip + (finished && !day.isEmpty ? " · " + day : "")
+        return [day, topic.status.chip].filter { !$0.isEmpty }.joined(separator: " · ")
     }
     private func symbol(_ status: TopicStatus) -> String {
         switch status { case .waitingOnYou: "bubble.left"; case .working: "clock"; case .review: "eye"; case .paused: "pause.circle"; case .backlog: "circle"; case .done: "checkmark"; case .dropped: "xmark"; case .stopped: "stop.fill"; case .didntWork: "exclamationmark.triangle" }

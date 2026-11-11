@@ -150,7 +150,7 @@
       : n('div', {className: 'grow'},
           n('p', {className: 'set-ctl'}, look.description || (svc ? 'Not set' : '')),
           look.pending != null ? n('p', {className: 'meta lk-pending', 'data-testid': 'look-pending'}, 'Waiting for approval: “' + look.pending + '”') : null,
-          !svc ? n('p', {className: 'meta'}, 'Connect this workspace to the relay or publish to describe it.') : null);
+          !svc ? n('p', {className: 'meta'}, 'A short line about this workspace, shown on your phone and on pages you share. You can write one once your phone or page sharing is turned on under Add-ons.') : null);
     return n('div', {className: 'card-row', 'data-key': 'lk-desc-row'}, n('span', {className: 'set-label'}, 'Description'), body,
       !editing && svc ? n('button', {type: 'button', className: 'btn sm', 'data-lk': 'desc-edit', 'data-key': 'lk-desc-edit'}, 'Edit') : null);
   }
@@ -167,12 +167,13 @@
           open ? null : n('button', {type: 'button', className: 'btn sm', 'data-lk': 'open', 'data-key': 'lk-open', 'data-testid': 'look-change'}, 'Change')),
         open ? picker() : null,
         descriptionRow(),
-        n('div', {className: 'card-row', 'data-key': 'lk-shared-row'}, n('span', {className: 'set-label'}, 'Shared pages'),
-          n('div', {className: 'grow'}, n('p', {}, 'Show workspace name and icon on shared pages'),
+        // Like every other switch row: the words left, the switch right, one row at any width.
+        n('div', {className: 'card-row lk-shared-row', 'data-key': 'lk-shared-row'},
+          n('div', {className: 'grow'}, n('h3', {}, 'Shared pages: show workspace name and icon'),
             n('p', {className: 'meta'}, 'On files you share with a link. Turn off to show nothing.')),
           n('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': String(on), 'aria-label': 'Show workspace name and icon on shared pages', 'data-lk': 'shared', 'data-key': 'lk-shared', 'data-testid': 'look-shared-pages', disabled: busy}))),
       status ? n('p', {className: 'meta lk-status ' + statusTone, role: 'status', 'data-key': 'lk-status'}, status) : null,
-      set === null && look.set_by === null ? n('p', {className: 'meta'}, 'Nobody has picked an icon yet. An agent can pick one for you, or press Change.') : null);
+      set === null && look.set_by === null ? n('p', {className: 'meta'}, 'Nobody has picked an icon yet. A helper can pick one for you, or press Change.') : null);
   }
 
   function repaint() {

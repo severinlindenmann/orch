@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GroupRoomView: View {
     let key: GroupKey
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
     @State private var members = false
@@ -13,26 +14,45 @@ struct GroupRoomView: View {
     var body: some View {
         Group {
             if let group {
-                VStack(spacing: 0) {
-                    header(group)
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            if !group.startedHere { pill("Earlier messages are in \(group.hostName)") }
-                            ForEach(Array(group.messages.enumerated()), id: \.element.id) { index, message in
-                                if let seq = message.seq,
-                                   group.gaps.contains(where: { gap in gap.upperBound <= seq && gap.lowerBound > (group.messages.prefix(index).compactMap(\.seq).max() ?? 0) }) {
-                                    pill("a message is missing")
+                let rows = transcript(group)
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        header(group)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                if !group.startedHere { pill("Earlier messages are in \(group.hostName)") }
+                                ForEach(Array(rows.enumerated()), id: \.element.id) { rowIndex, row in
+                                    Group {
+                                        switch row {
+                                        case .message(let index, let message):
+                                            if let seq = message.seq,
+                                               group.gaps.contains(where: { gap in gap.upperBound <= seq && gap.lowerBound > (group.messages.prefix(index).compactMap(\.seq).max() ?? 0) }) {
+                                                pill("a message is missing")
+                                            }
+                                            messageView(message, previous: rowIndex > 0 ? rows[rowIndex - 1].groupMessage : nil, group: group)
+                                        case .outgoing(let item):
+                                            outgoingView(item, group: group)
+                                        }
+                                    }.id(row.id)
                                 }
-                                messageView(message, previous: index > 0 ? group.messages[index - 1] : nil, group: group)
-                            }
-                            TimelineView(.periodic(from: .now, by: 30)) { context in
-                                ForEach(GroupRoomRules.thinking(group: group, now: context.date), id: \.self) { ws in
-                                    group.memberText(ws, suffix: " is thinking…").themeFont(13).foregroundStyle(Theme.muted)
-                                }
-                            }
-                        }.padding(16)
-                    }.accessibilityIdentifier("group-messages")
-                    footer(group)
+                                Color.clear.frame(height: 1).id("group-bottom")
+                            }.padding(16)
+                        }
+                        .defaultScrollAnchor(.bottom).defaultScrollAnchor(.top, for: .alignment)
+                        .scrollDismissesKeyboard(.interactively)
+                        .accessibilityIdentifier("group-messages")
+                        .onChange(of: rows.count) { old, new in
+                            if new > old { scrollToBottom(proxy) }
+                        }
+                        // The bottom anchor alone lands short in a lazy list of rows with different heights: jump to the
+                        // end marker once the rows are laid out (twice, as lazy rows settle their real heights).
+                        .task(id: key) {
+                            proxy.scrollTo("group-bottom", anchor: .bottom)
+                            try? await Task.sleep(for: .milliseconds(300))
+                            proxy.scrollTo("group-bottom", anchor: .bottom)
+                        }
+                        footer(group, onSent: { scrollToBottom(proxy) })
+                    }
                 }
                 .onAppear { markRead(group) }
                 .onChange(of: group.messages) { _, _ in markRead(group) }
@@ -51,6 +71,68 @@ struct GroupRoomView: View {
             .fullScreenCover(item: $viewer) { ArtifactViewer(item: $0) }
     }
 
+    private enum Row: Identifiable {
+        case message(Int, GroupMessage)
+        case outgoing(ConvItem)
+        var id: String {
+            switch self {
+            case .message(_, let message): message.message.clientId ?? message.message.message.body.clientId ?? message.id
+            case .outgoing(let item): item.rowID
+            }
+        }
+        var groupMessage: GroupMessage? {
+            if case .message(_, let message) = self { return message }
+            return nil
+        }
+        var at: String {
+            switch self {
+            case .message(_, let message): message.at
+            case .outgoing(let item): item.at
+            }
+        }
+    }
+
+    private func transcript(_ group: PhoneGroup) -> [Row] {
+        let copies = Set(group.messages.map(\.id))
+        let echoedClients = Set(group.messages.compactMap { $0.message.clientId ?? $0.message.message.body.clientId })
+        let echoedIDs = Set(group.messages.compactMap { $0.message.message.body.echoOf })
+        let outgoing = model.conversationItems(.topic(workspace: key.host, ticket: group.ticket ?? "")).filter {
+            $0.side == .me && $0.replyTo.map { copies.contains($0) } == true &&
+            !echoedClients.contains($0.clientId ?? $0.id) && !echoedIDs.contains($0.id)
+        }
+        var rows = group.messages.enumerated().map { Row.message($0.offset, $0.element) }
+        // Keep host sequence order, inserting local/listed phone texts by their send time.
+        for item in outgoing {
+            let index = rows.firstIndex { $0.at > item.at } ?? rows.endIndex
+            rows.insert(.outgoing(item), at: index)
+        }
+        return rows
+    }
+
+    private func outgoingView(_ item: ConvItem, group: PhoneGroup) -> some View {
+        MessageBubble(item: item, conversationId: .topic(workspace: key.host, ticket: group.ticket ?? ""),
+                      conversationLanguage: "en", workspaceName: group.hostName, quotedText: nil,
+                      onRetry: { Task { await model.retrySend(item.clientId ?? "") } },
+                      onDiscard: { model.discardSend(item.clientId ?? "") },
+                      waitNote: QueuedNote.text(for: item.clientId.flatMap { model.outbox.item(clientId: $0) }), hugsContent: true)
+    }
+
+    /// Deferred: a scroll in the same update that adds the row runs before the lazy list has laid it out, and stops short
+    /// of the new bubble (e2e P4.8). Scroll on the next turn and once more after the row has its real height.
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            jump(proxy)
+            try? await Task.sleep(for: .milliseconds(300))
+            jump(proxy)
+        }
+    }
+
+    private func jump(_ proxy: ScrollViewProxy) {
+        if reduceMotion { proxy.scrollTo("group-bottom", anchor: .bottom) }
+        else { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("group-bottom", anchor: .bottom) } }
+    }
+
     private func header(_ group: PhoneGroup) -> some View {
         HStack(spacing: 16) {
             Button { dismiss() } label: {
@@ -60,17 +142,19 @@ struct GroupRoomView: View {
             GroupBadges(group: group).padding(.trailing, 10)
             VStack(alignment: .leading, spacing: 6) {
                 Button { members = true } label: {
-                    Text(group.title).themeFont(17, .semibold).multilineTextAlignment(.leading)
+                    Text(group.title).themeFont(17, .semibold).lineLimit(1).truncationMode(.tail)
                 }.accessibilityIdentifier("group-members")
                 if let ticket = group.ticket {
                     NavigationLink(value: ChatRoute.ticket(workspace: key.host, ticket: ticket)) {
-                        Text("From ticket \(group.ticketKey ?? "") ›").themeFont(13).foregroundStyle(Theme.brand)
+                        Text("From ticket ›").themeFont(13).foregroundStyle(Theme.brand)
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-            TimelineView(.everyMinute) { context in
-                ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: context.date), groupStyle: true) { mute in
-                    Task { await model.setGroupMute(key, mute) }
+            if !group.closed {
+                TimelineView(.everyMinute) { context in
+                    ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: context.date), groupStyle: true) { mute in
+                        Task { await model.setGroupMute(key, mute) }
+                    }
                 }
             }
             Button { members = true } label: {
@@ -106,7 +190,7 @@ struct GroupRoomView: View {
                                          text: message.text, label: phoneLabel(message.sender)),
                           conversationId: .topic(workspace: key.host, ticket: group.ticket ?? ""),
                           conversationLanguage: "en", workspaceName: senderName(message.sender, group: group),
-                          quotedText: nil, onRetry: nil, onDiscard: nil, onOpenArtifact: { _ in })
+                          quotedText: nil, onRetry: nil, onDiscard: nil, onOpenArtifact: { _ in }, hugsContent: true)
         }
         if let task = message.task, GroupRoomRules.showsTaskCard(message, group: group) { GroupTaskView(task: group.tasks[task.delegate] ?? task, group: group) }
         ForEach(message.ticketView?.attachments.filter { message.sharedFiles.contains($0.blobId ?? "") } ?? []) { attachment in
@@ -142,17 +226,27 @@ struct GroupRoomView: View {
             .padding(.horizontal, 12).padding(.vertical, 8).background(Theme.surface2, in: Capsule())
             .frame(maxWidth: .infinity)
     }
-    @ViewBuilder private func footer(_ group: PhoneGroup) -> some View {
+    @ViewBuilder private func footer(_ group: PhoneGroup, onSent: @escaping () -> Void) -> some View {
         if group.closed {
-            Text("This group is done. Read only.").themeFont(13).foregroundStyle(Theme.muted).padding(16)
+            Text("Read only").themeFont(13).foregroundStyle(Theme.muted).padding(16)
         } else {
             let target: SendTarget? = GroupStore.replyTarget(in: group) == nil ? nil : group.ticket.map { .topic(workspace: key.host, ticket: $0) }
             VStack(spacing: 0) {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    let thinking = GroupRoomRules.thinking(group: group, now: context.date)
+                    if !thinking.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(thinking, id: \.self) { ws in
+                                group.memberText(ws, suffix: " is thinking…").themeFont(13).foregroundStyle(Theme.muted)
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 12)
+                    }
+                }
                 group.members.enumerated().reduce(Text("To: ")) { text, entry in
                     text + Text(entry.offset == 0 ? "" : ", ") + group.memberText(entry.element.ws)
                 }
-                    .themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20)
-                Composer(target: target, placeholder: "Message the group", reply: $reply, groupKey: key,
+                    .themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 8)
+                Composer(target: target, placeholder: "Message the group", reply: $reply, onSent: onSent, groupKey: key,
                          unavailableText: "Waiting for the first group message")
                 Button { details = true } label: {
                     (Text("Everyone in this group sees what you write here · ").foregroundColor(Theme.muted) + Text("Details").foregroundColor(Theme.brand))
@@ -186,7 +280,7 @@ struct GroupTaskView: View {
             }
             if let target {
                 NavigationLink(value: ChatRoute.ticket(workspace: target.workspace, ticket: target.ticket)) {
-                    Text("Open \(target.label) ›").themeFont(15).foregroundStyle(Theme.brand).frame(minHeight: 44)
+                    Text("Open task ›").themeFont(15).foregroundStyle(Theme.brand).frame(minHeight: 44)
                 }
             }
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -262,7 +356,7 @@ struct GroupMembersView: View {
                                 Divider()
                                 HStack(spacing: 12) {
                                     GroupMemberBadge(group: group, ws: member.ws, size: 34)
-                                    group.memberText(member.ws, suffix: member.ws == key.host ? " · started the group from \(group.ticketKey ?? "")" : "").themeFont(15)
+                                    group.memberText(member.ws, suffix: member.ws == key.host ? " · started the group" : "").themeFont(15)
                                 }
                             }
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))

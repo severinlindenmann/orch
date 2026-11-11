@@ -1,0 +1,468 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/job-event.schema.json",
+  "title": "orch job event v1 (orch.job/1, one line of .orch/record/jobs/<run>/<job>.jsonl)",
+  "description": "What a long-running program reports about itself. See job-events.md. Stored lines are complete (orch fills v, job, run, ticket, seq, at); $defs/input is what a program may write to $ORCH_EVENTS. Everything is 'reported by the job': never a passed check, never an approval, never a Needs-you card.",
+  "type": "object",
+  "required": [
+    "v",
+    "type",
+    "job",
+    "run",
+    "ticket",
+    "seq",
+    "at"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "type": {
+      "enum": [
+        "start",
+        "step",
+        "progress",
+        "artifact",
+        "metric",
+        "table",
+        "link",
+        "log",
+        "end",
+        "lost"
+      ]
+    },
+    "job": {
+      "$ref": "#/$defs/job"
+    },
+    "run": {
+      "type": "string",
+      "pattern": "^r_[a-z0-9_]{6,32}$"
+    },
+    "ticket": {
+      "type": "string",
+      "pattern": "^t_[a-z0-9]{6,16}$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "#/$defs/payload"
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "lost"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "by"
+        ],
+        "properties": {
+          "by": {
+            "const": "orch"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "by"
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "job": {
+      "type": "string",
+      "pattern": "^j_[a-z0-9]{6,32}$"
+    },
+    "line": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+    },
+    "payload": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "start"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "title"
+            ],
+            "properties": {
+              "title": {
+                "$ref": "#/$defs/line"
+              },
+              "quiet_minutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 240,
+                "default": 10,
+                "description": "No event for this long while running = lost."
+              },
+              "command": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.+-]{1,64}$",
+                "description": "Base name of the program (orch job run)."
+              },
+              "pid": {
+                "type": "integer",
+                "minimum": 2
+              },
+              "token_hash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "Set by orch at start: sha256 of the job's write token (never the token). Not accepted from a program."
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "step"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "step",
+              "label",
+              "state"
+            ],
+            "properties": {
+              "step": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"
+              },
+              "label": {
+                "$ref": "#/$defs/line"
+              },
+              "state": {
+                "enum": [
+                  "waiting",
+                  "running",
+                  "done",
+                  "failed",
+                  "skipped"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "progress"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "done"
+            ],
+            "properties": {
+              "done": {
+                "type": "number",
+                "minimum": 0
+              },
+              "total": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                ]
+              },
+              "unit": {
+                "type": "string",
+                "maxLength": 32,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+              },
+              "text": {
+                "$ref": "#/$defs/line"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "artifact"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "blocks.schema.json#/$defs/path"
+              },
+              "label": {
+                "$ref": "#/$defs/line"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "metric"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "name",
+              "value"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/line"
+              },
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "type": "string",
+                "maxLength": 32,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "table"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "table"
+            ],
+            "properties": {
+              "table": {
+                "$ref": "blocks.schema.json#/$defs/table"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "link"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "url",
+              "label"
+            ],
+            "properties": {
+              "url": {
+                "$ref": "blocks.schema.json#/$defs/https"
+              },
+              "label": {
+                "$ref": "#/$defs/line"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "log"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "stream": {
+                "enum": [
+                  "out",
+                  "err"
+                ],
+                "default": "out"
+              },
+              "capped": {
+                "const": true,
+                "description": "Set by orch on the one 'more events were left out' line. Not accepted from a program."
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^[^\\u0000-\\u0008\\u000a-\\u001f\\u007f]*$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "end"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "summary": {
+                "$ref": "#/$defs/line"
+              },
+              "exit": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "lost"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ],
+            "properties": {
+              "reason": {
+                "enum": [
+                  "quiet",
+                  "process-gone",
+                  "run-ended"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "input": {
+      "description": "One line a program writes to $ORCH_EVENTS (at most 8 KB). job and run may be left out; when present they must equal the job's own, else the line is refused. 'lost' and 'by' are never accepted from a program. pid and command are set only by orch job run (from the process it started); a program cannot name a pid for orch to signal.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "start",
+            "step",
+            "progress",
+            "artifact",
+            "metric",
+            "table",
+            "link",
+            "log",
+            "end"
+          ]
+        },
+        "job": {
+          "$ref": "#/$defs/job"
+        },
+        "run": {
+          "type": "string",
+          "pattern": "^r_[a-z0-9_]{6,32}$"
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "by"
+            ]
+          },
+          {
+            "required": [
+              "seq"
+            ]
+          },
+          {
+            "required": [
+              "ticket"
+            ]
+          },
+          {
+            "required": [
+              "pid"
+            ]
+          },
+          {
+            "required": [
+              "command"
+            ]
+          },
+          {
+            "required": [
+              "token_hash"
+            ]
+          },
+          {
+            "required": [
+              "capped"
+            ]
+          }
+        ]
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/payload"
+        }
+      ]
+    }
+  }
+}

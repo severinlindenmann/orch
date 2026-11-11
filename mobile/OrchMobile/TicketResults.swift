@@ -10,10 +10,11 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
     let rawDoc: Data
     var doc: BlocksResult { BlocksResult.decode(rawDoc) }
 
+    // contracts/blocks.md keeps agent source labels; the phone displays helper wording only.
     var label: String {
         switch from {
         case "job": "Reported by the job"
-        case "agent": checked ? "Checked by the agent" : "From the agent"
+        case "agent": checked ? "Checked by the helper" : "From the helper"
         default: "Worked out by orch"
         }
     }

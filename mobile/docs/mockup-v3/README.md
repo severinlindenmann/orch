@@ -20,3 +20,20 @@ Rule (orch-mockup): every UI change to the phone app updates this mockup in the 
 or state the mockup lacks.
 
 What is simulated here: recording, transcription, replies, camera, uploads, sync, push, pairing. Audio playback is real.
+
+11 Nov visual challenge — use the matching entries in the right-panel **11 Nov · Visual challenge** jump list:
+
+- **Chats · Groups** — chats with stacked group badges, report preview, key tag and the 44 pt Done groups row; also present in Workspaces.
+- **Group · open** — Pay car tax 2027, member runs, task card, thinking, recipients and group composer; also tap the group in Chats.
+- **Group · after send** — the open group with an owner message and delivery ticks; also type and send in the group composer.
+- **Group · done** — Pay car tax 2026 with system pills and Read only footer; also tap a row in Done groups.
+- **Done groups** — muted group rows without unread badges; also tap Done groups in Chats.
+- **Ticket info · collapsed** — PIL-12 app-layout header, description, Results and counted tabs; tap a result to expand.
+- **Ticket info · expanded** — agent result with summary, totals and fitted chart; tap the chart to preview it.
+- **Ticket info · job result** — expanded job result with right-aligned numbers and 3 of 40 rows; switch Photos / Files / References / Artifacts below.
+- **Ticket · ready for review** — Result with a fish-page artifact preview and Accept / Ask for changes bar; also replaces Questions → Accept / Ask for changes.
+- **Ticket · no review question** — finished work stays Ready for review with 3 of 3 tasks done and no review bar.
+
+Ticket info is also reachable through PIL-12 → Info or the existing Artifacts · Files · References entry. Back returns to the originating screen. New fixtures are local simulations; jump-list entries reset them for repeatable review.
+
+11 Nov: helper wording

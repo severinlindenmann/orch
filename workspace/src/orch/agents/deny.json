@@ -1,1 +1,12 @@
-{}
+{
+  "adapters": {
+    "claude": { "deny": { "format": "patterns/1" } },
+    "codex": {
+      "deny": {
+        "format": "none",
+        "note": "codex cannot be told a deny list; its workspace-write sandbox keeps writes inside the workspace. Reads of orch's own folder and writes of .orch/record are not enforced."
+      }
+    },
+    "generic": { "deny": { "format": "none", "note": "A command orch does not know cannot be told a deny list." } }
+  }
+}

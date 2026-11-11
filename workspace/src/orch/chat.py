@@ -601,6 +601,10 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         "--reply-to <message id>. "
         "Add --ref ticket:<KEY> for a ticket you opened, --ref reference:<url> or --ref file:<path> "
         "for something you point to: they show as cards.",
+        "When you sum up what is open or done, write a few short lines in everyday words, one line per kind "
+        "of thing (for example: 11 plant checks wait for your OK). Never list ticket keys or ids in the text "
+        "and do not use board words like Backlog; instead add --ref ticket:<KEY> for each ticket the person "
+        "can act on, so the line has its card with the buttons.",
         "When the person has told you enough to make a ticket, ask 'Ready. Shall I make this a ticket?' "
         "and add --ref proposal:<short ticket title>. Never make the ticket yourself in this talk: "
         "the person clicks Make ticket on the dashboard. When the person writes from their phone (the message came via the phone), never tell them to tap or click Make ticket: the phone has no such card yet; say you can make a ticket for this and that it is one click in the dashboard, and still add the proposal card. You may write notes and answer questions. You never sign, approve, "
