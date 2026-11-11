@@ -206,6 +206,47 @@ def test_crash_before_apply_recovers(machines, monkeypatch):
     assert not (b / '.orch/run/sync/pending.json').exists()
 
 
+def test_forged_pending_missing_merges_refuses_before_writes(machines, monkeypatch):
+    a, b, bare = both(machines)
+    edit(a, title='Forged recovery')
+    save(a, 'ticket-counter.json', {'last': 20})
+    success(a)
+
+    def crash(*args):
+        raise RuntimeError('crash')
+
+    with monkeypatch.context() as m:
+        m.setattr(step, 'apply', crash)
+        with pytest.raises(RuntimeError, match='crash'):
+            run(b)
+    pending_path = b / '.orch/run/sync/pending.json'
+    pending = json.loads(pending_path.read_text())
+    assert TICKET in pending['merges']
+    pending['merges'] = {}
+    pending_path.write_bytes(step.encoded(pending))
+    before = {path: (b / '.orch' / path).read_bytes()
+              if (b / '.orch' / path).exists() else None
+              for path in (TICKET, 'ticket-counter.json')}
+    head, tip = step.oid(b, 'HEAD'), remote_sha(bare)
+    git, write = repo.git, step.write
+
+    def checked_git(root, *args, **kwargs):
+        assert args[0] not in ('update-ref', 'push')
+        return git(root, *args, **kwargs)
+
+    def no_write(root, path, data):
+        assert path == 'run/sync/state.json'  # Recording the refusal is allowed.
+        return write(root, path, data)
+
+    monkeypatch.setattr(repo, 'git', checked_git)
+    monkeypatch.setattr(step, 'write', no_write)
+    assert 'busy' in run(b)['last_error']
+    for path, data in before.items():
+        p = b / '.orch' / path
+        assert (p.read_bytes() if p.exists() else None) == data
+    assert step.oid(b, 'HEAD') == head and remote_sha(bare) == tip
+
+
 def test_first_push_excludes_old_history(machines):
     a, _, bare = machines
     save(a, 'me/old-secret', b'orp_' + b'x' * 30)

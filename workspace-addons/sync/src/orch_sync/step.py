@@ -277,9 +277,13 @@ def merged_tree(root, head, remote, index, now):
 
 def apply(root, old, new, state, merges=None):
     before, after = entries(root, old), entries(root, new)
-    for path in sorted(before.keys() | after.keys()):
-        if before.get(path) == after.get(path):
-            continue
+    changed = sorted(path for path in before.keys() | after.keys()
+                     if before.get(path) != after.get(path))
+    # Check the whole transaction before writing any path, including on recovery.
+    for path in changed:
+        if paths.TICKET.fullmatch(path) and path not in (merges or {}):
+            raise repo.Refused(f'{path}: busy')
+    for path in changed:
         tid = path.split('/')[1].removesuffix('.json') if path.startswith('tickets/') else 'key'
         with tickets.sync_apply(root, tid):
             p = repo.safe(root, path)
