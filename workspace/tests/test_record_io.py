@@ -48,6 +48,7 @@ CORE = {
     "_write_new",
     "_size",
     "_rmtree",
+    "_rmdir_empty",
     "_lock",
 }
 
@@ -170,6 +171,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "stored.get",
     "super().__init__",
     "time.time_ns",
+    "unreadable.append",
     "uuid.uuid4",
 }
 SAFE_ATTRIBUTE_VALUES = {
@@ -211,6 +213,7 @@ ERROR_BOUNDARIES = {
     "_store_detail",
     "delete_detail",
     "detail_files",
+    "ticket_detail_files",
     "delete_detail_files",
     "record_sizes",
     "list_runs",
@@ -786,9 +789,11 @@ def test_18_random_detail_names():
     seen = set()
     for i in range(5000):
         eid = str(i) + "".join(rng.choice("Ab/\\..é中 CON:NUL") for _ in range(20))
-        name = record.detail_name(RUN, rng.choice(["step", "usage"]), eid, rng.choice(["t_aaaaaa", None]))
+        kind = rng.choice(["step", "usage"])
+        name = record.detail_name(RUN, kind, eid, rng.choice(["t_aaaaaa", "t_bbbbbb"]))
         assert re.fullmatch(r"[0-9a-f]{32}", name) and name not in seen
         seen.add(name)
+        assert record.detail_name(RUN, kind, eid, None) is None  # no ticket: no detail file (I4)
 
 
 def test_19_case_distinct_details(store):

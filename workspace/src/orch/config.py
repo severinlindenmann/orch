@@ -400,9 +400,19 @@ RESERVED_DEFAULTS = {
 
 
 def file_value(root: Path | None, section: str, key: str) -> bool | int:
-    """The value as the FILE says it (a wrong type or a value <= 0 is the default). Never a decision on its
-    own: the widening ones count only through their record (insights_*, record_* below)."""
-    return _reserved(root, section, key, RESERVED_DEFAULTS[(section, key)])
+    """The value as the FILE says it (a wrong type, a bool for a number, or a value <= 0 is the default). A
+    retention number is snapped DOWN to its allowed list with a floor of 30 days / 512 MB
+    (humanproof.retention_snap: `keep_days = 1` counts as 30), so an edit of the file can never make pruning
+    delete nearly the whole record. Never a decision on its own: the widening ones count only through their
+    record (insights_*, record_* below)."""
+    from orch import humanproof
+
+    value = _reserved(root, section, key, RESERVED_DEFAULTS[(section, key)])
+    setting = _RETENTION_SETTINGS.get((section, key))
+    return value if setting is None else humanproof.retention_snap(setting, value)
+
+
+_RETENTION_SETTINGS = {("record", "keep_days"): "insights.keep_days", ("record", "max_mb"): "insights.max_mb"}
 
 
 def focus_live_session(root: Path | None) -> bool:
@@ -459,7 +469,9 @@ def share_counts_state(root: Path) -> str:
     """The state of the daily counts upload (counts.md `sharing.counts`, usage-counts.md): `not_connected` (no
     relay connection, `.orch/secrets/relay.json`), `off_by_admin` (the last relay policy said
     `usage_counts: "off"`; kept by relay.refresh in `.orch/secrets/policy.json`), else `on` / `off` (the
-    effective `insights.share_counts`). The core and the Insights page read the same state."""
+    effective `insights.share_counts`). The core and the Insights page read the same state. The policy file
+    counts only while there is a connection, and relay.connect clears it (a new connection never inherits the
+    last relay's policy)."""
     from orch import net
 
     sec = net.secrets_dir(root)
@@ -550,13 +562,16 @@ def change_insights(
     """THE CORE decides (2.11 addendum): under ONE lock (keys.lock, the lock of the settings record and of the
     proof nonce store) read the CURRENT effective value, refuse a stale `if_current` (code `changed`),
     classify widen / narrow / same, and only for a widening ask `person(target)` for the verified person (it
-    verifies and spends the value-bound proof in this same critical section). Same value: nothing written, no
-    proof. An agent caller (`agent` = the words it is refused with) asking to widen is refused
-    (`needs_person`) before any proof is read. `insights.share_counts` = on is refused (`not_available`,
-    nothing written, no proof read) while the share state is off_by_admin or not_connected; off is always
-    allowed."""
+    verifies and spends the value-bound proof in this same critical section; the proof LINE was read from
+    stdin by the caller before the lock, so a stdin that never closes cannot hold keys.lock). Same value:
+    nothing written, no proof checked. An agent caller (`agent` = the words it is refused with) asking to
+    widen is refused (`needs_person`) before any proof is read. `insights.share_counts` = on is refused
+    (`not_available`, nothing written, no proof read) while the share state is off_by_admin or not_connected;
+    off is always allowed."""
     from orch import humanproof
 
+    # keys.lock is re-entrant per thread by design (humanproof._key_lock: a per-thread depth count over ONE
+    # O_EXCL lock file), so the nested takes below stay in this section; another thread or process waits.
     with humanproof._key_lock(humanproof.key_dir(root)):
         current = insights_value(root, setting)
         widened = value > current

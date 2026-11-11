@@ -215,10 +215,17 @@ def act_event_id(tool_call_id, run, seq):
 
 
 def act_detail_name(run, kind, event_id, ticket):
-    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/2\\0" run \\0 kind \\0 id \\0 ticket);
-    a missing ticket is the empty string. Two tickets never share a detail file."""
-    data = b"orch.detail/2\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id, ticket or ""))
+    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/2\\0" run \\0 kind \\0 id \\0 ticket).
+    Two tickets never share a detail file. An event with no ticket has NO detail file: None."""
+    if not ticket:
+        return None
+    data = b"orch.detail/2\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id, ticket))
     return hashlib.sha256(data).hexdigest()[:32]
+
+
+def act_detail_path(run, kind, event_id, ticket):
+    name = act_detail_name(run, kind, event_id, ticket)
+    return None if name is None else f"detail/{run}/{name}.json"
 
 
 def act_dedupe(lines):
@@ -353,7 +360,7 @@ def act_map_stream(lines, ctx):
 
     def emit(**k):
         ev = {"v": 1, "id": k.pop("id", None), "seq": len(out) + 1, "run": run, "session": session, "agent": "main",
-              "parent": None, "at": ctx["at"], "ticket": ctx["ticket"], "harness": ctx["harness"], "via": "log",
+              "parent": None, "at": ctx["at"], "ticket": ctx.get("ticket"), "harness": ctx["harness"], "via": "log",
               "used": None, "outcome": None, "detail": None, "coverage": "full"}
         ev.update(k)
         if ev["id"] is None:
@@ -380,12 +387,12 @@ def act_map_stream(lines, ctx):
                 first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
                 err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
                 emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
-                     detail=f"detail/{run}/{act_detail_name(run, 'step', eid, ctx['ticket'])}.json")
+                     detail=act_detail_path(run, 'step', eid, ctx.get('ticket')))
         elif t == "item.completed" and item.get("type") == "agent_message":
             eid = f"{run}:{turn}:{item['id']}"
             say = _one_line(item.get("text", ""), 200)
             emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
-                 detail=f"detail/{run}/{act_detail_name(run, 'run.state', eid, ctx['ticket'])}.json")
+                 detail=act_detail_path(run, 'run.state', eid, ctx.get('ticket')))
         elif t == "turn.completed":
             u = m.get("usage") or {}
             emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
@@ -427,6 +434,14 @@ def kind_activity():
     for c in vec["detail_names"]:
         _expect(f"activity detail_names {c['kind']} {c['id']} {c.get('ticket')}",
                 act_detail_name(c["run"], c["kind"], c["id"], c.get("ticket")), c["file"])
+    shared = {}
+    for c in vec["detail_names"]:
+        if c.get("ticket"):
+            shared.setdefault((c["run"], c["kind"], c["id"]), {})[c["ticket"]] = c["file"]
+    _expect("activity detail_names: two tickets with the same run, kind and id get different names",
+            any(len(set(t.values())) == len(t) > 1 for t in shared.values()), True)
+    _expect("activity detail_names: a ticketless case has no detail file",
+            any(not c.get("ticket") and c["file"] is None for c in vec["detail_names"]), True)
     for c in vec["dedupe"]:
         _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
     for c in vec["hook_entry"]:

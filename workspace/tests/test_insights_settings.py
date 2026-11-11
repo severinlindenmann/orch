@@ -834,7 +834,7 @@ def test_delete_detail_with_a_proof(ws, rec, run, monkeypatch):
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 2, "ticket": a, "kept": 0}
+    assert json.loads(out) == {"deleted": 2, "ticket": a, "kept": 0, "unreadable": 0}
     assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
     assert _detail(ws, RUN_C).is_dir()  # the other ticket keeps its detail
     assert _lines(ws) == lines  # every line stays as it was
@@ -857,7 +857,7 @@ def test_delete_detail_with_a_proof(ws, rec, run, monkeypatch):
     assert code == 2 and _answer(out)["code"] == "not_found"  # details not available
     again = _proof(ws, "record.delete_detail", a)  # nothing left: 0, and a new audit line
     code, out, _ = _cli(run, monkeypatch, again, "record", "delete-detail", a, "--json")
-    assert code == 0 and json.loads(out) == {"deleted": 0, "ticket": a, "kept": 0}
+    assert code == 0 and json.loads(out) == {"deleted": 0, "ticket": a, "kept": 0, "unreadable": 0}
     assert len(_changes(ws)) == 2
 
 
@@ -932,18 +932,110 @@ def test_delete_detail_unknown_ticket(ws, rec, run, monkeypatch, ticket):
     _untouched(ws)
 
 
-def test_delete_detail_unreadable_record_deletes_nothing(ws, rec, run, monkeypatch, tmp_path):
+@pytest.mark.parametrize("which", [RUN_B, RUN_C])
+def test_delete_detail_skips_an_unreadable_run_and_says_so(ws, rec, run, monkeypatch, tmp_path, which):
+    """M4: a run that cannot be read is no veto: it is skipped (its detail stays, also this ticket's own
+    files in it), counted in `unreadable`, and the CLI says so plainly; the readable runs lose this ticket's
+    detail."""
     a, _ = rec
-    run_file = record_dir(ws) / "runs" / f"{RUN_C}.jsonl"
+    run_file = record_dir(ws) / "runs" / f"{which}.jsonl"
     outside = tmp_path / "outside.jsonl"
     run_file.rename(outside)
-    run_file.symlink_to(outside)  # one run of the record was changed outside orch
-    code, out, _ = _cli(
+    run_file.symlink_to(outside)  # one run of the record was changed outside orch (planted by an agent)
+    before = sorted(p.name for p in _detail(ws, which).iterdir())
+    code, out, err = _cli(
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
-    assert code == 2 and _answer(out)["code"] == "tampered"
-    assert _detail(ws, RUN_A).is_dir() and _detail(ws, RUN_B).is_dir()
-    assert _changes(ws) == []
+    assert code == 0, out + err
+    gone = 1 if which == RUN_B else 2  # RUN_B is A's: only RUN_A goes; RUN_C is B's: RUN_A and RUN_B go
+    assert json.loads(out) == {"deleted": gone, "ticket": a, "kept": 0, "unreadable": 1}
+    assert "1 run could not be read; its detail was not deleted." in err
+    assert cli_record.delete_unreadable_text(3) == "3 runs could not be read; their detail was not deleted."
+    assert not _detail(ws, RUN_A).exists()
+    assert sorted(p.name for p in _detail(ws, which).iterdir()) == before  # the unreadable run keeps it all
+    assert [c["deleted"] for c in _changes(ws)] == [gone]
+
+
+def test_delete_detail_never_removes_a_folder_a_file_was_written_to_in_between(ws, rec, run, monkeypatch):
+    """M3: after this ticket's files went, another ticket's detail written into the same run folder (before
+    the folder is removed) stays: the folder goes only by rmdir, which fails when it is not empty. The files
+    of a run are deleted under that run's lock (the writer stores detail under it)."""
+    from orch import record
+
+    a, _ = rec
+    real, seen = record._rmdir_empty, []
+
+    def write_in_between(ws_, rel):
+        run_id = rel[-1]
+        seen.append((run_id, (record_dir(ws) / "runs" / f"{run_id}.lock").exists()))
+        late = record_dir(ws) / "detail" / run_id / ("f" * 32 + ".json")
+        late.write_text("{}")  # another ticket's writer was quicker than the folder removal
+        return real(ws_, rel)
+
+    monkeypatch.setattr(record, "_rmdir_empty", write_in_between)
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
+    )
+    assert code == 0, out + err
+    assert sorted(seen) == [(RUN_A, True), (RUN_B, True)]  # under each run's lock
+    for run_id in (RUN_A, RUN_B):
+        assert [p.name for p in _detail(ws, run_id).iterdir()] == ["f" * 32 + ".json"]
+
+
+def test_rmdir_empty_removes_only_an_empty_folder(ws, rec):
+    from orch import record
+
+    assert record._rmdir_empty(ws, ("detail", RUN_A)) is False  # not empty: stays
+    assert _detail(ws, RUN_A).is_dir()
+    (record_dir(ws) / "detail" / "r_emptyy1").mkdir()
+    assert record._rmdir_empty(ws, ("detail", "r_emptyy1")) is True
+    assert not (record_dir(ws) / "detail" / "r_emptyy1").exists()
+    assert record._rmdir_empty(ws, ("detail", "r_emptyy1")) is False  # already gone
+
+
+def test_delete_detail_deletes_this_tickets_orphan_files(ws, rec, run, monkeypatch):
+    """M4: a detail file of this ticket that no line points at (the detail is written before its line: a crash
+    in between) goes too and counts in `deleted`; another ticket's orphan and a file whose stored fields do
+    not give its own name stay."""
+    from orch import record
+
+    a, b = rec
+    example = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+
+    def orphan(run_id, tid, eid, *, name=None):
+        payload = {
+            "v": 1,
+            "id": eid,
+            "run": run_id,
+            "kind": example["kind"],
+            "ticket": tid,
+            "input": {},
+            "output": "orphan",
+            "truncated": False,
+            "hidden": 0,
+        }
+        name = name or record.detail_name(run_id, example["kind"], eid, tid)
+        folder = _detail(ws, run_id)
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = folder / f"{name}.json"
+        path.write_text(json.dumps(payload))
+        os.chmod(path, 0o600)
+        return path
+
+    RUN_D = "r_4d4d4d"
+    mine_in_c = orphan(RUN_C, a, "toolu_lost1")  # A's orphan in B's run
+    mine_alone = orphan(RUN_D, a, "toolu_lost2")  # A's orphan in a run with no run file at all
+    theirs = orphan(RUN_C, b, "toolu_lost3")  # B's orphan: stays
+    renamed = orphan(RUN_C, a, "toolu_lost4", name="0" * 32)  # stored fields do not give this name: stays
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out) == {"deleted": 4, "ticket": a, "kept": 0, "unreadable": 0}  # A, B, C, D
+    assert not mine_in_c.exists() and not mine_alone.exists() and not _detail(ws, RUN_D).exists()
+    assert theirs.exists() and renamed.exists()
+    assert len(list(_detail(ws, RUN_C).iterdir())) == 4  # B's two own files, B's orphan, the renamed one
+    assert [c["deleted"] for c in _changes(ws)] == [4]
 
 
 def test_delete_detail_needs_json(ws, rec, run):
@@ -1044,6 +1136,153 @@ def test_settle_bool_in_a_numeric_file_setting_is_the_default(ws, run):
     assert _record(ws, "insights.keep_days") is None and _record(ws, "insights.max_mb") is None
     settings = json.loads(run("record", "settings", "--json")[1])
     assert type(settings["keep_days"]) is int and type(settings["max_mb"]) is int
+
+
+# (file key, file value, effective value: snapped down, floor 30 / 512, never above the record)
+FILE_RETENTION = [
+    ("keep_days", True, 90),  # a bool is not a number: the default
+    ("keep_days", 1, 30),  # the floor: a file edit cannot make pruning delete nearly everything
+    ("keep_days", 29, 30),
+    ("keep_days", 45, 30),  # snapped DOWN to an allowed value
+    ("keep_days", 100, 90),
+    ("keep_days", 0, 90),  # <= 0: the default
+    ("keep_days", -5, 90),
+    ("keep_days", 99999, 90),  # snapped to 365, then the default record (90) caps it
+    ("max_mb", 1, 512),
+    ("max_mb", 600, 512),
+    ("max_mb", False, 2048),
+    ("max_mb", 10**9, 2048),
+]
+
+
+@pytest.mark.parametrize("key,value,want", FILE_RETENTION)
+def test_file_retention_is_snapped_down_with_a_floor(ws, run, monkeypatch, key, value, want):
+    """H2: an agent's edit of config.toml can lower retention only to an allowed value, never below 30 / 512,
+    and never writes a record below that floor."""
+    from orch import record
+
+    setting = f"insights.{key}"
+    config.set_key(ws, "record", key, value)
+    assert config.file_value(ws, "record", key) in hp.RETENTION_ALLOWED[setting]
+    got = _get(run, setting)
+    assert got == want and type(got) is int
+    assert getattr(config, f"record_{key}")(ws) == want
+    rec = _record(ws, setting)
+    assert rec is None or (rec["value"] == want and rec["value"] >= hp.RETENTION_FLOOR[setting])
+    seen = []
+    monkeypatch.setattr(record, "apply_retention", lambda root, now, keep, mb, fold: seen.append((keep, mb)))
+    cli_record.prune(ws, lambda r, e: None, now="2026-11-16T00:00:00Z")
+    assert seen[-1][0] >= 30 and seen[-1][1] >= 512 and want in seen[-1]
+
+
+@pytest.mark.parametrize("planted", [1, 29, 511])
+def test_a_record_below_the_floor_counts_as_none(ws, planted):
+    hp.key_dir(ws)
+    path, wkey = hp._settings_path(ws)
+    recs = {
+        s: {"value": planted, "by": "file", "at": "2026-11-16T09:00:00Z"}
+        for s in ("insights.keep_days", "insights.max_mb")
+    }
+    hp._write_private(path, json.dumps({"schema": "orch.human-settings/1", "workspaces": {wkey: recs}}))
+    assert config.record_keep_days(ws) == 90 and config.record_max_mb(ws) == 2048
+
+
+def test_unreadable_settings_record_retention_is_the_lower_of_file_and_default(ws):
+    hp.key_dir(ws)
+    path, _ = hp._settings_path(ws)
+    hp._write_private(path, "not json")
+    assert config.record_keep_days(ws) == 90 and config.record_max_mb(ws) == 2048
+    config.set_key(ws, "record", "keep_days", 30)
+    config.set_key(ws, "record", "max_mb", 4096)
+    assert config.record_keep_days(ws) == 30 and config.record_max_mb(ws) == 2048
+
+
+def test_key_lock_nested_in_one_thread_and_another_thread_waits(ws):
+    """H1: keys.lock is re-entrant per thread by design (a depth count over one O_EXCL file): nested takes in
+    one thread go through; a second thread blocks until the first thread's OUTERMOST exit."""
+    import threading
+
+    d = hp.key_dir(ws)
+    order, entered = [], threading.Event()
+
+    def other():
+        with hp._key_lock(d):
+            order.append("other")
+        entered.set()
+
+    with hp._key_lock(d):
+        with hp._key_lock(d):  # nested in the same thread: no wait, no deadlock
+            t = threading.Thread(target=other)
+            t.start()
+            assert not entered.wait(0.3)  # the other thread is held off ...
+        assert not entered.wait(0.2)  # ... also after the INNER exit
+        order.append("first")
+    assert entered.wait(5)  # ... and gets in after the outermost exit
+    t.join(5)
+    assert order == ["first", "other"]
+
+
+def test_proof_stdin_is_read_before_keys_lock_is_taken(ws, run, monkeypatch):
+    """M1: the proof line is read (a stdin that never closes) BEFORE change_insights takes keys.lock: while
+    the reader waits, another thread can take the lock; only verify-and-consume runs inside it."""
+    import threading
+
+    d = hp.key_dir(ws)
+    key = "insights.keep_days"
+    proof = _sp(ws, key, "365")
+    checks = []
+
+    def slow_reader():
+        checks.append(hp._lock_held(d))  # not held by this thread while stdin is read
+        done = threading.Event()
+
+        def take():
+            with hp._key_lock(d):
+                done.set()
+
+        t = threading.Thread(target=take)
+        t.start()
+        checks.append(done.wait(5))  # another thread gets keys.lock while this one waits on stdin
+        t.join(5)
+        return proof
+
+    monkeypatch.setattr(hp, "read_proof_line", slow_reader)
+    code, out, err = run("config", "set", key, "365", "--proof-stdin", "--json")
+    assert code == 0, out + err
+    assert checks == [False, True] and _get(run, key) == 365 and _used(ws) == 1
+
+
+def test_a_proof_stdin_that_never_closes_does_not_hold_keys_lock(ws, run, monkeypatch):
+    """M1 with a real pipe nobody writes to: the command waits on stdin with keys.lock free."""
+    import threading
+
+    d = hp.key_dir(ws)
+    r, w = os.pipe()
+    reader = os.fdopen(r, "r")
+    monkeypatch.setattr("sys.stdin", reader)
+    result = []
+    t = threading.Thread(
+        target=lambda: result.append(
+            run("config", "set", "insights.keep_days", "365", "--proof-stdin", "--json")
+        ),
+        daemon=True,
+    )
+    t.start()
+    time.sleep(0.3)  # the command now waits on the pipe
+    got = threading.Event()
+
+    def take():
+        with hp._key_lock(d):
+            got.set()
+
+    taker = threading.Thread(target=take, daemon=True)
+    taker.start()
+    try:
+        assert got.wait(5), "keys.lock was held while the proof was read from stdin"
+    finally:
+        os.close(w)  # stdin ends: the command finishes (no proof: refused)
+        t.join(10)
+    assert result and result[0][0] == 2 and _answer(result[0][1])["code"] == "needs_person"
 
 
 def test_retention_read_never_overwrites_a_newer_widening(ws, monkeypatch):
@@ -1277,7 +1516,8 @@ def test_delete_detail_keeps_other_tickets_detail_in_a_shared_run(ws, rec, run, 
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0}  # RUN_A, RUN_B and A's one file in RUN_C
+    # RUN_A, RUN_B and A's one file in RUN_C
+    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0, "unreadable": 0}
     after = sorted(p.name for p in _detail(ws, RUN_C).iterdir())
     assert len(after) == 2 and set(after) < set(before)
     for n in (1, 2):  # B's detail is still there
@@ -1358,7 +1598,7 @@ def test_planted_line_of_another_ticket_does_not_block_delete(ws, rec, run, monk
         run, monkeypatch, _proof(ws, "record.delete_detail", a), "record", "delete-detail", a, "--json"
     )
     assert code == 0, out + err
-    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0}
+    assert json.loads(out) == {"deleted": 3, "ticket": a, "kept": 0, "unreadable": 0}
     assert not _detail(ws, RUN_A).exists() and not _detail(ws, RUN_B).exists()
     left = sorted(p.name for p in _detail(ws, RUN_C).iterdir())
     assert len(left) == 2 and set(left) < set(b_files)
@@ -1387,7 +1627,7 @@ def test_planted_line_path_is_refused_on_read_and_counted_as_kept(ws, rec, run, 
     )
     assert code == 0, out + err
     # B's RUN_C goes; A's file named by B's planted line stays and is reported
-    assert json.loads(out) == {"deleted": 1, "ticket": b, "kept": 1}
+    assert json.loads(out) == {"deleted": 1, "ticket": b, "kept": 1, "unreadable": 0}
     assert not _detail(ws, RUN_C).exists()
     assert sorted(p.name for p in _detail(ws, RUN_A).iterdir()) == a_files
     code, out, _ = run("record", "query", "--run", RUN_A, "--detail", f"toolu_{RUN_A[2:]}2", "--json")
@@ -1413,3 +1653,69 @@ def test_prune_uses_the_effective_values(ws, run, monkeypatch):
     config.set_key(ws, "record", "keep_days", 30)  # a lower file value counts at once
     cli_record.prune(ws, lambda r, e: None)
     assert seen[-1] == (30, 2048)
+
+
+# ------------------------------------------------------------------ --detail compares ticket and id (M5)
+
+
+def test_detail_of_a_line_with_no_ticket_is_tampered(ws, rec, monkeypatch, run):
+    """The line's ticket is ALWAYS compared: a line with no ticket (None) never reads a stored t_... file."""
+    from orch import record
+
+    real = record.read_run
+
+    def ticketless(*a, **k):
+        result = real(*a, **k)
+        for e in result.value or []:
+            e.pop("ticket", None)
+        return result
+
+    monkeypatch.setattr(record, "read_run", ticketless)
+    code, out, _ = run("record", "query", "--run", RUN_A, "--detail", f"toolu_{RUN_A[2:]}1", "--json")
+    assert code == 2 and _answer(out)["code"] == "tampered"
+
+
+def test_detail_whose_stored_id_is_not_the_lines_is_tampered(ws, rec, run):
+    """A planted line of the SAME ticket with another id pointing at an existing file: the stored id
+    differs."""
+    victim = _own_line(ws, RUN_A, 1)
+    _plant(ws, RUN_A, dict(victim, id="toolu_fake01", seq=99))
+    code, out, _ = run("record", "query", "--run", RUN_A, "--detail", "toolu_fake01", "--json")
+    assert code == 2 and _answer(out)["code"] == "tampered"
+    code, out, _ = run("record", "query", "--run", RUN_A, "--detail", victim["id"], "--json")
+    assert code == 0 and json.loads(out)["id"] == victim["id"]
+
+
+def test_counts_report_the_effective_share_names(ws, run, monkeypatch):
+    def names():
+        code, out, err = run("record", "counts", "--json")
+        assert code == 0, out + err
+        return json.loads(out)["sharing"]["names"]
+
+    assert names() is False
+    config.set_key(ws, "insights", "share_names", True)  # the file alone: still off
+    assert names() is False
+    proof = _sp(ws, "insights.share_names", "on")
+    assert _cli(run, monkeypatch, proof, "config", "set", "insights.share_names", "on", "--json")[0] == 0
+    assert names() is True
+
+
+def test_relay_connect_clears_the_last_admin_policy(ws, monkeypatch):
+    """A (re)connection never inherits a stale admin policy; the refresh of THIS connection writes it."""
+    from orch import net, relay
+
+    _connect(ws, "off")
+    assert config.share_counts_state(ws) == "off_by_admin"
+    monkeypatch.setattr(net, "connect_service", lambda *a, **k: {"workspace": "w_2"})
+    monkeypatch.setattr(relay, "refresh", lambda root: "refreshed")
+    relay.connect(ws, "https://r2.example", "w_2", "orn_y")
+    assert not (net.secrets_dir(ws) / "policy.json").exists()
+    assert config.share_counts_state(ws) == "on"
+
+
+def test_an_event_with_no_ticket_gets_no_detail_file(ws):
+    """M5: one rule for a missing ticket: no detail file (not detail_lost); the writer's guard."""
+    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    event = {"run": RUN_A, "kind": "step", "id": "toolu_x", "ticket": None}
+    assert w._prepare_detail(event, {"input": {}, "output": "x"}) is None
+    assert "detail_lost" not in event

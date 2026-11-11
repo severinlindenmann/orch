@@ -580,7 +580,10 @@ def _detail(root: Path, args) -> dict:
     _show_alert(detail.alert)
     if detail.status != "ok":
         raise _fail(detail)
-    if detail.value.get("id") != args.detail:  # the file must be the one this event points to
+    # ALWAYS compared (a line with no ticket is None, never equal to a stored t_...): the file must be the one
+    # this event points to, of the line's own ticket and id
+    stored = (detail.value.get("ticket"), detail.value.get("id"))
+    if stored != (line.get("ticket"), line["id"]) or line["id"] != args.detail:
         raise RecordError(str(record.RecordTampered("swapped")), "tampered")
     return detail.value
 
@@ -619,12 +622,15 @@ def settings(root: Path) -> dict:
 # --- delete-detail (a person only) ---
 def delete_detail(root: Path, args) -> dict:
     """Delete the detail of one ticket: the detail files its own lines point at whose name is this ticket's
-    own (I4; a person's own decision, op `record.delete_detail`, target the ticket id, invariant H1);
-    `deleted` = the runs that lost detail, `kept` = files its lines point at that are not its own name
-    (left, reported). Lines, counts and the detail of other tickets stay. Order: an agent is refused before
-    anything else (needs_person); a ticket that does not exist is not_found; then the proof (needs_person); a
-    record that cannot be read refuses with nothing deleted; the audit line is written BEFORE anything is
-    deleted (it cannot be written: not_available, nothing deleted)."""
+    own (I4), and its own files no line points at (orphans, found by their stored ticket/kind/id); a person's
+    own decision, op `record.delete_detail`, target the ticket id, invariant H1. `deleted` = the runs that
+    lost detail, `kept` = files its lines point at that are not its own name (left, reported), `unreadable` =
+    runs that could not be read (skipped, never a veto; their detail stays, said plainly on stderr). Lines,
+    counts and the detail of other tickets stay. Order: an agent is refused before anything else
+    (needs_person); a ticket that does not exist is not_found (a deleted ticket's detail goes with retention:
+    accepted); then the proof (needs_person); a detail folder that is not safe refuses with nothing deleted;
+    the audit line is written BEFORE anything is deleted (it cannot be written: not_available, nothing
+    deleted)."""
     from orch import humanproof, tickets
 
     agent = tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:")
@@ -651,13 +657,15 @@ def delete_detail(root: Path, args) -> dict:
         raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
     mine: dict[tuple[str, str], None] = {}
     pointed: dict[tuple[str, str], None] = {}
+    unreadable: dict[str, None] = {}
     for run in _known(root):
         result = record.read_run(root, run, seen_by="cli")
         _show_alert(result.alert)
         if result.status == "unavailable" and result.reason == "missing":
             continue  # pruned since it was listed: nothing of it to delete
         if result.status != "ok":
-            raise _fail(result)  # nothing is deleted when any run of the record cannot be read
+            unreadable.setdefault(run)  # skipped and reported (no veto): its detail is not deleted
+            continue
         for e in result.value:
             ref = _detail_ref(run, e.get("detail"))
             if ref is None or e.get("ticket") != tid:
@@ -672,17 +680,29 @@ def delete_detail(root: Path, args) -> dict:
     _show_alert(found.alert)
     if found.status != "ok":
         raise _fail(found)
-    deleted = len({run for run, _ in found.value})
+    # This ticket's own files no line points at (orphans: the detail is written before its line): found by
+    # their stored ticket, id and kind, which must give the file's own name (I4).
+    orphans = record.ticket_detail_files(root, tid, skip=tuple(unreadable))
+    _show_alert(orphans.alert)
+    if orphans.status != "ok":
+        raise _fail(orphans)
+    own_files, unreadable_folders = orphans.value
+    for run in unreadable_folders:
+        unreadable.setdefault(run)
+    items = list(dict.fromkeys([*found.value, *(ref for ref in own_files if ref[0] not in unreadable)]))
+    deleted = len({run for run, _ in items})
     try:
         record.note_change(root, change="record.delete_detail", by=who, ticket=tid, deleted=deleted)
     except (OSError, record.RecordInvalid):
         raise RecordError(DELETE_NOT_SAVED, "not_available") from None
     try:
-        record.delete_detail_files(root, found.value)
-    except (OSError, record.RecordInvalid):
+        record.delete_detail_files(root, items)
+    except (OSError, record.RecordInvalid, record.RecordBusy):
         # The audit line above names what was going to go; what is left can be deleted with a new proof.
         raise RecordError(DELETE_PARTLY, "not_available") from None
-    return {"deleted": deleted, "ticket": tid, "kept": kept}
+    if unreadable:
+        print(delete_unreadable_text(len(unreadable)), file=sys.stderr)
+    return {"deleted": deleted, "ticket": tid, "kept": kept, "unreadable": len(unreadable)}
 
 
 def prune(root: Path, fold, now: str | None = None) -> dict:
@@ -697,6 +717,15 @@ def prune(root: Path, fold, now: str | None = None) -> dict:
 
 DELETE_NOT_SAVED = "The deletion could not be noted in the record, so nothing was deleted. Try again later."
 DELETE_PARTLY = "Some details could not be deleted. Try again later."
+
+
+def delete_unreadable_text(n: int) -> str:
+    """The plain words for `unreadable` (a page shows the same sentence)."""
+    if n == 1:
+        return "1 run could not be read; its detail was not deleted."
+    return f"{n} runs could not be read; their detail was not deleted."
+
+
 _DETAIL_REF = re.compile(r"^detail/(r_[a-z0-9_]{6,32})/([0-9a-f]{32})\.json$")
 
 
@@ -899,7 +928,7 @@ def counts(root: Path, args) -> dict:
         },
         "sharing": {
             "counts": config.share_counts_state(root),
-            "names": False,
+            "names": config.insights_share_names(root),  # the EFFECTIVE share_names (file AND the record)
             "last_sent": None,
             "queued": 0,
         },

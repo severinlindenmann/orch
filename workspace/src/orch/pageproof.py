@@ -56,8 +56,11 @@ def child_env(env: dict, orch_bin: str | None) -> dict:
 def cookie_name(server: str, port: int) -> str:
     """The session cookie of ONE page server on ONE port: `orch_page_<server>_<port>`. Cookies on 127.0.0.1
     are shared by every loopback port (Path=/), so a single name would let one server's login replace (log
-    out) the other's and hand its value to every loopback server; a per-server, per-port name keeps them
-    apart."""
+    out) the other's. The per-server, per-port name keeps the SESSIONS of the servers apart on the same host
+    (one server's login never replaces another's, and a server only accepts its own name). It does NOT keep
+    the values apart: the browser still sends every cookie of the host to every localhost port, so any
+    local server the person visits (an agent-run dev server too) receives them (documented residual; the
+    mint route also checks Host, Origin and the absence of proxy headers)."""
     if not isinstance(server, str) or not _SERVER_NAME_RE.fullmatch(server):
         raise ValueError("not a page server name")
     if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:

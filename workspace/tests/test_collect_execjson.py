@@ -142,12 +142,26 @@ def test_detail_names(case):
 
 
 def test_detail_name_binds_the_ticket():
-    """Invariant I4: two tickets with the same run, kind and id never share a detail file; no ticket = ""."""
+    """Invariant I4: two tickets with the same run, kind and id never share a detail file; an event with no
+    ticket has no detail file at all."""
     a = detail_name("r_8k2m01", "step", "toolu_1", "t_aaaaaa")
     b = detail_name("r_8k2m01", "step", "toolu_1", "t_bbbbbb")
     assert a != b and len(a) == len(b) == 32
-    assert detail_name("r_8k2m01", "step", "toolu_1", None) == detail_name("r_8k2m01", "step", "toolu_1", "")
-    assert detail_name("r_8k2m01", "step", "toolu_1", None) not in (a, b)
+    assert detail_name("r_8k2m01", "step", "toolu_1", None) is None
+    assert detail_name("r_8k2m01", "step", "toolu_1", "") is None
+
+
+def test_no_ticket_no_detail_pointer():
+    """A mapped event with no ticket keeps its fields but points at no detail file (not detail_lost)."""
+    line = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {"id": "item_0", "type": "command_execution", "command": "ls", "exit_code": 0},
+        }
+    )
+    (event,) = ExecJsonMapper("r_cx00001", None, "codex").feed(line)
+    assert event["detail"] is None and "detail_lost" not in event
+    assert (event["kind"], event["text"], event["ticket"]) == ("step", "ls", None)
 
 
 @pytest.mark.parametrize("line", ["", "not json", "[]", b"\xff", "null", "42", '{"item":[]}'])

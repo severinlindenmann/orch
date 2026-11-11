@@ -248,18 +248,27 @@ def _insights_set(args, root: Path) -> None:
         if not (args.value.isascii() and args.value.isdigit()) or int(args.value) not in allowed:
             raise _Coded("Choose one of: " + ", ".join(str(v) for v in allowed) + ".", "invalid")
         value = int(args.value)
+    agent = AGENT_ASKS.format(what=f"change {key}") if _actor(args).startswith("agent:") else None
+    # The proof line is read from stdin HERE, before change_insights takes keys.lock: a caller whose stdin
+    # never closes must not hold the lock. Only verify-and-consume runs inside it. An agent's stdin is never
+    # read.
+    proof = humanproof.read_proof_line() if agent is None and getattr(args, "proof_stdin", False) else None
+    extra = {} if proof is None else {"proof": proof}
     res = config.change_insights(
         root,
         key,
         value,
-        agent=AGENT_ASKS.format(what=f"change {key}") if _actor(args).startswith("agent:") else None,
+        agent=agent,
         person=lambda target: _person(
             args,
             root,
             "insights.settings",
             target,
-            no_handoff=humanproof.HANDOFF,  # page only: a hand-off would wait for a click holding keys.lock
+            # no_handoff = the refusal words instead of a hand-off card (HANDOFF: "Do this in the dashboard on
+            # this computer."): page only, as a hand-off would wait for a click holding keys.lock
+            no_handoff=humanproof.HANDOFF,
             parts={"setting": key, "value": config.insights_text(value)},
+            **extra,
         ),
         if_current=args.if_current,
     )

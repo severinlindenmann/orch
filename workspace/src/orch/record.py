@@ -511,6 +511,28 @@ def _rmtree(ws, rel):
         os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
 
 
+def _rmdir_empty(ws, rel):
+    """Remove the folder only if it is empty, in ONE step: rmdir itself fails on a folder that is not empty,
+    so a file another writer created in between is never removed with it (no check-then-delete). True when
+    it went; False when it is not empty or already gone."""
+    _parts(rel)
+    try:
+        with _walk(ws, rel[:-1]) as directory:
+            try:
+                os.rmdir(
+                    rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {})
+                )
+            except OSError as error:
+                if error.errno in (errno.ENOTEMPTY, errno.EEXIST, errno.ENOENT):
+                    return False
+                raise
+            return True
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return False
+
+
 def _try_lock(fd):
     with _io():
         try:
@@ -1069,8 +1091,8 @@ class RecordWriter:
         return line.encode("utf-8")
 
     def _prepare_detail(self, event, detail, hidden=0):
-        if detail is None:
-            return None
+        if detail is None or not event.get("ticket"):
+            return None  # an event with no ticket gets no detail file (not detail_lost: activity.md, I4)
         try:
             before = _json(detail).count("[hidden: ")
             payload = self.hider.hide_json(detail)
@@ -1400,28 +1422,74 @@ def detail_files(workspace, items, *, seen_by="cli"):
         return _report(workspace, error, "folder", None, seen_by)
 
 
+def ticket_detail_files(workspace, ticket, *, skip=(), seen_by="cli"):
+    """ReadResult of ((run, detail id) pairs, runs whose detail folder cannot be read): every file in
+    detail/<run>/ whose STORED payload belongs to `ticket` and whose name is the I4 name of its own stored
+    (run, kind, id, ticket). So this ticket's own files are found also when no line points at them (orphans: a
+    crash between the detail write and its line). A file of another ticket, a name orch never writes, or a
+    file that is not valid is left alone, silently (it is not read as this ticket's: no alert). Runs in `skip`
+    (their run file cannot be read) are not looked at; a run's detail folder that is not safe is skipped and
+    returned as unreadable (no veto). The detail folder itself not being safe refuses."""
+    found, unreadable = [], []
+    try:
+        try:
+            runs = _entries(workspace, ("detail",))
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+            return ReadResult("ok", ([], []))
+        for run in sorted(runs):
+            if not re.fullmatch(_RUN, run) or run in skip:
+                continue
+            try:
+                names = _entries(workspace, ("detail", run))
+            except RecordUnavailable as error:
+                if error.reason != "missing":
+                    unreadable.append(run)
+                continue
+            except RecordTampered as error:
+                _report(workspace, error, "folder", run, seen_by)
+                unreadable.append(run)
+                continue
+            for name in sorted(names):
+                if not re.fullmatch(_FILE + r"\.json", name):
+                    continue  # a name orch never writes for a detail file (a writer's tmp_ file too)
+                file_id = name[: -len(".json")]
+                try:
+                    value = _read_json(workspace, ("detail", run, name))
+                except (RecordTampered, RecordUnavailable):
+                    continue
+                if (
+                    _DETAIL_VALIDATOR.is_valid(value)
+                    and value["run"] == run
+                    and value["ticket"] == ticket
+                    and detail_name(run, value["kind"], value["id"], ticket) == file_id
+                ):
+                    found.append((run, file_id))
+        return ReadResult("ok", (found, unreadable))
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", None, seen_by)
+
+
 def delete_detail_files(workspace, items, *, seen_by="cli"):
     """Delete exactly these detail files ((run, detail id) pairs): every one is checked first (nothing is
-    deleted when one is not safe), then they go one by one; a run's detail folder left empty goes too. Detail
-    of other tickets in the same run stays. Returns how many files were deleted."""
+    deleted when one is not safe), then they go run by run UNDER THE RUN'S LOCK (the writer stores detail
+    under it); a run's detail folder goes only when rmdir finds it empty, so detail of other tickets in the
+    same run (also one written in between) stays. Returns how many files were deleted."""
     rels = [_detail_file(run, file_id) for run, file_id in items]
     run, gone = None, 0
     try:
         for rel in rels:
             run = rel[1]
             _size(workspace, rel)
-        for rel in rels:
-            run = rel[1]
-            gone += 1 if _unlink(workspace, rel) else 0
         for run in dict.fromkeys(rel[1] for rel in rels):
-            try:
-                left = _entries(workspace, ("detail", run))
-            except RecordUnavailable as error:
-                if error.reason != "missing":
-                    raise
-                continue
-            if not left:
-                _rmtree(workspace, ("detail", run))
+            with _lock(workspace, run) as check_lock:
+                for rel in rels:
+                    if rel[1] == run:
+                        check_lock()
+                        gone += 1 if _unlink(workspace, rel) else 0
+                check_lock()
+                _rmdir_empty(workspace, ("detail", run))
     except (RecordTampered, RecordUnavailable) as error:
         _report(workspace, error, "folder", run, seen_by)
         raise

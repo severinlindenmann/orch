@@ -410,7 +410,8 @@ def test_detail_name_property():
     for run in ("r_8k2m01", "r_8k2m02"):
         for kind in ("step", "helper.start", "run.state"):
             for eid in ids:
-                for ticket in ("t_aaaaaa", "t_bbbbbb", None):
+                assert detail_name(run, kind, eid, None) is None  # no ticket: no detail file (I4)
+                for ticket in ("t_aaaaaa", "t_bbbbbb", "t_cccccc"):
                     name = detail_name(run, kind, eid, ticket)
                     assert re.fullmatch("[0-9a-f]{32}", name)
                     assert seen.setdefault(name, (run, kind, eid, ticket)) == (run, kind, eid, ticket)

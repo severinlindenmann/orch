@@ -92,7 +92,12 @@ tombstone (inventory.md).
 **Retention numbers** (`[record] keep_days` 30 · 90 · 365 and `[record] max_mb` 512 · 1024 · 2048 · 4096, set as
 `insights.keep_days` / `insights.max_mb`, record keys of the same names) are the number form: the record holds the value a
 person approved; **effective = the LOWER of the file value and the record** (the default record 90 / 2048 when none exists,
-or when the record is unreadable or holds anything but a whole number from 1 to the largest allowed value). Raising above
+or when the record holds anything but a whole number from the floor to the largest allowed value). A file value is first
+snapped DOWN to the allowed list with a **floor of 30 days / 512 MB** (`keep_days = 1` counts as 30, `100` as 90, `99999` as
+365; a bool, a wrong type or a value <= 0 is the default), so an edit of config.toml can never make pruning delete nearly the
+whole record; a record value below the floor counts as no record. An unreadable settings record (a home or file that
+cannot be read) falls back to the lower of the file value and the default record 90 / 2048: never wider than the
+default, though it may be wider than a lowered record that can no longer be read (accepted). Raising above
 the record needs an `insights.settings` proof (target = `<setting>=<value>`, below); lowering is open to anyone and writes the lower
 record (`by: reset`, or `file` when the core saw a lower file value), so the file alone never keeps records longer or larger
 than a person approved. So a READ of a retention value (`orch config get`, `orch record settings`, pruning) may write:
@@ -109,7 +114,9 @@ switch off→`on`, a larger number) by an agent caller is refused before anythin
 otherwise needs an `insights.settings` proof that is **value-bound**: target `<setting>=<value>` (`insights.keep_days=365`,
 `insights.share_names=on`; booleans `on`/`off`); it is verified and spent (verify_and_consume) in the same critical section
 as the record write, so a proof for another value or key, or one already used, is refused (`needs_person`) and nothing
-changes. The same value succeeds without a proof and writes nothing (a given proof is not read). A narrowing needs no proof
+changes. The proof LINE is read from stdin (`--proof-stdin`) before keys.lock is taken, so a caller whose stdin never
+closes cannot hold the lock (keys.lock also gives up after 10 s, "The key store is busy"); an agent caller's stdin is
+never read. The same value succeeds without a proof and writes nothing (a given proof is not checked or spent). A narrowing needs no proof
 and writes the off / lower record. `--if-current <old>` (on/off or the number): if the current effective value is not
 `<old>` the command refuses with code `changed` ("This changed in the meantime: now <current>") and writes nothing, so a
 page that showed a stale value gets a clean refusal. `insights.share_counts on` is refused with code `not_available`

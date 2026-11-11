@@ -245,7 +245,7 @@ def test_agents_test_not_installed_and_unknown(proj, run, capsys, fake_path):
 RESERVED = [
     ("focus", "live_session", True, False),
     ("focus", "session_typing", False, True),
-    ("record", "keep_days", 90, 12),
+    ("record", "keep_days", 90, 30),  # an allowed value (others are snapped: test_insights_settings.py)
     ("record", "max_mb", 2048, 512),
     ("insights", "share_counts", True, False),
     ("insights", "share_names", False, True),

@@ -46,13 +46,17 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
 - `seq` = position in the run file, 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
 - `run`, `session`, `agent` (`main` or `h_<n>`), `parent` (null for main) bind the event; `ticket` is the run's ticket.
 - **Detail file name** (invariant I4): always 32 lowercase hex characters, `sha256(b"orch.detail/2\0" + run + b"\0" + kind +
-  b"\0" + id + b"\0" + ticket)[:32]` (UTF-8; a missing ticket is the empty string; vectors `detail_names`); no raw id ever
+  b"\0" + id + b"\0" + ticket)[:32]` (UTF-8; vectors `detail_names`). **An event with no ticket gets no detail file**: its
+  `detail` stays null, it is not `detail_lost`, the line keeps its other fields (the detail schema requires `ticket`). No raw id ever
   becomes a file name, so case-insensitive file systems, separators and reserved names cannot make two events share a file.
   The ticket is part of the name, so two tickets never share a detail file, even with the same run, kind and id: a line of
   ticket B can only name a file made for B. The path is `detail/<run>/<file name>.json`. The file stores `id`, `kind` and
   `ticket`; a writer never overwrites a file whose stored `(run, kind, id, ticket)` differs. A reader recomputes the name
   from the stored `(run, kind, id, ticket)` and refuses a file whose name does not match (`swapped`); `--detail` also
-  refuses (`tampered`) a file whose stored `ticket` or `id` is not the one of the line pointing at it.
+  refuses (`tampered`) a file whose stored `ticket` or `id` is not the one of the line pointing at it (always compared: a
+  line with no ticket never matches a stored `t_…`).
+  Detail files made before the ticket-bound name (`orch.detail/1`) are not read (a read reports them `swapped`) and not
+  migrated or deleted by delete-detail: the record store was not released before this rule (pre-release, no legacy rule).
 - **Detail lost.** When a payload exists but cannot be stored (the file name is taken by another event, a write fails, or it
   exceeds the 1 MB limit), the line is still written with `detail: null` and `detail_lost: true`. A detail problem
   never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file.
@@ -173,7 +177,8 @@ keeps) and `files_normalise` (producer normalisation).
 
 `[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048` (512 · 1024 · 2048 · 4096). Pruning uses the
 **effective** values (`config.record_keep_days` / `record_max_mb`): the lower of the file value and the person's settings
-record (default record 90 / 2048; human-proof.md, Settings), so a file value alone never keeps more. Raising either needs an
+record (default record 90 / 2048; human-proof.md, Settings), so a file value alone never keeps more; a file value is
+snapped down to the list with a floor of 30 / 512, so a file edit alone never makes pruning delete nearly everything. Raising either needs an
 `insights.settings` proof bound to the new value (target `insights.keep_days=365`); lowering does not, and deletes nothing at once (the next pruning applies it).
 Pruning runs when a run ends and once a day:
 1. Before anything is deleted, the run is folded into `counts/<day>.json` (counts never depend on detail).
@@ -217,23 +222,30 @@ Vectors `retention` fix the order.
   hardened helpers (no record yet: 0). When the record cannot be read, the sizes and `runs` are `null` and the answer
   carries the read marker `status` (`unavailable` | `tampered`), `reason`, `message` (exit 0).
 - **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…", "kept":
-  k}` (a person only: op `record.delete_detail`, target = the ticket id). Exactly the detail files the ticket's OWN lines
-  point at go (`detail/<run>/<file name>.json` of a line with that `ticket` whose file name is the I4 name of that line's
-  run, kind, id and ticket). Lines of other tickets never veto it: by I4 their own files have other names, so a run shared
-  with other tickets keeps their detail and a line planted elsewhere cannot block the deletion. A line of this ticket that
-  points at a file whose name is not this ticket's own (planted or changed) is not followed: that file stays and is
-  counted in `k` (never skipped silently). A run's detail folder goes only when nothing is left in it. `n` = the runs
-  that lost detail. Run files, lines and counts stay; the events then show "Details not available" (`--detail` answers
-  `not_found`). Before anything is deleted the core appends one `orch.record-change/1` line (`$defs/record_change`: `{v,
-  schema, at, change: "record.delete_detail", by: <the proven person>, ticket, deleted: n}`, no path, no content) to
-  `alerts/<day>.jsonl`, so the deletion itself stays auditable; if that line cannot be written nothing is deleted
-  (`not_available`). `deleted` is what was going to go: a failure in the middle answers `not_available` ("Some details
-  could not be deleted"), the rest goes with a new proof (and a new line).
+  k, "unreadable": u}` (a person only: op `record.delete_detail`, target = the ticket id). The detail files the ticket's
+  OWN lines point at go (`detail/<run>/<file name>.json` of a line with that `ticket` whose file name is the I4 name of
+  that line's run, kind, id and ticket), and so do this ticket's own files that no line points at (orphans, e.g. a crash
+  between the detail write and its line): a file in `detail/<run>/` whose stored `ticket` is this ticket and whose stored
+  `(run, kind, id, ticket)` gives its own name. Lines of other tickets never veto it: by I4 their own files have other
+  names, so a run shared with other tickets keeps their detail and a line planted elsewhere cannot block the deletion. A
+  line of this ticket that points at a file whose name is not this ticket's own (planted or changed) is not followed:
+  that file stays and is counted in `k` (never skipped silently). A run that cannot be read (its run file or its detail
+  folder unreadable or changed outside orch) is skipped, never a veto: its detail is not deleted, it is counted in `u`,
+  and the CLI (stderr) and the page say so plainly ("N runs could not be read; their detail was not deleted"). The files
+  of one run are deleted under that run's lock; its detail folder goes only when `rmdir` finds it empty (a file written
+  in between stays). `n` = the runs that lost detail. Run files, lines and counts stay; the events then show "Details
+  not available" (`--detail` answers `not_found`). Before anything is deleted the core appends one
+  `orch.record-change/1` line (`$defs/record_change`: `{v, schema, at, change: "record.delete_detail", by: <the proven
+  person>, ticket, deleted: n}`, no path, no content) to `alerts/<day>.jsonl`, so the deletion itself stays auditable;
+  if that line cannot be written nothing is deleted (`not_available`). The line is not authenticated (an agent can
+  append look-alike lines): it is a note, not evidence. `deleted` is what was going to go: a failure in the middle
+  answers `not_available` ("Some details could not be deleted"), the rest goes with a new proof (and a new line).
 - Refused (exit 2, `{"error", "code"}`), in this order, for `delete-detail`: an agent caller (agent tool in the
-  environment, `--by agent:…`) before anything else, `needs_person`; a ticket that does not exist, `not_found`; no or an
-  invalid proof (missing, expired, other target, other op, replayed, a `--by` other than the proof's), `needs_person`;
-  a record that cannot be read (any run unreadable, or the record folder unsafe, e.g. a symlink), `not_available` |
-  `tampered`, with nothing deleted.
+  environment, `--by agent:…`) before anything else, `needs_person`; a ticket that does not exist, `not_found` (accepted:
+  the detail of a ticket deleted from disk goes with retention); no or an invalid proof (missing, expired, other
+  target, other op, replayed, a `--by` other than the proof's), `needs_person`; the record or its `detail` folder unsafe
+  (e.g. a symlink), or a file this ticket's lines point at that is not safe, `not_available` | `tampered`, with nothing
+  deleted.
 
 ## Mapping from a JSON event stream (one-shot collectors)
 

@@ -88,6 +88,9 @@ SETTING_DEFAULTS = {
 # (or the default record when none exists): a file value alone never keeps records longer or larger.
 RETENTION_DEFAULTS = {"insights.keep_days": 90, "insights.max_mb": 2048}
 RETENTION_ALLOWED = {"insights.keep_days": (30, 90, 365), "insights.max_mb": (512, 1024, 2048, 4096)}
+# The lowest retention that can ever count (file or record): 30 days / 512 MB. Lowering is open to anyone, but
+# an edit of config.toml (keep_days = 1) must never make pruning delete nearly the whole record.
+RETENTION_FLOOR = {setting: min(allowed) for setting, allowed in RETENTION_ALLOWED.items()}
 _TARGET_RE = re.compile(r"[A-Za-z0-9_.:@=-]+")  # `=`: the value-bound insights.settings target key=value
 _BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
 _NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22}")
@@ -867,9 +870,17 @@ def effective(root: Path, setting: str, file_value: bool) -> bool:
 
 
 def _retention_ok(setting: str, value) -> bool:
-    """A retention record value that can count: a whole number from 1 up to the largest allowed value (a lower
-    value comes from a lowered file). Anything else (a planted 99999, true, "*") counts as no record."""
-    return type(value) is int and 1 <= value <= max(RETENTION_ALLOWED[setting])
+    """A retention record value that can count: a whole number from the floor (30 / 512) up to the largest
+    allowed value. Anything else (a planted 99999 or 1, true, "*") counts as no record (the default
+    record)."""
+    return type(value) is int and RETENTION_FLOOR[setting] <= value <= max(RETENTION_ALLOWED[setting])
+
+
+def retention_snap(setting: str, value: int) -> int:
+    """A FILE retention number as it can count: snapped DOWN to the allowed list (keep_days 100 -> 90,
+    99999 -> 365) and never below the floor (keep_days 1 -> 30, max_mb 1 -> 512)."""
+    allowed = RETENTION_ALLOWED[setting]
+    return max((v for v in allowed if v <= value), default=RETENTION_FLOOR[setting])
 
 
 def _retention_set(root: Path, setting: str, value, by: str) -> None:
@@ -902,8 +913,11 @@ def _retention_record(root: Path, setting: str) -> int:
 
 def retention(root: Path, setting: str, file_value: int) -> int:
     """Effective retention value: the LOWER of the file value and the record (the default record when none
-    exists, or when the record is unreadable or not a valid number). A file value below the record lowers the
-    record at once (like a tombstone), so editing the file back up later changes nothing without a proof.
+    exists, or when the record is not a valid number). A file value below the record lowers the record at once
+    (like a tombstone), so editing the file back up later changes nothing without a proof. `file_value` is
+    already snapped to the allowed list with its floor (config.file_value). An UNREADABLE settings record
+    falls back to the lower of the file value and the default record (90 / 2048): never wider than the
+    default, but possibly wider than a lowered record that can no longer be read (documented, human-proof.md).
 
     So a READ may write: the lowering record (`by: file`). It is decided under keys.lock with the file and the
     record read AGAIN there (a person's widening writes the record and then the file under the same lock, so a
@@ -2187,13 +2201,20 @@ def person_by(
     no_handoff=None,
     parts=None,
     exact=None,
+    proof: str | None = None,
 ) -> str:
     """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
     comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
     its own, unprivileged, identity. Anything claiming to be a person without a proof is refused and handed
-    off to the page."""
+    off to the page. `proof`: the proof line the caller already read from stdin (read_proof_line) BEFORE it
+    took keys.lock, so a stdin that never closes cannot hold the lock; only verify-and-consume runs here.
+
+    `no_handoff`: the words of the refusal when this command cannot be approved on the page as typed: no
+    hand-off card is queued (humanproof.HANDOFF = "Do this in the dashboard on this computer.": the person
+    does it on the page itself, which sends a proof)."""
     if getattr(args, "proof_stdin", False):
-        return verify_and_consume(root, read_proof_line(), op, target, getattr(args, "by", None))
+        line = read_proof_line() if proof is None else proof
+        return verify_and_consume(root, line, op, target, getattr(args, "by", None))
     tool = None
     from orch import tickets
 

@@ -147,7 +147,7 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
 | `orch record query … [--limit N] [--after C] --json` | page of `orch.activity/1` events | activity.md |
 | `orch record counts [--days N] … --json` | `orch.counts/1` with inventory | counts.md |
 | `orch record settings --json` | `{keep_days, max_mb, share_counts, share_names, record_mb, detail_mb, runs}` (effective values, read only) | activity.md |
-| `orch record delete-detail <ticket> --proof-stdin --json` | `{"deleted": n, "ticket": "t_…", "kept": k}` (a person only) | activity.md |
+| `orch record delete-detail <ticket> --proof-stdin --json` | `{"deleted": n, "ticket": "t_…", "kept": k, "unreadable": u}` (a person only; `u` > 0: show "N runs could not be read; their detail was not deleted") | activity.md |
 | `orch config get\|set insights.share_counts\|share_names\|keep_days\|max_mb [--proof-stdin] --json` | `{"<key>": <effective value>}` (widening: a person only) | human-proof.md |
 | `orch record propose --json` (the draft on stdin, proposal.schema.json `$defs/draft`) | the stored `orch.proposal/1` (check-up runs only) | proposal.md |
 | `orch job start\|step\|progress\|artifact\|metric\|table\|link\|log\|end\|run …` | the stored `orch.job/1` event | job-events.md |
