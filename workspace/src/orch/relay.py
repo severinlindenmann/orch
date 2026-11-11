@@ -1814,6 +1814,7 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
     who = _line(name_of(root, frm), 100) or _line(frm, 100)
     by = _by_relay(frm)
+    # A phone may address General by ticket id instead of body.general; both belong in the Chat day log.
     general = (body.get("general") is True and not msg.get("ticket")) or _is_general(root, msg.get("ticket"))
     tid = _ticket_by_message(root, mid)
     if tid is not None and _relay_ext(root, tid).get("message") != mid:

@@ -1204,18 +1204,39 @@ def test_make_ticket_across_midnight_local(proj, monkeypatch):
     assert chat.read_day(proj, "2026-11-09")["messages"][0]["moved_to"]["id"] == result["ticket"]
 
 
-def test_general_ticket_addressed_phone_text_is_chat(proj, run, conn):
+def test_general_ticket_addressed_phone_text_is_chat(proj, run, subprocess_home, conn, monkeypatch):
+    import shutil
+
+    monkeypatch.syspath_prepend(str(CONTRACTS.parent / "workspace-addons" / "dashboard" / "src"))
+    from orch_dashboard.data import load_chat_day, load_chat_days, load_state
+
+    orch_bin = shutil.which("orch")
+    assert orch_bin
     gid = tickets.ensure_general(proj, "human:test")
-    message = pv3.msg(pv3.GEN, {"text": "What is still open this week?"})
+    message = pv3.msg(pv3.GEN, {"text": "What is still open this week? [1203]"})
     message["ticket"] = gid
     conn.inbox.append(message)
     assert run("relay", "inbox")[0] == 0
-    run("relay", "send", pv3.PHONE, "Two tasks remain.", "--ticket", gid)
-    expected = ["What is still open this week?", "Two tasks remain."]
-    assert [m["text"] for m in chat.status(proj)["messages"]] == expected
-    assert [m["text"] for m in chat.read_day(proj, chat.day_key(proj))["messages"]] == expected
-    assert chat.status(proj)["messages"][0]["by"] == "you"
-    assert chat.status(proj)["messages"][0]["via"] == "phone"
+    with monkeypatch.context() as agent:
+        agent.setenv("CLAUDECODE", "1")
+        assert run("relay", "send", pv3.PHONE, "Two tasks remain.", "--ticket", gid)[0] == 0
+    expected = ["What is still open this week? [1203]", "Two tasks remain."]
+    # Real relay inbox -> ticket intake -> day log -> real CLI subprocess -> dashboard state.
+    # Ticket history alone cannot satisfy either Today or History.
+    state = load_state(proj, orch_bin=orch_bin)
+    today = state["chat"]["day"]
+    assert [m["text"] for m in state["chat"]["messages"]] == expected
+    assert state["chat"]["messages"][0]["phone"] == pv3.PHONE
+    assert state["chat"]["messages"][0]["via"] == "phone"
+    assert state["chat"]["messages"][0]["by"] == "you"
+    assert state["chat"]["messages"][1]["via"] == "helper"
+    assert any(d["day"] == today and d["count"] == 2 for d in load_chat_days(proj, orch_bin))
+    assert [m["text"] for m in load_chat_day(proj, orch_bin, today)["messages"]] == expected
+    # Relay redelivery must not duplicate either the human input or the day entry.
+    conn.acked.clear()
+    assert run("relay", "inbox")[0] == 0
+    assert len(runs.undelivered(proj, gid)) == 1
+    assert [m["text"] for m in load_state(proj, orch_bin=orch_bin)["chat"]["messages"]] == expected
 
 
 @pytest.mark.parametrize(
