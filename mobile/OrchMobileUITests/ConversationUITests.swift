@@ -35,7 +35,7 @@ final class ConversationUITests: XCTestCase {
         let app = launch(["-openChat", "ws_pilatus001"])
         let title = el(app, "chat-title")
         must(app, title, "chat title")
-        XCTAssertEqual(title.label, "Your helper")
+        XCTAssertFalse(title.label.contains("helper"), "workspace name is the title (P10.12p)")
         XCTAssertNotEqual(title.label, "Chat")
         let history = el(app, "chat-history"), info = el(app, "chat-info")
         must(app, history, "Earlier"); must(app, info, "Info")

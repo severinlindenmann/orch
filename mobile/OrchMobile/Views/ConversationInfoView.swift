@@ -33,13 +33,13 @@ struct ConversationInfoView: View {
     }
 
     private var title: String {
-        if case .general = conversation { return "Your helper" }
+        if case .general = conversation { return workspaceName }
         let name = topic?.title ?? ticket?.displayTitle ?? "Getting started…"
         return name
     }
 
     private var summary: String {
-        if case .general = conversation { return "Your ongoing Chat with \(workspaceName)" }
+        if case .general = conversation { return "Your ongoing chat with your helper" }
         let status = topic?.status.label ?? ticket.map { TopicStatus($0).label } ?? "Working"
         let snapshot = ticket?.view
         let done = snapshot?.done ?? snapshot.flatMap { $0.checklist.isEmpty ? nil : $0.checklist.filter(\.done).count }

@@ -156,7 +156,8 @@ struct ConversationView: View {
     }
     private var title: String {
         switch resolved {
-        case .general: "Your helper"
+        // The workspace name is the chat title (owner feedback, e2e P10.12p); "helper" only in body text and labels.
+        case .general: historyDay.map { ChatDay.label(forDay: $0, today: today) + " · you can read, not reply" } ?? workspaceName
         case .starting: "New topic"
         case .topic: ticket.map { $0.displayTitle } ?? "Topic"
         }
