@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, humanproof, procs, saferead, syncgate, term
+from orch import config, humanproof, net, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -2363,16 +2363,8 @@ def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -
         )
         entries = [s for s in entries if s != entry]
         entries.append(entry)
-        p = root / ".orch" / "run" / "own-sessions.json"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".own-sessions-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(entries[-OWN_SESSIONS_MAX:], f)
-                f.write("\n")
-            procs.replace(tmp, p)
-        finally:
-            Path(tmp).unlink(missing_ok=True)
+        # atomic temp + replace in net (never through a link); only tickets._write replaces files in here
+        net.write_json(root / ".orch" / "run" / "own-sessions.json", entries[-OWN_SESSIONS_MAX:])
 
 
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
