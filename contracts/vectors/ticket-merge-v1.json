@@ -1,5 +1,5 @@
 {
- "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now, person=VERIFIER) must give `expect` (null = cannot merge, caller pauses) and expect_reverse (default expect) with a and b swapped. History attribution is directional; other fields remain symmetric apart from no-op revision/updated_at reuse. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now, held) -> {changed, counter} (null = malformed, caller pauses; held = ids that held the key locally, they keep it). VERIFIER (every `wont` vector; the real one is humanproof.wont_verifier: the receiving core's own wontdo1 MAC, valid for the step's text and covers AND the CURRENT entry of its ledger, human-proof.md 'Synced won't do'): person(step, ticket id) is true exactly when step.wont_mac equals the vector's `ledger[\"<ticket id>:<step id>\"]` AND equals \"v1-\" + the first 20 hex characters of sha256 of the \"|\"-joined values ticket id, step id, step.wont_nonce, step.text, (step.covers or \"\"), (\"True\" or \"False\" by step.wont_do), (step.reason when wont_do, else \"\"). The text of `by` is never looked at; no verifier = nobody is a person. INVARIANT: with a base, a step's decision fields (wont_do, reason, wont_mac, wont_nonce) differ from base's only when that step verifies; otherwise they are base's. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys). VERDICT (every `verdict` vector; the real one is humanproof.verdict_verifier, human-proof.md 'Done needs a signed verdict'): merge_ticket(..., verdict=V) with V(entry, ticket) returning \"current\" when entry.mac equals the vector's `ledger[<ticket id>]` (the core's own MAC that is the CURRENT ledger entry), \"stale\" when entry.mac is in the vector's `own` list but not current (the core's own MAC, replayed, tombstoned or superseded: dropped), else null (not provable here: carried along); the real V also needs the MAC to verify over the merged checklist. No `ledger` entry and no `own` = nobody verifies. INVARIANT: an entry V calls current is never changed or dropped; the merge never decides Done (status follows the plain rule: FINAL wins, done + an open step = active; a raw done without a current entry is Review on the receiving core). HISTORY: upstream=a is remote and mine=b is local. Only remote-only additions absent from base are checked. Keep only string agent: labels excluding agent:relay prefixes without proof. Other authors require a verified decision new in this merge (not verified in base or local), a matching author (step by / verdict person), and one line per decision, chosen in canonical order. Legacy verdicts without person cannot authorize history. Local lines are never demoted. A locally carried demotion suppresses a returning original absent locally. Thus receiving replicas converge on forged remote lines; genuine local unpushed lines remain local, and matching new verified decisions preserve attribution at a receiving peer. A peer's fabricated demotion cannot erase local history. Unverified local originals and their remote demotions intentionally cannot converge to one attribution without relaxing local preservation. convergence vectors replay incoming originals and exchange the checked result; they do not grant trust to an unverified origin.",
+ "about": "Ticket merge (git step 2, design D8; workspace-addons/sync merge.py). tickets: merge_ticket(base, upstream=a, mine=b, now, person=VERIFIER) must give `expect` (null = cannot merge, caller pauses) and expect_reverse (default expect) with a and b swapped. History attribution is directional; other fields remain symmetric apart from no-op revision/updated_at reuse. counter: merge_counter(base, a, b, keys). key_clash: renumber_key_clashes(tickets, counter, now, held) -> {changed, counter} (null = malformed or a clash involving a held id, caller pauses; held = ids known locally before merge; local-wins would diverge between offline peers). VERIFIER (every `wont` vector; the real one is humanproof.wont_verifier: the receiving core's own wontdo1 MAC, valid for the step's text and covers AND the CURRENT entry of its ledger, human-proof.md 'Synced won't do'): person(step, ticket id) is true exactly when step.wont_mac equals the vector's `ledger[\"<ticket id>:<step id>\"]` AND equals \"v1-\" + the first 20 hex characters of sha256 of the \"|\"-joined values ticket id, step id, step.wont_nonce, step.text, (step.covers or \"\"), (\"True\" or \"False\" by step.wont_do), (step.reason when wont_do, else \"\"). The text of `by` is never looked at; no verifier = nobody is a person. INVARIANT: with a base, a step's decision fields (wont_do, reason, wont_mac, wont_nonce) differ from base's only when that step verifies; otherwise they are base's. `rule` = section of the design (4.1 rules 2-10, D8 = clock/loser/old_keys). VERDICT (every `verdict` vector; the real one is humanproof.verdict_verifier, human-proof.md 'Done needs a signed verdict'): merge_ticket(..., verdict=V) with V(entry, ticket) returning \"current\" when entry.mac equals the vector's `ledger[<ticket id>]` (the core's own MAC that is the CURRENT ledger entry), \"stale\" when entry.mac is in the vector's `own` list but not current (the core's own MAC, replayed, tombstoned or superseded: dropped), else null (not provable here: carried along); the real V also needs the MAC to verify over the merged checklist. No `ledger` entry and no `own` = nobody verifies. INVARIANT: an entry V calls current is never changed or dropped; the merge never decides Done (status follows the plain rule: FINAL wins, done + an open step = active; a raw done without a current entry is Review on the receiving core). HISTORY: upstream=a is remote and mine=b is local. Only remote-only additions absent from base are checked for attribution. Remote lines with missing or non-string text or invalid timestamps are dropped. Only plain ASCII agent labels matching ^agent:[a-z0-9._-]{1,40}$ after case folding, excluding relay, phone and ph_ prefixes, retain unverified attribution. Other remote-only authors are demoted to agent:sync with the text prefix \"(synced, not verified here) \"; signed decisions do not bind history authors. Local lines are never demoted. A locally carried demotion suppresses a returning original absent locally. A peer cannot erase genuine local attribution with a fabricated demotion. Convergence vectors replay incoming originals and exchange the checked result.",
  "now": "2026-11-10T12:00:00Z",
  "tickets": [
   {
@@ -13693,40 +13693,7 @@
      "revision": 1
     }
    },
-   "expect": {
-    "changed": {
-     "t_aaa111": {
-      "schema": "orch.ticket/1",
-      "id": "t_aaa111",
-      "key": "DM1-14",
-      "title": "Invoice export",
-      "status": "open",
-      "created_at": "2020-01-01T00:00:00Z",
-      "updated_at": "2020-01-01T00:00:00Z",
-      "checklist": [],
-      "refs": [],
-      "questions": [],
-      "history": [
-       {
-        "at": "2026-11-10T12:00:00Z",
-        "by": "agent:sync",
-        "text": "sync: key changed from DM1-13 to DM1-14 (another ticket had it)"
-       }
-      ],
-      "revision": 2,
-      "ext": {
-       "sync": {
-        "old_keys": [
-         "DM1-13"
-        ]
-       }
-      }
-     }
-    },
-    "counter": {
-     "last": 14
-    }
-   }
+   "expect": null
   },
   {
    "name": "malformed-key-gives-null",
@@ -13775,6 +13742,127 @@
      "schema": "orch.ticket/1",
      "id": "t_bbb222",
      "key": "DM1-5",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T09:00:00Z",
+     "updated_at": "2026-11-09T09:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "offline-clash-peer-a-pauses",
+   "counter": {
+    "last": 13
+   },
+   "held": [
+    "t_aaa111"
+   ],
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2020-01-01T00:00:00Z",
+     "updated_at": "2020-01-01T00:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T09:00:00Z",
+     "updated_at": "2026-11-09T09:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "offline-clash-peer-b-pauses",
+   "counter": {
+    "last": 13
+   },
+   "held": [
+    "t_bbb222"
+   ],
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2020-01-01T00:00:00Z",
+     "updated_at": "2020-01-01T00:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2026-11-09T09:00:00Z",
+     "updated_at": "2026-11-09T09:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    }
+   },
+   "expect": null
+  },
+  {
+   "name": "both-known-clash-pauses",
+   "counter": {
+    "last": 13
+   },
+   "held": [
+    "t_aaa111",
+    "t_bbb222"
+   ],
+   "tickets": {
+    "t_aaa111": {
+     "schema": "orch.ticket/1",
+     "id": "t_aaa111",
+     "key": "DM1-13",
+     "title": "Invoice export",
+     "status": "open",
+     "created_at": "2020-01-01T00:00:00Z",
+     "updated_at": "2020-01-01T00:00:00Z",
+     "checklist": [],
+     "refs": [],
+     "questions": [],
+     "history": [],
+     "revision": 1
+    },
+    "t_bbb222": {
+     "schema": "orch.ticket/1",
+     "id": "t_bbb222",
+     "key": "DM1-13",
      "title": "Invoice export",
      "status": "open",
      "created_at": "2026-11-09T09:00:00Z",

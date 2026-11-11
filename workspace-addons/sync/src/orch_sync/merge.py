@@ -792,12 +792,16 @@ def old_keys_of(ticket):
 
 
 def renumber_key_clashes(tickets, counter, now, held=()):
-    """Tickets (by id) where two different ids share a key. The ticket that already held the key here (`held` =
-    ids known locally before the merge) keeps it, so a backdated created_at cannot take over an existing key;
-    among equals the one created first (then the smaller id) keeps it. The others get the next numbers from the
-    counter, and their old key stays in ext.sync.old_keys so it still resolves ("DM1-13 moved to DM1-15").
-    Returns (changed tickets by id, new counter), or None when the input is malformed (bad key, ext or
-    created_at type, counter too large): the caller pauses. Pure: the inputs are not modified."""
+    """Renumber incoming-only collisions deterministically, retaining old keys and history.
+
+    Any collision involving an id in `held` (known locally before merging) returns None:
+    peer-controlled created_at must never displace a local key. Local-wins is unsafe too:
+    offline peers would each keep their own ticket and assign contradictory keys. Both
+    must pause for a person's choice instead. The step exposes the same key and
+    id-sorted title options on either peer; no speculative renumber reaches disk.
+    Only collisions with no locally known id use (created_at, id) as a tie-breaker.
+    None also means malformed input. Pure.
+    """
     try:
         if not isinstance(tickets, dict) or _too_deep(tickets) or _too_deep(counter):
             return None
@@ -824,9 +828,11 @@ def renumber_key_clashes(tickets, counter, now, held=()):
         for t in tickets.values():
             if t.get("key"):
                 by_key.setdefault(t["key"], []).append(t)
+        if any(len(group) > 1 and any(t["id"] in held for t in group) for group in by_key.values()):
+            return None
         changed = {}
         for key in sorted(by_key):
-            order = sorted(by_key[key], key=lambda t: (t["id"] not in held, t.get("created_at", ""), t["id"]))
+            order = sorted(by_key[key], key=lambda t: (t.get("created_at", ""), t["id"]))
             for t in order[1:]:
                 counter["last"] += 1
                 if counter["last"] > MAX_COUNTER:
