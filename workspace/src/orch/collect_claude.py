@@ -60,9 +60,10 @@ class StreamJsonMapper:
         now: Callable[[], str] = _now,
         hider: Callable[[str], str] | None = None,
         seq_start: int = 0,
+        helper_start: int = 0,
     ):
-        """`seq_start`: lines the run file already holds when this process starts collecting (a resumed
-        run), so default ids `<run>:<seq>` (lines without a tool id or uuid) never reuse an earlier id."""
+        """`seq_start`: lines the run file already holds when this process starts (a resumed run), so
+        default ids `<run>:<seq>` never reuse an earlier id. `helper_start`: helpers started so far."""
         self.run, self.ticket, self.harness, self.now = run, ticket, harness, now
         self.hider, self.hidden = hider, hider is not None
         self.seq = seq_start
@@ -72,7 +73,7 @@ class StreamJsonMapper:
         self._partial = False
         self._pending: dict[str, dict] = {}
         self._helpers: dict[str, tuple[str, str]] = {}
-        self._helper_count = 0
+        self._helper_count = helper_start
 
     def _ignore(self, key: str) -> None:
         self.ignored[key] = self.ignored.get(key, 0) + 1
@@ -102,6 +103,13 @@ class StreamJsonMapper:
             self._partial = False
         return _hide(event, self.hider) if self.hider is not None else event
 
+    def _stable(self, *parts: Any) -> dict:
+        """{"id": ...} from the line's own ids when all are usable, else {} (default id `<run>:<seq>`)."""
+        if not all(isinstance(x, (str, int)) and not isinstance(x, bool) and str(x) for x in parts):
+            return {}
+        eid = ":".join([self.run, *map(str, parts)])
+        return {"id": eid} if _valid_id(eid) else {}
+
     def _detail(self, kind: str, eid: str) -> str:
         return f"detail/{self.run}/{detail_name(self.run, kind, eid)}.json"
 
@@ -118,13 +126,18 @@ class StreamJsonMapper:
             self.session = message["session_id"]
         stamp = _timestamp(message.get("timestamp"))
         at = stamp.isoformat().replace("+00:00", "Z") if stamp else self.now()
+        stamp = stamp or _timestamp(at)  # the clock stands in for a missing line time, so ms stays right
         typ = message.get("type")
         if typ == "system" and message.get("subtype") == "init":
-            return [(self._emit(at, kind="run.state", text="Working", data={"state": "working"}), None)]
+            fields = self._stable(self.session, "init", message.get("uuid"))
+            return [
+                (self._emit(at, **fields, kind="run.state", text="Working", data={"state": "working"}), None)
+            ]
         if typ in ("assistant", "user"):
             body = message.get("message")
             content = body.get("content") if isinstance(body, dict) else None
             if not isinstance(content, list):
+                self._ignore(f"{typ}/content")
                 return []
             parent_id = message.get("parent_tool_use_id")
             owner = (
@@ -148,7 +161,7 @@ class StreamJsonMapper:
         key = str(typ)
         if message.get("subtype") is not None:
             key += "/" + str(message["subtype"])
-        self._ignore(key)
+        self._ignore(key[:40])
         return []
 
     def _assistant(
@@ -182,14 +195,14 @@ class StreamJsonMapper:
         if not isinstance(original, str) or not original:
             self._ignore("tool_use/noid")
             return []
-        eid = original if _valid_id(original) else _hash(original)
+        final = original if _valid_id(original) else _hash(original)  # the writer hashes unsafe ids itself
         name = block.get("name")
         name = name if isinstance(name, str) else "Tool"
         inp = block.get("input")
         inp = inp if isinstance(inp, dict) else {}
         agent, parent = owner
         kind = "step"
-        if name in ("Task", "Agent"):
+        if name in ("Task", "Agent") and self._helper_count < 9999:
             self._helper_count += 1
             agent, parent = f"h_{self._helper_count}", agent
             self._helpers[original] = (agent, parent)
@@ -211,8 +224,8 @@ class StreamJsonMapper:
                 verb = {"Grep": "Search", "Glob": "Find files"}.get(name, name)
                 path = next((inp[k] for k in ("file_path", "path", "pattern", "url") if inp.get(k)), "")
                 text = f"{verb} {PurePosixPath(str(path)).name}" if path else verb
-        fields = dict(id=eid, kind=kind, used=used, agent=agent, parent=parent, text=_one_line(text))
-        self._pending[original] = dict(fields=fields, input=inp, timestamp=stamp)
+        fields = dict(id=original, kind=kind, used=used, agent=agent, parent=parent, text=_one_line(text))
+        self._pending[original] = dict(fields=fields, final=final, input=inp, timestamp=stamp)
         return [(self._emit(at, **fields), None)]
 
     def _finish(self, block: dict, at: str, stamp: datetime | None) -> list:
@@ -234,7 +247,7 @@ class StreamJsonMapper:
         error = next((line for line in text.splitlines() if line.strip()), "Failed")
         fields.update(
             outcome=dict(ok=ok, error=None if ok else _one_line(error, 300), ms=ms),
-            detail=self._detail(fields["kind"], fields["id"]),
+            detail=self._detail(fields["kind"], pending["final"]),
         )
         return [(self._emit(at, **fields), {"input": pending["input"], "output": content})]
 
@@ -269,12 +282,21 @@ class StreamJsonMapper:
 
     def _result(self, message: dict, at: str) -> list[dict]:
         events = []
+        turns = message.get("num_turns")
+        tag = message.get("uuid") or (
+            f"{self.session}.{turns}" if self.session and type(turns) is int else None
+        )
         denials = message.get("permission_denials")
-        for denial in denials if isinstance(denials, list) else []:
+        for index, denial in enumerate(denials if isinstance(denials, list) else []):
             if not isinstance(denial, dict):
                 continue
             name = _name(denial.get("tool_name"))
-            fields = {"id": denial["tool_use_id"]} if _valid_id(denial.get("tool_use_id")) else {}
+            tool_id = denial.get("tool_use_id")  # raw: the writer hashes unsafe ids like for the step
+            fields = (
+                {"id": tool_id}
+                if isinstance(tool_id, str) and tool_id
+                else self._stable(tag, "denial", index)
+            )
             events.append(
                 self._emit(
                     at,
@@ -299,6 +321,7 @@ class StreamJsonMapper:
             events.append(
                 self._emit(
                     at,
+                    **self._stable(tag, "usage"),
                     kind="usage",
                     text=f"Tokens: {ti} in, {to} out",
                     data=dict(tokens_in=ti, tokens_out=to, used=0),
@@ -308,7 +331,9 @@ class StreamJsonMapper:
         data = {"state": state}
         if type(message.get("num_turns")) is int:
             data["turns"] = message["num_turns"]
-        events.append(self._emit(at, kind="run.state", text=state.capitalize(), data=data))
+        events.append(
+            self._emit(at, **self._stable(tag, "end"), kind="run.state", text=state.capitalize(), data=data)
+        )
         return events
 
     def feed(self, line: str | bytes) -> list[dict]:
@@ -327,7 +352,12 @@ def map_stream(lines: Iterable[str | bytes], ctx: dict) -> list[dict]:
 
 def collect(lines: Iterable[str | bytes], writer: Any, ctx: dict) -> dict:
     mapper = StreamJsonMapper(
-        ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: ctx["at"], seq_start=ctx.get("seq_start", 0)
+        ctx["run"],
+        ctx["ticket"],
+        ctx["harness"],
+        now=_now,
+        seq_start=ctx.get("seq_start", 0),
+        helper_start=ctx.get("helper_start", 0),
     )
     written = deduped = 0
     for line in lines:

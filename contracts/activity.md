@@ -183,7 +183,10 @@ id (so a hook's line and this one dedupe). `is_error: true` → `outcome.ok: fal
 - `assistant` text → `run.state working` with `data.say`; `thinking` → nothing; an unknown block type makes the next step `partial`.
 - `rate_limit_event` → `usage` (`used`, `window`, `status`); `result` → one `denial` per `permission_denials` entry (id = its `tool_use_id`),
   `usage` (`tokens_in` = input + cache creation + cache read, `tokens_out`) and `run.state` idle (failed when `is_error`).
-- Garbled or cut lines are counted and skipped; a replay of the same lines adds nothing (ids are the tool-call ids).
+- Garbled or cut lines are counted and skipped. A replay of the same lines adds nothing: ids are the tool-call ids (passed raw; the writer
+  hashes an unsafe one, so a hook line with the same raw id dedupes), else built from the line's own uuid or session id. Only a line
+  with none of these (a `rate_limit_event` without uuid) gets `<run>:<seq>`; the wiring passes `seq_start` so a resumed process never
+  reuses an id, and a replay with a different `seq_start` can duplicate such a usage line.
 
 ## Integrity
 

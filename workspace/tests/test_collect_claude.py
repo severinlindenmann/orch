@@ -135,7 +135,7 @@ def test_unknown_types_counted_not_silent():
         '{"type":"user","message":{"content":"plain text"}}',
     ):
         assert m.feed(line) == []
-    assert m.ignored == {"system/hook_started": 2, "future_thing": 1}
+    assert m.ignored == {"system/hook_started": 2, "future_thing": 1, "user/content": 1}
     m.feed(use("t1", "Task", {"description": "x"}))
     assert m.feed(result("never-started")) == [] and m.orphans == 1
 
@@ -166,17 +166,73 @@ def test_truncated_stream_keeps_started_steps():
     assert events[-1]["kind"] == "step" and events[-1]["outcome"] is not None  # the 6 whole lines still count
 
 
-def test_ids_stable_and_unsafe_ids_hashed():
+def test_ids_stable_and_unsafe_ids_stay_raw_for_the_writer():
     unsafe = "bad/id"
     stream = [use(unsafe), result(unsafe), use("z" * 161), use("ok_1")]
     first, second = list(mapper().events(stream)), list(mapper().events(stream))
     assert first == second
-    assert first[0]["id"] == "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]
-    assert first[0]["id"] == first[1]["id"]
-    assert first[1]["detail"] == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', first[0]['id'])}.json"
+    assert first[0]["id"] == first[1]["id"] == unsafe  # never pre-hashed: the writer hashes once
+    hashed = "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]
+    assert first[1]["detail"] == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', hashed)}.json"
     assert first[3]["id"] == "ok_1"
-    plain = list(mapper().events(lines("read-and-fail.jsonl")))
-    assert [e["id"] for e in plain] == [e["id"] for e in map_stream(lines("read-and-fail.jsonl"), CTX)]
+
+
+def test_unsafe_id_dedupes_with_a_hook_line_through_the_writer(store):
+    ws, writer = store
+    unsafe = "bad/id"
+    collect([use(unsafe), result(unsafe)], writer, CTX)
+    done = [e for e in mapper().events([use(unsafe), result(unsafe)]) if e["outcome"]][0]
+    hook = dict(done, via="hook", detail=None)
+    writer.append(hook)  # hooks win: appended, and readers dedupe on (run, id, kind, finished, via class)
+    finished = [e for e in read_run(ws, CTX["run"]).unwrap() if e["kind"] == "step" and e["outcome"]]
+    assert len(finished) == 1
+    assert finished[0]["id"] == "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]
+
+
+def test_result_events_get_stable_ids_from_the_line():
+    done = json.dumps({"type": "result", "uuid": "u9", "is_error": False, "usage": {"output_tokens": 1}})
+    one = ClaudeMapperFor(seq_start=0).feed(done)
+    two = ClaudeMapperFor(seq_start=50).feed(done)
+    assert (
+        [e["id"] for e in one] == [e["id"] for e in two] == [f"{CTX['run']}:u9:usage", f"{CTX['run']}:u9:end"]
+    )
+    denied = json.dumps(
+        {"type": "result", "uuid": "u9", "permission_denials": [{"tool_name": "X"}, {"tool_name": "Y"}]}
+    )
+    ids = [e["id"] for e in ClaudeMapperFor(seq_start=7).feed(denied) if e["kind"] == "denial"]
+    assert ids == [f"{CTX['run']}:u9:denial:0", f"{CTX['run']}:u9:denial:1"]
+    init = json.dumps({"type": "system", "subtype": "init", "session_id": "s-1", "uuid": "u0"})
+    mp = ClaudeMapperFor(seq_start=3)
+    assert mp.feed(init)[0]["id"] == f"{CTX['run']}:s-1:init:u0"
+
+
+def ClaudeMapperFor(**kw):
+    return StreamJsonMapper(CTX["run"], CTX["ticket"], "claude", now=lambda: CTX["at"], **kw)
+
+
+def test_helper_numbering_resumes_and_is_capped():
+    task = use("t1", "Task", {"description": "x"})
+    assert ClaudeMapperFor(helper_start=2).feed(task)[0]["agent"] == "h_3"
+    capped = ClaudeMapperFor(helper_start=9999).feed(task)[0]
+    assert capped["kind"] == "step" and capped["agent"] == "main"
+
+
+def test_collect_uses_the_real_clock_and_keeps_ms(store):
+    ws, writer = store
+    stream = [use("t1", at="x"), result("t1", at="y")]  # no usable line times
+    collect(stream, writer, CTX)
+    events = read_run(ws, CTX["run"]).unwrap()
+    assert not any(e["at"] == CTX["at"] for e in events)
+    assert events[-1]["outcome"]["ms"] is not None and events[-1]["outcome"]["ms"] >= 0
+
+
+def test_ignored_counts_are_capped_and_bad_content_counted():
+    m = mapper()
+    m.feed(json.dumps({"type": "t" * 80}))
+    m.feed(json.dumps({"type": "assistant", "message": {"content": "text"}}))
+    m.feed(json.dumps({"type": "user", "message": []}))
+    assert all(len(k) <= 40 for k in m.ignored)
+    assert m.ignored["assistant/content"] == 1 and m.ignored["user/content"] == 1
 
 
 def test_hider_on_events():
