@@ -1,4 +1,4 @@
-"""Local settings only. The sync engine and consent flows are not shipped yet."""
+"""Local settings and one-shot sync. Consent flows are not shipped yet."""
 import argparse
 import json
 import os
@@ -28,7 +28,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog='orch sync')
     ap.add_argument('--dir', default=os.environ.get('ORCH_ROOT', '.'))
     sub = ap.add_subparsers(dest='cmd', required=True)
-    for name in ("set", "status", "start", "stop", "needs"):
+    for name in ("set", "status", "now", "start", "stop", "needs"):
         p = sub.add_parser(name)
         p.add_argument("--json", action="store_true")
         if name == 'set':
@@ -70,9 +70,16 @@ def main(argv=None):
             finally:
                 Path(f.name).unlink(missing_ok=True)
             result = settings
+        elif args.cmd == 'now':
+            from .step import run_once
+            result = run_once(root, 'manual')
+            print(json.dumps(result) if args.json else str(result))
+            return 2 if result.get('last_error') else 0
         elif args.cmd == 'status':
-            result = {'state': read(root, 'state'), **settings, 'running': False,
-                      'remote_allowed': remote_allowed()}
+            state = read(root, 'state')
+            result = {'state': state, **settings, 'running': False,
+                      'remote_allowed': remote_allowed(),
+                      **{k: state.get(k) for k in ('last_ok', 'last_error', 'ahead', 'behind')}}
         elif args.cmd == 'start':
             raise repo.Refused('The sync loop is not available yet')
         else:

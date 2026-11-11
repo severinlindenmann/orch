@@ -232,6 +232,20 @@ def _break_stale(lock: Path) -> bool:
 
 
 @contextlib.contextmanager
+def sync_apply(root: Path, tid: str):
+    """Lock a ticket (or ``key`` for the counter) for an in-process sync write.
+
+    Call on the thread holding syncgate.hold; other writers retain the normal
+    gate-before-ticket ordering. The caller checks and replaces the file while
+    this context is held, without importing core lock internals.
+    """
+    if tid != "key":
+        ticket_path(root, tid)
+    with _locked(root, tid):
+        yield
+
+
+@contextlib.contextmanager
 def _locked(root: Path, tid: str, wait: float = 5.0):
     """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
     Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
