@@ -793,7 +793,7 @@ def test_output_is_released_at_once_not_when_the_command_ends(store, ws):
 
     start = time.monotonic()
     prog = "import sys,time;print('{\"ok\":1}');sys.stdout.flush();time.sleep(1.5)"
-    code = secretrun.run(ws, "env", "plain", [PY, "-c", prog], stdout=Out(), stderr=Out())
+    code = secretrun.run(ws, "env", "plain", [PY, "-c", prog], stdout=Out(), stderr=Out(), agent=False)
     assert code == 0 and times and times[0][1].startswith(b'{"ok":1}')
     assert times[0][0] - start < 1.2
 
@@ -827,3 +827,224 @@ def test_the_child_runs_in_its_own_session_without_a_terminal(store, run):
 def test_pid_liveness():
     assert secretrun._pid_alive(os.getpid()) is True
     assert secretrun._pid_alive(999999999) is False
+
+
+# --------------------------------------------------------------------------- Opus delta (F1-F7)
+
+
+class _Sink:
+    def __init__(self):
+        self.data = b""
+
+    def write(self, b):
+        self.data += bytes(b)
+
+    def flush(self):
+        pass
+
+
+def _gone(pid, wait=5.0):
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _env():
+    return {"PATH": "/usr/bin:/bin"}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups")
+def test_a_background_process_of_the_command_does_not_outlive_it_or_hang_the_call(store, ws):
+    from orch import hider
+
+    h = hider.Hider(keystore.all_needles(ws))
+    out = _Sink()
+    start = time.monotonic()
+    code = secretrun._child(["/bin/sh", "-c", "sleep 60 & echo $!"], _env(), h, out, _Sink())
+    assert code == 0 and time.monotonic() - start < 8
+    assert _gone(int(out.data.split()[0]))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
+def test_sigterm_ends_the_command_and_everything_it_started(store, ws):
+    import signal
+    import threading
+
+    from orch import hider
+
+    h = hider.Hider(keystore.all_needles(ws))
+    out = _Sink()
+    timer = threading.Timer(0.8, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    timer.start()
+    before = signal.getsignal(signal.SIGTERM)
+    with pytest.raises(SystemExit) as e:
+        secretrun._child(["/bin/sh", "-c", "sleep 60 & echo $!; wait"], _env(), h, out, _Sink())
+    timer.cancel()
+    assert e.value.code == 128 + signal.SIGTERM
+    assert _gone(int(out.data.split()[0]))
+    assert signal.getsignal(signal.SIGTERM) is before  # handlers restored
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
+def test_a_second_signal_during_cleanup_is_ignored(store, ws):
+    import signal
+    import threading
+
+    from orch import hider
+
+    h = hider.Hider(keystore.all_needles(ws))
+    timer = threading.Timer(
+        0.5, lambda: (os.kill(os.getpid(), signal.SIGTERM), os.kill(os.getpid(), signal.SIGHUP))
+    )
+    timer.start()
+    with pytest.raises(SystemExit) as e:
+        secretrun._child(["/bin/sh", "-c", "sleep 60 & wait"], _env(), h, _Sink(), _Sink())
+    timer.cancel()
+    assert e.value.code in (128 + signal.SIGTERM, 128 + signal.SIGHUP)  # the first one wins
+
+
+def test_enable_holds_the_key_lock_across_record_and_file(store, run, ws, monkeypatch):
+    held = []
+    real_lock = hp._key_lock
+    depth = []
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def tracking(d):
+        with real_lock(d):
+            depth.append(1)
+            try:
+                yield
+            finally:
+                depth.pop()
+
+    monkeypatch.setattr(hp, "_key_lock", tracking)
+    real_set = hp.record_set
+    monkeypatch.setattr(hp, "record_set", lambda *a, **k: (held.append(bool(depth)), real_set(*a, **k))[1])
+    _enable_get(run, monkeypatch, ws)
+    assert held and all(held)
+
+
+def test_reading_the_switch_takes_the_key_lock(store, run, ws, monkeypatch):
+    _enable_get(run, monkeypatch, ws)
+    import contextlib
+
+    seen = []
+    real_lock = hp._key_lock
+
+    @contextlib.contextmanager
+    def tracking(d):
+        seen.append(1)
+        with real_lock(d):
+            yield
+
+    monkeypatch.setattr(hp, "_key_lock", tracking)
+    assert run("secret", "get", "plain", "other-token")[0] == 0
+    assert seen
+
+
+def test_a_proof_given_with_a_lowering_is_checked_and_spent(store, run, ws, monkeypatch):
+    _enable_get(run, monkeypatch, ws)
+    argv = ["secret", "profile", "get-disable", "plain"]
+    bad = _proof(ws, "secret.profile", "other:allow_get")
+    code, *_ = _cli(run, monkeypatch, bad, *argv)
+    assert code == 2 and run("secret", "get", "plain", "other-token")[0] == 0  # refused: still on
+    good = _proof(ws, "secret.profile", "plain:allow_get")
+    assert _cli(run, monkeypatch, good, *argv)[0] == 0
+    _enable_get(run, monkeypatch, ws)
+    assert _cli(run, monkeypatch, good, *argv)[0] == 2  # spent: a replay is refused
+
+
+def test_lowering_goes_to_the_recorder_seam_and_a_failing_recorder_does_not_block_it(
+    store, run, ws, monkeypatch
+):
+    got = []
+    monkeypatch.setattr(secretrun, "_recorder", lambda root, ev: got.append(ev))
+    _enable_get(run, monkeypatch, ws)
+    run("secret", "profile", "get-disable", "plain")
+    assert got[-1]["action"] == "profile.get_disable" and got[-1]["profile"] == "plain"
+    assert got[-1]["by"] == "reset" and TOKEN2 not in json.dumps(got)
+
+    def boom(root, ev):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(secretrun, "_recorder", boom)
+    _enable_get(run, monkeypatch, ws)
+    assert run("secret", "profile", "get-disable", "plain")[0] == 0
+
+
+def test_agent_is_a_required_argument(store, ws):
+    with pytest.raises(TypeError):
+        secretrun.run(ws, "env", "plain", [PY], stdout=_Sink(), stderr=_Sink())
+
+
+def _set(run, monkeypatch, ws, name, *extra):
+    return _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", name), "secret", "profile", "set", name,
+        "--env", "T=other-token", *extra,
+    )  # fmt: skip
+
+
+def test_set_refuses_a_program_inside_the_workspace(store, run, ws, monkeypatch):
+    exe = ws / "mytool"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    code, _, err = _set(run, monkeypatch, ws, "inws", "--run", str(exe))
+    assert code == 2 and "inside this workspace" in err and "inws" not in keystore.read_profiles(ws)
+
+
+def test_set_refuses_a_program_others_can_change(store, run, ws, monkeypatch, tmp_path):
+    d = tmp_path / "shared"
+    d.mkdir()
+    exe = d / "tool"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    d.chmod(0o777)
+    try:
+        code, _, err = _set(run, monkeypatch, ws, "loose", "--run", str(exe))
+        assert code == 2 and "other users" in err
+        d.chmod(0o700)
+        exe.chmod(0o775)
+        code, _, err = _set(run, monkeypatch, ws, "loose", "--run", str(exe))
+        assert code == 2 and "other users" in err
+    finally:
+        d.chmod(0o700)
+
+
+def test_set_refuses_a_relative_path_and_resolves_symlinks(store, run, ws, monkeypatch):
+    code, _, err = _set(run, monkeypatch, ws, "rel", "--run", "./tool")
+    assert code == 2 and "relative" in err
+    code, _, err = _set(run, monkeypatch, ws, "rel", "--run", "bin/tool")
+    assert code == 2 and "relative" in err
+    code, out, _ = _set(run, monkeypatch, ws, "sym", "--run", "/bin/sh", "--json")
+    stored = keystore.read_profiles(ws)["sym"]["run"][0]
+    assert stored == os.path.realpath("/bin/sh") and json.loads(out)["command"] == stored
+
+
+def test_set_warns_about_an_interpreter_and_shows_the_resolved_path(store, run, ws, monkeypatch):
+    code, out, err = _set(run, monkeypatch, ws, "interp", "--run", "/bin/sh")
+    assert code == 0 and os.path.realpath("/bin/sh") in out
+    assert "can run any code" in err
+    code, out, err = _set(run, monkeypatch, ws, "interp2", "--run", "/bin/sh", "--json")
+    assert json.loads(out)["warnings"]
+
+
+def test_a_large_key_with_a_diverging_byte_is_not_slow(ws):
+    from orch import hider
+
+    big = "".join(chr(97 + (i * 7 + i // 13) % 26) for i in range(60000))
+    h = hider.Hider({"big": big})
+    s = hider.HidingStream(h)
+    start = time.monotonic()
+    out = [s.feed(big[:59000], now=True), s.feed("X", now=True)]
+    for _ in range(40):
+        out.append(s.feed("abc" * 160, now=True))
+    out.append(s.close())
+    assert time.monotonic() - start < 3
+    assert "".join(out).startswith(big[:100])

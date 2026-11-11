@@ -189,9 +189,18 @@ prints a header).
 - **Error paths**: exception messages, tracebacks (exit 1), stderr of failed children, refusals and HTTP error bodies go
   through the same hider before they are printed, logged or recorded. A writer that cannot get a hider refuses
   (activity.md, Fail closed).
+- **What approving a `run` command means.** `profile set` stores the real path of the program and refuses one inside
+  the workspace or changeable by other users. It only warns when the program is an interpreter or a tool that runs
+  arbitrary code (sh, bash, python, node, env, git, npm, curl, ssh, ...): approving one as `run` is the same as
+  approving any command. `exec` takes extra arguments even from an agent (they are appended to the approved command);
+  the agent rule of `env`/`file` (exact argv) does not apply to `exec`. Command and path are shown in the answer.
+- **The command's processes end with the call.** On POSIX the child runs in its own session (when stdin is not a terminal) and,
+  when the call ends or is interrupted (TERM, HUP, QUIT), everything it started is ended too (TERM, then KILL).
+  Further signals during that cleanup are ignored. Pipes held by a leftover process cannot hang the call.
 - **Streams are not delayed.** Only the tail of the output that could still become a key is held back; the rest is
   passed on at once (an MCP server on stdio keeps working). A child without a terminal on stdin gets its own session.
-  Binary key files (no text form) are hidden by their hex and base64 forms.
+  Binary key files (no text form) are hidden by the lower-case hex and the padded base64 / base64url of the
+  whole file; raw bytes, upper-case hex, unpadded or line-wrapped base64 of such a file are **not** hidden (Level 1).
 - Known limits (Level 1): a child can still open `/dev/tty` itself; a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
   terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences.
 

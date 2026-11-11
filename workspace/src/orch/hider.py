@@ -289,10 +289,10 @@ class HidingStream:
         """Length of the longest suffix of the buffer that is a proper prefix of a needle."""
         buf = self._buf
         for i in range(max(0, len(buf) - self._holdback), len(buf)):
-            tail = buf[i:]
+            size = len(buf) - i
             for needle in self._by_first.get(buf[i : i + 1], ()):
-                if len(needle) > len(tail) and needle.startswith(tail):
-                    return len(tail)
+                if len(needle) > size and needle.startswith(buf[i:]):
+                    return size
         return 0
 
     def feed(self, chunk: Any, *, now: bool = False) -> Any:

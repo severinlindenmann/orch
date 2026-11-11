@@ -77,33 +77,41 @@ def _file_bytes(path):
 
 
 def _change_profile(root, args, who):
+    """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action
     setting = f"secret.allow_get.{name}"
     agents = f"secret.agents_may_env.{name}"
-    profiles = keystore.read_profiles(root)
-    if action == "set":
-        profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
-        profile.update(allow_get=False, agents_may_env=False)
-        if args.run:  # the program is found once, here, and stored as a full path (never searched later)
-            profile["run"] = [secretrun.resolve_program(root, args.run[0]), *args.run[1:]]
-        if args.skill:
-            profile["skills"] = args.skill
-        hp.record_set(root, setting, False, who)
-        hp.record_set(root, agents, False, who)
-        profiles[name] = profile
-    else:
-        if name not in profiles:
-            raise Refused(f"Refused: there is no profile named {name}.")
-        if action == "remove":
+    extra: dict = {}
+    # One lock across record and file: a reader (secretrun._switch_on) never sees one without the other.
+    with hp._key_lock(hp.key_dir(root)):
+        profiles = keystore.read_profiles(root)
+        if action == "set":
+            profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
+            profile.update(allow_get=False, agents_may_env=False)
+            if args.run:  # found once, here: stored as the real full path, never searched later
+                path, warnings = secretrun.approve_program(root, args.run[0])
+                profile["run"] = [path, *args.run[1:]]
+                extra = {"command": path, **({"warnings": warnings} if warnings else {})}
+            if args.skill:
+                profile["skills"] = args.skill
             hp.record_set(root, setting, False, who)
             hp.record_set(root, agents, False, who)
-            del profiles[name]
+            profiles[name] = profile
         else:
-            flag, rec = ("allow_get", setting) if action.startswith("get") else ("agents_may_env", agents)
-            enabled = action.endswith("enable")
-            hp.record_set(root, rec, enabled, who)  # the record first, then the file
-            profiles[name][flag] = enabled
-    keystore.write_profiles(root, profiles)
+            if name not in profiles:
+                raise Refused(f"Refused: there is no profile named {name}.")
+            if action == "remove":
+                hp.record_set(root, setting, False, who)
+                hp.record_set(root, agents, False, who)
+                del profiles[name]
+            else:
+                flag, rec = ("allow_get", setting) if action.startswith("get") else ("agents_may_env", agents)
+                enabled = action.endswith("enable")
+                hp.record_set(root, rec, enabled, who)  # the record first, then the file
+                profiles[name][flag] = enabled
+        keystore.write_profiles(root, profiles)
+    secretrun.record_change(root, "profile." + action.replace("-", "_"), name, who)
+    return extra
 
 
 def dispatch(args, root: Path) -> bool:
@@ -153,7 +161,11 @@ def dispatch(args, root: Path) -> bool:
             # Preserve arbitrary file bytes and CRLF after the proof's text line.
             sys.stdin.reconfigure(encoding="utf-8", errors="surrogateescape", newline="")
         # Turning a switch OFF needs no proof (the record says "reset"); everything else does.
-        who = "reset" if lowering else _person(root, args, "secret." + action, target)
+        if lowering and not getattr(args, "proof_stdin", False):
+            who = "reset"
+        else:  # a proof handed over with a lowering is checked and spent like any other
+            who = _person(root, args, "secret." + action, target)
+        extra: dict = {}
         if action == "add":
             if args.file is not None and args.type != "key-file":
                 raise Refused("Refused: --file is only for a key-file.")
@@ -171,8 +183,13 @@ def dispatch(args, root: Path) -> bool:
         elif action == "remove":
             keystore.remove(root, args.name)
         else:
-            _change_profile(root, args, who)
-        print(json.dumps({"ok": True}) if getattr(args, "json", False) else "Done.")
+            extra = _change_profile(root, args, who)
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": True, **extra}))
+        else:
+            print("Done." + (f" Command: {extra['command']}" if extra.get("command") else ""))
+            for w in extra.get("warnings", []):
+                print("Note: " + w, file=sys.stderr)
     else:
         raise Refused("Choose an orch secret subcommand: " + ", ".join(SUBCOMMANDS) + ".")
     return True

@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from orch import hider, keystore, launchenv
@@ -76,6 +77,71 @@ def resolve_program(root, name):
     if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
         raise Refused(f"Refused: the program {name} was not found.")
     return path
+
+
+def record_change(root, action, profile, by):
+    """A person's or anyone's change of a profile switch, to the same recorder seam as key.use (best effort:
+    a failing recorder never blocks turning a switch off)."""
+    if _recorder is None:
+        return
+    try:
+        _recorder(
+            root,
+            {
+                "kind": "secret.change",
+                "action": action,
+                "profile": profile,
+                "by": by,
+                "outcome": {"ok": True},
+            },
+        )
+    except Exception:
+        pass
+
+
+RISKY_PROGRAMS = re.compile(
+    r"^(sh|bash|zsh|dash|ksh|fish|csh|tcsh|env|xargs|python[0-9.]*|node|npx|npm|pip[0-9.]*|perl|ruby|php|lua|"
+    r"java|git|osascript|pwsh|powershell|cmd|ssh|curl|wget)(\.exe)?$",
+    re.IGNORECASE,
+)
+
+
+def _under(path: str, base: str) -> bool:
+    return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
+
+
+def approve_program(root, name):
+    """What a person approves as a profile's `run` program: (real path, warnings). Refused: a relative path;
+    the program or a folder above it inside the workspace, or changeable by others (group/other-writable; the
+    root and admin groups of a normal system are fine). Interpreters and tools that run arbitrary code (sh,
+    python, node, env, git, npm, curl, ...) are allowed but warned about: approving one is approving
+    anything."""
+    if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
+        raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
+    path = resolve_program(root, name)
+    real = os.path.realpath(path)
+    ws = os.path.realpath(root)
+    here, chain = real, []
+    while True:
+        chain.append(here)
+        up = os.path.dirname(here)
+        if up == here:
+            break
+        here = up
+    for p in chain:
+        if _under(p, ws):
+            raise Refused("Refused: the program lies inside this workspace; an agent could change it.")
+        if os.name != "nt":
+            st = os.stat(p)
+            if st.st_mode & 0o002 or (st.st_mode & 0o020 and st.st_gid not in (0, 80)):
+                raise Refused("Refused: the program or a folder above it can be changed by other users.")
+    warnings = []
+    if RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)):
+        warnings.append(
+            f"{os.path.basename(real)} can run any code: approving it as this profile's command is the same "
+            "as approving any command."
+        )
+    return real, warnings
 
 
 def safe_path_dirs(root):
@@ -173,10 +239,19 @@ AGENT_COMMAND = (
 )
 
 
+def _switch_on(root, name, flag) -> bool:
+    """A profile switch (allow_get, agents_may_env): the file flag AND the person's record. The file is read
+    again under the key lock, the same lock a person's enable holds across record and file, so a reader never
+    writes an off record over an enable in progress."""
+    with hp._key_lock(hp.key_dir(root)):
+        profile = keystore.read_profiles(root).get(name)
+        return hp.effective(root, f"secret.{flag}.{name}", bool(profile and profile.get(flag) is True))
+
+
 def _agent_may_run(root, name, profile, command) -> bool:
     """An agent's env/file call: any command only with agents_may_env (file flag AND a person's record);
     else exactly the profile's own `run` (same argv, absolute program, no extra arguments)."""
-    if hp.effective(root, f"secret.agents_may_env.{name}", profile.get("agents_may_env") is True):
+    if _switch_on(root, name, "agents_may_env"):
         return True
     run = profile.get("run")
     return bool(run) and os.path.isabs(run[0]) and list(command) == list(run)
@@ -211,57 +286,94 @@ def _pump(pipe, out, h, errors):
         errors.append(True)
 
 
+def _kill_group(pid: int, grace: float = 2.0) -> None:
+    """End every process of the child's own session: TERM, then KILL after a short grace. Nothing left holds a
+    key or a pipe."""
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 1.0)):
+        try:
+            os.killpg(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+        end = time.monotonic() + wait
+        while time.monotonic() < end:
+            try:
+                os.killpg(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.02)
+
+
 def _child(command, env, h, stdout, stderr):
     child = None
     threads, errors = [], []
     main = threading.current_thread() is threading.main_thread()
     sigs = [getattr(signal, n) for n in ("SIGTERM", "SIGHUP", "SIGQUIT") if hasattr(signal, n)]
     old = {s: signal.getsignal(s) for s in sigs} if main else {}
+    state = {"spawning": False, "sig": None}
+    try:
+        interactive = sys.stdin is not None and sys.stdin.isatty()
+    except (ValueError, OSError):
+        interactive = False
+    # Own session when no terminal input is needed, so a hangup of ours does not leave it running with a key
+    # (a child can still open /dev/tty: known limit).
+    own_session = not interactive and os.name == "posix"
 
     def stop(signum, frame):
+        for s in sigs:  # the first signal wins; the cleanup below is not interrupted by more
+            signal.signal(s, signal.SIG_IGN)
+        if state["spawning"]:  # between starting the child and knowing it: act on it right after
+            state["sig"] = signum
+            return
         raise SystemExit(128 + signum)
 
     try:
         if main:
             for s in sigs:
                 signal.signal(s, stop)
+        state["spawning"] = True
         try:
-            interactive = sys.stdin is not None and sys.stdin.isatty()
-        except (ValueError, OSError):
-            interactive = False
-        # Own session when no terminal input is needed, so a hangup of ours does not leave it running with a
-        # key (a child can still open /dev/tty: known limit).
-        child = subprocess.Popen(
-            command,
-            env=env,
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=not interactive and os.name == "posix",
-        )
+            child = subprocess.Popen(
+                command,
+                env=env,
+                shell=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=own_session,
+            )
+        finally:
+            state["spawning"] = False
+        if state["sig"] is not None:
+            raise SystemExit(128 + state["sig"])
         for pipe, out in ((child.stdout, stdout), (child.stderr, stderr)):
             thread = threading.Thread(target=_pump, args=(pipe, out, h, errors), daemon=True)
             thread.start()
             threads.append(thread)
         code = child.wait()
         for thread in threads:
-            thread.join()
+            thread.join(2.0)
+        if own_session and any(t.is_alive() for t in threads):
+            _kill_group(child.pid)  # something kept the pipes open after the command ended
+            for thread in threads:
+                thread.join(2.0)
         if errors:
             raise Refused("Refused: could not run the command.")
         return 128 - code if code < 0 else code
     finally:
-        if child is not None and child.poll() is None:
-            child.terminate()
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait()
+        if child is not None:
+            if own_session:
+                _kill_group(child.pid)  # also anything the command left running with the key
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
         for s, handler in old.items():
             signal.signal(s, handler)
 
 
-def run(root, mode, profile_name, argv, *, stdout, stderr, agent=False) -> int:
+def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
     temp = None
     h = None
     try:
@@ -361,7 +473,7 @@ def _get(root, profile_name, key, *, stdout_is_tty, out) -> None:
 
     if key not in {*profile.get("env", {}).values(), *profile.get("files", {}).values()}:
         refuse("not_in_profile", f'Refused: the profile "{profile_name}" does not hold the key "{key}".')
-    if not hp.effective(root, f"secret.allow_get.{profile_name}", profile.get("allow_get") is True):
+    if not _switch_on(root, profile_name, "allow_get"):
         refuse(
             "get_off",
             f'Refused: the profile "{profile_name}" does not allow printing keys. '
