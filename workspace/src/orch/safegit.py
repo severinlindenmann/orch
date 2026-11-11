@@ -307,6 +307,16 @@ def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> l
         "-c", "rerere.enabled=false",
         "-c", "commit.gpgSign=false",
         "-c", "tag.gpgSign=false",
+        # a repo's own .git/config (an agent can write it) must never make git run a signature program as the
+        # person: no verification at all, and every gpg program is the trusted no-op
+        "-c", "merge.verifySignatures=false",
+        "-c", f"gpg.program={true}",
+        "-c", f"gpg.openpgp.program={true}",
+        "-c", f"gpg.x509.program={true}",
+        "-c", f"gpg.ssh.program={true}",
+        "-c", "gpg.ssh.defaultKeyCommand=",
+        "-c", "core.gitProxy=",
+        "-c", "core.askPass=",
         "-c", "core.sshCommand=",
         "-c", "credential.helper=",
         "-c", "diff.external=",
@@ -567,6 +577,12 @@ ALLOWED = {
 # refuse files that need filters. Neither runs a filter, textconv or external program.)
 _CHECK_IGNORE_OK = {"-q", "--quiet", "-v", "--verbose", "-n", "--non-matching", "--no-index"}
 _WORKTREE_OK = {"add", "remove", "prune", "list"}
+# rev-list and check-attr only read: exact flag sets (no --output=<file>, no abbreviations, no bundles)
+_REV_LIST_OK = {
+    "--count", "--parents", "--first-parent", "--no-merges", "--merges", "--reverse", "-q", "--quiet", "-n",
+}  # fmt: skip
+_CHECK_ATTR_OK = {"-z", "--cached"}
+_ATTR_SOURCE = re.compile(r"--source=[0-9a-fA-F]{7,64}")
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
 _BAD_GLOBALS = (
@@ -611,6 +627,20 @@ def refusal(args: list[str]) -> str | None:
         set(flags) <= _CHECK_IGNORE_OK
     ):  # exact names: no abbreviations, bundles
         return "git check-ignore: only -q, -v, -n, --no-index and paths from the argument list are run"
+    if cmd == "rev-list":
+        for a in flags:
+            if a.startswith("-") and a not in _REV_LIST_OK and not re.fullmatch(r"--max-count=\d+", a):
+                return (
+                    "git rev-list: only --count, --parents, --first-parent, -n and similar read flags are run"
+                )
+    if cmd == "check-attr":
+        for a in flags:
+            if (
+                a.startswith("-")
+                and a not in _CHECK_ATTR_OK
+                and not re.fullmatch(r"--source=[0-9a-fA-F]{7,64}", a)
+            ):
+                return "git check-attr: only -z, --cached and --source=<commit> are run"
     if cmd == "config" and not any(a in _CONFIG_READ for a in flags):
         return "git config: orch only reads the configuration"
     if cmd in _NO_MODES or cmd == "add":

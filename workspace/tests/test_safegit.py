@@ -818,8 +818,36 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
             assert want in argv, (cmd, want)
         assert any(a.startswith("core.editor=/") for a in argv), cmd
         assert any(a == "core.hooksPath=/dev/null" for a in argv), cmd
+        # a repo-writable config can never make git run a signature program (every git call of orch)
+        true = next(a.split("=", 1)[1] for a in argv if a.startswith("core.editor="))
+        for want in (
+            "merge.verifySignatures=false",
+            f"gpg.program={true}",
+            f"gpg.openpgp.program={true}",
+            f"gpg.x509.program={true}",
+            f"gpg.ssh.program={true}",
+            "gpg.ssh.defaultKeyCommand=",
+            "core.gitProxy=",
+            "core.askPass=",
+        ):
+            assert want in argv, (cmd, want)
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["rev-list", "--output=/tmp/x", "HEAD"],
+        ["rev-list", "--exec=x", "HEAD"],
+        ["rev-list", "--count", "--objects", "HEAD"],
+        ["check-attr", "--source", "x", "filter", "--", "f"],
+        ["check-attr", "--all", "--", "f"],
+        ["check-attr", "-z", "--stdin", "filter"],
+    ],
+)
+def test_rev_list_and_check_attr_run_only_exact_read_flags(args):
+    assert safegit.refusal(args) is not None
 
 
 def test_flags_that_are_not_bad_words_still_pass():
