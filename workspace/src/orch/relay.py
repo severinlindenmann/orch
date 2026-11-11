@@ -1146,7 +1146,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
         return f"not applied to {tid}: not the current review", None
     try:
         if ans.casefold() == "accept":
-            tickets.accept_review(root, tid, by, via)
+            tickets.accept_review(root, tid, by, via, proven=True)  # the relay channel is the phone's proof
             return f"accepted {tid} (via {via})", tid
         tickets.ask_for_changes(root, tid, ans, by, via=via, phone=frm, pid="p_" + str(msg["id"])[2:])
         return f"asked for changes on {tid} (via {via})", tid

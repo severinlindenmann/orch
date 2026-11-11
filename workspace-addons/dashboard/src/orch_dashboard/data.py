@@ -177,6 +177,9 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         items = [(t, None) for t in raw]
     else:
         items = [(_load(f), f.stem) for f in _json_files(root / ".orch" / "tickets")]
+        for t, _stem in items:  # without the core nothing can verify a verdict: a raw Done is Review (V1)
+            if isinstance(t, dict) and t.get("status") == "done":
+                t["status"], t["verdict_needed"] = "review", True
     tickets, skipped = [], 0
     for t, stem in items:
         if isinstance(t, dict) and t.get("general") is True:  # the hidden General conversation is no ticket

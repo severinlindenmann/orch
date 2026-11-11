@@ -40,7 +40,14 @@ def test_paste_rejects_invalid_text(text):
         actions.build_argv("ticket.paste", {"text": text})
 
 
-def test_parts_are_direct_children_with_done_counts(ws):
+def test_parts_are_direct_children_with_done_counts(ws, monkeypatch):
+    # the core says which tickets are Done (it verifies the signed verdict); without it a raw "done" reads as Review
+    monkeypatch.setattr(
+        data,
+        "run_orch",
+        lambda *a, **k: [data._load(f) for f in data._json_files(ws / ".orch" / "tickets")],
+    )
+
     def parent(child, parent):
         path = ws / ".orch/tickets" / f"{child}.json"
         ticket = json.loads(path.read_text())
