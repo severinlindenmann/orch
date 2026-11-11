@@ -735,7 +735,7 @@ def job_replay(events, binding, cap=JOB_EVENT_CAP):
         if t == "start" and state is not None:
             results.append("already_started")
             continue
-        if stored >= cap:
+        if stored >= cap and t != "end":  # one `end` may pass the cap so a job can always finish
             results.append("cap")
             continue
         if t == "step":

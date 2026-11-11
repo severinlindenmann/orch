@@ -50,6 +50,7 @@ _MESSAGES = {
     "io": "The records of this run cannot be read right now. Try again later.",
     "missing": "There are no records for this run.",
     "pending": "Some records of this run are waiting to be written.",
+    "torn": "The last entry of this job was cut off.",
 }
 
 
@@ -68,6 +69,10 @@ class RecordInvalid(RecordRefused):
 
 class RecordOff(RecordRefused):
     code = "refused"
+
+
+class RecordFull(RecordRefused):
+    code = "cap"
 
 
 class RecordBusy(RecordRefused):
@@ -407,7 +412,7 @@ def _unlink(ws, rel, *, expected=None):
         return False
 
 
-def _write_new(ws, rel, payload):
+def _write_new(ws, rel, payload, *, expected=None):
     temporary = (*rel[:-1], "tmp_" + uuid.uuid4().hex)
     with _walk(ws, rel[:-1], create=True) as directory:
         # Keep the same parent descriptor through creation and publication.
@@ -419,7 +424,22 @@ def _write_new(ws, rel, payload):
         try:
             _check_fd(fd)
             _write(fd, payload)
+            with _io():
+                os.fsync(fd)
             _verify_walk(directory)
+            if expected is not None:
+                # the file we read through `expected` must still be the one at this name (no swap in between)
+                with _io():
+                    current = os.stat(
+                        rel[-1] if _FD else directory.path / rel[-1], follow_symlinks=False, **kw
+                    )
+                    before = os.fstat(expected)
+                if (current.st_dev, current.st_ino, current.st_nlink) != (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_nlink,
+                ):
+                    raise RecordTampered("swapped")
             try:
                 existing = _open(ws, rel, "read", _directory=directory)
             except RecordUnavailable as error:
@@ -432,6 +452,9 @@ def _write_new(ws, rel, payload):
                 rel[-1] if _FD else directory.path / rel[-1],
                 **({"src_dir_fd": directory.fd, "dst_dir_fd": directory.fd} if _FD else {}),
             )
+            if _FD:
+                with _io():
+                    os.fsync(directory.fd)
         finally:
             os.close(fd)
             try:
@@ -709,6 +732,7 @@ LOST_REASONS = (
     "invalid",
     "too_large",
     "other_run",
+    "job_activity",
 )  # after the caller is proven to be in the run
 UNPROVEN_REASONS = ("not_active", "other_run", "not_provable")  # before it is: never under a run id
 _LOST_RUN_LINES = 50  # per run and day; the next one is a "trimmed" marker, then nothing
@@ -775,16 +799,20 @@ def note_unattributed(ws, reason, *, now=None):
 
 _JOB = r"j_[a-z0-9]{6,32}"
 JOB_BYTES = 5 * 1024**2  # stored stream of one job (job-events.md caps)
+JOB_RUN_BYTES = 50 * 1024**2  # all job streams of one run
+JOB_REPLACE_BYTES = 64 * 1024  # a same-second progress line is replaced (file rewritten) only below this size
 
 
-def _job_events(raw, run, job):
-    """The lines of one job stream. Strict: a line that is not a JSON object of this job and run, in order,
-    means the file was changed outside orch (tampered), never quietly skipped."""
+def _job_events(raw, run, job, valid):
+    """The lines of one job stream. Strict: a line that is not a valid event of this job and run, in order,
+    means the file was changed outside orch (tampered), never quietly skipped or trusted."""
+    if raw and not raw.endswith(b"\n"):
+        raise RecordUnavailable("torn")
     events = []
     for line in raw.splitlines():
         try:
             event = json.loads(line)
-            ok = (event["run"], event["job"], event["seq"]) == (run, job, len(events) + 1)
+            ok = (event["run"], event["job"], event["seq"]) == (run, job, len(events) + 1) and valid(event)
         except (ValueError, RecursionError, KeyError, TypeError):
             ok = False
         if not ok:
@@ -793,14 +821,15 @@ def _job_events(raw, run, job):
     return events
 
 
-def read_job(workspace, run, job, *, seen_by="reader") -> ReadResult[list[dict]]:
-    """One job stream (jobs/<run>/<job>.jsonl) with the same explicit status as read_run."""
+def read_job(workspace, run, job, *, valid, seen_by="reader") -> ReadResult[list[dict]]:
+    """One job stream (jobs/<run>/<job>.jsonl), explicit status as read_run. `valid(event)` is the caller's
+    schema check of a stored line."""
     _name(run, _RUN)
     _name(job, _JOB)
     try:
         fd = _open(workspace, ("jobs", run, job + ".jsonl"), "read")
         try:
-            return ReadResult("ok", _job_events(_read_bytes(fd), run, job))
+            return ReadResult("ok", _job_events(_read_bytes(fd), run, job, valid))
         finally:
             _close(fd)
     except (RecordTampered, RecordUnavailable) as error:
@@ -833,10 +862,12 @@ def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple
         return _report(workspace, error, "folder", run, seen_by)
 
 
-def append_job(workspace, run, job, decide):
+def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
     """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
     inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
-    is stored only after the caller's own checks passed (every string already hidden). Returns result."""
+    is stored only after the caller's own checks passed (every string already hidden). A cut-off last line (a
+    crash) is dropped under the lock. Caps are checked here, under the lock: the stream, the run's streams,
+    and (at the first line) the number of jobs of the run. Returns result."""
     _name(run, _RUN)
     _name(job, _JOB)
     rel = ("jobs", run, job + ".jsonl")
@@ -847,19 +878,32 @@ def append_job(workspace, run, job, decide):
             try:
                 check_lock()
                 raw = _read_bytes(fd)
-                events = _job_events(raw, run, job)
+                if raw and not raw.endswith(b"\n"):
+                    raw = raw[: raw.rfind(b"\n") + 1]
+                    _write_new(workspace, rel, raw, expected=fd)
+                    old, fd = fd, _open(workspace, rel, "read_append")
+                    _close(old)
+                events = _job_events(raw, run, job, valid)
+                if not events and max_jobs is not None and len(_entries(workspace, ("jobs", run))) > max_jobs:
+                    _unlink(workspace, rel, expected=fd)
+                    raise RecordFull("This run has reached its limit of jobs.")
                 event, replace_last, result = decide(events, len(raw))
                 if event is None:
                     return result
                 data = (_json(event) + "\n").encode()
                 if len(data) > 16384:
                     raise RecordInvalid("The job entry is too large.")
+                if (
+                    len(raw) + len(data) > JOB_BYTES
+                    or _size(workspace, ("jobs", run)) + len(data) > JOB_RUN_BYTES
+                ):
+                    raise RecordFull("This job has reached its limit of entries.")
                 check_lock()
-                if replace_last:
+                if replace_last and len(raw) <= JOB_REPLACE_BYTES:
                     rows = raw.splitlines(keepends=True)[:-1]
-                    _write_new(workspace, rel, b"".join(rows) + data)
+                    _write_new(workspace, rel, b"".join(rows) + data, expected=fd)
                 else:
-                    _write(fd, (b"\n" if raw and not raw.endswith(b"\n") else b"") + data)
+                    _write(fd, data)
                 return result
             finally:
                 _close(fd)

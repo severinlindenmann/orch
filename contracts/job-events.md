@@ -44,7 +44,7 @@ running --(orch only)--> lost                              (final)
 
 | What | Cap | Beyond the cap |
 |---|---|---|
-| Events per job | 2000 | refused `cap`; one stored `log` line "More events were left out." the first time |
+| Events per job | 2000 | refused `cap`; one stored `log` line "More events were left out." (`capped: true`, set by orch) the first time; one `end` is still accepted so a job can finish |
 | Jobs per run | 200 | `start` refused `cap` |
 | One input line | 8 KB | refused `too_large` |
 | Stored stream per job | 5 MB | as events per job |
@@ -79,7 +79,11 @@ process tree (the proof of `orch record hook`), else refused `not_active` (nothi
 registered value hider `hider_off`. Every string of an entry (and every table key) passes the value hider before anything is
 stored; an entry that is invalid after hiding is refused (`invalid`, plain words), never stored raw. A field the schema does not
 name for that `type` is `invalid`; `by`, `seq`, `ticket`, `pid`, `command` and type `lost` from a program are `not_allowed`.
-A job whose id belongs to another run is `other_run`. A job started inside an agent run is bound by its first stored line
+A job whose id belongs to another run is `other_run`.
+**One writer per job:** `start` makes a random 128-bit write token and returns it once (`{"job": "j_…", "token": "…"}`); only
+its sha256 is stored (`token_hash` in the `start` line). Every later write must present it (`ORCH_JOB_TOKEN` or `--token`),
+compared in constant time; a missing or wrong token is refused `token` and the token is never echoed or recorded, so another
+process of the same run cannot write into a sibling job by guessing its id. Reads need no token. A job started inside an agent run is bound by its first stored line
 (`.orch/record/jobs/<run>/<job>.jsonl` names run and job; ticket and run are stored in every line), so no separate binding
 file is needed until `orch job run` (which needs `pid`, `events_path`) is built.
 

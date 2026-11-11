@@ -25,9 +25,9 @@ def _number(text):
     try:
         value = float(text)
     except ValueError:
-        raise Refused(f"`{text}` is not a number.") from None
+        raise Refused("That is not a number.") from None
     if not math.isfinite(value):
-        raise Refused(f"`{text}` is not a number.")
+        raise Refused("That is not a number.")
     return int(value) if value.is_integer() and abs(value) < 2**53 else value
 
 
@@ -37,6 +37,7 @@ def add_parsers(sub, common) -> None:
     def add(name):
         p = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
         p.add_argument("--job")
+        p.add_argument("--token", help="the job's write key (default: ORCH_JOB_TOKEN)")
         return p
 
     p = add("start")
@@ -168,11 +169,11 @@ def dispatch(args, root: Path) -> bool:
                     raise jobs.JobError("no_job")
                 _emit(jobs.show_job(root, job_id))
             return True
-        stored = jobs.ingest(root, _input(args), job=args.job)
+        stored = jobs.ingest(root, _input(args), job=args.job, token=args.token)
     except record.RecordRefused as e:
         raise jobs.JobError(e.code, str(e)) from None
     if args.json:
-        _emit({"job": stored["job"]} if sub == "start" else stored)
+        _emit({"job": stored["job"], "token": stored["token"]} if sub == "start" else stored)
     elif sub == "start":
-        print(stored["job"])
+        print(f"job {stored['job']}\nkey {stored['token']}  (shown once: set ORCH_JOB_TOKEN)")
     return True

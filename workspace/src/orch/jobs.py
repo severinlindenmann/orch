@@ -16,11 +16,14 @@ An agent or a wrapper calls `orch job …` (cli_job) and every call ends here. W
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import math
 import os
 import re
 import secrets
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -39,7 +42,7 @@ QUIET_DEFAULT = 10  # minutes
 ACTIVITY_PROGRESS_SECONDS = 5
 MORE = "More events were left out."
 _FINAL = ("ok", "failed", "cancelled", "lost")
-_NOT_ALLOWED_FIELDS = ("by", "seq", "ticket", "pid", "command")
+_NOT_ALLOWED_FIELDS = ("by", "seq", "ticket", "pid", "command", "token_hash", "capped")
 _MESSAGES = {
     "other_run": "this job belongs to another run.",
     "not_started": "this job has not been started.",
@@ -53,6 +56,7 @@ _MESSAGES = {
     "not_active": "this run is not active, so nothing was recorded.",
     "hider_off": "recording is off until key hiding is ready.",
     "no_run": "`orch job` works inside an orch run; a job outside a run is not built yet.",
+    "token": "this job needs its write key (ORCH_JOB_TOKEN, given once by `orch job start`).",
     "no_job": "say which job: --job <id> or ORCH_JOB.",
     "not_found": "there is no such job.",
 }
@@ -85,6 +89,8 @@ def _fields() -> dict[str, set[str]]:
         name = part["if"]["properties"]["type"]["const"]
         out[name] = set(part["then"]["properties"])
     out.pop("lost", None)
+    out["start"] -= {"token_hash", "pid", "command"}
+    out["log"] -= {"capped"}
     return out
 
 
@@ -97,6 +103,10 @@ def _now() -> str:
 
 def _time(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def new_job_id() -> str:
@@ -141,7 +151,7 @@ def _rule(events: list[dict], ev: dict, cap: int) -> str | None:
         return "ended"
     if ev["type"] == "start" and state is not None:
         return "already_started"
-    if len([e for e in events if e["type"] != "lost"]) >= cap:
+    if ev["type"] != "end" and len([e for e in events if e["type"] != "lost"]) >= cap:
         return "cap"
     if ev["type"] == "step" and _steps(events).get(ev["step"]) in ("done", "failed", "skipped"):
         return "step_finished"
@@ -289,11 +299,12 @@ def _wants_activity(ev: dict, events: list[dict]) -> bool:
     return not last or _time(ev["at"]) - _time(last[-1]["at"]) >= timedelta(seconds=ACTIVITY_PROGRESS_SECONDS)
 
 
-def ingest(root, inp, *, environ=None, job=None, now=None) -> dict:
+def ingest(root, inp, *, environ=None, job=None, now=None, token=None) -> dict:
     """Store one event of a job (type start makes the job) and return the stored event.
 
     `inp` is one `$defs/input` object (what a program may write). Raises JobError (plain words, contract
-    code) for every refusal; a refused entry is never stored."""
+    code) for every refusal; a refused entry is never stored. `start` returns the job's write token once
+    (key `token`, never stored); every other type must present it (`token` or ORCH_JOB_TOKEN)."""
     environ = os.environ if environ is None else environ
     inp = validate_input(inp)
     run, ticket = _ids(environ)
@@ -320,6 +331,8 @@ def ingest(root, inp, *, environ=None, job=None, now=None) -> dict:
         raise JobError("invalid")
     if body["type"] == "artifact" and not _artifact_exists(root, body["path"], ticket):
         raise JobError("invalid", "that file does not exist in this workspace.")
+    token = token or environ.get("ORCH_JOB_TOKEN")
+    minted = secrets.token_hex(16) if is_start else None
     at = _now() if now is None else now.strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         _check_job_id(job_id)
@@ -328,6 +341,8 @@ def ingest(root, inp, *, environ=None, job=None, now=None) -> dict:
         elif len(_all(root, run)) >= JOBS_PER_RUN:
             raise JobError("cap")
         ctx: dict = {}
+        if is_start:
+            body["token_hash"] = _hash(minted)
 
         def decide(events, size):
             ev = {
@@ -339,6 +354,10 @@ def ingest(root, inp, *, environ=None, job=None, now=None) -> dict:
                 "seq": len(events) + 1,
                 "at": at,
             }
+            if events and not hmac.compare_digest(
+                _hash(token) if isinstance(token, str) else "", str(events[0].get("token_hash"))
+            ):
+                raise JobError("token")
             if events and is_quiet(events, _time(at)):
                 lost = {
                     "v": 1,
@@ -354,16 +373,17 @@ def ingest(root, inp, *, environ=None, job=None, now=None) -> dict:
                 ctx.update(events=events, ev=lost, refuse="ended")
                 return lost, False, None
             code = _rule(events, ev, EVENT_CAP)
-            if code is None and size + 2048 > record.JOB_BYTES:
+            if code is None and ev["type"] != "end" and size + 2048 > record.JOB_BYTES - 16384:
                 code = "cap"
             if code == "cap":
-                if len(events) > EVENT_CAP or events and events[-1].get("text") == MORE:
+                if any(e.get("capped") for e in events):
                     raise JobError("cap")
                 more = {
                     "v": 1,
                     "type": "log",
                     "stream": "out",
                     "text": MORE,
+                    "capped": True,
                     "job": job_id,
                     "run": run,
                     "ticket": ticket,
@@ -376,14 +396,21 @@ def ingest(root, inp, *, environ=None, job=None, now=None) -> dict:
                 raise JobError(code)
             if not _STORED.is_valid(ev):
                 raise JobError("invalid")
-            replace = ev["type"] == "progress" and events[-1]["type"] == "progress" and events[-1]["at"] == at
+            replace = (
+                ev["type"] == "progress"
+                and events[-1]["type"] == "progress"
+                and events[-1]["at"] == at
+                and size <= record.JOB_REPLACE_BYTES
+            )
             if replace:
                 ev["seq"] = events[-1]["seq"]
                 events = events[:-1]
             ctx.update(events=events, ev=ev, refuse=None, want=not replace and _wants_activity(ev, events))
             return ev, replace, None
 
-        record.append_job(root, run, job_id, decide)
+        record.append_job(
+            root, run, job_id, decide, valid=_STORED.is_valid, max_jobs=JOBS_PER_RUN if is_start else None
+        )
     except record.RecordRefused as e:
         raise JobError(getattr(e, "code", "invalid"), str(e)) from None
     if ctx["refuse"] and ctx["ev"] is None:
@@ -393,12 +420,13 @@ def ingest(root, inp, *, environ=None, job=None, now=None) -> dict:
         if stored is not None and (ctx["refuse"] or ctx["want"]):
             _activity(writer, stored, ctx["events"])
     except record.RecordRefused:
-        import sys
-
+        # the job line is stored; leave a gap marker under the (proven) run and say so
+        record.note_lost(root, run, "job_activity")
         sys.stderr.write("orch: the job entry was saved, but it could not be added to the run's record.\n")
     if ctx["refuse"]:
         raise JobError(ctx["refuse"])
-    return stored
+    shown = {k: v for k, v in stored.items() if k != "token_hash"}
+    return {**shown, "token": minted} if is_start else shown
 
 
 def _check_job_id(job_id) -> None:
@@ -452,7 +480,7 @@ def list_jobs(root, *, run=None, ticket=None) -> dict:
         raise JobError(e.code, str(e)) from None
     rows = []
     for r, j in pairs:
-        got = record.read_job(root, r, j, seen_by="cli")
+        got = record.read_job(root, r, j, valid=_STORED.is_valid, seen_by="cli")
         if got.status != "ok":
             rows.append(
                 {"job": j, "run": r, "status": got.status, "reason": got.reason, "message": got.message}
@@ -474,9 +502,10 @@ def show_job(root, job_id: str) -> dict:
         raise JobError(e.code, str(e)) from None
     if run is None:
         raise JobError("not_found")
-    got = record.read_job(root, run, job_id, seen_by="cli")
+    got = record.read_job(root, run, job_id, valid=_STORED.is_valid, seen_by="cli")
     if got.status != "ok":
         raise JobError("tampered" if got.status == "tampered" else "not_available", got.message)
     if not got.value:
         raise JobError("not_found")
-    return {"status": "ok", "job": summary(got.value), "events": got.value}
+    events = [{k: v for k, v in e.items() if k != "token_hash"} for e in got.value]
+    return {"status": "ok", "job": summary(got.value), "events": events}

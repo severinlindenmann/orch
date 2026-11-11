@@ -43,20 +43,33 @@ def live(proj, monkeypatch):
     monkeypatch.setenv("ORCH_RUN", rec["run"])
     monkeypatch.setenv("ORCH_TICKET", t["id"])
     monkeypatch.delenv("ORCH_JOB", raising=False)
+    monkeypatch.delenv("ORCH_JOB_TOKEN", raising=False)
     with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
         yield proj, rec["run"], t["id"]
 
 
+TOKENS = {}
+
+
+def ing(root, inp, job=None, **kw):
+    """jobs.ingest with the job's write key remembered from its start."""
+    kw.setdefault("token", TOKENS.get(job))
+    got = jobs.ingest(root, inp, job=job, **kw)
+    if inp.get("type") == "start":
+        TOKENS[got["job"]] = got["token"]
+    return got
+
+
 def start(root, title="Export", **kw):
-    return jobs.ingest(root, {"type": "start", "title": title, **kw})["job"]
+    return ing(root, {"type": "start", "title": title, **kw})["job"]
 
 
 def send(root, job, **ev):
-    return jobs.ingest(root, ev, job=job)
+    return ing(root, ev, job=job)
 
 
 def stream(root, run, job):
-    return record.read_job(root, run, job).unwrap()
+    return record.read_job(root, run, job, valid=jobs._STORED.is_valid).unwrap()
 
 
 def stream_file(root, run, job):
@@ -122,7 +135,7 @@ def test_vector_state_rules_through_the_real_store(live, case):
             if ev["type"] == "start" and job is None:
                 job = start(root, ev["title"])
             else:
-                jobs.ingest(root, ev, job=job or "j_nostart01")
+                ing(root, ev, job=job or "j_nostart01")
             results.append("ok")
         except jobs.JobError as e:
             results.append(e.code)
@@ -144,12 +157,12 @@ def test_vector_input_examples_are_accepted_or_refused_like_the_contract(live):
     job = start(root)
     for f in sorted((CONTRACTS / "examples/job-input").glob("invalid-*.json")):
         with pytest.raises(jobs.JobError):
-            jobs.ingest(root, json.loads(f.read_text()), job=job)
+            ing(root, json.loads(f.read_text()), job=job)
     for f in sorted((CONTRACTS / "examples/job-input").glob("valid-*.json")):
         ev = json.loads(f.read_text())
         ev.pop("job", None)
         ev.pop("run", None)
-        jobs.ingest(root, ev, job=start(root))
+        ing(root, ev, job=start(root))
 
 
 def test_vector_job_id_of_another_job_is_other_run(live):
@@ -166,9 +179,11 @@ def test_cap_vector_stores_one_marker_line(live, monkeypatch):
     for n in range(2):
         send(root, job, type="log", text=str(n))
     refused("cap", send, root, job, type="log", text="3")
-    refused("cap", send, root, job, type="end", status="ok")
-    texts = [e.get("text") for e in stream(root, run, job)]
-    assert texts[-1] == jobs.MORE and texts.count(jobs.MORE) == 1 and len(texts) == 4
+    refused("cap", send, root, job, type="log", text="4")
+    send(root, job, type="end", status="ok")  # one end may pass the cap: a job can always finish
+    events = stream(root, run, job)
+    assert [e.get("capped") for e in events].count(True) == 1 and events[-2]["text"] == jobs.MORE
+    assert jobs.state_of(events) == "ok"
 
 
 def test_terminal_state_is_frozen_and_replays_store_nothing(live):
@@ -190,7 +205,7 @@ def test_a_quiet_job_is_lost_and_the_late_event_is_refused(live):
     root, run, _ = live
     job = start(root, quiet_minutes=1)
     late = datetime.now(UTC) + timedelta(minutes=2)
-    refused("ended", jobs.ingest, root, {"type": "log", "text": "x"}, job=job, now=late)
+    refused("ended", ing, root, {"type": "log", "text": "x"}, job=job, now=late)
     events = stream(root, run, job)
     assert events[-1]["type"] == "lost" and events[-1]["by"] == "orch" and jobs.state_of(events) == "lost"
     assert STORED.is_valid(events[-1])
@@ -201,8 +216,8 @@ def test_progress_in_the_same_second_replaces_the_last(live):
     job = start(root)
     t = datetime.now(UTC).replace(microsecond=0)
     for n in (1, 2, 3):
-        jobs.ingest(root, {"type": "progress", "done": n, "total": 9}, job=job, now=t)
-    jobs.ingest(root, {"type": "progress", "done": 4, "total": 9}, job=job, now=t + timedelta(seconds=1))
+        ing(root, {"type": "progress", "done": n, "total": 9}, job=job, now=t)
+    ing(root, {"type": "progress", "done": 4, "total": 9}, job=job, now=t + timedelta(seconds=1))
     got = [(e["seq"], e["done"]) for e in stream(root, run, job) if e["type"] == "progress"]
     assert got == [(2, 3), (3, 4)]
     acts = [
@@ -488,11 +503,12 @@ def run_cli(capsys, *argv):
     return code, out.out, out.err
 
 
-def test_cli_flow_and_aliases(live, capsys):
+def test_cli_flow_and_aliases(live, capsys, monkeypatch):
     root, run, _ = live
     code, out, _ = run_cli(capsys, "start", "--title", "Export", "--json")
     job = json.loads(out)["job"]
-    assert code == 0 and job.startswith("j_")
+    assert code == 0 and job.startswith("j_") and len(json.loads(out)["token"]) == 32
+    monkeypatch.setenv("ORCH_JOB_TOKEN", json.loads(out)["token"])
     assert run_cli(capsys, "step", "read", "--label", "Read", "--job", job, "--json")[0] == 0
     code, out, _ = run_cli(
         capsys, "progress", "--done", "3", "--total", "9", "--unit", "files", "--job", job, "--json"
@@ -513,8 +529,10 @@ def test_cli_flow_and_aliases(live, capsys):
 
 def test_cli_fail_alias_and_env_job(live, capsys, monkeypatch):
     root, run, _ = live
-    job = json.loads(run_cli(capsys, "start", "--title", "X", "--json")[1])["job"]
+    started = json.loads(run_cli(capsys, "start", "--title", "X", "--json")[1])
+    job = started["job"]
     monkeypatch.setenv("ORCH_JOB", job)
+    monkeypatch.setenv("ORCH_JOB_TOKEN", started["token"])
     code, out, _ = run_cli(capsys, "fail", "--summary", "boom", "--exit", "3", "--json")
     assert code == 0 and json.loads(out)["status"] == "failed" and json.loads(out)["exit"] == 3
 
@@ -523,7 +541,7 @@ def test_cli_refusals_are_plain(live, capsys):
     code, out, err = run_cli(capsys, "start", "--json")
     assert code == 2 and "title" in err
     code, out, err = run_cli(capsys, "progress", "--done", "abc", "--json")
-    assert code == 2 and "not a number" in err
+    assert code == 2 and "not a number" in err and "abc" not in err
     code, out, err = run_cli(capsys, "run", "--", "x", "--json")
     assert code == 2 and "not built" in err
     code, out, err = run_cli(capsys, "list")
@@ -541,3 +559,132 @@ def test_every_job_stored_line_validates_against_the_contract_schema(live):
     send(root, job, type="end", status="cancelled", exit=1)
     for e in stream(root, run, job):
         assert not list(STORED.iter_errors(e))
+
+
+# --- review round (API Opus on 83805601) ---
+def test_a_sibling_job_cannot_be_written_without_its_token(live):
+    root, run, _ = live
+    mine, sibling = start(root, "Mine"), start(root, "Sibling")
+    mine_token, sibling_token = TOKENS[mine], TOKENS[sibling]
+    before = stream_file(root, run, sibling).read_bytes()
+    for token in (None, "", mine_token, "x" * 32, sibling_token.upper()):
+        e = refused("token", jobs.ingest, root, {"type": "log", "text": "hijack"}, job=sibling, token=token)
+        assert sibling_token not in str(e)
+    refused("token", jobs.ingest, root, {"type": "end", "status": "ok"}, job=sibling, token=mine_token)
+    assert stream_file(root, run, sibling).read_bytes() == before
+    jobs.ingest(root, {"type": "log", "text": "mine"}, job=sibling, token=sibling_token)
+    assert [e["type"] for e in stream(root, run, sibling)] == ["start", "log"]
+
+
+def test_token_is_handed_out_once_and_never_stored_in_plain(live, monkeypatch):
+    root, run, _ = live
+    job = start(root)
+    token = TOKENS[job]
+    ing(root, {"type": "log", "text": "x"}, job=job)
+    ing(root, {"type": "end", "status": "ok"}, job=job)
+    first = stream(root, run, job)[0]
+    assert first["token_hash"] == jobs._hash(token) and token not in json.dumps(first)
+    for blob in (
+        everything(root),
+        json.dumps(jobs.show_job(root, job)).encode(),
+        json.dumps(jobs.list_jobs(root)).encode(),
+    ):
+        assert token.encode() not in (blob if isinstance(blob, bytes) else blob.encode())
+    assert "token_hash" not in json.dumps(jobs.show_job(root, job))
+    # a program cannot send the hash or the marker itself
+    j2 = start(root)
+    refused("not_allowed", send, root, j2, type="log", text="x", capped=True)
+    refused("not_allowed", send, root, j2, type="log", text="x", token_hash="0" * 64)
+
+
+def test_a_forged_line_without_the_fields_is_tampered_not_a_crash(live):
+    root, run, _ = live
+    job = start(root)
+    f = stream_file(root, run, job)
+    f.write_text(f.read_text() + json.dumps({"run": run, "job": job, "seq": 2}) + "\n")
+    row = jobs.list_jobs(root)["jobs"][0]
+    assert row["status"] == "tampered"
+    refused("tampered", jobs.show_job, root, job)
+    refused("tampered", send, root, job, type="log", text="x")
+
+
+def test_a_cut_off_last_line_is_reported_and_dropped_under_the_lock(live):
+    root, run, _ = live
+    job = start(root)
+    f = stream_file(root, run, job)
+    f.write_text(f.read_text() + '{"v":1,"type":"lo')
+    row = jobs.list_jobs(root)["jobs"][0]
+    assert row["status"] == "unavailable" and row["reason"] == "torn"
+    send(root, job, type="log", text="after the crash")
+    assert [e["type"] for e in stream(root, run, job)] == ["start", "log"]
+
+
+def test_replace_refuses_when_the_file_was_swapped(live, monkeypatch):
+    root, run, _ = live
+    job = start(root)
+    t = datetime.now(UTC).replace(microsecond=0)
+    ing(root, {"type": "progress", "done": 1, "total": 9}, job=job, now=t)
+    f = stream_file(root, run, job)
+    real = record._write_new
+
+    def swapped(ws, rel, payload, *, expected=None):
+        f.rename(f.with_name("moved"))
+        f.write_text("planted")
+        return real(ws, rel, payload, expected=expected)
+
+    monkeypatch.setattr(record, "_write_new", swapped)
+    refused("tampered", ing, root, {"type": "progress", "done": 2, "total": 9}, job=job, now=t)
+    assert f.read_text() == "planted"  # never silently overwritten
+
+
+def test_a_forged_marker_line_does_not_cap_a_job(live):
+    root, run, _ = live
+    job = start(root)
+    got = send(root, job, type="log", text=jobs.MORE)
+    assert "capped" not in got
+    send(root, job, type="log", text="still fine")
+
+
+def test_stream_and_run_byte_caps_are_checked_under_the_lock(live, monkeypatch):
+    root, run, _ = live
+    job = start(root)
+    monkeypatch.setattr(record, "JOB_BYTES", 600)
+    with pytest.raises(jobs.JobError) as e:
+        for _ in range(20):
+            send(root, job, type="log", text="y" * 100)
+    assert e.value.code == "cap"
+    monkeypatch.setattr(record, "JOB_BYTES", 5 * 1024**2)
+    monkeypatch.setattr(record, "JOB_RUN_BYTES", 300)
+    refused("cap", send, root, job, type="log", text="z" * 400)
+
+
+def test_jobs_per_run_is_rechecked_inside_the_lock(live, monkeypatch):
+    root, run, _ = live
+    start(root)
+    monkeypatch.setattr(jobs, "_all", lambda root, run=None: [])  # the outside check is blind
+    monkeypatch.setattr(jobs, "JOBS_PER_RUN", 1)
+    refused("cap", start, root)
+    assert len(record.list_jobs(root, run).value) == 1  # no empty file left behind
+
+
+def test_big_streams_append_instead_of_rewriting(live, monkeypatch):
+    root, run, _ = live
+    job = start(root)
+    monkeypatch.setattr(record, "JOB_REPLACE_BYTES", 10)
+    t = datetime.now(UTC).replace(microsecond=0)
+    for n in (1, 2):
+        ing(root, {"type": "progress", "done": n, "total": 9}, job=job, now=t)
+    assert [e["seq"] for e in stream(root, run, job)] == [1, 2, 3]
+
+
+def test_a_failed_record_line_leaves_a_gap_marker(live, monkeypatch):
+    root, run, _ = live
+
+    def boom(self, event, detail=None):
+        raise record.RecordInvalid()
+
+    monkeypatch.setattr(record.RecordWriter, "append", boom)
+    job = start(root)
+    assert len(stream(root, run, job)) == 1  # the job line is stored
+    notes = "".join(p.read_text() for p in (root / ".orch/record/alerts").glob("hook-lost-2*.jsonl"))
+    assert "job_activity" in notes
