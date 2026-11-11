@@ -88,7 +88,7 @@ final class ArchiveStoreTests: XCTestCase {
         let r = a.split(s, now: now)
         XCTAssertEqual(r.topics.map(\.id.ticket), ["t2"])
         XCTAssertFalse(r.general)
-        XCTAssertEqual(r.archived.map(\.title), ["Chat", "t1"])
+        XCTAssertEqual(r.archived.map(\.title), ["Your helper", "t1"])
         XCTAssertTrue(r.archived[0].isGeneral)
     }
 

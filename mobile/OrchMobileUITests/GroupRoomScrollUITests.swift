@@ -55,7 +55,7 @@ final class GroupRoomScrollUITests: XCTestCase {
         waitUntilHittable(row)
         row.tap()
         XCTAssertTrue(element(app, "group-members").waitForExistence(timeout: 10))
-        waitUntilHittable(app.staticTexts["This group is done. Read only."])
+        waitUntilHittable(app.staticTexts["Read only"])
         XCTAssertFalse(element(app, "composer").exists)
     }
 }

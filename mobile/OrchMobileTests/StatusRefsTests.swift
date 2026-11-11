@@ -37,9 +37,9 @@ final class StatusRefsTests: XCTestCase {
     }
 
     func testChipWordsAndLabels() {
-        XCTAssertEqual(TopicStatus.working.chip, "Claude is working"); XCTAssertEqual(TopicStatus.waitingOnYou.chip, "Needs you")
+        XCTAssertEqual(TopicStatus.working.chip, "Helper is working"); XCTAssertEqual(TopicStatus.waitingOnYou.chip, "Needs your OK")
         XCTAssertEqual(TopicStatus.review.chip, "Ready for review"); XCTAssertEqual(TopicStatus.done.chip, "Done")
-        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Needs you", "Ready for review", "Paused", "Not started", "Done", "Dropped", "Stopped", "Didn't work"])
+        XCTAssertEqual(TopicStatus.allCases.map(\.label), ["Working", "Needs your OK", "Ready for review", "Paused", "Not started", "Done", "Dropped", "Stopped", "Didn't work"])
     }
 
     func testGroupingOrderOfTicketsIsNeedsYouReviewWorkingBacklogDone() {
@@ -103,7 +103,7 @@ final class StatusRefsTests: XCTestCase {
         XCTAssertEqual(rows.count, 5, "unsafe addresses are dropped")
         guard case .link(_, let title, let host, let url) = rows[0] else { return XCTFail("link") }
         XCTAssertEqual(title, "example.com"); XCTAssertEqual(host, "example.com"); XCTAssertEqual(url.scheme, "https")
-        XCTAssertEqual(rows[1], .ticket(id: "ref1", label: "PIL-12 · Q3 summary", known: true))
+        XCTAssertEqual(rows[1], .ticket(id: "ref1", label: "Q3 summary", known: true))
         guard case .artifact(_, let name, let found) = rows[2] else { return XCTFail("artifact") }
         XCTAssertEqual(name, "report.pdf"); XCTAssertEqual(found?.blobId, "b_1")
         XCTAssertEqual(rows[3], .file(id: "ref3", text: "docs/spec.md:40"))

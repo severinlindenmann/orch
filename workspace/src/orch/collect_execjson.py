@@ -15,8 +15,10 @@ import re
 import shlex
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Any
+
+from orch.record_files import workspace_files
 
 
 def _hash(text: str) -> str:
@@ -75,8 +77,11 @@ class ExecJsonMapper:
         harness: str,
         now: Callable[[], str] = _now,
         hider: Callable[[str], str] | None = None,
+        workspace: str | Path | None = None,
     ):
+        """`workspace`: the run's workspace root; `files` of a file change are made relative to it."""
         self.run, self.ticket, self.harness, self.now = run, ticket, harness, now
+        self.workspace = workspace
         self.hider, self.hidden = hider, hider is not None
         self.seq = self.turn = 0
         self.session: str | None = None
@@ -165,7 +170,7 @@ class ExecJsonMapper:
             say = _one_line(item.get("text", ""))
             return [self._emit(**fields, kind="run.state", text=say, data={"state": "working", "say": say})]
         name, text, action, source, used_kind = "Run command", "", None, "builtin", "tool"
-        ok, error = None, None
+        ok, error, extra = None, None, {}
         if typ == "command_execution":
             text = _shell_unwrap(str(item.get("command", "")))
             code = item.get("exit_code")
@@ -181,6 +186,14 @@ class ExecJsonMapper:
                 first = changes[0] if isinstance(changes, list) and changes else {}
                 path = first.get("path") if isinstance(first, dict) else None
                 name, text = "Edit", f"Edit {path}" if path else "Edit files"
+                paths = (
+                    [c.get("path") for c in changes if isinstance(c, dict)]
+                    if isinstance(changes, list)
+                    else []
+                )
+                files = workspace_files(paths, self.workspace)
+                if files:
+                    extra["files"] = files
             elif typ == "mcp_tool_call":
                 name, action = str(item.get("server") or "MCP"), item.get("tool")
                 used_kind, source, text = "mcp", "harness", f"{name} {action or ''}"
@@ -188,7 +201,7 @@ class ExecJsonMapper:
                 name, text = "Web search", f"Web search {item.get('query') or ''}"
         used = dict(kind=used_kind, name=name, action=action, source=source, version=None)
         outcome = dict(ok=ok, error=error, ms=None) if completed else None
-        return [self._emit(**fields, kind="step", text=_one_line(text), used=used, outcome=outcome)]
+        return [self._emit(**fields, kind="step", text=_one_line(text), used=used, outcome=outcome, **extra)]
 
     def events(self, lines: Iterable[str | bytes]) -> Iterator[dict]:
         for line in lines:
@@ -197,5 +210,7 @@ class ExecJsonMapper:
 
 def map_stream(lines: Iterable[str | bytes], ctx: dict) -> list[dict]:
     return list(
-        ExecJsonMapper(ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: ctx["at"]).events(lines)
+        ExecJsonMapper(
+            ctx["run"], ctx["ticket"], ctx["harness"], now=lambda: ctx["at"], workspace=ctx.get("workspace")
+        ).events(lines)
     )

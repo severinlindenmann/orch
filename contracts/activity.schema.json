@@ -52,11 +52,12 @@
     "coverage": { "enum": ["full", "partial"], "description": "full = the source saw everything of this step; partial = something is missing (no chat text, cut output, no helper)." },
     "data": { "type": "object", "description": "Per-kind fields (activity.md, Kinds). Unknown fields are kept." },
     "conflict": {"type": "boolean", "description": "Hook and log finished outcomes disagree; both lines are kept."},
-    "detail_lost": { "type": "boolean", "description": "true = a full payload existed but could not be stored (name collision with another event's file, write problem, too large); the line is kept with detail null (activity.md, Detail files)." }
+    "detail_lost": { "type": "boolean", "description": "true = a full payload existed but could not be stored (name collision with another event's file, write problem, too large); the line is kept with detail null (activity.md, Detail files)." },
+    "files": { "$ref": "#/$defs/files" }
   },
   "allOf": [
     { "if": { "properties": { "agent": { "const": "main" } } }, "then": { "properties": { "parent": { "type": "null" } } }, "else": { "properties": { "parent": { "$ref": "#/$defs/agent" } } } },
-    { "if": { "properties": { "kind": { "const": "step" } } }, "then": { "properties": { "via": { "enum": ["hook", "log"] }, "used": { "type": "object", "properties": { "kind": { "enum": ["skill", "tool", "mcp"] } } } } } },
+    { "if": { "properties": { "kind": { "const": "step" } } }, "then": { "properties": { "via": { "enum": ["hook", "log"] }, "used": { "type": "object", "properties": { "kind": { "enum": ["skill", "tool", "mcp"] } } } } }, "else": { "not": { "required": ["files"] } } },
     { "if": { "properties": { "kind": { "enum": ["task.start", "task.done"] } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "anyOf": [{ "required": ["check"], "properties": { "check": { "type": "string", "pattern": "^c[0-9]{1,4}$" } } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } },
     { "if": { "properties": { "kind": { "const": "ask" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "core" }, "data": { "anyOf": [{ "required": ["q"], "properties": { "q": { "type": "string", "pattern": "^q[0-9]{1,4}$" } } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] } } } },
     { "if": { "properties": { "kind": { "const": "denial" } } }, "then": { "properties": { "outcome": { "type": "object", "properties": { "ok": { "const": false } } } } } },
@@ -110,6 +111,8 @@
     "event_id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_.:-]+$" },
     "name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$" },
     "version": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "files": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/file_path" }, "description": "Only on kind step: the workspace files or folders the step named, display only, never used for access decisions (activity.md, Files)." },
+    "file_path": { "type": "string", "minLength": 1, "maxLength": 260, "pattern": "^(?![A-Za-z]:)(?![A-Za-z][A-Za-z0-9+.-]*:)(?![~$])(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08e2\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb\\\\]+$", "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash, no start with ~ $ or a scheme or drive letter (file: C:), no Unicode control or format character (Cc Cf Zl Zp: bidi overrides, zero-width), NFC. The writer enforces the full rule (record_files.file_ok); this pattern lists the BMP characters." },
     "detail_file": {
       "type": "object", "required": ["v", "id", "run", "kind", "ticket", "input", "output", "truncated", "hidden"], "additionalProperties": false,
       "description": "One file .orch/record/detail/<run>/<file name>.json: the full payload of one event, key values hidden. The file name is lowercase hex only (activity.md, Detail files); id, kind and ticket are stored here so a reader can verify the file belongs to the event.",

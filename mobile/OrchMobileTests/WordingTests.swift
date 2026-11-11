@@ -6,7 +6,7 @@ final class WordingTests: XCTestCase {
     private let banned = ["Waiting on you", "Waiting for your answer", "Check this", "Backlog"]
 
     func testStatusWordsAreTheOwnerWords() {
-        XCTAssertEqual(TopicStatus.waitingOnYou.label, "Needs you"); XCTAssertEqual(TopicStatus.waitingOnYou.chip, "Needs you")
+        XCTAssertEqual(TopicStatus.waitingOnYou.label, "Needs your OK"); XCTAssertEqual(TopicStatus.waitingOnYou.chip, "Needs your OK")
         XCTAssertEqual(TopicStatus.review.label, "Ready for review"); XCTAssertEqual(TopicStatus.review.chip, "Ready for review")
         XCTAssertEqual(TopicStatus.backlog.label, "Not started"); XCTAssertEqual(TopicStatus.backlog.chip, "Not started")
         var words = TopicStatus.allCases.flatMap { [$0.label, $0.chip] }
