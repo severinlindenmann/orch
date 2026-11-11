@@ -9,6 +9,8 @@ struct GroupRoomView: View {
     @State private var details = false
     @State private var reply: ReplyPreview?
     @State private var viewer: ArtifactItem?
+    /// The "group-bottom" marker is on screen (new rows then follow to the bottom).
+    @State private var atBottom = true
     private var group: PhoneGroup? { model.groups.groups.first { $0.key == key } }
 
     var body: some View {
@@ -36,13 +38,17 @@ struct GroupRoomView: View {
                                     }.id(row.id)
                                 }
                                 Color.clear.frame(height: 1).id("group-bottom")
+                                    .onAppear { atBottom = true }.onDisappear { atBottom = false }
                             }.padding(16)
                         }
                         .defaultScrollAnchor(.bottom).defaultScrollAnchor(.top, for: .alignment)
                         .scrollDismissesKeyboard(.interactively)
                         .accessibilityIdentifier("group-messages")
                         .onChange(of: rows.count) { old, new in
-                            if new > old { scrollToBottom(proxy) }
+                            // Follow new rows only when already at the bottom or the newest row is this phone's own:
+                            // someone reading older messages is not pulled away.
+                            let own = rows.last.map { $0.isOutgoing || $0.groupMessage?.sender == .you } ?? false
+                            if new > old, own || atBottom { scrollToBottom(proxy) }
                         }
                         // The bottom anchor alone lands short in a lazy list of rows with different heights: jump to the
                         // end marker once the rows are laid out (twice, as lazy rows settle their real heights).
@@ -71,42 +77,9 @@ struct GroupRoomView: View {
             .fullScreenCover(item: $viewer) { ArtifactViewer(item: $0) }
     }
 
-    private enum Row: Identifiable {
-        case message(Int, GroupMessage)
-        case outgoing(ConvItem)
-        var id: String {
-            switch self {
-            case .message(_, let message): message.message.clientId ?? message.message.message.body.clientId ?? message.id
-            case .outgoing(let item): item.rowID
-            }
-        }
-        var groupMessage: GroupMessage? {
-            if case .message(_, let message) = self { return message }
-            return nil
-        }
-        var at: String {
-            switch self {
-            case .message(_, let message): message.at
-            case .outgoing(let item): item.at
-            }
-        }
-    }
-
-    private func transcript(_ group: PhoneGroup) -> [Row] {
-        let copies = Set(group.messages.map(\.id))
-        let echoedClients = Set(group.messages.compactMap { $0.message.clientId ?? $0.message.message.body.clientId })
-        let echoedIDs = Set(group.messages.compactMap { $0.message.message.body.echoOf })
-        let outgoing = model.conversationItems(.topic(workspace: key.host, ticket: group.ticket ?? "")).filter {
-            $0.side == .me && $0.replyTo.map { copies.contains($0) } == true &&
-            !echoedClients.contains($0.clientId ?? $0.id) && !echoedIDs.contains($0.id)
-        }
-        var rows = group.messages.enumerated().map { Row.message($0.offset, $0.element) }
-        // Keep host sequence order, inserting local/listed phone texts by their send time.
-        for item in outgoing {
-            let index = rows.firstIndex { $0.at > item.at } ?? rows.endIndex
-            rows.insert(.outgoing(item), at: index)
-        }
-        return rows
+    private func transcript(_ group: PhoneGroup) -> [GroupTranscript.Row] {
+        GroupTranscript.rows(messages: group.messages,
+                             outgoing: model.conversationItems(.topic(workspace: key.host, ticket: group.ticket ?? "")))
     }
 
     private func outgoingView(_ item: ConvItem, group: PhoneGroup) -> some View {
@@ -297,6 +270,16 @@ struct GroupApprovalView: View {
     let group: PhoneGroup
     var late: Bool = false
     @State private var sending = false
+    private struct ApprovalOption: Identifiable { let id: String; let option: String; let label: String }
+    /// The button word for a raw approval option; nil = unknown (no button).
+    nonisolated static func approvalLabel(_ o: String) -> String? {
+        switch o.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "once", "allow once": "Allow once"
+        case "always", "permanent": "Always"
+        case "no", "deny": "No"
+        default: nil
+        }
+    }
     private var result: GroupEvent? {
         guard let delegate = event.delegate else { return nil }
         return group.messages.compactMap(\.event).last { $0.delegate == delegate && ["approved", "denied"].contains($0.kind) }
@@ -307,7 +290,12 @@ struct GroupApprovalView: View {
                 let text = GroupRoomRules.eventText(result, group: group, ownAnswer: model.ownGroupAnswer(for: result, in: group))
                 (group.isExternal(result.ws ?? "") ? Text(text).italic().foregroundColor(Theme.muted) : Text(text)).themeFont(15)
             } else if let answer = model.ownGroupAnswer(for: event, in: group) {
-                group.memberText(event.ws ?? "", prefix: answer.lowercased() == "no" ? "You said no to " : "You allowed ", suffix: answer.lowercased() == "no" ? "" : " \(answer.lowercased() == "always" ? "always" : "once")").themeFont(15)
+                switch Self.approvalLabel(answer) {
+                case "No"?: group.memberText(event.ws ?? "", prefix: "You said no to ", suffix: "").themeFont(15)
+                case "Always"?: group.memberText(event.ws ?? "", prefix: "You allowed ", suffix: " always").themeFont(15)
+                case "Allow once"?: group.memberText(event.ws ?? "", prefix: "You allowed ", suffix: " once").themeFont(15)
+                default: group.memberText(event.ws ?? "", prefix: "You answered \u{201C}\(answer)\u{201D} to ", suffix: "").themeFont(15)
+                }
             } else {
                 switch GroupStore.approvalCard(for: event, in: group, questions: model.questions, late: late) {
                 case .buttons(let question):
@@ -315,11 +303,15 @@ struct GroupApprovalView: View {
                     if let answer = model.answers[question.id] { Text(answer).themeFont(13).foregroundStyle(Theme.muted) }
                     else if sending || model.queuedAnswers[question.id] != nil { Text("Waiting for approval").themeFont(13).foregroundStyle(Theme.muted) }
                     else if !group.closed {
+                        // Only options with a known meaning get a button (an unknown one must not read "No" and send itself).
+                        let options = question.message.body.options.enumerated().compactMap { index, option in
+                            Self.approvalLabel(option).map { ApprovalOption(id: "\(index)-\(option)", option: option, label: $0) }
+                        }
                         HStack {
-                            ForEach(question.message.body.options, id: \.self) { option in
-                                Button(option.lowercased() == "once" || option.lowercased() == "allow once" ? "Allow once" : option.lowercased() == "always" ? "Always" : "No") {
+                            ForEach(options) { entry in
+                                Button(entry.label) {
                                     sending = true
-                                    Task { await model.answer(question, with: option); sending = false }
+                                    Task { await model.answer(question, with: entry.option); sending = false }
                                 }.themeFont(15, .medium).frame(maxWidth: .infinity, minHeight: 44)
                                     .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s))
                             }

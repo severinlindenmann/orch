@@ -27,7 +27,7 @@
     return h('div', {class: 'fx-help', id: 'fx-help', hidden: true}, h('div', {class: 'fx-help-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'fx-help-t'},
       h('p', {class: 'meta', text: 'Focus help'}), h('div', {class: 'row'}, h('h2', {id: 'fx-help-t', class: 'grow', text: 'A few useful keys'}), h('button', {class: 'btn ghost icon', 'data-act': 'help', 'aria-label': 'Close', icon: 'x'})),
       h('p', {class: 'meta', text: 'Everything is also a click away.'}), h('div', {class: 'fx-help-grid'}, keys([
-        ['Move around', [['Show help', '?'], ['Close a panel', 'Esc'], ['Next control', 'Tab'], ['Show or hide tasks', '['], ['Full screen', 'F'], ['Live · Results · Used · Files', '1 / 2 / 3 / 4']]],
+        ['Move around', [['Show help', '?'], ['Close a panel', 'Esc'], ['Next control', 'Tab'], ['Show or hide tasks', '['], ['Full screen', 'F'], ['Live · Results · Files · Used', '1 / 2 / 3 / 4']]],
         ['Write and choose', [['Write a message', '/'], ['Send a message', 'Enter'], ['Choose a button', 'Space'], ['Stop or continue', 'S'], ['Next or previous task', 'J / K']]],
       ]))));
   }
@@ -78,19 +78,23 @@
     return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') + ' ' + t;
   }
   const keyOf = o => JSON.stringify(o);
+  // A file name with its kind icon; the name never breaks in the middle (the line around it may wrap).
+  const docName = path => h('span', {class: 'fx-doc'}, h('span', {'aria-hidden': 'true', text: window.FocusHelpers.fileIcon(path) + ' '}), String(path ?? ''));
+  // A filled round badge with the first letter of an agent's name, in that agent's colour.
+  const avatar = name => h('span', {class: 'fx-area-av', title: name, 'aria-label': name, role: 'img', style: 'background:' + window.FocusHelpers.agentColor(name), text: String(name || '?').charAt(0).toUpperCase()});
 
   // a raw actor id inside a line ("agent:<name> finished the work") is shown as its name, like the dashboard's plainNames()
   const plainNames = text => String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => n.charAt(0).toUpperCase() + n.slice(1));
 
   const state = {
     view: null, sel: 0, firstRender: true, shownQs: new Map(), lastFeedKey: '',
-    tab: 0, changesRequested: false, prevQuestionLabel: undefined,
+    tab: 0, changesRequested: false, prevQuestionLabel: undefined, live: null, areas: null,
     workedBase: 0, workedAt: 0, clockWorking: false,
   };
   const subscribers = new Set();
   const store = window.FocusStore = {
     root, reduce, ic, TID, P, INAPP, h, toast, helpPanel, STATUS_WORD, statusWord, STATE,
-    hhmm, stamp, keyOf, plainNames, evText, els, act, proof, state, views: {},
+    hhmm, stamp, keyOf, docName, avatar, plainNames, evText, els, act, proof, state, views: {},
     register(name, def) { store.views[name] = def; },
     subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },
     notify(v) { for (const fn of subscribers) fn(v); },

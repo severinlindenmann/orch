@@ -224,7 +224,7 @@ struct GroupHistoryView: View {
                 ForEach(model.workspaceSummaries) { summary in
                     ForEach(ChatDay.split(model.conversationItems(.general(workspace: summary.id)), today: ChatDay.key(for: Date())).past.reversed(), id: \.day) { day in
                         NavigationLink {
-                            ConversationView(id: .general(workspace: summary.id), historyDay: day.day)
+                            HistoryDayView(workspaceId: summary.id, day: day.day)
                         } label: {
                             Text("\(ChatDay.label(forDay: day.day, today: ChatDay.key(for: Date()))) · \(WorkspaceAlias.name(for: summary.workspace))")
                         }
@@ -236,6 +236,16 @@ struct GroupHistoryView: View {
                 ForEach(groups, id: \.key) { GroupListRow(group: $0, history: true) }
             }.padding(16)
         }.background(Theme.bg).navigationTitle("Earlier").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// A past General day pushed from Earlier: "Back to today" leaves it (like ChatHistoryView's dismiss).
+private struct HistoryDayView: View {
+    let workspaceId: String
+    let day: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        ConversationView(id: .general(workspace: workspaceId), historyDay: day, goToToday: { dismiss() })
     }
 }
 

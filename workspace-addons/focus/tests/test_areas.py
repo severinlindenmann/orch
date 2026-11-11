@@ -77,7 +77,15 @@ def test_api_areas_lists_and_a_click_accepts_and_removes(server, ws):
     areas.add(ws, "Offsite", "offsite/")
     got = json.loads(req(server, "GET", "/api/areas")[1])["areas"]
     assert got == [
-        {"id": "a1", "name": "Offsite", "path": "offsite/", "state": "suggested", "who": [], "quiet": True}
+        {
+            "id": "a1",
+            "name": "Offsite",
+            "path": "offsite/",
+            "state": "suggested",
+            "who": [],
+            "quiet": True,
+            "tickets": [],
+        }
     ]
     st = req(server, "POST", "/api/act", {"op": "area.accept", "args": {"area": "a1"}})[0]
     assert st == 200 and areas.load(ws)[0]["state"] == "accepted"
@@ -150,8 +158,25 @@ def test_nothing_but_the_areas_surfaces_reads_areas():
         if p.name != "areas.py"
         and ("areas." in p.read_text() or "import areas" in p.read_text() or ", areas" in p.read_text())
     }
-    assert users <= {"cli.py", "server.py"}
+    assert users <= {"cli.py", "server.py", "livecards.py"}  # livecards only puts the label on a card
     server_text = (src / "server.py").read_text()
     for name in ("actions", "permissions", "proofs"):
         assert "areas" not in (src / f"{name}.py").read_text()
     assert server_text.count("areas.strip") == 2 and "areas.load" not in server_text
+
+
+def test_an_area_holds_the_live_tickets_that_touched_its_files(ws):
+    areas.add(ws, "Offsite", "offsite/")
+    areas.add(ws, "Budget", "budget-2026.xlsx")
+    areas.accept(ws, "a1")
+    live = [
+        {"ticket": TID, "agent": "Claude", "files": [{"path": "offsite/agenda.docx", "how": "changed"}, {"path": "budget-2026.xlsx", "how": "read"}]},
+        {"ticket": "t_other0001", "agent": "Codex", "files": [{"path": "offsite2/x.txt", "how": "read"}]},
+    ]  # fmt: skip
+    got = {a["name"]: (a["who"], a["tickets"]) for a in areas.strip(ws, live)}
+    assert got == {
+        "Offsite": (["Claude"], [TID]),
+        "Budget": (["Claude"], [TID]),
+    }  # a prefix like offsite2/ is not offsite/
+    areas.label(ws, live)  # only accepted areas label a card
+    assert [c["area"] for c in live] == ["Offsite", None]
