@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, adapterdata, chat, livecards, proofs, runfiles, selfupdate
+from . import actions, adapterdata, areas, chat, livecards, proofs, runfiles, selfupdate
 from .board import Board, TicketWatcher
 from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
@@ -47,7 +47,7 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "live-now.js", "focus.css", "logo.svg")
+WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "live-now.js", "areas.js", "focus.css", "logo.svg")
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -580,6 +580,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()})
         if path == "/api/live":
             return self._json(200, {"cards": livecards.cards(self.tracker)})
+        if path == "/api/areas":
+            return self._json(200, {"areas": areas.strip(self.root, livecards.cards(self.tracker))})
         if path == "/api/procs":
             return self._json(200, {"procs": self.tracker.procs()})
         if path == "/api/mobile":
@@ -673,6 +675,22 @@ class Handler(BaseHTTPRequestHandler):
             ok, failed = 1, 0
         self._json(200, {"stopped": ok, "failed": failed, "procs": self.tracker.procs()})
 
+    def _area_op(self, op, args):
+        """Accept or remove an area: a person's click, so under the real orch it needs the page session (like every
+        other click that acts as the person). Agents and the CLI can only suggest (areas.add)."""
+        bad = lambda: self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if not isinstance(args, dict) or set(args) != {"area"} or not isinstance(args["area"], str):
+            return bad()
+        if self.orch_bin == actions.SELF and not (
+            self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+        ):
+            return self._send(403, b"Open Focus from this computer (orch focus open) to do this.", "text/plain; charset=utf-8")
+        try:
+            (areas.accept if op == "area.accept" else areas.remove)(self.root, args["area"])
+        except areas.BadArea as e:
+            return self._send(422, str(e).encode(), "text/plain; charset=utf-8")
+        self._json(200, {"areas": areas.strip(self.root, livecards.cards(self.tracker))})
+
     def _refuse(self):
         self._send(405, b"not allowed", "text/plain")
 
@@ -723,6 +741,8 @@ class Handler(BaseHTTPRequestHandler):
         args = body.get("args", {})
         if body.get("op") in ("proc.stop", "proc.stop_all"):
             return self._proc_op(body["op"], args)
+        if body.get("op") in ("area.accept", "area.remove"):
+            return self._area_op(body["op"], args)
         try:
             mint = None
             if self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1]):
