@@ -5,21 +5,32 @@ replaces orch's own tool folder, so when orch ran it, uv stopped halfway ("Acces
 broken (`No module named 'orch'`). On Windows orch therefore hands the reinstall to a small finisher: a
 standalone script run by the base Python (outside the tool folder, it imports nothing from orch). It waits
 until orch has exited and the folder is free, runs uv, saves the add-on list and runs the follow-up step
-(e.g. turning the add-on on in the workspace). Its log: <orch home>/finish.log."""
+(e.g. turning the add-on on in the workspace). Its log: <orch home>/finish.log.
+
+The entry guard reads <orch home>/finish.updating (a decimal owner PID), beside finish.pending and
+finish/job.json. The finisher holds it from before the folder probe/reinstall through RESULT ok/fail,
+and removes it in finally. Dead owners or markers older than 15 minutes are ignored. POSIX holds the
+same marker around its in-place package reinstall. The top-level orch_entry checks both ORCH_HOME and
+the account's ~/.orch-tool (orch may reject an untrusted override). Internal `python -m orch` follow-up
+commands deliberately remain usable while the finisher owns the marker."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+from orch_entry import marker_path, updating
+
 # The finisher. Kept free of orch imports: it runs while orch's own files are being replaced.
 FINISHER = r'''
 import json, os, subprocess, sys, time
 
 job = json.load(open(sys.argv[1], encoding="utf-8"))
+job.setdefault("updating", os.path.join(os.path.dirname(job["pending"]), "finish.updating"))
 log = open(job["log"], "a", encoding="utf-8")
 registry_written = False
 registry_before = None
@@ -58,6 +69,8 @@ def busy():
 
 def main():
     global registry_written, registry_before
+    with open(job["updating"], "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
     busy()
     say("waiting for orch to exit (pid %d; folders: %s)" % (os.getpid(), ", ".join(job["free"])))
     deadline = time.time() + job["wait"]
@@ -116,6 +129,10 @@ except Exception:
 
     say("RESULT fail: " + traceback.format_exc())
 finally:
+    try:
+        os.remove(job["updating"])
+    except OSError:
+        pass
     if code != 0 and registry_written:
         path = job["registry"][0]
         if registry_before is None:
@@ -212,6 +229,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "log": str(log_path(home)),
         "done": done,
         "pending": str(home / "finish.pending"),
+        "updating": str(marker_path(home)),
     }
     # In orch's own folder, not %TEMP% (which can be shared, e.g. C:\Windows\Temp for tasks).
     d = home / "finish"
@@ -265,3 +283,23 @@ def _claim(home: Path, mark: Path) -> None:
 def _popen(argv: list[str], **kw) -> int:
     """Start the finisher; its process id. Tests replace this."""
     return subprocess.Popen(argv, **kw).pid
+
+
+@contextlib.contextmanager
+def replacing(home: Path):
+    """POSIX in-place reinstall: same PID marker and RESULT-before-release as Windows."""
+    home.mkdir(parents=True, exist_ok=True)
+    mark = marker_path(home)
+    if updating(home):
+        raise Busy("orch is still updating, try again in a moment.")
+    mark.write_text(str(os.getpid()), encoding="utf-8")
+    result = "fail"
+    try:
+        yield
+        result = "ok"
+    finally:
+        try:
+            with log_path(home).open("a", encoding="utf-8") as log:
+                log.write(f"RESULT {result}: package reinstall\n")
+        finally:
+            mark.unlink(missing_ok=True)
