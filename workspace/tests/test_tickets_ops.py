@@ -667,3 +667,202 @@ def test_old_key_unissued_or_other_prefix_refused(proj, new_ticket, alias):
     with pytest.raises(Refused, match="doesn't exist"):
         tickets.resolve(proj, alias, follow_moved=True, notice=notices.append)
     assert notices == []
+
+
+@pytest.mark.parametrize("general", [False, True])
+def test_pre_ownership_sessions_adopted_once(proj, new_ticket, general):
+    from orch import runs
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    ticket.update(general=general, sessions=[{"id": "old-local", "agent": "agent", "host": runs.host()}])
+    tickets.save(proj, ticket)
+    record = proj / ".orch" / "run" / "own-sessions.json"
+    marker = record.with_name("own-sessions.adopted")
+    assert not record.exists()
+    assert tickets.sessions_for(proj, tid, ticket, "agent", runs.host()) == "old-local"
+    entries = json.loads(record.read_text())
+    assert len(entries) == 1
+    assert entries[0] == {
+        "id": "old-local",
+        "agent": "agent",
+        "host": runs.host(),
+        "ticket_id": tid,
+        "first_seen": entries[0]["first_seen"],
+    }
+    assert entries[0]["first_seen"]
+    assert json.loads(marker.read_text()) == {"adopted": True}
+    record.unlink()
+    assert tickets.sessions_for(proj, tid, ticket, "agent", runs.host()) is None
+    assert marker.exists()
+    assert not record.exists()
+
+
+def test_adoption_skips_foreign_malformed_and_mismatched_tickets(proj, new_ticket):
+    from orch import runs
+
+    tid, mismatch, malformed = (new_ticket() for _ in range(3))
+    ticket = tickets.load(proj, tid)
+    ticket["sessions"] = [
+        {"id": "foreign", "agent": "agent", "host": runs.host() + "-other"},
+        None,
+        "session",
+        {"id": [], "agent": "agent", "host": runs.host()},
+        {"id": "missing-agent", "host": runs.host()},
+        {"id": "empty-agent", "agent": "", "host": runs.host()},
+        {"id": "missing-host", "agent": "agent"},
+    ]
+    tickets.save(proj, ticket)
+    bad = tickets.load(proj, mismatch)
+    bad.update(id=tid, sessions=[{"id": "copied", "agent": "agent", "host": runs.host()}])
+    tickets.ticket_path(proj, mismatch).write_text(json.dumps(bad))
+    bad = tickets.load(proj, malformed)
+    bad["sessions"] = {"id": "not-a-list", "agent": "agent", "host": runs.host()}
+    tickets.save(proj, bad)
+    assert tickets._own_sessions(proj) == []
+    assert (proj / ".orch" / "run" / "own-sessions.adopted").exists()
+
+
+def test_adoption_serializes_with_record_session(proj, new_ticket, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from orch import runs
+    from orch.errors import Refused
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    ticket["sessions"] = [{"id": "old", "agent": "agent", "host": runs.host()}]
+    tickets.save(proj, ticket)
+    adopting, release, recording = Event(), Event(), Event()
+    write_json = tickets.net.write_json
+
+    def paused_write(path, obj, *args, **kwargs):
+        if path.name == "own-sessions.adopted":
+            adopting.set()
+            assert release.wait(5)
+        return write_json(path, obj, *args, **kwargs)
+
+    def record():
+        recording.set()
+        tickets.record_session(proj, tid, "agent", "new", runs.host())
+
+    monkeypatch.setattr(tickets.net, "write_json", paused_write)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        adoption = pool.submit(tickets._own_sessions, proj)
+        try:
+            assert adopting.wait(5)
+            writer = pool.submit(record)
+            assert recording.wait(5)
+            with pytest.raises(Refused):
+                with tickets._locked(proj, "own-sessions", wait=0):
+                    pass
+            assert not writer.done()
+        finally:
+            release.set()
+        adoption.result(timeout=5)
+        writer.result(timeout=5)
+    assert {s["id"] for s in tickets._own_sessions(proj)} == {"old", "new"}
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "agent", runs.host()) == "new"
+
+
+@pytest.mark.parametrize("blocked", ["tracked", "git-failure"])
+def test_adoption_checks_outer_git_once(proj, new_ticket, monkeypatch, blocked):
+    from orch import runs, safegit
+
+    bad, *good = [new_ticket() for _ in range(40)]
+    for tid in (bad, *good):
+        ticket = tickets.load(proj, tid)
+        ticket["sessions"] = [{"id": tid, "agent": "agent", "host": runs.host()}]
+        tickets.save(proj, ticket)
+    subprocess.run(["git", "init", "-q", str(proj)], check=True)
+    if blocked == "tracked":
+        subprocess.run(["git", "add", "-f", "--", str(tickets.ticket_path(proj, bad))], cwd=proj, check=True)
+    # A nested state repo must not hide the outer team's index.
+    subprocess.run(["git", "init", "-q", str(proj / ".orch")], check=True)
+    original = safegit.run_bytes
+
+    listings = []
+
+    def git(args, *a, **kw):
+        if args[0] == "ls-files":
+            listings.append(args)
+            assert a[0] == proj
+            if blocked == "git-failure":
+                return 124, b"", "timeout"
+        return original(args, *a, **kw)
+
+    monkeypatch.setattr(safegit, "run_bytes", git)
+    expected = set(good) if blocked == "tracked" else set()
+    assert {s["id"] for s in tickets._own_sessions(proj)} == expected
+    assert len(listings) == 1
+    assert "-z" in listings[0]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("id", "-x"),
+        ("id", "--help"),
+        ("id", "_x"),
+        ("id", "bad.id"),
+        ("id", "bad/session"),
+        ("id", "x\n"),
+        ("id", "x" * 129),
+        ("agent", "Agent"),
+        ("agent", "a_b"),
+        ("agent", "a" * 33),
+    ],
+)
+def test_adoption_rejects_invalid_session_names(proj, new_ticket, field, value):
+    from orch import runs
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    bad = {"id": "bad", "agent": "agent", "host": runs.host(), field: value}
+    ticket["sessions"] = [bad, {"id": "Good_-123", "agent": "agent-1", "host": runs.host()}]
+    tickets.save(proj, ticket)
+    assert [s["id"] for s in tickets._own_sessions(proj)] == ["Good_-123"]
+
+
+def test_adoption_caps_and_keeps_valid_old_entries(proj, new_ticket):
+    from orch import runs
+
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    ticket["sessions"] = [
+        {"id": f"session-{i}", "agent": "agent", "host": runs.host()}
+        for i in range(tickets.OWN_SESSIONS_MAX + 10)
+    ]
+    tickets.save(proj, ticket)
+    old = {
+        "id": "session-0",
+        "agent": "agent",
+        "host": runs.host(),
+        "ticket_id": tid,
+        "first_seen": "before-migration",
+    }
+    path = proj / ".orch" / "run" / "own-sessions.json"
+    tickets.net.write_json(path, [None, old, {"id": "incomplete"}, old])
+    entries = tickets._own_sessions(proj)
+    assert len(entries) == tickets.OWN_SESSIONS_MAX
+    assert entries.count(old) == 1
+    assert len({s["id"] for s in entries}) == len(entries)
+    assert json.loads(path.read_text()) == entries
+
+
+@pytest.mark.parametrize("sid", ["-x", "--help", "_x", "", "x\n", "x" * 129, "bad.id", None])
+def test_invalid_session_id_never_recorded_or_selected(proj, new_ticket, sid):
+    tid = new_ticket()
+    before = tickets.load(proj, tid)
+    with pytest.raises(tickets.Refused, match="Invalid session id"):
+        tickets.record_session(proj, tid, "agent", sid, "host")
+    assert tickets.load(proj, tid) == before
+    path = proj / ".orch/run/own-sessions.json"
+    assert not path.exists()
+    entry = {"id": sid, "agent": "agent", "host": "host", "ticket_id": tid, "first_seen": tickets.now()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([entry]))
+    path.with_name("own-sessions.adopted").write_text("{}")
+    assert tickets.sessions_for(proj, tid, before | {"sessions": [entry]}, "agent", "host") is None
+    assert tickets._own_sessions(proj) == []

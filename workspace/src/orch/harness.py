@@ -291,6 +291,19 @@ def _tracked(root: Path, rel: str) -> bool:
     return rc == 0
 
 
+def tracked_ticket_paths(root: Path) -> set[str] | None:
+    """List ticket paths once from the outer repo; None means ownership cannot be established."""
+    try:
+        if not _in_git_repo(root):
+            return set()
+    except Refused:
+        return None
+    rc, raw, _ = _safegit().run_bytes(["ls-files", "-z", "--", ":(icase,literal).orch/tickets"], root, 10)
+    if rc != 0:
+        return None
+    return {os.fsdecode(n).casefold() for n in raw.split(b"\0") if n}
+
+
 def _refusal_text(root: Path, default: str) -> str:
     """What the person reads when git is not asked: the plain reason when the root is their home folder or a
     drive root (safegit.unusable_root), else `default`."""
