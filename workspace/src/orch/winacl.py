@@ -599,7 +599,14 @@ def check_private(path: str | os.PathLike) -> None:
     if not _windows():
         return
     p = Path(path)
-    _attrs(p)  # FileNotFoundError passes through: "not there" is not "wrong rights"
+    try:
+        _attrs(p)  # FileNotFoundError passes through: "not there" is not "wrong rights"
+    except FileNotFoundError:
+        raise
+    except Refused:
+        raise
+    except OSError as e:  # e.g. WinError 448 (untrusted mount point) on a user-made junction, elevated
+        raise _cant("a part of its path could not be checked") from e
     no_reparse(p)
     sid = user_sid()
     try:

@@ -701,6 +701,25 @@ def test_write_dacl_refuses_a_hard_linked_file(win, tmp_path, monkeypatch):
     assert "set" not in log and log[-1] == "close"
 
 
+def test_os_error_448_in_check_and_ensure_private_is_a_plain_refusal(win, tmp_path, monkeypatch):
+    """Elevated process, user-made junction: lstat/realpath raise OSError(448): a plain refusal."""
+
+    def boom(p):
+        raise OSError(448, "The path cannot be traversed because it contains an untrusted mount point")
+
+    monkeypatch.setattr(winacl, "_attrs", boom)
+    for fn in (winacl.check_private, winacl.ensure_private):
+        with pytest.raises(Refused, match="not private to you"):
+            fn(tmp_path)
+    assert _writes(win) == []
+    monkeypatch.setattr(winacl, "_attrs", lambda p: 0)
+    monkeypatch.setattr(winacl, "_owner_sid", boom)  # the owner lookup path
+    win["dacl"] = INHERITED
+    with pytest.raises(Refused):
+        winacl.ensure_private(tmp_path)
+    assert _writes(win) == []
+
+
 def test_guarded_home_raises_home_refused_not_a_winacl_refusal(tws, tmp_path, monkeypatch):
     # independent of the install kind and of where the test runs (native Windows too): a normal install with
     # the default home and a home that passes the pairing check, so only allow_home's refusal is under test
