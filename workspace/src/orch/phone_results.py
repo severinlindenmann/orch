@@ -130,8 +130,8 @@ def value_hider(root: Path):
 
 
 # Known gaps (not covered by the value hider or the pattern scrub): fullwidth/NFKC forms of a stored value
-# (the pattern scrub does look at the NFKC form), a value split over cells, base32, host case in a URL, a token
-# inside a URL path.
+# (the pattern scrub does look at the NFKC form), a value split over cells, base32, host case in a URL,
+# a token inside a URL path.
 CUT = "[hidden]"
 
 
