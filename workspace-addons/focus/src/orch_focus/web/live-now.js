@@ -21,7 +21,7 @@
         if (!response.ok) return;
         const data = await response.json(), json = JSON.stringify(data);
         if (version !== generation || sending || document.hidden || !box.isConnected || json === last) return;
-        paint(data.cards || [], data.same_file || []);
+        paint(data.cards || []);
         last = json;
       } catch (e) { /* Keep the last snapshot until the next poll. */ }
       finally {
@@ -30,14 +30,7 @@
       }
     }
 
-    /* Same file, two tickets: one yellow line (display only; the agents' own record said so). */
-    const HOW = {read: 'read it', changed: 'changed it', touched: 'used it'};
-    function clashLines(clash) {
-      return (Array.isArray(clash) ? clash : []).slice(0, 3).map(c => {
-        const who = (c.tickets || []).map(t => text(t.key) + ' ' + (HOW[t.how] || 'used it')).join(', ');
-        return h('p', {class: 'fx-ln-clash', role: 'status'}, h('b', {text: 'Two tickets have the same file open: '}), text(String(c.path || '')) + ' (' + who + ')');
-      });
-    }
+    /* The same-file line lives in "Where work is happening" (areas.js), above the area tiles. */
 
     function cardView(card) {
       const href = P + '/t/' + encodeURIComponent(card.ticket), question = card.question;
@@ -85,7 +78,7 @@
         h('header', {class: 'fx-ln-head'}, h('div', {class: 'fx-ln-title'},
           card.key ? h('div', {class: 'fx-ln-key', text: text(card.key)}) : null,
           h('a', {href, text: text(card.title)})),
-        h('span', {class: 'fx-ln-agent', text: text(card.agent) + (card.minutes == null ? '' : ' · ' + card.minutes + ' min')})),
+        h('span', {class: 'fx-ln-agent', text: text(card.agent) + (card.minutes == null ? '' : ' · ' + card.minutes + ' min') + (card.area ? ' · ' + text(card.area) : '')})),
         now, steps, h('footer', {class: 'fx-ln-foot'}, h('a', {href, text: 'Open →'})));
     }
 
@@ -103,16 +96,20 @@
     }
     current = hideListed;
 
-    function paint(cards, clash) {
+    function paint(cards) {
       shown = new Set(cards.map(c => c.ticket));
       hideListed();
       section.hidden = !cards.length;
       box.classList.toggle('fx-pick-live', !!cards.length);
+      // keep the keyboard where it was: the cards are drawn again
+      const at = section.contains(document.activeElement) ? [...section.querySelectorAll('a,button')].indexOf(document.activeElement) : -1;
       section.replaceChildren(...(cards.length ? [
         h('h2', {text: 'Live now '}, h('span', {class: 'meta', text: '(' + cards.length + ')'})),
-        ...clashLines(clash),
         h('div', {class: 'fx-ln-grid' + (cards.length > 4 ? ' compact' : '')}, cards.map(cardView))
       ] : []));
+      if (at >= 0) section.querySelectorAll('a,button')[at]?.focus();
+      S.state.pickAgents = cards.length;  // "2 agents are working." in the line under the title
+      if (S.views.ticket && S.views.ticket.pickerSub) S.views.ticket.pickerSub();
     }
 
     const visible = () => { if (!document.hidden) load(); };

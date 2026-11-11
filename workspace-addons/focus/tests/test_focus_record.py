@@ -268,16 +268,32 @@ def test_same_file_needs_two_tickets_and_a_change():
     from orch_focus.livecards import same_file
 
     c1 = {
+        "ticket": "t_a",
+        "agent": "Claude",
         "key": "PIL-1",
         "title": "x",
         "files": [{"path": "budget.xlsx", "how": "read"}, {"path": "only1.txt", "how": "changed"}],
     }
-    c2 = {"key": "PIL-2", "title": "y", "files": [{"path": "budget.xlsx", "how": "changed"}]}
-    assert same_file([c1, c2]) == [
-        {
-            "path": "budget.xlsx",
-            "tickets": [{"key": "PIL-1", "how": "read"}, {"key": "PIL-2", "how": "changed"}],
-        }
+    c2 = {
+        "ticket": "t_b",
+        "agent": "Codex",
+        "key": "PIL-2",
+        "title": "y",
+        "files": [{"path": "budget.xlsx", "how": "changed"}],
+    }
+    got = same_file([c1, c2])
+    assert [
+        (g["path"], [(t["key"], t["how"], t["ticket"], t["agent"], t["title"]) for t in g["tickets"]])
+        for g in got
+    ] == [
+        ("budget.xlsx", [("PIL-1", "read", "t_a", "Claude", "x"), ("PIL-2", "changed", "t_b", "Codex", "y")])
     ]
     c2["files"][0]["how"] = "read"
     assert same_file([c1, c2]) == []  # two readers are not a clash
+
+
+def test_the_board_remembers_each_agents_latest_step_for_the_tree():
+    a = stepf(["a.txt"], "Read", 1, text="Read the plan")
+    b = stepf([], "Bash", 2, text="Searched Slack", agent="h_1", parent="main")
+    snap = Board.from_events(to_events(a, TICKET, RUN) + to_events(b, TICKET, RUN)).snapshot()
+    assert snap["agent_now"] == {"main": "Read the plan", "h_1": "Searched Slack"}

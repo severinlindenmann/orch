@@ -41,7 +41,13 @@ class TicketWatcher:
         first = not self._primed
         for c in ticket.get("checklist", []):
             cid = c["id"]
-            now = "wont" if c.get("wont_do") else "done" if c.get("done") else ("doing" if c.get("state") == "doing" else "todo")
+            now = (
+                "wont"
+                if c.get("wont_do")
+                else "done"
+                if c.get("done")
+                else ("doing" if c.get("state") == "doing" else "todo")
+            )
             old = self._state.get(cid, "todo")
             self._state[cid] = now
             if first and prime:
@@ -82,11 +88,16 @@ class Board:
         self.open_calls: dict[str, dict] = {}  # tool/helper id -> start event
         self.helpers: dict[str, dict] = {}
         self.usage: dict | None = None
-        self.context: dict | None = None  # how much of the saved conversation was reused: {reused: 0..100, at}
+        self.context: dict | None = (
+            None  # how much of the saved conversation was reused: {reused: 0..100, at}
+        )
         self.denials: list[dict] = []
         self.last_step = ""
         self.used: dict[tuple, dict] = {}  # (kind, name, source) -> {count, actions}: the Used tab
         self.files: dict[str, dict] = {}  # path -> {how, at}: the Files tab (display only, never opened)
+        self.agent_now: dict[
+            str, str
+        ] = {}  # agent ('main', 'h_1') -> its latest step line: the tree's status line
         self.counted: set[str] = set()  # step ids already counted (a start and its end are one use)
 
     def apply(self, e: dict) -> None:
@@ -125,6 +136,8 @@ class Board:
         elif k in ("tool.start", "helper.start"):
             self._count(d)
             self._files(e, d)
+            if k == "tool.start" and len(self.agent_now) < 60:
+                self.agent_now[str(e.get("agent") or "main")] = e["text"]
             self.open_calls[d["id"]] = e
             self.last_step = e["text"]
             if k == "helper.start":
@@ -169,17 +182,28 @@ class Board:
             old = self.files.get(p)
             if old is None and len(self.files) >= 200:
                 continue
-            if old is None or (how == "changed" and old["how"] != "changed") or (old["how"] == "touched" and how == "read"):
+            if (
+                old is None
+                or (how == "changed" and old["how"] != "changed")
+                or (old["how"] == "touched" and how == "read")
+            ):
                 self.files[p] = {"how": how, "at": e.get("at")}
             else:
                 old["at"] = e.get("at") or old["at"]
 
     def _count(self, d: dict) -> None:
         u, sid = d.get("used"), d.get("id")
-        if not isinstance(u, dict) or not isinstance(sid, str) or sid in self.counted or len(self.counted) > 5000:
+        if (
+            not isinstance(u, dict)
+            or not isinstance(sid, str)
+            or sid in self.counted
+            or len(self.counted) > 5000
+        ):
             return
         self.counted.add(sid)
-        row = self.used.setdefault((u["kind"], u["name"], u.get("source", "harness")), {"count": 0, "actions": []})
+        row = self.used.setdefault(
+            (u["kind"], u["name"], u.get("source", "harness")), {"count": 0, "actions": []}
+        )
         row["count"] += 1
         a = u.get("action")
         if isinstance(a, str) and a not in row["actions"] and len(row["actions"]) < 8:
@@ -208,6 +232,7 @@ class Board:
             "tasks": list(self.tasks.values()),
             "asks": [a for a in self.asks.values() if a["open"]],
             "helpers": [h for h in self.helpers.values() if h["open"]],
+            "agent_now": dict(self.agent_now),
             "helper_tree": list(self.helpers.values())[-50:],  # every helper, open or finished, with its parent
             "jobs": jobs,
             "usage": usage,

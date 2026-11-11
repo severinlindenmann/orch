@@ -142,7 +142,7 @@ def test_json_unicode_escapes_do_not_hide_tokens():
 
 
 def test_pdf_and_media_with_hidden_archive_need_a_click():
-    for name, data in (("a.pdf", b"%PDF-1.7\n%text only"), ("p.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 50 + b"PK\x03\x04zip"),
+    for name, data in (("a.pdf", b"%PDF-1.7\n%text only"), ("p.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 50 + b"PK\x03\x04\x14\x00zip"),
                        ("v.mp4", b"\x00\x00\x00\x18ftypmp42" + b"Rar!\x1a\x07\x00")):
         fs = scan_blob("tickets/t_abc123/artifacts/" + name, data)
         assert len(fs) == 1 and fs[0].code == "cannot-check" and fs[0].needs_click, name
@@ -165,10 +165,30 @@ def test_repeated_json_keys_cannot_hide_a_value():
     assert ("secret", "token-field") in codes("tickets/t_abc123.json", b'{"tok\\u0065n": "abc", "token": 5}')
 
 
-@pytest.mark.parametrize("sig", [b"\x1f\x8b\x08\x08", b"\x1f\x8b\x08\x00", b"BZh9", b"\xfd7zXZ\x00"])
+@pytest.mark.parametrize("sig", [
+    b"\x1f\x8b\x08\x08\x00\x00\x00\x00\x00\x03", b"\x1f\x8b\x08\x00\x5e\x1a\x2b\x67\x02\xff", b"BZh91AY&SY",
+    b"\xfd7zXZ\x00", b"PK\x03\x04\x14\x00", b"PK\x05\x06",
+])
 def test_embedded_archive_signatures_in_media(sig):
     fs = scan_blob("tickets/t_abc123/artifacts/p.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 20 + sig + b"x")
     assert [(f.code, f.rule) for f in fs] == [("cannot-check", "media-with-archive")]
+
+
+@pytest.mark.parametrize("sig", [
+    b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x01\x03",  # XFL 1: gunzip ignores it
+    b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x80",  # OS 0x80: ignored as well
+    b"\x1f\x8b\x08\x08x",  # a name follows: a real header whatever comes after
+])
+def test_a_gzip_header_counts_whatever_its_xfl_and_os(sig):
+    fs = scan_blob("tickets/t_abc123/artifacts/p.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 20 + sig + b"x")
+    assert [(f.code, f.rule) for f in fs] == [("cannot-check", "media-with-archive")]
+
+
+@pytest.mark.parametrize("noise", [b"BZh9x", b"BZh", b"\x1f\x8b\x08\xff\xff", b"\x1f\x8b\x08\xe0x", b"PK\x03\x04\xff\xff"])
+def test_chance_bytes_in_media_are_not_archives(noise):
+    # Fable B15: 3-byte signatures occur by chance in large compressed media about once per 16 MB.
+    data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20 + noise + b"x" * 20
+    assert scan_blob("tickets/t_abc123/artifacts/p.png", data) == []
 
 
 def test_utf16_without_bom_is_not_text():

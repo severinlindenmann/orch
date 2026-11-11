@@ -10,13 +10,14 @@ workspace, home or key: <dir> is under ~/.orch-test. Prints `ready` when the pag
 
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 D, PORT = Path(sys.argv[1]).resolve(), int(sys.argv[2])
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "workspace-addons" / "focus" / "src"))
 sys.path.insert(0, str(ROOT / "workspace" / "src"))
-ws, fake = D / "ws", D / "fake"
+ws, fake = D / "Pilatus", D / "fake"  # the workspace name shows on the page
 (ws / ".orch" / "tickets").mkdir(parents=True, exist_ok=True)
 fake.mkdir(exist_ok=True)
 
@@ -34,7 +35,7 @@ TICKETS = [
     ], [{"id": "q1", "text": "Should the boat trip be on day 1 or day 2?", "answer": None,
          "options": ["Day 2", "Day 1"], "recommended": "Day 2"}]),
     ticket("t_pil2bbbb", "PIL-2", "Write the newsletter", [
-        {"id": "c1", "text": "Outline", "done": True, "evidence": []},
+        {"id": "c1", "text": "Outline", "done": True, "evidence": [{"type": "note", "ref": "outline", "text": "Outline written"}]},
         {"id": "c2", "text": "Write the intro", "done": False, "state": "doing", "evidence": []},
     ]),
 ]  # fmt: skip
@@ -50,27 +51,31 @@ def event(run, tid, i, text, at, used, files=(), kind="step", agent="main", pare
             "files": list(files), "outcome": None}  # fmt: skip
 
 
+NOW = datetime.now(UTC)
+ago = lambda m: (NOW - timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
 # (text, used, files, kind, agent, parent) per step; PIL-1 reads the budget, PIL-2 changes it (same-file line)
 RUNS = {
     "t_pil1aaaa": ("r_pilone01", [
-        ("Looked up the weather for Lucerne", ("mcp", "Weather", "forecast", "harness"), (), "step", "main", None),
-        ("Read budget-2026.xlsx", ("tool", "Read", None, "builtin"), ["budget-2026.xlsx"], "step", "main", None),
-        ("Planning the days", ("skill", "event-planning", None, "workspace"), (), "step", "main", None),
-        ("Changed offsite/agenda.docx", ("tool", "Edit", None, "builtin"), ["offsite/agenda.docx"], "step", "main", None),
+        ("Looked up the weather for Lucerne, 14-15 May", ("mcp", "Weather", "forecast", "harness"), (), "step", "main", None, 9),
+        ("Read budget-2026.xlsx (sheet Offsite)", ("tool", "Read", None, "builtin"), ["budget-2026.xlsx"], "step", "main", None, 7),
+        ("Planning the days", ("skill", "event-planning", None, "workspace"), (), "step", "main", None, 5),
+        ("Changed offsite/agenda.docx", ("tool", "Edit", None, "builtin"), ["offsite/agenda.docx"], "step", "main", None, 3),
     ]),
     "t_pil2bbbb": ("r_piltwo01", [
-        ("collect the news from the team chat", ("helper", "Researcher", None, "builtin"), (), "helper.start", "h_1", "main"),
-        ("Searched Slack", ("mcp", "Slack", "search", "admin"), (), "step", "h_1", "main"),
-        ("Changed budget-2026.xlsx (1 row)", ("tool", "Edit", None, "builtin"), ["budget-2026.xlsx"], "step", "main", None),
-        ("Writing the intro in newsletter-nov.docx", ("skill", "newsletter-writing", None, "workspace"), (), "step", "main", None),
+        ("collect the news from the team chat", ("helper", "Researcher", None, "builtin"), (), "helper.start", "h_1", "main", 8),
+        ("Searched Slack", ("mcp", "Slack", "search", "admin"), (), "step", "h_1", "main", 7),
+        ("Read newsletter-outline.docx", ("tool", "Read", None, "builtin"), ["comms/newsletter-outline.docx"], "step", "main", None, 6),
+        ("Writing the intro in newsletter-nov.docx", ("skill", "newsletter-writing", None, "workspace"), (), "step", "main", None, 4),
+        ("Wrote comms/newsletter-nov.docx", ("tool", "Write", None, "builtin"), ["comms/newsletter-nov.docx"], "step", "main", None, 3),
+        ("Changed budget-2026.xlsx (1 row: newsletter print)", ("tool", "Edit", None, "builtin"), ["budget-2026.xlsx"], "step", "main", None, 2),
     ]),
 }  # fmt: skip
 lines = {}
 for tid, (run, steps) in RUNS.items():
     lines[tid] = [
         json.dumps({"type": "event", "cursor": f"rc1.{tid}{i}",
-                    "event": event(run, tid, i + 1, text, f"2026-11-16T10:{35 + i}:00Z", used, files, kind, agent, parent)})
-        for i, (text, used, files, kind, agent, parent) in enumerate(steps)
+                    "event": event(run, tid, i + 1, text, ago(m), used, files, kind, agent, parent)})
+        for i, (text, used, files, kind, agent, parent, m) in enumerate(steps)
     ]  # fmt: skip
 (fake / "events.json").write_text(json.dumps(lines))
 (fake / "runs.json").write_text(json.dumps({tid: run for tid, (run, _) in RUNS.items()}))
@@ -85,15 +90,17 @@ if a[:2] == ["ticket", "list"]:
 elif a[:2] == ["ticket", "show"]:
     print((ws / (a[2] + ".json")).read_text())
 elif a[:2] == ["run", "status"]:
-    print(json.dumps({{"running": True, "claim": {{"run": runs[a[2]], "agent": "claude", "mode": "oneshot",
-                                                  "started_at": "2026-11-16T10:20:00Z"}}}}))
+    print(json.dumps({{"running": True, "claim": {{"run": runs[a[2]], "agent": "codex" if a[2] == "t_pil2bbbb" else "claude", "mode": "oneshot",
+                                                  "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 18 * 60))}}}}))
 elif a[:2] == ["record", "tail"]:
     tid = [t for t, r in runs.items() if r == a[a.index("--run") + 1]][0]
     for line in json.loads((d / "events.json").read_text())[tid]:
         print(line, flush=True)
     time.sleep(600)
+elif a[:3] == ["relay", "mobile", "status"]:
+    print(json.dumps({{"on": False}}))
 elif a[:1] == ["agents"]:
-    print(json.dumps([{{"name": "claude", "label": "Claude"}}]))
+    print(json.dumps([{{"name": "claude", "label": "Claude"}}, {{"name": "codex", "label": "Codex"}}]))
 elif a[:1] == ["answer"]:
     p = ws / (a[1] + ".json")
     t = json.loads(p.read_text())
@@ -113,9 +120,10 @@ from orch_focus.server import make_server  # noqa: E402
 areas.add(ws, "Offsite", "offsite/")
 areas.add(ws, "Newsletter", "comms/")
 areas.add(ws, "Budget", "budget-2026.xlsx")
-areas.accept(ws, "a1")
-areas.accept(ws, "a2")  # a3 stays suggested: the dialog shows both kinds
-areas.set_ticket(ws, "t_pil1aaaa", "Offsite")
+areas.add(ws, "Venue", "venue/")
+areas.add(ws, "Catering", "catering/")  # stays suggested: the dialog shows both kinds
+for n in ("a1", "a2", "a3", "a4"):
+    areas.accept(ws, n)
 srv = make_server(ws, PORT, orch_bin=str(fake / "orch"))
 print("ready", flush=True)
 srv.serve_forever()

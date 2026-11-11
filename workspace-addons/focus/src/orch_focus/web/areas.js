@@ -10,7 +10,7 @@
     if (!box || box.querySelector('.fx-areas')) return;
     const section = h('section', {class: 'fx-areas', hidden: true, 'aria-label': 'Where work is happening'});
     box.insertBefore(section, box.querySelector('.fx-pick-group, .fx-procs'));
-    let last = '', loading = false, sending = 0, generation = 0, areas = [], dialog = null, list = null;
+    let last = '', loading = false, sending = 0, generation = 0, areas = [], sameFile = [], dialog = null, list = null;
 
     async function load() {
       if (document.hidden || loading || sending || !box.isConnected) return;
@@ -19,9 +19,12 @@
       try {
         const response = await fetch(P + '/api/areas');
         if (!response.ok) return;
-        const data = await response.json(), json = JSON.stringify(data);
+        const data = await response.json();
+        // a same-file line says "2 min ago": draw it again once a minute even when nothing else changed
+        const json = JSON.stringify(data) + ((data.same_file || []).length ? '|' + Math.floor(Date.now() / 60000) : '');
         if (version !== generation || sending || document.hidden || !box.isConnected || json === last) return;
         areas = data.areas || [];
+        sameFile = Array.isArray(data.same_file) ? data.same_file : [];
         paint();
         last = json;
       } catch (e) { /* Keep the last snapshot until the next poll. */ }
@@ -31,32 +34,56 @@
       }
     }
 
-    function tile(area) {
-      const who = (area.who || []).map(text).filter(Boolean);
+    function tile(area, clash) {
+      const who = [...new Set([...(area.who || []), ...(clash ? clashAgents(clash) : [])].map(text).filter(Boolean))];
       const people = h('div', {class: 'fx-area-who'});
-      if (who.length) people.append(...who.map(name => h('span', {class: 'fx-area-av', title: name, 'aria-label': name, role: 'img', text: name.charAt(0).toUpperCase()})));
+      if (who.length) people.append(...who.map(S.avatar));
       else if (area.quiet) people.append(h('span', {class: 'chip', text: 'quiet'}));
-      return h('div', {class: 'fx-area' + (who.length ? ' busy' : '')},
+      return h('div', {class: 'fx-area' + (clash ? ' clash' : who.length ? ' busy' : '')},
         h('strong', {class: 'fx-area-name', text: text(area.name)}),
         h('span', {class: 'fx-area-path', text: text(area.path)}),
         people);
     }
 
+    /* Same file, two tickets: one amber line (display only; the agents' own record said so). */
+    const HOW = {read: 'read it', changed: 'changed it', touched: 'used it'};
+    const NUMBER = ['', 'One', 'Two', 'Three', 'Four', 'Five'];
+    const clashAgents = c => (c.tickets || []).map(t => t.agent);
+    function clashLine(c) {
+      const tickets = c.tickets || [];
+      const who = tickets.map(t => text(t.key) + ' ' + (HOW[t.how] || 'used it') + (t.how === 'changed' && FH.ago(t.at) ? ' ' + FH.ago(t.at) : '')).join(', ');
+      return h('p', {class: 'fx-clash', role: 'status'},
+        h('span', {'aria-hidden': 'true', text: '⚠ '}),
+        h('b', {text: (NUMBER[tickets.length] || tickets.length) + ' tickets have the same file open:'}), ' ',
+        S.docName(text(c.path)), ' (' + who + ')');
+    }
+    const FH = window.FocusHelpers;
+    const folder = p => String(p || '').replace(/\/+$/, '');
+    const covers = (area, path) => { const a = folder(area.path); return !!a && (path === a || path.startsWith(a + '/')); };
+    const titleName = path => FH.plainFileName(path).replace(/\b\w/g, c => c.toUpperCase());
+
     function paint() {
       const accepted = areas.filter(a => a.state === 'accepted'), suggested = areas.filter(a => a.state === 'suggested');
-      section.hidden = !accepted.length && !suggested.length;
-      if (accepted.length) {
+      const clashes = sameFile.filter(c => c && typeof c.path === 'string' && (c.tickets || []).length >= 2);
+      const had = section.contains(document.activeElement) ? document.activeElement.className : '';
+      section.hidden = !accepted.length && !clashes.length && !suggested.length;
+      const button = h('button', {type: 'button', class: 'btn ghost sm fx-areas-btn', 'aria-haspopup': 'dialog', text: 'Areas…' + (suggested.length ? ' (' + suggested.length + ' new)' : ''), onclick: open});
+      if (accepted.length || clashes.length) {
+        const tiles = accepted.map(a => tile(a, clashes.find(c => folder(c.path) === folder(a.path))));
+        for (const c of clashes) {
+          if (accepted.some(a => covers(a, c.path))) continue;
+          tiles.push(tile({name: titleName(c.path) || c.path, path: c.path}, c));
+        }
         section.replaceChildren(
-          h('div', {class: 'row fx-areas-h'},
-            h('h2', {class: 'grow', text: 'Where work is happening '},
-              h('span', {class: 'meta', text: '(' + accepted.length + (suggested.length ? ', ' + suggested.length + ' suggested' : '') + ')'})),
-            h('button', {type: 'button', class: 'btn ghost sm', 'aria-haspopup': 'dialog', text: 'Areas…', onclick: open})),
-          h('div', {class: 'fx-areas-grid'}, accepted.map(tile)));
+          h('div', {class: 'fx-areas-h'}, h('h2', {text: 'Where work is happening'}), button),
+          ...clashes.slice(0, 3).map(clashLine),
+          h('div', {class: 'fx-areas-grid'}, tiles));
       } else if (suggested.length) {
         section.replaceChildren(h('div', {class: 'row fx-areas-note'},
           h('span', {class: 'grow meta', text: suggested.length + (suggested.length === 1 ? ' area suggested' : ' areas suggested')}),
-          h('button', {type: 'button', class: 'btn ghost sm', 'aria-haspopup': 'dialog', text: 'Review', onclick: open})));
+          h('button', {type: 'button', class: 'btn ghost sm fx-areas-btn', 'aria-haspopup': 'dialog', text: 'Review', onclick: open})));
       } else section.replaceChildren();
+      if (had) { const again = section.querySelector('.fx-areas-btn'); if (again) again.focus(); }  // the button is drawn again; keep the keyboard on it
       paintList();
     }
 

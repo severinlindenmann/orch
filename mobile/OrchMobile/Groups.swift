@@ -98,6 +98,56 @@ struct GroupDrop: Equatable { let messageId: String; let rule: String; let reaso
 struct GroupSnapshot: Equatable { let groups: [PhoneGroup]; let dropped: [GroupDrop] }
 enum ApprovalCard: Equatable { case buttons(Question), answerInWorkspace(String), closed }
 
+/// The group room's transcript (pure, unit-tested): host messages in sequence order plus this phone's own texts the
+/// host has not echoed yet.
+enum GroupTranscript {
+    enum Row: Identifiable {
+        case message(Int, GroupMessage)
+        case outgoing(ConvItem)
+        /// Message rows use the relay message id: a client_id is untrusted (a member may send any, or repeat one).
+        var id: String {
+            switch self {
+            case .message(_, let message): "m-" + message.id
+            case .outgoing(let item): item.rowID
+            }
+        }
+        var groupMessage: GroupMessage? {
+            if case .message(_, let message) = self { return message }
+            return nil
+        }
+        var at: String {
+            switch self {
+            case .message(_, let message): message.at
+            case .outgoing(let item): item.at
+            }
+        }
+        var isOutgoing: Bool { if case .outgoing = self { return true }; return false }
+    }
+
+    /// `outgoing`: the phone texts of the group's ticket conversation (only own replies to a group message are kept).
+    static func rows(messages: [GroupMessage], outgoing: [ConvItem]) -> [Row] {
+        let copies = Set(messages.map(\.id))
+        // Only the phone's own echoed texts may stand for an outgoing item; a member's client_id must not hide it.
+        let echoedClients = Set(messages.filter { $0.sender == .you }.compactMap { $0.message.clientId ?? $0.message.message.body.clientId })
+        let echoedIDs = Set(messages.compactMap { $0.message.message.body.echoOf })
+        let pending = outgoing.filter {
+            $0.side == .me && $0.replyTo.map { copies.contains($0) } == true &&
+            !echoedClients.contains($0.clientId ?? $0.id) && !echoedIDs.contains($0.id)
+        }
+        var rows = messages.enumerated().map { Row.message($0.offset, $0.element) }
+        // Keep host sequence order, inserting local/listed phone texts by their send time, never above the message they
+        // reply to (clock skew, or "…00Z" vs "…00.500Z" as strings). Times compare as dates; unreadable = at the end.
+        for item in pending {
+            let first = rows.firstIndex { $0.groupMessage?.id == item.replyTo }.map { $0 + 1 } ?? rows.startIndex
+            let index = ConversationRules.date(item.at).flatMap { sent in
+                rows[first...].firstIndex { row in ConversationRules.date(row.at).map { $0 > sent } ?? false }
+            } ?? rows.endIndex
+            rows.insert(.outgoing(item), at: index)
+        }
+        return rows
+    }
+}
+
 /// Receive-order state, independent of transcript display order.
 struct GroupOrder {
     enum Outcome: String { case apply, buffer, skipJumpAndApply = "skip_jump_and_apply", skipGapAndApply = "skip_gap_and_apply", lateShowNoState = "late_show_no_state" }
