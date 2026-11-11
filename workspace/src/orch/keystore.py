@@ -607,7 +607,8 @@ def write_profiles(root: Path, profiles: dict, *, sign: frozenset = frozenset())
     """Replace profiles.toml (a person's action: the proof is the caller's job, slice 1.2). Names only.
     A new or changed profile body gets its MAC (human key) in the guarded ledger BEFORE the file is written; a
     removed profile is tombstoned; an unchanged body keeps whatever the ledger says (rewriting a switch never
-    vouches for a body that was edited outside orch). `sign`: names a person is setting right now, signed even when the file already holds that exact body."""
+    vouches for a body that was edited outside orch). `sign`: names being set now, signed even when the file
+    already holds that exact body."""
     d = hp.key_dir(root)
     with hp._key_lock(d):
         _tighten_locked(d)
