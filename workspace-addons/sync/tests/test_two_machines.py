@@ -75,7 +75,7 @@ def test_tracked_turned_general(machines):
     other = "tickets/t_second.json"
     save(a, other, ticket() | {"id": "t_second"})
     state = success(a)
-    assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
+    assert state["skipped"] == []
     assert load(a)["general"] is True
     for path in (TICKET, ART):
         assert step.entries(a, "HEAD")[path] == before[path]
@@ -567,7 +567,11 @@ def test_broken_tracked_ticket_kept_on_remote(machines, broken, artifact_change)
     other = "tickets/t_second.json"
     save(a, other, ticket() | {"id": "t_second"})
     state = success(a)
-    assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
+    if broken is None:
+        assert state["skipped"] == []
+        assert state["notices"] == [f"Restored a missing ticket file: {TICKET}"]
+    else:
+        assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
     assert (a / ".orch" / TICKET).read_bytes() == (original if broken is None else broken)
     for path in (TICKET, ART):
         assert step.entries(a, "HEAD")[path] == before[path]

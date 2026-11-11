@@ -169,19 +169,21 @@ def stage(root, head, index, state, now):
                     except (ValueError, RecursionError):
                         raise ValueError("Ticket has a problem") from None
                     if doc.get("general") is True:
-                        raise ValueError("General ticket stays local")
+                        (preserved if path in old else generals).add(Path(path).stem)
+                        continue
                 repo.git(root, "add", "-f", "--", ":(literal)" + path, index=index)
             except FileNotFoundError:
                 if paths.TICKET.fullmatch(path):
                     (preserved if path in old else generals).add(Path(path).stem)
-                    state["skipped"].append(f"Ticket {Path(path).stem} has a problem and was not synced")
+                    if path not in old:
+                        state["skipped"].append(f"Ticket {Path(path).stem} has a problem and was not synced")
                 if path in old:
                     if paths.TICKET.fullmatch(path):
                         if cli.read(root, "allow-delete").get(Path(path).stem) is True:
                             repo.git(root, "update-index", "--force-remove", "--", path, index=index)
                             continue
                         write(root, path, blob(root, old[path]))
-                        state["skipped"].append(f"A ticket file is missing: {path}. Restored it.")
+                        state["notices"].append(f"Restored a missing ticket file: {path}")
                         state.setdefault("deleted", {})[Path(path).stem] = (
                             datetime.now(UTC).isoformat().replace("+00:00", "Z")
                         )
@@ -446,7 +448,7 @@ def _run(root, reason, now, remote_allowed):
     previous = cli.read(root, "state")
     if previous.get("paused"):
         return previous
-    state = previous | {"last_error": None, "skipped": [], "reason": reason}
+    state = previous | {"last_error": None, "skipped": [], "notices": [], "reason": reason}
     remote = None
     try:
         repo.local_dir(root)
