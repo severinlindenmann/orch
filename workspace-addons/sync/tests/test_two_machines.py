@@ -75,7 +75,7 @@ def test_tracked_turned_general(machines):
     other = "tickets/t_second.json"
     save(a, other, ticket() | {"id": "t_second"})
     state = success(a)
-    assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
+    assert state["skipped"] == []
     assert load(a)["general"] is True
     for path in (TICKET, ART):
         assert step.entries(a, "HEAD")[path] == before[path]
@@ -377,17 +377,19 @@ def test_partial_apply_crash_is_idempotent(machines, monkeypatch):
     assert load(b)["title"] == "New title" and (b / ".orch" / ART).read_bytes() == b"new artifact"
 
 
-def test_key_clash_waits_for_pr5(machines):
-    a, b, bare = both(machines)
+def test_live_key_clash_pauses_without_renumbering(machines):
+    a, b, _ = both(machines)
     edit(a, key="AB1-1")
+    edit(b, key="AB1-1")
     success(a)
     success(b)
     from test_step import ticket
 
-    save(b, "tickets/t_second.json", dict(ticket(), id="t_second", key="AB1-1"))
-    head, tip = step.oid(b, "HEAD"), remote_sha(bare)
-    assert "key clash" in run(b)["last_error"]
-    assert step.oid(b, "HEAD") == head and remote_sha(bare) == tip
+    path = "tickets/t_second.json"
+    save(b, path, dict(ticket(), id="t_second", key="AB1-1"))
+    before = {p: repo.safe(b, p).read_bytes() for p in (TICKET, path)}
+    assert run(b)["paused"]["key_clashes"]["AB1-1"]
+    assert {p: repo.safe(b, p).read_bytes() for p in before} == before
 
 
 def test_push_timeout_is_offline(machines, monkeypatch):
@@ -566,7 +568,11 @@ def test_broken_tracked_ticket_kept_on_remote(machines, broken, artifact_change)
     other = "tickets/t_second.json"
     save(a, other, ticket() | {"id": "t_second"})
     state = success(a)
-    assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
+    if broken is None:
+        assert state["skipped"] == []
+        assert state["notices"] == [f"Restored a missing ticket file: {TICKET}"]
+    else:
+        assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
     assert (a / ".orch" / TICKET).read_bytes() == (original if broken is None else broken)
     for path in (TICKET, ART):
         assert step.entries(a, "HEAD")[path] == before[path]
@@ -742,7 +748,9 @@ def test_idle_syncs_and_one_edit_converge_without_churn(machines, monkeypatch):
 
 @pytest.mark.parametrize("decision", ["wont", "verdict"])
 @pytest.mark.parametrize("proof", ["forged", "valid", "foreign"])
-def test_remote_human_history_is_demoted_even_with_verified_decision(machines, monkeypatch, decision, proof):
+def test_remote_human_history_needs_a_new_verified_decision_naming_its_author(
+    machines, monkeypatch, decision, proof
+):
     from orch import cli, humanproof, tickets
 
     a, b, _ = both(machines)
@@ -754,8 +762,12 @@ def test_remote_human_history_is_demoted_even_with_verified_decision(machines, m
         # machines cannot verify each other's MACs merely by syncing ticket files.
         (a / ".orch/.local-id").write_bytes((b / ".orch/.local-id").read_bytes())
     check = {
-        "id": "c2", "text": "Order dessert (B)", "done": False, "evidence": [],
-        "wont_do": True, "wont_nonce": "test-decision",
+        "id": "c2",
+        "text": "Order dessert (B)",
+        "done": False,
+        "evidence": [],
+        "wont_do": True,
+        "wont_nonce": "test-decision",
     }
     if decision == "wont":
         text = "Marked as won't do: Order dessert (B)"
@@ -823,9 +835,10 @@ def test_remote_human_history_is_demoted_even_with_verified_decision(machines, m
     success(a)
     assert verified  # The receiving core rechecks under the ticket lock before writing.
     result = load(a)
-    expected = {
-        **line, "by": "agent:sync", "text": "(synced, not verified here) " + text
-    }
+    demoted = {**line, "by": "agent:sync", "text": "(synced, not verified here) " + text}
+    # #484: a decision NEW on the receiver that verifies there and names the line's author keeps the person's
+    # name (the fixture only lends A B's key); a forged or foreign one does not.
+    expected = line if valid else demoted
     assert result["history"] == [expected]
     if decision == "wont":
         assert bool(result["checklist"][0].get("wont_do")) is valid
@@ -835,12 +848,12 @@ def test_remote_human_history_is_demoted_even_with_verified_decision(machines, m
     rendered = cli._show(result, a)
     assert expected["by"] in rendered
     assert tickets.history_line(expected["text"], result["checklist"]) in rendered
-    assert "human:lindenmann:" not in rendered
+    assert valid or "human:lindenmann:" not in rendered
     success(b)
     success(a)
     assert load(a)["history"] == [expected]
-    # B owns the original locally; A retains its demotion on subsequent syncs.
-    assert line in load(b)["history"] and expected in load(b)["history"]
+    # B owns the original locally; A retains its attribution (or demotion) on subsequent syncs.
+    assert line in load(b)["history"] and (valid or expected in load(b)["history"])
     success(b)
     success(a)
     assert load(a)["history"] == [expected]

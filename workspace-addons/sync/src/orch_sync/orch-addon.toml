@@ -6,6 +6,8 @@ recommended = false
 description = "Keeps workspace tickets in a private state repository."
 run = "orch_sync"
 skill = "skills/orch-sync"
+ticket_ext = "ext.schema.json"
+ticket_ext_inert = true
 needs = true
 background = true
 

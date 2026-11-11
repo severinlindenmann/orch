@@ -1238,3 +1238,16 @@ def test_sync_is_shipped_and_can_be_added(proj, monkeypatch, run, uv_calls, kind
     assert "--with" in uv_calls[0]
     assert any("workspace-addons/sync" in arg for arg in uv_calls[0])
     assert "add-on list entry" not in run("addon", "list")[2]
+
+
+@pytest.mark.parametrize("value", ["true", "false", None])
+def test_ticket_ext_inert_manifest_boolean(tmp_path, value):
+    extra = f"ticket_ext_inert = {value}" if value is not None else ""
+    folder = make_addon(tmp_path / "a", extra=extra)
+    assert addons.folder_manifest(folder)["ticket_ext_inert"] is (value == "true")
+
+
+def test_ticket_ext_inert_manifest_refuses_truthy_string(tmp_path):
+    folder = make_addon(tmp_path / "a", extra='ticket_ext_inert = "true"')
+    with pytest.raises(Refused, match="ticket_ext_inert"):
+        addons.folder_manifest(folder)
