@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+# The shared process helper lives in core; expose it in this add-on's standalone test env.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "workspace" / "src"))
+
 FAKE_ORCH = """#!{py}
 import json, sys, os
 from pathlib import Path

@@ -1,6 +1,6 @@
 {
  "v": 1,
- "about": "human-proof.md reference cases (hp_verify, hp_effective in validate.py). The key is a test key; now and iat/exp are unix seconds.",
+ "about": "human-proof.md reference cases (hp_verify, hp_effective in validate.py). The key is a test key; now and iat/exp are unix seconds. `verdict`: verdict_is_human(case) in validate.py (human-proof.md 'Done needs a signed verdict'): ledger must be 'ok', and `mac` must equal verdict1 over the ticket's checklist AND be `ledger_current`.",
  "verify": [
   {
    "name": "valid",
@@ -1397,6 +1397,484 @@
    "relay_authenticated_sender": false,
    "mac": "-gjQnEPgFLotgtG22TNvHuw0VEAROqBVzr1NWg1khjw",
    "human": false
+  }
+ ],
+ "verdict": [
+  {
+   "name": "own MAC, the current ledger entry -> a person's verdict",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": true
+  },
+  {
+   "name": "kind agent, own MAC, current (an agent finish under the recorded grant) -> counts",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "agent",
+   "nonce": "0011223344556677",
+   "mac": "dDC8RqX7CO-QhQjzA5Ametn59eCApS2Mh8eLoO8PAXw",
+   "ledger": "ok",
+   "ledger_current": "dDC8RqX7CO-QhQjzA5Ametn59eCApS2Mh8eLoO8PAXw",
+   "human": true
+  },
+  {
+   "name": "no verdicts on the ticket (mac null) -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": null,
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": false
+  },
+  {
+   "name": "the MAC copied onto another ticket -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_other7",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": false
+  },
+  {
+   "name": "a MAC made for another workspace -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "5KQJDg2A2p6Ojh1StwN10HZKI7NkiZrM-yRyha1Dvd0",
+   "ledger": "ok",
+   "ledger_current": "5KQJDg2A2p6Ojh1StwN10HZKI7NkiZrM-yRyha1Dvd0",
+   "human": false
+  },
+  {
+   "name": "a new step added after signing -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c3",
+     "text": "Another step",
+     "done": false,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": false
+  },
+  {
+   "name": "a step reworded after signing -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the CSV file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": false
+  },
+  {
+   "name": "a step reopened after signing -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": false,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": false
+  },
+  {
+   "name": "kind changed from agent to person -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "0011223344556677",
+   "mac": "dDC8RqX7CO-QhQjzA5Ametn59eCApS2Mh8eLoO8PAXw",
+   "ledger": "ok",
+   "ledger_current": "dDC8RqX7CO-QhQjzA5Ametn59eCApS2Mh8eLoO8PAXw",
+   "human": false
+  },
+  {
+   "name": "another nonce -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "0000000000000000",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": false
+  },
+  {
+   "name": "another machine's key -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "KQ36eURSG2Xm8yuFJnxyfFnv9Ti59Ebg-iTckaK4OSs",
+   "ledger": "ok",
+   "ledger_current": "KQ36eURSG2Xm8yuFJnxyfFnv9Ti59Ebg-iTckaK4OSs",
+   "human": false
+  },
+  {
+   "name": "ledger entry is null (tombstone after a reopen), the old MAC replayed -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": null,
+   "human": false
+  },
+  {
+   "name": "ledger entry is a newer MAC, an older valid MAC replayed -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "5N4N5mcZpHdgsL3hoRPGwB0oIXwsOOj5a3p69yOIvCY",
+   "human": false
+  },
+  {
+   "name": "no ledger file -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "missing",
+   "ledger_current": null,
+   "human": false
+  },
+  {
+   "name": "damaged ledger -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "damaged",
+   "ledger_current": null,
+   "human": false
+  },
+  {
+   "name": "a wontdo1 MAC over the same JSON -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "R9a_yfx935ypDDCqmyKnfm6d_v8BbgZ5ak33gMObI88",
+   "ledger": "ok",
+   "ledger_current": "R9a_yfx935ypDDCqmyKnfm6d_v8BbgZ5ak33gMObI88",
+   "human": false
+  },
+  {
+   "name": "a pending1 MAC over the same JSON -> not",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "VoJJ_z3X5ZhoxKvlnlpbavOPzdsTh_1DPwqJS1gH7ps",
+   "ledger": "ok",
+   "ledger_current": "VoJJ_z3X5ZhoxKvlnlpbavOPzdsTh_1DPwqJS1gH7ps",
+   "human": false
+  },
+  {
+   "name": "title and summary changed after signing -> still counts (not bound)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "workspace": "ws_aaaaaaaaaa",
+   "ticket": "t_inv7c2",
+   "checklist": [
+    {
+     "id": "c1",
+     "text": "Write the file",
+     "done": true,
+     "wont_do": false
+    },
+    {
+     "id": "c2",
+     "text": "Email finance",
+     "done": true,
+     "wont_do": false
+    }
+   ],
+   "kind": "person",
+   "nonce": "a1b2c3d4e5f60718",
+   "mac": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "ledger": "ok",
+   "ledger_current": "YJs6-TPhgV6lV00ysPUgjsrV_hCcDiECEqSwCL1CHEE",
+   "human": true,
+   "title": "Renamed export",
+   "summary": "Written after finishing"
   }
  ]
 }

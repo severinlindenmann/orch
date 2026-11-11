@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, procs, saferead, syncgate, term
+from orch import config, humanproof, net, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -138,20 +138,71 @@ def new_id(root: Path) -> str:
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
 
 
-def resolve(root: Path, ref):
+def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
     """The one place a ticket key (DM1-12, any case) becomes the ticket id. Anything else is returned as it
-    is (an id, or a word the command refuses later)."""
+    is (an id, or a word the command refuses later). Old keys require explicit opt-in."""
     if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
         return ref
     want = ref.strip().upper()
-    for t in list_all(root):
+    local = list_all(root)
+    for t in local:
         if str(t.get("key", "")).upper() == want:
+            return t["id"]
+    if follow_moved:
+        t = _moved_ticket(root, want, local)
+        if t is not None:
+            if notice is not None:
+                notice(f"{want} moved to {t.get('key') or t['id']}")
             return t["id"]
     raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
 
 
+def _moved_ticket(root: Path, want: str, local: list[dict]):
+    """Find a unique, locally issued old key; never follow chains or cross workspaces."""
+    key = _KEY_RE.fullmatch(want)
+    code = config.workspace_code(root)
+    alias_allowed = (
+        key is not None
+        and code is not None
+        and key.group(1) == code.upper()
+        and int(key.group(2)) <= _counter_last(root)
+    )
+    matches = []
+    for t in local if alias_allowed else []:
+        old_keys = _get(t, "ext.sync.old_keys")
+        if isinstance(old_keys, list) and any(isinstance(k, str) and k.upper() == want for k in old_keys):
+            matches.append(t)
+    if len(matches) > 1:
+        keys = ", ".join(sorted(str(t.get("key") or t["id"]) for t in matches))
+        raise Refused(f"{want} is an old key claimed by several tickets: {keys}. Use a current key.")
+    return matches[0] if matches else None
+
+
+def resolve_cli(root: Path, ref, *, json_output: bool = False):
+    """Text CLI follows moved keys visibly; JSON callers must use the current key."""
+    if not json_output:
+        return resolve(root, ref, follow_moved=True, notice=lambda message: print(message, file=sys.stderr))
+    try:
+        return resolve(root, ref)
+    except Refused:
+        if isinstance(ref, str) and _KEY_RE.fullmatch(ref.strip()):
+            want = ref.strip().upper()
+            t = _moved_ticket(root, want, list_all(root))
+            if t is not None:
+                current = t.get("key") or t["id"]
+                raise Refused(f"{want} moved to {current}; use {current}") from None
+        raise
+
+
 def _counter_path(root: Path) -> Path:
     return root / ".orch" / "ticket-counter.json"
+
+
+def _counter_last(root: Path) -> int:
+    try:
+        return int(json.loads(_counter_path(root).read_text(encoding="utf-8")).get("last", 0))
+    except (OSError, ValueError, AttributeError, TypeError):
+        return 0
 
 
 def next_key(root: Path) -> str:
@@ -162,10 +213,7 @@ def next_key(root: Path) -> str:
     code = config.workspace_code(root) or config.set_code(root, config.suggest_code(root.resolve().name))
     with _locked(root, "key"):
         p = _counter_path(root)
-        try:
-            last = int(json.loads(p.read_text(encoding="utf-8")).get("last", 0))
-        except (OSError, ValueError, AttributeError, TypeError):
-            last = 0
+        last = _counter_last(root)
         for t in list_all(root):
             m = _KEY_RE.match(str(t.get("key", "")))
             if m:
@@ -180,11 +228,51 @@ def next_key(root: Path) -> str:
     return f"{code}-{n}"
 
 
-def load(root: Path, tid: str) -> dict:
+def _load_raw(root: Path, tid: str) -> dict:
+    """The ticket file as it is (no signed-verdict view): for the writers, which must see and keep what a
+    peer or an agent wrote."""
     p = ticket_path(root, tid)
     if not p.exists():
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return _read_ticket(p, tid)
+
+
+def load(root: Path, tid: str) -> dict:
+    """The ticket as every reader sees it: a raw `done` without this core's current verdict is Review."""
+    return _effective(root, _load_raw(root, tid))
+
+
+def _effective(root: Path, t, checker=None, ledger=None):
+    """THE one read path of the signed verdict (human-proof.md "Done needs a signed verdict", invariant V1).
+    A raw `done` that does not carry a verdict entry this core vouches for (its own MAC over the ticket's
+    checklist AND the current ledger entry) is returned as `review` with a computed `verdict_needed: true`
+    (never stored). A raw ticket that is NOT done tombstones its ledger entry now, so an old entry cannot come
+    back by editing the file to active and back to done. The file is never rewritten by a reader."""
+    if not isinstance(t, dict):
+        return t
+    if t.get("status") == "done":
+        chk = checker or humanproof.VerdictChecker(root)
+        if chk.ok(t):
+            return t
+        return {**t, "status": "review", "verdict_needed": True}
+    if isinstance(t.get("id"), str):
+        _replay_tombstone(root, t["id"], ledger)
+    return t
+
+
+def _replay_tombstone(root: Path, tid: str, ledger=None) -> None:
+    """The ledger entry of a ticket whose file is not done: tombstone it (under the ticket lock, taken without
+    waiting: a writer that holds it signs or tombstones itself, and a sync step in progress is left alone)."""
+    try:
+        led = humanproof.verdict_ledger(root) if ledger is None else ledger
+        if not led or led.get(tid) is None or syncgate.live_holder(root) is not None:
+            return
+        with _locked(root, tid, wait=0.0):
+            raw = json.loads(ticket_path(root, tid).read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and raw.get("status") != "done":
+                humanproof.verdict_forget(root, tid)
+    except (Refused, OSError, ValueError):
+        pass  # best effort: the reader still shows the truth (a non-done ticket), the next read tries again
 
 
 def _read_ticket(p: Path, tid: str) -> dict:
@@ -193,7 +281,10 @@ def _read_ticket(p: Path, tid: str) -> dict:
     quarantines or deletes a file."""
     for attempt in range(4):
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("id") != tid:
+                raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
+            return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
                 if isinstance(e, PermissionError):
@@ -229,6 +320,20 @@ def _break_stale(lock: Path) -> bool:
     finally:
         with contextlib.suppress(OSError):
             mine.unlink()
+
+
+@contextlib.contextmanager
+def sync_apply(root: Path, tid: str):
+    """Lock a ticket (or ``key`` for the counter) for an in-process sync write.
+
+    Call on the thread holding syncgate.hold; other writers retain the normal
+    gate-before-ticket ordering. The caller checks and replaces the file while
+    this context is held, without importing core lock internals.
+    """
+    if tid != "key":
+        ticket_path(root, tid)
+    with _locked(root, tid):
+        yield
 
 
 @contextlib.contextmanager
@@ -319,9 +424,26 @@ def _get(ticket: dict, path: str):
     return cur
 
 
+def _disk_status(p: Path):
+    try:
+        t = json.loads(p.read_text(encoding="utf-8"))
+        return t.get("status") if isinstance(t, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
 def _write(root: Path, ticket: dict) -> None:
-    """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
+    """Lock-free atomic write (tmp + os.replace). Callers hold the lock. THE one write guard of the signed
+    verdict: a new raw `done` needs a verdict entry this core vouches for (the file already holding `done` is
+    left as it is: an unrelated op never rewrites a peer's Done); any other status tombstones this ticket's
+    ledger entry first (leaving Done needs no proof)."""
     p = ticket_path(root, ticket["id"])
+    ticket = {k: v for k, v in ticket.items() if k != "verdict_needed"}  # computed for readers, never stored
+    ok = ticket.get("status") == "done" and humanproof.verdict_ok(root, ticket)
+    if ticket.get("status") == "done" and not ok and _disk_status(p) != "done":
+        raise Refused(humanproof.VERDICT_NEEDED)
+    if not ok:  # left Done, or a Done whose state no longer matches its verdict (a step reopened and redone)
+        humanproof.verdict_forget(root, ticket["id"])  # the old entry must never come back
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
     try:
@@ -339,13 +461,14 @@ NO_WRITE = object()  # an op returns this when it changed nothing
 
 
 def _wont_view(ticket: dict) -> dict:
-    """The Won't do state of every step (id, flag, reason, who, when): what only a person may change."""
+    """The Won't do state (id, flag, reason, who, when, text): what only a person may change."""
     return {
         c.get("id"): (
             c.get("wont_do"),
             c.get("reason"),
             c.get("by") if c.get("wont_do") else None,
             c.get("at") if c.get("wont_do") else None,
+            c.get("text") if c.get("wont_do") else None,
         )
         for c in ticket.get("checklist") or []
         if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
@@ -366,7 +489,11 @@ def apply_op(
     it is refused (Conflict, exit 2) when that changed. Returns (ticket, result)."""
     ticket_path(root, tid)  # id shape check, same friendly refusal
     with _locked(root, tid):
-        ticket = load(root, tid)
+        ticket = _load_raw(root, tid)
+        raw_status = ticket.get("status")
+        eff_status = _effective(root, ticket)["status"] if raw_status == "done" else raw_status
+        if raw_status == "done":
+            ticket["status"] = eff_status  # ops see what readers see: an unsigned Done is Review
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
         if expect is not None and _get(ticket, expect[0]) != expect[1]:
@@ -384,6 +511,14 @@ def apply_op(
                 raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
+        if ticket.get("status") == eff_status and raw_status == "done":
+            ticket["status"] = "done"  # an unrelated op never rewrites a peer's Done into Review
+        elif (
+            ticket.get("status") == "done"
+            and eff_status != "done"
+            and not humanproof.verdict_ok(root, ticket)
+        ):
+            raise Refused(humanproof.VERDICT_NEEDED)  # no op makes a ticket Done without signing it
         if was_review and ticket.get("status") != "review":
             # leaving Review closes the phones' review round in the same lock (fb8): an old "accept"
             # can never apply to work that came back to Review later
@@ -420,6 +555,7 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
     `general: true`) is left out unless include_general: it is not a ticket anyone lists, counts or closes."""
     d = tickets_dir(root)
     out = []
+    checker = humanproof.VerdictChecker(root, snapshot=True)  # key and ledger read once for the listing
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
@@ -428,8 +564,10 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 )  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
-            if include_general or not (isinstance(t, dict) and t.get("general") is True):
-                out.append(t)
+            if not isinstance(t, dict) or t.get("id") != p.stem:
+                continue
+            if include_general or t.get("general") is not True:
+                out.append(_effective(root, t, checker, checker.ledger()))
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
 
@@ -816,16 +954,40 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
     return status, by
 
 
+AGENT_FINISH_TEXT = "finished by the agent (agents may finish is on)"
+
+
+def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
+    """The ticket is becoming Done (it was not Done for the reader): sign it, inside the ticket lock, with the
+    checklist as it is now. Signers: an agent while the recorded grant `agents_may_finish` is effective (kind
+    "agent"), or a person with a verified proof (kind "person"). Anyone else: refused, never an unsigned
+    Done."""
+    if actor.startswith("agent:"):
+        if not config.agents_may_finish(root):
+            raise Refused(humanproof.VERDICT_NEEDED)
+        kind = "agent"
+        add_history(ticket, actor, AGENT_FINISH_TEXT)
+    elif proven and _is_person(actor):
+        kind = "person"
+    else:
+        raise Refused(humanproof.VERDICT_NEEDED)
+    old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
+    entry = humanproof.verdict_sign(root, ticket, kind)
+    kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
+    ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
+
+
 def note_history(root: Path, tid: str, by: str, text: str, via: str | None = None) -> None:
     """One history line, nothing else changes (e.g. a phone answer that was too late)."""
     apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via))
 
 
-def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
+def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: bool = False) -> dict:
     """A person accepts a ticket in Review: Review -> Done, like the dashboard's Accept. Refused for an agent
     (an agent in the environment, or any `by` that is not human:) and when the ticket is not in Review, so a
     second accept is refused. The relay's phone path calls it only for a phone-verified answer to the
-    current review question (relay._apply_review_answer)."""
+    current review question (relay._apply_review_answer), which passes proven=True (the relay channel is the
+    phone's proof). The accept signs the verdict: without `proven` nothing becomes Done."""
     if not by.startswith("human:") or agent_tool():
         raise Refused("Only a person can accept.")
 
@@ -837,6 +999,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone") -> dict:
         ticket["status"] = "done"
         ticket["waiting_on"] = None
         add_history(ticket, by, "Status review -> done", via)
+        _sign_done(root, ticket, by, proven)
 
     result = apply_op(root, tid, op)[0]
     from orch import worktrees
@@ -981,7 +1144,7 @@ def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
             raise
 
 
-def set_status(root: Path, tid: str, status: str, by: str) -> dict:
+def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
 
@@ -997,6 +1160,8 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
         ticket["status"] = target
         if old != target and target == status:
             add_history(ticket, actor, f"Status {old} -> {target}")
+        if target == "done" and old != "done":
+            _sign_done(root, ticket, actor, proven)
 
     result = apply_op(root, tid, op)[0]
     if result.get("status") in CLOSED:  # done, closed or cancelled: its separate copy goes (never raises)
@@ -1388,8 +1553,6 @@ def _sign_wont(root: Path, tid: str, item: dict) -> None:
     """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
     a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
     step as an agent's, which is the safe side)."""
-    from orch import humanproof
-
     item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
     mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
     if mac:
@@ -1563,8 +1726,6 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
-        from orch import humanproof
-
         humanproof.wont_forget(
             root, tid, cid
         )  # tombstone (whatever the file says): no old MAC on a reused id
@@ -2107,7 +2268,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     return apply_op(root, tid, op2)[0]
 
 
-def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
+def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bool = False) -> dict:
     """Atomic change of several fields; refused (exit 2 + current values) when `revision` changed."""
     try:
         obj = json.loads(data)
@@ -2159,11 +2320,51 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str) -> dict:
         old, ticket["status"] = ticket["status"], status
         note = f" (status {old} -> {status})" if old != status else ""
         add_history(ticket, actor, "Patched " + ", ".join(sorted(obj)) + note)
+        if status == "done" and old != "done":
+            _sign_done(root, ticket, actor, proven)
 
     return apply_op(root, tid, op, if_revision=if_revision)[0]
 
 
 # ---------------------------------------------------------------- agent sessions (used by the run lane)
+
+
+OWN_SESSIONS_MAX = 500
+
+
+def _own_sessions(root: Path) -> list[dict]:
+    """Only a valid local record grants permission to resume; absent or corrupt means none."""
+    try:
+        entries = json.loads((root / ".orch" / "run" / "own-sessions.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(entries, list) or any(
+        not isinstance(s, dict)
+        or any(
+            not isinstance(s.get(k), str) or not s[k]
+            for k in ("id", "agent", "host", "ticket_id", "first_seen")
+        )
+        for s in entries
+    ):
+        return []
+    return entries
+
+
+def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -> None:
+    with _locked(root, "own-sessions"):
+        entries = _own_sessions(root)
+        entry = next(
+            (
+                s
+                for s in entries
+                if (s["id"], s["agent"], s["host"], s["ticket_id"]) == (sid, agent, host, tid)
+            ),
+            {"id": sid, "agent": agent, "host": host, "ticket_id": tid, "first_seen": now()},
+        )
+        entries = [s for s in entries if s != entry]
+        entries.append(entry)
+        # atomic temp + replace in net (never through a link); only tickets._write replaces files in here
+        net.write_json(root / ".orch" / "run" / "own-sessions.json", entries[-OWN_SESSIONS_MAX:])
 
 
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
@@ -2181,13 +2382,16 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
 
-    return apply_op(root, tid, op)[0]
+    ticket = apply_op(root, tid, op)[0]
+    _record_own_session(root, tid, agent, sid, host)
+    return ticket
 
 
-def sessions_for(ticket: dict, agent: str, host: str) -> str | None:
-    """The session id to resume for this agent on this machine, else None. No age limit."""
+def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> str | None:
+    """Resume local sessions for the trusted file/resolve id, never the peer-controlled ticket id."""
+    owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
     for s in ticket.get("sessions") or []:
-        if s.get("agent") == agent and s.get("host") == host:
+        if s.get("agent") == agent and s.get("host") == host and (s.get("id"), agent, host, tid) in owned:
             return s.get("id")
     return None
 

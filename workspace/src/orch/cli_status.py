@@ -97,8 +97,6 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
 def _services_cmd(args, root: Path) -> None:
     if args.cmd == "start":
         if args.print_launch_url:  # refuse before anything starts
-            from orch import humanproof
-
             if not humanproof.is_test_workspace(root):
                 raise Refused("--print-launch-url works only on a test install, in a test folder.")
         from orch import worktrees
@@ -177,10 +175,34 @@ def _copy_clean(args, root: Path) -> None:
     from orch import worktrees
 
     if args.sub == "remove-orphaned":
+        if not isinstance(args.ws8, str) or not worktrees._WS8.fullmatch(args.ws8):
+            raise Refused("That is not a copies folder.")
+        who = humanproof.person_by(
+            root,
+            args,
+            "copy.remove_orphaned",
+            f"{args.ws8}:discard" if args.discard else args.ws8,
+            label="Remove copies of a project that is gone",
+            parts={"ws8": humanproof.part(args.ws8), "discard": args.discard},
+        )
+        if not who.startswith("human:"):
+            raise Refused("Only a person can remove copies of a project that is gone.")
         notes = worktrees.remove_orphaned(root, args.ws8, args.discard)
         _out(args, {"notes": notes}, "\n".join(notes) or "Removed.")
         return
     if args.sub == "retry":
+        if not isinstance(args.ticket, str) or not worktrees._TID.fullmatch(args.ticket):
+            raise Refused("That is not a ticket id.")
+        who = humanproof.person_by(
+            root,
+            args,
+            "copy.retry",
+            args.ticket,
+            label="Try again where git was interrupted",
+            parts={"title": humanproof.ticket_name(root, args.ticket)},
+        )
+        if not who.startswith("human:"):
+            raise Refused("Only a person can do this.")
         notes = worktrees.retry(root, args.ticket)
         _out(args, {"notes": notes}, "\n".join(notes) or "Done.")
         return

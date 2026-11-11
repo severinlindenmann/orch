@@ -107,7 +107,8 @@ def start(root: Path, port: int | None = None) -> dict:
     d = _dir(root)
     nonce = secrets.token_hex(16)
     ready = d / f"ready-{nonce[:12]}.json"
-    kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
+    from orch.procs import background_popen_kwargs
+
     # -P: the workspace folder is never on the import path (a planted orch_dashboard.py there is not run)
     root = root.resolve()
     cmd = [
@@ -128,9 +129,8 @@ def start(root: Path, port: int | None = None) -> dict:
             cwd=root,
             stdout=out,
             stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
             env={**os.environ, "ORCH_ROOT": str(root.resolve()), "ORCH_DASHBOARD_NONCE": nonce},
-            **kw,
+            **background_popen_kwargs(),
         )
     try:
         end = time.time() + 15

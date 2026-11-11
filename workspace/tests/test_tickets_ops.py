@@ -106,6 +106,29 @@ def test_agent_can_reorder_wont_do_steps_but_cannot_change_decisions(proj, new_t
         assert read(proj, tid) == moved
 
 
+@pytest.mark.parametrize("agent,wont_do", [(True, True), (True, False), (False, True)])
+def test_reword_step_respects_persons_wont_do(proj, new_ticket, monkeypatch, agent, wont_do):
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    _, step = tickets.check_add(proj, tid, "Ask finance", "human:Ann")
+    if wont_do:
+        tickets.check_wont_do(proj, tid, step["id"], "human:Ann", "Not needed")
+    before = read(proj, tid)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex" if agent else None)
+
+    def reword(ticket):
+        ticket["checklist"][0]["text"] = "Ask sales"
+
+    if agent and wont_do:
+        with pytest.raises(tickets.Refused, match="Only a person"):
+            tickets.apply_op(proj, tid, reword)
+        assert read(proj, tid) == before
+    else:
+        tickets.apply_op(proj, tid, reword)
+        expected = {**before["checklist"][0], "text": "Ask sales"}
+        assert read(proj, tid)["checklist"][0] == expected
+
+
 @pytest.mark.parametrize("reopen_original", [False, True])
 def test_agent_cannot_duplicate_wont_do_step(proj, new_ticket, monkeypatch, reopen_original):
     tid = new_ticket()
@@ -247,10 +270,10 @@ def test_sessions_record_and_find(proj, validate, new_ticket):
     t = tickets.load(proj, tid)
     validate(t)
     assert len(t["sessions"]) == 2
-    assert tickets.sessions_for(t, "my-agent", "laptop") == "s-2"
-    assert tickets.sessions_for(t, "my-agent", "vps") == "s-1"
-    assert tickets.sessions_for(t, "other", "laptop") is None
-    assert tickets.sessions_for(t, "my-agent", "elsewhere") is None
+    assert tickets.sessions_for(proj, tid, t, "my-agent", "laptop") == "s-2"
+    assert tickets.sessions_for(proj, tid, t, "my-agent", "vps") == "s-1"
+    assert tickets.sessions_for(proj, tid, t, "other", "laptop") is None
+    assert tickets.sessions_for(proj, tid, t, "my-agent", "elsewhere") is None
     for i in range(40):
         tickets.record_session(proj, tid, "a", f"s{i}", f"h{i}")
     assert len(tickets.load(proj, tid)["sessions"]) == 32
@@ -467,7 +490,180 @@ def test_outcome_shown_by_show_on_done_only(proj, run, new_ticket):
     tid = new_ticket()
     assert run("ticket", "outcome", tid, "--changed", "Added CSV export.")[0] == 0
     assert "Changed: Added CSV export." not in run("ticket", "show", tid)[1]
-    t = read(proj, tid)
-    t["status"] = "done"
-    (proj / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(t), encoding="utf-8")
+    from conftest import sign_done
+
+    sign_done(proj, tid)  # Done is a signed verdict: a raw "done" in the file would read as Review
     assert "Changed: Added CSV export." in run("ticket", "show", tid)[1]
+
+
+def test_sessions_require_local_ownership(proj, new_ticket):
+    tid = new_ticket()
+    tickets.record_session(proj, tid, "agent", "local", "host")
+    t = tickets.load(proj, tid)
+    t["sessions"].insert(0, {"id": "foreign", "agent": "agent", "host": "host"})
+    tickets.save(proj, t)  # incoming ticket JSON may contain a session from another machine
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "agent", "host") == "local"
+    t["sessions"] = t["sessions"][:1]
+    assert tickets.sessions_for(proj, tid, t, "agent", "host") is None
+    # Neither the same id under another agent/host nor another workspace grants ownership.
+    assert (
+        tickets.sessions_for(
+            proj,
+            tid,
+            {"id": tid, "sessions": [{"id": "local", "agent": "other", "host": "host"}]},
+            "other",
+            "host",
+        )
+        is None
+    )
+    assert tickets.sessions_for(proj / "other", tid, tickets.load(proj, tid), "agent", "host") is None
+
+
+@pytest.mark.parametrize("contents", [None, "{", "{}", '[{"id":"local"}]', "\udcff"])
+def test_sessions_missing_or_corrupt_record(proj, new_ticket, contents):
+    tid = new_ticket()
+    tickets.record_session(proj, tid, "agent", "local", "host")
+    p = proj / ".orch" / "run" / "own-sessions.json"
+    if contents is None:
+        p.unlink()
+    else:
+        p.write_bytes(contents.encode("utf-8", errors="surrogateescape"))
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "agent", "host") is None
+
+
+def test_own_sessions_bounded(proj, new_ticket):
+    tid = new_ticket()
+    for i in range(501):
+        tickets.record_session(proj, tid, "agent", f"s{i}", "host")
+    p = proj / ".orch" / "run" / "own-sessions.json"
+    entries = json.loads(p.read_text())
+    assert len(entries) == 500
+    assert entries[0]["id"] == "s1"
+    first_seen = entries[0]["first_seen"]
+    tickets.record_session(proj, tid, "agent", "s1", "host")
+    entries = json.loads(p.read_text())
+    assert len(entries) == 500
+    assert entries[-1]["first_seen"] == first_seen
+    assert (
+        tickets.sessions_for(
+            proj,
+            tid,
+            {"id": tid, "sessions": [{"id": "s0", "agent": "agent", "host": "host"}]},
+            "agent",
+            "host",
+        )
+        is None
+    )
+
+
+def test_old_key_resolution(proj, new_ticket, run):
+    from orch import config
+
+    config.set_code(proj, "DM1")
+    for _ in range(12):
+        tickets.next_key(proj)
+    tid = new_ticket()
+    t = tickets.load(proj, tid)
+    t["key"] = "DM1-15"
+    t["ext"] = {"sync": {"old_keys": ["DM1-13"]}}
+    tickets.save(proj, t)
+    notices = []
+    assert tickets.resolve(proj, "dm1-13", follow_moved=True, notice=notices.append) == tid
+    assert notices == ["DM1-13 moved to DM1-15"]
+    code, _, err = run("ticket", "show", "DM1-13")
+    assert code == 0
+    assert "DM1-13 moved to DM1-15" in err
+    from orch.errors import Refused
+
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj, "DM1-13", notice=notices.append)
+    for args in [("show", "DM1-13"), ("set", "DM1-13", "title", "Must not change")]:
+        code, out, err = run("ticket", *args, "--json")
+        assert code == 2
+        assert json.loads(out)["error"] == "DM1-13 moved to DM1-15; use DM1-15"
+        assert "DM1-13 moved to DM1-15; use DM1-15" in err
+    assert tickets.load(proj, tid) == t
+
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj / "other", "DM1-13", follow_moved=True)
+    other = new_ticket()
+    t2 = tickets.load(proj, other)
+    t2["key"] = "DM1-13"
+    tickets.save(proj, t2)
+    notices.clear()
+    assert tickets.resolve(proj, "DM1-13", follow_moved=True, notice=notices.append) == other
+    assert notices == []
+    t2["key"] = "DM1-16"
+    t2["ext"] = {"sync": {"old_keys": ["DM1-13"]}}
+    tickets.save(proj, t2)
+    with pytest.raises(Refused, match="DM1-15, DM1-16"):
+        tickets.resolve(proj, "DM1-13", follow_moved=True)
+
+
+def test_sessions_cannot_cross_tickets(proj, new_ticket):
+    a, b = new_ticket(), new_ticket()
+    tickets.record_session(proj, a, "agent", "local", "host")
+    original = tickets.load(proj, a)
+    copied = tickets.load(proj, b)
+    copied["sessions"] = original["sessions"]
+    tickets.save(proj, copied)
+    assert tickets.sessions_for(proj, b, tickets.load(proj, b), "agent", "host") is None
+    assert tickets.sessions_for(proj, a, original, "agent", "host") == "local"
+
+
+@pytest.mark.parametrize("embedded_id", ["other", None])
+def test_sessions_spoofed_ticket_id_refused(proj, new_ticket, embedded_id):
+    from orch.errors import Refused
+
+    a, b = new_ticket(), new_ticket()
+    original = tickets.record_session(proj, a, "agent", "local", "host")
+    copied = tickets.load(proj, b)
+    key = copied["key"]
+    copied["sessions"] = original["sessions"]
+    if embedded_id == "other":
+        copied["id"] = a
+    else:
+        del copied["id"]
+    path = tickets.ticket_path(proj, b)
+    contents = json.dumps(copied)
+    path.write_text(contents, encoding="utf-8")
+
+    # Even a caller holding unvalidated peer JSON must use the trusted file id.
+    assert tickets.sessions_for(proj, b, copied, "agent", "host") is None
+    with pytest.raises(Refused, match="id does not match its filename"):
+        tickets.load(proj, b)
+    assert tickets.list_all(proj) == [original]
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj, key)
+    assert path.read_text(encoding="utf-8") == contents
+    assert tickets.load(proj, a) == original
+    assert tickets.sessions_for(proj, a, original, "agent", "host") == "local"
+
+
+def test_sessions_legacy_record_fails_closed(proj, new_ticket):
+    tid = new_ticket()
+    ticket = tickets.record_session(proj, tid, "agent", "local", "host")
+    p = proj / ".orch" / "run" / "own-sessions.json"
+    entries = json.loads(p.read_text())
+    del entries[0]["ticket_id"]
+    p.write_text(json.dumps(entries))
+    assert tickets.sessions_for(proj, tid, ticket, "agent", "host") is None
+    tickets.record_session(proj, tid, "agent", "local", "host")
+    assert tickets.sessions_for(proj, tid, ticket, "agent", "host") == "local"
+
+
+@pytest.mark.parametrize("alias", ["DM1-2", "AB-1"])
+def test_old_key_unissued_or_other_prefix_refused(proj, new_ticket, alias):
+    from orch import config
+    from orch.errors import Refused
+
+    config.set_code(proj, "DM1")
+    tid = new_ticket()
+    t = tickets.load(proj, tid)
+    t["key"] = "DM1-15"
+    t["ext"] = {"sync": {"old_keys": [alias]}}
+    tickets.save(proj, t)
+    notices = []
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj, alias, follow_moved=True, notice=notices.append)
+    assert notices == []

@@ -187,5 +187,7 @@
   "names": false,
   "last_sent": "2026-11-15",
   "queued": 0
- }
+ },
+  "unavailable": [],
+  "complete": true
 }

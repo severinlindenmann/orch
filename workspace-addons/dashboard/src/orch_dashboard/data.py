@@ -177,6 +177,9 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         items = [(t, None) for t in raw]
     else:
         items = [(_load(f), f.stem) for f in _json_files(root / ".orch" / "tickets")]
+        for t, _stem in items:  # without the core nothing can verify a verdict: a raw Done is Review (V1)
+            if isinstance(t, dict) and t.get("status") == "done":
+                t["status"], t["verdict_needed"] = "review", True
     tickets, skipped = [], 0
     for t, stem in items:
         if isinstance(t, dict) and t.get("general") is True:  # the hidden General conversation is no ticket
@@ -555,16 +558,21 @@ def _disk_count(root: Path, key: str) -> None:
 def copies_disk(root: Path) -> dict | None:
     """{copies, bytes, partial} for the settings line "Copies on this computer", or None while it is being
     counted (the page shows "..."). The walk runs on a thread (capped by core), never on the request."""
+    from orch import worktrees
+
+    def current(val):
+        return {**val, "copies": worktrees.count(root)} if val is not None else None
+
     key = str(root)
     with _DISK_LOCK:
         e = _DISK.get(key)
         fresh = e is not None and time.monotonic() - e["at"] < DISK_TTL
         if e is not None and (fresh or e["busy"]):
-            return e["val"]
+            return current(e["val"])
         _DISK[key] = {"at": e["at"] if e else 0.0, "val": e["val"] if e else None, "busy": True}
         old = e["val"] if e else None
     threading.Thread(target=_disk_count, args=(root, key), daemon=True).start()
-    return old
+    return current(old)
 
 
 def copies_disk_forget(root: Path) -> None:

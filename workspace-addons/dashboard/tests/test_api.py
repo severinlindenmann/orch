@@ -738,3 +738,16 @@ def test_state_preserves_started(ws):
     result = next(t for t in load_state(ws)["tickets"] if t["id"] == ticket["id"])
     assert result["started"] is True
     assert result["status"] == "ready"
+
+
+def test_standalone_fallback_shows_a_raw_done_as_review(tmp_path):
+    """Without the orch core nothing can verify a signed verdict (V1): a raw `done` file reads as Review."""
+    from orch_dashboard import data
+
+    folder = tmp_path / ".orch" / "tickets"
+    folder.mkdir(parents=True)
+    t = json.loads((Path(__file__).parents[3] / "contracts" / "review" / "ticket.example.json").read_text())
+    t.update(id="t_abc123", title="Export", status="done")
+    (folder / "t_abc123.json").write_text(json.dumps(t))
+    tickets, _skipped = data.load_tickets(tmp_path, orch_bin=None)
+    assert [(x["id"], x["status"], x["verdict_needed"]) for x in tickets] == [("t_abc123", "review", True)]
