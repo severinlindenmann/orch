@@ -1291,8 +1291,11 @@ def test_review_retry_bounds_remove_and_restores_deadline(repo, monkeypatch, rai
 
 
 @pytest.fixture(autouse=True)
-def _copies_test_home(monkeypatch):
+def _copies_test_home(monkeypatch, request):
     from orch import humanproof
+
+    if request.node.name.startswith("test_task_e_real_guard"):
+        return
 
     # Legacy proj fixtures live outside the fake account's .orch-test directory.
     # Keep the real private-directory, file, and key checks on their isolated home.
@@ -1371,3 +1374,82 @@ def test_task_d_replayed_store_is_unknown(repo, update):
     # A replay must not become a fresh empty registry on the next write either.
     with pytest.raises(Refused):
         worktrees._remember_copies(repo, addons.home(repo) / "worktrees" / wid8(repo))
+
+
+def test_task_e_real_guard_round_trip(repo, monkeypatch):
+    from orch import humanproof
+
+    home = addons.real_home() / ".orch-test" / "copies-home"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("ORCH_HOME", str(home))
+    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    p = make(repo)
+    assert worktrees._known_copies(p.parent.parent)[wid8(repo)] == {
+        "main": str(repo.resolve()),
+        "workspace_id": addons.workspace_id(repo),
+    }
+
+
+def test_task_e_real_guard_outside_refused(repo, monkeypatch):
+    from orch import humanproof
+
+    monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
+    home = addons.home(repo)
+    before = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    entry, note = worktrees._create_inner(repo, repo.tids[0])
+    assert entry is None
+    assert "cannot make the copy folder" in note
+    assert "Traceback" not in note
+    assert {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
+    assert not (home / "worktrees").exists()
+    assert not (home / "keys" / "copies").exists()
+
+
+@pytest.mark.parametrize("linked", ["folder", "owner"])
+def test_task_e_owner_refresh_refuses_links(repo, tmp_path, monkeypatch, linked):
+    p = make(repo)
+    folder = p.parent
+    target = tmp_path.parent / (tmp_path.name + "-owner-target")
+    if linked == "folder":
+        folder.rename(target)
+        folder.symlink_to(target, target_is_directory=True)
+        # Simulate a stale path check; opening the directory must refuse the link.
+        monkeypatch.setattr(worktrees, "_is_link", lambda path: False)
+        marker = target / ".owner"
+    else:
+        target.write_text("precious\n")
+        (folder / ".owner").unlink()
+        (folder / ".owner").symlink_to(target)
+        marker = target
+    before = marker.read_bytes()
+    known = worktrees._known_copies(folder.parent)
+    moved = repo.parent / "moved-owner"
+    repo.rename(moved)
+    try:
+        with pytest.raises((Refused, OSError)):
+            worktrees._remember_copies(moved, folder)
+        assert marker.read_bytes() == before
+        assert worktrees._known_copies(folder.parent) == known
+    finally:
+        moved.rename(repo)
+        if linked == "folder":
+            folder.unlink()
+            target.rename(folder)
+
+
+def test_task_e_failed_orphan_rmdir_restores_owner(repo):
+    main = repo.parent / "gone-extra"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    known = worktrees._known_copies(d.parent)
+    extra = d / "unexpected.txt"
+    extra.write_text("keep")
+    notes = worktrees.remove_orphaned(repo, d.name, discard=True)
+    assert notes and "kept" in " ".join(notes)
+    assert extra.read_text() == "keep"
+    assert (d / ".owner").read_text().strip() == known[d.name]["main"]
+    assert worktrees._known_copies(d.parent) == known
+    extra.unlink()
+    assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
+    assert not d.exists()
+    assert d.name not in worktrees._known_copies(d.parent)

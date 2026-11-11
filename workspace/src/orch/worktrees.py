@@ -121,11 +121,16 @@ def copies_dir(root: Path) -> Path | None:
     return ((addons.home(root) / "worktrees").resolve()) / wid[:8]
 
 
-def _copies_key(home: Path, *, create: bool = False) -> bytes:
-    """Account/home key, independent of workspace ids and path bindings; never in a copy."""
+def _check_copies_home(home: Path) -> None:
+    """Reject an unguarded destination before creating any folders or lock files."""
     guarded = humanproof.guarded_home(home)
     if guarded.resolve() != home.resolve():
         raise Refused("The copies record is outside the guarded home.")
+
+
+def _copies_key(home: Path, *, create: bool = False) -> bytes:
+    """Account/home key, independent of workspace ids and path bindings; never in a copy."""
+    _check_copies_home(home)
     humanproof.winacl.no_reparse(home)
     if create:
         home.mkdir(parents=True, exist_ok=True)
@@ -243,11 +248,42 @@ def _legacy_copies_entry(base: Path, ws8: str):
         raise Refused("The legacy copies record cannot be migrated.") from None
 
 
+def _write_copies_owner(folder: Path, main: str) -> None:
+    """Anchor replacement to a no-follow directory fd; never write through an owner link."""
+    if os.name != "posix":
+        if _is_link(folder) or (folder / ".owner").is_symlink():
+            raise Refused("orch cannot use that folder for copies.")
+        runs._atomic(folder / ".owner", main + "\n")
+        return
+    directory = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temporary = ".owner-" + secrets.token_hex(16)
+    try:
+        # Refuse an existing link. Replacement itself never follows the destination,
+        # even if another process swaps it after this open.
+        try:
+            owner = os.open(".owner", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+        else:
+            os.close(owner)
+        fd = os.open(temporary, os.O_NOFOLLOW | os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(main + "\n")
+            os.replace(temporary, ".owner", src_dir_fd=directory, dst_dir_fd=directory)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=directory)
+    finally:
+        os.close(directory)
+
+
 def _remember_copies(root: Path, folder: Path) -> None:
     wid = addons.workspace_id(root)
     if not wid or _ws8(wid) != folder.name:
         raise Refused("The copies folder does not match this workspace's id.")
     home = folder.parent.parent
+    _check_copies_home(home)
     with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
         try:
             key = _copies_key(home, create=True)
@@ -265,9 +301,7 @@ def _remember_copies(root: Path, folder: Path) -> None:
             if legacy is not None and legacy != main:
                 raise Refused("Another workspace uses the same copy folder.")
         if old is not None and old != main:
-            if _is_link(folder) or (folder / ".owner").is_symlink():
-                raise Refused("orch cannot use that folder for copies.")
-            runs._atomic(folder / ".owner", main + "\n")
+            _write_copies_owner(folder, main)
         known[folder.name] = {"main": main, "workspace_id": wid}
         _save_copies_store(home, key, counter, known)
 
@@ -496,6 +530,7 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     folder = dest.parent
     owner = folder / ".owner"
     try:
+        _check_copies_home(folder.parent.parent)
         folder.mkdir(parents=True, exist_ok=True)
         _remember_copies(root, folder)
         if owner.is_symlink():
@@ -504,7 +539,7 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
             if owner.read_text(encoding="utf-8").strip() != str(root.resolve()):
                 return None, "Another workspace uses the same copy folder."
         else:
-            runs._atomic(owner, str(root.resolve()) + "\n")
+            _write_copies_owner(folder, str(root.resolve()))
     except (OSError, Refused) as e:
         return None, f"orch cannot make the copy folder: {e}"
     if dest.exists() or dest.is_symlink():
@@ -1655,14 +1690,24 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
         if _empty_trash_in(root, d, time.monotonic() + 300, grace=False) and not any(
             _TID.fullmatch(e.name) for e in os.scandir(d)
         ):
-            with contextlib.suppress(OSError):
-                (d / TRASH).rmdir()
-                (d / ".owner").unlink()
-                with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
-                    d.rmdir()
-                    key = _copies_key(base.parent)
-                    counter, known = _copies_store(base.parent, key)
-                    known.pop(ws8, None)
+            with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
+                key = _copies_key(base.parent)
+                counter, known = _copies_store(base.parent, key)
+                if ws8 not in known or not _known_gone(d):
+                    raise Refused("The copies identity changed. Nothing more was removed.")
+                try:
+                    with contextlib.suppress(FileNotFoundError):
+                        (d / TRASH).rmdir()
+                    (d / ".owner").unlink()
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        _write_copies_owner(d, known[ws8]["main"])
+                        raise
+                except OSError as e:
+                    notes.append(f"{ws8}: kept: could not remove the copies folder: {e}")
+                else:
+                    known.pop(ws8)
                     _save_copies_store(base.parent, key, counter, known)
     return notes
 
