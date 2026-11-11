@@ -171,6 +171,23 @@ mapping for the `item.*` stream shape (thread.started, turn.started, item.starte
 - `turn.completed` → `usage` (`tokens_in`, `tokens_out`, `used` 0 when unknown) and `run.state idle`.
 - Unknown item types → skipped, `coverage` of the run's next step becomes `partial`.
 
+### The `claude -p --output-format stream-json --verbose` stream (`claude-stream-json/1`)
+
+Declared by `oneshot.events` of the adapter (agent-adapter.schema.json) with `capabilities.activity: live`. One JSON object per
+line (captures: `workspace/tests/fixtures/w2b/claude/`). A tool call is a `tool_use` content block of an `assistant` line and its
+result a `tool_result` block of a later `user` line; the pair is one started and one finished `step` with the same `id` = the tool-call
+id (so a hook's line and this one dedupe). `is_error: true` → `outcome.ok: false`; input and result go to the detail file.
+- `system/init` → `session` and `run.state working`; other `system` lines and unknown types → no event, counted by the collector.
+- `Task`/`Agent` tool → `helper.start` / `helper.end` (agent `h_<n>`, `parent` = the starter); lines with `parent_tool_use_id` belong to that helper.
+- `mcp__<server>__<tool>` → `used.kind` mcp (server, tool, source `harness`); `Skill` → kind skill (source `harness`); other tools → kind tool, source `builtin`.
+- `assistant` text → `run.state working` with `data.say`; `thinking` → nothing; an unknown block type makes the next step `partial`.
+- `rate_limit_event` → `usage` (`used`, `window`, `status`); `result` → one `denial` per `permission_denials` entry (id = its `tool_use_id`),
+  `usage` (`tokens_in` = input + cache creation + cache read, `tokens_out`) and `run.state` idle (failed when `is_error`).
+- Garbled or cut lines are counted and skipped. A replay of the same lines adds nothing: ids are the tool-call ids (passed raw; the writer
+  hashes an unsafe one, so a hook line with the same raw id dedupes), else built from the line's own uuid or session id. Only a line
+  with none of these (a `rate_limit_event` without uuid) gets `<run>:<seq>`; the wiring passes `seq_start` so a resumed process never
+  reuses an id, and a replay with a different `seq_start` can duplicate such a usage line.
+
 ## Integrity
 
 Every read and write uses one hardened open. From `.orch` down, directories may
