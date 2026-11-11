@@ -77,6 +77,17 @@
         } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] }
       }
     } },
+    { "if": { "properties": { "kind": { "const": "secret.change" } } }, "then": {
+      "required": ["data"],
+      "properties": {
+        "via": { "const": "broker" }, "detail": { "type": "null" }, "used": { "type": "null" },
+        "data": { "anyOf": [{ "required": ["action", "profile", "by"], "additionalProperties": false, "properties": {
+          "action": { "enum": ["profile.set", "profile.remove", "profile.get_enable", "profile.get_disable", "profile.agents_enable", "profile.agents_disable"] },
+          "profile": { "$ref": "#/$defs/name" },
+          "by": { "$ref": "#/$defs/name", "description": "human:<name> from the proof, or reset (no proof)." }
+        } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] }
+      }
+    } },
     { "if": { "properties": { "kind": { "const": "job" } } }, "then": { "required": ["data"], "properties": { "via": { "const": "job" }, "data": { "anyOf": [{ "required": ["job", "type", "state"], "properties": {
       "job": { "type": "string", "pattern": "^j_[a-z0-9]{6,32}$" },
       "type": { "enum": ["start", "step", "progress", "artifact", "metric", "table", "link", "log", "end", "lost"] },
@@ -93,7 +104,7 @@
   ],
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
-    "kind": { "enum": ["step", "task.start", "task.done", "ask", "denial", "helper.start", "helper.end", "run.state", "usage", "key.use", "job", "session.input"] },
+    "kind": { "enum": ["step", "task.start", "task.done", "ask", "denial", "helper.start", "helper.end", "run.state", "usage", "key.use", "secret.change", "job", "session.input"] },
     "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" },
     "agent": { "type": "string", "pattern": "^(main|h_[0-9]{1,4})$" },
     "event_id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_.:-]+$" },

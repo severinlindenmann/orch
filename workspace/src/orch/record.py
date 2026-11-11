@@ -1554,7 +1554,50 @@ _SCHEMA = {
                                             "missing",
                                             "too_short",
                                             "switched_off",
+                                            "agent_command",
                                         ]
+                                    },
+                                },
+                            },
+                            {
+                                "type": "object",
+                                "required": ["cut"],
+                                "additionalProperties": False,
+                                "properties": {"cut": {"const": True}},
+                            },
+                        ]
+                    },
+                },
+            },
+        },
+        {
+            "if": {"properties": {"kind": {"const": "secret.change"}}},
+            "then": {
+                "required": ["data"],
+                "properties": {
+                    "via": {"const": "broker"},
+                    "detail": {"type": "null"},
+                    "used": {"type": "null"},
+                    "data": {
+                        "anyOf": [
+                            {
+                                "required": ["action", "profile", "by"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "action": {
+                                        "enum": [
+                                            "profile.set",
+                                            "profile.remove",
+                                            "profile.get_enable",
+                                            "profile.get_disable",
+                                            "profile.agents_enable",
+                                            "profile.agents_disable",
+                                        ]
+                                    },
+                                    "profile": {"$ref": "#/$defs/name"},
+                                    "by": {
+                                        "$ref": "#/$defs/name",
+                                        "description": "human:<name> from the proof, or reset (no proof).",
                                     },
                                 },
                             },
@@ -1684,6 +1727,7 @@ _SCHEMA = {
                 "run.state",
                 "usage",
                 "key.use",
+                "secret.change",
                 "job",
                 "session.input",
             ]

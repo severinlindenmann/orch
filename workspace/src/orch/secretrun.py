@@ -1,7 +1,9 @@
 """Deliver keys to commands and hide their output (Level 1).
 
-The record store is not merged yet: without set_recorder(), calls proceed without
-persisting events. A configured recorder must succeed before a command starts.
+Every use is written to the run's record (`.orch/record`, record.py) as a key.use event BEFORE the command
+starts, without any value; a writer that cannot write (no hider, damaged record) stops the command. The record
+belongs to an orch run: a call outside a run (no ORCH_RUN / ORCH_TICKET) has no run file to write to
+and is not recorded. set_recorder() replaces the writer (tests).
 """
 
 from __future__ import annotations
@@ -24,6 +26,83 @@ from orch import humanproof as hp
 from orch.errors import Refused
 
 _recorder = None
+_NAME = re.compile(r"^[A-Za-z0-9_.+-]{1,64}$")
+
+
+def _now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _run_ids():
+    run, ticket = os.environ.get("ORCH_RUN"), os.environ.get("ORCH_TICKET")
+    return (run, ticket) if run and ticket else None
+
+
+def _record_event(root, ev):
+    """The record line for an event of this module, or None when there is no run to write it to."""
+    ids = _run_ids()
+    if ids is None:
+        return None
+    from orch import tickets
+
+    tool = tickets.agent_tool()
+    harness = tool if isinstance(tool, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", tool) else "generic"
+    line = {
+        "run": ids[0],
+        "session": None,
+        "agent": "main",
+        "parent": None,
+        "at": _now(),
+        "ticket": ids[1],
+        "harness": harness,
+        "coverage": "full",
+        "via": "broker",
+        "kind": ev["kind"],
+        "detail": None,
+        "outcome": {"ok": ev["outcome"]["ok"], "error": None, "ms": None},
+    }
+    if ev["kind"] == "key.use":
+        refused = ev.get("refused")
+        sources = {r["name"]: r["source"] for r in keystore.list_keys(root) if r["state"] != "shadowed"}
+        cmd = ev.get("command")
+        data = {
+            "profile": ev["profile"],
+            "command": cmd if cmd and _NAME.match(cmd) else None,
+            "skill": ev.get("skill"),
+        }
+        if refused:
+            data["refused"] = refused
+            line["outcome"]["error"] = "Not allowed by this profile"
+        line.update(
+            text=f"Key {ev['key']} not given: {refused}"
+            if refused
+            else f"Key {ev['key']} handed to {cmd or 'a command'}",
+            used={
+                "kind": "key",
+                "name": ev["key"],
+                "action": ev["action"],
+                "source": sources.get(ev["key"], "workspace"),
+                "version": None,
+            },
+            data=data,
+        )
+    else:
+        line.update(
+            text=f"Profile {ev['profile']}: {ev['action']}",
+            used=None,
+            data={"action": ev["action"], "profile": ev["profile"], "by": ev["by"]},
+        )
+    return line
+
+
+def _write_record(root, ev):
+    """The default recorder: the run's record writer with a hider built from THIS workspace's key store."""
+    from orch import record
+
+    line = _record_event(root, ev)
+    if line is None:
+        return
+    record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root))).append(line)
 
 
 def set_recorder(fn):
@@ -56,12 +135,11 @@ class Recorder:
                 return {self.h.hide_text(k): hide(v) for k, v in value.items()}
             return value
 
-        if _recorder is not None:
-            try:
-                _recorder(self.root, hide(event))
-            except Exception:
-                if refused is None:
-                    raise Refused("Refused: this use could not be recorded.") from None
+        try:
+            (_recorder or _write_record)(self.root, hide(event))
+        except Exception:
+            if refused is None:
+                raise Refused("Refused: this use could not be recorded.") from None
 
 
 def resolve_program(root, name):
@@ -82,10 +160,8 @@ def resolve_program(root, name):
 def record_change(root, action, profile, by):
     """A person's or anyone's change of a profile switch, to the same recorder seam as key.use (best effort:
     a failing recorder never blocks turning a switch off)."""
-    if _recorder is None:
-        return
     try:
-        _recorder(
+        (_recorder or _write_record)(
             root,
             {
                 "kind": "secret.change",

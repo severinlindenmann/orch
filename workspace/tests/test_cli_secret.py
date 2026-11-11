@@ -1048,3 +1048,101 @@ def test_a_large_key_with_a_diverging_byte_is_not_slow(ws):
     out.append(s.close())
     assert time.monotonic() - start < 3
     assert "".join(out).startswith(big[:100])
+
+
+# --------------------------------------------------------------------------- the real record writer (M1)
+
+RUN, TICKET = "r_8k2m01", "t_inv7c2"
+
+
+@pytest.fixture
+def in_run(monkeypatch):
+    monkeypatch.setenv("ORCH_RUN", RUN)
+    monkeypatch.setenv("ORCH_TICKET", TICKET)
+
+
+def _record_text(ws):
+    from orch.record import record_dir
+
+    out = []
+    for p in record_dir(ws).rglob("*"):
+        if p.is_file():
+            out.append(p.read_bytes().decode("utf-8", "replace"))
+    return "\n".join(out)
+
+
+def _forms(value):
+    import base64
+    from urllib.parse import quote
+
+    raw = value.encode()
+    forms = {value, raw.hex(), raw.hex().upper(), quote(value, safe=""), json.dumps(value)[1:-1]}
+    for off in range(3):
+        b = base64.b64encode(b"x" * off + raw).decode().rstrip("=")
+        forms.add(b[4:-4])
+        forms.add(base64.urlsafe_b64encode(b"x" * off + raw).decode().rstrip("=")[4:-4])
+    return forms
+
+
+def test_a_use_is_written_to_the_run_record_without_the_value(store, run, ws, in_run):
+    from orch.record import read_run
+
+    code, out, err = run(
+        "secret", "env", "plain", "--", PY, "-c", "import os;print(os.environ['PLAIN_TOKEN'])"
+    )
+    assert code == 0
+    lines = read_run(ws, RUN).unwrap()
+    uses = [x for x in lines if x["kind"] == "key.use"]
+    assert (
+        len(uses) == 1 and uses[0]["used"]["name"] == "other-token" and uses[0]["data"]["profile"] == "plain"
+    )
+    assert uses[0]["via"] == "broker" and uses[0]["data"]["command"] == os.path.basename(PY)
+    text = _record_text(ws)
+    for secret in (TOKEN2, TOKEN):
+        for f in _forms(secret):
+            assert len(f) < 8 or f not in text, f
+
+
+def test_a_refusal_and_a_lowering_are_in_the_record(store, run, ws, in_run, monkeypatch):
+    from orch.record import read_run
+
+    assert run("secret", "get", "plain", "other-token")[0] == 2
+    assert run("secret", "profile", "get-disable", "plain")[0] == 0
+    kinds = [
+        (x["kind"], x["data"].get("refused") or x["data"].get("action")) for x in read_run(ws, RUN).unwrap()
+    ]
+    assert ("key.use", "get_off") in kinds and ("secret.change", "profile.get_disable") in kinds
+
+
+def test_no_hider_for_the_record_stops_the_command(store, run, ws, in_run, monkeypatch):
+    from orch import record
+
+    class Off:
+        def __init__(self, *a, **k):
+            raise record.RecordOff("Recording is off until key hiding is ready.")
+
+    monkeypatch.setattr(record, "RecordWriter", Off)
+    code, out, err = run(
+        "secret", "env", "plain", "--", PY, "-c", f"open({str(ws / 'started')!r}, 'w').close()"
+    )
+    assert code == 2 and "could not be recorded" in err and not (ws / "started").exists()
+    assert TOKEN2 not in out + err
+
+
+def test_a_damaged_record_stops_the_command_but_not_a_lowering(store, run, ws, in_run, monkeypatch):
+    from orch import record
+
+    def boom(*a, **k):
+        raise record.RecordUnavailable("io")
+
+    monkeypatch.setattr(record.RecordWriter, "append", boom)
+    code, _, err = run("secret", "env", "plain", "--", PY, "-c", "pass")
+    assert code == 2 and "could not be recorded" in err
+    assert run("secret", "profile", "get-disable", "plain")[0] == 0
+
+
+def test_outside_a_run_nothing_is_written(store, run, ws):
+    from orch.record import record_dir
+
+    assert run("secret", "env", "plain", "--", PY, "-c", "pass")[0] == 0
+    assert not record_dir(ws).exists()
