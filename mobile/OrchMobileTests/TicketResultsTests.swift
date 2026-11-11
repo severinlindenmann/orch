@@ -5,7 +5,7 @@ final class TicketResultsTests: XCTestCase {
     private func snapshot(_ object: [String: Any]) throws -> TicketSnapshot {
         try JSONCoding.decoder.decode(TicketSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
     }
-    private func item(_ id: String = "a_first", at: String = "2026-11-11T09:00:00Z") -> [String: Any] {
+    private func item(_ id: String = "j_first1", at: String = "2026-11-11T09:00:00Z") -> [String: Any] {
         ["id": id, "from": "agent", "at": at,
          "doc": ["schema": "orch.blocks/1", "from": "agent", "blocks": [["type": "summary", "text": "Result"]]]]
     }
@@ -77,11 +77,11 @@ final class TicketResultsTests: XCTestCase {
 
     func testOverlayAndRoundTrip() throws {
         let base = try snapshot(["results": [item()]])
-        let light = try snapshot(["light": true, "summary": "New status", "results": [item("a_new")]])
+        let light = try snapshot(["light": true, "summary": "New status", "results": [item("j_newone")]])
         XCTAssertTrue(light.results.isEmpty)
         XCTAssertEqual(light.overlaid(on: base).results, base.results)
         XCTAssertTrue(try snapshot([:]).overlaid(on: base).results.isEmpty)
-        XCTAssertEqual(try snapshot(["results": [item("a_new")]]).overlaid(on: base).results.first?.id, "a_new")
+        XCTAssertEqual(try snapshot(["results": [item("j_newone")]]).overlaid(on: base).results.first?.id, "j_newone")
         let encoded = try JSONCoding.encoder.encode(base)
         XCTAssertEqual(try JSONCoding.decoder.decode(TicketSnapshot.self, from: encoded).results, base.results)
         let empty = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(TicketSnapshot())) as? [String: Any])
@@ -95,6 +95,30 @@ final class TicketResultsTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: roundTrip.results[0].rawDoc) as? NSDictionary)
         XCTAssertEqual(object, raw["doc"] as? NSDictionary)
         if case .shown = roundTrip.results[0].doc { XCTFail("Invalid doc must stay invalid") }
+    }
+
+    func testDeepNestingFailsCleanlyOnBackgroundThread() async throws {
+        var deep: Any = 1
+        for _ in 0..<500 { deep = [deep] }
+        var hostile = item("j_deep001"); hostile["doc"] = ["schema": "orch.blocks/1", "from": "agent",
+                                                         "blocks": [["type": "x-new", "v": deep]]]
+        let data = try JSONSerialization.data(withJSONObject: ["results": [item("j_before"), hostile]])
+        let ids = try await Task.detached { try JSONCoding.decoder.decode(TicketSnapshot.self, from: data).results.map(\.id) }.value
+        XCTAssertEqual(ids, ["j_before"])
+        var block: Any = 1
+        for _ in 0..<500 { block = [block] }
+        let doc = try JSONSerialization.data(withJSONObject: ["schema": "orch.blocks/1", "from": "job", "blocks": [["type": "x-new", "v": block]]])
+        let result = await Task.detached { BlocksResult.decode(doc) }.value
+        if case .shown = result { XCTFail("500-deep doc must not render") }
+    }
+
+    func testTitleRulesAndBigNumbers() throws {
+        var lined = item("j_title01"); lined["title"] = "A\nChecked by the agent"
+        var long = item("j_title02"); long["title"] = String(repeating: "x", count: 201)
+        var big = item("j_bignum1"); big["doc"] = ["schema": "orch.blocks/1", "from": "agent", "blocks": [["type": "stat", "label": "Big", "value": 1e200]]]
+        let decoded = try snapshot(["results": [lined, long, big]])
+        XCTAssertEqual(decoded.results.map(\.id), ["j_bignum1"], "control chars / >200 titles dropped; 1e200 kept")
+        if case .invalid = decoded.results[0].doc { XCTFail("1e200 stat must render") }
     }
 
     func testMalformedItemsDoNotHideValidNeighbors() throws {
@@ -111,21 +135,21 @@ final class TicketResultsTests: XCTestCase {
         }
         var unknown = item(); unknown["unknown_field"] = true; broken.append(unknown)
         var mismatch = item(); mismatch["from"] = "job"; broken.append(mismatch)
-        let decoded = try snapshot(["results": [item("a_before")] + broken + [item("a_after")]])
-        XCTAssertEqual(decoded.results.map(\.id), ["a_before", "a_after"])
+        let decoded = try snapshot(["results": [item("j_before")] + broken + [item("j_after1")]])
+        XCTAssertEqual(decoded.results.map(\.id), ["j_before", "j_after1"])
         XCTAssertEqual(decoded.results.first?.label, "From the agent")
     }
 
     func testFirstDuplicateWinsThenDatesSortAndCap() throws {
-        let first = item("a_duplicate", at: "2026-11-11T09:00:00Z")
-        let later = item("a_duplicate", at: "2026-11-11T11:00:00Z")
-        let offset = item("a_offset", at: "2026-11-11T10:30:00+02:00")
-        let fractional = item("a_fraction", at: "2026-11-11T09:00:00.500Z")
+        let first = item("j_duplicate", at: "2026-11-11T09:00:00Z")
+        let later = item("j_duplicate", at: "2026-11-11T11:00:00Z")
+        let offset = item("j_offset1", at: "2026-11-11T10:30:00+02:00")   // schema: UTC "Z" only -> dropped
+        let fractional = item("j_fraction", at: "2026-11-11T09:00:00.500Z")
         let decoded = try snapshot(["results": [offset, first, later, fractional]])
-        XCTAssertEqual(decoded.results.map(\.id), ["a_fraction", "a_duplicate", "a_offset"])
+        XCTAssertEqual(decoded.results.map(\.id), ["j_fraction", "j_duplicate"])
         XCTAssertEqual(decoded.results[1].at, first["at"] as? String)
-        let many = (0..<7).map { item("a_\($0)", at: "2026-11-11T0\($0):00:00Z") }
-        XCTAssertEqual(try snapshot(["results": many]).results.map(\.id), ["a_6", "a_5", "a_4", "a_3", "a_2"])
+        let many = (0..<7).map { item("j_many0\($0)", at: "2026-11-11T0\($0):00:00Z") }
+        XCTAssertEqual(try snapshot(["results": many]).results.map(\.id), ["j_many06", "j_many05", "j_many04", "j_many03", "j_many02"])
     }
 
     func testUnsafeLinksRemainInvalidAndMockDocsRoundTrip() throws {

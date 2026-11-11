@@ -46,7 +46,12 @@ private struct BlocksDocumentInput: Decodable {
 /// JSON dictionary decoding preserves table keys (including underscores).
 indirect enum BlockValue: Decodable {
     case string(String), number(Double), null, array([BlockValue]), object([String: BlockValue]), bool(Bool)
+    /// Nesting cap: hostile deeply nested values must fail cleanly, not overflow the stack (no block needs > ~10 levels).
+    static let maxDepth = 40
     init(from decoder: Decoder) throws {
+        guard decoder.codingPath.count <= Self.maxDepth else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "nested too deep"))
+        }
         let c = try decoder.singleValueContainer()
         if c.decodeNil() { self = .null }
         else if let b = try? c.decode(Bool.self) { self = .bool(b) }
@@ -124,10 +129,13 @@ enum BlockRow {
 }
 
 enum BlocksFormat {
-    static func number(_ value: Double) -> String {
+    nonisolated(unsafe) private static let formatter: NumberFormatter = {
         let f = NumberFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
         f.numberStyle = .decimal; f.groupingSeparator = " "; f.maximumFractionDigits = 12
-        return f.string(from: NSNumber(value: value)) ?? String(value)
+        return f
+    }()
+    static func number(_ value: Double) -> String {
+        formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
     static func size(_ bytes: Double) -> String {
         if bytes < 1024 { return number(bytes) + " B" }

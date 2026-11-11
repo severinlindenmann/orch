@@ -24,12 +24,12 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
         let fields = try c.decode([String: ResultJSON].self)
         guard Set(fields.keys).isSubset(of: ["id", "from", "title", "at", "checked", "doc"]),
               let id = fields["id"]?.string,
-              id.range(of: #"\A[ja]_[A-Za-z0-9_-]{1,64}\z"#, options: .regularExpression) != nil,
+              id.range(of: #"\A(j_[a-z0-9]{6,32}|a_[0-9a-f]{12})\z"#, options: .regularExpression) != nil,
               let from = fields["from"]?.string, ["job", "agent", "orch"].contains(from),
-              let at = fields["at"]?.string, Self.date(at) != nil,
+              let at = fields["at"]?.string, at.hasSuffix("Z"), Self.date(at) != nil,
               case .object(let document)? = fields["doc"], document["from"]?.string == from,
               fields["checked"] == nil || (fields["checked"] == .bool(true) && from == "agent"),
-              fields["title"] == nil || fields["title"]?.string != nil else {
+              fields["title"] == nil || fields["title"]?.string.map(Self.validTitle) == true else {
             throw DecodingError.dataCorruptedError(in: c, debugDescription: "Invalid ticket result envelope")
         }
         self.id = id; self.from = from; self.at = at
@@ -45,6 +45,11 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
         if checked { fields["checked"] = .bool(true) }
         var c = encoder.singleValueContainer()
         try c.encode(fields)
+    }
+
+    /// Schema: 1-200 characters, no control characters (a line break could fake a label line).
+    static func validTitle(_ t: String) -> Bool {
+        (1...200).contains(t.count) && !t.unicodeScalars.contains { $0.value < 32 || $0.value == 127 }
     }
 
     static func date(_ value: String) -> Date? {
@@ -82,14 +87,18 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
 
 /// Lossless JSON shape for storage; dictionary keys are never rewritten by key strategies.
 private indirect enum ResultJSON: Codable, Equatable {
-    case string(String), number(Decimal), bool(Bool), null, array([ResultJSON]), object([String: ResultJSON])
+    case string(String), number(Double), bool(Bool), null, array([ResultJSON]), object([String: ResultJSON])
     var string: String? { if case .string(let value) = self { return value }; return nil }
     init(from decoder: Decoder) throws {
+        // Same nesting cap as BlockValue: deep hostile input fails this item cleanly instead of overflowing the stack.
+        guard decoder.codingPath.count <= BlockValue.maxDepth else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "nested too deep"))
+        }
         let c = try decoder.singleValueContainer()
         if c.decodeNil() { self = .null }
         else if let value = try? c.decode(Bool.self) { self = .bool(value) }
         else if let value = try? c.decode(String.self) { self = .string(value) }
-        else if let value = try? c.decode(Decimal.self) { self = .number(value) }
+        else if let value = try? c.decode(Double.self) { self = .number(value) }
         else if let value = try? c.decode([ResultJSON].self) { self = .array(value) }
         else { self = .object(try c.decode([String: ResultJSON].self)) }
     }
