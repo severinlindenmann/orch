@@ -81,7 +81,7 @@
         },
         "own_seq": {
           "const": true,
-          "description": "NEW (optional). Host -> the member that sent origin only (`to` = origin.from, type text, with group.seq, fan-out id of (host, origin.id, to), quiet update.kind note): the group seq the member's own message took. The member steps over that seq and never shows the stub; an older member that does not know the field shows it as its own message (the text rides along)."
+          "description": "NEW (optional). Host -> the member that sent origin only (`to` = origin.from, type text, with group.seq, fan-out id of (host, origin.id, to), quiet update.kind note): the group seq the member's own message took. The member steps over that seq and never shows the stub, and after its first stub from a host it never guesses own seqs for that host (chat-groups.md §5). An older member checks incoming messages with built-in rules that ignore unknown body fields (body here never had additionalProperties false), so it keeps the stub as a quiet text by itself (the text rides along); a receiver validating against a closed body schema would drop it and wait as before."
         },
         "group_event": {
           "$ref": "#/$defs/group_event"

@@ -42,6 +42,8 @@ SEQ_MAX = 2**31 - 1
 SEQ_JUMP = 1000  # a forward jump bigger than this is a gap skip, never expanded
 BUF_MAX = 50  # group messages kept per group while an earlier one is missing
 BUF_TIMEOUT_S = 600  # a quiet group: skip a gap after 10 minutes
+OWN_KEEP_S = 2 * BUF_TIMEOUT_S  # own sends remembered for rule 2, which runs only at the gap timeout
+STUB_HOSTS_KEEP = 64  # hosts known to send own_seq stubs (rule 2 is off for them)
 BUF_BYTES_MAX = 256 * 1024  # bytes of buffered (reduced) messages per group
 MAX_OPEN_GROUPS_PER_HOST = 20
 CREATED_PER_HOUR = 5
@@ -2109,6 +2111,10 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         return _own_seq(st, j, m, me, seq)
     nxt = j["next_seq"]
     buf = j.setdefault("buf", {})
+    if seq < nxt and seq in j.get("own_guess", []):  # rule 2 took this seq for ours: it came after all
+        j["own_guess"] = [x for x in j["own_guess"] if x != seq]
+        o = b.get("origin") if isinstance(b.get("origin"), dict) else {}
+        return _member_apply(st, j, m, me, late=True, guessed=o.get("from") != me)
     if seq < nxt:  # late: shown, but it changes no state
         return _member_apply(st, j, m, me, late=True)
     if seq - (nxt - 1) > SEQ_JUMP:  # a huge forward jump: one gap skip, no buffer and no per-seq expansion
@@ -2119,9 +2125,6 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
             del buf[k]
         _drain(st, j, me)
         return res
-    if seq > nxt and _own_gap(j, seq):  # the numbers before it are our own messages: never wait for them
-        _drain(st, j, me)
-        nxt = j["next_seq"]
     if seq > nxt:
         if str(seq) in buf:
             return _drop(st, m, "already waiting for this group message")
@@ -2151,50 +2154,63 @@ def _drain(st: dict, j: dict, me: str) -> None:
         elif j["next_seq"] in j.get("own_seqs", []):
             # our own message: the host never sends it back, so there is nothing to wait for
             j["seq_max"] = max(j["seq_max"], j["next_seq"])
-        elif not (buf and _own_gap(j, min(int(k) for k in buf))):
-            break
         else:
-            continue  # the gap before the oldest waiting message was ours: step over it now
+            break
         j["next_seq"] += 1
     if "own_seqs" in j:
         j["own_seqs"] = [x for x in j["own_seqs"] if x >= j["next_seq"]]
 
 
 def _own_sent(j: dict, msg: dict | None) -> None:
-    """Remember a group message we sent to the host (its id becomes the origin.id of the seq it takes), so the
-    view never waits for it, also with a host that sends no `own_seq` stub (rule 2). Kept 10 minutes at most:
-    a message the host refused is never numbered, and after that time any gap is skipped anyway."""
+    """Remember a group message we sent to the host (its id becomes the origin.id of the seq it takes), for
+    rule 2 with a host that sends no `own_seq` stub. Kept 20 minutes at most (rule 2 runs only once a gap is
+    10 minutes old): a message the host refused is never numbered and must not linger."""
     if isinstance(msg, dict) and isinstance(msg.get("id"), str):
         now = _now_epoch()
-        keep = [x for x in j.get("own", []) if now - x["at"] < BUF_TIMEOUT_S][-(BUF_MAX - 1) :]
+        keep = [x for x in j.get("own", []) if now - x["at"] < OWN_KEEP_S][-(BUF_MAX - 1) :]
         j["own"] = [*keep, {"id": msg["id"], "at": now}]
 
 
-def _own_gap(j: dict, upto: int) -> bool:
-    """Rule 2: the seqs missing before `upto` are at most as many as our own messages the host has not yet
-    numbered for us (sent before now, under 10 minutes ago): they are ours, so they are marked as our own and
-    never waited on. More missing than that: a message of someone else is missing, so the gap is kept."""
+def _stub_host(st: dict, j: dict) -> bool:
+    """The host sends `own_seq` stubs (one ever came, in this group or another of that host): its gaps are
+    never ours, so rule 2 is off for it."""
+    return bool(j.get("stub_host")) or j["host"] in st.get("stub_hosts", [])
+
+
+def _own_gap(st: dict, j: dict, upto: int) -> bool:
+    """Rule 2, the last resort for an older host without `own_seq` stubs, run only when a gap is 10 minutes
+    old (`expire_buffers`): the seqs missing before `upto` are at most as many as our own messages that host
+    has not numbered for us yet, each sent before the higher seq arrived: they are taken for ours
+    (`own_guess`) and the gap closes without "a message is missing". A send the host refused is never
+    numbered, so a guess can be wrong: the real message, when it comes, still applies its close or leave
+    (`_member_apply(guessed=True)`)."""
+    if _stub_host(st, j):
+        return False
     now, have, buf = _now_epoch(), set(j.get("own_seqs", [])), j.get("buf", {})
-    own = [x for x in j.get("own", []) if now - x["at"] < BUF_TIMEOUT_S]
+    own = [x for x in j.get("own", []) if now - x["at"] < OWN_KEEP_S]
     missing = [s for s in range(j["next_seq"], upto) if s not in have and str(s) not in buf]
     j["own"] = own
     if not missing or len(missing) > len(own):
         return False
     for s, x in zip(missing, own, strict=False):  # the oldest sends took the lowest numbers
         # a message we sent after we already got a higher number cannot have taken this lower one
-        if x["at"] > min([e["at"] for k, e in buf.items() if int(k) > s] + [now]):
+        if x["at"] > min(e["at"] for k, e in buf.items() if int(k) > s):
             return False
     j["own"] = own[len(missing) :]
     j["own_seqs"] = sorted(have | set(missing))
+    j["own_guess"] = sorted({*j.get("own_guess", []), *missing})[-BUF_MAX:]
     return True
 
 
 def _own_seq(st: dict, j: dict, m: dict, me: str, seq: int) -> dict:
     """Rule 1: the host's `own_seq` stub tells us the seq our own message took. Never shown (we sent it), no
-    state; the order only steps over it."""
+    state; the order only steps over it. From now on rule 2 is off for this host (kept per group and host)."""
     o = m["body"].get("origin") if isinstance(m["body"].get("origin"), dict) else {}
     if o.get("from") != me:
         return _drop(st, m, "own_seq names a message this workspace did not send")
+    j["stub_host"] = True
+    if j["host"] not in st.setdefault("stub_hosts", []):
+        st["stub_hosts"] = [*st["stub_hosts"], j["host"]][-STUB_HOSTS_KEEP:]
     j["own"] = [x for x in j.get("own", []) if x["id"] != o.get("id")]
     nxt = j["next_seq"]
     if seq >= nxt and seq - (nxt - 1) <= SEQ_JUMP:
@@ -2238,7 +2254,8 @@ def prune_ended(st: dict, keep_s: float = 86400) -> None:
 
 
 def expire_buffers(st: dict, me: str) -> None:
-    """After 10 quiet minutes with a gap, the oldest waiting message is applied and the gap skipped."""
+    """After 10 quiet minutes with a gap, the oldest waiting message is applied and the gap skipped (a gap
+    that rule 2 takes for our own sends is stepped over without "a message is missing")."""
     now = _now_epoch()
     for j in st["joined"].values():
         buf = j.get("buf") or {}
@@ -2247,7 +2264,10 @@ def expire_buffers(st: dict, me: str) -> None:
             and now - min(e["at"] for e in buf.values()) >= BUF_TIMEOUT_S
             and not (j["left"] or j["closed"])
         ):
-            _skip_gap(st, j, me)
+            if _own_gap(st, j, min(int(k) for k in buf)):
+                _drain(st, j, me)
+            else:
+                _skip_gap(st, j, me)
 
 
 _KEEP_BODY = (
@@ -2280,8 +2300,11 @@ def _reduce(m: dict) -> dict:
     return {k: m[k] for k in ("id", "from", "to", "type", "created_at", "ticket") if k in m} | {"body": body}
 
 
-def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> dict:
-    """The state changes of one group message for a member, called in seq order."""
+def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False, guessed: bool = False) -> dict:
+    """The state changes of one group message for a member, called in seq order. `guessed`: a late message of
+    someone else at a seq rule 2 took for our own: shown as late, and its close or our leave still applies
+    (both are final and come from the host; a leave only when we were not added back at a later seq). Task,
+    answer and membership news are shown in the log only: a member keeps no other state for them."""
     b, typ, gw = m["body"], m["type"], m["body"]["group"]
     ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
     seq = gw.get("seq")
@@ -2292,9 +2315,16 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> di
         j["origins"] = [*j["origins"], o["id"]][-ORIGINS_KEEP:]
     if seq is not None and not late:
         j["seq_max"] = max(j["seq_max"], seq)
-    if ev and ev.get("kind") == "closed" and not late:
+    final = not late or guessed
+    if ev and ev.get("kind") == "closed" and final:
         j["closed"], j["ended_at"] = True, _now_epoch()
-    if ev and ev.get("kind") == "member_left" and ev.get("ws") == me and not late:
+    if (
+        ev
+        and ev.get("kind") == "member_left"
+        and ev.get("ws") == me
+        and final
+        and not (late and _added_after(j, me, seq))
+    ):
         j["left"], j["ended_at"] = True, _now_epoch()
     if isinstance(b.get("shared_ticket"), dict):
         old = j.get("card") or {}
@@ -2317,6 +2347,8 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> di
     }
     if late:
         item["late"] = True
+    if guessed:
+        item["was_not_own"] = True  # rule 2 had taken this seq for one of our own messages
     if ev:
         item["event"] = _c_event(ev)
     if isinstance(b.get("task"), dict):
@@ -2345,6 +2377,17 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False) -> di
         f"group {_host_name(j)} - {shown}: {item['text'][:80]}" if item["text"] else f"group {_host_name(j)}"
     )
     return {"handled": True, "auto": not waits, "note": note, "applied": None}
+
+
+def _added_after(j: dict, me: str, seq: int | None) -> bool:
+    """We were added (back) at a seq after `seq`: an older leave must not end the group for us."""
+    return any(
+        (x.get("event") or {}).get("kind") == "member_added"
+        and (x.get("event") or {}).get("ws") == me
+        and isinstance(x.get("seq"), int)
+        and (seq is None or x["seq"] > seq)
+        for x in j["log"]
+    )
 
 
 WS_RE = re.compile(r"ws_[a-z0-9]{10}")

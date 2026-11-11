@@ -1565,21 +1565,87 @@ def test_hosts_close_after_own_sends_is_applied(proj, run, rel, member):
 def test_stubs_after_the_hosts_message_change_nothing(proj, run, rel, member):
     inbox(run, rel, _added(1))
     a, b = _say(proj, "one"), _say(proj, "two")
-    inbox(run, rel, from_host("text", {"text": "early"}, seq=4, id=mid("e4")))  # before the stubs (rule 2)
+    inbox(run, rel, from_host("text", {"text": "early"}, seq=4, id=mid("e4")))  # before the stubs: kept
+    assert list(_joined(proj)["buf"]) == ["4"]  # rule 2 never steps over a gap on arrival
     inbox(run, rel, _own_stub(a, 2), _own_stub(b, 3))
     j = _joined(proj)
     assert [x["seq"] for x in j["log"]] == [1, 4] and j["next_seq"] == 5 and j["buf"] == {}
 
 
-def test_old_host_without_stub_never_stalls_on_own_messages(proj, run, rel, member):
+def test_old_host_without_stub_never_stalls_on_own_messages(proj, run, rel, member, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
     inbox(run, rel, _added(1))
     _say(proj, "one")
     _say(proj, "two")
-    inbox(run, rel, from_host("text", {"text": "host after"}, seq=4, id=mid("old4")))  # no stub: rule 2
+    inbox(run, rel, from_host("text", {"text": "host after"}, seq=4, id=mid("old4")))  # no stub
+    clock[0] += cg.BUF_TIMEOUT_S - 1
+    run("relay", "inbox")
+    j = _joined(proj)
+    assert list(j["buf"]) == ["4"] and j["next_seq"] == 2  # rule 2 is only the fallback at the timeout
+    clock[0] += 2
+    run("relay", "inbox")  # sync at the timeout: 2 and 3 are taken for our two sends (rule 2)
     j = _joined(proj)
     assert [x["seq"] for x in j["log"]] == [1, 4] and j["buf"] == {} and j["next_seq"] == 5
+    assert j["own_guess"] == [2, 3] and j["own"] == []
     inbox(run, rel, _close(5))
     assert _joined(proj)["closed"] is True
+
+
+def test_a_refused_own_send_never_swallows_the_hosts_close(proj, run, rel, member, monkeypatch):
+    """Opus finding 1: an own send the host never numbers (a losing answer, a refusal) stays in `own`; the
+    host's close at 2 arrives after 3. The close must be applied, not taken for our own message."""
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    _say(proj, "refused by the host, never numbered")
+    inbox(run, rel, from_host("text", {"text": "three"}, seq=3, id=mid("r3")))
+    j = _joined(proj)
+    assert list(j["buf"]) == ["3"] and j["next_seq"] == 2 and "own_guess" not in j
+    inbox(run, rel, _close(2))
+    j = _joined(proj)
+    assert j["closed"] is True and [x["seq"] for x in j["log"]] == [1, 2, 3]
+
+
+def test_a_close_that_rule_two_took_for_ours_still_closes(proj, run, rel, member, monkeypatch):
+    """The close comes later than the 10 minutes: rule 2 took its seq for our refused send. Arriving late, a
+    close of someone else still ends the group (final, from the host)."""
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    _say(proj, "refused")
+    inbox(run, rel, from_host("text", {"text": "three"}, seq=3, id=mid("t3")))
+    clock[0] += cg.BUF_TIMEOUT_S + 1
+    run("relay", "inbox")
+    j = _joined(proj)
+    assert j["own_guess"] == [2] and j["next_seq"] == 4 and j["closed"] is False
+    inbox(run, rel, _close(2))
+    j = _joined(proj)
+    assert j["closed"] is True and j["log"][-1]["late"] is True and j["log"][-1]["was_not_own"] is True
+    assert j["own_guess"] == [] and j["seq_max"] == 3
+
+
+def test_a_leave_that_rule_two_took_for_ours_still_ends_the_group(proj, run, rel, member, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    mine = _say(proj, "mine, the host echoes it back late")
+    _say(proj, "refused")
+    inbox(run, rel, from_host("text", {"text": "four"}, seq=4, id=mid("l4")))
+    clock[0] += cg.BUF_TIMEOUT_S + 1
+    run("relay", "inbox")
+    assert _joined(proj)["own_guess"] == [2, 3]
+    origin = {"id": mine, "from": WS, "at": "2026-11-08T10:03:00Z"}
+    own = from_host(
+        "text", {"text": "mine", "by": WS, "origin": origin}, seq=2, id=cg.fanout_id(FIN, mine, WS)
+    )
+    assert contract_errors(own) == []
+    inbox(run, rel, own)  # really ours: shown late, no state, never marked as someone else's
+    j = _joined(proj)
+    assert j["left"] is False and "was_not_own" not in j["log"][-1] and j["own_guess"] == [3]
+    ev = {"kind": "member_left", "at": "2026-11-08T10:00:00Z", "ws": WS, "reason": "removed"}
+    inbox(run, rel, from_host("text", {"text": "removed", "group_event": ev}, seq=3, id=mid("lv3")))
+    assert _joined(proj)["left"] is True
 
 
 def test_own_seq_stub_for_someone_elses_message_is_dropped(proj, run, rel, member):
@@ -1602,20 +1668,48 @@ def test_a_missing_foreign_message_is_still_waited_for(proj, run, rel, member, m
     inbox(run, rel, from_host("text", {"text": "three"}, seq=3, id=mid("f3")))
     j = _joined(proj)
     assert [x["seq"] for x in j["log"]] == [1, 3, 4] and j["buf"] == {} and j["next_seq"] == 5
-    # without a stub (older host): one own send cannot cover two missing seqs, so the foreign one is awaited
-    _say(proj, "mine again")  # takes 5 at the host
-    inbox(run, rel, from_host("text", {"text": "seven"}, seq=7, id=mid("f7")))
-    assert list(_joined(proj)["buf"]) == ["7"] and _joined(proj)["next_seq"] == 5
-    inbox(run, rel, from_host("text", {"text": "six"}, seq=6, id=mid("f6")))  # now only 5 (ours) is missing
+
+
+def test_after_a_stub_from_the_host_rule_two_never_fires(proj, run, rel, member, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    inbox(run, rel, _own_stub(_say(proj, "mine"), 2))
+    _say(proj, "refused by the host")  # never numbered, stays in `own`
+    inbox(run, rel, from_host("text", {"text": "four"}, seq=4, id=mid("s4")))  # 3 is missing
+    clock[0] += cg.BUF_TIMEOUT_S + 1
+    run("relay", "inbox")  # timeout: a plain gap skip, 3 is never taken for ours
+    st = json.loads((proj / ".orch/secrets/groups.json").read_text())
+    j = st["joined"][f"{FIN}/grp_t_fin14a"]
+    assert j["stub_host"] is True and st["stub_hosts"] == [FIN] and "own_guess" not in j
+    assert [x["seq"] for x in j["log"]] == [1, 4] and j["next_seq"] == 5 and len(j["own"]) == 1
+    # the flag is per host: another group of the same host gets no rule 2 either
+    assert cg._own_gap(st, {"host": FIN, "next_seq": 1, "own": j["own"], "buf": {"3": {"at": 0}}}, 3) is False
+
+
+def test_old_host_rule_two_only_at_timeout_and_only_for_own_gaps(proj, run, rel, member, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(cg, "_now_epoch", lambda: clock[0])
+    inbox(run, rel, _added(1))
+    _say(proj, "mine")
+    # one own send cannot cover two missing seqs: a foreign one is missing, so the timeout is a plain skip
+    inbox(run, rel, from_host("text", {"text": "four"}, seq=4, id=mid("f4")))
+    run("relay", "inbox")
+    assert list(_joined(proj)["buf"]) == ["4"] and _joined(proj)["next_seq"] == 2
+    clock[0] += cg.BUF_TIMEOUT_S + 1
+    run("relay", "inbox")
     j = _joined(proj)
-    assert [x["seq"] for x in j["log"]] == [1, 3, 4, 6, 7] and j["buf"] == {} and j["next_seq"] == 8
+    assert [x["seq"] for x in j["log"]] == [1, 4] and j["next_seq"] == 5 and "own_guess" not in j
+    clock[0] += cg.OWN_KEEP_S  # the unnumbered send is forgotten
     # an own message sent after a higher seq arrived cannot have taken the lower missing one
-    inbox(run, rel, from_host("text", {"text": "nine"}, seq=9, id=mid("f9")))  # 8 (not ours) missing
+    inbox(run, rel, from_host("text", {"text": "six"}, seq=6, id=mid("f6")))  # 5 (not ours) missing
     clock[0] += 5
-    _say(proj, "late of mine")  # takes 11 or later at the host
-    inbox(run, rel, from_host("text", {"text": "ten"}, seq=10, id=mid("f10")))  # only 8 missing, 1 own send
+    _say(proj, "late of mine")  # takes 7 or later at the host
+    clock[0] += cg.BUF_TIMEOUT_S
+    run("relay", "inbox")
     j = _joined(proj)
-    assert sorted(j["buf"]) == ["10", "9"] and j["next_seq"] == 8  # still waiting for 8
+    assert [x["seq"] for x in j["log"]] == [1, 4, 6] and j["next_seq"] == 7 and "own_guess" not in j
+    assert len(j["own"]) == 1
 
 
 @pytest.mark.parametrize(
