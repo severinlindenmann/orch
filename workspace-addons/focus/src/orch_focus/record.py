@@ -13,6 +13,7 @@ import json
 import re
 import subprocess
 import threading
+import unicodedata
 from pathlib import Path
 
 from . import actions, events
@@ -44,18 +45,32 @@ def _label(e: dict) -> dict | None:
 
 
 MAX_FILES = 8
-FILE_PATH = re.compile(r"[^\\\x00-\x1f\x7f:]{1,260}")  # no backslash, no control character, no drive colon
+MAX_PATH = 260
+_HIDDEN = ("Cc", "Cf", "Zl", "Zp")  # control and format characters (unicodedata categories)
+_NOT_PLAIN = re.compile(r"^(?:[~$]|[A-Za-z][A-Za-z0-9+.\-]*:)")  # ~, $, a scheme or a drive letter
+
+
+def file_ok(p) -> bool:
+    """One entry of a step's `files` (contracts/activity.md, Files): 1..260 characters, NFC, workspace-relative POSIX
+    (no leading /, no `..` segment, no backslash, no ~ $ scheme or drive start, no control or format character).
+    The core writer checks the same; Focus checks again because it shows whatever it is handed."""
+    return (
+        isinstance(p, str)
+        and 1 <= len(p) <= MAX_PATH
+        and unicodedata.is_normalized("NFC", p)
+        and not p.startswith("/")
+        and "\\" not in p
+        and not _NOT_PLAIN.match(p)
+        and ".." not in p.split("/")
+        and not any(unicodedata.category(c) in _HIDDEN for c in p)
+    )
 
 
 def clean_files(raw) -> list[str]:
-    """The `files` of a step (contracts: 0..8 workspace-relative POSIX paths). Anything that is not exactly that
-    is dropped. Display only: Focus never opens these paths."""
+    """The `files` of a step: the good entries, at most 8. Display only: Focus never opens these paths."""
     out: list[str] = []
     for p in raw if isinstance(raw, list) else []:
-        if (
-            isinstance(p, str) and FILE_PATH.fullmatch(p) and not p.startswith("/")
-            and ".." not in p.split("/") and "" not in p.split("/") and "." not in p.split("/")
-        ):  # fmt: skip
+        if file_ok(p):
             out.append(p)
         if len(out) == MAX_FILES:
             break
