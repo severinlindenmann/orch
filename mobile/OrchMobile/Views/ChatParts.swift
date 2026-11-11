@@ -14,9 +14,10 @@ struct StatusPill: View {
     let status: Ticket.Status
     let kind: String
     var text: String {
-        switch status { case .needsYou: "Needs your OK"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "result" ? "Done" : (kind == "stopped" ? "Stopped" : "Did not work") }
+        // The snapshot status decides Done; only a failure or stop keeps its own sign (a done ticket may arrive as note/ack).
+        switch status { case .needsYou: "Needs your OK"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "failure" ? "Did not work" : (kind == "stopped" ? "Stopped" : "Done") }
     }
-    var color: Color { switch status { case .needsYou: Theme.warn; case .review: Theme.warn; case .paused, .backlog: Theme.muted; case .working: Theme.brand; case .done: kind == "result" ? Theme.muted : Theme.danger } }
+    var color: Color { switch status { case .needsYou: Theme.warn; case .review: Theme.warn; case .paused, .backlog: Theme.muted; case .working: Theme.brand; case .done: kind == "failure" || kind == "stopped" ? Theme.danger : Theme.muted } }
     var body: some View {
         Text(text).themeFont(11, .semibold).foregroundStyle(color).padding(.horizontal, 8).padding(.vertical, 3)
             .overlay(Capsule(style: .continuous).stroke(color.opacity(0.6)))
@@ -29,9 +30,14 @@ struct ProgressBar: View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
                 Capsule(style: .continuous).fill(Theme.surface3)
-                Capsule(style: .continuous).fill(Theme.brand).frame(width: g.size.width * CGFloat(done) / CGFloat(max(total, 1)))
+                Capsule(style: .continuous).fill(Theme.brand).frame(width: g.size.width * Self.fraction(done: done, total: total))
             }
         }.frame(height: 4).accessibilityHidden(true)
+    }
+    /// Filled share, clamped to 0...1 (done above total or below zero; total 0 is empty).
+    static func fraction(done: Int, total: Int) -> CGFloat {
+        guard total > 0 else { return 0 }
+        return min(1, max(0, CGFloat(done) / CGFloat(total)))
     }
 }
 
