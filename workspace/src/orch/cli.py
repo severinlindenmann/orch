@@ -27,6 +27,7 @@ from orch import (
     cli_status,
     fields,
     humanproof,
+    is_record_hook,
     mobile_mode,
     net,
     refs,
@@ -1166,14 +1167,14 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
 
 
 def main(argv: list[str] | None = None, watchdog=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if is_record_hook(argv):  # a tool's hook: exit 0 whatever happens (only --strict refuses), no parser
+        return cli_record.hook_main(argv, watchdog)
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
-    argv = sys.argv[1:] if argv is None else list(argv)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
-    if argv[:2] == ["record", "hook"]:  # a tool's hook: exit 0 whatever happens (only --strict refuses)
-        return cli_record.hook_main(argv, watchdog)
     humanproof.CURRENT_ARGV = list(argv)  # what a hand-off to the dashboard will run (H1)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]

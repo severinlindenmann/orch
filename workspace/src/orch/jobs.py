@@ -185,7 +185,7 @@ def _prove(root, ids) -> None:
 
 def _writer(root):
     try:
-        return record_hook._writer(root)
+        return record_hook.record_writer(root)
     except record.RecordOff:
         raise JobError("hider_off") from None
 
