@@ -1,3 +1,5 @@
+from pathlib import Path
+
 """T0 settings: the view, the widening rule, and the H1 fence of POST /api/act (human-only clicks)."""
 
 import http.client
@@ -80,7 +82,7 @@ def stored(fake):
 
 
 def set_argv(key, value, current):
-    return ["config", "set", key, value, "--if-current", current, "--json"]
+    return ["config", "set", key, value, f"--if-current={current}", "--json"]
 
 
 def strings(node):
@@ -847,3 +849,41 @@ def test_settings_js_served(server):
     code, headers, body = request(server, "/web/settings.js")
     assert code == 200 and headers["Content-Type"] == "text/javascript"
     assert body == PACKAGE.joinpath("web", "settings.js").read_bytes()
+
+
+def test_success_answer_is_built_from_parsed_fields_only():
+    from orch_insights.actions import _clean_success
+
+    out = _clean_success(
+        {
+            "insights.keep_days": 90,
+            "changed": True,
+            "widened": False,
+            "note": "/Users/x/secret",
+            "evil": {"a": 1},
+        }
+    )
+    assert out == {"insights.keep_days": 90, "changed": True, "widened": False}
+    assert _clean_success({"deleted": 2, "ticket": "../x"}) == {"deleted": 2}
+    assert _clean_success("text") is None
+
+
+def test_lock_wait_gives_busy(monkeypatch):
+    from orch_insights import actions
+
+    monkeypatch.setattr(actions, "LOCK_WAIT", 0.05)
+    actions._LOCK.acquire()
+    try:
+        code, text, _ = actions.run_op(
+            Path("/nonexistent"), None, "settings.set", {"key": "insights.keep_days", "value": "30"}
+        )
+    finally:
+        actions._LOCK.release()
+    assert code == 503 and text == actions.BUSY
+
+
+def test_deadline_stops_a_late_child():
+    from orch_insights import actions
+
+    code, _, _ = actions.orch(Path("/nonexistent"), "/bin/true", ["x"], deadline=0)
+    assert code == 124

@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from .overview import validated
@@ -43,7 +44,10 @@ SHARING_LOCKS = {
     "not_connected": "Not connected to an admin.",
 }
 SHARING_UNKNOWN = "Sharing could not be read. Nothing was changed."
-WRITE_TIMEOUT = 60
+WRITE_TIMEOUT = 10  # per child; one overall deadline (TOTAL_BUDGET) covers reads, run and retry
+TOTAL_BUDGET = 25
+LOCK_WAIT = 5
+BUSY = "Busy, try again."
 _LOCK = threading.Lock()  # one settings change at a time in this server (read, write and retry together)
 
 
@@ -128,10 +132,21 @@ def human_env(root: Path, orch_bin) -> dict:
     return child_env({**env, "ORCH_ROOT": str(root)}, orch_bin)
 
 
-def orch(root: Path, orch_bin, argv: list[str], proof: str | None = None, timeout: int | None = None):
+def orch(
+    root: Path,
+    orch_bin,
+    argv: list[str],
+    proof: str | None = None,
+    timeout: float | None = None,
+    deadline=None,
+):
     orch_bin = real_bin(orch_bin)
     env = human_env(root, orch_bin)
     timeout = WRITE_TIMEOUT if timeout is None else timeout
+    if deadline is not None:
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            return 124, "", ""
     try:
         if proof is not None:
             if run_with_proof is None:
@@ -162,12 +177,38 @@ def _code(out) -> str | None:
     return code if isinstance(code, str) else None
 
 
+def _clean_success(out) -> dict | None:
+    """Only parsed, expected fields leave this server; the core's own output is never passed on (L2)."""
+    if not isinstance(out, dict):
+        return None
+    clean: dict = {}
+    for key, value in out.items():
+        if (
+            key in KEYS
+            and isinstance(value, (bool, int, str))
+            and len(str(value)) <= 20
+            or key in ("changed", "widened")
+            and isinstance(value, bool)
+            or (
+                key == "deleted"
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value < 10**6
+            )
+            or key == "ticket"
+            and isinstance(value, str)
+            and TID.fullmatch(value)
+        ):
+            clean[key] = value
+    return clean
+
+
 def _answer(code, out, timeout_text) -> tuple[int, str, dict | None]:
     """The HTTP answer for one core exit: fixed texts only, never the core's own words or its stderr (L7)."""
     if code == 124:
         return 504, timeout_text, None  # the write may or may not have happened: say nothing about it (L8)
     if code == 0:
-        return 200, "", out
+        return 200, "", _clean_success(out)
     why = _code(out)
     if why == "changed":
         return 409, CHANGED, None
@@ -176,14 +217,14 @@ def _answer(code, out, timeout_text) -> tuple[int, str, dict | None]:
     return 422, MESSAGES.get(why, FAILED), None
 
 
-def _with_person(root, orch_bin, argv, mint, need, timeout_text):
+def _with_person(root, orch_bin, argv, mint, need, timeout_text, deadline=None):
     """Run without a proof; only when the core says needs_person: mint (person here) and retry once."""
-    code, stdout, _ = orch(root, orch_bin, argv)
+    code, stdout, _ = orch(root, orch_bin, argv, deadline=deadline)
     out = _parsed(stdout)
     if code != 0 and code != 124 and _code(out) == "needs_person":
         if mint is None:
             raise NeedsPerson(PERSON)
-        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need))
+        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need), deadline=deadline)
         out = _parsed(stdout)
     return _answer(code, out, timeout_text)
 
@@ -198,7 +239,7 @@ def _sharing_refusal(read) -> str | None:
     return SHARING_LOCKS.get(state, SHARING_UNKNOWN)
 
 
-def _set(root, orch_bin, args, argv, mint, read):
+def _set(root, orch_bin, args, argv, mint, read, deadline):
     key, value = args["key"], args["value"]
     if key == "insights.share_counts" and value == "on":
         refusal = _sharing_refusal(read)
@@ -207,9 +248,10 @@ def _set(root, orch_bin, args, argv, mint, read):
     observed = current_value(read("record", "settings", "--json"), key)
     if observed is None and mint is None:
         raise NeedsPerson(PERSON)  # an unreadable current value counts as widening (M6)
-    guard = ["--if-current", observed] if observed is not None else []
+    allowed = KEYS[key][1]
+    guard = [f"--if-current={observed}"] if isinstance(observed, str) and observed in allowed else []
     need = ("insights.settings", f"{key}={value}")
-    return _with_person(root, orch_bin, [*argv, *guard, "--json"], mint, need, SET_TIMEOUT)
+    return _with_person(root, orch_bin, [*argv, *guard, "--json"], mint, need, SET_TIMEOUT, deadline)
 
 
 def run_op(
@@ -219,7 +261,12 @@ def run_op(
     the request has the person; `read(*argv)` is the server's read of a CLI answer (None when it fails)."""
     argv = build_argv(op, args)
     if op == "settings.set":
-        with _LOCK:
-            return _set(root, orch_bin, args, argv, mint, read)
+        deadline = time.monotonic() + TOTAL_BUDGET
+        if not _LOCK.acquire(timeout=LOCK_WAIT):
+            return 503, BUSY, None
+        try:
+            return _set(root, orch_bin, args, argv, mint, read, deadline)
+        finally:
+            _LOCK.release()
     need = ("record.delete_detail", args["ticket"])
-    return _with_person(root, orch_bin, argv, mint, need, DELETE_TIMEOUT)
+    return _with_person(root, orch_bin, argv, mint, need, DELETE_TIMEOUT, time.monotonic() + TOTAL_BUDGET)

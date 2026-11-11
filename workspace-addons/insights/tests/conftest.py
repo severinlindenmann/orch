@@ -124,14 +124,14 @@ def config_set():
     guard = plain[4:-1]
     if plain[-1] != "--json" or plain[2] not in FIELDS:
         sys.exit(3)
-    if guard and (len(guard) != 2 or guard[0] != "--if-current"):
+    if guard and (len(guard) != 1 or not guard[0].startswith("--if-current=")):
         sys.exit(3)
     key, value = plain[2], plain[3]
     before_write()
     settings = json.loads((folder / "settings.json").read_text())
     raw = settings[FIELDS[key]]
     current = ("on" if raw else "off") if isinstance(raw, bool) else str(raw)
-    if guard and guard[1] != current:
+    if guard and guard[0].split("=", 1)[1] != current:
         refuse("changed", "This changed in the meantime: now " + current)
     if value == current:
         print(json.dumps({{key: value, "changed": False, "widened": False}}))
