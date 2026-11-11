@@ -7,6 +7,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from orch.errors import Refused as CoreRefused
+
 from . import repo
 
 DEFAULTS = {"mode": "off", "interval": 15, "kind": "private"}
@@ -37,6 +39,25 @@ def main(argv=None):
             p.add_argument("--remote")
             p.add_argument("--interval", type=int, choices=(5, 15, 60))
             p.add_argument("--kind", choices=("private", "team"), default="private")
+    p = sub.add_parser("resolve")
+    p.add_argument("path")
+    p.add_argument("--keep", choices=("mine", "theirs"), required=True)
+    p.add_argument("--proof-stdin", action="store_true")
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("approve")
+    p.add_argument("ticket")
+    p.add_argument("addon")
+    p.add_argument("--ignore", action="store_true")
+    p.add_argument("--proof-stdin", action="store_true")
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("deleted")
+    p.add_argument("ticket")
+    p.add_argument("--keep", action="store_true")
+    p.add_argument("--proof-stdin", action="store_true")
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     try:
         start = Path(args.dir).absolute()
@@ -60,6 +81,21 @@ def main(argv=None):
             if args.remote:
                 repo.set_remote(root, args.remote)
                 settings["remote"] = args.remote
+                from .visibility import remote_visibility
+
+                notices = read(root, "visibility")
+                if args.remote not in notices:
+                    visibility = remote_visibility(args.remote)
+                    notices[args.remote] = visibility
+                    from .step import encoded, write
+
+                    write(root, "run/sync/visibility.json", encoded(notices))
+                    print(
+                        "Anyone can read this repository"
+                        if visibility == "public"
+                        else "Make sure this repository is private",
+                        file=sys.stderr,
+                    )
             settings.update(mode=args.mode, kind=args.kind, interval=args.interval or settings["interval"])
             target = repo.safe(root, "run/sync/settings.json")
             with tempfile.NamedTemporaryFile(mode="w", dir=repo.local_dir(root), delete=False) as f:
@@ -86,6 +122,42 @@ def main(argv=None):
                 "remote_allowed": remote_allowed(),
                 **{k: state.get(k) for k in ("last_ok", "last_error", "ahead", "behind")},
             }
+        elif args.cmd == "resolve":
+            from .pause import resolve
+
+            result = resolve(root, args.path, args.keep, args)
+        elif args.cmd == "approve":
+            from .approval import approve
+
+            result = approve(root, args.ticket, args.addon, args)
+        elif args.cmd == "needs":
+            from .needs import rows
+
+            result = rows(root)
+        elif args.cmd == "deleted":
+            from orch import config, humanproof, syncgate
+
+            from .step import encoded, step_lock, write
+
+            with step_lock(root), syncgate.hold(root):
+                state = read(root, "state")
+                if args.ticket not in state.get("deleted", {}):
+                    raise repo.Refused("No missing ticket notice")
+                if not args.keep:
+                    by = humanproof.person_by(
+                        root,
+                        args,
+                        "addon.act",
+                        "sync:deleted:" + args.ticket,
+                        no_handoff="Leaving a ticket deleted needs a person's proof.",
+                    )
+                    config.require_person(by, "leave this ticket deleted")
+                    allowed = read(root, "allow-delete")
+                    allowed[args.ticket] = True
+                    write(root, "run/sync/allow-delete.json", encoded(allowed))
+                state["deleted"].pop(args.ticket)
+                write(root, "run/sync/state.json", encoded(state))
+            result = {"acknowledged": args.ticket}
         elif args.cmd == "start":
             raise repo.Refused("The sync loop is not available yet")
         else:
@@ -103,7 +175,7 @@ def main(argv=None):
         else:
             print(json.dumps(result) if args.json else str(result))
         return 0
-    except (ValueError, OSError) as e:
+    except (ValueError, OSError, CoreRefused) as e:
         print(
             json.dumps({"error": str(e)}) if args.json else f"Refused: {e}",
             file=sys.stdout if args.json else sys.stderr,

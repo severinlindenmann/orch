@@ -93,9 +93,13 @@ def test_artifact_deletion_threshold(root):
     success(root)
     head = step.oid(root, 'HEAD')
     p.unlink()
-    success(root)
-    assert ART not in tracked(root)
-    assert step.oid(root, 'HEAD') != head
+    assert run(root)["paused"]["files"] == [ART]
+    assert ART in tracked(root)
+    assert step.oid(root, "HEAD") == head
+    from orch_sync.pause import resolve
+
+    assert not resolve(root, ART, "mine", now=NOW).get("last_error")
+    assert p.read_bytes() == b"hello"
 
 
 def test_invalid_ticket_skipped(root):

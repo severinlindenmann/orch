@@ -377,17 +377,21 @@ def test_partial_apply_crash_is_idempotent(machines, monkeypatch):
     assert load(b)["title"] == "New title" and (b / ".orch" / ART).read_bytes() == b"new artifact"
 
 
-def test_key_clash_waits_for_pr5(machines):
-    a, b, bare = both(machines)
+def test_key_clash_renumbers(machines):
+    a, b, _ = both(machines)
     edit(a, key="AB1-1")
     success(a)
     success(b)
     from test_step import ticket
 
     save(b, "tickets/t_second.json", dict(ticket(), id="t_second", key="AB1-1"))
-    head, tip = step.oid(b, "HEAD"), remote_sha(bare)
-    assert "key clash" in run(b)["last_error"]
-    assert step.oid(b, "HEAD") == head and remote_sha(bare) == tip
+    success(b)
+    second = json.loads(repo.safe(b, "tickets/t_second.json").read_text())
+    assert second["key"] == "AB1-2"
+    assert second["ext"]["sync"]["old_keys"] == ["AB1-1"]
+    assert any("key changed" in h["text"] for h in second["history"])
+    success(a)
+    assert json.loads(repo.safe(a, "tickets/t_second.json").read_text())["key"] == "AB1-2"
 
 
 def test_push_timeout_is_offline(machines, monkeypatch):

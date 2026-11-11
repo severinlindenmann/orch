@@ -22,6 +22,7 @@
     "skill": { "$ref": "#/$defs/path", "description": "Folder with SKILL.md (frontmatter name: orch-<name>). Copied to .agents/skills/orch-<name>/." },
     "agents_block": { "$ref": "#/$defs/path", "description": "Markdown body of the AGENTS.md block. Default: <skill>/AGENTS-block.md." },
     "ticket_ext": { "$ref": "#/$defs/path", "description": "Local JSON Schema (no remote $ref, max 32 KB) for ticket ext.<name>. Without it the add-on writes no ticket data." },
+    "ticket_ext_inert": { "type": "boolean", "default": false, "description": "Data only: this extension never starts work. Incoming changes do not require local approval." },
     "background": { "type": "boolean", "default": false, "description": "true = the add-on has a long-running process. It must implement `orch <name> start|stop|status --json`; `orch start`/`orch stop` and deactivation call them (addon-manifest.md, Background)." },
     "dashboard": {
       "type": "object",

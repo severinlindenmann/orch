@@ -53,7 +53,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts".split()
+    "ticket_links ticket_fields acts ticket_ext_inert".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -897,7 +897,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         ):
             raise _bad("a [[ticket_view]] row needs field, label and format")
     m["ticket_view"] = tv
-    for key in ("recommended", "runs_agents", "needs"):
+    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert"):
         if not isinstance(m.setdefault(key, False), bool):
             raise _bad(f"{key} is true or false")
     gi = m.setdefault("gitignore", [])
