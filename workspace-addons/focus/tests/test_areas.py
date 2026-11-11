@@ -103,3 +103,55 @@ def test_cli_only_suggests(ws, capsys):
     assert cli.main(["--dir", str(ws), "area", "add", "Bad", "../x"]) == 2
     assert cli.main(["--dir", str(ws), "area", "list", "--json"]) == 0
     assert [a["tickets"] for a in json.loads(capsys.readouterr().out.splitlines()[-1])] == [[TID]]
+
+
+def _snapshot(server):
+    return {
+        p: req(server, "GET", p)[1]
+        for p in ("/api/live", f"/api/t/{TID}", "/api/procs", "/api/tickets", "/api/mobile")
+    }
+
+
+def test_a_forged_areas_file_changes_nothing_but_the_strip(server, ws, fake_orch):
+    """areas.toml is writable by agents. Whatever it says, only the strip changes: no card, ticket, permission,
+    process or action differs, and nothing outside areas.toml is read or written because of it."""
+    before = _snapshot(server)
+    calls_before = (
+        (fake_orch.parent / "calls.jsonl").read_text() if (fake_orch.parent / "calls.jsonl").exists() else ""
+    )
+    quiet = lambda p: p.is_file() and "runs" not in p.parts  # the work clock and event logs are Focus's own
+    files_before = {p: p.stat().st_mtime_ns for p in ws.rglob("*") if quiet(p)}
+    d = ws / ".orch" / "addons" / "focus"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "areas.toml").write_text(
+        f'[[area]]\nid="a1"\nname="Everything"\npath="."\nstate="accepted"\ntickets=["{TID}"]\n'
+    )
+    assert areas.load(ws) == []  # "." is not an area path: refused row
+    (d / "areas.toml").write_text(
+        f'[[area]]\nid="a1"\nname="Forged"\npath="x/"\nstate="accepted"\ntickets=["{TID}"]\n'
+    )
+    assert _snapshot(server) == before
+    shown = json.loads(req(server, "GET", "/api/areas")[1])["areas"]
+    assert [(a["name"], a["state"]) for a in shown] == [("Forged", "accepted")]
+    after = {p: p.stat().st_mtime_ns for p in ws.rglob("*") if quiet(p) and p != d / "areas.toml"}
+    assert after == {p: t for p, t in files_before.items() if p in after}
+    calls_after = (fake_orch.parent / "calls.jsonl").read_text()
+    assert [c for c in calls_after.splitlines()[len(calls_before.splitlines()) :] if "area" in c] == []
+
+
+def test_nothing_but_the_areas_surfaces_reads_areas():
+    """The invariant in code: areas are not used for access, permits, routing or the guard."""
+    from pathlib import Path
+
+    src = Path(areas.__file__).parent
+    users = {
+        p.name
+        for p in src.glob("*.py")
+        if p.name != "areas.py"
+        and ("areas." in p.read_text() or "import areas" in p.read_text() or ", areas" in p.read_text())
+    }
+    assert users <= {"cli.py", "server.py"}
+    server_text = (src / "server.py").read_text()
+    for name in ("actions", "permissions", "proofs"):
+        assert "areas" not in (src / f"{name}.py").read_text()
+    assert server_text.count("areas.strip") == 2 and "areas.load" not in server_text
