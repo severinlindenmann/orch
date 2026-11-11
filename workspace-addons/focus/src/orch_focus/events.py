@@ -110,7 +110,7 @@ def runs_dir(root: Path, create: bool = True) -> Path:
     d = Path(root)
     for part in (".orch", "addons", "focus", "runs"):
         d = d / part
-        if create and not runfiles.is_link(d) and not runfiles.mkdir_private(d) and part == "runs":
+        if create and not runfiles.is_link(d) and not runfiles.mkdir_private(d, root) and part == "runs":
             runfiles.check_listable(d)
         _plain(d)
     return d
