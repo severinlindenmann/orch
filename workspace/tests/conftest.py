@@ -250,6 +250,7 @@ def _start_guard_off(request, monkeypatch):
     monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)
 
 
+REAL_HOME_MODULES = ("test_secret_store", "test_install_kind")  # they test the home pairing itself
 REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_verdict_mac")
 
 
@@ -309,7 +310,8 @@ def _legacy_trust(request, monkeypatch):
 
     monkeypatch.setattr(humanproof, "person_by", legacy)
     monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
-    monkeypatch.setattr(humanproof, "guarded_home", test_home)
+    if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
+        monkeypatch.setattr(humanproof, "guarded_home", test_home)
 
     def trusting(fn, proven_pos):
         """TEST-ONLY, same trust as `legacy` above: a direct Python call as `human:` counts as the person's
