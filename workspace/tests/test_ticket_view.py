@@ -38,6 +38,26 @@ def conn(proj, run, rel):
     return rel
 
 
+def png() -> bytes:
+    """A well-formed 1x1 PNG (signature, IHDR, IDAT, IEND): the scan can walk it, so it may be sent."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(b"\x00\x00"))
+        + chunk(b"IEND", b"")
+    )
+
+
+CHART = png()
+
+
 def views(rel):
     """Snapshots sent with an update, without the quiet one that tells the phone a ticket exists."""
     return [m for m in rel.sent if "ticket_view" in m["body"] and m["body"]["text"] != phone_view.NEW_TEXT]
@@ -58,22 +78,12 @@ def test_vector_cases_agree_on_schema_and_cap():
         assert ok == case["ok"], case["name"]
 
 
-def _png() -> bytes:
-    import zlib
-
-    def chunk(kind: bytes, body: bytes) -> bytes:
-        return len(body).to_bytes(4, "big") + kind + body + zlib.crc32(kind + body).to_bytes(4, "big")
-
-    ihdr = chunk(b"IHDR", (1).to_bytes(4, "big") * 2 + bytes([8, 2, 0, 0, 0]))
-    return b"\x89PNG\r\n\x1a\n" + ihdr + chunk(b"IEND", b"")
-
-
 def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, new_ticket, conn):
     tid = new_ticket("Q3 summary for the board")
     for text in ("Read the Q3 sheet", "Write the charts", "Check the totals"):
         run("check", "add", tid, text)
     (proj / "out").mkdir()
-    (proj / "out/q3-chart.png").write_bytes(_png())  # a real PNG: evidence goes through the secret gate
+    (proj / "out/q3-chart.png").write_bytes(CHART)
     (proj / "out/notes.txt").write_text("support notes, never sent")
     run("check", "done", tid, "c1", "--file", "out/q3-chart.png", "--title", "Q3 chart", "--role", "result",
         "--by", "agent:claude")  # fmt: skip
@@ -93,8 +103,8 @@ def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, ne
     assert ("image", "Q3 chart") in kinds and ("link", "Fix #142") in kinds
     assert not [a for a in tv["attachments"] if a.get("name") == "notes.txt"], "support proof stays local"
     img = next(a for a in tv["attachments"] if a["kind"] == "image")
-    assert conn.blobs[img["blob_id"]] == _png() and img["size"] == len(_png())
-    assert list(conn.blobs.values()) == [_png()], "only the marked file was uploaded"
+    assert conn.blobs[img["blob_id"]] == CHART and img["size"] == len(CHART)
+    assert list(conn.blobs.values()) == [CHART], "only the marked file was uploaded"
     ci = next(a for a in tv["attachments"] if "ci.example.ch" in a.get("url", ""))
     assert "abc123" not in ci["url"] and "token=" in ci["url"]
     texts = [h["text"] for h in tv["history_tail"]]

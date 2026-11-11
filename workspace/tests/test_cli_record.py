@@ -618,8 +618,8 @@ def test_follow_drops_cursor_entries_of_pruned_runs(ws):
 def test_detail_file_of_another_event_is_tampered(ws, capsys, monkeypatch):
     real = cli_record.record.read_detail
 
-    def other(root, run, file_id):
-        result = real(root, run, file_id)
+    def other(root, run, file_id, **kw):
+        result = real(root, run, file_id, **kw)
         return type(result)("ok", dict(result.value, id="toolu_other"))
 
     monkeypatch.setattr(cli_record.record, "read_detail", other)

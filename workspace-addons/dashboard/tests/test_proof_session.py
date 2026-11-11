@@ -76,7 +76,7 @@ def test_launch_token_bootstraps_the_cookie_once(live):
     root, port = live
     tok = hp.write_launch_token(root, "dashboard")
     st, ck, _ = post(port, "/session", {"token": tok})
-    assert st == 204 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith("orch_page=")
+    assert st == 204 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith(f"orch_page_dashboard_{port}=")
     assert post(port, "/session", {"token": tok})[0] == 403  # single use
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 
@@ -123,6 +123,39 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
     assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1"
     assert seen["kw"]["orch_bin"] == pageproof.SELF
     assert "ORCH_BIN" not in seen["kw"]["env"]
+
+
+def test_two_loopback_servers_keep_independent_sessions(live, monkeypatch):
+    """Cookies on 127.0.0.1 reach every loopback port: each server has its own `orch_page_<server>_<port>`, so
+    signing in to one does not log the other out, and a cookie of one is not accepted by the other."""
+    root, port = live
+    srv2 = make_server(root, 0, orch_bin=pageproof.SELF)
+    threading.Thread(target=srv2.serve_forever, daemon=True).start()
+    try:
+        port2 = srv2.server_address[1]
+        ran = []
+
+        class R:
+            returncode, stdout, stderr = 0, "{}", ""
+
+        monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **kw: ran.append(argv) or R())
+        act = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+        ck1 = session(root, port)
+        ck2 = session(root, port2)  # signing in to the second server ...
+        assert ck1.split("=")[0] == f"orch_page_dashboard_{port}" and ck2.split("=")[0] == f"orch_page_dashboard_{port2}"
+        both = f"{ck1}; {ck2}"  # ... leaves the first cookie in the browser jar (different names)
+        assert post(port, "/api/act", act, {"Cookie": both})[0] == 200  # first still signed in
+        assert post(port2, "/api/act", act, {"Cookie": both})[0] == 200
+        n = len(ran)
+        assert post(port2, "/api/act", act, {"Cookie": ck1})[0] == 403  # one's cookie is no session on the other
+        assert post(port, "/api/act", act, {"Cookie": ck2})[0] == 403
+        value1 = ck1.split("=", 1)[1]  # nor is its value under the other's name
+        assert post(port2, "/api/act", act, {"Cookie": f"orch_page_dashboard_{port2}={value1}"})[0] == 403
+        assert post(port2, "/api/act", act, {"Cookie": f"orch_page={value1}"})[0] == 403  # the old shared name
+        assert len(ran) == n
+    finally:
+        srv2.shutdown()
+        srv2.server_close()
 
 
 def test_click_with_session_but_forwarded_is_refused(live):
@@ -259,10 +292,10 @@ def test_update_click_runs_detached_answers_at_once_and_the_restart_keeps_the_se
     st, _, body = post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})
     assert st == 202 and b"Update started" in body and started["proof"].startswith("hp1.")
     # the update restarts the server: a NEW server for the same workspace adopts the page's session once
-    s2 = pageproof.PageSession(root, "dashboard")
-    assert s2.can_mint({"Host": "127.0.0.1:1", "Cookie": ck}, 1)
+    s2 = pageproof.PageSession(root, "dashboard")  # restarted on the same port: the cookie name is per port
+    assert s2.can_mint({"Host": f"127.0.0.1:{port}", "Cookie": ck}, port)
     s3 = pageproof.PageSession(root, "dashboard")  # a second restart: the marker is spent
-    assert not s3.can_mint({"Host": "127.0.0.1:1", "Cookie": ck}, 1)
+    assert not s3.can_mint({"Host": f"127.0.0.1:{port}", "Cookie": ck}, port)
 
 
 def test_resume_cookie_is_one_use_expires_and_only_after_a_click(live, monkeypatch):
@@ -288,7 +321,7 @@ def test_print_launch_url_gives_the_page_a_session_once_and_reuse_revokes(live):
     c.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})  # the page loads (read-only, no cookie)
     assert c.getresponse().status == 200
     st, ck, _ = post(port, "/session", {"token": token})
-    assert st == 204 and ck.startswith("orch_page=")
+    assert st == 204 and ck.startswith(f"orch_page_dashboard_{port}=")
     assert hp.LAUNCH_LIFE == 30 and not list(hp.key_dir(root).glob("launch-dashboard.token"))  # spent
     st, _, body = post(port, "/session", {"token": token})
     assert st == 403 and b"Someone else tried to use this sign-in link" in body

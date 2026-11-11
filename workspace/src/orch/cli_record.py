@@ -1,7 +1,8 @@
-"""`orch record tail | query | counts` (contracts/activity.md, counts.md): read-only views of the record.
+"""`orch record tail | query | counts | settings | delete-detail` (contracts/activity.md, counts.md).
 
-Every view reads the record through these commands (add-ons never read the files). Nothing here writes, so no
-proof is needed. `delete-detail` and `propose` are not built yet.
+Every view reads the record through these commands (add-ons never read the files). The views write nothing
+(but `settings` may record a lowered retention value, humanproof.retention) and need no proof. `delete-detail`
+is a person's own decision (op `record.delete_detail`, invariant H1).
 """
 
 import argparse
@@ -20,8 +21,8 @@ from pathlib import Path
 from orch import record
 from orch.errors import Refused
 
-SUBCOMMANDS = ("tail", "query", "counts", "delete-detail", "hook")
-_BUILT = ("tail", "query", "counts", "hook")
+SUBCOMMANDS = ("tail", "query", "counts", "settings", "delete-detail", "hook")
+_BUILT = ("tail", "query", "counts", "settings", "delete-detail", "hook")
 _RUN = re.compile(r"^r_[a-z0-9_]{6,32}$")
 _TICKET = re.compile(r"^t_[a-z0-9]{6,16}$")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
@@ -45,6 +46,17 @@ _PREFIX = "rc1."
 _MAX_CURSOR = 4096
 POLL_SECONDS = 1.0
 PING_SECONDS = 15.0
+
+
+def _ticket_title(root, tid: str) -> str:
+    """The ticket's title for the proof card (plain text, capped; the card shows it as text only)."""
+    from orch import tickets
+
+    try:
+        t = tickets.load(root, tid).get("title")
+    except Refused:
+        return tid
+    return t[:200] if isinstance(t, str) and t.strip() else tid
 
 
 class RecordError(Refused):
@@ -81,6 +93,9 @@ def add_parsers(sub, common) -> None:
     c.add_argument("--to")
     c.add_argument("--ticket")
     c.add_argument("--kind", action="append")
+    r.add_parser("settings", parents=[common], help=argparse.SUPPRESS)
+    d = r.add_parser("delete-detail", parents=[common], help=argparse.SUPPRESS)
+    d.add_argument("ticket")
     for name in SUBCOMMANDS:
         if name not in _BUILT:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
@@ -146,6 +161,10 @@ def dispatch(args, root: Path) -> bool:
             _tail_cli(args, root)
         elif args.sub == "query":
             _emit(query(root, args))
+        elif args.sub == "settings":
+            _emit(settings(root))
+        elif args.sub == "delete-detail":
+            _emit(delete_detail(root, args))
         else:
             _emit(counts(root, args))
     except record.RecordRefused as e:
@@ -549,19 +568,201 @@ def _detail(root: Path, args) -> dict:
     if result.status != "ok":
         raise _fail(result)
     pointers = [
-        e["detail"] for e in result.value if e["id"] == args.detail and e.get("detail")
+        e for e in result.value if e["id"] == args.detail and e.get("detail")
     ]  # the line knows its detail file; the name is never rebuilt here
     unavailable = RecordError("The details of this step are not available.", "not_found")
     if not pointers:
         raise unavailable
-    file_id = pointers[-1].rsplit("/", 1)[-1].removesuffix(".json")
-    detail = record.read_detail(root, args.run, file_id)
+    line = pointers[-1]
+    file_id = line["detail"].rsplit("/", 1)[-1].removesuffix(".json")
+    # the file must belong to the line's own ticket (I4): a line of ticket B naming A's file is refused
+    detail = record.read_detail(root, args.run, file_id, ticket=line.get("ticket"))
     _show_alert(detail.alert)
     if detail.status != "ok":
         raise _fail(detail)
-    if detail.value.get("id") != args.detail:  # the file must be the one this event points to
+    # ALWAYS compared (a line with no ticket is None, never equal to a stored t_...): the file must be the one
+    # this event points to, of the line's own ticket and id
+    stored = (detail.value.get("ticket"), detail.value.get("id"))
+    if stored != (line.get("ticket"), line["id"]) or line["id"] != args.detail:
         raise RecordError(str(record.RecordTampered("swapped")), "tampered")
     return detail.value
+
+
+# --- settings (read only) ---
+_MB = 1024**2
+
+
+def settings(root: Path) -> dict:
+    """The Insights settings in effect (config.py: share_* with the person's record, retention the lower of
+    the file and the record) and how big the record is, read through the hardened helpers. A record that
+    cannot be read gives the sizes as null plus the `status`/`reason`/`message` marker of the other reads."""
+    from orch import config
+
+    out = {
+        "keep_days": config.record_keep_days(root),
+        "max_mb": config.record_max_mb(root),
+        "share_counts": config.insights_share_counts(root),
+        "share_names": config.insights_share_names(root),
+        "record_mb": None,
+        "detail_mb": None,
+        "runs": None,
+    }
+    for read in (sizes := record.record_sizes(root), runs := record.list_runs(root)):
+        _show_alert(read.alert)
+        if read.status != "ok" and not (read.status == "unavailable" and read.reason == "missing"):
+            return {**out, "status": read.status, "reason": read.reason, "message": read.message}
+    return {
+        **out,
+        "record_mb": -(-sizes.value["record"] // _MB),  # rounded up: a record that holds anything is >= 1 MB
+        "detail_mb": -(-sizes.value["detail"] // _MB),
+        "runs": len(runs.value or []),
+    }
+
+
+# --- delete-detail (a person only) ---
+def delete_detail(root: Path, args) -> dict:
+    """Delete the detail of one ticket: the detail files its own lines point at whose name is this ticket's
+    own (I4), and its own files no line points at (orphans, found by their stored ticket/kind/id); a person's
+    own decision, op `record.delete_detail`, target the ticket id, invariant H1. `deleted` = the runs that
+    lost detail in this call, `kept` = files its lines point at that are not its own name (left, reported),
+    `unreadable` = runs that could not be read (their run file, or their detail folder a link or not a folder:
+    skipped, never a veto; their detail stays), `skipped` = single files that are not safe (a link, FIFO or
+    hardlink at the name: only that file stays, its run's other files go); both said plainly on stderr. Lines,
+    counts and the detail of other tickets stay. Order: an agent is refused before anything else
+    (needs_person); a ticket that does not exist is not_found (a deleted ticket's detail goes with retention:
+    accepted); then the proof (needs_person); the detail folder itself not being safe refuses with nothing
+    deleted; the audit line (`deleted`: the runs that are going to lose detail) is written BEFORE anything is
+    deleted (it cannot be written: not_available, nothing deleted)."""
+    from orch import humanproof, tickets
+
+    agent = tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:")
+    if agent:
+        raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
+    try:
+        tid = tickets.resolve(root, args.ticket)
+    except Refused:
+        tid = None
+    if not isinstance(tid, str) or not _TICKET.fullmatch(tid) or not tickets.ticket_path(root, tid).is_file():
+        raise RecordError("That ticket does not exist.", "not_found")
+    try:
+        who = humanproof.person_by(
+            root,
+            args,
+            "record.delete_detail",
+            tid,
+            no_handoff=humanproof.HANDOFF,
+            parts={"title": _ticket_title(root, tid)},
+        )
+    except Refused as e:
+        raise RecordError(str(e), "needs_person") from None
+    if not who.startswith("human:"):
+        raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
+    mine: dict[tuple[str, str], None] = {}
+    pointed: dict[tuple[str, str], None] = {}
+    unreadable: dict[str, None] = {}
+    for run in _known(root):
+        result = record.read_run(root, run, seen_by="cli")
+        _show_alert(result.alert)
+        if result.status == "unavailable" and result.reason == "missing":
+            continue  # pruned since it was listed: nothing of it to delete
+        if result.status != "ok":
+            unreadable.setdefault(run)  # skipped and reported (no veto): its detail is not deleted
+            continue
+        for e in result.value:
+            ref = _detail_ref(run, e.get("detail"))
+            if ref is None or e.get("ticket") != tid:
+                continue  # lines of other tickets never veto: by I4 their files have other names
+            pointed.setdefault(ref)
+            if ref[1] == record.detail_name(run, e["kind"], e["id"], tid):
+                mine.setdefault(ref)
+    # Exactly the files this ticket's own lines point at AND whose name is this ticket's own (I4). A line of
+    # this ticket naming any other file (planted or changed) is not followed: it stays, counted in `kept`.
+    kept = sum(1 for ref in pointed if ref not in mine)
+    found = record.find_detail_files(root, list(mine))
+    _show_alert(found.alert)
+    if found.status != "ok":
+        raise _fail(found)  # only the detail folder itself not being safe refuses
+    for run in found.value.unreadable:
+        unreadable.setdefault(run)  # the run's detail folder is a link or not a folder: the run is skipped
+    skipped = dict.fromkeys(found.value.kept)  # one planted link or special file: only that file is skipped
+    # This ticket's own files no line points at (orphans: the detail is written before its line): found by
+    # their stored ticket, id and kind, which must give the file's own name (I4).
+    orphans = record.ticket_detail_files(root, tid, skip=tuple(unreadable))
+    _show_alert(orphans.alert)
+    if orphans.status != "ok":
+        raise _fail(orphans)
+    own_files, unreadable_folders = orphans.value
+    for run in unreadable_folders:
+        unreadable.setdefault(run)
+    items = list(
+        dict.fromkeys(
+            ref for ref in [*found.value.files, *own_files] if ref[0] not in unreadable and ref not in skipped
+        )
+    )
+    try:
+        # What is going to go (the runs): written BEFORE anything is deleted; the answer says what went.
+        record.note_change(
+            root, change="record.delete_detail", by=who, ticket=tid, deleted=len({run for run, _ in items})
+        )
+    except (OSError, record.RecordInvalid):
+        raise RecordError(DELETE_NOT_SAVED, "not_available") from None
+    try:
+        done = record.delete_detail_files(root, items)
+    except (OSError, record.RecordInvalid, record.RecordBusy):
+        # The audit line above names what was going to go; what is left can be deleted with a new proof.
+        raise RecordError(DELETE_PARTLY, "not_available") from None
+    # A file or run swapped for a link or special file after it was found: skipped the same way (no veto).
+    for run in done.unreadable:
+        unreadable.setdefault(run)
+    skipped.update(dict.fromkeys(done.kept))
+    if unreadable:
+        print(delete_unreadable_text(len(unreadable)), file=sys.stderr)
+    if skipped:
+        print(delete_skipped_text(len(skipped)), file=sys.stderr)
+    return {
+        "deleted": len({run for run, _ in done.files}),
+        "ticket": tid,
+        "kept": kept,
+        "unreadable": len(unreadable),
+        "skipped": len(skipped),
+    }
+
+
+def prune(root: Path, fold, now: str | None = None) -> dict:
+    """Apply retention (record.apply_retention) with the EFFECTIVE values: config.record_keep_days /
+    record_max_mb, the lower of the file and the person's record, never a file value alone. A lowered value
+    deletes nothing when it is set; it takes effect here, at the next pruning."""
+    from orch import config
+
+    when = now or _today().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return record.apply_retention(root, when, config.record_keep_days(root), config.record_max_mb(root), fold)
+
+
+DELETE_NOT_SAVED = "The deletion could not be noted in the record, so nothing was deleted. Try again later."
+DELETE_PARTLY = "Some details could not be deleted. Try again later."
+
+
+def delete_unreadable_text(n: int) -> str:
+    """The plain words for `unreadable` (a page shows the same sentence)."""
+    if n == 1:
+        return "1 run could not be read; its detail was not deleted."
+    return f"{n} runs could not be read; their detail was not deleted."
+
+
+def delete_skipped_text(n: int) -> str:
+    """The plain words for `skipped` (a page shows the same sentence)."""
+    if n == 1:
+        return "1 detail file was changed outside orch; it was not deleted."
+    return f"{n} detail files were changed outside orch; they were not deleted."
+
+
+_DETAIL_REF = re.compile(r"^detail/(r_[a-z0-9_]{6,32})/([0-9a-f]{32})\.json$")
+
+
+def _detail_ref(run: str, value) -> tuple[str, str] | None:
+    """(run, detail id) of an event's `detail` path when it is one orch writes for this run, else None."""
+    m = _DETAIL_REF.fullmatch(value) if isinstance(value, str) else None
+    return (run, m[2]) if m and m[1] == run else None
 
 
 # --- counts ---
@@ -717,6 +918,8 @@ def _since(root: Path, models: list[dict]) -> tuple[str | None, list[dict]]:
 
 
 def counts(root: Path, args) -> dict:
+    from orch import config
+
     _check_filters(args.ticket, None)
     kinds = _kinds(args.kind, _USED_KINDS)
     day_from, day_to = _window(args)
@@ -753,7 +956,12 @@ def counts(root: Path, args) -> dict:
             "connections": [],
             "keys": [],
         },
-        "sharing": {"counts": "not_connected", "names": False, "last_sent": None, "queued": 0},
+        "sharing": {
+            "counts": config.share_counts_state(root),
+            "names": config.insights_share_names(root),  # the EFFECTIVE share_names (file AND the record)
+            "last_sent": None,
+            "queued": 0,
+        },
         "unavailable": unavailable,
         "complete": not unavailable,
     }

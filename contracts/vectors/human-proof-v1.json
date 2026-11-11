@@ -401,6 +401,54 @@
    "used_nonces": [],
    "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCIiwib3AiOiJyZWxheS5hbGxvdyIsInRhcmdldCI6Im1fYWFhYWFhYWFhYWFhYWFhYTpvbmNlIn0.T41spxNOx8zTbDilluHl2NNxN6Xh0F2dKvjaD94brcc",
    "result": "wrong_target"
+  },
+  {
+   "name": "insights.settings value-bound: the proof for insights.keep_days=365 sets 365",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "insights.settings",
+   "target": "insights.keep_days=365",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDIiwib3AiOiJpbnNpZ2h0cy5zZXR0aW5ncyIsInRhcmdldCI6Imluc2lnaHRzLmtlZXBfZGF5cz0zNjUifQ._rU4Ucweae31j_O5szf5U0w8oC8LeGbVbbC4mRwaxKk",
+   "result": "ok"
+  },
+  {
+   "name": "insights.settings value-bound: the proof for 365 used for another value (90)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "insights.settings",
+   "target": "insights.keep_days=90",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDIiwib3AiOiJpbnNpZ2h0cy5zZXR0aW5ncyIsInRhcmdldCI6Imluc2lnaHRzLmtlZXBfZGF5cz0zNjUifQ._rU4Ucweae31j_O5szf5U0w8oC8LeGbVbbC4mRwaxKk",
+   "result": "wrong_target"
+  },
+  {
+   "name": "insights.settings value-bound: the proof for share_names=on used for another key (share_counts=on)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "insights.settings",
+   "target": "insights.share_counts=on",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": [],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJEREREREREREREREREREREREREREREIiwib3AiOiJpbnNpZ2h0cy5zZXR0aW5ncyIsInRhcmdldCI6Imluc2lnaHRzLnNoYXJlX25hbWVzPW9uIn0.ppY0mtegd24XE3Ema9E1ZFR8vv4z8l9xyqk3LOCs9Gk",
+   "result": "wrong_target"
+  },
+  {
+   "name": "insights.settings value-bound: the same proof again (replay)",
+   "key": "0000000000000000000000000000000011111111111111111111111111111111",
+   "op": "insights.settings",
+   "target": "insights.keep_days=365",
+   "now": 1794300010,
+   "by_flag": null,
+   "agent_env": false,
+   "used_nonces": ["CCCCCCCCCCCCCCCCCCCCCC"],
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDIiwib3AiOiJpbnNpZ2h0cy5zZXR0aW5ncyIsInRhcmdldCI6Imluc2lnaHRzLmtlZXBfZGF5cz0zNjUifQ._rU4Ucweae31j_O5szf5U0w8oC8LeGbVbbC4mRwaxKk",
+   "result": "replayed"
   }
  ],
  "settings": [
