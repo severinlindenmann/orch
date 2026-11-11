@@ -579,11 +579,18 @@ UPDATE_KINDS = ("ack", "working", "note", "result", "question", "failure", "stop
 
 
 def _update_title(root: Path, ticket: str) -> str | None:
-    """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces)."""
+    """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces), with
+    secrets and stored key values hidden like every text of the ticket view (send_text itself hides nothing).
+    No value hider: no title (fail closed)."""
+    from orch import phone_results, phone_view
+
     try:
         title = tickets.load(root, ticket)["title"]
     except (Refused, ValueError, KeyError):
         return None
+    if (h := phone_results.value_hider(root)) is None:
+        return None
+    title = h.hide_text(phone_view.redact(h.hide_text(str(title))))
     line = " ".join(clean_untrusted(title, 200).split())
     line = "".join(c for c in line if unicodedata.category(c)[0] in "LMNPS" or c == " ")
     return line[:120].strip() or None

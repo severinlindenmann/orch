@@ -85,10 +85,7 @@ def test_forged_checked_is_impossible():
     ok = cand(4, "2026-11-11T08:03:00Z", checked=True)
     assert phone_results.prepare(Path("."), [ok], h=NOHIDE)[0]["checked"] is True
     ok["checked"] = False
-    assert (
-        phone_results.prepare(Path("."), [ok], h=NOHIDE) == []
-        or "checked" not in (phone_results.prepare(Path("."), [ok], h=NOHIDE)[0])
-    )
+    assert phone_results.prepare(Path("."), [ok], h=NOHIDE) == [], "checked is true or absent: dropped"
 
 
 def test_invalid_document_is_dropped_never_sent():
@@ -183,11 +180,28 @@ def test_secrets_never_leave_in_result_text_kv_or_table(proj, new_ticket, conn):
     assert "[hidden: api-token]" in out or not view.get("results")
 
 
-def test_hider_off_means_no_results_in_the_snapshot(proj, new_ticket, conn, monkeypatch):  # noqa: F811
+def test_hider_off_means_no_view_and_no_ticket_text(proj, run, new_ticket, conn, monkeypatch):  # noqa: F811
     tid = _evidence_ticket(proj, new_ticket, [("a.json", doc(), "2026-11-11T08:00:00Z")])
     assert phone_view.view_for(proj, tid)["results"]
     monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
-    assert "results" not in phone_view.view_for(proj, tid)
+    assert phone_view.view_for(proj, tid) is None, "stored values can't be hidden: no view at all"
+    t = tickets.load(proj, tid)
+    closed = phone_view.build(proj, t, [])
+    assert_valid(closed)
+    assert closed["title"] == "Ticket" and "results" not in closed and "summary" not in closed
+    assert closed["history_tail"] == [] and closed["checklist"] == [] and closed["attachments"] == []
+    word = "Ready for your review" if t["status"] == "review" else "Done"
+    assert phone_view.result_text(t, None) == word
+    with pytest.raises(Refused):
+        phone_view.light_view(proj, t)
+    code, _, err = run("relay", "send", "phones", "Done", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    body = _result_message(conn)["body"]
+    assert "ticket_view" not in body and "title" not in body["update"], body
+
+
+def _result_message(rel):
+    return next(m for m in reversed(rel.sent) if m["body"].get("update", {}).get("kind") == "result")
 
 
 def test_budget_sheds_history_first_and_results_last_never_the_newest():
@@ -378,20 +392,35 @@ def test_authorization_header_loses_scheme_and_token():
         assert "abcdefghijklmnop" not in out and "dXNlcjpwYXNzd29yZA" not in out, out
         assert phone_view._SECRET_KV.search(text)
     kv = phone_view._SECRET_KV
-    assert not any("tkn" in m.group(0) for m in [] if kv)
     assert kv.sub(lambda m: m.group(1) + m.group(2) + "[hidden]", "Authorization: Bearer abc") == (
         "Authorization: [hidden]"
     )
 
 
-@pytest.mark.parametrize("unit", ["token-", "auth-", "pass-", "secret_", "x"])
-def test_kv_pattern_is_linear_on_long_names(unit):
+@pytest.mark.parametrize(
+    "unit", ["token-", "auth-", "pass-", "secret_", "x", '"token": ', "token'] = ", "a'] "]
+)
+def test_kv_pattern_is_linear_on_long_names(unit, monkeypatch):
+    """Structural, not a wall-clock race: every head search starts after the last one, at most one per
+    separator (also with quoted and subscripted names). The 5 s bound only catches a quadratic blow-up."""
     import time
 
     text = unit * (65536 // len(unit))
+    real, starts = phone_view._KV_HEAD, []
+
+    class CountingHead:
+        def search(self, s, pos=0):
+            starts.append(pos)
+            return real.search(s, pos)
+
+    monkeypatch.setattr(phone_view, "_KV_HEAD", CountingHead())
+    list(phone_view._SECRET_KV.finditer(text))
+    assert starts == sorted(set(starts))  # strictly increasing: nothing is scanned twice
+    assert len(starts) <= text.count(":") + text.count("=") + 1
+    monkeypatch.undo()
     t0 = time.perf_counter()
     phone_view.redact(text)
-    phone_view._SECRET_KV.search(text)
+    phone_view._has_secret(text.encode())
     assert time.perf_counter() - t0 < 5
 
 
@@ -410,6 +439,20 @@ def test_several_long_keys_never_overwrite_each_other():
 
 INNER_PAIRS = ["Config: password=hunter2", "a=1,token=hunter2", "user=bob&secret=hunter2"]
 INNER_PAIRS += ["x: y: password=hunter2"]
+# quoted or subscripted names (H2) and the other separators (M1)
+QUOTED_PAIRS = [
+    '{"password": "hunter2"}',
+    "{'db_password': 'hunter2'}",
+    'os.environ["DB_PASSWORD"] = "hunter2"',
+]
+QUOTED_PAIRS += ["config['token'] = 'hunter2'", 'password: "hunter2"', 'password := "hunter2"']
+QUOTED_PAIRS += [
+    "PASSWORD ?= hunter2",
+    "PASSWORD += hunter2",
+    "'password' => 'hunter2'",
+    '$c["api_key"] => "hunter2",',
+]
+INNER_PAIRS += QUOTED_PAIRS
 
 
 @pytest.mark.parametrize("text", INNER_PAIRS)
@@ -476,6 +519,14 @@ SECRET_FLAGS = [
     ('deploy --api-key "hunter2 x" now', "deploy --api-key [hidden] now"),
     ("tool --password --token hunter2", "tool --password --token [hidden]"),
     ("ran:\n  mysql -phunter2 shop\ndone", "ran:\n  mysql -p[hidden] shop\ndone"),
+    # a known command anywhere on its line, .exe, the flag last in a cluster (M8); an en dash flag (L3)
+    ("docker compose exec db mysql -uroot -phunter2", "docker compose exec db mysql -uroot -p[hidden]"),
+    ("cd /srv && mysql -phunter2", "cd /srv && mysql -p[hidden]"),
+    ("curl -su bob:hunter2 https://x.ch", "curl -su [hidden] https://x.ch"),
+    ("mysql.exe -phunter2", "mysql.exe -p[hidden]"),
+    ("C:\\mysql\\bin\\mysql.exe -u root -phunter2", "C:\\mysql\\bin\\mysql.exe -u root -p[hidden]"),
+    ("env X=1 sshpass -p hunter2 ssh me@host", "env X=1 sshpass -p [hidden] ssh me@host"),
+    ("deploy \u2013password hunter2", "deploy \u2013password [hidden]"),
 ]
 
 
@@ -510,6 +561,9 @@ PLAIN_FLAGS = [
     "mysql -u root -p",
     "mysqlx -p 33060",
     "run --verbose --author bob",
+    "cd /srv && mysql -u root shop",
+    "curl -sS -o out.html https://x.ch",
+    "mysql -u root -p && curl -s https://x.ch",
 ]
 
 
@@ -519,7 +573,9 @@ def test_plain_flags_stay(text):
 
 
 @pytest.mark.parametrize(
-    "unit", ["--password ", "--x ", "--password=", "mysql -p\n", "mysql -u -u -u\n", '--token "', "-- "]
+    "unit",
+    ["--password ", "--x ", "--password=", "mysql -p\n", "mysql -u -u -u\n", '--token "', "-- "]
+    + ["mysql ", "curl -su ", "mysql -x ", "a/b/c/", "a\\b\\mysqlx ", "\u2013token "],
 )
 def test_flag_scan_is_linear(unit):
     """A generous bound: a quadratic scan of 64 KiB takes minutes, the linear one milliseconds."""
@@ -635,6 +691,9 @@ def test_redact_property_no_secret_survives_confusables_comments_fullwidth():
                 full(name[:cut]) + name[cut:] + "=" + value,
                 f"cfg: {name}={value}",
                 f"a=1,{name}={value}",
+                f'{{"{name}": "{value}"}}',  # JSON
+                f"cfg['{name}'] = '{value}'",  # a subscript
+                f"{name} := {value}",
             ]
         )
         out = redact(spelled)
@@ -702,3 +761,262 @@ def test_redact_linear_on_long_name_runs():
     for text in ("a=" * 20000, "a.b" * 20000, "pass-" * 8000, "a: " * 15000):
         redact(text)
     assert time.monotonic() - t0 < 5
+
+
+# ---- review #497: each finding with its concrete strings ----
+
+
+def _evidence_files(proj, new_ticket, files, title="Deploy"):
+    """A ticket whose one task holds the given (name, bytes) proof files, role result."""
+    tid = new_ticket(title)
+    evs = []
+    for name, data in files:
+        p = proj / ".orch/tickets" / tid / "evidence" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+        evs.append({"type": "file", "ref": f".orch/tickets/{tid}/evidence/{name}", "role": "result"})
+
+    def op(t):
+        t["checklist"] = [{"id": "c1", "text": "Deploy", "done": True, "evidence": evs}]
+
+    tickets.apply_op(proj, tid, op)
+    return tid
+
+
+USERINFO = [
+    ("DATABASE_URL=postgres://admin:hunter2@db:5432/shop", "DATABASE_URL=[hidden]db:5432/shop"),
+    ("redis-cli -u redis://:hunter2@cache", "redis-cli -u [hidden]cache"),
+    ("git clone https://bob:hunter2@git.example.ch/x.git", "git clone [hidden]git.example.ch/x.git"),
+    ("curl https://bob:hunter2@x.ch/api", "curl [hidden]x.ch/api"),
+    ("db: postgres://u:p@ss@db/x", "db: [hidden]db/x"),  # an @ in the password: up to the last one
+]
+
+
+@pytest.mark.parametrize("text, want", USERINFO)
+def test_h3_url_userinfo_in_free_text_is_hidden(text, want):
+    assert phone_view.redact(text) == want
+    assert phone_view._has_secret(text.encode())
+
+
+@pytest.mark.parametrize(
+    "text", ["see https://x.ch:8080/a@b", "mail bob@x.ch", "ssh://git@host:22/x", "a://b"]
+)
+def test_h3_urls_without_a_password_stay(text):
+    assert phone_view.redact(text) == text
+
+
+H4_FORMS = [
+    "pass\u200bword=hunter2",  # ZWSP: a text viewer shows password=hunter2
+    "tok<!---->en=hunter2",  # in an .html/.md artifact the comment vanishes when shown
+    "ｐａｓｓｗｏｒｄ=hunter2",
+    "sshpass -p hunter2 ssh me@host",
+    "deploy --token hunter2",
+    "curl -u bob:hunter2 https://x.ch",
+    "CREATE USER bob WITH PASSWORD 'hunter2';",
+]
+
+
+VALUE = "Xk93-pq7Lm-aa21"  # a stored key value, written in prose without any label
+
+
+def test_h5_stored_values_never_leave_in_any_text_of_the_view(proj, run, new_ticket, conn):  # noqa: F811
+    keystore.add(proj, "db-cred", "token", VALUE)
+    tid = new_ticket(f"Rotate {VALUE} today")
+    run("check", "add", tid, f"Use {VALUE} for the db")
+    run("log", tid, f"Rotated the DB credentials, new value {VALUE}")
+    # evidence and artifact files: covered by the backlog upload-gate PR (phone_view.attachments), not #497
+
+    def op(t):
+        t["summary"] = f"Done, new value {VALUE}"
+        # url/file evidence: covered by the backlog upload-gate PR (phone_view.attachments), not #497
+
+    tickets.apply_op(proj, tid, op)
+    code, _, err = run("relay", "send", "phones", "Finished", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    assert VALUE not in json.dumps(conn.sent, ensure_ascii=False), "no message at all carries it"
+    msg = _result_message(conn)
+    assert "[hidden: db-cred]" in json.dumps(msg, ensure_ascii=False)
+    tv = msg["body"]["ticket_view"]
+    assert_valid(tv)
+    assert tv["title"] == "Rotate [hidden: db-cred] today", "hidden in place, not the closed view"
+    assert "[hidden: db-cred]" in msg["body"]["update"]["title"]
+    t = tickets.load(proj, tid)
+    h = phone_results.value_hider(proj)
+    pushed = phone_view.result_text(t, h)
+    assert VALUE not in pushed and "[hidden: db-cred]" in pushed
+    assert VALUE not in json.dumps(phone_view.light_view(proj, t), ensure_ascii=False)
+
+
+def test_h5_a_value_left_in_the_finished_view_closes_it(proj, new_ticket):
+    keystore.add(proj, "db-cred", "token", VALUE)
+    tid = new_ticket("Plain")
+    att = {"kind": "link", "title": f"x {VALUE}", "url": "https://x.ch/", "at": "2026-11-11T08:00:00Z"}
+    view = phone_view.build(proj, tickets.load(proj, tid), [att])  # a caller's attachment, not hidden
+    assert VALUE not in json.dumps(view) and view["title"] == "Ticket" and view["attachments"] == []
+
+
+@pytest.mark.parametrize(
+    "text, want",
+    [
+        ("CREATE USER bob WITH PASSWORD 'hunter2'", "CREATE USER bob WITH PASSWORD [hidden]"),
+        ("ALTER USER x IDENTIFIED BY 'hunter2'", "ALTER USER x IDENTIFIED BY [hidden]"),
+        ("GRANT ALL TO x IDENTIFIED BY hunter2;", "GRANT ALL TO x IDENTIFIED BY [hidden]"),
+        ("machine h login u password hunter2", "machine h login u password [hidden]"),
+        ("machine h\n  login u\n  password hunter2", "machine h\n  login u\n  password [hidden]"),
+    ],
+)
+def test_m2_labelled_values_without_a_separator(text, want):
+    assert phone_view.redact(text) == want
+    assert phone_view.redact(want) == want
+
+
+@pytest.mark.parametrize("text", ["Reset the password for bob", "The password reset flow works", "password"])
+def test_m2_password_in_prose_stays(text):
+    assert phone_view.redact(text) == text
+
+
+@pytest.mark.parametrize(
+    "text, want",
+    [
+        ("password: correct horse battery staple", "password: [hidden]"),
+        ("Cookie: a=1; sessionid=SECRET; csrftoken=x", "Cookie: [hidden]"),
+        ("Set-Cookie: sid=SECRET; Path=/; HttpOnly", "Set-Cookie: [hidden]"),
+        ("cookie=a=1; sid=SECRET", "cookie=[hidden]"),
+        ("token: abc def\nnext line stays", "token: [hidden]\nnext line stays"),
+    ],
+)
+def test_m3_colon_and_cookie_values_hide_to_the_end_of_the_line(text, want):
+    assert phone_view.redact(text) == want
+
+
+M4_NAMES = ["SSHPASS", "DBPASS", "ADMINPASS", "SMTPPASS", "sessionid", "SESSIONID", "PHPSESSID"]
+M4_NAMES += ["passcode", "pw", "db_pw", "totp", "sessionId"]
+
+
+@pytest.mark.parametrize("name", M4_NAMES)
+def test_m4_compound_secret_names(name):
+    assert phone_view.secret_name(name)
+    assert "hunter2" not in phone_view.redact(f"{name}=hunter2")
+
+
+@pytest.mark.parametrize("key", ["tok<!---->en", "to\u200bken", "pass\u200bword"])
+def test_m5_labels_are_judged_after_cleaning(key):
+    assert phone_view.secret_name(key)
+    d = doc(blocks=[{"type": "kv", "items": [{"key": key, "value": "hunter2"}]}])
+    out = phone_results.prepare(Path("."), [cand(1, "2026-11-11T08:00:00Z") | {"doc": d}], h=NOHIDE)
+    assert "hunter2" not in json.dumps(out)
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig12345", "sk_live_4f9d7a1c8b2e6053aa11"],
+)
+def test_m6_a_query_key_that_is_a_secret_is_hidden(secret):
+    url = phone_view.safe_url(f"https://app.ch/cb?{secret}&page=2")
+    assert url and secret[:8] not in url and "page=2" in url, url
+
+
+WEBHOOKS = [
+    ("https://hooks." + "slack.com/services/T0ABCDEF1/B0ABCDEF1/" + "X" * 24, "XXXXXXXX"),
+    ("https://discord.com/api/webhooks/123456789012345678/AbCdEf-ghIJ_klMNop", "AbCdEf-ghIJ"),
+    ("https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/sendMessage", "AAHdqTcv"),
+]
+
+
+@pytest.mark.parametrize("url, token", WEBHOOKS)
+def test_m7_webhook_tokens_in_url_paths(url, token):
+    assert token not in phone_view.redact(f"posted to {url}")
+    out = phone_view.safe_url(url)
+    assert out and token not in out, out
+
+
+TOKEN_SHAPES = [
+    "AIza" + "B" * 35,
+    "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF0\n-----END PGP PRIVATE KEY BLOCK-----",
+    "hf_" + "a" * 34,
+    "npm_" + "a" * 36,
+    "pypi-AgE" + "a" * 60,
+    "SG." + "a" * 22 + "." + "b" * 43,
+    "dop_v1_" + "a" * 64,
+]
+
+
+@pytest.mark.parametrize("token", TOKEN_SHAPES)
+def test_m9_token_shapes(token):
+    assert phone_view.redact(f"key {token} here") == "key [hidden] here"
+
+
+@pytest.mark.parametrize("url", ["http://h:99999/", "http://h:x/", "https://h:-1/a"])
+def test_l1_a_bad_port_is_no_url(url):
+    assert phone_view.safe_url(url) is None
+
+
+def test_l2_a_token_cut_at_the_limit_leaves_no_prefix():
+    tok = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    text = ("word " * 5000)[: phone_view.TEXT_CUT - 10] + tok  # the cut falls inside the token
+    out = phone_view.redact(text)
+    assert "ghp_" not in out and out.endswith("[hidden]")
+    assert phone_view.redact(out) == out
+
+
+@pytest.mark.parametrize(
+    "text, gone",
+    [
+        ('password="ab\\"cdefgh" rest', "cdefgh"),  # an escaped quote inside
+        ("password=`hunter 2` rest", "2`"),  # backticks
+        ('password="hunter 2', "2"),  # never closed: to the end of the line
+    ],
+)
+def test_l3_quoted_values(text, gone):
+    out = phone_view.redact(text)
+    assert gone not in out and "hunter" not in out, out
+
+
+def test_l9_status_outside_the_contract_is_open(proj, new_ticket):
+    t = tickets.load(proj, new_ticket("Odd"))
+    t["status"] = "<b>weird</b>"
+    assert phone_view.build(proj, t, [])["status"] == "open"
+    assert phone_view.light_view(proj, t)["status"] == "open"
+
+
+@pytest.mark.parametrize(
+    "unit",
+    ["a.", "a+b://", "x://a:", "x://:a@", "login a ", "password ", "identified by ", "<!--", "<!--a-->"]
+    + ['"', "'a", "-", "a\\", "bot1:", "token: a\n", '"a": ', "/services/T", "/api/webhooks/1"],
+)
+def test_new_patterns_are_linear(unit):
+    """A generous bound: a quadratic scan of 64 KiB takes minutes, the linear one milliseconds."""
+    import time
+
+    from orch.text import clean_untrusted
+
+    text = unit * (65536 // len(unit))
+    t0 = time.perf_counter()
+    phone_view._scrub_text(text)
+    phone_view._has_secret(text.encode())
+    phone_view.redact(text)
+    clean_untrusted(text, 10**9)
+    assert time.perf_counter() - t0 < 5
+
+
+def test_clean_untrusted_unchanged_by_the_fast_path():
+    """The distinct-character judge and the search up to the last `-->` give what the plain way gives."""
+    import random
+
+    from orch import text as text_mod
+
+    def slow(t):
+        import unicodedata
+
+        t = unicodedata.normalize("NFC", t).replace("\u2028", "\n").replace("\u2029", "\n")
+        t = "".join(ch for ch in t if not text_mod._drop(ch))
+        while (new := text_mod._COMMENT.sub("", t)) != t:
+            t = new
+        cut = t.find("<!--")
+        return t if cut == -1 else t[:cut]
+
+    rnd = random.Random(497)
+    alphabet = ["a", "b", " ", "\n", "<!--", "-->", "<!-", "->", "\u200b", "\u2028", "\x07", "e\u0301", "ﬁ"]
+    for _ in range(500):
+        t = "".join(rnd.choice(alphabet) for _ in range(rnd.randint(0, 30)))
+        assert text_mod.clean_untrusted(t, 10**6) == slow(t), repr(t)

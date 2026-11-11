@@ -129,9 +129,7 @@ def value_hider(root: Path):
         return None
 
 
-# Known gaps (not covered by the value hider or the pattern scrub): fullwidth/NFKC forms of a stored value
-# (the pattern scrub does look at the NFKC form), a value split over cells, base32, host case in a URL,
-# a token inside a URL path.
+# Known gaps of the value hider and the pattern scrub: the one list is ACCEPTED GAPS in orch/phone_view.py.
 CUT = "[hidden]"
 
 
@@ -212,16 +210,23 @@ def _one(r: dict, h) -> dict | None:
                 r["title"] = t  # in place before the trim: it counts against the 2560 bytes
         r = trim(r)  # a trim never cuts a string, and the hider then sees less
         _hide_labelled(r["doc"])
-        for _ in range(2):  # hide (exact values), scrub (patterns), trim; twice: the second pass proves it
-            r = trim(_scrub(h.hide_json(r), redact))
-        return r if phone_ok(r) and h.hide_json(r) == r and _scrub(r, redact) == r else None
+        for _ in range(
+            2
+        ):  # hide (exact values), scrub (patterns), labels, trim; twice: the second pass proves it
+            r = _scrub(h.hide_json(r), redact)
+            _hide_labelled(r["doc"])  # again on the scrubbed labels: cleaning can make one (tok<!---->en)
+            r = trim(r)
+        labels = json.loads(json.dumps(r))
+        _hide_labelled(labels["doc"])
+        stable = h.hide_json(r) == r and _scrub(r, redact) == r and labels == r
+        return r if phone_ok(r) and stable else None
     except Exception:
         return None
 
 
 def prepare(root: Path, candidates: list[dict], h=None) -> list[dict]:
     """The `results` of a full snapshot (newest first, at most 5, ids unique, 8192 bytes together)."""
-    h = h or value_hider(root)
+    h = h if h is not None else value_hider(root)
     if h is None or not candidates:
         return []
     seen, ordered = set(), []
