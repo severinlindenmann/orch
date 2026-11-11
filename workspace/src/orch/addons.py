@@ -1394,6 +1394,7 @@ class _Batch:
 
 
 # A ContextVar, not a module global: another thread (e.g. a dashboard hand-off) never joins this batch.
+# Asyncio tasks inherit this value: keep the scope synchronous and do not spawn tasks inside it.
 _BATCH: contextvars.ContextVar[_Batch | None] = contextvars.ContextVar("orch_addon_batch", default=None)
 
 
