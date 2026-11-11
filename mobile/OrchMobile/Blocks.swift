@@ -125,6 +125,7 @@ enum BlockRow {
         case .chart(let b): return b.heading + [b.text("x_label"), b.text("y_label")].compactMap { $0 } + b.objects("series").flatMap { s in
             [s.text("name") ?? ""] + s.list("points").flatMap { $0.array.map { BlocksFormat.cell($0) } }
         }
+        }
     }
 }
 
