@@ -39,3 +39,14 @@ def test_web_scripts_are_served_and_loaded_in_order():
     scripts = re.findall(r'<script src="([^"]+)" defer></script>', html)
     names = ["helpers", "proof", "store", "jobs", "live-now", "areas", "used", "session", "settings", "live", "ticket", "focus"]
     assert scripts[-len(names):] == [f"__P__/web/{name}.js" for name in names]
+
+
+def test_every_name_helpers_js_exports_is_defined():
+    """A name in the export list that is not defined throws at load and takes the whole page down (#525 lost holdText)."""
+    import re
+
+    web = Path(__file__).resolve().parents[1] / "src" / "orch_focus" / "web"
+    text = (web / "helpers.js").read_text()
+    exported = re.search(r"root\.FocusHelpers = \{([^}]*)\}", text).group(1).replace(" ", "").split(",")
+    missing = [n for n in exported if not re.search(rf"(?:function|const|let|var)\s+{n}\b", text)]
+    assert not missing, missing

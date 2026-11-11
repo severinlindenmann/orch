@@ -60,6 +60,10 @@
     for (const ch of String(name || '').toLowerCase()) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
     return PALETTE[hash % PALETTE.length];
   }
+  /* Why a live run waits before orch types into its window: the core's own words, only while the run runs. */
+  function holdText(v) {
+    return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+  }
   root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, attentionText, pickerLine, fileIcon, ago, agentColor, holdText};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);
