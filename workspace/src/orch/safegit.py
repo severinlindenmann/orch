@@ -577,7 +577,7 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
 ALLOWED = {
     "worktree", "read-tree", "update-index", "checkout-index", "ls-files", "rev-parse", "config", "branch",
     "symbolic-ref", "cat-file", "merge-base", "show-ref", "for-each-ref", "status", "diff", "log", "show",
-    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore", "rev-list", "check-attr",
+    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore", "rev-list", "check-attr", "merge-tree",
 }  # fmt: skip
 # (check-ignore reads ignore rules only: no content, no filters; --stdin is refused below)
 # (rev-list and check-attr only read: commit graph / attribute names. B13 uses them for ancestry counts and to
@@ -589,6 +589,12 @@ _REV_LIST_OK = {
     "--count", "--parents", "--first-parent", "--no-merges", "--merges", "--reverse", "-q", "--quiet", "-n",
 }  # fmt: skip
 _CHECK_ATTR_OK = {"-z", "--cached"}
+_MERGE_TREE_OK = {
+    "--write-tree",
+    "--name-only",
+    "-z",
+    "--no-messages",
+}  # computes a result tree, touches no work tree
 _ATTR_SOURCE = re.compile(r"--source=[0-9a-fA-F]{7,64}")
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
@@ -640,6 +646,10 @@ def refusal(args: list[str]) -> str | None:
                 return (
                     "git rev-list: only --count, --parents, --first-parent, -n and similar read flags are run"
                 )
+    if cmd == "merge-tree":
+        for a in flags:
+            if a.startswith("-") and a not in _MERGE_TREE_OK:
+                return "git merge-tree: only --write-tree, --name-only, -z and --no-messages are run"
     if cmd == "check-attr":
         for a in flags:
             if (

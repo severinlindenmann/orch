@@ -754,6 +754,7 @@ def test_external_tools_and_interactive_modes_are_refused(args, tmp_path):
         ["commit", "-m", "msg"],
         ["worktree", "add", "p"],
         ["rev-list", "--count", "a..b"],
+        ["merge-tree", "--write-tree", "--name-only", "-z", "a", "b"],
         ["check-attr", "filter", "diff", "text", "--", "f.txt"],
     ],
 )
@@ -840,6 +841,8 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
 @pytest.mark.parametrize(
     "args",
     [
+        ["merge-tree", "--write-tree", "--merge-base=x", "a", "b"],
+        ["merge-tree", "--trivial-merge", "a", "b", "c"],
         ["rev-list", "--output=/tmp/x", "HEAD"],
         ["rev-list", "--exec=x", "HEAD"],
         ["rev-list", "--count", "--objects", "HEAD"],
