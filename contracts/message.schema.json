@@ -189,9 +189,10 @@
       "required": ["title", "status", "running"],
       "if": { "not": { "required": ["light"], "properties": { "light": { "const": true } } } },
       "then": { "required": ["checklist", "done", "total", "history_tail", "attachments"] },
+      "allOf": [{ "if": { "required": ["light"], "properties": { "light": { "const": true } } }, "then": { "not": { "required": ["results"] } } }],
       "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and references). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
       "properties": {
-        "light": { "type": "boolean", "description": "true = a LIGHT status update for a ticket the phone already lists (quiet, update kind note, never pushed). It carries only title, status, started, running, summary, agent and updated_at; checklist, done, total, history_tail, attachments and refs are absent and the phone overlays the present fields on its last full snapshot (never wipes them). No flag (or false) = a full snapshot as before, which replaces the stored one." },
+        "light": { "type": "boolean", "description": "true = a LIGHT status update for a ticket the phone already lists (quiet, update kind note, never pushed). It carries only title, status, started, running, summary, agent and updated_at; checklist, done, total, history_tail, attachments, refs and results are absent (results: refused by the schema) and the phone overlays the present fields on its last full snapshot (never wipes them). No flag (or false) = a full snapshot as before, which replaces the stored one." },
         "updated_at": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "When the ticket last changed (UTC). Optional; sent by light updates." },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "status": { "enum": ["open", "active", "waiting", "ready", "review", "done", "dropped"] },
@@ -268,8 +269,51 @@
             "then": { "required": ["blob_id", "name", "size"], "not": { "required": ["url"] } },
             "else": { "required": ["url"], "not": { "required": ["blob_id"] } }
           }
+        },
+        "results": {
+          "type": "array", "maxItems": 5,
+          "description": "Optional, full snapshots only (never with light: true): the ticket's newest results (job results, the agent's proof, results computed by orch) as phone block snapshots, newest first by `at`, at most 5, ids unique, at most 2560 bytes each and 8192 bytes together (compact UTF-8 JSON). Absent = none. The phone keeps the results of the last full snapshot while light updates arrive; a newer full snapshot replaces them. Display only: the phone has no action on a result; Looks good / Send back stay on the existing Result card (body.feedback on an attachment). See blocks.md, Phone.",
+          "items": { "$ref": "#/$defs/phone_result" }
         }
       }
+    },
+    "phone_result": {
+      "type": "object", "additionalProperties": false, "required": ["id", "from", "at", "doc"],
+      "description": "One result on the phone (blocks.md, Phone). The label comes from `from` and `checked` only: job = \"Reported by the job\"; agent with checked = \"Checked by the agent\"; agent without = \"From the agent\"; orch = \"Worked out by orch\". `checked` is display only: it approves nothing and the phone never sends it back.",
+      "properties": {
+        "id": { "type": "string", "pattern": "^(j_[a-z0-9]{6,32}|a_[0-9a-f]{12})$", "description": "A job result: the job id (job-events.md). The agent's proof or a result computed by orch: the artifact id of the evidence that holds the document, derived like attachment ids (a_ + 12 hex of sha256(\"<evidence type>\\n<ref>\")). Never a feedback target." },
+        "from": { "enum": ["job", "agent", "orch"], "description": "Equals doc.from (set by the core from the channel, blocks.md)." },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\u0000-\u001f\u007f]*$" },
+        "at": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "When the result was written (UTC); the list is sorted by it, newest first." },
+        "checked": { "const": true, "description": "Only with from agent: the agent's proof of a step that is done with proof (ticket_view.checklist done). Absent = not a passed check. A job or orch result never carries it." },
+        "doc": { "$ref": "#/$defs/phone_blocks" }
+      },
+      "allOf": [
+        { "if": { "required": ["checked"] }, "then": { "properties": { "from": { "const": "agent" } } } },
+        { "if": { "properties": { "from": { "const": "job" } } }, "then": { "properties": { "doc": { "properties": { "from": { "const": "job" } } } } } },
+        { "if": { "properties": { "from": { "const": "agent" } } }, "then": { "properties": { "doc": { "properties": { "from": { "const": "agent" } } } } } },
+        { "if": { "properties": { "from": { "const": "orch" } } }, "then": { "properties": { "doc": { "properties": { "from": { "const": "orch" } } } } } }
+      ]
+    },
+    "phone_blocks": {
+      "type": "object", "additionalProperties": false, "required": ["schema", "from", "blocks"],
+      "description": "An orch.blocks/1 document already trimmed for the phone (blocks.md, Phone). This envelope is all the relay checks (it compiles only this file); the sender checks the whole document against blocks.schema.json before sending, and the phone renderer checks it again: an invalid document shows \"These results can't be shown\" for that one result.",
+      "properties": {
+        "schema": { "const": "orch.blocks/1" },
+        "from": { "enum": ["job", "agent", "orch"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\u0000-\u001f\u007f]*$" },
+        "blocks": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/phone_block" } }
+      }
+    },
+    "phone_block": {
+      "type": "object", "required": ["type"],
+      "description": "Snapshot rules on top of blocks.schema.json: no log block; a table has at most 20 rows (total_rows says how many there are); a link has no query and no fragment; a file block's path is the base name only. Unknown types pass (a newer workspace; the phone draws one muted row).",
+      "properties": { "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "not": { "const": "log" } } },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "table" } } }, "then": { "properties": { "rows": { "type": "array", "maxItems": 20 } } } },
+        { "if": { "properties": { "type": { "const": "link" } } }, "then": { "properties": { "url": { "type": "string", "maxLength": 2000, "pattern": "^https://[^/?#@\\s<>\"'`]+(/[^?#\\s<>\"'`]*)?$" } } } },
+        { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "path": { "type": "string", "maxLength": 255, "pattern": "^[^/\\\\.\u0000-\u001f\u007f][^/\\\\\u0000-\u001f\u007f]*$" } } } }
+      ]
     },
     "file": {
       "type": "object", "required": ["blob_id", "name", "size", "sha256"],
