@@ -518,7 +518,38 @@ def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner)
     # test_person_keeps_key_without_live_duplicates; A here authored the forgery.
 
 
-@pytest.mark.parametrize("problem", ["manifest", "commit", "path", "size", "private", "local-general"])
+@pytest.mark.parametrize("current", [0, 140])
+def test_keep_key_live_counter_only_reserves_selected_numbers(machines, monkeypatch, current):
+    from test_step import ticket
+
+    a, b, bare = both(machines)
+    local, remote_only = "tickets/t_local1.json", "tickets/t_remote1.json"
+    save(a, local, ticket() | {"id": "t_local1", "key": "DM1-5"})
+    success(a)
+    success(b)
+    live_counter = {"last": current, "local_only": {"value": 7}}
+    save(b, "ticket-counter.json", live_counter)
+    save(a, local, ticket() | {
+        "id": "t_local1", "key": "DM1-99", "ext": {"sync": {"old_keys": ["DM1-5"]}},
+    })
+    save(a, remote_only, ticket() | {"id": "t_remote1", "key": "DM1-5"})
+    save(a, "ticket-counter.json", {"last": 999999, "remote_only": "untrusted", "local_only": {"value": 999}})
+    repo.git(a, "add", "--", local, remote_only, "ticket-counter.json")
+    hostile(a, bare, ["commit", "-m", "remote counter inflation"])
+    remote = run(b)["paused"]["remote_sha"]
+    # Inspect the reservation before the normal verified merge resumes.
+    monkeypatch.setattr(step, "_run", lambda *args: cli.read(b, "state"))
+    pause.keep_key(
+        b, "DM1-5", "t_remote1",
+        proof(b, f"sync:keep-key:DM1-5:t_remote1:{remote}", monkeypatch), now=NOW,
+    )
+    assert json.loads(repo.safe(b, local).read_bytes())["key"] == "DM1-99"
+    assert json.loads(repo.safe(b, "ticket-counter.json").read_bytes()) == {
+        **live_counter, "last": max(current, 99),
+    }
+
+
+@pytest.mark.parametrize("problem", ["manifest", "commit", "path", "size", "private", "local-general", "counter-schema", "counter-deletion"])
 def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch, problem):
     from test_step import ticket
 
@@ -537,7 +568,7 @@ def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch
         save(b, path, json.loads(repo.safe(b, path).read_bytes()) | {"general": True})
     else:
         checked = incoming.Result("wrong" if problem == "commit" else remote, [
-            incoming.Problem("", problem, "refused")
+            incoming.Problem("ticket-counter.json" if problem.startswith("counter-") else "", problem, "refused")
         ])
         monkeypatch.setattr(incoming, "check", lambda *a, **kw: checked)
     before = repo.safe(b, "tickets/t_later1.json").read_bytes()

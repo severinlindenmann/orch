@@ -238,7 +238,9 @@ def keep_key(root, key, tid, args, *, now=None):
         if cli.read(root, "theirs").get("remote_sha") != remote:
             raise repo.Refused("Saved copy is no longer current")
         checked = incoming.check(root, remote, base=None)
-        if checked.commit != remote or any(p.code in ("path", "size") for p in checked.problems):
+        if checked.commit != remote or any(
+            p.code in ("path", "size") or p.path == "ticket-counter.json" for p in checked.problems
+        ):
             raise repo.Refused("Incoming files could not be checked")
         if any(p.code == "private" for p in checked.problems):
             raise repo.Refused("General ticket stays local")
@@ -267,9 +269,10 @@ def keep_key(root, key, tid, args, *, now=None):
         if any(i not in docs or docs[i].get("key") != key for i in group):
             raise repo.Refused("Ticket numbers changed; review again")
         counter_path = "ticket-counter.json"
-        live_counter = repo.safe(root, counter_path)
+        live_counter_path = repo.safe(root, counter_path)
+        live_counter = incoming.strict_load(live_counter_path.read_bytes()) if live_counter_path.exists() else {}
         counter = merge.merge_counter(
-            {}, incoming.strict_load(live_counter.read_bytes()) if live_counter.exists() else {},
+            {}, live_counter,
             incoming.strict_load(step.blob(root, theirs.get(counter_path)) or b"{}"),
             [k for doc in docs.values() for k in [doc.get("key"), *merge.old_keys_of(doc)]],
         )
@@ -307,7 +310,9 @@ def keep_key(root, key, tid, args, *, now=None):
             decisions = {"remote_sha": remote, "files": {}}
         selected_docs[counter_path] = step.encoded(counter)
         # Reserve in the live counter too, so offline ticket creation cannot reuse a
-        # selected number. merge_counter includes the live value and never decreases it.
+        # selected number. Only reserve this decision's keys, never remote counter fields.
+        allocated_max = max(int(k.rsplit("-", 1)[1]) for k in keys)
+        live_reservation = step.encoded({**live_counter, "last": max(live_counter.get("last", 0), allocated_max)})
         # Save the reservation first and move local losers before resuming the merge.
         # Remote-only tickets stay in sync state until the verified incoming merge.
         order = [counter_path] + [p for p in selected_docs if p not in (counter_path, f"tickets/{tid}.json")] + [f"tickets/{tid}.json"]
@@ -316,7 +321,7 @@ def keep_key(root, key, tid, args, *, now=None):
             step.write(root, "run/sync/choices/" + path, data)
             is_incoming = path == counter_path or originals[path] is None
             if path == counter_path or not is_incoming:
-                step.write(root, path, data)
+                step.write(root, path, live_reservation if path == counter_path else data)
             decisions["files"][path] = {"keep": "key", "at": now, "incoming": is_incoming}
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
         paused["key_clashes"].pop(key)
