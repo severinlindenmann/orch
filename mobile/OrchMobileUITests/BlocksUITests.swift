@@ -16,8 +16,9 @@ final class BlocksUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-blocksPreview", "invalid-link-javascript"]
         app.launch()
-        let invalid = app.descendants(matching: .any)["blocks-invalid"].firstMatch
-        XCTAssertTrue(invalid.waitForExistence(timeout: 10), app.debugDescription)
+        // SwiftUI folds the inner "blocks-invalid" container into the outer "blocks-view" element.
+        XCTAssertTrue(app.descendants(matching: .any)["blocks-view"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["Details"].exists, app.debugDescription)
         let notice = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "can't be shown")).firstMatch
         XCTAssertTrue(notice.exists, app.debugDescription)
     }

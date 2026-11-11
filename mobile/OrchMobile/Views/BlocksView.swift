@@ -16,7 +16,7 @@ struct BlocksView: View {
                     DisclosureGroup {
                         Text(verbatim: raw).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     } label: { Text(verbatim: "Details") }
-                }.accessibilityElement(children: .contain).accessibilityIdentifier("blocks-invalid")
+                }
             case .shown(let doc):
                 Text(verbatim: fromLabel ?? doc.fromLabel).themeFont(11).foregroundStyle(Theme.muted)
                 if let title = doc.title { Text(verbatim: title).themeFont(20, .semibold) }
