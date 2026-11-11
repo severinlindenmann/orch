@@ -742,7 +742,7 @@ def test_idle_syncs_and_one_edit_converge_without_churn(machines, monkeypatch):
 
 @pytest.mark.parametrize("decision", ["wont", "verdict"])
 @pytest.mark.parametrize("proof", ["forged", "valid", "foreign"])
-def test_remote_human_history_requires_verified_decision(machines, monkeypatch, decision, proof):
+def test_remote_human_history_is_demoted_even_with_verified_decision(machines, monkeypatch, decision, proof):
     from orch import cli, humanproof, tickets
 
     a, b, _ = both(machines)
@@ -823,7 +823,7 @@ def test_remote_human_history_requires_verified_decision(machines, monkeypatch, 
     success(a)
     assert verified  # The receiving core rechecks under the ticket lock before writing.
     result = load(a)
-    expected = line if valid else {
+    expected = {
         **line, "by": "agent:sync", "text": "(synced, not verified here) " + text
     }
     assert result["history"] == [expected]
@@ -835,21 +835,16 @@ def test_remote_human_history_requires_verified_decision(machines, monkeypatch, 
     rendered = cli._show(result, a)
     assert expected["by"] in rendered
     assert tickets.history_line(expected["text"], result["checklist"]) in rendered
-    if not valid:
-        assert "human:lindenmann:" not in rendered
+    assert "human:lindenmann:" not in rendered
     success(b)
     success(a)
     assert load(a)["history"] == [expected]
-    if valid:
-        assert load(a) == load(b)
-    else:
-        # B owns the original locally: a remote demotion cannot overwrite it.
-        # A keeps its demotion even when B returns the original from shared base.
-        assert line in load(b)["history"] and expected in load(b)["history"]
-        success(b)
-        success(a)
-        assert load(a)["history"] == [expected]
-        assert line in load(b)["history"]
+    # B owns the original locally; A retains its demotion on subsequent syncs.
+    assert line in load(b)["history"] and expected in load(b)["history"]
+    success(b)
+    success(a)
+    assert load(a)["history"] == [expected]
+    assert line in load(b)["history"]
 
 
 def test_new_remote_ticket_history_is_not_shared_history(machines):

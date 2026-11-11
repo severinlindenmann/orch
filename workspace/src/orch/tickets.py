@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, humanproof, procs, saferead, syncgate, term
+from orch import config, humanproof, net, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -138,20 +138,71 @@ def new_id(root: Path) -> str:
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
 
 
-def resolve(root: Path, ref):
+def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
     """The one place a ticket key (DM1-12, any case) becomes the ticket id. Anything else is returned as it
-    is (an id, or a word the command refuses later)."""
+    is (an id, or a word the command refuses later). Old keys require explicit opt-in."""
     if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
         return ref
     want = ref.strip().upper()
-    for t in list_all(root):
+    local = list_all(root)
+    for t in local:
         if str(t.get("key", "")).upper() == want:
+            return t["id"]
+    if follow_moved:
+        t = _moved_ticket(root, want, local)
+        if t is not None:
+            if notice is not None:
+                notice(f"{want} moved to {t.get('key') or t['id']}")
             return t["id"]
     raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
 
 
+def _moved_ticket(root: Path, want: str, local: list[dict]):
+    """Find a unique, locally issued old key; never follow chains or cross workspaces."""
+    key = _KEY_RE.fullmatch(want)
+    code = config.workspace_code(root)
+    alias_allowed = (
+        key is not None
+        and code is not None
+        and key.group(1) == code.upper()
+        and int(key.group(2)) <= _counter_last(root)
+    )
+    matches = []
+    for t in local if alias_allowed else []:
+        old_keys = _get(t, "ext.sync.old_keys")
+        if isinstance(old_keys, list) and any(isinstance(k, str) and k.upper() == want for k in old_keys):
+            matches.append(t)
+    if len(matches) > 1:
+        keys = ", ".join(sorted(str(t.get("key") or t["id"]) for t in matches))
+        raise Refused(f"{want} is an old key claimed by several tickets: {keys}. Use a current key.")
+    return matches[0] if matches else None
+
+
+def resolve_cli(root: Path, ref, *, json_output: bool = False):
+    """Text CLI follows moved keys visibly; JSON callers must use the current key."""
+    if not json_output:
+        return resolve(root, ref, follow_moved=True, notice=lambda message: print(message, file=sys.stderr))
+    try:
+        return resolve(root, ref)
+    except Refused:
+        if isinstance(ref, str) and _KEY_RE.fullmatch(ref.strip()):
+            want = ref.strip().upper()
+            t = _moved_ticket(root, want, list_all(root))
+            if t is not None:
+                current = t.get("key") or t["id"]
+                raise Refused(f"{want} moved to {current}; use {current}") from None
+        raise
+
+
 def _counter_path(root: Path) -> Path:
     return root / ".orch" / "ticket-counter.json"
+
+
+def _counter_last(root: Path) -> int:
+    try:
+        return int(json.loads(_counter_path(root).read_text(encoding="utf-8")).get("last", 0))
+    except (OSError, ValueError, AttributeError, TypeError):
+        return 0
 
 
 def next_key(root: Path) -> str:
@@ -162,10 +213,7 @@ def next_key(root: Path) -> str:
     code = config.workspace_code(root) or config.set_code(root, config.suggest_code(root.resolve().name))
     with _locked(root, "key"):
         p = _counter_path(root)
-        try:
-            last = int(json.loads(p.read_text(encoding="utf-8")).get("last", 0))
-        except (OSError, ValueError, AttributeError, TypeError):
-            last = 0
+        last = _counter_last(root)
         for t in list_all(root):
             m = _KEY_RE.match(str(t.get("key", "")))
             if m:
@@ -233,7 +281,10 @@ def _read_ticket(p: Path, tid: str) -> dict:
     quarantines or deletes a file."""
     for attempt in range(4):
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("id") != tid:
+                raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
+            return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
                 if isinstance(e, PermissionError):
@@ -513,7 +564,9 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 )  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
-            if include_general or not (isinstance(t, dict) and t.get("general") is True):
+            if not isinstance(t, dict) or t.get("id") != p.stem:
+                continue
+            if include_general or t.get("general") is not True:
                 out.append(_effective(root, t, checker, checker.ledger()))
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -919,7 +972,7 @@ def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
     else:
         raise Refused(humanproof.VERDICT_NEEDED)
     old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
-    entry = humanproof.verdict_sign(root, ticket, kind, person=actor if kind == "person" else None)
+    entry = humanproof.verdict_sign(root, ticket, kind)
     kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
     ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
 
@@ -2276,6 +2329,44 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bo
 # ---------------------------------------------------------------- agent sessions (used by the run lane)
 
 
+OWN_SESSIONS_MAX = 500
+
+
+def _own_sessions(root: Path) -> list[dict]:
+    """Only a valid local record grants permission to resume; absent or corrupt means none."""
+    try:
+        entries = json.loads((root / ".orch" / "run" / "own-sessions.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(entries, list) or any(
+        not isinstance(s, dict)
+        or any(
+            not isinstance(s.get(k), str) or not s[k]
+            for k in ("id", "agent", "host", "ticket_id", "first_seen")
+        )
+        for s in entries
+    ):
+        return []
+    return entries
+
+
+def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -> None:
+    with _locked(root, "own-sessions"):
+        entries = _own_sessions(root)
+        entry = next(
+            (
+                s
+                for s in entries
+                if (s["id"], s["agent"], s["host"], s["ticket_id"]) == (sid, agent, host, tid)
+            ),
+            {"id": sid, "agent": agent, "host": host, "ticket_id": tid, "first_seen": now()},
+        )
+        entries = [s for s in entries if s != entry]
+        entries.append(entry)
+        # atomic temp + replace in net (never through a link); only tickets._write replaces files in here
+        net.write_json(root / ".orch" / "run" / "own-sessions.json", entries[-OWN_SESSIONS_MAX:])
+
+
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
     """Remember the agent session for this agent and machine (updates last_used when it is known)."""
 
@@ -2291,13 +2382,16 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
 
-    return apply_op(root, tid, op)[0]
+    ticket = apply_op(root, tid, op)[0]
+    _record_own_session(root, tid, agent, sid, host)
+    return ticket
 
 
-def sessions_for(ticket: dict, agent: str, host: str) -> str | None:
-    """The session id to resume for this agent on this machine, else None. No age limit."""
+def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> str | None:
+    """Resume local sessions for the trusted file/resolve id, never the peer-controlled ticket id."""
+    owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
     for s in ticket.get("sessions") or []:
-        if s.get("agent") == agent and s.get("host") == host:
+        if s.get("agent") == agent and s.get("host") == host and (s.get("id"), agent, host, tid) in owned:
             return s.get("id")
     return None
 

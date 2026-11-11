@@ -702,5 +702,19 @@ def test_ticket_json_id_cannot_read_outside_local_refs(proj, run, tid):  # noqa:
     (proj / "x.json").write_text(json.dumps([{"kind": "file", "path": "PRIVATE_MARKER"}]))
     for argv in (("ref", "list", tid), ("ticket", "show", tid)):
         code, out, err = run(*argv)
-        assert code == 0, err
-        assert "PRIVATE_MARKER" not in out
+        # a ticket whose embedded id differs from its file is refused outright (#478); never a leak
+        assert code == 0 or "id does not match its filename" in err, err
+        assert "PRIVATE_MARKER" not in out + err
+
+
+@pytest.mark.parametrize("artifact", [False, True])
+def test_old_key_references_do_not_redirect(proj, new_ticket, artifact):
+    owner, other = new_ticket(), new_ticket()
+    ticket = tickets.load(proj, other)
+    old = ticket["key"]
+    ticket["key"] = tickets.next_key(proj)
+    ticket["ext"] = {"sync": {"old_keys": [old]}}
+    tickets.save(proj, ticket)
+    value = f"artifact:{old}/report.txt" if artifact else old
+    with pytest.raises(Refused, match="doesn't exist"):
+        refs.detect(proj, owner, value, check_exists=False)

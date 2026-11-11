@@ -237,7 +237,7 @@ def test_session_is_resumed_the_same_day_and_fresh_the_next(proj, run, gen, one_
     tickets.apply_op(proj, gid, lambda t: t.setdefault("ext", {}).__setitem__("chat", {"session_day": today}))
     assert (
         runs.plan(proj, gid)["session"] in ("sess-1", None)
-        and tickets.sessions_for(tickets.load(proj, gid), "fake", runs.host()) == "sess-1"
+        and tickets.sessions_for(proj, gid, tickets.load(proj, gid), "fake", runs.host()) == "sess-1"
     )
     # a session of an earlier Chat day: cut, the next start is empty
     tickets.apply_op(proj, gid, lambda t: t["ext"].__setitem__("chat", {"session_day": "2020-01-01"}))
@@ -267,7 +267,7 @@ def test_the_helper_is_an_agent_and_cannot_do_human_only_things(proj, run, conn,
 def test_sessions_of_normal_tickets_are_not_cut(proj, new_ticket):
     tid = new_ticket()
     tickets.record_session(proj, tid, "fake", "sess-2", runs.host())
-    assert tickets.sessions_for(tickets.load(proj, tid), "fake", runs.host()) == "sess-2"
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "fake", runs.host()) == "sess-2"
 
 
 # ---------------------------------------------------------------- the helper's role is enforced in code
@@ -1202,3 +1202,15 @@ def test_make_ticket_across_midnight_local(proj, monkeypatch):
     result = chat.make_ticket(proj, "proposal", by="human:me")
     assert len(tickets.list_all(proj)) == 1
     assert chat.read_day(proj, "2026-11-09")["messages"][0]["moved_to"]["id"] == result["ticket"]
+
+
+def test_old_key_mentions_do_not_redirect(proj, new_ticket):
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    old = ticket["key"]
+    ticket["key"] = tickets.next_key(proj)
+    ticket["ext"] = {"sync": {"old_keys": [old]}}
+    tickets.save(proj, ticket)
+    assert chat.refs_in_text(proj, f"See {old}") == []
+    assert chat.clean_refs(proj, [{"kind": "ticket", "key": old}]) == []
+    assert chat.refs_in_text(proj, f"See {ticket['key']}")[0]["id"] == tid

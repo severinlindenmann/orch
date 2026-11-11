@@ -1134,20 +1134,25 @@ def test_history_verifier_failure_is_closed(decision):
 
 @pytest.mark.parametrize("by", ["Human:lindenmann", " human:x", "lindenmann", ["human:x"],
                                "agent:relay from ph_abc", "agent:relay", None])
-def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by):
+def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by, root):
     line = {"at": T2, "by": by, "text": "Approved"}
     peer = tk(history=[line])
     assert merge_ticket(tk(), peer, tk(), NOW)["history"] == [
         {**line, "by": "agent:sync", "text": "(synced, not verified here) Approved"}
     ]
     assert merge_ticket(tk(), tk(), peer, NOW)["history"] == [line]
+    from orch.phone_view import build
+
+    rendered = build(root, merge_ticket(tk(), peer, tk(), NOW), [])["history_tail"]
+    assert rendered[0]["role"] == "agent"
+    assert rendered[0]["text"] == "(synced, not verified here) Approved"
 
 
 @pytest.mark.parametrize("decision", ["wont", "verdict"])
 @pytest.mark.parametrize("known", [None, "base", "local"])
-def test_history_binds_new_decision_author_and_consumes_it_once(decision, known):
+def test_verified_decision_does_not_authenticate_history_author(decision, known):
     check = signed(_step(**WONT))
-    entry = {"kind": "person", "person": "human:Ann", "nonce": "0123456789abcdef", "mac": "A" * 43}
+    entry = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
     peer = tk(checklist=[check]) if decision == "wont" else tk(status="done", verdicts=[entry])
     text = "Marked c1 as won't do" if decision == "wont" else "Looks good"
     base = deepcopy(peer) if known == "base" else tk()
@@ -1159,7 +1164,7 @@ def test_history_binds_new_decision_author_and_consumes_it_once(decision, known)
     out = merge_ticket(base, peer, local, NOW, person_for(ledger_of(check)),
                        verdict_for({TK: entry["mac"]}, []))
     human = [h for h in out["history"] if h["by"] != "agent:sync"]
-    assert human == ([] if known else [peer["history"][1]])
+    assert human == []
     # Returning the untrusted original cannot resurrect a demoted line.
     again = merge_ticket(base, peer, out, NOW, person_for(ledger_of(check)),
                          verdict_for({TK: entry["mac"]}, []))
@@ -1173,8 +1178,11 @@ def test_returned_demotion_cannot_erase_local_unpushed_answer():
     assert line in merge_ticket(tk(), remote, local, NOW)["history"]
 
 
-def test_phone_attribution_and_sync_share_agent_allowlist():
+@pytest.mark.parametrize("by", ["agent:worker", " Agent:Worker ", "AGENT:worker"])
+def test_phone_attribution_and_sync_share_agent_allowlist(by):
     from orch.phone_view import _who, is_agent_history_author
 
-    for by in ("agent:worker", "agent:relay from ph_abc", "human:A", "Human:A", " agent:A", [], None):
-        assert is_agent_history_author(by) == (_who(by)[1] == "agent")
+    assert is_agent_history_author(by)
+    assert _who(by)[1] == "agent"
+    line = {"at": T2, "by": by, "text": "Working"}
+    assert merge_ticket(tk(), tk(history=[line]), tk(), NOW)["history"] == [line]

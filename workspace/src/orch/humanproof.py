@@ -70,7 +70,8 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup "
+    "copy.remove_orphaned copy.retry".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -793,12 +794,20 @@ def is_conn_grant_key(setting) -> bool:
     return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
 
 
+def is_secret_get_key(setting) -> bool:
+    """Exactly a per-profile secret switch (allow_get, agents_may_env)."""
+    return (
+        isinstance(setting, str)
+        and re.fullmatch(r"secret\.(allow_get|agents_may_env)\.[a-z][a-z0-9-]{0,31}", setting) is not None
+    )
+
+
 def record_set(root: Path, setting: str, value, by: str) -> None:
     """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
     but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
     an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
     moment where the file says on and the record is stale."""
-    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting):
+    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting) and not is_secret_get_key(setting):
         raise Refused("That is not a setting a person has to allow.")
     if value is not False and not str(by).startswith("human:"):
         raise Refused(AGENT_REFUSED)
@@ -829,7 +838,7 @@ def conn_grants(root: Path) -> dict:
 def effective(root: Path, setting: str, file_value: bool) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
-    default = SETTING_DEFAULTS[setting]
+    default = SETTING_DEFAULTS.get(setting, False)
     try:
         path, wkey = _settings_path(root)
         data = _settings_load(root, path)
@@ -1313,7 +1322,6 @@ def verdict_record(ticket: dict, entry: dict) -> dict:
         "kind": entry.get("kind"),
         "checks": verdict_checks(ticket),
         "nonce": entry.get("nonce"),
-        **({"person": entry["person"]} if "person" in entry else {}),
     }
 
 
@@ -1358,7 +1366,7 @@ def _verdict_ledger_put(root: Path, tid: str, mac: str | None) -> bool:
     return _ledger_put(root, VERDICT_LEDGER, "orch.verdict-ledger/1", tid, mac)
 
 
-def verdict_sign(root: Path, ticket: dict, kind: str, person: str | None = None) -> dict:
+def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
     """A fresh verdict entry for the ticket as it is NOW (its checklist must be final), recorded as the
     CURRENT ledger entry. No key, no workspace id or a damaged ledger = Refused: never a half-signed Done."""
     from orch import addons
@@ -1374,8 +1382,6 @@ def verdict_sign(root: Path, ticket: dict, kind: str, person: str | None = None)
     if not ws or not isinstance(tid, str):
         raise Refused(VERDICT_LEDGER_DAMAGED)
     entry = {"kind": kind, "nonce": secrets.token_hex(8)}
-    if kind == "person" and person is not None:
-        entry["person"] = person
     entry["mac"] = verdict_mac(key, ws, tid, verdict_record(ticket, entry))
     if not _verdict_ledger_put(root, tid, entry["mac"]):
         raise Refused(VERDICT_LEDGER_DAMAGED)
@@ -1556,6 +1562,8 @@ HANDOFF_HEADS = {
     "chat.make_ticket": (("chat", "make-ticket"),),
     "config.agents_may_finish": (("config", "set"),),
     "config.copy_setup": (("config", "set"),),
+    "copy.remove_orphaned": (("copy", "remove-orphaned"),),
+    "copy.retry": (("copy", "retry"),),
     "config.permissions": (("config", "set"),),
     "config.agent_add": (("config", "agent", "add"),),
     "private.allow": (("private", "allow"),),

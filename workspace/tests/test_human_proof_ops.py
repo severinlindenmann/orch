@@ -137,13 +137,6 @@ def test_looks_good_needs_the_proof(ws, run, monkeypatch):
     code, out, err = _cli(run, monkeypatch, _proof(ws, "ticket.verdict", tid), *args, "--json")
     assert code == 0, out + err
     assert tickets.load(ws, tid)["status"] == "done"
-    doc = tickets.load(ws, tid)
-    entry = doc["verdicts"][0]
-    assert entry["person"] == "human:pat"
-    verify = hp.verdict_verifier(ws)
-    assert verify(entry, doc) == "current"
-    assert verify({**entry, "person": "human:impostor"}, doc) is None
-    assert verify({k: v for k, v in entry.items() if k != "person"}, doc) is None
 
 
 def test_send_back_forged_and_proven(ws, run, monkeypatch):
@@ -2063,3 +2056,87 @@ def test_conn_grant_keys_are_exact_and_need_a_person(ws):
     path, wkey = hp._settings_path(ws)
     assert json.loads(path.read_text())["workspaces"][wkey]["conn.allow.s"]["by"] == "reset"
     assert hp.conn_grants(ws) == {}
+
+
+@pytest.mark.parametrize(
+    "sub,target,extra",
+    [
+        ("remove-orphaned", "deadbeef", []),
+        ("remove-orphaned", "deadbeef:discard", ["--discard"]),
+        ("retry", "t_abcdef12", []),
+    ],
+)
+def test_copy_cleanup_requires_target_bound_person_proof(ws, run, monkeypatch, sub, target, extra):
+    from orch import config, worktrees
+
+    monkeypatch.setattr(config, "COPIES_LOCKED", False)
+    calls = []
+    monkeypatch.setattr(worktrees, sub.replace("-", "_"), lambda *a: calls.append(a) or [])
+    op = "copy." + sub.replace("-", "_")
+    argv = ("copy", sub, target.split(":")[0], *extra, "--json")
+    code, out, err = run(*argv)
+    assert code == 2 and "dashboard on this computer" in out + err
+    card = next(h for h in hp.handoffs(ws) if h["op"] == op)
+    assert card["target"] == target and card["parts"]
+    assert not calls
+    wrong_target = "deadbeef" if extra else ("T-2" if sub == "retry" else "cafebabe")
+    assert _cli(run, monkeypatch, _proof(ws, op, wrong_target), *argv)[0] == 2
+    assert run(*argv, "--by", "agent:x")[0] == 2
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "test-agent")
+    assert run(*argv)[0] == 2
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    assert not calls
+    proof = _proof(ws, op, target)
+    assert _cli(run, monkeypatch, proof, *argv)[0] == 0
+    assert len(calls) == 1
+    assert _cli(run, monkeypatch, proof, *argv)[0] == 2
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "sub,value",
+    [
+        ("remove-orphaned", "../deadbeef"),
+        ("remove-orphaned", "DEADBEEF"),
+        ("retry", "T-1"),
+        ("retry", "t_abcdef/../x"),
+    ],
+)
+def test_review_copy_invalid_target_never_requests_proof(ws, monkeypatch, sub, value):
+    from types import SimpleNamespace
+
+    from orch import cli_status
+
+    calls = []
+    monkeypatch.setattr(hp, "person_by", lambda *a, **kw: calls.append(a) or "human:pat")
+    args = SimpleNamespace(sub=sub, ws8=value, ticket=value, discard=False)
+    with pytest.raises(Refused):
+        cli_status._copy_clean(args, ws)
+    assert calls == []
+    assert hp.handoffs(ws) == []
+
+
+def test_copies_identity_key_survives_workspace_deletion(ws, monkeypatch):
+    from orch import addons, worktrees
+
+    wid = addons.workspace_id(ws, create=True)
+    home = hp.guarded_home(ws)
+    folder = home / "worktrees" / wid[:8]
+    folder.mkdir(parents=True)
+    (folder / ".owner").write_text(str(ws.resolve()))
+    worktrees._remember_copies(ws, folder)
+    keyfile = home / "keys" / "copies" / "identity.key"
+    assert keyfile.is_file()
+    assert keyfile.stat().st_mode & 0o777 == 0o600
+    assert keyfile.parent.stat().st_mode & 0o777 == 0o700
+    (ws / ".orch" / ".local-id").unlink()
+    (ws / ".orch").rmdir()
+    ws.rmdir()
+    other = ws.parent / "another-workspace"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    assert worktrees._known_gone(folder)
+    (folder / "t_abcdef12").mkdir()
+    assert worktrees.orphaned(other) == [{"ws8": wid[:8], "copies": 1}]
+    assert worktrees.remove_orphaned(other, wid[:8], discard=True) == []
+    assert not folder.exists()

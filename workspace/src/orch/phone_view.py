@@ -177,35 +177,25 @@ def size_of(view: dict) -> int:
 
 def is_agent_history_author(by) -> bool:
     """Only explicit agent labels are safe as unverified synced attribution."""
-    return isinstance(by, str) and by.startswith("agent:") and not by.startswith("agent:relay")
+    if not isinstance(by, str):
+        return False
+    label = by.strip().casefold()
+    return label.startswith("agent:") and not label[6:].lstrip().startswith(("relay", "phone", "ph_"))
 
 
 def _who(by: str) -> tuple[str, str]:
-    kind, _, name = str(by).partition(":")
+    kind, _, name = str(by).strip().partition(":")
     name = _clip(name or kind, 64) or "Someone"
     if is_agent_history_author(by):
         return name[:1].upper() + name[1:], "agent"
+    if kind.casefold() == "agent":
+        return "orch", "agent"
     return name, "person"
 
 
 _ADMIN_NOTE = re.compile(
     r"(?:Set|Removed) ext\."
 )  # add-on settings notes: admin business, not for a phone chat
-_FROM_PREFIX = re.compile(r"From [^:\n]{1,100}: ")
-_RELAY_BY = re.compile(r"agent:relay from (ph_\S+)")  # a phone only; a workspace keeps its own label
-
-
-def _phone_line(root: Path, h: dict) -> tuple[str, str, str] | None:
-    """(who, role, text) of a text that came from a phone: its name (never the raw ph_ id), as a person."""
-    from orch import relay
-
-    m = _RELAY_BY.fullmatch(str(h.get("by", "")))
-    if not m:
-        return None
-    text = str(h.get("text", ""))
-    if h.get("via") == "phone":
-        text = _FROM_PREFIX.sub("", text, count=1)
-    return _clip(relay.name_of(root, m.group(1)), 64) or "Phone", "person", text
 
 
 def _agent(root: Path, ticket: dict) -> tuple[str | None, bool]:
@@ -675,15 +665,15 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     for h in (ticket.get("history") or [])[-HISTORY:]:
         if _ADMIN_NOTE.match(str(h.get("text", ""))):
             continue
-        pl = _phone_line(root, h)
-        raw = pl[2] if pl else str(h.get("text", ""))
+        # Ticket history has no verified relay sender; raw labels cannot name a phone.
+        raw = str(h.get("text", ""))
         text = _clip(tickets.history_line(raw, ticket.get("checklist") or []), 1000)
         if not text:
             continue
         at = str(h.get("at") or "")
         if not _TIME.fullmatch(at):
             continue
-        who, role = pl[:2] if pl else _who(h.get("by", ""))
+        who, role = _who(h.get("by", ""))
         hist.append({"at": at, "who": who, "role": role, "text": text})
     view: dict = {
         "title": _clip(ticket.get("title", ""), 200) or "Ticket",

@@ -1,7 +1,7 @@
 """Pure three-way merge of orch tickets (git step 2, design D8). No git, no files, no clock: the caller passes
 `now`. Two machines that merge the same three versions with the same `now` get byte-identical output, in either
 argument order, except history attribution: upstream is remote, mine is local.
-Local history is trusted; only remote-only additions require a newly verified decision.
+Local history is trusted; remote-only person attribution is demoted (decisions do not bind history authors).
 Non-history content is symmetric; revision/updated_at may differ on no-op reuse.
 Shared vectors: contracts/vectors/ticket-merge-v1.json.
 """
@@ -386,8 +386,7 @@ def _ref_id(r):
 
 
 # The verdict entries a ticket carries (human-proof.md "Done needs a signed verdict"). The fields of a stored
-# entry: the core's humanproof.VERDICT_FIELDS (parity-tested). The optional person field is MAC-bound
-# for new verdicts; legacy entries retain their original record and cannot authorize history.
+# entry: the core's humanproof.VERDICT_FIELDS (parity-tested).
 _VERDICT_FIELDS = ("kind", "nonce", "mac")
 VERDICT_CAP = 8
 _NONCE = re.compile(r"^[0-9a-f]{16}$")
@@ -397,8 +396,7 @@ _MAC = re.compile(r"^[A-Za-z0-9_-]{43}$")
 def _verdict_shape(e):
     return (
         isinstance(e, dict)
-        and set(_VERDICT_FIELDS) <= set(e) <= set(_VERDICT_FIELDS) | {"person"}
-        and ("person" not in e or isinstance(e["person"], str))
+        and set(e) == set(_VERDICT_FIELDS)
         and e["kind"] in ("person", "agent")
         and isinstance(e["nonce"], str)
         and bool(_NONCE.match(e["nonce"]))
@@ -433,36 +431,8 @@ def _verdicts(ctx, base, a, b, out):
     return sorted(keep, key=lambda e: e["mac"])
 
 
-def _history_decisions(ctx, ticket):
-    """Verified decision identity -> (author, permitted history texts)."""
-    decisions = {}
-    for check in ticket.get("checklist", []):
-        if _person_wont(ctx, check):
-            decisions[("wont", check["id"], check.get("wont_mac"))] = (
-                check.get("by"),
-                (f"Marked {check['id']} as won't do", f"Marked as won't do: {check.get('text', '')}"),
-            )
-    for entry in ticket.get("verdicts", []):
-        if entry.get("kind") == "person" and ctx.verdict_state(entry, ticket) == "current":
-            decisions[("verdict", entry.get("mac"))] = (
-                entry.get("person"), ("Status review -> done", "Looks good"),
-            )
-    return decisions
-
-
-def _verified_history(h, decisions, used):
-    for key, (author, texts) in sorted(decisions.items()):
-        if key not in used and isinstance(author, str) and h.get("by") == author and h.get("text") in texts:
-            used.add(key)
-            return True
-    return False
-
-
 def _merge(base, a, b, now, person=None, verdict=None):
     ctx = _Ctx(a, b, now, person, verdict)
-    # Capture provenance before checklist normalization imposes remote authority locally.
-    known = _history_decisions(ctx, base).keys() | _history_decisions(ctx, b).keys()
-    decisions = {k: v for k, v in _history_decisions(ctx, a).items() if k not in known}
     # the same id added on both sides with different content: the newer side's item is renumbered
     ren = _renumber_clashes(
         ctx,
@@ -577,18 +547,14 @@ def _merge(base, a, b, now, person=None, verdict=None):
     histories = [{_canon(h) for h in t.get("history", [])} for t in (base, a, b)]
     incoming = histories[1] - histories[2] - histories[0]
     lines = base.get("history", []) + a.get("history", []) + b.get("history", [])
-    decisions = {k: v for k, v in decisions.items() if k in _history_decisions(ctx, out)}
-    used, hist = set(), {}
+    hist = {}
     for h in sorted({_canon(h): h for h in lines}.values(), key=_canon):
         key = _canon(h)
         demoted = {**h, "by": SYNC_BY, "text": "(synced, not verified here) " + h.get("text", "")}
         if (
             not is_agent_history_author(h.get("by"))
             and key not in histories[2]
-            and (
-                _canon(demoted) in histories[2]
-                or (key in incoming and not _verified_history(h, decisions, used))
-            )
+            and (_canon(demoted) in histories[2] or key in incoming)
         ):
             h = demoted
         hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via"), h.get("lost")])] = h
