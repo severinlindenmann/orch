@@ -118,7 +118,18 @@ struct GroupRoomView: View {
                       waitNote: QueuedNote.text(for: item.clientId.flatMap { model.outbox.item(clientId: $0) }))
     }
 
+    /// Deferred: a scroll in the same update that adds the row runs before the lazy list has laid it out, and stops short
+    /// of the new bubble (e2e P4.8). Scroll on the next turn and once more after the row has its real height.
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            jump(proxy)
+            try? await Task.sleep(for: .milliseconds(300))
+            jump(proxy)
+        }
+    }
+
+    private func jump(_ proxy: ScrollViewProxy) {
         if reduceMotion { proxy.scrollTo("group-bottom", anchor: .bottom) }
         else { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("group-bottom", anchor: .bottom) } }
     }
