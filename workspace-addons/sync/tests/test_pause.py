@@ -386,6 +386,47 @@ def test_person_keeps_key_without_live_duplicates(machines, monkeypatch, winner)
         assert repo.safe(a, f"tickets/{tid}.json").read_bytes() == repo.safe(b, f"tickets/{tid}.json").read_bytes()
 
 
+@pytest.mark.parametrize("current", [0, 40])
+def test_keep_key_reserves_live_counter_when_resume_is_offline(machines, monkeypatch, current):
+    from orch import config, tickets
+    from test_step import ticket
+
+    a, b, bare = both(machines)
+    first, second = "tickets/t_first1.json", "tickets/t_later1.json"
+    save(a, first, ticket() | {"id": "t_first1", "key": "DM1-5"})
+    save(b, second, ticket() | {"id": "t_later1", "key": "DM1-5"})
+    save(b, "ticket-counter.json", {"last": current})
+    config.set_code(b, "DM1")
+    success(a)
+    remote = run(b)["paused"]["remote_sha"]
+    offline = bare.with_name("offline.git")
+    original_run = step._run
+
+    def resume_offline(*args, **kwargs):
+        bare.rename(offline)
+        return original_run(*args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(step, "_run", resume_offline)
+        result = pause.keep_key(
+            b, "DM1-5", "t_later1",
+            proof(b, f"sync:keep-key:DM1-5:t_later1:{remote}", m), now=NOW,
+        )
+    assert result["last_error"] and not result.get("paused")
+    reserved = max(current, 5) + 1
+    assert json.loads(repo.safe(b, "ticket-counter.json").read_bytes())["last"] == reserved
+    assert not repo.safe(b, first).exists()
+    created = tickets.create(b, "Created offline", "human:Pat")
+    assert created["key"] == f"DM1-{reserved + 1}"
+    offline.rename(bare)
+    for _ in range(2):
+        assert not success(b).get("paused")
+    assert json.loads(repo.safe(b, first).read_bytes())["key"] == f"DM1-{reserved}"
+    assert step.oid(b, "HEAD") == remote_sha(bare).decode()
+    for path in (first, second, f"tickets/{created['id']}.json", "ticket-counter.json"):
+        assert repo.safe(b, path).read_bytes() == repo.git(b, "show", "HEAD:" + path).stdout
+
+
 def test_ignore_requires_person(machines):
     a, b, _ = both(machines)
     edit(a, ext={"automation": {"enabled": True}})

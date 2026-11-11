@@ -25,6 +25,7 @@ description: Check or change how this computer keeps a private copy of the works
 
 ## Rules
 
+- After a hostile rewrite of a known ticket key, each computer keeps its own key until a person runs `keep-key` on both.
 - Change the setting only when the person asks for it.
 - Copying to another computer or server is a preview and stays off unless the person set it up themselves.
 - Team sharing is not available yet; say so instead of trying.

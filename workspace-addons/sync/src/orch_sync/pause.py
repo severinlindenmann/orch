@@ -213,6 +213,8 @@ def resolve(root, path, keep, args=None, *, now=None):
 
 def keep_key(root, key, tid, args, *, now=None):
     """A local person's choice, pinned to the reviewed remote and live ticket bytes."""
+    # After a hostile rewrite of a known key, each machine keeps its own key until
+    # a person runs keep-key on both machines; one machine's choice cannot authorize the other.
     from contextlib import ExitStack
 
     from . import merge, step
@@ -304,6 +306,8 @@ def keep_key(root, key, tid, args, *, now=None):
         if decisions.get("remote_sha") != remote:
             decisions = {"remote_sha": remote, "files": {}}
         selected_docs[counter_path] = step.encoded(counter)
+        # Reserve in the live counter too, so offline ticket creation cannot reuse a
+        # selected number. merge_counter includes the live value and never decreases it.
         # Save the reservation first and move local losers before resuming the merge.
         # Remote-only tickets stay in sync state until the verified incoming merge.
         order = [counter_path] + [p for p in selected_docs if p not in (counter_path, f"tickets/{tid}.json")] + [f"tickets/{tid}.json"]
@@ -311,7 +315,7 @@ def keep_key(root, key, tid, args, *, now=None):
             data = selected_docs[path]
             step.write(root, "run/sync/choices/" + path, data)
             is_incoming = path == counter_path or originals[path] is None
-            if not is_incoming:
+            if path == counter_path or not is_incoming:
                 step.write(root, path, data)
             decisions["files"][path] = {"keep": "key", "at": now, "incoming": is_incoming}
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
