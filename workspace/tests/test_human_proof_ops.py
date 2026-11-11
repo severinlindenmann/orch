@@ -2067,9 +2067,8 @@ def test_conn_grant_keys_are_exact_and_need_a_person(ws):
     ],
 )
 def test_copy_cleanup_requires_target_bound_person_proof(ws, run, monkeypatch, sub, target, extra):
-    from orch import config, worktrees
+    from orch import worktrees
 
-    monkeypatch.setattr(config, "COPIES_LOCKED", False)
     calls = []
     monkeypatch.setattr(worktrees, sub.replace("-", "_"), lambda *a: calls.append(a) or [])
     op = "copy." + sub.replace("-", "_")

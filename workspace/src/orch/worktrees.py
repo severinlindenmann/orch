@@ -1341,8 +1341,6 @@ def remove(root: Path, ticket: str, wait: float = 10.0) -> list[str]:
     invariant holds,
     else the copy stays and the notes say why. Never raises. The folder is moved to the trash; a detached
     `orch copy clean --trash` empties it."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return []
     try:
         with _scoped(root), runs.locked(root, LOCK_ID, wait=wait):
             before = getattr(_ctx, "deadline", None)
@@ -1359,8 +1357,6 @@ def remove(root: Path, ticket: str, wait: float = 10.0) -> list[str]:
 
 def on_closed(root: Path, ticket: str) -> None:
     """A ticket was done, closed or cancelled: its copy goes. Never raises, never waits long."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         if ticket not in registry(root):
             return  # no copy: nothing to do, no git call, no lock (the sweep finds odd leftovers)
@@ -1371,8 +1367,6 @@ def on_closed(root: Path, ticket: str) -> None:
 
 def on_run_ended(root: Path, tid: str) -> None:
     """A run of `tid` ended: when its ticket is already closed, its copy goes now (it waited for the run)."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         if tid in registry(root) and _ticket_closed(root, tid):
             remove(root, tid, wait=SWEEP_WAIT)
@@ -1468,8 +1462,6 @@ def _empty_trash_in(root: Path, wsdir: Path, deadline: float, grace: bool = True
 
 def empty_trash(root: Path, budget: float = 300.0) -> bool:
     """Empty this workspace's trash (explicit `orch copy clean --trash`, run detached). Never raises."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return True
     try:
         d = copies_dir(root)
         if d is None or not d.is_dir() or _is_link(d) or not _owned(root, d / "t_x000000"):
@@ -1504,8 +1496,6 @@ def _spawn_clean(root: Path, flag: str) -> None:
 
 def spawn_trash_clean(root: Path) -> None:
     """Empty the trash in a detached process, so a big folder never delays the person's command."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         d = copies_dir(root)
         if d is not None and (d / TRASH).is_dir():
@@ -1517,8 +1507,6 @@ def spawn_trash_clean(root: Path) -> None:
 def schedule_sweep(root: Path) -> None:
     """What a START does: never the sweep itself (its saves must not run under a start's patience), only a
     detached `orch copy clean --background`, and only when there is anything that could need cleaning."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return None
     try:
         d = copies_dir(root)
         if (d is not None and d.is_dir() and any(True for _ in os.scandir(d))) or (
@@ -1667,10 +1655,6 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
     is still reachable); one that cannot be saved stays, unless `discard` (CLI only: "throw the changes
     away").
     Refused for an agent. Never touches a workspace that is there."""
-    if config.COPIES_LOCKED:  # no human proof yet for this delete (B12 follow-up): refused while locked
-        raise Refused(
-            "Separate copies are paused in this release, so this isn't available yet. Nothing was changed."
-        )
     if tickets.agent_tool():
         raise Refused("Only a person can remove copies of a project that is gone.")
     if not isinstance(ws8, str) or not _WS8.fullmatch(ws8):
@@ -1743,10 +1727,6 @@ def retry(root: Path, ticket: str) -> list[str]:
     LOCK_STALE_SECONDS;
     safegit runs no such operation, so it is a plain unlink with these checks), then remove the copy through
     the normal path. Refused for an agent."""
-    if config.COPIES_LOCKED:  # no human proof yet for this delete (B12 follow-up): refused while locked
-        raise Refused(
-            "Separate copies are paused in this release, so this isn't available yet. Nothing was changed."
-        )
     if tickets.agent_tool():
         raise Refused("Only a person can do this.")
     if not isinstance(ticket, str) or not _TID.fullmatch(ticket):
@@ -1799,8 +1779,6 @@ def sweep(root: Path, budget: float = SWEEP_BUDGET) -> list[str]:
     tickets, (3) leftover branches. The trash is emptied by a detached process. Triggers: orch start,
     orch run
     start, orch copy clean, the dashboard's "Clean up now"."""
-    if config.COPIES_LOCKED:  # copies are locked Off in this release: nothing is removed automatically
-        return []
     notes: list[str] = []
     try:
         deadline = time.monotonic() + budget

@@ -834,10 +834,6 @@ def test_usage_counts_copies_and_size_without_following_links(repo, tmp_path):
 # ---------------------------------------------------------------- triggers
 
 
-@pytest.mark.skipif(
-    __import__("orch.config", fromlist=["x"]).COPIES_LOCKED,
-    reason="runs orch in a child process, where copies are locked Off; re-enable with the B12 follow-up",
-)
 def test_orch_copy_clean_removes_and_says_what_is_left(repo, subprocess_home):
     import sys
 
