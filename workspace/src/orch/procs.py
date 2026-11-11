@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import os
+import signal
+import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+
+_run = subprocess.run  # module-local seam: tests must not patch subprocess.run for other threads
 
 
 def orch_python_argv(*args: str) -> list[str]:
@@ -30,6 +35,51 @@ def background_popen_kwargs() -> dict[str, int | bool]:
             "close_fds": True,
         }
     return {"start_new_session": True, "stdin": subprocess.DEVNULL}
+
+
+def stop_tree(pid: int, *, verified: Callable[[], bool]) -> bool:
+    """Stop only a recorded service, after its caller's full identity check.
+
+    Windows venv launchers can leave children behind: taskkill includes descendants of this pid.
+    Never walk up to a parent (which may not be ours). POSIX retains single-pid SIGTERM.
+    A taskkill failure is surfaced so callers keep the record for a later stop attempt.
+    """
+    if type(pid) is not int or pid <= 1 or not verified():
+        return False
+    if sys.platform == "win32":
+        try:
+            _run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5,
+                check=True,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError("The service could not be stopped. Try again in a moment.") from exc
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    return True
+
+
+def wait_port_free(port: int, timeout: float = 5.0) -> bool:
+    """Allow an exiting local server time to release its listening port before starting another."""
+    end = time.monotonic() + timeout
+    while True:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                pass
+        except ConnectionRefusedError:
+            return True
+        except OSError:
+            pass  # an inconclusive probe does not establish that the port is free
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.1, remaining))
 
 
 def _iso(ts: float) -> str:

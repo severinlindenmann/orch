@@ -859,3 +859,32 @@ def test_new_remote_ticket_history_is_not_shared_history(machines):
     success(a)
     assert load(a)["history"] == [expected]
     assert line in load(b)["history"] and expected in load(b)["history"]
+
+
+def test_first_sync_marks_ownership_before_import(machines, monkeypatch):
+    from orch import runs, tickets
+
+    a, b, _ = machines
+    value = ticket() | {
+        "sessions": [{"id": "peer-session", "agent": "claude", "host": runs.host(), "last_used": NOW}]
+    }
+    save(a, value=value)
+    success(a)
+    marker = b / ".orch/run/own-sessions.adopted"
+    assert json.loads(marker.read_text()) == {"adopted": True}
+    assert not (b / ".orch" / TICKET).exists()
+    original = repo.git
+
+    def git(root, *args, **kwargs):
+        if root == b and args[0] == "fetch":
+            assert json.loads(marker.read_text()) == {"adopted": True}
+            assert not (b / ".orch" / TICKET).exists()
+        return original(root, *args, **kwargs)
+
+    monkeypatch.setattr(repo, "git", git)
+    success(b)
+    assert json.loads(marker.read_text()) == {"adopted": True}
+    assert "sessions" not in load(b)  # normal sync also strips peer session metadata
+    # Even if peer session metadata later arrives on disk, it cannot be adopted.
+    save(b, value=load(b) | {"sessions": value["sessions"]})
+    assert tickets.sessions_for(b, value["id"], load(b), "claude", runs.host()) is None

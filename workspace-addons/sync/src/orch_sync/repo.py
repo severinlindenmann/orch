@@ -153,6 +153,10 @@ def state(root):
 
 def ensure(root):
     current = state(root)
+    if current in ('new', 'ready'):
+        from orch import tickets  # adopt this machine's own sessions BEFORE any remote ticket can arrive
+
+        tickets.adopt_own_sessions(Path(root))
     if current == 'ready':
         return
     if current != 'new':

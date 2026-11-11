@@ -21,6 +21,8 @@ from pathlib import Path
 
 from orch import config, humanproof, net, procs, saferead, syncgate, term
 from orch.errors import Refused
+from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
+from orch.session_ids import valid_session_id
 from orch.text import clean_untrusted
 
 STATUSES = ("open", "active", "waiting", "ready", "review", "done", "dropped")
@@ -2332,27 +2334,94 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bo
 OWN_SESSIONS_MAX = 500
 
 
+def adopt_own_sessions(root: Path) -> None:
+    """Run the one-time adoption of this machine's existing sessions now (if it hasn't run yet). The sync
+    add-on calls this before its first fetch, so synced tickets can never take part in the adoption."""
+    if not tickets_dir(root).is_dir():  # nothing to adopt; don't create the folder (the lock lives there)
+        marker = root / ".orch" / "run" / "own-sessions.adopted"
+        if not marker.exists():
+            net.write_json(marker, {"adopted": True})
+        return
+    _own_sessions(root)
+
+
 def _own_sessions(root: Path) -> list[dict]:
-    """Only a valid local record grants permission to resume; absent or corrupt means none."""
+    """Read local ownership, adopting pre-record sessions once under the writer's lock."""
+    with _locked(root, "own-sessions"):
+        return _own_sessions_locked(root)
+
+
+def _own_sessions_locked(root: Path) -> list[dict]:
+    """Caller holds own-sessions. After adoption, absent or corrupt records grant nothing."""
+    path = root / ".orch" / "run" / "own-sessions.json"
     try:
-        entries = json.loads((root / ".orch" / "run" / "own-sessions.json").read_text(encoding="utf-8"))
+        entries = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
-    if not isinstance(entries, list) or any(
-        not isinstance(s, dict)
-        or any(
-            not isinstance(s.get(k), str) or not s[k]
-            for k in ("id", "agent", "host", "ticket_id", "first_seen")
+        entries = []
+    entries = [
+        s
+        for s in (entries if isinstance(entries, list) else [])
+        if isinstance(s, dict)
+        and valid_session_id(s.get("id"))
+        and all(
+            isinstance(s.get(k), str) and s[k] for k in ("id", "agent", "host", "ticket_id", "first_seen")
         )
-        for s in entries
-    ):
-        return []
+    ]
+    marker = path.with_name("own-sessions.adopted")
+    if not marker.exists():
+        from orch import harness, runs
+
+        host, first_seen = runs.host(), now()
+        owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in entries}
+        adopted = []
+        # Shared tickets cannot establish local ownership, even when the hostname matches.
+        # General/Chat tickets also use sessions_for and therefore have session semantics.
+        candidates = []
+        for p in sorted(tickets_dir(root).glob("t_*.json")):
+            try:
+                ticket = load(root, p.stem)  # refuses embedded id / trusted filename mismatches
+            except (OSError, ValueError, Refused):
+                continue
+            sessions = ticket.get("sessions")
+            if not isinstance(sessions, list) or not sessions:
+                continue
+            candidates.append((p, sessions))
+        tracked = harness.tracked_ticket_paths(root) if candidates else set()
+        for p, sessions in candidates:
+            if tracked is None or p.relative_to(root).as_posix().casefold() in tracked:
+                continue  # git failures grant no ownership
+            for s in sessions:
+                if (
+                    not isinstance(s, dict)
+                    or s.get("host") != host
+                    or not valid_session_id(s.get("id"))
+                    or not isinstance(s.get("agent"), str)
+                    or not config.NAME_RE.fullmatch(s["agent"])
+                ):
+                    continue
+                key = (s["id"], s["agent"], host, p.stem)
+                if key not in owned:
+                    adopted.append(
+                        {
+                            "id": s["id"],
+                            "agent": s["agent"],
+                            "host": host,
+                            "ticket_id": p.stem,
+                            "first_seen": first_seen,
+                        }
+                    )
+                    owned.add(key)
+        # Keep valid old ownership preferentially when migration reaches the cap.
+        merged = {(s["id"], s["agent"], s["host"], s["ticket_id"]): s for s in adopted + entries}
+        entries = list(merged.values())[-OWN_SESSIONS_MAX:]
+        net.write_json(path, entries)
+        net.write_json(marker, {"adopted": True})
     return entries
 
 
 def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -> None:
     with _locked(root, "own-sessions"):
-        entries = _own_sessions(root)
+        entries = _own_sessions_locked(root)
         entry = next(
             (
                 s
@@ -2369,6 +2438,11 @@ def _record_own_session(root: Path, tid: str, agent: str, sid: str, host: str) -
 
 def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dict:
     """Remember the agent session for this agent and machine (updates last_used when it is known)."""
+    if not valid_session_id(sid):
+        raise Refused(
+            "Invalid session id: use 1-128 letters, digits, underscores or hyphens, "
+            "starting with a letter or digit."
+        )
 
     def op(t):
         sessions = t.setdefault("sessions", [])
@@ -2391,7 +2465,13 @@ def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> s
     """Resume local sessions for the trusted file/resolve id, never the peer-controlled ticket id."""
     owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
     for s in ticket.get("sessions") or []:
-        if s.get("agent") == agent and s.get("host") == host and (s.get("id"), agent, host, tid) in owned:
+        if (
+            isinstance(s, dict)
+            and valid_session_id(s.get("id"))
+            and s.get("agent") == agent
+            and s.get("host") == host
+            and (s["id"], agent, host, tid) in owned
+        ):
             return s.get("id")
     return None
 

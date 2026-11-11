@@ -204,3 +204,47 @@ def test_command_line_must_name_exactly_this_folder(ws, kills, monkeypatch):
     )
     monkeypatch.setattr(service, "ident", lambda port, c: {"pid": me, "mac": service.mac("b" * 32, c)})
     assert service.stop(ws) == "not verified" and kills == []
+
+
+@pytest.mark.parametrize("matches", [False, True])
+def test_windows_stop_checks_record_before_taskkill(ws, monkeypatch, matches):
+    from unittest.mock import Mock
+
+    from orch import procs
+
+    rec = {"pid": 4242, "port": 8430, "nonce": "a" * 32, "started": "original"}
+    service.runfiles.write_json(service._dir(ws) / "server.json", rec)
+    monkeypatch.setattr(service.runfiles, "proc_start", lambda pid: "original" if matches else "reused")
+    monkeypatch.setattr(service, "alive", lambda pid: True)
+    monkeypatch.setattr(service.runfiles, "command", lambda pid: "ignored")
+    monkeypatch.setattr(service.runfiles, "runs_args", lambda *args: True)
+    monkeypatch.setattr(service, "ident", lambda port, c: {"pid": 4242, "mac": service.mac(rec["nonce"], c)})
+    run = Mock()
+    monkeypatch.setattr(procs.sys, "platform", "win32")
+    monkeypatch.setattr(procs, "_run", run)
+    assert service.stop(ws) == ("stopped" if matches else "not verified")
+    if matches:
+        assert run.call_args.args[0] == ["taskkill", "/PID", "4242", "/T", "/F"]
+    else:
+        run.assert_not_called()
+
+
+def test_start_waits_for_old_listener_before_spawn(ws, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from orch import procs
+
+    now = [0.0]
+    monkeypatch.setattr(procs.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(procs.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    probe = MagicMock(side_effect=[MagicMock(), MagicMock(), ConnectionRefusedError()])
+    monkeypatch.setattr(procs.socket, "create_connection", probe)
+
+    def spawn(*args, **kwargs):
+        assert probe.call_count == 3
+        assert now[0] == pytest.approx(0.2)
+        raise RuntimeError("reached spawn after port freed")
+
+    monkeypatch.setattr(service.subprocess, "Popen", spawn)
+    with pytest.raises(RuntimeError, match="reached spawn after port freed"):
+        service.start(ws, port=8430)
