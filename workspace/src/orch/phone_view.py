@@ -822,6 +822,92 @@ def update_state(root: Path, fn) -> dict:
         return st
 
 
+_JPEG_META_OK = {0xE0, 0xE1, 0xE2}  # APP0 (JFIF), APP1 (Exif/XMP), APP2 (ICC); COM and APP3+ are refused
+_JPEG_PLAIN = {0xDB, 0xC4, 0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xDD, 0xDA}
+JPEG_META_MAX = 128 * 1024  # all metadata segments together
+JPEG_PLAIN_MAX = 8 * 1024  # all table/frame segments together (real files use ~1 KB): no payload room
+
+
+def _jpeg_walk(data: bytes) -> list[bytes] | None:
+    """The metadata segments of a JPEG that is structurally plain, else None: only known segments, then the
+    entropy data up to one EOI that ends the file (NUL padding allowed). Nothing may follow (no archive behind
+    the picture), no COM / APP3+ segment, bounded metadata."""
+    if not data.startswith(b"\xff\xd8"):
+        return None
+    pos, meta, size, plain = 2, [], 0, 0
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            return None
+        m = data[pos + 1]
+        n = int.from_bytes(data[pos + 2 : pos + 4], "big")
+        if n < 2 or pos + 2 + n > len(data):
+            return None
+        if m in _JPEG_META_OK:
+            size += n
+            meta.append(data[pos + 4 : pos + 2 + n])
+            if size > JPEG_META_MAX:
+                return None
+        elif m not in _JPEG_PLAIN:
+            return None
+        else:
+            plain += n
+            if plain > JPEG_PLAIN_MAX:
+                return None
+        pos += 2 + n
+        if m == 0xDA:  # entropy-coded data: FF00 and RSTn are data, any other marker ends it
+            while pos + 1 < len(data):
+                if data[pos] == 0xFF and data[pos + 1] not in (0x00, *range(0xD0, 0xD8)):
+                    break
+                pos += 1
+            if data[pos : pos + 2] != b"\xff\xd9":
+                return None
+            return meta if not data[pos + 2 :].strip(b"\x00") else None
+    return None
+
+
+def _photo_verdict(data: bytes) -> str:
+    """ok / secret / unknown for an evidence JPEG `_scan` could not fully check: it must be structurally plain
+    (_jpeg_walk) and neither its bytes nor the UTF-16 readings of its metadata may hold a secret. Any other
+    format is unknown (fail closed)."""
+    meta = _jpeg_walk(data)
+    if meta is None:
+        return "unknown"
+    texts = [data]
+    for codec in ("utf-16-le", "utf-16-be"):  # both byte orders, both alignments, over the whole file
+        texts += [data[k:].decode(codec, "ignore").encode() for k in (0, 1)]
+    return "secret" if any(_has_secret(t) for t in texts) else "ok"
+
+
+def _gate(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:
+    """The one secret gate in front of every phone upload (proof files and named artifacts alike): True when
+    `data` may be sent. A file that looks like a password or key, or can't be checked, is not sent and is
+    marked once in the ticket log and in state["secret_skipped"] (fail closed). `photo_ok` (evidence only): a
+    picture that can't be fully checked (a JPEG photo) still goes when its raw bytes hold no secret."""
+    try:
+        verdict = _scan(data, name)
+    except Exception:  # a malformed file skips only itself, never the whole view
+        verdict = "unknown"
+    if verdict == "unknown" and photo_ok and _is_image(data, name):
+        verdict = _photo_verdict(data)
+    name = Path(name).name
+    if verdict == "ok":
+        return True
+    why = (
+        "it looks like it holds a password or key"
+        if verdict == "secret"
+        else "it can't be checked for passwords"
+    )
+    if state is not None:
+        skipped = state.setdefault("secret_skipped", [])
+        key = f"{name}:{hashlib.sha256(data).hexdigest()}"
+        if key not in skipped:
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
+            skipped.append(key)
+            del skipped[:-200]
+    return False
+
+
 def _upload(root: Path, data: bytes, state: dict) -> dict | None:
     """Upload a proof file once (cached by content); {blob_id, size} or None when the relay says no."""
     from orch import relay
@@ -900,7 +986,11 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         at = ev["at"] if _TIME.fullmatch(str(ev.get("at"))) else at0
         if ev.get("type") == "file":
             f = _proof_file(root, tid, ev)
-            b = _upload(root, f[1], state) if (f and upload and state is not None) else None
+            b = (
+                _upload(root, f[1], state)
+                if (f and upload and state is not None and _gate(root, tid, f[1], f[0], state, photo_ok=True))
+                else None
+            )
             if not b:
                 continue
             kind = "image" if Path(f[0]).suffix.lower() in IMAGE_EXT else "file"
@@ -975,21 +1065,7 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         if data is None:
             continue
         sha = hashlib.sha256(data).hexdigest()
-        verdict = _scan(data, name)
-        if verdict != "ok":
-            why = (
-                "it looks like it holds a password or key"
-                if verdict == "secret"
-                else "it can't be checked for passwords"
-            )
-            if state is not None:
-                skipped = state.setdefault("secret_skipped", [])
-                key = f"{name}:{sha}"
-                if key not in skipped:
-                    with contextlib.suppress(Exception):
-                        tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
-                    skipped.append(key)
-                    del skipped[:-200]
+        if not _gate(root, tid, data, name, state):
             continue
         if sha in evidence_hashes:  # the same content is already in the view (evidence or an artifact)
             continue
