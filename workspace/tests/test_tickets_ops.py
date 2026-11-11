@@ -270,10 +270,10 @@ def test_sessions_record_and_find(proj, validate, new_ticket):
     t = tickets.load(proj, tid)
     validate(t)
     assert len(t["sessions"]) == 2
-    assert tickets.sessions_for(proj, t, "my-agent", "laptop") == "s-2"
-    assert tickets.sessions_for(proj, t, "my-agent", "vps") == "s-1"
-    assert tickets.sessions_for(proj, t, "other", "laptop") is None
-    assert tickets.sessions_for(proj, t, "my-agent", "elsewhere") is None
+    assert tickets.sessions_for(proj, tid, t, "my-agent", "laptop") == "s-2"
+    assert tickets.sessions_for(proj, tid, t, "my-agent", "vps") == "s-1"
+    assert tickets.sessions_for(proj, tid, t, "other", "laptop") is None
+    assert tickets.sessions_for(proj, tid, t, "my-agent", "elsewhere") is None
     for i in range(40):
         tickets.record_session(proj, tid, "a", f"s{i}", f"h{i}")
     assert len(tickets.load(proj, tid)["sessions"]) == 32
@@ -502,20 +502,21 @@ def test_sessions_require_local_ownership(proj, new_ticket):
     t = tickets.load(proj, tid)
     t["sessions"].insert(0, {"id": "foreign", "agent": "agent", "host": "host"})
     tickets.save(proj, t)  # incoming ticket JSON may contain a session from another machine
-    assert tickets.sessions_for(proj, tickets.load(proj, tid), "agent", "host") == "local"
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "agent", "host") == "local"
     t["sessions"] = t["sessions"][:1]
-    assert tickets.sessions_for(proj, t, "agent", "host") is None
+    assert tickets.sessions_for(proj, tid, t, "agent", "host") is None
     # Neither the same id under another agent/host nor another workspace grants ownership.
     assert (
         tickets.sessions_for(
             proj,
+            tid,
             {"id": tid, "sessions": [{"id": "local", "agent": "other", "host": "host"}]},
             "other",
             "host",
         )
         is None
     )
-    assert tickets.sessions_for(proj / "other", tickets.load(proj, tid), "agent", "host") is None
+    assert tickets.sessions_for(proj / "other", tid, tickets.load(proj, tid), "agent", "host") is None
 
 
 @pytest.mark.parametrize("contents", [None, "{", "{}", '[{"id":"local"}]', "\udcff"])
@@ -527,7 +528,7 @@ def test_sessions_missing_or_corrupt_record(proj, new_ticket, contents):
         p.unlink()
     else:
         p.write_bytes(contents.encode("utf-8", errors="surrogateescape"))
-    assert tickets.sessions_for(proj, tickets.load(proj, tid), "agent", "host") is None
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "agent", "host") is None
 
 
 def test_own_sessions_bounded(proj, new_ticket):
@@ -545,7 +546,11 @@ def test_own_sessions_bounded(proj, new_ticket):
     assert entries[-1]["first_seen"] == first_seen
     assert (
         tickets.sessions_for(
-            proj, {"id": tid, "sessions": [{"id": "s0", "agent": "agent", "host": "host"}]}, "agent", "host"
+            proj,
+            tid,
+            {"id": tid, "sessions": [{"id": "s0", "agent": "agent", "host": "host"}]},
+            "agent",
+            "host",
         )
         is None
     )
@@ -602,8 +607,37 @@ def test_sessions_cannot_cross_tickets(proj, new_ticket):
     copied = tickets.load(proj, b)
     copied["sessions"] = original["sessions"]
     tickets.save(proj, copied)
-    assert tickets.sessions_for(proj, tickets.load(proj, b), "agent", "host") is None
-    assert tickets.sessions_for(proj, original, "agent", "host") == "local"
+    assert tickets.sessions_for(proj, b, tickets.load(proj, b), "agent", "host") is None
+    assert tickets.sessions_for(proj, a, original, "agent", "host") == "local"
+
+
+@pytest.mark.parametrize("embedded_id", ["other", None])
+def test_sessions_spoofed_ticket_id_refused(proj, new_ticket, embedded_id):
+    from orch.errors import Refused
+
+    a, b = new_ticket(), new_ticket()
+    original = tickets.record_session(proj, a, "agent", "local", "host")
+    copied = tickets.load(proj, b)
+    key = copied["key"]
+    copied["sessions"] = original["sessions"]
+    if embedded_id == "other":
+        copied["id"] = a
+    else:
+        del copied["id"]
+    path = tickets.ticket_path(proj, b)
+    contents = json.dumps(copied)
+    path.write_text(contents, encoding="utf-8")
+
+    # Even a caller holding unvalidated peer JSON must use the trusted file id.
+    assert tickets.sessions_for(proj, b, copied, "agent", "host") is None
+    with pytest.raises(Refused, match="id does not match its filename"):
+        tickets.load(proj, b)
+    assert tickets.list_all(proj) == [original]
+    with pytest.raises(Refused, match="doesn't exist"):
+        tickets.resolve(proj, key)
+    assert path.read_text(encoding="utf-8") == contents
+    assert tickets.load(proj, a) == original
+    assert tickets.sessions_for(proj, a, original, "agent", "host") == "local"
 
 
 def test_sessions_legacy_record_fails_closed(proj, new_ticket):
@@ -613,9 +647,9 @@ def test_sessions_legacy_record_fails_closed(proj, new_ticket):
     entries = json.loads(p.read_text())
     del entries[0]["ticket_id"]
     p.write_text(json.dumps(entries))
-    assert tickets.sessions_for(proj, ticket, "agent", "host") is None
+    assert tickets.sessions_for(proj, tid, ticket, "agent", "host") is None
     tickets.record_session(proj, tid, "agent", "local", "host")
-    assert tickets.sessions_for(proj, ticket, "agent", "host") == "local"
+    assert tickets.sessions_for(proj, tid, ticket, "agent", "host") == "local"
 
 
 @pytest.mark.parametrize("alias", ["DM1-2", "AB-1"])

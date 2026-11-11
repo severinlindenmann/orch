@@ -241,7 +241,10 @@ def _read_ticket(p: Path, tid: str) -> dict:
     quarantines or deletes a file."""
     for attempt in range(4):
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("id") != tid:
+                raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
+            return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
                 if isinstance(e, PermissionError):
@@ -491,7 +494,9 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 )  # no retry: a listing never stalls on a bad file
             except (OSError, ValueError):
                 continue
-            if include_general or not (isinstance(t, dict) and t.get("general") is True):
+            if not isinstance(t, dict) or t.get("id") != p.stem:
+                continue
+            if include_general or t.get("general") is not True:
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
@@ -2295,15 +2300,11 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
     return ticket
 
 
-def sessions_for(root: Path, ticket: dict, agent: str, host: str) -> str | None:
-    """Resume only sessions recorded for this ticket by this workspace on this machine. No age limit."""
+def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> str | None:
+    """Resume local sessions for the trusted file/resolve id, never the peer-controlled ticket id."""
     owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
     for s in ticket.get("sessions") or []:
-        if (
-            s.get("agent") == agent
-            and s.get("host") == host
-            and (s.get("id"), agent, host, ticket.get("id")) in owned
-        ):
+        if s.get("agent") == agent and s.get("host") == host and (s.get("id"), agent, host, tid) in owned:
             return s.get("id")
     return None
 
