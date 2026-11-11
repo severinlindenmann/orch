@@ -97,7 +97,7 @@
       return e;
     }
     function width(e, value) {
-      if (number(value)) e.setAttribute('style', 'width:' + Math.max(0, Math.min(100, value)) + '%');
+      if (number(value)) e.style.setProperty('width', Math.max(0, Math.min(100, value)) + '%');
       return e;
     }
     const result = validate(doc);

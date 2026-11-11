@@ -45,7 +45,7 @@ def run_dir(root: Path, name: str) -> Path:
     for p in (orch, run, d):
         if is_link(p):
             raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
-        if p is not orch and not mkdir_private(p) and p is d:
+        if p is not orch and not mkdir_private(p, root) and p is d:
             check_listable(p)
         if is_link(p):
             raise RuntimeError(f"{p} is a symbolic link; orch does not use it. Remove it and try again.")
@@ -112,13 +112,14 @@ def system_icacls() -> str:
     return str(Path(d) / "icacls.exe")
 
 
-def grant_user(d: Path) -> None:
+def grant_user(d: Path, root: Path | None = None) -> None:
     """Windows: mkdir(mode=0o700) gives only OWNER RIGHTS, SYSTEM and Administrators. A folder made by an elevated
     process is owned by Administrators, so the same user without elevation is locked out. Also grant the current
     user (inheritable); nobody else (not Users, not Everyone). Best effort: a standard user does not need it."""
     sid = user_sid()
     if not sid:
         return
+    check_orch_area(d, root)  # rights change only inside this workspace's .orch folder
     try:  # right before the grant: only a plain folder, never a link someone swapped in after mkdir
         st = os.lstat(d)
     except OSError:
@@ -137,14 +138,51 @@ def grant_user(d: Path) -> None:
         pass
 
 
-def mkdir_private(p: Path) -> bool:
-    """Create p as 0700 when it is missing; True only when this call created it (an existing folder is not touched)."""
+def _anchor(p: Path, root: Path | None) -> Path | None:
+    """The workspace root whose .orch folder p must be in: the one the caller passes (run_dir/runs_dir do);
+    without it, the parent of the nearest `.orch` component of p as written (never of its real path)."""
+    if root is not None:
+        return Path(root)
+    for c in (p, *p.parents):
+        if c.name.casefold() == ".orch":
+            return c.parent
+    return None  # no .orch in the path: nothing can be inside it
+
+
+def in_orch_area(p: Path, root: Path | None = None) -> bool:
+    """True when p's real path (links and junctions resolved) is the real <workspace>/.orch folder or below it.
+    Both sides are resolved the same way, so mapped drives and UNC paths keep working; a folder that merely
+    has the name .orch somewhere else (another workspace, a link target) does not count."""
+    base = _anchor(Path(p), root)
+    if base is None:
+        return False
+    area = os.path.normcase(os.path.realpath(base / ".orch"))
+    r = os.path.normcase(os.path.realpath(p))
+    try:
+        return os.path.commonpath([r, area]) == area
+    except ValueError:  # different drives
+        return False
+
+
+def check_orch_area(p: Path, root: Path | None = None) -> None:
+    """The add-on makes private folders and grants rights ONLY inside a workspace's .orch folder: never the
+    current folder, the workspace root, the Public folder or a profile folder. Refused otherwise (no fallback)."""
+    if not in_orch_area(p, root):
+        raise RuntimeError(
+            f"{p} is not inside the workspace's .orch folder; orch will not change its rights."
+        )
+
+
+def mkdir_private(p: Path, root: Path | None = None) -> bool:
+    """Create p as 0700 when it is missing; True only when this call created it (an existing folder is not touched).
+    Only inside a workspace's .orch folder (checked before the folder is made)."""
+    check_orch_area(p, root)
     try:
         p.mkdir(mode=0o700)
     except FileExistsError:
         return False
     if WINDOWS:
-        grant_user(p)
+        grant_user(p, root)
     return True
 
 

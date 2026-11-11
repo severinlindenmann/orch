@@ -5,7 +5,7 @@ phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (ve
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
-With kinds (activity, secrets, jobs, blocks, inventory, addon-manifest, screen, counts, human, proposal) only those draft-02 checks run.
+With kinds (activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -16,6 +16,7 @@ import sys
 import tomllib
 import types
 import unicodedata
+import urllib.parse
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -596,6 +597,87 @@ def kind_blocks():
         if not any(f.name.startswith(prefix) for f in files):
             fails.append(f"vectors/blocks: needs at least one {prefix}* fixture")
 
+
+
+# --- phone results (blocks.md, Phone; message.schema.json ticket_view.results) ------------------------------------
+PHONE_KNOWN = [b for b in BLOCK_TYPES if b != "log"]  # log blocks never go to the phone
+
+
+def _cj(o):
+    return len(json.dumps(o, separators=(",", ":"), ensure_ascii=False).encode())
+
+
+def phone_trim(r, more, result_bytes, rows):
+    """Reference: what the sending workspace makes of one result for the phone (before the value hider)."""
+    r = json.loads(json.dumps(r))
+    out, cut = [], False
+    for b in r["doc"]["blocks"]:
+        t = b.get("type")
+        if t not in PHONE_KNOWN:
+            cut = True
+            continue
+        if t == "table" and len(b["rows"]) > rows:
+            b["total_rows"] = b.get("total_rows", len(b["rows"]))
+            b["rows"] = b["rows"][:rows]
+            cut = True
+        if t == "link":
+            u = urllib.parse.urlsplit(b["url"])
+            b["url"] = urllib.parse.urlunsplit((u.scheme, u.netloc, u.path, "", ""))
+        if t == "file":
+            b["path"] = b["path"].rsplit("/", 1)[-1]
+        out.append(b)
+    tail = {"type": "summary", "text": more}
+    if cut and out[-1:] != [tail]:
+        out.append(tail)
+    r["doc"]["blocks"] = out
+    while _cj(r) > result_bytes or len(out) > 50:
+        if out[-1:] != [tail]:
+            out.append(tail)
+        if len(out) == 1:
+            break
+        out.pop(-2)
+    return r
+
+
+def kind_phone_results():
+    pv = _vec("phone-results-v1.json")
+    bv, rv, mv = _w("blocks"), _w("message", "phone_result"), _w("message")
+    trim = lambda r: phone_trim(r, pv["more_text"], pv["result_bytes"], pv["table_rows"])  # noqa: E731
+
+    def snapshot_ok(label, r):
+        for m in blocks_errors(bv, r["doc"])[:1]:
+            fails.append(f"{label}: doc is not a valid orch.blocks/1 document: {m}")
+        for m in _msgs(rv, r)[:1]:
+            fails.append(f"{label}: not a valid ticket_view result: {m}")
+        if trim(r) != r:
+            fails.append(f"{label}: not in the trimmed phone form (trimming it again changes it)")
+        if _cj(r) > pv["result_bytes"]:
+            fails.append(f"{label}: over {pv['result_bytes']} bytes")
+
+    for c in pv["trim"]:
+        label = f"phone-results trim {c['name']}"
+        for m in blocks_errors(bv, c["in"]["doc"])[:1]:
+            fails.append(f"{label}: input doc invalid: {m}")
+        _expect(label, trim(c["in"]), c["out"])
+        snapshot_ok(label, c["out"])
+    cases = [c for c in _vec("ticket-view-v1.json")["cases"] if c["name"].startswith("results-")]
+    if not any(c["ok"] for c in cases) or all(c["ok"] for c in cases):
+        fails.append("ticket-view vector: needs results-* cases that pass and that are refused")
+    for c in cases:
+        label = f"ticket-view vector {c['name']}"
+        if (not _msgs(mv, c["message"])) != c["ok"]:
+            fails.append(f"{label}: expected {'ok' if c['ok'] else 'refused'}")
+        if not c["ok"]:
+            continue
+        results = c["message"]["body"]["ticket_view"].get("results", [])
+        for i, r in enumerate(results):
+            snapshot_ok(f"{label} results[{i}]", r)
+        if [r["at"] for r in results] != sorted((r["at"] for r in results), reverse=True):
+            fails.append(f"{label}: results must be newest first")
+        if len({r["id"] for r in results}) != len(results):
+            fails.append(f"{label}: result ids must be unique")
+        if _cj(results) > pv["results_bytes"] or len(results) > pv["max_results"]:
+            fails.append(f"{label}: results over {pv['results_bytes']} bytes or {pv['max_results']} items")
 
 
 # --- jobs (job-events.md) --------------------------------------------------------------------------------------------
@@ -1364,6 +1446,7 @@ KINDS = {
     "secrets": kind_secrets,
     "jobs": kind_jobs,
     "blocks": kind_blocks,
+    "phone-results": kind_phone_results,
     "inventory": kind_inventory,
     "addon-manifest": kind_addon_manifest,
     "screen": kind_screen,

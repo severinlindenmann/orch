@@ -5,6 +5,12 @@ description = "orch sync add-on: keeps the workspace state in a git repo (merge 
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+orch-sync = "orch_sync.cli:main"
+
+[project.entry-points."orch.addons"]
+sync = "orch_sync"
+
 [dependency-groups]
 dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
 
