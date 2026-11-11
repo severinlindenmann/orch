@@ -38,6 +38,32 @@ def _run_ids():
     return (run, ticket) if run and ticket else None
 
 
+NO_RUN = "Refused: an agent can use keys only inside an active orch run, where the use is recorded."
+BAD_RUN = "Refused: this run is not active, so the use cannot be recorded."
+
+
+def require_run(root, agent) -> None:
+    """The run a use is recorded in. An agent must have one (ORCH_RUN + ORCH_TICKET naming a live claim that
+    belong together, like orch's own runs), or the call is refused before any key is read. A person or script
+    without a run is not recorded and not refused; with a run named in its environment the same check applies
+    (nothing is written into another run's record)."""
+    ids = _run_ids()
+    if ids is None:
+        if agent:
+            raise Refused(NO_RUN)
+        return
+    from orch import runs
+
+    run, ticket = ids
+    try:
+        rec = runs.read(root, ticket)
+        ok = bool(rec) and rec.get("run") == run and runs.state(rec) in ("alive", "maybe-stale")
+    except Exception:
+        ok = False
+    if not ok:
+        raise Refused(BAD_RUN)
+
+
 def _record_event(root, ev):
     """The record line for an event of this module, or None when there is no run to write it to."""
     ids = _run_ids()
@@ -102,6 +128,7 @@ def _write_record(root, ev):
     line = _record_event(root, ev)
     if line is None:
         return
+    require_run(root, False)  # never write into a run that is not live and does not match
     record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root))).append(line)
 
 
@@ -453,6 +480,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
     temp = None
     h = None
     try:
+        require_run(root, agent)  # before any key or file is touched
         profile = _profile(root, profile_name)
         if mode not in ("env", "file", "exec"):
             raise Refused("Refused: unknown secret command.")
@@ -538,7 +566,8 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                 raise Refused("Refused: could not remove the temporary key files.") from None
 
 
-def _get(root, profile_name, key, *, stdout_is_tty, out) -> None:
+def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
+    require_run(root, agent)
     profile = _profile(root, profile_name)
     h = hider.Hider(keystore.all_needles(root))
     recorder = Recorder(root, h, "get", profile_name, "")
@@ -590,9 +619,9 @@ def list_answer(root) -> dict:
     return {"items": items, "next": None}
 
 
-def get(root, profile_name, key, *, stdout_is_tty, out) -> None:
+def get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
     try:
-        _get(root, profile_name, key, stdout_is_tty=stdout_is_tty, out=out)
+        _get(root, profile_name, key, stdout_is_tty=stdout_is_tty, out=out, agent=agent)
     except Refused:
         raise
     except Exception:

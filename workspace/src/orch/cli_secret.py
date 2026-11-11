@@ -42,6 +42,12 @@ def add_parsers(sub, common) -> None:
                         q.add_argument("--" + option, action="append", default=[])
 
 
+def _agent(args) -> bool:
+    """An agent tool in the environment, or --by agent:... (an agent that hides its identity looks like a
+    script: Level 1)."""
+    return bool(tickets.agent_tool()) or str(getattr(args, "by", None) or "").startswith("agent:")
+
+
 def _person(root, args, op, target):
     who = hp.person_by(root, args, op, target, no_handoff="Do this in the dashboard on this computer.")
     if not who.startswith("human:"):
@@ -127,14 +133,21 @@ def dispatch(args, root: Path) -> bool:
             rest,
             stdout=sys.stdout.buffer,
             stderr=sys.stderr.buffer,
-            agent=bool(tickets.agent_tool()) or str(getattr(args, "by", None) or "").startswith("agent:"),
+            agent=_agent(args),
         )
         sys.stdout.flush()
         sys.stderr.flush()
         if code:
             raise SystemExit(code)
     elif action == "get":
-        secretrun.get(root, args.profile, args.key, stdout_is_tty=sys.stdout.isatty(), out=sys.stdout.buffer)
+        secretrun.get(
+            root,
+            args.profile,
+            args.key,
+            stdout_is_tty=sys.stdout.isatty(),
+            out=sys.stdout.buffer,
+            agent=_agent(args),
+        )
     elif action == "list":
         answer = secretrun.list_answer(root)
         if getattr(args, "json", False):

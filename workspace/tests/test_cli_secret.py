@@ -47,6 +47,23 @@ def run(capsys):
     return _run
 
 
+RUN, TICKET = "r_8k2m01", "t_inv7c2"
+
+
+def _claim(ws, run=RUN, pid=None):
+    from orch import runs
+
+    runs._write(ws, {"run": run, "ticket": TICKET, "pid": os.getpid() if pid is None else pid})
+
+
+@pytest.fixture
+def in_run(ws, monkeypatch):
+    """Inside a live orch run: the env names it and the claim exists."""
+    _claim(ws)
+    monkeypatch.setenv("ORCH_RUN", RUN)
+    monkeypatch.setenv("ORCH_TICKET", TICKET)
+
+
 @pytest.fixture
 def events(monkeypatch):
     got = []
@@ -341,7 +358,7 @@ def test_get_to_a_terminal_is_refused(store, run, ws, monkeypatch):
     monkeypatch.setattr("sys.stdout", Tty(io.BytesIO(), encoding="utf-8"))
     with pytest.raises(Refused, match="screen"):
         cli_secret_get = secretrun.get
-        cli_secret_get(ws, "plain", "other-token", stdout_is_tty=True, out=io.BytesIO())
+        cli_secret_get(ws, "plain", "other-token", stdout_is_tty=True, out=io.BytesIO(), agent=False)
 
 
 def test_get_is_off_again_after_get_disable(store, run, ws, monkeypatch):
@@ -547,7 +564,7 @@ LOCK_RUN = [PY, "-c", "import os;print(len(os.environ['LOCK_TOKEN']))"]
 
 
 @pytest.fixture
-def lock(store, ws, monkeypatch):
+def lock(store, ws, in_run, monkeypatch):
     prof = keystore.read_profiles(ws)
     prof["lock"] = {"env": {"LOCK_TOKEN": "other-token"}, "files": {}, "run": LOCK_RUN}
     keystore.write_profiles(ws, prof)
@@ -1052,14 +1069,6 @@ def test_a_large_key_with_a_diverging_byte_is_not_slow(ws):
 
 # --------------------------------------------------------------------------- the real record writer (M1)
 
-RUN, TICKET = "r_8k2m01", "t_inv7c2"
-
-
-@pytest.fixture
-def in_run(monkeypatch):
-    monkeypatch.setenv("ORCH_RUN", RUN)
-    monkeypatch.setenv("ORCH_TICKET", TICKET)
-
 
 def _record_text(ws):
     from orch.record import record_dir
@@ -1146,3 +1155,81 @@ def test_outside_a_run_nothing_is_written(store, run, ws):
 
     assert run("secret", "env", "plain", "--", PY, "-c", "pass")[0] == 0
     assert not record_dir(ws).exists()
+
+
+# --------------------------------------------------------------------------- agents need a live run
+
+
+def _nothing_touched(ws):
+    assert not (ws / "started").exists()
+    assert not (hp.guarded_home(ws) / "keys" / "tmp").exists()
+
+
+def _agent_call(run, monkeypatch, *cmd, profile="filesonly", mode="file"):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    return run("secret", mode, profile, "--", *cmd)
+
+
+@pytest.mark.parametrize("how", ["no-run", "only-run", "only-ticket"])
+def test_an_agent_without_a_run_is_refused_before_anything_is_touched(store, run, ws, monkeypatch, how):
+    if how != "no-run":
+        monkeypatch.setenv(
+            "ORCH_RUN" if how == "only-run" else "ORCH_TICKET", RUN if how == "only-run" else TICKET
+        )
+    code, out, err = _agent_call(run, monkeypatch, PY, "-c", f"open({str(ws / 'started')!r}, 'w').close()")
+    assert code == 2 and "inside an active orch run" in err
+    _nothing_touched(ws)
+
+
+def test_an_agent_by_flag_without_a_run_is_refused_too(store, run, ws):
+    code, _, err = run("secret", "env", "--by", "agent:codex", "plain", "--", PY, "-c", "pass")
+    assert code == 2 and "inside an active orch run" in err
+
+
+def test_an_agent_without_a_run_cannot_get_a_key(store, run, ws, monkeypatch):
+    _enable_get(run, monkeypatch, ws)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    code, out, err = run("secret", "get", "plain", "other-token")
+    assert code == 2 and TOKEN2 not in out + err
+
+
+def test_an_agent_with_a_run_that_does_not_match_the_ticket_is_refused(store, run, ws, monkeypatch):
+    _claim(ws, run="r_other0001")
+    monkeypatch.setenv("ORCH_RUN", RUN)
+    monkeypatch.setenv("ORCH_TICKET", TICKET)
+    code, _, err = _agent_call(run, monkeypatch, PY, "-c", f"open({str(ws / 'started')!r}, 'w').close()")
+    assert code == 2 and "not active" in err
+    _nothing_touched(ws)
+
+
+def test_an_agent_with_a_dead_or_finished_run_is_refused(store, run, ws, monkeypatch):
+    monkeypatch.setenv("ORCH_RUN", RUN)
+    monkeypatch.setenv("ORCH_TICKET", TICKET)
+    code, _, err = _agent_call(run, monkeypatch, PY, "-c", "pass")  # no claim at all: finished
+    assert code == 2 and "not active" in err
+    _claim(ws, pid=999999999)  # a claim whose process is gone
+    code, _, err = _agent_call(run, monkeypatch, PY, "-c", "pass")
+    assert code == 2 and "not active" in err
+    _nothing_touched(ws)
+
+
+def test_an_agent_with_a_live_matching_run_works_and_is_recorded(lock, run, ws):
+    from orch.record import read_run
+
+    code, out, err = run("secret", "env", "lock", "--", *LOCK_RUN)
+    assert code == 0, err
+    assert [x["kind"] for x in read_run(ws, RUN).unwrap()] == ["key.use"]
+
+
+def test_a_person_or_script_without_a_run_still_works(store, run, ws):
+    assert run("secret", "env", "plain", "--", PY, "-c", "pass")[0] == 0
+    assert run("secret", "file", "filesonly", "--", PY, "-c", "pass")[0] == 0
+
+
+def test_a_script_naming_a_run_that_is_not_live_is_refused_and_writes_nothing(store, run, ws, monkeypatch):
+    from orch.record import record_dir
+
+    monkeypatch.setenv("ORCH_RUN", RUN)
+    monkeypatch.setenv("ORCH_TICKET", TICKET)
+    code, _, err = run("secret", "env", "plain", "--", PY, "-c", "pass")
+    assert code == 2 and "not active" in err and not record_dir(ws).exists()
