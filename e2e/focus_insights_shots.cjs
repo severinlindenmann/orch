@@ -58,7 +58,7 @@ async function start() {
   return { base: `http://127.0.0.1:${port}`, stop };
 }
 
-const settle = (page, ms = 4500) => page.waitForTimeout(ms); // polls run every 1.5-5 s
+const settle = (page, ms = Number(process.env.FOCUS_SHOTS_SETTLE_MS) || 4500) => page.waitForTimeout(ms); // polls run every 1.5-5 s
 
 // Add a screen here. setup(page, base) runs after the page loaded; return value is ignored.
 const SCREENS = [
@@ -78,7 +78,7 @@ const SCREENS = [
   } },
 ];
 
-(async () => {
+async function main() {
   const args = process.argv.slice(2);
   const onlyAt = args.indexOf('--only');
   const only = onlyAt >= 0 ? args.splice(onlyAt, 2)[1].split(',') : null;
@@ -110,4 +110,7 @@ const SCREENS = [
   } finally { await browser.close(); srv.stop(); }
   console.log(`shots in ${out}`);
   process.exit(failed ? 1 : 0);
-})().catch(e => { console.error(e); process.exit(1); });
+}
+
+module.exports = { SCREENS, start, playwright, settle }; // e2e/focus_insights_smoke.cjs loads every screen from here
+if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });

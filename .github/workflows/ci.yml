@@ -42,7 +42,7 @@ jobs:
           filters: |
             contracts: ['contracts/**', '.github/workflows/contracts.yml']
             workspace: ['workspace/**', 'workspace-addons/*/src/**', 'contracts/**', 'install.ps1', 'install.sh', 'e2e/windows/**', '.github/workflows/workspace.yml']
-            addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', '.github/workflows/addons.yml']
+            addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', '.github/workflows/relay.yml']
             mobile: ['mobile/**', 'contracts/**', '.github/workflows/mobile.yml']
