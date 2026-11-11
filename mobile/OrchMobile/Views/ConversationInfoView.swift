@@ -128,11 +128,8 @@ struct ConversationInfoView: View {
                         Button { expandedResults[result.id] = !expanded } label: {
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(verbatim: result.label).themeFont(11).foregroundStyle(Theme.muted)
+                                    Text(verbatim: [result.label, ShellTime.short(result.at)].filter { !$0.isEmpty }.joined(separator: " · ")).themeFont(11).foregroundStyle(Theme.muted)
                                     if let title = result.title { Text(verbatim: title).themeFont(15, .semibold) }
-                                    if let date = TicketResult.date(result.at) {
-                                        Text(date, style: .relative).themeFont(11).foregroundStyle(Theme.muted)
-                                    }
                                 }
                                 Spacer(minLength: 0)
                                 Image(systemName: expanded ? "chevron.up" : "chevron.down").foregroundStyle(Theme.muted)
@@ -142,7 +139,7 @@ struct ConversationInfoView: View {
                         .accessibilityIdentifier("results-card-\(result.id)")
                         .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                         if expanded {
-                            BlocksView(result: result.doc, fromLabel: result.label, fileAttachment: { name in
+                            BlocksView(result: result.doc, fromLabel: result.label, showsSourceLabel: false, showsTitle: result.title == nil, fileAttachment: { name in
                                 TicketResult.attachment(named: name, in: ticket?.view?.attachments ?? [])
                             }, onOpenAttachment: { attachment in
                                 viewer = ArtifactItem(attachment, in: conversation)
@@ -207,7 +204,7 @@ struct ConversationInfoView: View {
     private func tabButton(_ group: InfoGroup, count: Int, fill: Bool) -> some View {
         Button { selection = group } label: {
             HStack(spacing: 5) {
-                Text(group.title).themeFont(13, .semibold).lineLimit(1).fixedSize()
+                Text(group.tabLabel(count: count)).themeFont(13, .semibold).lineLimit(1).fixedSize()
             }
             .foregroundStyle(selection == group ? Theme.brand : Theme.muted)
             .padding(.horizontal, 10).frame(maxWidth: fill ? .infinity : nil, minHeight: 44)
@@ -217,7 +214,7 @@ struct ConversationInfoView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(group.title), \(count) items")
+        .accessibilityLabel(group.tabLabel(count: count))
         .accessibilityAddTraits(selection == group ? .isSelected : [])
         .accessibilityIdentifier("info-tab-\(group.rawValue)")
     }
@@ -396,6 +393,7 @@ enum InfoGroup: String, CaseIterable, Identifiable {
     case photos, files, links, artifacts
     var id: String { rawValue }
     var title: String { self == .links ? "References" : rawValue.capitalized }
+    func tabLabel(count: Int) -> String { count > 0 ? "\(title) (\(count))" : title }
 }
 
 struct InfoEntry: Identifiable {
@@ -438,7 +436,7 @@ private struct InfoThumbnail: View {
                     ZStack {
                         Theme.surface2
                         if let image {
-                            Image(uiImage: image).resizable().scaledToFill()
+                            Image(uiImage: image).resizable().aspectRatio(contentMode: .fit).padding(8)
                                 .frame(width: geometry.size.width, height: geometry.size.height)
                         }
                     }

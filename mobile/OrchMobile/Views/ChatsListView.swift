@@ -206,6 +206,10 @@ struct ChatsListView: View {
         let name = WorkspaceAlias.name(for: summary.workspace)
         let newest = summary.topics.max { ($0.lastAt ?? "") < ($1.lastAt ?? "") }
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
+        let shownQuestions = (filter == "All" || filter == "Needs you") ? model.questions.filter {
+            !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil && $0.message.from == summary.id
+        } : []
+        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, shownQuestionCount: shownQuestions.count)
         return TimelineView(.everyMinute) { context in
             let muted = model.notificationsMuted(workspace: summary.id, now: context.date)
             NavigationLink(value: ChatRoute.workspace(summary.id)) {
@@ -216,8 +220,8 @@ struct ChatsListView: View {
                             Text("Chat · \(name)").themeFont(17, .semibold).lineLimit(2)
                             if muted { MutedIcon() }
                         }
-                        Text(starting ? "Getting started…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
-                        if summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
+                        Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                        if shownQuestions.isEmpty && summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .trailing, spacing: 10) {
                         Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
@@ -350,5 +354,14 @@ struct ChatsListView: View {
                 ShellChevron()
             }.frame(minHeight: 56).padding(.vertical, 8).contentShape(Rectangle())
         }.buttonStyle(PressStyle()).accessibilityIdentifier(identifier)
+    }
+}
+
+
+enum ChatsRowRules {
+    static func preview(_ text: String, starting: Bool = false, shownQuestionCount: Int = 0) -> String {
+        if shownQuestionCount > 0 { return shownQuestionCount == 1 ? "1 needs you" : "\(shownQuestionCount) need you" }
+        if starting { return "Getting started…" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No messages yet" : text
     }
 }

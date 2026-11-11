@@ -61,7 +61,7 @@ enum ConversationRules {
     static func summaryText(done: Int, total: Int, status: String, separator: String = " · ", wontDo: Int = 0) -> String {
         guard total > 0 else { return "" }
         if wontDo > 0 { return "\(done) of \(total) done, \(wontDo) won't do" }
-        return "\(done) of \(total) steps done"
+        return "\(done) of \(total) tasks done"
     }
 
     static func summaryRepeatsResult(_ summary: String, in items: [ConvItem]) -> Bool {
@@ -194,7 +194,7 @@ struct ConversationView: View {
                 }.chatCircleBackground()
                 ToolbarItem(placement: .principal) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(title).themeFont(16, .semibold).lineLimit(1).accessibilityIdentifier("chat-title")
+                        Text(title).themeFont(16, .semibold).lineLimit(1).truncationMode(.tail).accessibilityIdentifier("chat-title")
                         presence
                     }
                     .padding(.vertical, 8)
@@ -261,14 +261,12 @@ struct ConversationView: View {
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
         else {
-            HStack(spacing: 4) {
-                if resolved.ticket != nil { Text("\(workspaceName) ·") }
-                TimelineView(.everyMinute) { context in
-                    let presence = model.presence(of: resolved.workspace, now: context.date)
-                    HStack(spacing: 4) {
-                        if presence.isOnline { PresenceDot() }
-                        Text(presence.line(now: context.date))
-                    }
+            TimelineView(.everyMinute) { context in
+                let presence = model.presence(of: resolved.workspace, now: context.date)
+                HStack(spacing: 4) {
+                    if presence.isOnline { PresenceDot() }
+                    Text((resolved.ticket != nil ? "\(workspaceName) · " : "") + presence.line(now: context.date))
+                        .lineLimit(1).truncationMode(.tail)
                 }
             }.themeFont(13).foregroundStyle(Theme.muted)
         }

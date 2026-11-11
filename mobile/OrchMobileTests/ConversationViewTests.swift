@@ -79,9 +79,9 @@ final class ConversationViewTests: XCTestCase {
 
     func testTopicSummaryHidesTheCountWithoutAChecklist() {
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Working"), "")
-        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 tasks done")
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Ready for review"), "")
-        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 tasks done")
     }
 
     func testSummaryRepeatsResultAfterTrimming() {

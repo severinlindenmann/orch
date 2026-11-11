@@ -21,7 +21,7 @@ struct GroupRoomView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 12) {
                                 if !group.startedHere { pill("Earlier messages are in \(group.hostName)") }
-                                ForEach(rows) { row in
+                                ForEach(Array(rows.enumerated()), id: \.element.id) { rowIndex, row in
                                     Group {
                                         switch row {
                                         case .message(let index, let message):
@@ -29,16 +29,11 @@ struct GroupRoomView: View {
                                                group.gaps.contains(where: { gap in gap.upperBound <= seq && gap.lowerBound > (group.messages.prefix(index).compactMap(\.seq).max() ?? 0) }) {
                                                 pill("a message is missing")
                                             }
-                                            messageView(message, previous: index > 0 ? group.messages[index - 1] : nil, group: group)
+                                            messageView(message, previous: rowIndex > 0 ? rows[rowIndex - 1].groupMessage : nil, group: group)
                                         case .outgoing(let item):
                                             outgoingView(item, group: group)
                                         }
                                     }.id(row.id)
-                                }
-                                TimelineView(.periodic(from: .now, by: 30)) { context in
-                                    ForEach(GroupRoomRules.thinking(group: group, now: context.date), id: \.self) { ws in
-                                        group.memberText(ws, suffix: " is thinking…").themeFont(13).foregroundStyle(Theme.muted)
-                                    }
                                 }
                                 Color.clear.frame(height: 1).id("group-bottom")
                             }.padding(16)
@@ -85,6 +80,10 @@ struct GroupRoomView: View {
             case .outgoing(let item): item.rowID
             }
         }
+        var groupMessage: GroupMessage? {
+            if case .message(_, let message) = self { return message }
+            return nil
+        }
         var at: String {
             switch self {
             case .message(_, let message): message.at
@@ -115,7 +114,7 @@ struct GroupRoomView: View {
                       conversationLanguage: "en", workspaceName: group.hostName, quotedText: nil,
                       onRetry: { Task { await model.retrySend(item.clientId ?? "") } },
                       onDiscard: { model.discardSend(item.clientId ?? "") },
-                      waitNote: QueuedNote.text(for: item.clientId.flatMap { model.outbox.item(clientId: $0) }))
+                      waitNote: QueuedNote.text(for: item.clientId.flatMap { model.outbox.item(clientId: $0) }), hugsContent: true)
     }
 
     /// Deferred: a scroll in the same update that adds the row runs before the lazy list has laid it out, and stops short
@@ -143,7 +142,7 @@ struct GroupRoomView: View {
             GroupBadges(group: group).padding(.trailing, 10)
             VStack(alignment: .leading, spacing: 6) {
                 Button { members = true } label: {
-                    Text(group.title).themeFont(17, .semibold).multilineTextAlignment(.leading)
+                    Text(group.title).themeFont(17, .semibold).lineLimit(1).truncationMode(.tail)
                 }.accessibilityIdentifier("group-members")
                 if let ticket = group.ticket {
                     NavigationLink(value: ChatRoute.ticket(workspace: key.host, ticket: ticket)) {
@@ -151,9 +150,11 @@ struct GroupRoomView: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-            TimelineView(.everyMinute) { context in
-                ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: context.date), groupStyle: true) { mute in
-                    Task { await model.setGroupMute(key, mute) }
+            if !group.closed {
+                TimelineView(.everyMinute) { context in
+                    ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: context.date), groupStyle: true) { mute in
+                        Task { await model.setGroupMute(key, mute) }
+                    }
                 }
             }
             Button { members = true } label: {
@@ -189,7 +190,7 @@ struct GroupRoomView: View {
                                          text: message.text, label: phoneLabel(message.sender)),
                           conversationId: .topic(workspace: key.host, ticket: group.ticket ?? ""),
                           conversationLanguage: "en", workspaceName: senderName(message.sender, group: group),
-                          quotedText: nil, onRetry: nil, onDiscard: nil, onOpenArtifact: { _ in })
+                          quotedText: nil, onRetry: nil, onDiscard: nil, onOpenArtifact: { _ in }, hugsContent: true)
         }
         if let task = message.task, GroupRoomRules.showsTaskCard(message, group: group) { GroupTaskView(task: group.tasks[task.delegate] ?? task, group: group) }
         ForEach(message.ticketView?.attachments.filter { message.sharedFiles.contains($0.blobId ?? "") } ?? []) { attachment in
@@ -227,14 +228,24 @@ struct GroupRoomView: View {
     }
     @ViewBuilder private func footer(_ group: PhoneGroup, onSent: @escaping () -> Void) -> some View {
         if group.closed {
-            Text("This group is done. Read only.").themeFont(13).foregroundStyle(Theme.muted).padding(16)
+            Text("Read only").themeFont(13).foregroundStyle(Theme.muted).padding(16)
         } else {
             let target: SendTarget? = GroupStore.replyTarget(in: group) == nil ? nil : group.ticket.map { .topic(workspace: key.host, ticket: $0) }
             VStack(spacing: 0) {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    let thinking = GroupRoomRules.thinking(group: group, now: context.date)
+                    if !thinking.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(thinking, id: \.self) { ws in
+                                group.memberText(ws, suffix: " is thinking…").themeFont(13).foregroundStyle(Theme.muted)
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 12)
+                    }
+                }
                 group.members.enumerated().reduce(Text("To: ")) { text, entry in
                     text + Text(entry.offset == 0 ? "" : ", ") + group.memberText(entry.element.ws)
                 }
-                    .themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20)
+                    .themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.bottom, 8)
                 Composer(target: target, placeholder: "Message the group", reply: $reply, onSent: onSent, groupKey: key,
                          unavailableText: "Waiting for the first group message")
                 Button { details = true } label: {

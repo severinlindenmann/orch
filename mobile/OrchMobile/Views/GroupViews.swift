@@ -102,7 +102,7 @@ enum GroupRoomRules {
     static func eventText(_ event: GroupEvent, group: PhoneGroup, ownAnswer: String?) -> String {
         let name = group.name(of: event.ws ?? "")
         switch event.kind {
-        case "created": return "Group started from ticket \(group.ticketKey ?? "") · \(group.title)"
+        case "created": return "Group started"
         case "member_added": return "\(group.hostName) added \(name) to this group"
         case "member_left": return "\(name) left this group"
         case "approved":
@@ -157,6 +157,7 @@ struct GroupListRow: View {
     static func rowID(_ group: PhoneGroup) -> String { "group-\(group.key.host.utf8.count)-\(group.key.host)-\(group.key.id)" }
     @Environment(AppModel.self) private var model
     let group: PhoneGroup
+    var history = false
     var body: some View {
         TimelineView(.everyMinute) { context in
             let muted = model.notificationsMuted(workspace: group.messages.last(where: { !$0.message.fromPhone })?.message.message.from ?? group.key.host, group: group.key, now: context.date)
@@ -165,7 +166,7 @@ struct GroupListRow: View {
                     GroupBadges(group: group)
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 6) {
-                            Text(group.title).themeFont(17, .semibold)
+                            Text(group.title).themeFont(17, .semibold).foregroundStyle(history ? Theme.muted : Theme.text)
                             if muted { MutedIcon() }
                         }
                         lastLine.themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
@@ -173,7 +174,7 @@ struct GroupListRow: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     VStack(spacing: 8) {
                         Text(ShellTime.short(group.messages.last?.at)).themeFont(12).foregroundStyle(Theme.muted)
-                        ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted)
+                        if !history { ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted) }
                     }
                 }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
             }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier(Self.rowID(group))
@@ -206,7 +207,8 @@ struct GroupsSection: View {
         }
         if !groups.isEmpty || !GroupRoomRules.rows(model.groups, closed: true).isEmpty {
             NavigationLink(value: ChatRoute.groupHistory) {
-                Text("Done groups › History").themeFont(15).foregroundStyle(Theme.brand).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                HStack { Text("Done groups"); Spacer(); ShellChevron() }
+                    .themeFont(15).foregroundStyle(Theme.brand).frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
             }.accessibilityIdentifier("group-history")
         }
     }
@@ -219,9 +221,9 @@ struct GroupHistoryView: View {
             VStack(spacing: 12) {
                 let groups = GroupRoomRules.rows(model.groups, closed: true)
                 if groups.isEmpty { Text("No done groups yet.").foregroundStyle(Theme.muted) }
-                ForEach(groups, id: \.key) { GroupListRow(group: $0) }
+                ForEach(groups, id: \.key) { GroupListRow(group: $0, history: true) }
             }.padding(16)
-        }.background(Theme.bg).navigationTitle("History").navigationBarTitleDisplayMode(.inline)
+        }.background(Theme.bg).navigationTitle("Done groups").navigationBarTitleDisplayMode(.inline)
     }
 }
 
