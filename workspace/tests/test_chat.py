@@ -1182,6 +1182,14 @@ def test_helper_prompt_does_not_say_tap_for_phone_conversations(proj):
     assert "Never make the ticket yourself" in prompt
 
 
+def test_helper_prompt_asks_for_short_summaries_with_cards_not_id_lists(proj):
+    gid = tickets.ensure_general(proj, "human:me")
+    prompt = chat.helper_prompt(proj, tickets.load(proj, gid), [], "")
+    assert "a few short lines in everyday words" in prompt
+    assert "Never list ticket keys or ids in the text" in prompt
+    assert "add --ref ticket:<KEY> for each ticket the person can act on" in prompt
+
+
 def test_last_moved_title_is_one_line_and_helper_may_log_to_the_moved_ticket(proj, monkeypatch):
     from types import SimpleNamespace
 

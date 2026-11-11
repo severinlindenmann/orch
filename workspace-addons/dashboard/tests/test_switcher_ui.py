@@ -29,3 +29,12 @@ def test_switcher_keyboard_and_touch_targets():
     assert "close(); box.focus();" in js
     assert "ArrowDown:" in js and "ArrowUp:" in js
     assert "min-height:64px" in css and ":focus-visible" in css
+
+
+def test_switcher_stays_one_row_in_the_open_menu():
+    # The kit shows the workspace box as a block in the open Menu (0,3,0); the switcher
+    # (icon, name + sub-label, chevron) must win with a more specific flex rule.
+    kit = (WEB / "kit" / "components.css").read_text()
+    look = (WEB / "look.css").read_text()
+    assert ".sidebar[data-open=true] .workspace," in kit
+    assert ".sidebar[data-open=true] .workspace.ws-switch{display:flex}" in look
