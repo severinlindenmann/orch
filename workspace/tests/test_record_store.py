@@ -265,3 +265,46 @@ def test_oversize_refuses_without_event(store):
         writer.append(event(data={"huge": ["x" * 10000] * 2}))
     assert read_events(ws, "r_8k2m01") == []
     assert not (record_dir(ws) / "meta.json").exists()
+
+
+def test_detail_schema_and_runtime_schema():
+    from orch.record import _SCHEMA
+
+    def constraints(value):
+        if isinstance(value, dict):
+            return {
+                k: constraints(v)
+                for k, v in value.items()
+                if k not in ("description", "title", "$id", "$schema")
+            }
+        if isinstance(value, list):
+            return [constraints(v) for v in value]
+        return value
+
+    assert _SCHEMA == constraints(SCHEMA)
+    validator = jsonschema.Draft202012Validator({"$ref": "#/$defs/detail_file", "$defs": SCHEMA["$defs"]})
+    for path in (CONTRACTS / "examples/activity-detail").glob("*.json"):
+        assert validator.is_valid(json.loads(path.read_text())) == path.name.startswith("valid-")
+
+
+def test_preflight_leaves_nothing(store):
+    ws, writer = store
+    with pytest.raises(RecordRefused):
+        writer.append(event(), detail={"input": "x" * (1024**2), "output": ""})
+    assert not ws.exists()
+    with pytest.raises(RecordRefused):
+        writer.append(event(data={"large": ["x" * 5000] * 3}))
+    assert not ws.exists()
+
+
+def test_stale_lock_and_missing_reads(store):
+    ws, writer = store
+    assert read_events(ws, "r_8k2m01") == []
+    assert read_detail(ws, "r_8k2m01", "missing") is None
+    assert list_runs(ws) == []
+    writer.append(event())
+    lock = record_dir(ws) / "runs/r_8k2m01.lock"
+    lock.touch()
+    os.utime(lock, (1, 1))
+    assert writer.append(event(id="after_stale"))["seq"] == 2
+    assert not lock.exists()
