@@ -20,7 +20,10 @@ function dom() {
     get textContent() { return this.data; }
   }
   const selector = sel => sel.split(',').map(s => {
+    const c = /^\s*\.([a-z0-9_-]+)\s*$/i.exec(s);  // .class (the page also asks for .sidebar and .dragging)
+    if (c) return n => n.nodeType === 1 && String(n.className || '').split(/\s+/).includes(c[1]);
     const m = /^\s*([a-z0-9]*)(?:\[([a-z-]+)(?:="([^"]*)")?\])?\s*$/i.exec(s);
+    if (!m) return () => false;  // a selector this fake does not know matches nothing, never throws
     return n => n.nodeType === 1 && (!m[1] || n.tagName === m[1].toUpperCase()) && (!m[2] || (n.hasAttribute(m[2]) && (m[3] === undefined || n.getAttribute(m[2]) === m[3])));
   });
   class El extends Node {
@@ -73,6 +76,7 @@ function dom() {
   for (const id of ['content', 'side-nav', 'side-settings', 'workspace-name', 'workspace-mode', 'crumb', 'new-ticket', 'open-agent', 'menu-toggle', 'connection']) {
     const n = new El(id === 'content' ? 'main' : 'div'); n.id = id; doc.body.appendChild(n);
   }
+  const sidebar = new El('aside'); sidebar.className = 'sidebar'; doc.body.appendChild(sidebar);
   doc.getElementById = id => doc.body.querySelectorAll('[id="' + id + '"]')[0] || null;
   doc.querySelectorAll = sel => doc.body.querySelectorAll(sel);
   doc.querySelector = sel => doc.body.querySelector(sel);
