@@ -281,7 +281,7 @@ three-way rule (lowering needs no proof, and the write that applies it tombstone
 is the authority and is always kept, never changed or dropped, whatever a side did; the core's own stale entries are dropped; every other entry
 (another machine's, or one that cannot be checked here) is merged three-way by `mac`, deduplicated, sorted by `mac`, and capped so the total is
 at most 8, so the output is byte-identical with the sides swapped (vectors `ticket-merge-v1.json` rule `verdict`; a test fails if
-`orch_sync.merge` keeps a different field list than `humanproof.VERDICT_FIELDS`). A Done made on another machine is Review here until a person
+`orch_sync.merge` has drifted from `humanproof.VERDICT_FIELDS`). A Done made on another machine is Review here until a person
 here clicks Looks good (its MAC cannot be checked here: the same limit as a synced Won't do). A verified Won't do counts as resolved in `checks`;
 a Won't do the merge drops reopens its step, so the ticket is active and the verdict stops verifying. A peer agent's `kind: "agent"` entry never
 verifies here (the grant is ours). No migration: a raw `done` from before this core has no entry and shows as Review once; the person's Looks good

@@ -389,7 +389,7 @@ def _merge_mod():
     return merge
 
 
-def test_the_merge_does_not_keep_its_own_copy_of_the_verdict_fields():
+def test_the_merges_dependency_free_copy_of_the_verdict_fields_has_not_drifted():
     assert _merge_mod()._VERDICT_FIELDS == hp.VERDICT_FIELDS
     assert _merge_mod().VERDICT_CAP == hp.VERDICT_MAX
 
@@ -464,3 +464,52 @@ def test_the_effective_view_is_applied_in_one_place():
     src = (Path(__file__).resolve().parents[1] / "src" / "orch" / "tickets.py").read_text()
     assert src.count("def _effective(") == 1
     assert "def load(" in src and "_effective(root, _load_raw(root, tid))" in src
+
+
+def test_a_step_reopened_and_redone_does_not_bring_the_old_done_back(ws, run, monkeypatch):
+    """Opus review MEDIUM-1: the checks hash ignores evidence, so reopen + redo restores the signed state.
+    The write of the reopened (not done) state tombstones the entry; and a Done write that no longer
+    verifies tombstones too."""
+    tid = _finished(ws, run)
+    _verdict(ws, run, monkeypatch, tid)
+    assert tickets.load(ws, tid)["status"] == "done"
+    code, out, err = run("check", "reopen", tid, "c1", "--by", "agent:x")
+    assert code == 0, out + err
+    assert hp.verdict_ledger(ws)[tid] is None
+    code, out, err = run("check", "done", tid, "c1", "--note", "other", "--by", "agent:x", "--json")
+    assert code == 0, out + err
+    t = tickets.load(ws, tid)
+    assert t["status"] != "done"
+    assert hp.verdict_ledger(ws)[tid] is None
+
+
+def test_a_done_write_that_stopped_verifying_tombstones_the_entry(ws, run, monkeypatch):
+    tid = _finished(ws, run)
+    _verdict(ws, run, monkeypatch, tid)
+    t = _raw(ws, tid)
+    t["checklist"][0]["text"] = "reworded"  # the file still says done and still holds the entry
+    tickets.ticket_path(ws, tid).write_text(json.dumps(t))
+    tickets.apply_op(ws, tid, lambda x: tickets.add_history(x, "human:pat", "a line"))
+    assert hp.verdict_ledger(ws)[tid] is None  # the old state can never come back by editing the file back
+
+
+def test_a_loose_verdict_ledger_is_damaged_and_a_reader_never_resets_protection(ws, run, monkeypatch):
+    tid = _finished(ws, run)
+    _verdict(ws, run, monkeypatch, tid)
+    key_before = hp.human_key(ws)
+    resets = hp._RESETS
+    led = hp.key_dir(ws) / hp.VERDICT_LEDGER
+    led.chmod(0o644)
+    assert hp.verdict_ledger(ws) is None
+    assert tickets.load(ws, tid)["status"] == "review"
+    assert hp._RESETS == resets and hp.human_key(ws) == key_before
+
+
+def test_a_reset_of_protection_also_clears_both_ledgers(ws, run, monkeypatch):
+    tid = _finished(ws, run)
+    _verdict(ws, run, monkeypatch, tid)
+    led = hp.key_dir(ws) / hp.VERDICT_LEDGER
+    assert led.exists()
+    hp.reset_protection(ws, "test")
+    assert not led.exists() and not (hp.key_dir(ws) / hp.LEDGER).exists()
+    assert tickets.load(ws, tid)["status"] == "review"

@@ -272,7 +272,13 @@ SAFE_DEFAULTS = {
     "conn.allow": False,
 }  # live_session and share_counts stay at the owner defaults (3C, I5): their records are dropped
 RESET_NOTICE = "orch reset its protection on this computer; please turn on again what you need."
-_SECRET_FILES = ("proofs-used.json", "delivered.json", "handoffs.json")
+_SECRET_FILES = (
+    "proofs-used.json",
+    "delivered.json",
+    "handoffs.json",
+    "wont.json",
+    "verdict.json",
+)  # the ledgers go with the key they were signed with
 
 
 def _check_dir(p: Path) -> None:
@@ -1158,9 +1164,12 @@ def _ledger_load(root: Path, name: str) -> dict | None:
     or loose). ONE reader for every ledger (wont.json, verdict.json)."""
     try:
         d = key_dir(root, create=False)
-        data = _read_json(root, d / name, {"entries": {}})
-    except (Refused, OSError):
-        return None
+        try:
+            data = json.loads(_read_guarded(d / name))
+        except FileNotFoundError:
+            data = {"entries": {}}
+    except (Refused, OSError, ValueError):  # incl. LooseFile: a loose or damaged ledger vouches for nobody,
+        return None  # and a reader never resets protection (no DoS by chmod)
     ent = data.get("entries") if isinstance(data, dict) else None
     return ent if isinstance(ent, dict) else None
 
@@ -1269,7 +1278,7 @@ VERDICT_KINDS = ("person", "agent")
 
 VERDICT_LEDGER_DAMAGED = (
     "orch's record of your Done decisions is damaged, so this was not saved. Nothing was changed. "
-    "Close orch and start it again; orch then resets its protection and you can decide again."
+    "Ask your admin to reset orch's protection on this computer, then decide again."
 )
 VERDICT_NEEDED = "Done needs your OK. Click Looks good in the dashboard."
 

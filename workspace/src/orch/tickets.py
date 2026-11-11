@@ -374,11 +374,11 @@ def _write(root: Path, ticket: dict) -> None:
     ledger entry first (leaving Done needs no proof)."""
     p = ticket_path(root, ticket["id"])
     ticket = {k: v for k, v in ticket.items() if k != "verdict_needed"}  # computed for readers, never stored
-    if ticket.get("status") == "done":
-        if _disk_status(p) != "done" and not humanproof.verdict_ok(root, ticket):
-            raise Refused(humanproof.VERDICT_NEEDED)
-    else:
-        humanproof.verdict_forget(root, ticket["id"])
+    ok = ticket.get("status") == "done" and humanproof.verdict_ok(root, ticket)
+    if ticket.get("status") == "done" and not ok and _disk_status(p) != "done":
+        raise Refused(humanproof.VERDICT_NEEDED)
+    if not ok:  # left Done, or a Done whose state no longer matches its verdict (a step reopened and redone)
+        humanproof.verdict_forget(root, ticket["id"])  # the old entry must never come back
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
     try:

@@ -514,7 +514,10 @@ def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     `verdict(entry, ticket)` is the core's say on a verdict entry (humanproof.verdict_verifier): "current" (its own
     MAC, the current ledger entry), "stale" (its own MAC, no longer current: dropped) or None (not provable here:
     carried along). None = nobody verifies. The merge never decides Done: `status` follows the plain rule below
-    and a raw "done" without a current verdict is Review on the receiving core."""
+    and a raw "done" without a current verdict is Review on the receiving core.
+    WIRING (W2a, when the sync caller uses this): pass `verdict=humanproof.verdict_verifier(root)`, run the read,
+    the merge and the write under `tickets.apply_op`'s lock, and write only through `tickets._write` (the one
+    guard that tombstones). This `verdict` hook is a stable contract: v2 builds on it (W6)."""
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
