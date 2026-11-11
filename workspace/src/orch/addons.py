@@ -61,7 +61,7 @@ EXT_SCHEMA_MAX = 32 * 1024
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
 # Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
-SHIPPED_ADDONS = ("automation", "dashboard", "focus")
+SHIPPED_ADDONS = ("automation", "dashboard", "focus", "sync")
 
 
 # ---------------------------------------------------------------- sources
@@ -634,10 +634,20 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
     tool_env_change_ok()
     if not winfinish.needed():
         _install_tool(entries)
-        if save:
-            _save_registry(entries)
-        for t in then:
-            reexec(t)
+        path = registry_path()
+        before = path.read_bytes() if save and path.exists() else None
+        try:
+            if save:
+                _save_registry(entries)  # discovery in the project step needs the new entries
+            for t in then:
+                reexec(t)
+        except Exception:
+            if save:
+                if before is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(before)
+            raise
         return True
     if winfinish.pending(home()):
         raise Refused(
