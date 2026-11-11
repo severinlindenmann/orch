@@ -73,7 +73,18 @@
           "profile": { "$ref": "#/$defs/name" },
           "command": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,64}$" }], "description": "Base name of the program the key was handed to; never its arguments." },
           "skill": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/name" }] },
-          "refused": { "enum": ["not_in_profile", "get_off", "get_to_terminal", "missing", "too_short", "switched_off"] }
+          "refused": { "enum": ["not_in_profile", "get_off", "get_to_terminal", "missing", "too_short", "switched_off", "agent_command"] }
+        } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] }
+      }
+    } },
+    { "if": { "properties": { "kind": { "const": "secret.change" } } }, "then": {
+      "required": ["data"],
+      "properties": {
+        "via": { "const": "broker" }, "detail": { "type": "null" }, "used": { "type": "null" },
+        "data": { "anyOf": [{ "required": ["action", "profile", "by"], "additionalProperties": false, "properties": {
+          "action": { "enum": ["profile.set", "profile.remove", "profile.get_enable", "profile.get_disable", "profile.agents_enable", "profile.agents_disable"] },
+          "profile": { "$ref": "#/$defs/name" },
+          "by": { "type": "string", "pattern": "^(human:.+|reset)$", "maxLength": 64, "description": "human:<name> from the proof, or reset (no proof)." }
         } }, {"type": "object", "required": ["cut"], "additionalProperties": false, "properties": {"cut": {"const": true}}}] }
       }
     } },
@@ -93,7 +104,7 @@
   ],
   "$defs": {
     "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
-    "kind": { "enum": ["step", "task.start", "task.done", "ask", "denial", "helper.start", "helper.end", "run.state", "usage", "key.use", "job", "session.input"] },
+    "kind": { "enum": ["step", "task.start", "task.done", "ask", "denial", "helper.start", "helper.end", "run.state", "usage", "key.use", "secret.change", "job", "session.input"] },
     "run": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$" },
     "agent": { "type": "string", "pattern": "^(main|h_[0-9]{1,4})$" },
     "event_id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9_.:-]+$" },
