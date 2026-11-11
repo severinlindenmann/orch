@@ -125,7 +125,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 3,
+    "revision": 2,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -376,7 +376,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 3,
+    "revision": 2,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -1080,7 +1080,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 3,
+    "revision": 2,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -2458,8 +2458,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 9,
-    "updated_at": "2026-11-09T10:00:00Z"
+    "revision": 8,
+    "updated_at": "2026-11-09T09:00:00Z"
    }
   },
   {
@@ -2870,7 +2870,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 3,
+    "revision": 2,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -3232,7 +3232,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T09:00:00Z"
    }
   },
@@ -3524,7 +3524,7 @@
     "checklist": [
      {
       "at": "2026-11-09T09:00:00Z",
-      "by": "agent:claude",
+      "by": "human:Ann",
       "done": false,
       "id": "c1",
       "evidence": [
@@ -3656,7 +3656,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -3955,7 +3955,8 @@
       "reason": "Not needed",
       "text": "Email finance",
       "wont_nonce": "n1",
-      "wont_mac": "v1-2445a7a2b06f82ea36f3"
+      "wont_mac": "v1-2445a7a2b06f82ea36f3",
+      "by": "human:Ann"
      }
     ],
     "questions": [],
@@ -4076,8 +4077,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -4191,8 +4192,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -4305,8 +4306,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -4418,8 +4419,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -4522,7 +4523,7 @@
     "checklist": [
      {
       "at": "2026-11-09T09:00:00Z",
-      "by": "agent:claude",
+      "by": "human:Ann",
       "done": false,
       "id": "c1",
       "evidence": [
@@ -4650,7 +4651,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T09:00:00Z"
    }
   },
@@ -4858,7 +4859,8 @@
       "reason": "Not needed",
       "text": "Email finance",
       "wont_nonce": "n3",
-      "wont_mac": "v1-381129a923aa0e02488a"
+      "wont_mac": "v1-381129a923aa0e02488a",
+      "by": "human:Ann"
      }
     ],
     "questions": [],
@@ -4966,8 +4968,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -5183,8 +5185,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -5299,8 +5301,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -5410,8 +5412,8 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T09:00:00Z"
+    "revision": 1,
+    "updated_at": "2026-11-09T08:00:00Z"
    }
   },
   {
@@ -5604,7 +5606,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T09:00:00Z"
    }
   },
@@ -5719,7 +5721,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T09:00:00Z"
    }
   },
@@ -6016,7 +6018,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -6131,7 +6133,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -6232,7 +6234,8 @@
       "reason": "Not needed any more",
       "text": "Email finance",
       "wont_nonce": "n5",
-      "wont_mac": "v1-2e8c80b037ac8b33a128"
+      "wont_mac": "v1-2e8c80b037ac8b33a128",
+      "by": "human:Ann"
      }
     ],
     "questions": [],
@@ -6339,7 +6342,8 @@
       "reason": "Not needed any more",
       "text": "Email finance",
       "wont_nonce": "n5",
-      "wont_mac": "v1-2e8c80b037ac8b33a128"
+      "wont_mac": "v1-2e8c80b037ac8b33a128",
+      "by": "human:Ann"
      }
     ],
     "questions": [],
@@ -6559,7 +6563,7 @@
     "questions": [],
     "refs": [],
     "history": [],
-    "revision": 2,
+    "revision": 1,
     "updated_at": "2026-11-09T10:00:00Z"
    }
   },
@@ -6939,6 +6943,189 @@
    }
   },
   {
+   "name": "equal-content-different-revision",
+   "rule": "D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 7
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 9
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 9
+   }
+  },
+  {
+   "name": "idempotent-re-merge",
+   "rule": "D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "owner": "Ann",
+    "schema": "orch.ticket/1",
+    "title": "Changed",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   },
+   "b": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "owner": "Ann",
+    "schema": "orch.ticket/1",
+    "title": "Changed",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   },
+   "expect": {
+    "created_at": "2026-11-09T08:00:00Z",
+    "key": "DM1-1",
+    "owner": "Ann",
+    "schema": "orch.ticket/1",
+    "title": "Changed",
+    "id": "t_abc123",
+    "status": "open",
+    "checklist": [],
+    "questions": [],
+    "refs": [],
+    "history": [],
+    "revision": 3,
+    "updated_at": "2026-11-09T10:00:00Z"
+   }
+  },
+  {
+   "name": "one-side-equals-base-ignoring-bookkeeping",
+   "rule": "D8",
+   "base": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T08:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1
+   },
+   "a": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T10:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 9
+   },
+   "b": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Changed",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   },
+   "expect": {
+    "schema": "orch.ticket/1",
+    "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Changed",
+    "status": "open",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
+    "checklist": [],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 2
+   }
+  },
+  {
    "name": "verdict-1-peer-done-without-entry",
    "rule": "verdict",
    "ledger": {},
@@ -7312,18 +7499,18 @@
     ]
    },
    "expect": {
-    "created_at": "2026-11-09T08:00:00Z",
-    "key": "DM1-1",
-    "note": "x",
     "schema": "orch.ticket/1",
-    "title": "Invoice export",
     "id": "t_abc123",
+    "key": "DM1-1",
+    "title": "Invoice export",
     "status": "done",
+    "created_at": "2026-11-09T08:00:00Z",
+    "updated_at": "2026-11-09T09:00:00Z",
     "checklist": [
      {
-      "done": true,
       "id": "c1",
       "text": "Write the file",
+      "done": true,
       "evidence": [
        {
         "type": "note",
@@ -7332,6 +7519,10 @@
       ]
      }
     ],
+    "refs": [],
+    "questions": [],
+    "history": [],
+    "revision": 1,
     "verdicts": [
      {
       "kind": "person",
@@ -7339,11 +7530,7 @@
       "mac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
      }
     ],
-    "questions": [],
-    "refs": [],
-    "history": [],
-    "revision": 2,
-    "updated_at": "2026-11-09T10:00:00Z"
+    "note": "x"
    }
   },
   {

@@ -88,6 +88,68 @@ def test_busy_message(proj, new_ticket, monkeypatch):
         tickets.log(proj, tid, "x", "agent:x")
 
 
+def test_agent_can_reorder_wont_do_steps_but_cannot_change_decisions(proj, new_ticket, monkeypatch):
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    for text in ("Ask finance", "Ask sales"):
+        _, step = tickets.check_add(proj, tid, text, "human:Ann")
+        tickets.check_wont_do(proj, tid, step["id"], "human:Ann", "Not needed")
+    before = read(proj, tid)["checklist"]
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
+
+    tickets.check_move(proj, tid, "c1", "c2", "agent:codex")
+    moved = read(proj, tid)
+    assert moved["checklist"] == list(reversed(before))
+    for edit in ({"wont_do": False}, {"reason": "Changed"}, {"by": "agent:codex"}):
+        with pytest.raises(tickets.Refused, match="Only a person"):
+            tickets.apply_op(proj, tid, lambda t, edit=edit: t["checklist"][0].update(edit))
+        assert read(proj, tid) == moved
+
+
+@pytest.mark.parametrize("agent,wont_do", [(True, True), (True, False), (False, True)])
+def test_reword_step_respects_persons_wont_do(proj, new_ticket, monkeypatch, agent, wont_do):
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    _, step = tickets.check_add(proj, tid, "Ask finance", "human:Ann")
+    if wont_do:
+        tickets.check_wont_do(proj, tid, step["id"], "human:Ann", "Not needed")
+    before = read(proj, tid)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex" if agent else None)
+
+    def reword(ticket):
+        ticket["checklist"][0]["text"] = "Ask sales"
+
+    if agent and wont_do:
+        with pytest.raises(tickets.Refused, match="Only a person"):
+            tickets.apply_op(proj, tid, reword)
+        assert read(proj, tid) == before
+    else:
+        tickets.apply_op(proj, tid, reword)
+        expected = {**before["checklist"][0], "text": "Ask sales"}
+        assert read(proj, tid)["checklist"][0] == expected
+
+
+@pytest.mark.parametrize("reopen_original", [False, True])
+def test_agent_cannot_duplicate_wont_do_step(proj, new_ticket, monkeypatch, reopen_original):
+    tid = new_ticket()
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    _, step = tickets.check_add(proj, tid, "Ask finance", "human:Ann")
+    tickets.check_wont_do(proj, tid, step["id"], "human:Ann", "Not needed")
+    before = read(proj, tid)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "codex")
+
+    def attack(ticket):
+        original = ticket["checklist"][0]
+        ticket["checklist"].append(original.copy())
+        if reopen_original:
+            original["wont_do"] = False
+            original.pop("reason", None)
+
+    with pytest.raises(tickets.Refused, match="Duplicate checklist step ids"):
+        tickets.apply_op(proj, tid, attack)
+    assert read(proj, tid) == before
+
+
 def test_fields_owner_due_note_summary(proj, run, validate, new_ticket):
     tid = new_ticket()
     code, out, _ = run(

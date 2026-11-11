@@ -272,6 +272,20 @@ def _break_stale(lock: Path) -> bool:
 
 
 @contextlib.contextmanager
+def sync_apply(root: Path, tid: str):
+    """Lock a ticket (or ``key`` for the counter) for an in-process sync write.
+
+    Call on the thread holding syncgate.hold; other writers retain the normal
+    gate-before-ticket ordering. The caller checks and replaces the file while
+    this context is held, without importing core lock internals.
+    """
+    if tid != "key":
+        ticket_path(root, tid)
+    with _locked(root, tid):
+        yield
+
+
+@contextlib.contextmanager
 def _locked(root: Path, tid: str, wait: float = 5.0):
     """One writer at a time per ticket: an exclusive lock file next to it (stale after 30 s).
     Lock order is gate -> ticket lock: a synced ticket (or the counter) waits for the sync gate BEFORE taking
@@ -395,19 +409,19 @@ def _write(root: Path, ticket: dict) -> None:
 NO_WRITE = object()  # an op returns this when it changed nothing
 
 
-def _wont_view(ticket: dict) -> list:
-    """The Won't do state of every step (id, flag, reason, who, when): what only a person may change."""
-    return [
-        (
-            c.get("id"),
+def _wont_view(ticket: dict) -> dict:
+    """The Won't do state (id, flag, reason, who, when, text): what only a person may change."""
+    return {
+        c.get("id"): (
             c.get("wont_do"),
             c.get("reason"),
             c.get("by") if c.get("wont_do") else None,
             c.get("at") if c.get("wont_do") else None,
+            c.get("text") if c.get("wont_do") else None,
         )
         for c in ticket.get("checklist") or []
         if isinstance(c, dict) and (c.get("wont_do") or c.get("reason"))
-    ]
+    }
 
 
 def _is_person(by: str) -> bool:
@@ -437,9 +451,13 @@ def apply_op(
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
-        if agent_tool() and _wont_view(ticket) != wont_before:
-            # the one structural guard: no write path run by an agent changes a person's Won't do decision
-            raise Refused("Only a person marks a step as won't do, or opens it again.")
+        if agent_tool():
+            ids = [c.get("id") for c in ticket.get("checklist") or [] if isinstance(c, dict)]
+            if len(ids) != len(set(ids)):
+                raise Refused("Duplicate checklist step ids are not allowed.")
+            if _wont_view(ticket) != wont_before:
+                # no write path run by an agent changes a person's Won't do decision
+                raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
         if ticket.get("status") == eff_status and raw_status == "done":

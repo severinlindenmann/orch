@@ -64,6 +64,28 @@ def test_longer_word_does_not_name_artifact(proj, run, new_ticket, conn):  # noq
     assert not conn.blobs
 
 
+def test_description_only_sends_ticket_artifacts(proj, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Plan")
+    artifact(proj, tid, "plan.md")
+    (proj / "notes").mkdir()
+    (proj / "notes/x.md").write_bytes(b"workspace file")
+    ticket = tickets.load(proj, tid)
+    ticket["description"] = "see artifacts/plan.md and notes/x.md"
+    tickets.save(proj, ticket)
+    assert [a["name"] for a in phone_view.view_for(proj, tid)["attachments"]] == ["plan.md"]
+    assert list(conn.blobs.values()) == [b"artifact bytes"]
+
+
+def test_description_traversal_does_not_name_artifact(proj, new_ticket, conn):  # noqa: F811
+    tid = new_ticket("Traversal")
+    artifact(proj, tid, "secret.md")
+    ticket = tickets.load(proj, tid)
+    ticket["description"] = "See ../secret.md"
+    tickets.save(proj, ticket)
+    assert phone_view.view_for(proj, tid)["attachments"] == []
+    assert not conn.blobs
+
+
 def test_symlink_is_never_uploaded(proj, run, new_ticket, conn):  # noqa: F811
     tid = new_ticket("Linked file")
     outside = proj / "outside.md"
@@ -138,6 +160,8 @@ def test_oversized_artifact_is_skipped(proj, new_ticket, conn, monkeypatch):  # 
         ("report.pdf", "See report.pdf.bak", False),
         ("report.pdf", "See artifacts/report.pdf.bak", False),
         ("report.pdf", "See report.pdf.", True),
+        ("report.pdf", "See `artifacts/report.pdf`.", True),
+        ("report.pdf", "See `report.pdf`, then continue.", True),
         ("report.pdf", "See /report.pdf", False),
     ],
 )
@@ -209,7 +233,8 @@ def test_artifacts_leave_room_for_refs(proj, new_ticket, conn):  # noqa: F811
     assert len(conn.blobs) == 1
 
 
-def test_artifact_matching_evidence_is_not_added(proj, new_ticket, conn):  # noqa: F811
+@pytest.mark.parametrize("source", ["summary", "description"])
+def test_artifact_matching_evidence_is_not_added(proj, new_ticket, conn, source):  # noqa: F811
     tid = new_ticket("Evidence")
     data = b"same evidence and artifact"
     artifact(proj, tid, "report.txt", data)
@@ -217,7 +242,7 @@ def test_artifact_matching_evidence_is_not_added(proj, new_ticket, conn):  # noq
     evidence.parent.mkdir(parents=True, exist_ok=True)
     evidence.write_bytes(data)
     ticket = tickets.load(proj, tid)
-    ticket["summary"] = "report.txt"
+    ticket[source] = "report.txt"
     ticket["checklist"] = [
         {
             "text": "Proof",

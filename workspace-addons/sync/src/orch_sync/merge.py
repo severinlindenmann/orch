@@ -15,19 +15,44 @@ SYNC_BY = "agent:sync"
 SESSION_CAP = 32
 _MISSING = object()
 _KEY_RE = re.compile(r"^([A-Z0-9]{2,4})-([1-9][0-9]{0,8})$")
-_SPECIAL = {"id", "updated_at", "revision", "status", "checklist", "questions", "refs",
-            "history", "sessions", "ext", "verdicts"}
+_SPECIAL = {
+    "id",
+    "updated_at",
+    "revision",
+    "status",
+    "checklist",
+    "questions",
+    "refs",
+    "history",
+    "sessions",
+    "ext",
+    "verdicts",
+}
 _ANSWER = ("answer", "answered_by", "via")
 MAX_DEPTH = 32
-MAX_ITEMS = {"history": 5000, "checklist": 500, "questions": 500, "refs": 500, "sessions": 200, "verdicts": 64}
+MAX_ITEMS = {
+    "history": 5000,
+    "checklist": 500,
+    "questions": 500,
+    "refs": 500,
+    "sessions": 200,
+    "verdicts": 64,
+}
 MAX_BYTES = 2_000_000
 MAX_COUNTER = 999_000_000  # keys stay inside the schema pattern (9 digits)
-_IDENT = {"checklist": lambda x: x["id"], "questions": lambda x: x["id"],
-          "sessions": lambda s: _canon([s.get("agent"), s.get("host")])}
+_IDENT = {
+    "checklist": lambda x: x["id"],
+    "questions": lambda x: x["id"],
+    "sessions": lambda s: _canon([s.get("agent"), s.get("host")]),
+}
 
 
 def _canon(x):
     return json.dumps(x, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _content(ticket):
+    return {k: v for k, v in ticket.items() if k not in ("revision", "updated_at")}
 
 
 def _cm(x):
@@ -110,7 +135,9 @@ def _obj(ctx, base, a, b, skip=(), top=False, label=""):
     for k in sorted(set(a) | set(b) | set(base)):
         if k in skip:
             continue
-        v = _three(ctx, base.get(k, _MISSING), a.get(k, _MISSING), b.get(k, _MISSING), k if top else None, label)
+        v = _three(
+            ctx, base.get(k, _MISSING), a.get(k, _MISSING), b.get(k, _MISSING), k if top else None, label
+        )
         if v is not _MISSING:
             out[k] = v
     return out
@@ -145,7 +172,9 @@ def _renumber_clashes(ctx, base, a, b, same, prefix, vouched=False):
     verifying items cannot be merged (pause); updated_at only decides between unverified items. Returns the
     renames per side."""
     bids = {x["id"] for x in base}
-    clash = [x["id"] for x in a if x["id"] not in bids and any(y["id"] == x["id"] and not same(x, y) for y in b)]
+    clash = [
+        x["id"] for x in a if x["id"] not in bids and any(y["id"] == x["id"] and not same(x, y) for y in b)
+    ]
     used = {x["id"] for x in base + a + b}
     ren = {"a": {}, "b": {}}
     newer = "a" if ctx.a_newer else "b"
@@ -284,7 +313,7 @@ def _impose(x, auth):
     no Won't do at all without an authority."""
     if auth is None:
         return _drop_wont(x)
-    fields = _SIGNED if auth.get("wont_do") is True else _DECISION
+    fields = (*_SIGNED, "by") if auth.get("wont_do") is True else _DECISION
     y = {k: v for k, v in x.items() if k not in fields}
     y.update({k: auth[k] for k in fields if k in auth})
     if y.get("wont_do"):
@@ -336,8 +365,10 @@ def _question(ctx, x0, xa, xb):
             pick = ga
         else:
             pick, lose = (ga, gb) if ctx.a_newer else (gb, ga)
-            ctx.say(f'another answer "{_short(lose["answer"])}" by {lose["answered_by"]} was replaced',
-                    {"field": f"{xa.get('id')} answer", "value": lose})
+            ctx.say(
+                f'another answer "{_short(lose["answer"])}" by {lose["answered_by"]} was replaced',
+                {"field": f"{xa.get('id')} answer", "value": lose},
+            )
     elif ga["answer"] is None and gb["answer"] is None:
         pick = ga if ctx.a_newer else gb  # symmetric even when only answered_by/via differ
     else:  # an answered question beats an unanswered one
@@ -360,9 +391,15 @@ _MAC = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
 def _verdict_shape(e):
-    return (isinstance(e, dict) and set(e) == set(_VERDICT_FIELDS) and e["kind"] in ("person", "agent")
-            and isinstance(e["nonce"], str) and bool(_NONCE.match(e["nonce"]))
-            and isinstance(e["mac"], str) and bool(_MAC.match(e["mac"])))
+    return (
+        isinstance(e, dict)
+        and set(e) == set(_VERDICT_FIELDS)
+        and e["kind"] in ("person", "agent")
+        and isinstance(e["nonce"], str)
+        and bool(_NONCE.match(e["nonce"]))
+        and isinstance(e["mac"], str)
+        and bool(_MAC.match(e["mac"]))
+    )
 
 
 def _verdicts(ctx, base, a, b, out):
@@ -381,7 +418,9 @@ def _verdicts(ctx, base, a, b, out):
                 auth[e["mac"]] = min(auth.get(e["mac"], e), e, key=_canon)
             elif st is None:
                 others[i].append(e)
-    rest = _keyed(others[0], others[1], others[2], lambda e: e["mac"], lambda e0, ea, eb: min(ea, eb, key=_canon))
+    rest = _keyed(
+        others[0], others[1], others[2], lambda e: e["mac"], lambda e0, ea, eb: min(ea, eb, key=_canon)
+    )
     for m in auth:
         rest.pop(m, None)
     keep = [auth[m] for m in sorted(auth)][:VERDICT_CAP]
@@ -392,15 +431,27 @@ def _verdicts(ctx, base, a, b, out):
 def _merge(base, a, b, now, person=None, verdict=None):
     ctx = _Ctx(a, b, now, person, verdict)
     # the same id added on both sides with different content: the newer side's item is renumbered
-    ren = _renumber_clashes(ctx, base.get("checklist", []), a.setdefault("checklist", []),
-                            b.setdefault("checklist", []), lambda x, y: x.get("text") == y.get("text"), "c",
-                            vouched=True)
+    ren = _renumber_clashes(
+        ctx,
+        base.get("checklist", []),
+        a.setdefault("checklist", []),
+        b.setdefault("checklist", []),
+        lambda x, y: x.get("text") == y.get("text"),
+        "c",
+        vouched=True,
+    )
     for side, t in (("a", a), ("b", b)):
         for q in t.get("questions", []):
             if q.get("check") in ren[side]:
                 q["check"] = ren[side][q["check"]]
-    _renumber_clashes(ctx, base.get("questions", []), a.setdefault("questions", []),
-                      b.setdefault("questions", []), lambda x, y: x.get("text") == y.get("text"), "q")
+    _renumber_clashes(
+        ctx,
+        base.get("questions", []),
+        a.setdefault("questions", []),
+        b.setdefault("questions", []),
+        lambda x, y: x.get("text") == y.get("text"),
+        "q",
+    )
 
     out = _obj(ctx, base, a, b, skip=_SPECIAL, top=True)
     out["id"] = a["id"]
@@ -417,10 +468,17 @@ def _merge(base, a, b, now, person=None, verdict=None):
     def ids(lst):
         return [x["id"] for x in lst]
 
-    cl = _keyed(base.get("checklist", []), a["checklist"], b["checklist"], lambda x: x["id"],
-                lambda x0, xa, xb: _check_item(ctx, x0, xa, xb))
+    cl = _keyed(
+        base.get("checklist", []),
+        a["checklist"],
+        b["checklist"],
+        lambda x: x["id"],
+        lambda x0, xa, xb: _check_item(ctx, x0, xa, xb),
+    )
     seen = {}
-    for side, t in (("0", base), ("a", a), ("b", b)):
+    # Prefer the newer side's attribution when both carry the verified decision.
+    sides = (("a", a), ("b", b)) if ctx.a_newer else (("b", b), ("a", a))
+    for side, t in (*sides, ("0", base)):
         for x in t.get("checklist", []):
             if isinstance(x, dict):
                 seen.setdefault(x.get("id"), {})[side] = x
@@ -430,7 +488,12 @@ def _merge(base, a, b, now, person=None, verdict=None):
     # one needs the person's proof, which is only checked where it is made). Both sides deleting it is final.
     still = {x.get("id") for t in (a, b) for x in t.get("checklist", []) if isinstance(x, dict)}
     for x0 in base.get("checklist", []):
-        if isinstance(x0, dict) and x0.get("id") not in cl and x0.get("id") in still and _person_wont(ctx, x0):
+        if (
+            isinstance(x0, dict)
+            and x0.get("id") not in cl
+            and x0.get("id") in still
+            and _person_wont(ctx, x0)
+        ):
             cl[x0["id"]] = _normalize_check(ctx, dict(x0))
     out["checklist"] = _order(cl, ids(base.get("checklist", [])))
     if out["status"] == "done" and any(not (c.get("done") or c.get("wont_do")) for c in out["checklist"]):
@@ -440,17 +503,33 @@ def _merge(base, a, b, now, person=None, verdict=None):
         vs = _verdicts(ctx, base, a, b, out)
         if vs:
             out["verdicts"] = vs
-    qs = _keyed(base.get("questions", []), a["questions"], b["questions"], lambda x: x["id"],
-                lambda x0, xa, xb: _question(ctx, x0, xa, xb))
+    qs = _keyed(
+        base.get("questions", []),
+        a["questions"],
+        b["questions"],
+        lambda x: x["id"],
+        lambda x0, xa, xb: _question(ctx, x0, xa, xb),
+    )
     out["questions"] = _order(qs, ids(base.get("questions", [])))
-    refs = _keyed(base.get("refs", []), a.get("refs", []), b.get("refs", []), _ref_id,
-                  lambda r0, ra, rb: _obj(ctx, r0, ra, rb))
+    refs = _keyed(
+        base.get("refs", []),
+        a.get("refs", []),
+        b.get("refs", []),
+        _ref_id,
+        lambda r0, ra, rb: _obj(ctx, r0, ra, rb),
+    )
     out["refs"] = _order(refs, [_ref_id(r) for r in base.get("refs", [])], key=lambda i: i)
     if any("sessions" in t for t in (base, a, b)):
-        sess = _keyed(base.get("sessions", []), a.get("sessions", []), b.get("sessions", []),
-                      lambda s: _canon([s.get("agent"), s.get("host")]),
-                      lambda s0, sa, sb: max(sa, sb, key=lambda s: (s.get("last_used", ""), _canon(s))))
-        out["sessions"] = sorted(sess.values(), key=lambda s: (s.get("last_used", ""), _canon(s)))[-SESSION_CAP:]
+        sess = _keyed(
+            base.get("sessions", []),
+            a.get("sessions", []),
+            b.get("sessions", []),
+            lambda s: _canon([s.get("agent"), s.get("host")]),
+            lambda s0, sa, sb: max(sa, sb, key=lambda s: (s.get("last_used", ""), _canon(s))),
+        )
+        out["sessions"] = sorted(sess.values(), key=lambda s: (s.get("last_used", ""), _canon(s)))[
+            -SESSION_CAP:
+        ]
     if "ext" in a or "ext" in b:
         d = lambda t: t["ext"] if isinstance(t.get("ext"), dict) else {}
         out["ext"] = _deep(ctx, d(base), d(a), d(b))
@@ -462,8 +541,11 @@ def _merge(base, a, b, now, person=None, verdict=None):
     hist = {}
     for h in base.get("history", []) + a.get("history", []) + b.get("history", []):
         hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via"), h.get("lost")])] = h
-    old = {(h.get("text"), _canon(h["lost"]) if "lost" in h else "") for h in hist.values()
-           if h.get("by") == SYNC_BY}  # the same line is never added twice
+    old = {
+        (h.get("text"), _canon(h["lost"]) if "lost" in h else "")
+        for h in hist.values()
+        if h.get("by") == SYNC_BY
+    }  # the same line is never added twice
     for text, lost_key in sorted(set(ctx.lines) - old):
         line = {"at": now, "by": SYNC_BY, "text": text}
         if ctx.lines[(text, lost_key)] is not _MISSING:
@@ -495,8 +577,12 @@ def _valid(base, a, b):
             return False
         if not all(isinstance(x.get("id"), str) for f in ("checklist", "questions") for x in t.get(f, [])):
             return False
-        for f, ident in (("checklist", _IDENT["checklist"]), ("questions", _IDENT["questions"]),
-                         ("refs", _ref_id), ("sessions", _IDENT["sessions"])):
+        for f, ident in (
+            ("checklist", _IDENT["checklist"]),
+            ("questions", _IDENT["questions"]),
+            ("refs", _ref_id),
+            ("sessions", _IDENT["sessions"]),
+        ):
             ids = [ident(x) for x in t.get(f, [])]
             if len(ids) != len(set(ids)):
                 return False  # a duplicate id would silently drop an item
@@ -521,8 +607,17 @@ def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
-        return _merge({} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person,
-                      verdict)
+        out = _merge(
+            {} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person, verdict
+        )
+        # Run the authority and normalization rules before reusing an input. A no-op
+        # must never bypass the receiving core's verdict on signed decisions.
+        matches = [t for t in (upstream, mine) if _content(t) == _content(out)]
+        if matches:
+            return deepcopy(
+                max(matches, key=lambda t: (t.get("revision", 0), t.get("updated_at", ""), _canon(t)))
+            )
+        return out
     except Exception:  # noqa: BLE001 - a crafted ticket must never crash the sync loop
         return None
 
@@ -535,6 +630,7 @@ def _key_n(k):
 def merge_counter(base, a, b, keys=()):
     """ticket-counter.json: `last` = the highest of all sides and of every key number in `keys` (current and old
     keys). Other int entries: per-key max (recursively); anything else: the larger canonical json."""
+
     def mx(x, y):
         if isinstance(x, dict) and isinstance(y, dict):
             return {k: mx(x.get(k, _MISSING), y.get(k, _MISSING)) for k in sorted(set(x) | set(y))}
@@ -545,13 +641,20 @@ def merge_counter(base, a, b, keys=()):
         if isinstance(x, int) and isinstance(y, int) and not isinstance(x, bool):
             return max(x, y)
         return max(x, y, key=_canon)
+
     def clean(x):
         return x if isinstance(x, dict) and not _too_deep(x) else {}
+
     try:
         out = mx(mx(clean(base), clean(a)), clean(b))
         last = out.get("last", 0)
-        out["last"] = min(max([last if isinstance(last, int) and not isinstance(last, bool) else 0]
-                              + [_key_n(k) for k in keys]), MAX_COUNTER + 1)
+        out["last"] = min(
+            max(
+                [last if isinstance(last, int) and not isinstance(last, bool) else 0]
+                + [_key_n(k) for k in keys]
+            ),
+            MAX_COUNTER + 1,
+        )
         return out
     except Exception:  # noqa: BLE001 - e.g. unsortable keys: fall back to what the keys alone say
         return {"last": min(max([0] + [_key_n(k) for k in keys]), MAX_COUNTER + 1)}
@@ -577,13 +680,22 @@ def renumber_key_clashes(tickets, counter, now, held=()):
         tickets = deepcopy(tickets)
         held = set(held)
         for i, t in tickets.items():
-            if (not isinstance(t, dict) or t.get("id") != i or not isinstance(t.get("created_at", ""), str)
-                    or not isinstance(t.get("ext", {}), dict) or not isinstance(t.get("history", []), list)
-                    or (t.get("key") is not None and not (isinstance(t["key"], str) and _KEY_RE.match(t["key"])))
-                    or not isinstance((t.get("ext", {}).get("sync", {})), dict)):
+            if (
+                not isinstance(t, dict)
+                or t.get("id") != i
+                or not isinstance(t.get("created_at", ""), str)
+                or not isinstance(t.get("ext", {}), dict)
+                or not isinstance(t.get("history", []), list)
+                or (t.get("key") is not None and not (isinstance(t["key"], str) and _KEY_RE.match(t["key"])))
+                or not isinstance((t.get("ext", {}).get("sync", {})), dict)
+            ):
                 return None
-        counter = merge_counter(counter if isinstance(counter, dict) else {}, None, None,
-                                [k for t in tickets.values() for k in [t.get("key"), *old_keys_of(t)]])
+        counter = merge_counter(
+            counter if isinstance(counter, dict) else {},
+            None,
+            None,
+            [k for t in tickets.values() for k in [t.get("key"), *old_keys_of(t)]],
+        )
         by_key = {}
         for t in tickets.values():
             if t.get("key"):
@@ -599,8 +711,13 @@ def renumber_key_clashes(tickets, counter, now, held=()):
                 sync = t.setdefault("ext", {}).setdefault("sync", {})
                 sync["old_keys"] = sorted(set(old_keys_of(t)) | {key})
                 t["key"] = new
-                t.setdefault("history", []).append({"at": now, "by": SYNC_BY, "text":
-                                                    f"sync: key changed from {key} to {new} (another ticket had it)"})
+                t.setdefault("history", []).append(
+                    {
+                        "at": now,
+                        "by": SYNC_BY,
+                        "text": f"sync: key changed from {key} to {new} (another ticket had it)",
+                    }
+                )
                 t["revision"] = t.get("revision", 0) + 1 if isinstance(t.get("revision", 0), int) else 1
                 changed[t["id"]] = t
         return changed, counter

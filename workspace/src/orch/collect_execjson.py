@@ -23,8 +23,13 @@ def _hash(text: str) -> str:
     return "x_" + hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()[:32]
 
 
-def detail_name(event_id: str) -> str:
-    return event_id if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", event_id) else _hash(event_id)
+def detail_name(run: str, kind: str, event_id: str) -> str:
+    """The ONLY way a detail file name is made: 32 lowercase hex of a domain-separated sha256 over
+    (run, kind, final event id). No raw id is ever a file name (case-insensitive file systems, separators)."""
+    data = b"orch.detail/1\0" + b"\0".join(
+        x.encode("utf-8", errors="surrogatepass") for x in (run, kind, event_id)
+    )
+    return hashlib.sha256(data).hexdigest()[:32]
 
 
 def hide_values(text: str, hider: Callable[[str], str]) -> str:
@@ -147,7 +152,10 @@ class ExecJsonMapper:
             eid = f"{self.run}:{self.turn}:{item['id']}"
             if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid):
                 eid = _hash(eid)
-        fields = dict(id=eid, detail=f"detail/{self.run}/{detail_name(eid)}.json" if completed else None)
+        kind = "run.state" if typ == "agent_message" else "step"
+        fields = dict(
+            id=eid, detail=f"detail/{self.run}/{detail_name(self.run, kind, eid)}.json" if completed else None
+        )
         if typ == "agent_message":
             say = _one_line(item.get("text", ""))
             return [self._emit(**fields, kind="run.state", text=say, data={"state": "working", "say": say})]
