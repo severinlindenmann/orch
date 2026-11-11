@@ -341,7 +341,7 @@ def test_secret_names_hide(label):
 
 
 ORDINARY = ["Keyboard", "Monkey", "Hotkey", "Turkey", "Passed", "Passage", "Author", "Authored", "Authoring"]
-ORDINARY += ["Authority", "Pass", "Fail", "Pass/Fail", "pass count", "pass rate", "Passes"]
+ORDINARY += ["Authority", "Fail", "Pass/Fail", "pass count", "pass rate", "Passes"]
 
 
 @pytest.mark.parametrize("label", ORDINARY)
@@ -422,7 +422,12 @@ def test_a_plain_name_never_hides_a_secret_pair_in_its_value(text):
 
 def test_plain_pairs_stay():
     assert phone_view.redact("Config: debug=1, rows=9") == "Config: debug=1, rows=9"
-    assert phone_view.redact("Pass: 12, Fail: 0, pass rate: 100%") == "Pass: 12, Fail: 0, pass rate: 100%"
+    # a bare `pass: value` is a password until proven otherwise (fail-safe, documented over-redaction);
+    # the phrases pass rate / pass count / passed stay
+    assert phone_view.redact("Fail: 0, pass rate: 100%, pass_count=5, passed: 12") == (
+        "Fail: 0, pass rate: 100%, pass_count=5, passed: 12"
+    )
+    assert phone_view.redact("pass: 12") == "pass: [hidden]"
 
 
 @pytest.mark.parametrize("unit", ["a=", "x: ", "Config: ", "a=1,", "user=bob&"])
@@ -495,3 +500,78 @@ def test_ordinary_query_params_stay():
 )
 def test_more_secret_names(label):
     assert phone_view.secret_name(label), label
+
+
+# ---- redact: one pipeline iterated to a fixed point (clean, NFKC, scrub raw, scrub NFKC) ----
+def test_redact_comment_joined_secret_is_not_left_after_cleaning():
+    from orch.phone_view import redact
+
+    for text in ("pass<!-- x -->word=hunter2", "tok<!---->en=abc123xyz", "ghp_<!-- c -->" + "a" * 24):
+        out = redact(text)
+        assert "hunter2" not in out and "abc123xyz" not in out and "a" * 24 not in out, (text, out)
+
+
+def test_redact_property_no_secret_survives_confusables_comments_fullwidth():
+    import random
+    import unicodedata
+
+    from orch.phone_view import redact
+
+    rnd = random.Random(1137)
+    names = ["password", "passwd", "secret", "token", "api_key", "smtp_pass", "ADMIN_PASS", "Authorization"]
+    full = lambda s: "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in s)  # noqa: E731
+    for i in range(400):
+        value = "".join(rnd.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(rnd.randint(8, 16)))
+        value = f"Zq{i}x{value}"
+        name = rnd.choice(names)
+        # split the name or the value with a hidden comment / zero-width char, or write them fullwidth
+        cut = rnd.randint(1, len(name) - 1)
+        spelled = rnd.choice(
+            [
+                name + "=" + value,
+                full(name) + "=" + value,
+                name[:cut] + "<!-- c -->" + name[cut:] + "=" + value,
+                name[:cut] + "​" + name[cut:] + ": " + value,
+                name + "=" + full(value),
+                f"cfg: {name}={value}",
+                f"a=1,{name}={value}",
+            ]
+        )
+        out = redact(spelled)
+        assert value not in out and unicodedata.normalize("NFKC", value) not in unicodedata.normalize(
+            "NFKC", out
+        ), (
+            spelled,
+            out,
+        )
+
+
+def test_redact_is_idempotent_and_hides_when_not_stable(monkeypatch):
+    from orch import phone_view
+
+    assert phone_view.redact(phone_view.redact("password=hunter2 ok")) == phone_view.redact(
+        "password=hunter2 ok"
+    )
+    monkeypatch.setattr(phone_view, "_round", lambda t: t + "x")  # never settles
+    assert phone_view.redact("hello") == phone_view.HIDDEN
+
+
+def test_redact_secret_only_in_the_raw_form_is_hidden():
+    from orch.phone_view import redact
+
+    # a ligature/compat form that NFKC rewrites: the raw form holds the secret pattern
+    assert "hunter2" not in redact("ｐassword=hunter2") and "hunter2" not in redact("password＝hunter2")
+
+
+@pytest.mark.parametrize("name", ["smtp_pass", "ADMIN_PASS", "db_pass", "Pass", "pass"])
+def test_pass_label_names_are_secrets(name):
+    from orch.phone_view import secret_name
+
+    assert secret_name(name)
+
+
+@pytest.mark.parametrize("name", ["Pass/Fail", "pass rate", "pass count", "Passed", "Passage", "pass_rate"])
+def test_pass_test_result_labels_stay_visible(name):
+    from orch.phone_view import secret_name
+
+    assert not secret_name(name)

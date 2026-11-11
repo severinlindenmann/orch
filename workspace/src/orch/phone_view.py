@@ -55,8 +55,10 @@ SECRET_NAME_WORDS = (
     "passw", "passphrase", "secret", "token", "credential", "bearer", "signature", "auth", "authoriz",
     "api key", "access key", "private key", "db pass",
 )  # fmt: skip
-# whole words only (not inside another word). No bare "pass": Pass, Pass/Fail, pass rate are test results.
+# whole words only (not inside another word). A bare "pass" counts; secret_name drops the known harmless
+# test-result phrases first (Pass/Fail, pass rate, pass count).
 SECRET_LABEL_WORDS = (
+    "pass",
     "key",
     "keys",
     "pin",
@@ -84,8 +86,10 @@ def _words_rx(sep: str) -> str:
 # characters). A name without one never matches, so it never swallows a pair in its value (Config: password=x,
 # a=1,token=x, user=bob&secret=x). Linear: the lookbehind allows one start per run, the run is possessive.
 # Authorization: Bearer x takes the scheme AND the token.
+# a bare word `pass` (smtp_pass, ADMIN_PASS) but not the test-result phrases pass_rate / pass-count / passed
+_PASS_WORD = r"|(?<![a-z])pass(?![a-z])(?![_-]?(?:rate|count|total|percent))"
 _KV_RAW = re.compile(
-    r"(?<![\w-])(?=[\w-]*?(?:" + _words_rx("[_-]?") + r"))([\w-]++)(\s*+[:=]\s*+)"
+    r"(?<![\w-])(?=[\w-]*?(?:" + _words_rx("[_-]?") + _PASS_WORD + r"))([\w-]++)(\s*+[:=]\s*+)"
     r"((?:(?:bearer|basic|token|digest)\s++)?(?:\"[^\"]*\"|'[^']*'|\S++))",
     re.I,
 )
@@ -114,7 +118,7 @@ _SECRET_KV = _KV()
 # bare pass) as whole words; secret_name() too (camelCase)
 _SECRET_PARAM = re.compile(
     "(?i)" + _words_rx("[_-]?") + r"|key|sig|code|password|passwd"
-    r"|(?<![a-z])(?:" + "|".join((*SECRET_LABEL_WORDS, "pass")) + r")(?![a-z])"
+    r"|(?<![a-z])(?:" + "|".join(SECRET_LABEL_WORDS) + r")(?![a-z])"
 )
 HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
@@ -207,15 +211,33 @@ def _scan(data: bytes, name: str) -> str:
     return "secret" if _has_secret(data) else "ok"
 
 
+_ROUNDS = 3
+
+
+def _round(t: str) -> str:
+    """One round: clean, NFKC, scrub the NFKC form AND the cleaned raw form. When only the raw form had a
+    secret the raw scrub is kept (the next round normalizes it again)."""
+    c = clean_untrusted(t, 20000)
+    n = unicodedata.normalize("NFKC", c)
+    s_norm = _scrub_text(n)
+    if s_norm != n:
+        return s_norm
+    return _scrub_text(c) if c != n else n
+
+
 def redact(text: str) -> str:
     """Plain, safe text for the phone: invisible/control characters and comments go (clean_untrusted), then
-    anything that looks like a key, token or password is replaced by [hidden]. The scan runs on the NFKC
-    form too (ｐａｓｓｗｏｒｄ=x): when that hides something, the NFKC form is what is shown."""
-    t = clean_untrusted(str(text), 20000)
-    norm = unicodedata.normalize("NFKC", t)
-    if norm != t and (out := _scrub_text(norm)) != norm:
-        return clean_untrusted(out, 20000)  # after the scrub: NFKC may have made a new <!--, cut it
-    return _scrub_text(t)
+    anything that looks like a key, token or password is replaced by [hidden]. One pipeline iterated to a
+    fixed point: [clean, NFKC, scrub raw, scrub NFKC] repeats until the text stops changing, because
+    cleaning or normalizing can join text into a new secret (a hidden comment between two halves, fullwidth
+    names). Not stable after _ROUNDS rounds: the whole value is hidden."""
+    t = str(text)
+    for _ in range(_ROUNDS):
+        nxt = _round(t)
+        if nxt == t:
+            return t
+        t = nxt
+    return HIDDEN
 
 
 def _scrub_text(t: str) -> str:
@@ -250,6 +272,9 @@ def safe_url(url: str) -> str | None:
     return out if len(out) <= 2000 else None
 
 
+_PASS_OK = re.compile(
+    r"(?<![a-z])pass\s*/\s*fail(?![a-z])|(?<![a-z])pass\s+(?:rate|count|total|percent|percentage)(?![a-z])"
+)
 _NAME_SUBSTR = re.compile(_words_rx(" ?"))
 _NAME_WORD = re.compile(
     r"(?<![a-z])(" + "|".join(SECRET_LABEL_WORDS) + r")(?![a-z])"
@@ -262,6 +287,9 @@ def secret_name(name: str) -> bool:
     Monkey, Hotkey, Turkey, Passed and Passage do not. The one predicate for labelled values in results."""
     t = unicodedata.normalize("NFKC", str(name))
     words = re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)).lower()
+    words = _PASS_OK.sub(
+        " ", words
+    )  # test-result phrases: Pass/Fail, pass rate, pass count (not passed: a word)
     return bool(_NAME_SUBSTR.search(words) or _NAME_WORD.search(words))
 
 
