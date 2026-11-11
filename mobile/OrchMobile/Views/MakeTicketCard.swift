@@ -33,7 +33,9 @@ struct MakeTicketCard: View {
             switch state {
             case .making: status("Making ticket…", spinning: true)
             case .waiting: status("Waiting for \(question.workspaceName)…", spinning: true)
-            case .made(let key): status("Ticket made" + (key.map { " · \($0)" } ?? ""))
+            case .made(let key):
+                status("Ticket made")
+                if let key { DisclosureGroup("Details") { Text(key).themeFont(13) }.themeFont(13) }
             case .failed: status("Couldn't make the ticket")
             case .closed(let notNow): status(notNow ? "Not now" : "Already decided")
             case .open:

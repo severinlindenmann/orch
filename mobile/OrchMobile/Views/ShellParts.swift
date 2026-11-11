@@ -58,17 +58,19 @@ enum ShellTime {
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f.date(from: clean)
     }
-    static func short(_ iso: String?) -> String {
+    static func short(_ iso: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let date = date(iso) else { return "" }
-        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
-        return formatted(date, Calendar.current.isDateInToday(date) ? "HH:mm" : "d MMM")
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) { return "Yesterday" }
+        return formatted(date, calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "d MMM", timeZone: calendar.timeZone)
     }
     static func day(_ iso: String?) -> String {
         guard let date = date(iso) else { return "" }
-        return formatted(date, "d MMM")
+        if Calendar.current.isDateInToday(date) { return "today" }
+        if Calendar.current.isDateInYesterday(date) { return "yesterday" }
+        return formatted(date, "EEE d MMM")
     }
-    private static func formatted(_ date: Date, _ format: String) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = format
+    private static func formatted(_ date: Date, _ format: String, timeZone: TimeZone = .current) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = format; f.timeZone = timeZone
         return f.string(from: date)
     }
 }

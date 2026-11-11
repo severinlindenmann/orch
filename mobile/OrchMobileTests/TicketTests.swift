@@ -114,7 +114,7 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(t.filter { $0.status == .needsYou }.count, 2)
         XCTAssertEqual(t.filter { $0.status == .working }.map(\.title), ["Invoice CSV export"])
         XCTAssertEqual(t.filter { $0.status == .done }.map(\.title), ["Q3 summary for the board"])
-        XCTAssertEqual(t.map(\.status), t.map(\.status).sorted(), "Needs you first, Done last")
+        XCTAssertEqual(t.map(\.status), t.map(\.status).sorted(), "Needs your OK first, Done last")
     }
 
     func testOpenQuestionWinsOverTheLastUpdateAndAnsweredGoesBack() {
@@ -224,7 +224,7 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(t("stopped").stateLine, "Stopped")
         XCTAssertTrue(t("failure", "No access").stateLine.hasPrefix("Did not work"))
         let q = MockRelayTestsFixtures.question
-        XCTAssertEqual(TicketBuilder.build(updates: [], questions: [q], answers: [:])[0].stateLine, "Needs you")
+        XCTAssertEqual(TicketBuilder.build(updates: [], questions: [q], answers: [:])[0].stateLine, "Needs your OK")
     }
 
     func testTextBodyReadsUpdateKind() throws {
