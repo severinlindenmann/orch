@@ -18,6 +18,15 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
                 "claude": {"mcp_settings"},
                 "codex": {"mcp_settings"},
             }
+        elif name == "capabilities":  # W2b 1.8: what the record can learn from the tool's stream
+            assert got == {
+                "adapters": {
+                    "claude": {
+                        "capabilities": {"activity": "live"},
+                        "oneshot": {"events": "claude-stream-json/1"},
+                    }
+                }
+            }
         else:
             assert got == {}
     merged = agentsdata.load()
@@ -29,6 +38,8 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     for key in ("reminder_hooks", "reminder"):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")
+    merged["adapters"]["claude"]["oneshot"].pop("events")
+    merged["adapters"]["claude"]["capabilities"].pop("activity")
     assert merged == base
     assert {p.name for p in agentsdata.agents_dir().iterdir()} == {
         "base.json",
