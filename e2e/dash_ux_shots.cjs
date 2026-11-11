@@ -2,7 +2,8 @@
 // (workspace-addons/dashboard/tests/fixtures/state-chat-settings.json + chat-day-pilatus-2026-11-11.json) in
 // Chromium, no server: every request is answered from the files. Chat (Today, Earlier, one past day) and Settings
 // at 1280, 720 and 390 px; checks no horizontal scroll, nothing cut off at the right edge, one header row on a
-// narrow screen and the 4 h / 8 h / 12 h / 24 h choice on one line.
+// narrow screen and the 4 h / 8 h / 12 h / 24 h choice on one line. Settings at 1280 and 390 px also shows one review
+// step open (Clean up now) and checks the keyboard moves into it and Escape closes it.
 // usage: [PW_DIR=<node_modules holding playwright>] [SHOTS_DIR=<folder>] node --test e2e/dash_ux_shots.cjs
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -116,6 +117,19 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
       await page.click('[data-key="settings-copies-details"] summary');
       await page.locator('[data-key="settings-copies-details"]').scrollIntoViewIfNeeded();
       await shot('settings-copies-details');
+      if (w !== 720) {
+        // the review step before a change: shown in place with [Clean up] [Cancel], the keyboard in it, Escape closes it
+        await page.click('[data-key="settings-copies-clean"]');
+        await page.waitForSelector('[data-key="settings-review-copies-clean"]');
+        await page.locator('[data-key="settings-review-copies-clean"]').scrollIntoViewIfNeeded();
+        await shot('settings-review');
+        report[`settings-review-${w}`].review = await page.evaluate(() => {
+          const p = document.querySelector('.settings-review');
+          return {inPanel: document.activeElement === p, text: p.innerText.replace(/\s+/g, ' ').trim(), buttons: [...p.querySelectorAll('button')].map(b => b.textContent)};
+        });
+        await page.keyboard.press('Escape');
+        report[`settings-review-${w}`].afterEscape = await page.evaluate(() => ({open: !!document.querySelector('.settings-review'), at: document.activeElement?.dataset?.key || ''}));
+      }
       if (w === 390) {
         await page.click('#menu-toggle');
         await page.waitForSelector('#mm-toggle:visible');
@@ -140,6 +154,13 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
     assert.equal(report[`chat-earlier-${w}`].hasToday, 0, 'today is not repeated in Earlier');
     assert.equal(report[`chat-earlier-${w}`].searchBoxes, 1, 'one search box');
     assert.match(report[`chat-day-${w}`].banner, /you can read, not reply.*Back to today/);
+  }
+  for (const w of [1280, 390]) {
+    const r = report[`settings-review-${w}`];
+    assert.equal(r.review.inPanel, true, `settings-review-${w}: the keyboard is in the review`);
+    assert.deepEqual(r.review.buttons, ['Clean up', 'Cancel']);
+    assert.match(r.review.text, /will be removed now\..*Your own files are not touched\./);
+    assert.deepEqual(r.afterEscape, {open: false, at: 'settings-copies-clean'}, `settings-review-${w}: Escape closes it and goes back to the button`);
   }
   assert.match(report['menu-390'].menuLabel, /^Menu · \d+$/);
   assert.match(report['menu-390'].phoneSwitch, /Send questions to my phone/);

@@ -47,12 +47,13 @@ function shareCard(settings) {
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Share with team'),
         settingsText('p', {className:'meta'}, on ? 'AGENTS.md has a short orch entry. Turn off to remove it.' : 'Off: orch files stay on this computer and your team sees nothing.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Share with team', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')}))));
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Share with team', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
+      reviewPanel('share', settings)));
 }
 // The CLI hint stays out of the page: a missing sign-in is said in plain words.
-const plainTest = reason => /not logged in|\/login/i.test(String(reason || '')) ? 'The agent is not signed in yet.' : reason;
+const plainTest = reason => /not logged in|\/login/i.test(String(reason || '')) ? 'The helper is not signed in yet.' : reason;
 // Every field the approval covers, in full (name, adapter, command, interactive, prompt).
-const pendingText = p => [['Agent', p.name], ['Adapter', p.adapter], ['Command', p.command], ['Live command', p.interactive], ['Prompt', p.prompt]].filter(r => r[1]).map(r => r[0] + ': ' + r[1]).join('\n');
+const pendingText = p => [['Helper', p.name], ['Adapter', p.adapter], ['Command', p.command], ['Live command', p.interactive], ['Prompt', p.prompt]].filter(r => r[1]).map(r => r[0] + ': ' + r[1]).join('\n');
 function privateCard(settings) {
   const info = settings.git_private;
   const pending = array(info?.pending);
@@ -71,13 +72,46 @@ function workflowCard(settings) {
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers may mark tickets Done'),
         settingsText('p', {className:'meta'}, 'On: a helper marks its finished work Done. Off: helpers send finished work to Review and you decide when it is Done.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Helpers may mark tickets Done', 'aria-checked':!!settings.agents_may_finish, 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')}))));
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Helpers may mark tickets Done', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
+      reviewPanel('workflow', settings)));
 }
 // Separate copies (draft 1f, owner pass 11 Nov): one plain row with a switch; when, how many, what is on this
 // computer, how a copy is prepared and what it needs sit behind Details.
 const COPY_CHOICES = [['together', 'When helpers work at the same time'], ['always', 'Every time, even for one helper']];
 // Text fields on this page: Edit, then the field with Save / Cancel (like Description); switches save at once.
 let copySetupEditing = false;
+// Review step (owner rule): a change here is one plain click after a shown review: what will happen and what it
+// touches, then [Verb] [Cancel]; never a typed word. It opens in place, in the same look as the command review of
+// "+ Add your own helper" (.cmd-preview with its .acts row). Only its first button makes the change.
+let settingsReview = null, settingsReviewFrom = null;
+const SETTINGS_REVIEW_BUSY = {share:'share', workflow:'workflow', 'copies-switch':'copies', 'copies-clean':'copies-clean'};
+const copiesModeOf = settings => ['off', 'together', 'always'].includes(settings.copies) ? settings.copies : 'together';
+function settingsReviewText(id, settings) {
+  if (id === 'share') return settings.share === true
+    ? {verb:'Stop sharing', what:'Your team will no longer see that this workspace uses orch.', affects:'The short orch entry is taken out of AGENTS.md. Nothing else in your files changes.'}
+    : {verb:'Share', what:'Your team will see that this workspace uses orch.', affects:'A short orch entry is added to AGENTS.md in your team’s files. Everything else from orch stays on this computer.'};
+  if (id === 'workflow') return settings.agents_may_finish
+    ? {verb:'Turn off', what:'Helpers will send finished work to Review, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
+    : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting in Review stay there.'};
+  if (id === 'copies-switch') return copiesModeOf(settings) !== 'off'
+    ? {verb:'Turn off', what:'Helpers will all work in your own folder, also when they work at the same time.', affects:'Copies that already exist stay until their ticket is done. Your own files are not touched.'}
+    : {verb:'Turn on', what:'When helpers work at the same time, each one gets its own copy of your files.', affects:'At most ' + (settings.copies_max || 3) + ' copies at the same time. They take space on this computer and are removed when their ticket is done. Your own files are not touched.'};
+  const n = settings.copies_disk?.copies;
+  return {verb:'Clean up', what:'Copies of your files that no helper needs any more will be removed now.',
+    affects:(n === 0 ? 'There are no copies right now, so nothing will be removed.'
+      : typeof n === 'number' ? 'Up to ' + n + (n === 1 ? ' copy' : ' copies') + ' will be removed, only the ones no ticket needs any more. Saved changes stay in the version history.'
+      : 'Only copies no ticket needs any more are removed. Saved changes stay in the version history.') + ' Your own files are not touched.'};
+}
+function reviewPanel(id, settings) {
+  if (settingsReview !== id || snapshot) return null;
+  const r = settingsReviewText(id, settings);
+  return h('div', {className:'cmd-preview settings-review', role:'group', tabindex:'-1', 'aria-labelledby':'settings-review-what', 'aria-describedby':'settings-review-affects', 'data-key':'settings-review-' + id},
+    settingsText('p', {id:'settings-review-what', className:'settings-review-what'}, r.what),
+    settingsText('p', {id:'settings-review-affects', className:'meta'}, r.affects),
+    h('div', {className:'acts'},
+      settingsText('button', {type:'button', className:'btn sm primary', 'data-key':'settings-review-ok', 'data-action':'settings-review-ok', disabled:settingsBusy.has(SETTINGS_REVIEW_BUSY[id])}, r.verb),
+      settingsText('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-review-cancel', 'data-action':'settings-review-cancel'}, 'Cancel')));
+}
 function copiesDiskText(d) {
   if (!d || typeof d.copies !== 'number') return 'Counting…';
   const n = d.copies, b = Number(d.bytes) || 0;
@@ -89,7 +123,7 @@ function copiesDiskText(d) {
     + array(d.stuck).map(() => ' · a copy could not be cleaned up').join('');
 }
 function copiesCard(settings) {
-  const mode = ['off', 'together', 'always'].includes(settings.copies) ? settings.copies : 'together', on = mode !== 'off', busy = settingsBusy.has('copies');
+  const mode = copiesModeOf(settings), on = mode !== 'off', busy = settingsBusy.has('copies');
   const disk = settings.copies_disk, problems = array(disk?.stuck).length + array(disk?.orphaned).length > 0, off = snapshot || busy;
   const cap = h('select', {className:'input copies-max', 'aria-label':'Most copies at the same time', 'data-key':'settings-copies-max', disabled:off},
     [1, 2, 3, 4, 5, 6, 8, 10, 20].map(n => h('option', {value:String(n)}, String(n))));
@@ -104,7 +138,8 @@ function copiesCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-copies'}, h('h2', {className:'set-sub'}, 'Copies of your files'),
     h('div', {className:'card'},
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers working at the same time: each gets its own copy of your files')),
-        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Each helper gets its own copy of your files', 'data-key':'settings-switch-copies', 'data-action':'copies-mode', 'data-mode':on ? 'off' : 'together', disabled:off})),
+        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Each helper gets its own copy of your files', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
+      reviewPanel('copies-switch', settings),
       h('details', {className:'copies-details', 'data-key':'settings-copies-details', open:problems ? '' : null}, h('summary', {}, 'Details'),
         h('div', {className:'stack copies-more'},
           row('When', '', h('div', {className:'row copies-choices', role:'radiogroup', 'aria-label':'When each helper gets its own copy'}, COPY_CHOICES.map(([id, label]) =>
@@ -114,7 +149,8 @@ function copiesCard(settings) {
             h('div', {className:'row'},
               array(disk?.stuck).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-retry', 'data-action':'copies-retry', disabled:off || settingsBusy.has('copies-clean')}, 'Try again') : null,
               array(disk?.orphaned).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-orphaned', 'data-action':'copies-orphaned', disabled:off || settingsBusy.has('copies-clean')}, 'Remove the moved ones') : null,
-              h('button', {type:'button', className:'btn sm outline', 'data-key':'settings-copies-clean', 'data-action':'copies-clean', disabled:off || settingsBusy.has('copies-clean')}, 'Clean up now'))),
+              h('button', {type:'button', className:'btn sm outline', 'data-key':'settings-copies-clean', 'data-action':'copies-clean', disabled:off || settingsBusy.has('copies-clean')}, 'Clean up now')),
+            reviewPanel('copies-clean', settings)),
           row('Prepare a copy with', 'Runs once in each new copy, for example to install what the project needs.', setup),
           settingsText('p', {className:'meta'}, 'Needs version history in this folder. When a copy is removed, its saved changes stay in the version history.')))));
 }
@@ -125,7 +161,7 @@ function settingsPage() {
     const radio = h('input', {type:'radio', 'aria-label':agent.label, name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
-    const status = agent.status === 'your command' ? 'Your own agent' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer';
+    const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer';
     return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
@@ -155,7 +191,7 @@ function settingsPage() {
         h('details', {className:'folder-details', 'data-key':'settings-folder-details'}, h('summary', {}, 'Details'), settingsText('p', {className:'mono meta'}, settings.folder)))))),
       shareCard(settings), workflowCard(settings), copiesCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
-      snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own agent'))),
+      snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
     panel('addons', h('div', {className:'settings-addon-grid'}, array(settings.addons).map(addonRow)))))
   ));
@@ -187,7 +223,7 @@ function openAgentForm(control) {
     fields.hidden = true;
     preview.hidden = false;
     preview.replaceChildren(el('p', 'meta', 'orch will run this for each ticket:'), settingsText('pre', {className:'cmd-preview mono preserve-lines'}, draft.command),
-      (() => { const a = el('div', 'acts'); a.append(back, button('Add agent', 'primary sm', async () => {
+      (() => { const a = el('div', 'acts'); a.append(back, button('Add helper', 'primary sm', async () => {
         const args = {name:draft.name, command:draft.command};
         if (draft.prompt_via === 'stdin') args.prompt_via = 'stdin';
         const result = await settingsSend('config.agent.add', args, 'add');
@@ -232,6 +268,35 @@ async function settingsSend(op, args, key) {
   if (!result.ok) window.orch.toast(result.text, 'error');
   render();
   return result;
+}
+// The review step: the control opens the panel and the keyboard moves into it; Cancel or Escape closes it and the
+// keyboard goes back to the control; the panel's first button runs the same action the control ran before.
+const settingsReviewFocus = key => { if (key) document.querySelector('[data-key="' + key + '"]')?.focus(); };
+function settingsReviewOpen(id, control) {
+  if (snapshot || control.disabled || !SETTINGS_REVIEW_BUSY[id]) return;
+  settingsReview = id;
+  settingsReviewFrom = control.dataset.key || null;
+  render();
+  settingsReviewFocus('settings-review-' + id);
+}
+function settingsReviewClose() {
+  const from = settingsReviewFrom;
+  settingsReview = null; settingsReviewFrom = null;
+  render();
+  settingsReviewFocus(from);
+}
+async function settingsReviewRun() {
+  const id = settingsReview, from = settingsReviewFrom, settings = state.settings || {};
+  if (!id || snapshot || settingsBusy.has(SETTINGS_REVIEW_BUSY[id])) return;
+  settingsReview = null; settingsReviewFrom = null;
+  if (id === 'share') {
+    const on = settings.share !== true;
+    const result = await settingsSend('share.set', {on}, 'share');
+    if (result.ok) window.orch.toast(on ? 'Shared. Your team can now see this workspace.' : 'Not shared any more.', 'ok');
+  } else if (id === 'workflow') await settingsSend('workflow.set', {on:!settings.agents_may_finish}, 'workflow');
+  else if (id === 'copies-switch') await settingsSend('copies.set', {mode:copiesModeOf(settings) === 'off' ? 'together' : 'off'}, 'copies');
+  else await settingsSend('copies.clean', {}, 'copies-clean');
+  settingsReviewFocus(from);
 }
 
 const addonViews = Object.create(null), addonBusy = new Set();
