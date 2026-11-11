@@ -26,7 +26,9 @@ The core names no agent tool here: tool-specific mapping lives in the collectors
                                       line (run set), and a global "trimmed" line (run null) when the file passes 1 MB
   alerts/hook-lost-unattributed-<YYYY-MM-DD>.jsonl  the same for a caller NOT proven to be in the run (not_active |
                                       other_run | not_provable): run is null, never a run id the caller named; 1 per reason per minute
-  pending/<run>/<time_uuid>.json     prepared writes waiting for the run lock
+  pending/<run>/<time_uuid>.json     prepared writes waiting for the run lock; committed first under the lock. One
+                                      that cannot be read, checked or committed is left in place with an alert
+                                      (target folder) and skipped, never raised: it never stops the run's record
   meta.json                           {"schema": "orch.record/1", "since": "<time>", "keep_days": 90, "max_mb": 2048}
   runs/<run>.jsonl                    one file per run, one orch.activity/1 event per line
   detail/<run>/<file name>.json       full payload of one event ($defs/detail_file), at most 1 MB, key values hidden
@@ -67,10 +69,11 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   call that appends under the per-run lock `runs/<run>.lock`, named with O_EXCL and
   held with a kernel lock, released in a `finally`). Each event is one line, one
   `write()` of at most 8 KB (text is cut, never the line split), so lines never mix.
-- **The hook entry is narrow.** `orch record hook` (the only out-of-process way in) accepts only `step`, `denial`,
-  `helper.start`, `helper.end` and `usage`, and always writes `via: hook` whatever the caller sent. `task.*`, `ask`,
-  `run.state`, `key.use`, `job` and `session.input` are written only in-process by the core, the broker and `orch job`
-  (vectors `hook_entry`). The call is bound to the run: `ORCH_RUN` and `ORCH_TICKET` must name a live claim that belong
+- **The hook entry is narrow.** `orch record hook` (the only out-of-process way in) accepts only `step`,
+  `helper.start` and `helper.end` (the kinds whose line can be provisional, Precedence and dedupe), and always writes
+  `via: hook` whatever the caller sent. `denial` (it says how a call ended) and `usage` (numbers no log line checks)
+  come only from the log and the core; `task.*`, `ask`, `run.state`, `key.use`, `job` and `session.input` are written
+  only in-process by the core, the broker and `orch job` (vectors `hook_entry`). No other CLI path writes `via: hook`. The call is bound to the run: `ORCH_RUN` and `ORCH_TICKET` must name a live claim that belong
   together **and the calling process must be a descendant of the claim's process** (its wrapper pid or agent pid, start
   time checked), so a process outside the run cannot write into it by setting the same variables; a line naming another
   run is dropped; the caller's `at` and `harness` are never kept (time of the call; the tool this process runs under).
@@ -79,10 +82,14 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   pids anywhere among the caller's ancestors, so a call from a child run's tree can still name its parent run; telling
   them apart needs the token below. `orch record hook` always exits 0 with nothing on stdout and at most one stderr
   line (a tool's hook exit 2 would block the tool call) unless `--strict` (then 2): any `orch record [flags] hook
-  [anything]` is taken before the parser, the Chat guard and the notices, and `python -m orch` turns anything that
-  still fails (an import of a broken install, a SystemExit) into the same exit. The hook wiring calls exactly
-  `orch record hook` (optionally `--strict`): the root comes from `ORCH_ROOT` or the working folder only; other flags
-  are ignored. The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
+  [anything]` is taken before the parser, the Chat guard and the notices. The `orch` console script's own entry
+  (`orch_entry:main`, stdlib only) checks this first, before orch is imported and before the update check: its
+  watchdog starts before the import, and anything that still fails (an update in progress, an import of a broken
+  install that raises or hangs, a SystemExit) ends with the same exit; `python -m orch` does the same. Only `--by`
+  is known as a flag that takes a value: a global flag before `record` (`orch --json record hook`) or another flag
+  with a value before `hook` is not this form and goes to the parser (which can exit 2). The hook wiring calls
+  exactly `orch record hook` (optionally `--strict`): the root comes from `ORCH_ROOT` or the working folder only;
+  other flags are ignored. The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
   never ends the process inside a write. *Follow-up:* the per-run hook file token
   (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
   The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller
@@ -118,16 +125,20 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
   the same command itself with any payload and read its own tool-call ids (the process-tree proof only shows it
   comes from inside the run). So a hook line is the agent's word:
   - **The hook entry never says how a call ended.** On every path (the tool's payload or an event-shaped line) it
-    writes a finished `step` or `helper.end` as **provisional**: `outcome` `{ok: null, error: null, ms: null}`,
+    writes any line with an outcome as **provisional**: `outcome` `{ok: null, error: null, ms: null}`,
     whatever the caller sent. Without a log (a live run) the call stays "finished, result unknown".
   - **The log line wins, started and finished alike.** For a key that a log line also has, the log line replaces the
-    hook line (it is written, with its own detail file over the hook's, and readers keep it), and a hook line after the
-    log line is dropped (vectors `dedupe`).
-  - **Disagreement is kept, never hidden.** When the hook line says something else than the log line (`used`, `text`,
-    `files`, or, both finished and the hook's not provisional, `ok` or `error`), both lines are kept and the log line
-    carries `conflict: true`; the log line is the one to believe (counts take its result).
+    hook line (it is written, with its own detail file over the hook's, and readers keep it), and a hook line after
+    any log line of that call (run, id, kind; started or finished) is dropped (vectors `dedupe`).
+  - **Disagreement is kept, never hidden.** When a hook line of the call says something else than the log line
+    (`used`, `text`, `files`, whether either is finished; or, both finished and the hook's not provisional, `ok` or
+    `error`), both lines are kept and the log line carries `conflict: true`; the log line is the one to believe:
+    counts take its line of the call, even a started one over a hook end (result unknown). A kept hook line and its
+    `conflict` log line share one detail file name: when the log line has a detail, the file is the log's.
   - The writer removes the hook's detail file when the log line that replaced it has none of its own (lost or none),
-    so the agent's payload never stays behind without a line pointing to it.
+    so the agent's payload never stays behind without a line pointing to it. Writing over a detail file is atomic
+    (a temporary file in the same folder, then a rename): a reader sees the old file or the new one; a failed
+    rename leaves the old file and marks the line `detail_lost`.
   The hook's detail keeps the tool's input with every text cut at 32 K characters (lists at 100 entries) and only an
   allow-list of plain result fields, each text cut the same way (never the tool's internal copies such as
   `originalFile` or `structuredPatch`). The agent can also switch the tool's hooks off (its folder's or the person's
@@ -144,10 +155,10 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 | `step` | hook, log | skill · tool · mcp | – | one tool call; `text` = "Read report-2025-11.pdf" |
 | `task.start`, `task.done` | core | null | `check` (`c<n>`) | from the ticket |
 | `ask` | core | null | `q` (`q<n>`) | a question on the ticket |
-| `denial` | hook, log, core | tool · mcp | – | `outcome.ok: false`, `error` = "Not allowed by this workspace" |
+| `denial` | log, core | tool · mcp | – | `outcome.ok: false`, `error` = "Not allowed by this workspace" |
 | `helper.start`, `helper.end` | hook, log | helper | – | `agent` = the helper `h_<n>`, `parent` = who started it |
 | `run.state` | core | null | `state` | starting · working · waiting_you · idle · done · failed · stopped |
-| `usage` | hook, log | null | `used` 0..1, `window`, `status`, `tokens_in/out` | plan or token use |
+| `usage` | log | null | `used` 0..1, `window`, `status`, `tokens_in/out` | plan or token use |
 | `key.use` | broker | key (`action` = env · file · exec · get) | `profile`, `command`, `skill`, `refused`? | one per key per broker call, never the value (secrets.md) |
 | `secret.change` | broker | null | `action` (`profile.set` · `profile.remove` · `profile.get_enable` · `profile.get_disable` · `profile.agents_enable` · `profile.agents_disable`), `profile`, `by` (`human:<name>` or `reset`) | a change of a key profile or its switches (secrets.md); never a value. Written best effort: a failing writer never blocks turning a switch off |
 | `job` | job | null | `job`, `type`, `state` | one line per job event that changes what people see (job-events.md); the full stream is in `jobs/` |

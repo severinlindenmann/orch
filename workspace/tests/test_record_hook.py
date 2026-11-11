@@ -62,16 +62,15 @@ def test_step_is_written_as_hook_for_the_env_run(live):
 @pytest.mark.parametrize("vector", VECTORS["hook_entry"], ids=lambda v: v["name"])
 def test_vectors(live, vector):
     root, run, _ = live
+    kind = vector["line"]["kind"]
+    helper = {"kind": "helper", "name": "Helper", "action": None, "source": "harness", "version": None}
     raw = dict(
         vector["line"],
         run=run,
         text="x",
-        used=USED if vector["line"]["kind"] == "step" else None,
-        **(
-            {"data": {"used": 0.4, "window": "5h", "status": "ok"}}
-            if vector["line"]["kind"] == "usage"
-            else {}
-        ),
+        used=USED if kind == "step" else helper if kind.startswith("helper.") else None,
+        **({"agent": "h_1", "parent": "main"} if kind.startswith("helper.") else {}),
+        **({"data": {"used": 0.4, "window": "5h", "status": "ok"}} if kind == "usage" else {}),
     )
     if vector["stored"] == "refused":
         with pytest.raises(record_hook.NotRecorded):
@@ -190,10 +189,11 @@ def test_dedupe_with_a_collector_line(live):
     assert (
         record_hook.hook(root, line(outcome={"ok": True, "error": None, "ms": 5})) is None
     )  # a hook line after the log's: dropped
-    # another origin keeps its own key
-    denial = dict(json.loads(line(kind="denial", used=USED, outcome={"ok": False, "error": "no", "ms": 1})))
-    record_hook.hook(root, json.dumps(denial))
-    other = dict(collector, kind="denial", via="core", outcome=denial["outcome"], used=USED)
+    # a hook may not say a call was denied (record.HOOK_KINDS, N1b); another origin keeps its own key
+    no = {"ok": False, "error": "no", "ms": 1}
+    with pytest.raises(record_hook.NotRecorded):
+        record_hook.hook(root, line(kind="denial", used=USED, outcome=no))
+    other = dict(collector, kind="denial", via="core", outcome=no, used=USED)
     with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
         assert record.registered_writer(root).append(other) is not None
 
@@ -720,10 +720,11 @@ def test_files_not_a_list_is_not_stored(live, files):
 
 def test_files_on_another_hook_kind_are_not_stored(live):
     root, run, _ = live
+    helper = {"kind": "helper", "name": "Helper", "action": None, "source": "harness", "version": None}
     got = record_hook.hook(
-        root, line(kind="denial", outcome={"ok": False, "error": "No", "ms": None}, files=["a.py"])
+        root, line(kind="helper.start", agent="h_1", parent="main", used=helper, files=["a.py"])
     )
-    assert got["kind"] == "denial" and "files" not in got
+    assert got["kind"] == "helper.start" and "files" not in got
 
 
 def test_files_filter_keeps_them_and_refused_kinds_stay_refused():
@@ -1172,7 +1173,7 @@ def test_a_forged_started_line_never_hides_what_the_call_did(tool_run):
     assert seen == [
         ("hook", "Read", "Read notes.txt", None),
         ("log", "Bash", "Run rm -rf build/", True),
-        ("log", "Bash", "Run rm -rf build/", None),
+        ("log", "Bash", "Run rm -rf build/", True),  # a hook line of the call is compared, finished or not
     ]
     model = cli_record.run_model(run, events(root, run))
     assert [(u["name"], u["result"]) for u in model["uses"]] == [("Bash", "failed")]
@@ -1194,6 +1195,97 @@ def test_run_model_reports_the_logs_result_on_a_conflict(tool_run):
     assert [(e["via"], e["outcome"]["ok"]) for e in seen] == [("hook", True), ("log", False)]
     assert [u["result"] for u in cli_record.run_model(run, seen)["uses"]] == ["failed"]
     assert [u["result"] for u in cli_record.run_model(run, seen[::-1])["uses"]] == ["failed"]
+
+
+@pytest.mark.parametrize("forged_pre", [True, False])
+def test_a_forged_hook_end_never_beats_the_logs_started_line(tool_run, forged_pre):
+    """N1a: the call never finishes in the log (an interrupted turn). The agent sends a provisional end (and
+    maybe a started line) naming another tool, text and files. The log's started line carries `conflict`
+    (a hook end is compared with it too), counts believe it (result unknown), and a hook end sent after it
+    is dropped."""
+    from orch import cli_record, collect_claude
+
+    root, run, tid = tool_run
+    forged = dict(id=TOOL_ID, used=READ, text="Read notes.txt", files=["notes.txt"])
+    if forged_pre:
+        record_hook.hook(root, line(**forged))
+    end = record_hook.hook(root, line(**forged, outcome={"ok": True, "error": None, "ms": 1}))
+    assert end["outcome"] == {"ok": None, "error": None, "ms": None}
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    bash = {"command": "rm -rf build/"}
+    collect_claude.collect([use_line(TOOL_ID, "Bash", bash)], record.registered_writer(root), ctx)
+    seen = events(root, run)
+    assert [(e["via"], e["used"]["name"], e["outcome"] is not None, e.get("conflict")) for e in seen] == [
+        *([("hook", "Read", False, None)] if forged_pre else []),
+        ("hook", "Read", True, None),
+        ("log", "Bash", False, True),
+    ]
+    for order in (seen, seen[::-1]):
+        uses = cli_record.run_model(run, order)["uses"]
+        assert [(u["name"], u["result"]) for u in uses] == [("Bash", "unknown")]
+    assert record_hook.hook(root, line(**forged, outcome={"ok": True, "error": None, "ms": 2})) is None
+
+
+def test_one_bad_spooled_entry_never_stops_the_runs_record(tool_run, monkeypatch):
+    """N2: entries in pending/<run>/ that cannot be read, checked or committed are skipped with an alert;
+    the good ones are committed and the next turn is written (its _so_far drain never raises)."""
+    from orch import run_record
+
+    root, run, tid = tool_run
+    writer = record.registered_writer(root)
+    writer.append(collector_line(run, tid, 0) | {"id": "toolu_first"})
+    lock = root / ".orch/record/runs" / f"{run}.lock"
+    os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))  # somebody else's fresh lock
+    for tid_ in ("toolu_a", "toolu_b"):
+        got = writer.append(collector_line(run, tid, 0) | {"id": tid_}, lock_wait=0.05)
+        assert got["pending"] is True
+    lock.unlink()
+    pending = root / ".orch/record/pending" / run
+    (pending / "00000000000000000001_text.json").write_text("not json")
+    (pending / "00000000000000000002_list.json").write_text("[]")
+    (pending / "00000000000000000003_dir.json").mkdir()
+    real = record.RecordWriter._commit
+
+    def commit(self, event, *a, **kw):
+        if event["id"] == "toolu_a":
+            raise ValueError("an entry that breaks inside the commit")
+        return real(self, event, *a, **kw)
+
+    monkeypatch.setattr(record.RecordWriter, "_commit", commit)
+    for _ in range(2):  # every later turn too
+        run_record.collect_turn(root, run, tid, "claude", root, [use_line(), result_line()])
+    ids = [e["id"] for e in run_lines(root, run)]
+    assert ids[:2] == ["toolu_first", "toolu_b"] and "toolu_a" not in ids and ids.count(TOOL_ID) == 2
+    alerts = "".join(p.read_text() for p in (root / ".orch/record/alerts").glob("2*.jsonl"))
+    assert '"target":"folder"' in alerts and '"reason":"swapped"' in alerts
+
+
+def test_the_logs_detail_replaces_the_hooks_atomically(tool_run, monkeypatch):
+    """N5: the log's detail is written to a temporary file and renamed over the hook's. Up to the rename the
+    hook's file is untouched (never half-written); a failed rename is no crash: the log line is detail_lost,
+    the hook's orphaned payload goes (N5 rule), and no temporary file stays behind."""
+    from orch import collect_claude
+
+    root, run, tid = tool_run
+    record_hook.hook(root, tool_hook("PreToolUse"))
+    post = record_hook.hook(root, tool_hook("PostToolUse"))
+    path = root / ".orch/record" / post["detail"]
+    before = path.read_bytes()
+    real, at_rename = os.replace, []
+
+    def failing(src, dst, *a, **kw):
+        if str(dst).endswith(path.name):
+            at_rename.append(path.read_bytes())  # the new payload is complete in the temporary file by now
+            raise OSError(5, "rename failed")
+        return real(src, dst, *a, **kw)
+
+    monkeypatch.setattr(record.os, "replace", failing)
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    collect_claude.collect([use_line(), result_line()], record.registered_writer(root), ctx)
+    assert at_rename == [before]
+    end = [e for e in run_lines(root, run) if e["via"] == "log" and e["outcome"] is not None]
+    assert [(e["detail"], e.get("detail_lost")) for e in end] == [(None, True)]
+    assert not path.exists() and not [p for p in path.parent.iterdir() if p.name.startswith("tmp_")]
 
 
 def test_a_provisional_hook_end_after_the_logs_failure_is_dropped(tool_run):
@@ -1369,13 +1461,24 @@ def test_a_hooks_tool_input_is_cut_too():
     assert "[cut: nested too deep]" in json.dumps(collect_claude.hook_input(deep))
 
 
-def test_the_persons_own_settings_that_switch_the_hooks_off_leave_a_trace(tool_run, tmp_path):
-    """N4: the person's own tool settings (under the home; faked per test) can switch the hooks off too."""
+def test_the_persons_own_settings_that_switch_the_hooks_off_leave_a_trace(tool_run, tmp_path, monkeypatch):
+    """N4: the person's own tool settings (under the home) can switch the hooks off too. The home is this
+    test's own temp folder (HOME and USERPROFILE set here, not only by conftest): the developer's real
+    ~/.claude/settings.json is never written."""
+    from conftest import _REAL_HOME_FN
+
     from orch import run_record
 
     root, run, tid = tool_run
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     user = Path.home() / ".claude"
-    user.mkdir(parents=True, exist_ok=True)
+    # hard stop before any write: the settings folder must be inside this test's temp folder
+    assert user.resolve().is_relative_to(tmp_path.resolve()), user
+    assert not user.resolve().is_relative_to((_REAL_HOME_FN() / ".claude").resolve())
+    user.mkdir()
     (user / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
     run_record.collect_turn(root, run, tid, "claude", tmp_path / "copy", [use_line(), result_line()])
     rows = [json.loads(x) for x in lost_notes(root).splitlines()]
@@ -1426,6 +1529,34 @@ def test_only_the_hook_form_skips_the_parser():
 
 
 @pytest.mark.parametrize(
+    "argv",
+    [
+        ["record", "hook"], ["record", "--json", "hook", "--bogus"], ["record", "--by", "agent:x", "hook"],
+        ["record", "hook", "--strict"], ["record", "--by"], ["record", "--by", "hook", "tail"],
+        ["record", "query", "--detail", "hook"], ["--json", "record", "hook"], ["ticket", "record", "hook"],
+        ["record"], [], ["record", "-x", "hook"], ["record", "--", "hook"],
+    ],
+)  # fmt: skip
+def test_the_console_entry_knows_the_same_hook_form(argv):
+    """orch_entry (stdlib only, never imports orch) keeps its own copy of the rule: the two must agree."""
+    import orch_entry
+    from orch import is_record_hook
+
+    assert orch_entry.is_record_hook(argv) is is_record_hook(argv)
+
+
+def test_the_console_entry_under_test_is_this_source():
+    """orch_entry.py is copied into the environment (not an editable link): a stale copy would test the old
+    entry. After a change to src/orch_entry.py, reinstall (uv sync --reinstall-package orch-workspace)."""
+    import orch_entry
+
+    src = ROOT / "workspace/src/orch_entry.py"
+    assert Path(orch_entry.__file__).read_bytes() == src.read_bytes(), (
+        f"{orch_entry.__file__} is stale; run: uv sync --reinstall-package orch-workspace"
+    )
+
+
+@pytest.mark.parametrize(
     "code",
     [
         "sys.argv = ['orch', 'record', '--json', 'hook', '--bogus']",
@@ -1450,6 +1581,102 @@ def test_the_hook_process_exits_zero_whatever_breaks(tmp_path, code):
         env=env, timeout=60,
     )  # fmt: skip
     assert r.returncode == 2 and r.stdout == "" and r.stderr.startswith("Refused: ")
+
+
+def _console_entry():
+    """The `orch` console script's target, as installed (what the hook wiring's `orch record hook` runs)."""
+    from importlib.metadata import entry_points
+
+    found = list(entry_points(group="console_scripts", name="orch"))
+    assert found and {ep.value for ep in found} == {"orch_entry:main"}, found
+    return found[0]
+
+
+def _hook_env(**extra):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ORCH_RUN") and k != "ORCH_TICKET"}
+    return {**env, **extra}
+
+
+BAD_FLAG = ["record", "--json", "hook", "--bogus"]
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_the_console_entry_with_a_broken_install_still_exits_zero(tmp_path, strict):
+    """L4b: the wiring runs the console script (orch_entry:main), not `python -m orch`: its own guard turns a
+    broken orch.cli into exit 0, empty stdout, one stderr line (2 only with --strict)."""
+    import subprocess
+
+    import orch_entry
+
+    ep = _console_entry()
+    assert ep.load() is orch_entry.main
+    argv = ["orch", *BAD_FLAG, *(["--strict"] if strict else [])]
+    code = (
+        "import sys; from importlib.metadata import entry_points; "
+        "main = list(entry_points(group='console_scripts', name='orch'))[0].load(); "
+        f"sys.modules['orch.cli'] = None; sys.argv = {argv!r}; sys.exit(main())"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", code], cwd=tmp_path, input="not json\n", capture_output=True, text=True,
+        env=_hook_env(), timeout=60,
+    )  # fmt: skip
+    assert (r.returncode, r.stdout) == (2 if strict else 0, ""), r.stderr
+    assert len(r.stderr.splitlines()) == 1 and r.stderr.startswith("Refused: " if strict else "orch: ")
+
+
+def _installed_script():
+    import shutil
+
+    found = shutil.which("orch", path=str(Path(sys.executable).parent))
+    if found is None:
+        pytest.skip("no installed `orch` script next to this interpreter")
+    return found
+
+
+@pytest.mark.parametrize("case", ["plain", "broken", "updating", "hung"])
+def test_the_installed_orch_script_never_fails_a_hook(tmp_path, case):
+    """L4b, through the installed `orch` script itself with a bad flag: exit 0, nothing on stdout, at most one
+    stderr line, whether orch.cli works, cannot be imported, hangs on import (the watchdog runs before it),
+    or an update is in progress (never exit 3, never an import of a half-installed orch)."""
+    import subprocess
+
+    script = _installed_script()
+    extra = {}
+    if case in ("broken", "hung"):
+        site = tmp_path / "site"
+        site.mkdir()
+        body = {
+            "broken": "import sys\nsys.modules['orch.cli'] = None\n",
+            "hung": (
+                "import sys, time\n"
+                "class _Hang:\n"
+                "    def find_spec(self, name, path=None, target=None):\n"
+                "        if name == 'orch.cli':\n"
+                "            time.sleep(60)\n"
+                "        return None\n"
+                "sys.meta_path.insert(0, _Hang())\n"
+            ),
+        }[case]
+        (site / "sitecustomize.py").write_text(body)
+        extra["PYTHONPATH"] = str(site)
+    elif case == "updating":
+        import orch_entry
+
+        home = tmp_path / "toolhome"
+        home.mkdir()
+        orch_entry.marker_path(home).write_text(str(os.getpid()))  # a live update owner
+        extra["ORCH_HOME"] = str(home)
+    t0 = time.monotonic()
+    r = subprocess.run(
+        [script, *BAD_FLAG], cwd=tmp_path, input="not json\n", capture_output=True, text=True,
+        env=_hook_env(**extra), timeout=60,
+    )  # fmt: skip
+    assert (r.returncode, r.stdout) == (0, ""), r.stderr
+    assert len(r.stderr.splitlines()) <= 1, r.stderr
+    if case != "hung":
+        assert r.stderr.startswith("orch: "), r.stderr
+    else:
+        assert time.monotonic() - t0 < 30  # the watchdog, not the 60 s import
 
 
 def test_every_lost_reason_is_named_in_the_contract():

@@ -449,11 +449,14 @@ def _write_new(ws, rel, payload, *, expected=None):
                     raise
             else:
                 _close(existing)
-            os.replace(
-                name,
-                rel[-1] if _FD else directory.path / rel[-1],
-                **({"src_dir_fd": directory.fd, "dst_dir_fd": directory.fd} if _FD else {}),
-            )
+            # temp file + rename: a reader sees the old file or the new one, never a half-written one; a
+            # failed rename leaves the old file as it was (a RecordUnavailable: the caller marks detail_lost)
+            with _io():
+                os.replace(
+                    name,
+                    rel[-1] if _FD else directory.path / rel[-1],
+                    **({"src_dir_fd": directory.fd, "dst_dir_fd": directory.fd} if _FD else {}),
+                )
             if _FD:
                 with _io():
                     os.fsync(directory.fd)
@@ -660,17 +663,24 @@ def _replaces(old, event):
     return event["via"] == "log" and old["via"] == "hook" and _key(old) == _key(event) and _agree(old, event)
 
 
+def _same_call(old, event):
+    """Lines of one call (run, id, kind), started or finished."""
+    return all(old[k] == event[k] for k in ("run", "id", "kind"))
+
+
 def _decision(previous, event):
     """Keep `event`? Hook lines come from inside the agent's trust boundary, so for one key (started or
-    finished alike) the log line wins: it replaces the hook line, a hook line after it is dropped. When the
-    two disagree, both are kept and the log line carries `conflict: true` (the log line is the one to
-    believe). Repeats of one origin keep the first."""
+    finished alike) the log line wins: it replaces the hook line, and a hook line after any log line of that
+    call (started or finished) is dropped. When a log line disagrees with any hook line of its call (a hook
+    end against the log's started line too), both are kept and the log line carries `conflict: true` (the
+    log line is the one to believe). Repeats of one origin keep the first."""
     matching = [old for old in previous if _key(old) == _key(event)]
     if any(old["via"] == event["via"] for old in matching):
         return False
-    if event["via"] == "hook" and any(old["via"] == "log" for old in matching):
+    call = [old for old in previous if old["via"] in ("hook", "log") and _same_call(old, event)]
+    if event["via"] == "hook" and any(old["via"] == "log" for old in call):
         return False  # the log already has this call
-    if event["via"] == "log" and any(not _agree(old, event) for old in matching):
+    if event["via"] == "log" and any(old["via"] == "hook" and not _agree(old, event) for old in call):
         event["conflict"] = True
     return True
 
@@ -1388,8 +1398,19 @@ class RecordWriter:
             except (KeyError, TypeError, ValueError, RecursionError, RecordInvalid):
                 _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
                 continue
-            self._commit(event, payload, pending["default_id"], check_lock=check_lock)
-            _unlink(self.workspace, rel)
+            try:
+                self._commit(event, payload, pending["default_id"], check_lock=check_lock)
+            except (KeyError, TypeError, ValueError, UnicodeError, RecursionError, RecordInvalid):
+                # one bad entry is skipped with a trace, never raised: every later write and every
+                # run_lines(drain=...) of the run would fail with it. A lock or run-file problem still raises.
+                _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
+                continue
+            try:
+                with _io():
+                    _unlink(self.workspace, rel)
+            except (RecordTampered, RecordUnavailable) as error:
+                # committed already; left behind it is deduped next time (or alerted), never raised
+                _report(self.workspace, error, "folder", run, "writer")
 
 
 def _files_in_budget(files: list[str]) -> list[str]:
@@ -1401,14 +1422,14 @@ def _files_in_budget(files: list[str]) -> list[str]:
     return files[:keep]
 
 
+# The out-of-process hook entry's kinds: only kinds whose line can be provisional (the log's line of the call
+# replaces it). A `denial` must say ok: false and `usage` carries numbers no log line checks, so both are the
+# log's (and the core's) alone: from the agent's side of the trust boundary they would assert an outcome.
+HOOK_KINDS = ("step", "helper.start", "helper.end")
+
+
 def hook_entry_filter(line: dict) -> dict | None:
-    if not isinstance(line, dict) or line.get("kind") not in (
-        "step",
-        "denial",
-        "helper.start",
-        "helper.end",
-        "usage",
-    ):
+    if not isinstance(line, dict) or line.get("kind") not in HOOK_KINDS:
         raise RecordRefused("This kind of record is not allowed here.")
     return dict(line, via="hook")
 

@@ -406,6 +406,34 @@
     0,
     1
    ]
+  },
+  {
+   "name": "a hook end after the log's started line of that call is dropped",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_8",
+     "kind": "step",
+     "via": "log",
+     "text": "Run rm -rf build/",
+     "outcome": null
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_8",
+     "kind": "step",
+     "via": "hook",
+     "text": "Read notes.txt",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    0
+   ]
   }
  ],
  "retention": [
@@ -1279,17 +1307,37 @@
    }
   },
   {
-   "name": "usage stored",
+   "name": "usage refused (numbers no log line checks)",
    "line": {
     "kind": "usage",
     "via": "hook",
     "id": "toolu_01X",
     "run": "r_8k2m01"
    },
-   "stored": {
-    "kind": "usage",
+   "stored": "refused"
+  },
+  {
+   "name": "denial refused (it says how a call ended)",
+   "line": {
+    "kind": "denial",
     "via": "hook",
     "id": "toolu_01X",
+    "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "helper.start stored as hook",
+   "line": {
+    "kind": "helper.start",
+    "via": "log",
+    "id": "toolu_01H",
+    "run": "r_8k2m01"
+   },
+   "stored": {
+    "kind": "helper.start",
+    "via": "hook",
+    "id": "toolu_01H",
     "run": "r_8k2m01"
    }
   }

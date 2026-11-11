@@ -625,10 +625,14 @@ def run_model(run: str, events: list[dict]) -> dict:
             continue
         key = (e["kind"], e["id"])
         finished = e.get("outcome") is not None
-        if key in uses and uses[key]["finished"] and not finished:
-            continue
-        if key in uses and uses[key]["event"].get("via") == "log" and e.get("via") == "hook":
-            continue  # hook and log lines of one call kept with `conflict`: believe the log line
+        if key in uses:
+            old_via, via = uses[key]["event"].get("via"), e.get("via")
+            if old_via == "log" and via == "hook":
+                continue  # hook and log lines of one call kept with `conflict`: believe the log line
+            # a log line replaces the hook's, finished or not: a hook end (provisional, the agent's word)
+            # never hides the log's started line of that call
+            if not (old_via == "hook" and via == "log") and uses[key]["finished"] and not finished:
+                continue
         uses[key] = {"event": e, "finished": finished}
     items = []
     for u in uses.values():

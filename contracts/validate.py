@@ -222,9 +222,9 @@ def act_detail_name(run, kind, event_id):
 
 def act_dedupe(lines):
     """Only hook/log share an origin. For one key the log line wins, started and finished alike: it replaces
-    the hook line, and a hook line after it is dropped. When the two disagree (`used`, `text`, `files`, or both
-    finished and the hook's not provisional: `ok`/`error`) both are kept (the log line carries `conflict`).
-    Repeats of one origin keep the first."""
+    the hook line, and a hook line after any log line of that call (run, id, kind; started or finished) is
+    dropped. When the two disagree (`used`, `text`, `files`, or both finished and the hook's not provisional:
+    `ok`/`error`) both are kept (the log line carries `conflict`). Repeats of one origin keep the first."""
     kept = []
     def key(line):
         via = line["via"]
@@ -243,7 +243,9 @@ def act_dedupe(lines):
         matches = [j for j in kept if key(lines[j]) == key(line)]
         if any(lines[j]["via"] == line["via"] for j in matches):
             continue
-        if line["via"] == "hook" and any(lines[j]["via"] == "log" for j in matches):
+        if line["via"] == "hook" and any(
+            lines[j]["via"] == "log" and all(lines[j][k] == line[k] for k in ("run", "id", "kind")) for j in kept
+        ):
             continue
         kept = [j for j in kept if not (j in matches and line["via"] == "log" and agree(lines[j], line))] + [i]
     return sorted(kept)
@@ -253,7 +255,7 @@ def _t(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
 
 
-HOOK_KINDS = ("step", "denial", "helper.start", "helper.end", "usage")
+HOOK_KINDS = ("step", "helper.start", "helper.end")  # only kinds whose line can be provisional
 
 
 def act_hook_accept(line):
