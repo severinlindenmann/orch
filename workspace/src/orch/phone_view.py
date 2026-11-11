@@ -371,6 +371,7 @@ def update_state(root: Path, fn) -> dict:
 _JPEG_META_OK = {0xE0, 0xE1, 0xE2}  # APP0 (JFIF), APP1 (Exif/XMP), APP2 (ICC); COM and APP3+ are refused
 _JPEG_PLAIN = {0xDB, 0xC4, 0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xDD, 0xDA}
 JPEG_META_MAX = 128 * 1024  # all metadata segments together
+JPEG_PLAIN_MAX = 8 * 1024  # all table/frame segments together (real files use ~1 KB): no payload room
 
 
 def _jpeg_walk(data: bytes) -> list[bytes] | None:
@@ -379,7 +380,7 @@ def _jpeg_walk(data: bytes) -> list[bytes] | None:
     the picture), no COM / APP3+ segment, bounded metadata."""
     if not data.startswith(b"\xff\xd8"):
         return None
-    pos, meta, size = 2, [], 0
+    pos, meta, size, plain = 2, [], 0, 0
     while pos + 4 <= len(data):
         if data[pos] != 0xFF:
             return None
@@ -394,6 +395,10 @@ def _jpeg_walk(data: bytes) -> list[bytes] | None:
                 return None
         elif m not in _JPEG_PLAIN:
             return None
+        else:
+            plain += n
+            if plain > JPEG_PLAIN_MAX:
+                return None
         pos += 2 + n
         if m == 0xDA:  # entropy-coded data: FF00 and RSTn are data, any other marker ends it
             while pos + 1 < len(data):
@@ -414,9 +419,8 @@ def _photo_verdict(data: bytes) -> str:
     if meta is None:
         return "unknown"
     texts = [data]
-    for seg in meta:
-        texts += [seg[k:].decode("utf-16-le", "ignore").encode() for k in (0, 1)]
-        texts += [seg[k:].decode("utf-16-be", "ignore").encode() for k in (0, 1)]
+    for codec in ("utf-16-le", "utf-16-be"):  # both byte orders, both alignments, over the whole file
+        texts += [data[k:].decode(codec, "ignore").encode() for k in (0, 1)]
     return "secret" if any(_has_secret(t) for t in texts) else "ok"
 
 

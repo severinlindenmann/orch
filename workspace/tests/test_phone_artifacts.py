@@ -576,6 +576,8 @@ def test_preview_never_points_outside_the_list(monkeypatch):
             b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + b"PK\x03\x04",
             False,
         ),  # no PNG shortcut under photo_ok
+        ("x.jpg", jpeg(APP0, (0xDB, TOKEN.encode("utf-16-le"))), False),  # small tables still hold no text
+        ("x.jpg", jpeg(APP0, *[(0xC4, b"z" * 6000)] * 2), False),  # payload spread over table segments
         ("x.jpg", jpeg(APP0, tail=b"\x00\x00"), True),  # camera NUL padding is fine
     ],
 )
