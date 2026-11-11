@@ -1,11 +1,13 @@
 """Pure three-way merge of orch tickets (git step 2, design D8). No git, no files, no clock: the caller passes
 `now`. Two machines that merge the same three versions with the same `now` get byte-identical output, in either
 argument order, except history attribution: upstream is remote, mine is local.
-Local history is trusted; remote-only person attribution is demoted (decisions do not bind history authors).
+Local history is trusted; a remote-only person line stays the person's only through ONE new verified decision
+that binds its author and time (human-proof.md "Person history lines over sync"), else it is demoted.
 Non-history content is symmetric; revision/updated_at may differ on no-op reuse.
 Shared vectors: contracts/vectors/ticket-merge-v1.json.
 """
 
+import hashlib
 import json
 import re
 from copy import deepcopy
@@ -284,7 +286,7 @@ def _evidence(*lists):
 #   - authority is an undo: they take the decision fields (_DECISION); text and covers are then free (an undo
 #     record does not bind them);
 #   - no authority (nothing verifies, or no verifier): no Won't do at all.
-_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_mac")
+_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_by", "wont_at", "wont_line", "wont_mac")
 _DECISION = ("wont_do", "reason", "wont_nonce", "wont_mac")
 
 
@@ -297,7 +299,11 @@ def _person_wont(ctx, x):
 
 
 def _drop_wont(x):
-    return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")}
+    return {
+        k: v
+        for k, v in x.items()
+        if k not in ("wont_do", "reason", "wont_mac", "wont_nonce", "wont_by", "wont_at", "wont_line")
+    }
 
 
 def _authority(ctx, *items):
@@ -389,15 +395,32 @@ def _ref_id(r):
 # The verdict entries a ticket carries (human-proof.md "Done needs a signed verdict"). The fields of a stored
 # entry: the core's humanproof.VERDICT_FIELDS (parity-tested).
 _VERDICT_FIELDS = ("kind", "nonce", "mac")
+_VERDICT_OPTIONAL = ("person", "at", "line")  # humanproof.VERDICT_OPTIONAL (drift-tested)
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+_ACTOR = re.compile(r"human:[A-Za-z0-9_.@ -]{1,58}")  # humanproof.ACTOR_PATTERN (drift-tested)
 VERDICT_CAP = 8
 _NONCE = re.compile(r"^[0-9a-f]{16}$")
 _MAC = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
+def _utc(s):
+    """Seconds since the epoch of an RFC 3339 UTC time ending in Z, else None."""
+    try:
+        if not (isinstance(s, str) and s.endswith("Z") and validate_rfc3339(s)):
+            return None
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
+
+
 def _verdict_shape(e):
     return (
         isinstance(e, dict)
-        and set(e) == set(_VERDICT_FIELDS)
+        and set(_VERDICT_FIELDS) <= set(e) <= set(_VERDICT_FIELDS) | set(_VERDICT_OPTIONAL)
+        and ("person" in e) == ("at" in e) == ("line" in e)
+        and ("line" not in e or (isinstance(e["line"], str) and bool(_DIGEST.fullmatch(e["line"]))))
+        and ("person" not in e or (isinstance(e["person"], str) and bool(_ACTOR.fullmatch(e["person"]))))
+        and ("at" not in e or (isinstance(e["at"], str) and _utc(e["at"]) is not None))
         and e["kind"] in ("person", "agent")
         and isinstance(e["nonce"], str)
         and bool(_NONCE.match(e["nonce"]))
@@ -432,8 +455,76 @@ def _verdicts(ctx, base, a, b, out):
     return sorted(keep, key=lambda e: e["mac"])
 
 
+LINE_WINDOW = 5  # seconds between a decision and the history line its writer adds in the same operation
+_LINE_KEYS = {"at", "by", "via", "text", "chat_message"}
+
+
+def history_digest(text, via):
+    """sha256 hex of the history line a decision's writer adds (humanproof.history_digest, drift-tested)."""
+    return hashlib.sha256(_canon({"text": text, "via": via}).encode()).hexdigest()
+
+
+def _decisions(ctx, ticket):
+    """Verified decisions that name their author, time and exact history line (new records only):
+    key -> (author, at, line digest)."""
+    found = {}
+    for check in ticket.get("checklist", []):
+        if _person_wont(ctx, check) and all(isinstance(check.get(k), str) for k in ("wont_by", "wont_line")):
+            found[("wont", check["id"], check.get("wont_mac"))] = (
+                check["wont_by"],
+                _utc(check.get("wont_at")),
+                check["wont_line"],
+            )
+    for entry in ticket.get("verdicts", []):
+        if (
+            _verdict_shape(entry)
+            and entry["kind"] == "person"
+            and "person" in entry
+            and ctx.verdict_state(entry, ticket) == "current"
+        ):
+            found[("verdict", entry["mac"])] = (entry["person"], _utc(entry["at"]), entry["line"])
+    return {
+        k: v
+        for k, v in found.items()
+        if v[1] is not None and _ACTOR.fullmatch(v[0]) and _DIGEST.fullmatch(v[2])
+    }
+
+
+def _attributed(unique, incoming, decisions):
+    """Canonical keys of the remote-only lines that stay the person's: per NEW verified decision at most ONE
+    line, whose `by` is the decision's author, whose {text, via} is EXACTLY the line the decision's MAC binds,
+    whose shape is the writer's and whose `at` is within LINE_WINDOW seconds of the decision's (the closest
+    wins)."""
+    kept = set()
+    for _, (author, at, digest) in sorted(decisions.items(), key=lambda kv: _canon(kv[0])):
+        best = None
+        for h in unique:
+            key = _canon(h)
+            t = _utc(h.get("at"))
+            if (
+                key in incoming
+                and key not in kept
+                and h.get("by") == author
+                and isinstance(h.get("text"), str)
+                and history_digest(h["text"], h.get("via")) == digest
+                and set(h) <= _LINE_KEYS
+                and h.get("chat_message") in (False, None)
+                and t is not None
+                and abs(t - at) <= LINE_WINDOW
+                and (best is None or (abs(t - at), key) < best[0])
+            ):
+                best = ((abs(t - at), key), key)
+        if best:
+            kept.add(best[1])
+    return kept
+
+
 def _merge(base, a, b, now, person=None, verdict=None):
     ctx = _Ctx(a, b, now, person, verdict)
+    # Provenance before the checklist merge imposes the authority locally: only decisions NEW to this machine
+    # (not verified in the base or here) may lend a person's name to a remote-only line.
+    known = _decisions(ctx, base).keys() | _decisions(ctx, b).keys()
+    decisions = {k: v for k, v in _decisions(ctx, a).items() if k not in known}
     # the same id added on both sides with different content: the newer side's item is renumbered
     ren = _renumber_clashes(
         ctx,
@@ -548,13 +639,16 @@ def _merge(base, a, b, now, person=None, verdict=None):
     histories = [{_canon(h) for h in t.get("history", [])} for t in (base, a, b)]
     incoming = histories[1] - histories[2] - histories[0]
     lines = base.get("history", []) + a.get("history", []) + b.get("history", [])
+    unique = sorted({_canon(h): h for h in lines}.values(), key=_canon)
+    kept = _attributed(unique, incoming, decisions)
     hist = {}
-    for h in sorted({_canon(h): h for h in lines}.values(), key=_canon):
+    for h in unique:
         key = _canon(h)
         demoted = {**h, "by": SYNC_BY, "text": "(synced, not verified here) " + h.get("text", "")}
         if (
             not is_agent_history_author(h.get("by"))
             and key not in histories[2]
+            and key not in kept
             and (_canon(demoted) in histories[2] or key in incoming)
         ):
             h = demoted

@@ -742,7 +742,9 @@ def test_idle_syncs_and_one_edit_converge_without_churn(machines, monkeypatch):
 
 @pytest.mark.parametrize("decision", ["wont", "verdict"])
 @pytest.mark.parametrize("proof", ["forged", "valid", "foreign"])
-def test_remote_human_history_is_demoted_even_with_verified_decision(machines, monkeypatch, decision, proof):
+def test_remote_human_history_needs_a_new_verified_decision_naming_its_author(
+    machines, monkeypatch, decision, proof
+):
     from orch import cli, humanproof, tickets
 
     a, b, _ = both(machines)
@@ -754,8 +756,12 @@ def test_remote_human_history_is_demoted_even_with_verified_decision(machines, m
         # machines cannot verify each other's MACs merely by syncing ticket files.
         (a / ".orch/.local-id").write_bytes((b / ".orch/.local-id").read_bytes())
     check = {
-        "id": "c2", "text": "Order dessert (B)", "done": False, "evidence": [],
-        "wont_do": True, "wont_nonce": "test-decision",
+        "id": "c2",
+        "text": "Order dessert (B)",
+        "done": False,
+        "evidence": [],
+        "wont_do": True,
+        "wont_nonce": "test-decision",
     }
     if decision == "wont":
         text = "Marked as won't do: Order dessert (B)"
@@ -823,9 +829,10 @@ def test_remote_human_history_is_demoted_even_with_verified_decision(machines, m
     success(a)
     assert verified  # The receiving core rechecks under the ticket lock before writing.
     result = load(a)
-    expected = {
-        **line, "by": "agent:sync", "text": "(synced, not verified here) " + text
-    }
+    demoted = {**line, "by": "agent:sync", "text": "(synced, not verified here) " + text}
+    # #484: a decision NEW on the receiver that verifies there and names the line's author keeps the person's
+    # name (the fixture only lends A B's key); a forged or foreign one does not.
+    expected = line if valid else demoted
     assert result["history"] == [expected]
     if decision == "wont":
         assert bool(result["checklist"][0].get("wont_do")) is valid
@@ -835,12 +842,12 @@ def test_remote_human_history_is_demoted_even_with_verified_decision(machines, m
     rendered = cli._show(result, a)
     assert expected["by"] in rendered
     assert tickets.history_line(expected["text"], result["checklist"]) in rendered
-    assert "human:lindenmann:" not in rendered
+    assert valid or "human:lindenmann:" not in rendered
     success(b)
     success(a)
     assert load(a)["history"] == [expected]
-    # B owns the original locally; A retains its demotion on subsequent syncs.
-    assert line in load(b)["history"] and expected in load(b)["history"]
+    # B owns the original locally; A retains its attribution (or demotion) on subsequent syncs.
+    assert line in load(b)["history"] and (valid or expected in load(b)["history"])
     success(b)
     success(a)
     assert load(a)["history"] == [expected]
