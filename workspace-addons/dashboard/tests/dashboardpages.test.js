@@ -91,11 +91,35 @@ test('Copy/Repeat capability is read from the real state.addons shape (active ad
   assert.equal(vm.runInContext('repeatsAddon()', c), null);
 });
 
+
+test('private settings card: move button, allow button, hidden when clear, no snapshot action', () => {
+  const c = context([], {snapshot:false, addons:() => []});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  assert.equal(c.privateCard({}), null);
+  assert.equal(c.privateCard({git_private:{count:0, lines:[], pending:[]}}), null);
+  const settings = {git_private:{count:2, lines:['<b>Two files.</b>'], pending:[{name:'mine', showable:true, adapter:'generic', command:'run <x>', interactive:'live x', prompt:'stdin', key:'a'.repeat(64)}]}};
+  const card = c.privateCard(settings);
+  assert.deepEqual(nodes(card, n => n.textContent != null).map(n => n.textContent),
+    ['Private files are in your team repo', '<b>Two files.</b>', 'Move to private',
+     'This workspace asks to run a command', 'Agent: mine\nAdapter: generic\nCommand: run <x>\nLive command: live x\nPrompt: stdin', 'Allow on this computer']);
+  const buttons = nodes(card, n => n.tag === 'button');
+  assert.deepEqual(buttons.map(b => b.attrs['data-action']), ['private-move', 'private-allow']);
+  vm.runInContext("settingsBusy.add('private')", c);
+  assert.equal(nodes(c.privateCard(settings), n => n.tag === 'button')[0].attrs.disabled, true);
+  c.state.settings = settings;
+  const general = nodes(c.settingsPage(), n => n.attrs?.id === 'settings-panel-general')[0];
+  assert.equal(general.children[0].attrs['data-key'], 'settings-private');
+  c.snapshot = true;
+  assert.equal(nodes(c.privateCard(settings), n => n.tag === 'button').length, 0);
+  settings.git_private.count = 0;
+  assert.equal(nodes(c.privateCard(settings), n => n.tag === 'h3').length, 1);
+});
+
 test('Separate copies card: three choices, the saved one is selected, setup and cap are controls', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
-  const c = vm.createContext({h, snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  const c = vm.createContext({h, array:x => Array.isArray(x) ? x : [], snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
   vm.runInContext(src.slice(start, end), c);
   const card = vm.runInContext('copiesCard', c)({copies:'always', copies_max:5, copy_setup:'npm ci'});
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
@@ -106,4 +130,26 @@ test('Separate copies card: three choices, the saved one is selected, setup and 
   assert.equal(all(card, n => n.tag === 'select')[0].value, '5');
   const dflt = vm.runInContext('copiesCard', c)({});
   assert.deepEqual(all(dflt, n => n.attrs?.['data-action'] === 'copies-mode').map(n => n.attrs['aria-checked']), [false, true, false]);
+});
+
+test('Copies on this computer line: count, size, "..." while counting, Clean up now button', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  const c = vm.createContext({h, array:x => Array.isArray(x) ? x : [], snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  vm.runInContext(src.slice(start, end), c);
+  const text = d => vm.runInContext('copiesDiskText', c)(d);
+  assert.match(text(null), /^…/);
+  assert.equal(text({copies:2, bytes:1.4e9, partial:false}), '2 copies · 1.4 GB · removed by themselves when a ticket is done');
+  assert.match(text({copies:1, bytes:5e6, partial:true}), /^1 copy · more than 5 MB/);
+  assert.match(text({copies:1, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}]}), /2 copies from a moved or deleted project/);
+  assert.match(text({copies:1, bytes:0, changed:1}), /1 removed copy changed after being saved/);
+  assert.match(text({copies:1, bytes:0, stuck:[{ticket:'t_abc123'}]}), /git was interrupted/);
+  const card = vm.runInContext('copiesCard', c)({copies_disk:{copies:0, bytes:0, orphaned:[{ws8:'aaaaaaaa', copies:2}], stuck:[{ticket:'t_abc123'}]}});
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const btn = all(card, n => n.attrs?.['data-action'] === 'copies-clean')[0];
+  assert.equal(btn.children[0], 'Clean up now');
+  assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-orphaned').length, 1);
+  assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-retry').length, 1);
+  assert.match(JSON.stringify(card), /files git ignores/);
 });

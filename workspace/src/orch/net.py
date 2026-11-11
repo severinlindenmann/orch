@@ -220,13 +220,14 @@ def auth_headers(cfg: dict) -> dict:
 
 def connect_service(root: Path, name: str, skill: str, url: str, workspace: str, token: str, prefix: str):
     """Shared part of `orch publish|relay connect`: init if needed, check token, save."""
+    from orch import harness, look, skillrender, skills
     from orch import init as init_mod
-    from orch import look, skillrender, skills
 
     url = clean_url(url)
     if not token.startswith(prefix):
         raise Refused(f"That token does not look right (it starts with {prefix}).")
-    if not (root / ".agents" / "skills" / "orch").is_dir():
+    sk = root / ".agents" / "skills" / "orch"
+    if not (harness.is_link(sk) or sk.is_dir()):  # a link is not traversed (WinError 448, #438)
         init_mod.init(root)
     hdrs = {"X-Orch-Workspace": workspace, "Authorization": f"Bearer {token}"}
     _, who = call_json("GET", url + "/v1/whoami", hdrs, timeout=30)

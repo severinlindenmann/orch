@@ -159,6 +159,33 @@ def _other(root: Path) -> str:
     cmd = input("Command (use {prompt} where the task goes): ").strip()
     if not cmd:
         return "No agent chosen; set one later: orch config set workspace.agent <name>"
-    config.add_agent(root, name, cmd)
+    # a command that will run is a human-only step (invariant H1): an agent in the environment is refused, a
+    # person leaves the same config.agent_add hand-off as `orch config agent add` (a click on the page)
+    from types import SimpleNamespace
+
+    from orch import humanproof
+
+    if not (1 <= len(cmd) <= 500 and "\n" not in cmd and "\r" not in cmd):
+        raise Refused("The command must be one line of at most 500 characters.")
+    target = humanproof.agent_add_target(name, cmd)  # computed first: a bad value refuses here (exit 2)
+    exact = humanproof.agent_add_exact(cmd)
+    try:
+        who = humanproof.person_by(
+            root,
+            SimpleNamespace(proof_stdin=False, by=None),
+            "config.agent_add",
+            target,
+            parts={"name": name, "command": cmd},
+            exact=exact,
+            argv=["config", "agent", "add", name, "--command", cmd],
+        )
+    except humanproof.HandOffPending as e:  # a person: the card is on the page; init goes on
+        return (
+            f"Agent: not set yet. {e} Confirm '{name}' on the page, "
+            f"then run: orch config set workspace.agent {name}"
+        )
+    if not who.startswith("human:"):
+        raise Refused(config.ONLY_PERSON_AGENT.format(what="add an agent command"))
+    config.add_agent(root, name, cmd, approve=True, by=who)  # a person: approve ONLY what they typed
     _save(root, name)
     return f"Agent: {name} (starts fresh each run; it cannot continue a conversation)."

@@ -51,6 +51,21 @@ function shareCard(settings) {
 }
 // The CLI hint stays out of the page: a missing sign-in is said in plain words.
 const plainTest = reason => /not logged in|\/login/i.test(String(reason || '')) ? 'The agent is not signed in yet.' : reason;
+// Every field the approval covers, in full (name, adapter, command, interactive, prompt).
+const pendingText = p => [['Agent', p.name], ['Adapter', p.adapter], ['Command', p.command], ['Live command', p.interactive], ['Prompt', p.prompt]].filter(r => r[1]).map(r => r[0] + ': ' + r[1]).join('\n');
+function privateCard(settings) {
+  const info = settings.git_private;
+  const pending = array(info?.pending);
+  if (!info || !(info.count > 0 || pending.length)) return null;
+  const lines = array(info.lines);
+  return h('div', {className:'stack', 'data-key':'settings-private'},
+    info.count > 0 ? h('div', {className:'card'}, h('div', {className:'card-row'}, h('div', {className:'grow'},
+      settingsText('h3', {}, 'Private files are in your team repo'), settingsText('p', {className:'meta'}, lines[0])),
+      snapshot ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-move', 'data-key':'settings-private-move', disabled:settingsBusy.has('private')}, 'Move to private'))) : null,
+    ...pending.map(p => h('div', {className:'card', 'data-key':'settings-private-pending-' + p.name}, h('div', {className:'card-row'}, h('div', {className:'grow'},
+      settingsText('h3', {}, 'This workspace asks to run a command'), p.showable ? settingsText('pre', {className:'meta mono preserve-lines'}, pendingText(p)) : settingsText('p', {className:'meta'}, "This workspace asks to run a command orch can't show safely. Not allowed.")),
+      snapshot || !p.showable ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-allow', 'data-name':p.name, 'data-key':'settings-private-allow-' + p.name, disabled:settingsBusy.has('private')}, 'Allow on this computer')))));
+}
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'}, h('h2', {className:'set-sub'}, 'Workflow'),
     h('div', {className:'card'}, h('div', {className:'card-row'},
@@ -60,6 +75,16 @@ function workflowCard(settings) {
 }
 // Separate copies (draft 1f): a copy of the project per ticket so agents do not edit the same files.
 const COPY_CHOICES = [['off', 'Off'], ['together', 'When agents work together'], ['always', 'Every time']];
+function copiesDiskText(d) {
+  if (!d || typeof d.copies !== 'number') return '… · removed by themselves when a ticket is done';
+  const n = d.copies, b = Number(d.bytes) || 0;
+  const size = b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b >= 1e6 ? Math.round(b / 1e6) + ' MB' : b > 0 ? 'under 1 MB' : '0 MB';
+  const gone = array(d.orphaned).reduce((sum, o) => sum + (Number(o.copies) || 0), 0);
+  return n + (n === 1 ? ' copy' : ' copies') + ' · ' + (d.partial ? 'more than ' : '') + size + ' · removed by themselves when a ticket is done'
+    + (gone ? ' · ' + gone + (gone === 1 ? ' copy' : ' copies') + ' from a moved or deleted project' : '')
+    + (d.changed ? ' · ' + d.changed + (d.changed === 1 ? ' removed copy' : ' removed copies') + ' changed after being saved, kept for you to look at' : '')
+    + array(d.stuck).map(s => ' · a copy could not be cleaned: git was interrupted').join('');
+}
 function copiesCard(settings) {
   const mode = COPY_CHOICES.some(c => c[0] === settings.copies) ? settings.copies : 'together', busy = settingsBusy.has('copies');
   const setup = h('input', {type:'text', className:'input', style:'width:100%;margin-top:6px', maxLength:500, value:settings.copy_setup || '', placeholder:'e.g. npm ci', 'aria-label':'Prepare a copy with', 'data-key':'settings-copy-setup', disabled:snapshot || busy});
@@ -70,14 +95,21 @@ function copiesCard(settings) {
     h('div', {className:'card'},
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Separate copies'),
         settingsText('p', {className:'meta'}, "Give an agent its own copy of the project so agents don't edit the same files."),
+        settings.copies_locked ? settingsText('p', {className:'meta', 'data-key':'settings-copies-soon'}, 'Coming soon. For now every agent works in the project folder.') : null,
         h('div', {className:'row', style:'flex-wrap:wrap;gap:8px;margin-top:8px', role:'radiogroup', 'aria-label':'Separate copies'}, COPY_CHOICES.map(([id, label]) =>
-          h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:snapshot || busy}, label))))),
+          h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:snapshot || busy || !!settings.copies_locked}, label))))),
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Most copies at once'),
         settingsText('p', {className:'meta'}, 'When this many exist, the next agent works in your own folder.'), cap)),
+      h('div', {className:'card-row', 'data-key':'settings-copies-disk'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Copies on this computer'),
+        settingsText('p', {className:'meta'}, copiesDiskText(settings.copies_disk))),
+        h('div', {className:'row', style:'gap:8px;flex-wrap:wrap'},
+          array(settings.copies_disk?.stuck).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-retry', 'data-action':'copies-retry', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Try again') : null,
+          array(settings.copies_disk?.orphaned).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-orphaned', 'data-action':'copies-orphaned', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Remove the moved ones') : null,
+          h('button', {type:'button', className:'btn sm outline', 'data-key':'settings-copies-clean', 'data-action':'copies-clean', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Clean up now'))),
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Prepare a copy with'),
         settingsText('p', {className:'meta'}, 'Runs once in each new copy, e.g. installing packages. Leave empty for nothing.'), setup,
         h('button', {type:'button', className:'btn sm outline', style:'margin-top:8px', 'data-key':'settings-copy-setup-save', 'data-action':'copies-setup', disabled:snapshot || busy}, 'Save'))),
-      h('p', {className:'meta card-row'}, 'Needs git. Without git you only get the warning line.')));
+      h('p', {className:'meta card-row'}, 'Needs git. Without git you only get the warning line. When a copy is removed, its changes are kept in git; files git ignores (like .env or build folders) and the inside of nested repositories are not.')));
 }
 function settingsPage() {
   const settings = state.settings;
@@ -109,7 +141,7 @@ function settingsPage() {
   };
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Agent'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => id === 'phone' ? h('a', {href:'#addon/' + phoneAddon.name, 'data-key':'settings-phone'}, label) : h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
-    panel('general', [snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
+    panel('general', [privateCard(settings), snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
       h('div', {className:'card-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'}, settingsText('p', {className:'mono'}, settings.folder), h('p', {className:'meta'}, 'Stored on this computer'))))),
       shareCard(settings), workflowCard(settings), copiesCard(settings)]),

@@ -33,8 +33,8 @@
         ]
       },
       "permissions": {
-        "ask": [],
-        "auto": { "args": ["--permission-mode", "auto"], "if_help_has": "\"auto\"", "else": ["--permission-mode", "acceptEdits"] },
+        "ask": ["--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json),Write(**/agent-approvals.json)"],
+        "auto": { "args": ["--permission-mode", "auto", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json),Write(**/agent-approvals.json)"], "if_help_has": "\"auto\"", "else": ["--permission-mode", "acceptEdits", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json),Write(**/agent-approvals.json)"] },
         "full": ["--dangerously-skip-permissions"]
       },
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
@@ -51,6 +51,11 @@
         "resume": ["codex", "exec", "resume", "--json", "{session}", "--", "{prompt}"]
       },
       "live": null,
+      "permissions": {
+        "ask": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." },
+        "auto": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." },
+        "full": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." }
+      },
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id" },

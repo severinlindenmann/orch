@@ -779,6 +779,9 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
             return {"released": False, "pending": True}
         _release_locked(root, tid, rec)
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
+    from orch import worktrees
+
+    worktrees.on_run_ended(root, tid)  # B12: a closed ticket's copy goes once its last run is over
     return {"released": True, "pending": waiting}
 
 
@@ -1196,6 +1199,8 @@ def plan(
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
+    person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
+    adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
     sid = None if fresh else tickets.sessions_for(ticket, name, host())
     if (
@@ -1210,6 +1215,7 @@ def plan(
         "session": sid,
         "orch_hooks_file": hooks_file,
         "stream": mode == "oneshot",
+        "person": person,
     }
     argv = None
     resumed = False
@@ -1259,6 +1265,7 @@ def plan(
         "stdin": v["prompt"] if a["prompt_via"] == "stdin" and mode == "oneshot" else None,
         "prompt": v["prompt"],
         "item_ids": [i["id"] for i in items],
+        "note": adapters.permission_note(name, root, None, person),
     }
 
 
@@ -1310,11 +1317,13 @@ def start(
 ) -> dict:
     """Start (or continue) the agent on a ticket. mode None = live in tmux when the agent and the machine can,
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
-    from orch import runs_live
+    from orch import runs_live, worktrees
 
+    worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)
+    adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
     notes = []
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
@@ -1363,6 +1372,8 @@ def start(
     notes += copy_notes
     try:
         p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name)
+        if p.get("note"):
+            notes.append(p["note"])
         log_rel = f".orch/run/logs/{tid}-{rec['run']}.log"
         (root / log_rel).parent.mkdir(parents=True, exist_ok=True)
         cmd = procs.orch_python_argv("run", "_wrap", rec["run"], "--ticket", tid, "--agent", name)

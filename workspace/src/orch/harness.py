@@ -218,7 +218,9 @@ def exclude_set(root: Path, tag: str, lines: list[str]) -> bool:
 
 # Local paths relative to .orch/: orch's own .gitignore keeps them out of git with or without git info
 # exclude, written before anything else and independent of linking. It lists itself.
-ORCH_IGNORE = [
+# The contract list (contracts/local-files.md, "Local-only lines"): ONE constant, and a test parses the contract
+# and checks it is the same, so the two cannot drift.
+CONTRACT_IGNORE = [
     ".gitignore",
     ".local-id",
     "secrets/",
@@ -228,12 +230,23 @@ ORCH_IGNORE = [
     "outbox/",
     "addons/",
     "run/",
-    "tmp-refresh/",
     "harness/",
+    "tickets/*/evidence/",
+    "record/",
+    ".usage-salt",
+]
+ORCH_IGNORE = [
+    *CONTRACT_IGNORE,
+    "tmp-refresh/",
     "local/",
     "chat/",
-    "tickets/*/evidence/",
     "tickets/.lock-*",  # per-ticket write locks
+    # Personal by default (9 Nov): tickets (history, phone texts, artifacts, the Chat ticket), the counter and the
+    # per-person settings stay out of a team repo. Fixed patterns only, never derived from data.
+    "tickets/",
+    "ticket-counter.json",
+    "config.toml",
+    "addons.json",
 ]
 
 
@@ -422,6 +435,98 @@ def glob_escape(text: str) -> str:
 SKILL_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
+# What `orch private` looks at: the personal files a team repo should not hold (paths relative to the project).
+PRIVATE_FILES = (
+    (".orch/tickets", "tickets"),
+    (".orch/ticket-counter.json", "ticket-counter.json"),
+    (".orch/config.toml", "config.toml"),
+    (".orch/addons.json", "addons.json"),
+)
+
+
+def tracked_private(root: Path) -> list[str]:
+    return _tracked_private(root) or []
+
+
+def _tracked_private(root: Path, icase: bool = True) -> list[str] | None:
+    """The personal orch files that git already tracks in this folder's repo (project-relative, sorted, at most
+    2000). [] outside a git repo or when git cannot say (the warning is advice; the trust check is `_tracked`)."""
+    try:
+        if not _in_git_repo(root):
+            return []
+    except Refused:
+        return None
+    rc, raw, _ = _safegit().run_bytes(
+        [
+            "ls-files",
+            "-z",
+            "--",
+            *[f":({'icase,' if icase else ''}literal){rel}" for rel, _ in PRIVATE_FILES],
+        ],
+        root,
+        20,
+    )
+    if rc != 0:
+        return None
+    names = sorted({os.fsdecode(n) for n in raw.split(b"\0") if n})
+    return names[:2000]
+
+
+def private_summary(root: Path) -> dict:
+    """{"files": [...], "counts": {"tickets": 3, "config.toml": 1}, "config_tracked": bool}: what the team repo holds."""
+    files = tracked_private(root)
+    counts: dict[str, int] = {}
+    for f in files:
+        low = f.lower()
+        for rel, label in PRIVATE_FILES:
+            if low == rel or low.startswith(rel + "/"):
+                counts[label] = counts.get(label, 0) + 1
+                break
+    return {"files": files, "counts": counts, "config_tracked": _tracked(root, ".orch/config.toml")}
+
+
+def private_words(summary: dict) -> str:
+    """One plain line: what is committed."""
+    parts = []
+    for label, n in summary["counts"].items():
+        parts.append(f"{n} ticket file{'s' if n != 1 else ''}" if label == "tickets" else label)
+    return "Committed in your team repo: " + ", ".join(parts) + "."
+
+
+def move_to_private(root: Path, by: str | None = None) -> list[str]:
+    """A person's click: `git rm --cached` for the tracked personal files. The files stay on disk; nothing is
+    committed (the removal is the person's to commit); older commits keep their copies. Returns the paths.
+    An agent (`by` = agent:...) is refused here too, behind the CLI's proof check."""
+    from orch import config
+
+    config.require_person(by, "move these files out of the team repo")
+    files = _tracked_private(root, icase=False) or []  # exactly the names git holds, no case variants
+    if not files:
+        return []
+    protect_local(root)  # the ignore rules first, so the files do not turn into "new files" afterwards
+    for i in range(0, len(files), 200):
+        chunk = files[i : i + 200]
+        rc, _, _ = _safegit().run(
+            ["rm", "--cached", "-f", "-q", "--", *[f":(literal){f}" for f in chunk]],
+            root,
+            60,
+            read_only=False,
+            filters=False,
+        )
+        if rc != 0:
+            if i:
+                raise Refused(
+                    f"git removed {i} file{'s' if i != 1 else ''} from the team repo, then stopped. "
+                    "Run orch private move again, or look at: git status"
+                )
+            raise Refused("git could not remove the files from the team repo. Nothing was changed.")
+    left = _tracked_private(root, icase=False)
+    if left is None:  # git cannot say now: do not claim anything was moved
+        raise Refused("git ran, but orch could not check what was removed. Look at: git status")
+    still = set(left)
+    return [f for f in files if f not in still]  # what really left the index
+
+
 def safe_skill_name(name: str) -> bool:
     return bool(SKILL_NAME.fullmatch(name)) and name not in {".", ".."}
 
@@ -449,7 +554,7 @@ def _is_ours_copy_checked(dest: Path, root: Path, mark: Path) -> bool:
             for fn in fns:
                 p = Path(dp) / fn
                 rel_f = p.relative_to(dest).as_posix()
-                if rel_f == COPY_MARK:
+                if rel_f == COPY_MARK or rel_f in KEEP_IN_COPY.get(dest.name, ()):
                     continue
                 if rel_f not in listed or p.lstat().st_mtime > mt:  # a file orch did not copy is the user's
                     return False
@@ -466,6 +571,13 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
     """Keep secrets and other local files out of git. Fails closed: when neither .orch/.gitignore nor
     .git/info/exclude can be written, it refuses (so no secret is stored unprotected). `lines` are the
     extra root-relative patterns for the exclude block (links, local instruction files)."""
+    if lines is None:  # a rewrite keeps every orch-owned exclude line (skill links, local instruction files)
+        try:
+            from orch import skills
+
+            lines = skills._exclude_lines(root)
+        except (Refused, OSError, ValueError, KeyError):
+            lines = None
     ignore = [*ORCH_IGNORE, *_general_lines(root)]
     text = "# orch: local files, never committed (written by orch)\n" + "\n".join(ignore) + "\n"
     ok = False
@@ -502,18 +614,36 @@ def protect_local(root: Path, lines: list[str] | None = None) -> None:
 def _link_dir(link: Path, target: Path) -> None:
     link.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform == "win32":
-        try:
-            import _winapi
-
-            _winapi.CreateJunction(str(target.resolve()), str(link))
-            return
-        except OSError:
-            _copy_dir(target, link)
-            return
+        # No junction: Windows refuses to traverse one made by an unprivileged process (WinError 448,
+        # "untrusted mount point", #438), and orch's own reparse-point refusals would reject it as well.
+        _copy_dir(target, link)
+        return
     try:
         os.symlink(os.path.relpath(target, link.parent), link, target_is_directory=True)
     except OSError:
         _copy_dir(target, link)
+
+
+def _own_junction(dest: Path, target: Path) -> bool:
+    """Windows: `dest` is a junction that an older orch made to `target`. Read with readlink, never traversed."""
+    if sys.platform != "win32" or dest.is_symlink() or not is_link(dest):
+        return False
+    try:
+        got = os.readlink(dest)
+    except OSError:
+        return False
+    want = {_norm_win(target.absolute())}
+    try:
+        want.add(
+            _norm_win(target.resolve())
+        )  # old orch made the junction with resolve(); target is never the junction
+    except OSError:
+        pass
+    return _norm_win(got) in want
+
+
+def _norm_win(p: object) -> str:
+    return os.path.normcase(os.path.normpath(str(p).removeprefix("\\\\?\\")))
 
 
 def _copy_dir(src: Path, dst: Path) -> None:
@@ -537,6 +667,18 @@ def _copy_dir(src: Path, dst: Path) -> None:
     )
 
 
+KEEP_IN_COPY = {"orch-relay": ("workspaces.json",)}  # files an add-on writes into its skill folder
+
+
+def _keep_files(dest: Path) -> dict[str, bytes]:
+    out = {}
+    for fn in KEEP_IN_COPY.get(dest.name, ()):
+        f = dest / fn
+        if not is_link(f) and f.is_file():
+            out[fn] = f.read_bytes()
+    return out
+
+
 def _same(a: Path, b: Path) -> bool:
     try:
         return a.resolve() == b.resolve()
@@ -553,12 +695,16 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
     if is_link(parent):
         return  # the team links the whole folder (to .agents/skills or elsewhere): nothing of ours goes into it
     dest = parent / name
-    if is_link(dest):
+    kept: dict[str, bytes] = {}
+    if _own_junction(dest, target):
+        os.rmdir(dest)  # removes the junction itself, never its target; a copy replaces it just below
+    elif is_link(dest):
         if _same(dest, target):
             return
         raise Refused(f"{dest} is a link to somewhere else; orch will not replace it.")
     if dest.exists():
         if (dest / COPY_MARK).is_file() and _is_ours_copy(dest, root):
+            kept = _keep_files(dest)
             shutil.rmtree(dest)
         elif name == "orch-relay" and dest.is_dir() and not (dest / "SKILL.md").exists():
             # only the directory the relay wrote before its skill came: move that one file into the harness
@@ -572,6 +718,8 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
         else:
             raise Refused(f"{dest} is not orch's; orch will not replace it. Nothing was changed there.")
     _link_dir(dest, target)
+    for fn, data in kept.items():
+        (dest / fn).write_bytes(data)  # same rule as sync_copies: the add-on's file wins
 
 
 def unlink_skill(root: Path, where: str, name: str) -> None:
@@ -601,12 +749,20 @@ def sync_copies(root: Path, wheres: list[str]) -> None:
             dest = root / where / s.name
             if is_link(root / where) or not _inside(root, root / where):
                 continue
-            if dest.is_dir() and not is_link(dest) and (dest / COPY_MARK).is_file():
+            if is_link(dest):
+                if _own_junction(dest, s):
+                    os.rmdir(dest)
+                    _copy_dir(s, dest)
+                continue  # a link is never traversed (WinError 448 on a junction, #438)
+            if dest.is_dir() and (dest / COPY_MARK).is_file():
                 if not _is_ours_copy(dest, root):
                     skip_note(f"{dest} (it has files of yours)")
                     continue
+                keep = _keep_files(dest)
                 shutil.rmtree(dest)  # rebuilt whole: deleted files go, a planted link inside is gone
                 _copy_dir(s, dest)
+                for fn, data in keep.items():
+                    (dest / fn).write_bytes(data)
 
 
 # ------------------------------------------------------------------ local instruction file
