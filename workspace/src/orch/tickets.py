@@ -210,8 +210,6 @@ def _counter_last(root: Path) -> int:
 def next_key(root: Path) -> str:
     """<code>-<n> for a new ticket. n is 1 + the highest number handed out (counter file or any ticket's key),
     written to the counter under one workspace lock, so no two tickets share a number and none is reused."""
-    from orch import config
-
     code = config.workspace_code(root) or config.set_code(root, config.suggest_code(root.resolve().name))
     with _locked(root, "key"):
         p = _counter_path(root)
@@ -330,11 +328,14 @@ def sync_apply(root: Path, tid: str):
 
     Call on the thread holding syncgate.hold; other writers retain the normal
     gate-before-ticket ordering. The caller checks and replaces the file while
-    this context is held, without importing core lock internals.
+    this context is held, without importing core lock internals. Before each
+    write batch the holder checks that the gate still carries its identity;
+    a thread holding no gate for `root` is refused (fail closed).
     """
     if tid != "key":
         ticket_path(root, tid)
     with _locked(root, tid):
+        syncgate.ensure_held(root)
         yield
 
 
@@ -513,8 +514,10 @@ def apply_op(
                 raise Refused("Only a person marks a step as won't do, or opens it again.")
         if result is NO_WRITE:  # the op found nothing to change: no new revision, no history
             return ticket, None
+        restored = False
         if ticket.get("status") == eff_status and raw_status == "done":
             ticket["status"] = "done"  # an unrelated op never rewrites a peer's Done into Review
+            restored = True  # (an unsigned Done is still Review: this op did not close the ticket)
         elif (
             ticket.get("status") == "done"
             and eff_status != "done"
@@ -530,7 +533,14 @@ def apply_op(
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
-        return ticket, result
+        closed_now = ticket.get("status") in CLOSED and eff_status not in CLOSED and not restored
+    if closed_now:
+        # THE one place a ticket becomes done/dropped, whatever op did it (accept, status, patch from the
+        # dashboard, ...): its separate copy goes, after the ticket lock is released (never raises)
+        from orch import worktrees
+
+        worktrees.on_closed(root, tid)
+    return ticket, result
 
 
 def save(root: Path, ticket: dict) -> None:
@@ -974,7 +984,13 @@ def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
     else:
         raise Refused(humanproof.VERDICT_NEEDED)
     old = (humanproof.verdict_ledger(root) or {}).get(ticket["id"])  # superseded by the new entry
-    entry = humanproof.verdict_sign(root, ticket, kind)
+    entry = humanproof.verdict_sign(
+        root,
+        ticket,
+        kind,
+        person=actor if kind == "person" else None,
+        line=ticket["history"][-1] if ticket["history"] else None,
+    )
     kept = [e for e in ticket.get("verdicts") or [] if isinstance(e, dict) and e.get("mac") != old]
     ticket["verdicts"] = [entry, *kept][: humanproof.VERDICT_MAX]
 
@@ -1003,11 +1019,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: boo
         add_history(ticket, by, "Status review -> done", via)
         _sign_done(root, ticket, by, proven)
 
-    result = apply_op(root, tid, op)[0]
-    from orch import worktrees
-
-    worktrees.on_closed(root, tid)  # B12: the copy goes (its changes stay on branch orch/<ticket>)
-    return result
+    return apply_op(root, tid, op)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
 
 def ask_for_changes(
@@ -1165,12 +1177,7 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
         if target == "done" and old != "done":
             _sign_done(root, ticket, actor, proven)
 
-    result = apply_op(root, tid, op)[0]
-    if result.get("status") in CLOSED:  # done, closed or cancelled: its separate copy goes (never raises)
-        from orch import worktrees
-
-        worktrees.on_closed(root, tid)
-    return result
+    return apply_op(root, tid, op)[0]  # apply_op takes the copy away of a done/closed ticket
 
 
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
@@ -1551,17 +1558,27 @@ def _person_only(by: str, item: dict, tid: str, cid: str) -> None:
         _refuse_if_wont_do(item, tid, cid)
 
 
-def _sign_wont(root: Path, tid: str, item: dict) -> None:
+def _sign_wont(root: Path, tid: str, item: dict, by: str | None = None, line: str | None = None) -> None:
     """The receiving core's own wontdo1 MAC over the step's decision (human-proof.md "Synced won't do"). Only
     a person's decision reaches here (a proven CLI call); no usable key = no MAC (the sync then treats the
     step as an agent's, which is the safe side)."""
     item["wont_nonce"] = secrets.token_hex(8)  # a fresh decision record every time
+    if (
+        item.get("wont_do") and humanproof.bindable_actor(by) and isinstance(line, str)
+    ):  # who, when and which line are inside the MAC (new decisions)
+        item["wont_by"], item["wont_at"] = by, now()
+        item["wont_line"] = humanproof.history_digest(line, _env_via())  # the exact line the writer adds
+    else:
+        for k in ("wont_by", "wont_at", "wont_line"):
+            item.pop(k, None)
     mac = humanproof.wont_sign(root, tid, item)  # also makes it the CURRENT entry of the ledger
     if mac:
         item["wont_mac"] = mac
     else:
         item.pop("wont_mac", None)
-        item.pop("wont_nonce", None)  # (no usable key: unsigned, so the sync treats it as an agent's)
+        item.pop("wont_nonce", None)
+        for k in ("wont_by", "wont_at", "wont_line"):
+            item.pop(k, None)  # (no usable key: unsigned, so the sync treats it as an agent's)
 
 
 def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = None) -> tuple[dict, dict]:
@@ -1586,8 +1603,9 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         else:
             item.pop("reason", None)
         item.update({"by": by, "at": now()})
-        _sign_wont(root, tid, item)
-        add_history(t, by, f"Marked {cid} as won't do")
+        text = f"Marked {cid} as won't do"
+        _sign_wont(root, tid, item, by, text)
+        add_history(t, by, text)
         return item
 
     return apply_op(root, tid, op)

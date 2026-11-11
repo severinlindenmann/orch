@@ -28,6 +28,8 @@ def vmac(ticket, step, nonce):
         str(on),
         str((step.get("reason") if on else "") or ""),
     ]
+    if on and "wont_by" in step:  # a NEW decision binds who and when (the real MAC: humanproof.wont_decision)
+        parts += [str(step["wont_by"]), str(step.get("wont_at")), str(step.get("wont_line"))]
     return "v1-" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:20]
 
 
@@ -98,9 +100,15 @@ def test_vector_ticket(c):
     person = person_for(c.get("ledger", {}))
     verdict = verdict_for(c.get("ledger", {}), c.get("own", []))
     assert merge_ticket(c["base"], c["a"], c["b"], NOW, person, verdict) == c["expect"]
-    assert (
-        merge_ticket(c["base"], c["b"], c["a"], NOW, person, verdict) == c["expect"]
-    )  # symmetric: two machines converge
+    assert merge_ticket(c["base"], c["b"], c["a"], NOW, person, verdict) == c.get(
+        "expect_reverse", c["expect"]
+    )  # attribution follows the receiving machine
+    if c.get("convergence"):
+        checked = c["expect"]
+        replay = merge_ticket(c["base"], c["a"], checked, NOW, person, verdict)
+        assert replay["history"] == checked["history"]
+        exchanged = merge_ticket(c["base"], checked, checked, NOW, person, verdict)
+        assert exchanged["history"] == checked["history"]
     assert (c["base"], c["a"], c["b"]) == before  # pure
     if c["expect"] is not None:
         assert list(SCHEMA.iter_errors(c["expect"])) == []
@@ -123,7 +131,22 @@ def test_vector_key_clash(c):
 
 def test_every_rule_has_a_vector():
     rules = {c["rule"] for c in VEC["tickets"]}
-    assert {"2", "3", "4", "5", "6", "7", "8", "9", "10", "D8", "add", "wont", "verdict"} <= rules
+    assert {
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "D8",
+        "add",
+        "wont",
+        "verdict",
+        "person-history",
+    } <= rules
 
 
 # ---- hand-written expectations (so the vectors are not only the code's own output) -------------------------
@@ -221,7 +244,7 @@ def test_history_and_evidence_never_lost():
         up(base, T3, history=base["history"] + [h(T2, "y")]),
         NOW,
     )
-    assert texts(m) == ["created", "y", "x"]
+    assert texts(m) == ["created", "y", "(synced, not verified here) x"]
 
 
 def test_sessions_cap_keeps_newest():
@@ -367,13 +390,20 @@ def test_property_symmetry_purity_and_no_loss(seed):
     b = _rand_side(rng, root, rng.choice([T1, T2, T3]))
     before = deepcopy((base, a, b))
     m = merge_ticket(base, a, b, NOW)
-    assert m == merge_ticket(base, b, a, NOW)
-    assert json.dumps(m, sort_keys=True) == json.dumps(merge_ticket(base, b, a, NOW), sort_keys=True)
+    reverse = merge_ticket(base, b, a, NOW)
+    assert {k: v for k, v in m.items() if k not in ("history", "revision", "updated_at")} == {
+        k: v for k, v in reverse.items() if k not in ("history", "revision", "updated_at")
+    }
     assert (base, a, b) == before
     assert m["schema"] != "orch.ticket/1" or list(SCHEMA.iter_errors(m)) == []
     have = {(h["at"], h["by"], h["text"]) for h in m["history"]}
     for side in (a, b):  # history is never dropped
-        assert {(h["at"], h["by"], h["text"]) for h in side["history"]} <= have
+        for h in side["history"]:
+            assert (h["at"], h["by"], h["text"]) in have or (
+                h["at"],
+                "agent:sync",
+                "(synced, not verified here) " + h["text"],
+            ) in have
     one = merge_ticket(base, a, a, NOW)  # merging a side with itself changes nothing but the revision
 
     def norm(t):  # history and the order of added items come back in a fixed order
@@ -500,10 +530,11 @@ def test_key_clash_malformed_input_gives_none():
 def test_backdating_cannot_steal_a_key_the_local_ticket_holds():
     mine = tk(id="t_bbb222", key="DM1-13", created_at=T2)
     theirs = tk(id="t_aaa111", key="DM1-13", created_at="2001-01-01T00:00:00Z")
-    changed, _ = renumber_key_clashes(
-        {"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"]
-    )
-    assert list(changed) == ["t_aaa111"]
+    docs = {"t_aaa111": theirs, "t_bbb222": mine}
+    before = deepcopy(docs)
+    for held in (["t_bbb222"], ["t_aaa111"], list(docs)):
+        assert renumber_key_clashes(docs, {"last": 13}, NOW, held=held) is None
+        assert docs == before
 
 
 def test_question_answered_by_differs_only_is_symmetric():
@@ -1050,6 +1081,7 @@ def test_merge_verdict_fields_and_shape():
     from orch_sync import merge
 
     assert merge._VERDICT_FIELDS == ("kind", "nonce", "mac")
+    assert merge._VERDICT_OPTIONAL == ("person", "at", "line")
     good = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
     assert merge._verdict_shape(good)
     for bad in (
@@ -1099,3 +1131,186 @@ def test_the_merge_output_validates_against_the_schema_with_verdicts():
     assert list(SCHEMA.iter_errors(out)) == []
     assert list(SCHEMA.iter_errors({**out, "verdicts": [{**A, "mac": "bad"}]})) != []
     assert list(SCHEMA.iter_errors({**out, "verdicts": [A] * 9})) != []
+
+
+@pytest.mark.parametrize("decision", ["wont", "verdict"])
+def test_history_verifier_failure_is_closed(decision):
+    line = {"at": T2, "by": "human:A", "text": "Looks good"}
+    peer = tk(status="done", verdicts=[{"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}])
+    if decision == "wont":
+        peer = tk(checklist=[signed(_step(**WONT))])
+        line["text"] = "Marked c1 as won't do"
+    peer["history"] = [line]
+
+    def boom(*args):
+        raise RuntimeError("unavailable")
+
+    out = merge_ticket(tk(), peer, tk(), NOW, boom, boom)
+    assert out["history"] == [
+        {**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}
+    ]
+    assert list(SCHEMA.iter_errors(out)) == []
+    assert merge_ticket(tk(), tk(), peer, NOW, boom, boom)["history"] == [line]
+
+
+@pytest.mark.parametrize(
+    "by",
+    [
+        "Human:lindenmann",
+        " human:x",
+        "lindenmann",
+        ["human:x"],
+        "agent:relay from ph_abc",
+        "agent:relay",
+        "agent:\u200brelay from ph_abc",
+        "agent:Severin Lindenmann",
+        " Agent:Worker ",
+        "agent:",
+        "agent:" + "a" * 41,
+        "agent:worker\n",
+        "agent:ＲＥＬＡＹ",
+        "ａｇｅｎｔ:ＣＯＤＥＸ",
+        "agent：severin",
+        "agent﹕x",
+        "\u0430gent:x",  # Cyrillic a
+        "agent:\u0445",  # Cyrillic x
+        "\u03b1gent:x",  # Greek alpha
+        "agent:\u200bx",  # zero-width space
+        "agent:\u00a0x",  # no-break space
+        "agent:x\u2010y",  # Unicode hyphen
+        "agent\u02d0x",  # modifier-letter colon
+        None,
+    ],
+)
+def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by, root):
+    line = {"at": T2, "by": by, "text": "Approved"}
+    peer = tk(history=[line])
+    assert merge_ticket(tk(), peer, tk(), NOW)["history"] == [
+        {**line, "by": "agent:sync", "text": "(synced, not verified here) Approved"}
+    ]
+    assert merge_ticket(tk(), tk(), peer, NOW)["history"] == [line]
+    from orch.phone_view import build
+
+    rendered = build(root, merge_ticket(tk(), peer, tk(), NOW), [])["history_tail"]
+    assert rendered[0]["role"] == "agent"
+    assert rendered[0]["text"] == "(synced, not verified here) Approved"
+
+
+@pytest.mark.parametrize("decision", ["wont", "verdict"])
+@pytest.mark.parametrize("known", [None, "base", "local"])
+def test_verified_decision_does_not_authenticate_history_author(decision, known):
+    check = signed(_step(**WONT))
+    entry = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
+    peer = tk(checklist=[check]) if decision == "wont" else tk(status="done", verdicts=[entry])
+    text = "Marked c1 as won't do" if decision == "wont" else "Looks good"
+    base = deepcopy(peer) if known == "base" else tk()
+    local = deepcopy(peer) if known == "local" else tk()
+    peer["history"] = [
+        {"at": at, "by": by, "text": text}
+        for at, by in [(T1, "human:Impostor"), (T2, "human:Ann"), (T3, "human:Ann")]
+    ]
+    out = merge_ticket(
+        base, peer, local, NOW, person_for(ledger_of(check)), verdict_for({TK: entry["mac"]}, [])
+    )
+    human = [h for h in out["history"] if h["by"] != "agent:sync"]
+    assert human == []
+    # Returning the untrusted original cannot resurrect a demoted line.
+    again = merge_ticket(
+        base, peer, out, NOW, person_for(ledger_of(check)), verdict_for({TK: entry["mac"]}, [])
+    )
+    assert again["history"] == out["history"]
+
+
+def test_returned_demotion_cannot_erase_local_unpushed_answer():
+    line = {"at": T2, "by": "human:lindenmann", "text": "Answered q1: yes"}
+    local = tk(history=[line])
+    remote = tk(history=[{**line, "by": "agent:sync", "text": "(synced, not verified here) " + line["text"]}])
+    assert line in merge_ticket(tk(), remote, local, NOW)["history"]
+
+
+@pytest.mark.parametrize(
+    "by",
+    [
+        "agent:worker",
+        "AGENT:worker",
+        "agent:claude",
+        "agent:sync",
+        "agent:codex",
+        "agent:automation",
+        "agent:focus",
+        "agent:my-agent_1.2",
+        "agent:" + "a" * 40,
+    ],
+)
+def test_phone_attribution_and_sync_share_agent_allowlist(by):
+    from orch.phone_view import _who, is_agent_history_author
+
+    assert is_agent_history_author(by)
+    assert _who(by)[1] == "agent"
+    line = {"at": T2, "by": by, "text": "Working"}
+    assert merge_ticket(tk(), tk(history=[line]), tk(), NOW)["history"] == [line]
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        {"text": 123},
+        {"text": ["bad"]},
+        {"text": None},
+        {"at": 5},
+        {"at": None},
+        {"at": ""},
+        {"at": "not-a-timestamp"},
+        {"at": "2026-02-30T00:00:00Z"},
+        {"at": "2026-11-09T09:00:00+01:00"},
+    ],
+)
+@pytest.mark.parametrize("by", ["human:Ann", "agent:worker", "agent:sync"])
+@pytest.mark.parametrize("has_base", [False, True])
+def test_malformed_remote_history_does_not_stall_merge(malformed, by, has_base):
+    bad = {"at": T2, "by": by, "text": "Malformed", **malformed}
+    good = {"at": T2, "by": "agent:worker", "text": "Working"}
+    local_line = {"at": T1, "by": "human:Ann", "text": "Requested"}
+    base = tk() if has_base else None
+    remote = tk(title="Remote update", history=[bad, good])
+    local = tk(history=[local_line])
+    before = deepcopy((base, remote, local))
+    out = merge_ticket(base, remote, local, NOW)
+    assert out is not None
+    assert out["title"] == "Remote update"
+    assert out["history"][:2] == [local_line, good]
+    assert bad not in out["history"]
+    assert all(isinstance(h["text"], str) for h in out["history"])
+    assert list(SCHEMA.iter_errors(out)) == []
+    assert (base, remote, local) == before
+    assert merge_ticket(base, remote, out, NOW)["history"] == out["history"]
+
+
+@pytest.mark.parametrize("text", [None, 7, ["x"], {"a": 1}])
+def test_a_remote_history_line_with_non_string_text_never_raises(text):
+    peer = tk(history=[{"at": T2, "by": "human:Ann", "text": text}])
+    out = merge_ticket(tk(), peer, tk(), NOW)
+    assert out is not None and out["history"] == []  # discarded, the sync does not get stuck
+
+
+def test_a_person_line_keeps_its_name_only_for_a_new_decision_and_both_orders_agree_elsewhere():
+    from orch_sync.merge import history_digest
+
+    line = {"at": T2, "by": "human:Ann", "via": "cli", "text": "Status review -> done", "chat_message": False}
+    entry = {
+        "kind": "person",
+        "person": "human:Ann",
+        "at": T2,
+        "line": history_digest(line["text"], "cli"),
+        "nonce": "0123456789abcdef",
+        "mac": "A" * 43,
+    }
+    peer = tk(status="done", verdicts=[entry], history=[line])
+    v = verdict_for({TK: entry["mac"]}, [])
+    out = merge_ticket(tk(), peer, tk(), NOW, None, v)
+    assert out["history"] == [line]
+    swapped = merge_ticket(tk(), tk(), peer, NOW, None, v)  # the peer's lines are local there
+    skip = ("revision", "updated_at")
+    assert {k: x for k, x in swapped.items() if k not in skip} == {
+        k: x for k, x in out.items() if k not in skip
+    }

@@ -75,7 +75,7 @@ def test_tracked_turned_general(machines):
     other = "tickets/t_second.json"
     save(a, other, ticket() | {"id": "t_second"})
     state = success(a)
-    assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
+    assert state["skipped"] == []
     assert load(a)["general"] is True
     for path in (TICKET, ART):
         assert step.entries(a, "HEAD")[path] == before[path]
@@ -377,17 +377,19 @@ def test_partial_apply_crash_is_idempotent(machines, monkeypatch):
     assert load(b)["title"] == "New title" and (b / ".orch" / ART).read_bytes() == b"new artifact"
 
 
-def test_key_clash_waits_for_pr5(machines):
-    a, b, bare = both(machines)
+def test_live_key_clash_pauses_without_renumbering(machines):
+    a, b, _ = both(machines)
     edit(a, key="AB1-1")
+    edit(b, key="AB1-1")
     success(a)
     success(b)
     from test_step import ticket
 
-    save(b, "tickets/t_second.json", dict(ticket(), id="t_second", key="AB1-1"))
-    head, tip = step.oid(b, "HEAD"), remote_sha(bare)
-    assert "key clash" in run(b)["last_error"]
-    assert step.oid(b, "HEAD") == head and remote_sha(bare) == tip
+    path = "tickets/t_second.json"
+    save(b, path, dict(ticket(), id="t_second", key="AB1-1"))
+    before = {p: repo.safe(b, p).read_bytes() for p in (TICKET, path)}
+    assert run(b)["paused"]["key_clashes"]["AB1-1"]
+    assert {p: repo.safe(b, p).read_bytes() for p in before} == before
 
 
 def test_push_timeout_is_offline(machines, monkeypatch):
@@ -566,7 +568,11 @@ def test_broken_tracked_ticket_kept_on_remote(machines, broken, artifact_change)
     other = "tickets/t_second.json"
     save(a, other, ticket() | {"id": "t_second"})
     state = success(a)
-    assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
+    if broken is None:
+        assert state["skipped"] == []
+        assert state["notices"] == [f"Restored a missing ticket file: {TICKET}"]
+    else:
+        assert "Ticket t_abc123 has a problem and was not synced" in str(state["skipped"])
     assert (a / ".orch" / TICKET).read_bytes() == (original if broken is None else broken)
     for path in (TICKET, ART):
         assert step.entries(a, "HEAD")[path] == before[path]
@@ -655,18 +661,30 @@ def test_synced_wont_do_requires_receivers_current_mac(machines, monkeypatch, ma
 
 
 @pytest.mark.parametrize("recover", [False, True])
-def test_ledger_changes_before_apply_fail_closed(machines, monkeypatch, recover):
+@pytest.mark.parametrize("decision", ["wont", "verdict"])
+def test_ledger_changes_before_apply_fail_closed(machines, monkeypatch, recover, decision):
     from orch import humanproof
 
     a, b, bare = both(machines)
     check = signed_wont(b, monkeypatch)
-    edit(a, checklist=[check], title="Remote change")
+    if decision == "wont":
+        edit(a, checklist=[check], title="Remote change")
+        text = "Marked c1 as won't do"
+    else:
+        doc = load(a) | {"status": "done"}
+        entry = humanproof.verdict_sign(b, doc, "person")
+        edit(a, status="done", verdicts=[entry], title="Remote change")
+        text = "Status review -> done"
+    edit(a, history=[{"at": NOW, "by": "human:Pat", "text": text}])
     success(a)
     before, head, tip = (b / ".orch" / TICKET).read_bytes(), step.oid(b, "HEAD"), remote_sha(bare)
     apply = step.apply
 
     def revoke(root, old, new, state, merges=None):
-        assert humanproof._ledger_set(root, "t_abc123", "c1", None)
+        if decision == "wont":
+            assert humanproof._ledger_set(root, "t_abc123", "c1", None)
+        else:
+            assert humanproof._verdict_ledger_put(root, "t_abc123", None)
         if recover:
             raise RuntimeError("crash")
         return apply(root, old, new, state, merges)
@@ -726,6 +744,134 @@ def test_idle_syncs_and_one_edit_converge_without_churn(machines, monkeypatch):
         assert step.oid(root, "HEAD") == edited.decode()
         assert load(root)["revision"] == 8
     assert (a / ".orch" / TICKET).read_bytes() == (b / ".orch" / TICKET).read_bytes()
+
+
+@pytest.mark.parametrize("decision", ["wont", "verdict"])
+@pytest.mark.parametrize("proof", ["forged", "valid", "foreign"])
+def test_remote_human_history_needs_a_new_verified_decision_naming_its_author(
+    machines, monkeypatch, decision, proof
+):
+    from orch import cli, humanproof, tickets
+
+    a, b, _ = both(machines)
+    valid = proof == "valid"
+    monkeypatch.setattr(humanproof, "guarded_home", lambda root: root.parent / "proof-homes" / root.name)
+    humanproof.human_key(b)
+    if valid:
+        # Fixture only: give A the same guarded authority as B. Real independent
+        # machines cannot verify each other's MACs merely by syncing ticket files.
+        (a / ".orch/.local-id").write_bytes((b / ".orch/.local-id").read_bytes())
+    check = {
+        "id": "c2",
+        "text": "Order dessert (B)",
+        "done": False,
+        "evidence": [],
+        "wont_do": True,
+        "wont_nonce": "test-decision",
+    }
+    if decision == "wont":
+        text = "Marked as won't do: Order dessert (B)"
+        if proof == "forged":
+            check["wont_mac"] = "fake"
+            edit(b, checklist=[check])
+        else:
+            edit(b, checklist=[{"id": "c2", "text": check["text"], "done": False, "evidence": []}])
+            tickets.check_wont_do(b, "t_abc123", "c2", "human:lindenmann")
+    else:
+        text = "Looks good"
+        if proof == "forged":
+            entry = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
+            edit(b, status="done", verdicts=[entry])
+        else:
+            edit(b, status="review")
+            tickets.accept_review(b, "t_abc123", "human:lindenmann", proven=True)
+    if proof == "forged":
+        line = {"at": NOW, "by": "human:lindenmann", "text": text}
+        edit(b, history=[line])
+    else:
+        line = load(b)["history"][-1]
+        text = line["text"]
+    if valid:
+        import shutil
+
+        # Copy only test authority, preserving private modes and A's own path binding.
+        humanproof.human_key(a)
+        for name in ("human.key", humanproof.LEDGER, humanproof.VERDICT_LEDGER):
+            source = humanproof.key_dir(b) / name
+            if source.exists():
+                shutil.copy2(source, humanproof.key_dir(a) / name)
+        doc = load(b)
+        if decision == "wont":
+            assert humanproof.wont_verifier(a)(doc["checklist"][0], "t_abc123")
+        else:
+            assert humanproof.verdict_ok(a, doc)
+    success(b)
+
+    sync_apply = tickets.sync_apply
+    verifier = humanproof.wont_verifier if decision == "wont" else humanproof.verdict_verifier
+    locked, verified = [], []
+
+    @contextlib.contextmanager
+    def lock(root, tid):
+        with sync_apply(root, tid):
+            locked.append(tid)
+            try:
+                yield
+            finally:
+                locked.pop()
+
+    def checking(root):
+        verify = verifier(root)
+
+        def call(*args):
+            if root == a and locked:
+                verified.append(True)
+            return verify(*args)
+
+        return call
+
+    monkeypatch.setattr(tickets, "sync_apply", lock)
+    monkeypatch.setattr(humanproof, "wont_verifier" if decision == "wont" else "verdict_verifier", checking)
+    success(a)
+    assert verified  # The receiving core rechecks under the ticket lock before writing.
+    result = load(a)
+    demoted = {**line, "by": "agent:sync", "text": "(synced, not verified here) " + text}
+    # #484: a decision NEW on the receiver that verifies there and names the line's author keeps the person's
+    # name (the fixture only lends A B's key); a forged or foreign one does not.
+    expected = line if valid else demoted
+    assert result["history"] == [expected]
+    if decision == "wont":
+        assert bool(result["checklist"][0].get("wont_do")) is valid
+    else:
+        assert humanproof.verdict_ok(a, result) is valid
+    # The CLI's shared ticket formatter must expose the stored attribution and warning.
+    rendered = cli._show(result, a)
+    assert expected["by"] in rendered
+    assert tickets.history_line(expected["text"], result["checklist"]) in rendered
+    assert valid or "human:lindenmann:" not in rendered
+    success(b)
+    success(a)
+    assert load(a)["history"] == [expected]
+    # B owns the original locally; A retains its attribution (or demotion) on subsequent syncs.
+    assert line in load(b)["history"] and (valid or expected in load(b)["history"])
+    success(b)
+    success(a)
+    assert load(a)["history"] == [expected]
+    assert line in load(b)["history"]
+
+
+def test_new_remote_ticket_history_is_not_shared_history(machines):
+    a, b, _ = machines
+    line = {"at": NOW, "by": "human:lindenmann", "text": "Looks good"}
+    save(b, value=ticket() | {"history": [line], "status": "done"})
+    success(b)
+    success(a)
+    expected = {**line, "by": "agent:sync", "text": "(synced, not verified here) Looks good"}
+    assert load(a)["history"] == [expected]
+    success(b)
+    success(a)
+    assert load(a)["history"] == [expected]
+    assert line in load(b)["history"] and expected in load(b)["history"]
 
 
 def test_first_sync_marks_ownership_before_import(machines, monkeypatch):

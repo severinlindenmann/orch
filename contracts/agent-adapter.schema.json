@@ -61,6 +61,7 @@
             "fresh": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "const": "{command}" }] },
             "resume": { "oneOf": [{ "$ref": "#/$defs/argv" }, { "type": "null" }], "description": "null = cannot resume: every run starts fresh from the ticket and its summary." },
             "stream_args": { "$ref": "#/$defs/argv", "description": "Optional. Added for a machine-readable event stream." },
+            "events": { "oneOf": [{ "type": "string", "pattern": "^[a-z0-9-]{1,40}/[0-9]{1,3}$" }, { "type": "null" }], "description": "Optional. Name of the collector for the stream that stream_args turns on (activity.md, Mapping from a JSON event stream), e.g. a stream format id; null or absent = no collector." },
             "allow_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to retry with a tool allowed ({allow})." },
             "settings_args": { "$ref": "#/$defs/argv", "description": "Optional. Added to pass the reminder hooks inline ({reminder_json} = the tool's settings JSON built from reminder_hooks)." }
           }
@@ -116,6 +117,7 @@
           ],
           "description": "null = no live mode; runs are oneshot."
         },
+        "deny": {"type": "object", "additionalProperties": false, "required": ["format"], "description": "Optional. How orch tells the tool the deny rules for orch's own folders (secrets.md, Deny rules). The deny set is the same for every adapter; only the format differs. `patterns/1` = merged into --disallowedTools; `none` = the tool cannot be told (Level 1 note).", "properties": {"format": {"enum": ["patterns/1", "none"]}, "note": {"type": "string", "maxLength": 400}}},
         "mcp_settings": {
           "type": "array", "maxItems": 8,
           "description": "Optional. Where the tool keeps its own connection (MCP) settings, read only (inventory.md, source harness). {home} = the account's home folder, {folder} = the workspace folder.",
@@ -222,7 +224,8 @@
           "properties": {
             "resume": { "type": "boolean" }, "choose_session_id": { "type": "boolean" }, "interactive_tmux": { "type": "boolean", "description": "For generic: true only when the user entry sets interactive." },
             "hooks": { "type": "boolean" }, "stream": { "type": "boolean" }, "permission_retry": { "type": "boolean" },
-            "subagents": { "type": "boolean" }, "usage": { "type": "boolean" }
+            "subagents": { "type": "boolean" }, "usage": { "type": "boolean" },
+            "activity": { "enum": ["live", "after", "none"], "description": "Optional, default none. What the record can learn from this tool without hooks: live = a collector reads the tool's stream while the run goes (oneshot.events), after = only a transcript read once the run ends, none = nothing (hooks only)." }
           }
         },
         "files": {

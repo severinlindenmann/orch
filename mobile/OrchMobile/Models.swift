@@ -474,11 +474,12 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var historyTail: [Line] = []
     /// What the ticket points at (web addresses, other tickets, files it produced, project files). Unknown kinds are left out.
     var refs: [TicketRef] = []
+    var results: [TicketResult] = []
     var light: Bool? = nil
 
     init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
-         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], light: Bool? = nil) {
-        self.refs = refs; self.light = light
+         running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], results: [TicketResult] = [], light: Bool? = nil) {
+        self.refs = refs; self.results = light == true ? [] : results; self.light = light
         self.title = title; self.status = status; self.agent = agent; self.summary = summary; self.checklist = checklist
         self.done = checklist.filter(\.done).count; self.total = checklist.count
         let declined = checklist.filter(\.wontDo).count; self.wontDo = declined > 0 ? declined : nil
@@ -500,8 +501,27 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         historyTail = (try? c.decodeIfPresent([Line].self, forKey: .historyTail)) ?? []
         refs = TicketRef.decodeList(c, forKey: .refs)
         light = try? c.decodeIfPresent(Bool.self, forKey: .light)
+        results = light == true ? [] : TicketResult.decodeList(c, forKey: .results)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, light }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, results, light }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(title, forKey: .title)
+        try c.encodeIfPresent(status, forKey: .status)
+        try c.encodeIfPresent(agent, forKey: .agent)
+        try c.encodeIfPresent(summary, forKey: .summary)
+        try c.encodeIfPresent(done, forKey: .done)
+        try c.encodeIfPresent(total, forKey: .total)
+        try c.encodeIfPresent(wontDo, forKey: .wontDo)
+        try c.encodeIfPresent(running, forKey: .running)
+        try c.encodeIfPresent(started, forKey: .started)
+        try c.encodeIfPresent(light, forKey: .light)
+        try c.encode(checklist, forKey: .checklist)
+        try c.encode(attachments, forKey: .attachments)
+        try c.encode(historyTail, forKey: .historyTail)
+        try c.encode(refs, forKey: .refs)
+        if light != true, !results.isEmpty { try c.encode(results, forKey: .results) }
+    }
     /// Quiet light views update only the fields they carry, preserving the full ticket details.
     func overlaid(on base: TicketSnapshot?) -> TicketSnapshot {
         guard light == true, var result = base else { return self }

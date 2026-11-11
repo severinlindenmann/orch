@@ -54,9 +54,13 @@ def require_run(root, agent) -> None:
         if agent:
             raise Refused(NO_RUN)
         return
+    check_live_run(root, *ids)
+
+
+def check_live_run(root, run, ticket) -> dict:
+    """run and ticket name a live claim that belong together: the claim, or Refused (BAD_RUN)."""
     from orch import runs
 
-    run, ticket = ids
     try:
         rec = runs.read(root, ticket)
         ok = bool(rec) and rec.get("run") == run and runs.state(rec) in ("alive", "maybe-stale")
@@ -64,6 +68,7 @@ def require_run(root, agent) -> None:
         ok = False
     if not ok:
         raise Refused(BAD_RUN)
+    return rec
 
 
 def _record_event(root, ev):
@@ -131,7 +136,14 @@ def _write_record(root, ev):
         read = record.read_run(root, line["run"], seen_by="writer")
         if read.status == "ok" and len(read.value) >= OUTSIDE_DAY_CAP:
             raise Refused("Refused: too many key uses outside a run today.")
-    record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root))).append(line)
+    record_writer(root).append(line)
+
+
+def record_writer(root):
+    """The record writer with a hider built from THIS workspace's key store (the one place that wires it)."""
+    from orch import record
+
+    return record.RecordWriter(root, hider=hider.Hider(keystore.all_needles(root)))
 
 
 def set_recorder(fn):
@@ -206,7 +218,7 @@ def record_change(root, action, profile, by):
 
 RISKY_PROGRAMS = re.compile(
     r"^(sh|bash|zsh|dash|ksh|fish|csh|tcsh|env|xargs|python[0-9.]*|node|npx|npm|pip[0-9.]*|perl|ruby|php|lua|"
-    r"java|git|osascript|pwsh|powershell|cmd|ssh|curl|wget)(\.exe)?$",
+    r"java|git|osascript|pwsh|powershell|cmd|ssh|curl|wget|psql|mysql|sqlite3|redis-cli|mongosh)(\.exe)?$",
     re.IGNORECASE,
 )
 
@@ -219,8 +231,9 @@ def approve_program(root, name):
     """What a person approves as a profile's `run` program: (real path, warnings). Refused: a relative path;
     the program or a folder above it inside the workspace, or changeable by others (group/other-writable; the
     root and admin groups of a normal system are fine). Interpreters and tools that run arbitrary code (sh,
-    python, node, env, git, npm, curl, ...) are allowed but warned about: approving one is approving
-    anything."""
+    python, node, env, git, npm, curl, and database clients that read commands from stdin or run shell
+    escapes: psql, mysql, sqlite3, redis-cli, mongosh) are allowed but warned about: approving one is
+    approving anything."""
     if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
         raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
     path = resolve_program(root, name)
@@ -349,7 +362,7 @@ def _switch_on(root, name, flag) -> bool:
     again under the key lock, the same lock a person's enable holds across record and file, so a reader never
     writes an off record over an enable in progress."""
     with hp._key_lock(hp.key_dir(root)):
-        profile = keystore.read_profiles(root).get(name)
+        profile = _verified(root, name)
         return hp.effective(root, f"secret.{flag}.{name}", bool(profile and profile.get(flag) is True))
 
 
@@ -363,8 +376,27 @@ def _agent_may_run(root, name, profile, command) -> bool:
     return bool(run) and os.path.isabs(run[0]) and list(command) == list(run)
 
 
-def _profile(root, name):
+def _verified(root, name):
+    """The profile `name` with its body MAC-verified (None when there is no such profile). A body edited
+    outside orch, or without a person's MAC, is refused; the variables are re-checked too (a forged file
+    cannot inject loader/interpreter variables even if it carried a valid MAC for them)."""
     profile = keystore.read_profiles(root).get(name)
+    if profile is None:
+        return None
+    if not hp.profile_verified(root, name, profile):
+        raise Refused("Refused: " + hp.PROFILE_CHANGED + ".")
+    keystore._profile_check({name: profile}, set())  # the variable rules again at run time (same code as set)
+    for sect in ("env", "files", "set"):
+        if any(
+            keystore.env_denied(v, sect) or (sect == "set" and not keystore.set_name_ok(v))
+            for v in profile.get(sect, {})
+        ):
+            raise Refused("Refused: this key profile sets a variable orch does not allow.")
+    return profile
+
+
+def _profile(root, name):
+    profile = _verified(root, name)
     if profile is None:
         raise Refused(f"Refused: there is no profile named {name}.")
     return profile
@@ -495,6 +527,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                     "Refused: this profile's command is not a full path. "
                     "Ask the person to set the profile again."
                 )
+            approve_program(root, profile["run"][0])  # still a safe, existing program at exec time
             command = profile["run"] + command
         if not command:
             raise Refused("Refused: give a command to run.")
@@ -593,7 +626,12 @@ def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
 
 
 def list_answer(root) -> dict:
-    profiles = keystore.read_profiles(root)
+    try:  # display only: a damaged file lists the keys with no profiles
+        profiles = {  # a profile changed outside orch counts for nothing (it cannot run)
+            n: v for n, v in keystore.read_profiles(root).items() if hp.profile_verified(root, n, v)
+        }
+    except Refused:
+        profiles = {}
     items = []
     for row in keystore.list_keys(root):
         members = sorted(

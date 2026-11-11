@@ -20,6 +20,26 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 VECTORS = CONTRACTS / "vectors" / "chat-groups"
 
 
+def test_real_pilatus_day_preserves_phone_messages_in_status_and_history(proj, run):
+    fixture = CONTRACTS.parent / "workspace-addons/dashboard/tests/fixtures/chat-day-pilatus-2026-11-11.json"
+    original = fixture.read_text()
+    day = json.loads(original)
+    chat.chat_dir(proj).mkdir(parents=True, exist_ok=True)
+    (chat.chat_dir(proj) / f"{day['day']}.json").write_text(original)
+
+    status = chat.status(proj, now="2026-11-11T11:08:00Z")
+    code, output, error = run("chat", "day", day["day"], "--json")
+    assert code == 0, error
+    history = json.loads(output)
+    for result in (status, history):
+        assert result["messages"] == day["messages"]
+        phone, reply = result["messages"][-2:]
+        assert phone["id"] == "m_74jdus1swo0w0dsc"
+        assert phone["text"] == "What is still open this week? [1203]"
+        assert phone["via"] == "phone" and phone["by"] == "you"
+        assert reply["reply_to"] == phone["id"]
+
+
 def _validator():
     from referencing import Registry, Resource
 
@@ -1162,6 +1182,14 @@ def test_helper_prompt_does_not_say_tap_for_phone_conversations(proj):
     assert "Never make the ticket yourself" in prompt
 
 
+def test_helper_prompt_asks_for_short_summaries_with_cards_not_id_lists(proj):
+    gid = tickets.ensure_general(proj, "human:me")
+    prompt = chat.helper_prompt(proj, tickets.load(proj, gid), [], "")
+    assert "a few short lines in everyday words" in prompt
+    assert "Never list ticket keys or ids in the text" in prompt
+    assert "add --ref ticket:<KEY> for each ticket the person can act on" in prompt
+
+
 def test_last_moved_title_is_one_line_and_helper_may_log_to_the_moved_ticket(proj, monkeypatch):
     from types import SimpleNamespace
 
@@ -1202,6 +1230,125 @@ def test_make_ticket_across_midnight_local(proj, monkeypatch):
     result = chat.make_ticket(proj, "proposal", by="human:me")
     assert len(tickets.list_all(proj)) == 1
     assert chat.read_day(proj, "2026-11-09")["messages"][0]["moved_to"]["id"] == result["ticket"]
+
+
+def test_general_ticket_addressed_phone_text_is_chat(proj, run, subprocess_home, conn, monkeypatch):
+    import shutil
+
+    monkeypatch.syspath_prepend(str(CONTRACTS.parent / "workspace-addons" / "dashboard" / "src"))
+    from orch_dashboard.data import load_chat_day, load_chat_days, load_state
+
+    orch_bin = shutil.which("orch")
+    assert orch_bin
+    gid = tickets.ensure_general(proj, "human:test")
+    message = pv3.msg(pv3.GEN, {"text": "What is still open this week? [1203]"})
+    message["ticket"] = gid
+    conn.inbox.append(message)
+    assert run("relay", "inbox")[0] == 0
+    with monkeypatch.context() as agent:
+        agent.setenv("CLAUDECODE", "1")
+        assert run("relay", "send", pv3.PHONE, "Two tasks remain.", "--ticket", gid)[0] == 0
+    expected = ["What is still open this week? [1203]", "Two tasks remain."]
+    # Real relay inbox -> ticket intake -> day log -> real CLI subprocess -> dashboard state.
+    # Ticket history alone cannot satisfy either Today or History.
+    state = load_state(proj, orch_bin=orch_bin)
+    today = state["chat"]["day"]
+    assert [m["text"] for m in state["chat"]["messages"]] == expected
+    assert state["chat"]["messages"][0]["phone"] == pv3.PHONE
+    assert state["chat"]["messages"][0]["via"] == "phone"
+    assert state["chat"]["messages"][0]["by"] == "you"
+    assert state["chat"]["messages"][1]["via"] == "helper"
+    assert any(d["day"] == today and d["count"] == 2 for d in load_chat_days(proj, orch_bin))
+    assert [m["text"] for m in load_chat_day(proj, orch_bin, today)["messages"]] == expected
+    # Relay redelivery must not duplicate either the human input or the day entry.
+    conn.acked.clear()
+    assert run("relay", "inbox")[0] == 0
+    assert len(runs.undelivered(proj, gid)) == 1
+    assert [m["text"] for m in load_state(proj, orch_bin=orch_bin)["chat"]["messages"]] == expected
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("disk busy"), Refused("Ticket chat is busy (retried for 5 s). Try again.")]
+)
+def test_failed_chat_write_retries_phone_intake(proj, run, conn, monkeypatch, error):
+    from orch import relay
+
+    original = chat.record
+    monkeypatch.setattr(chat, "record", lambda *a, **kw: (_ for _ in ()).throw(error))
+    conn.inbox.append(pv3.msg(pv3.GEN, {"text": "What is still open this week?", "general": True}))
+    run("relay", "inbox")
+    assert pv3.GEN not in relay.seen(proj)
+    gid = tickets.general_id(proj)
+    assert not runs.undelivered(proj, gid)
+    monkeypatch.setattr(chat, "record", original)
+    run("relay", "inbox")
+    assert pv3.GEN in relay.seen(proj)
+    conn.acked.clear()
+    run("relay", "inbox")
+    assert [m["text"] for m in chat.status(proj)["messages"]] == ["What is still open this week?"]
+    assert len(runs.undelivered(proj, gid)) == 1
+    assert sum("What is still open this week?" in h["text"] for h in tickets.load(proj, gid)["history"]) == 1
+
+
+@pytest.mark.parametrize(
+    "error,retry",
+    [
+        (OSError("disk busy"), True),
+        (Refused("Ticket chat is busy (retried for 5 s). Try again."), True),
+        (Refused("Chat storage must not be a link."), False),
+        (ValueError("invalid Chat data"), False),
+    ],
+)
+def test_persistent_chat_write_failure_finishes_phone_intake(proj, run, conn, monkeypatch, error, retry):
+    from orch import relay
+
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append(args[1])
+        raise error
+
+    monkeypatch.setattr(chat, "record", fail)
+    monkeypatch.setattr(relay, "PHONE_RETRY_SECONDS", 0)
+    conn.inbox.append(pv3.msg(pv3.GEN, {"text": "Keep this message", "general": True}))
+    if retry:
+        for _ in range(relay.PHONE_TRIES):
+            assert run("relay", "inbox")[0] == 0
+            assert pv3.GEN not in relay.seen(proj)
+            assert not runs.undelivered(proj, tickets.general_id(proj))
+    assert run("relay", "inbox")[0] == 0
+    assert pv3.GEN in relay.seen(proj)
+    assert len(calls) == (relay.PHONE_TRIES + 1 if retry else 1)
+    conn.acked.clear()
+    assert run("relay", "inbox")[0] == 0
+    assert len(calls) == (relay.PHONE_TRIES + 1 if retry else 1), "seen messages must not retry"
+    gid = tickets.general_id(proj)
+    pending = runs.undelivered(proj, gid)
+    assert len(pending) == 1 and "Keep this message" in pending[0]["text"]
+    assert sum("Keep this message" in h["text"] for h in tickets.load(proj, gid)["history"]) == 1
+    assert len(pv3.acks(conn)) == 1
+    assert not chat.status(proj)["messages"]
+    log = (proj / ".orch/run/relay-errors.log").read_text()
+    assert f"Chat message {pv3.GEN} could not be saved" in log and str(error) in log
+
+
+def test_legacy_wakeup_is_absent_from_chat_and_phone(proj, run, conn):
+    from orch import net, phone_view
+
+    gid = _general(proj, conn, run)
+    hint = f'A phone text in the General conversation is waiting for you. Answer it: orch relay send {pv3.PHONE} "<your answer>" --ticket {gid}'
+    tickets.log(proj, gid, hint, "agent:automation")
+    day = chat.day_key(proj)
+    saved = chat._read_day(proj, day)
+    saved["messages"].append({"id": "legacy", "by": WS, "via": "helper", "text": hint, "at": tickets.now()})
+    net.write_json(chat._day_path(proj, day), saved, True)
+    for data in (
+        chat.status(proj),
+        chat.read_day(proj, day),
+        phone_view.build(proj, tickets.load(proj, gid), []),
+    ):
+        assert "orch relay send" not in json.dumps(data)
+        assert "waiting for you. Answer it" not in json.dumps(data)
 
 
 def test_old_key_mentions_do_not_redirect(proj, new_ticket):

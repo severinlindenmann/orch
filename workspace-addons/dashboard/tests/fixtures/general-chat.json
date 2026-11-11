@@ -1,0 +1,15 @@
+{
+  "general": {
+    "id": "t_general1",
+    "history": [{"at": "2026-11-11T10:00:00Z", "by": "agent:relay from ph_iphone0001", "via": "phone", "chat_message": true, "text": "From Phone: What is still open this week?"}]
+  },
+  "chat": {
+    "helper": "General helper",
+    "day": "2026-11-11",
+    "messages": [
+      {"id": "m_phone00000000001", "at": "2026-11-11T10:00:00Z", "by": "you", "via": "phone", "text": "What is still open this week?"},
+      {"id": "m_helper000000001", "at": "2026-11-11T10:01:00Z", "by": "ws_abcdefghij", "via": "helper", "text": "Two tasks remain.",
+       "refs": [{"kind": "ticket", "id": "t_demo000x", "title": "Weekly report", "added_by": "helper"}]}
+    ]
+  }
+}

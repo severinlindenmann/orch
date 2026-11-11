@@ -91,7 +91,11 @@ actor MockRelay: RelayAPI {
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
+            #if DEBUG
+            received.append(contentsOf: GroupMock.messages(long: UserDefaults.standard.bool(forKey: "mockLongGroup")))
+            #else
             received.append(contentsOf: GroupMock.messages())
+            #endif
             all.append(GroupMock.question(at: Self.now()))
         }
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
@@ -144,6 +148,23 @@ actor MockRelay: RelayAPI {
     ]
 
     /// Fake ticket snapshots (the shape the workspace will send as `ticket_view`).
+    private static let q3Results: TicketSnapshot = {
+        let json = #"""
+        {"results":[
+          {"id":"a_cccccccccccc","from":"agent","checked":true,"title":"Q3 totals checked","at":"2026-11-05T11:20:00Z",
+           "doc":{"schema":"orch.blocks/1","from":"agent","blocks":[
+             {"type":"summary","text":"Q3 totals match the finance sheet."},
+             {"type":"kv","items":[{"key":"Sheet total","value":"CHF 1 204 300"},{"key":"Report total","value":"CHF 1 204 300"}]},
+             {"type":"file","path":"q3-chart.png","label":"Q3 chart","preview":"image"}]}},
+          {"id":"j_q3export","from":"job","title":"Q3 export","at":"2026-11-05T11:18:00Z",
+           "doc":{"schema":"orch.blocks/1","from":"job","blocks":[
+             {"type":"table","title":"Q3 export rows","columns":[{"key":"region","label":"Region"},{"key":"amount","label":"Amount"}],
+              "rows":[{"region":"North","amount":420000},{"region":"South","amount":384300},{"region":"West","amount":400000}],"total_rows":40},
+             {"type":"progress","label":"Rows exported","done":40,"total":40}]}}
+        ]}
+        """#
+        return (try? JSONCoding.decoder.decode(TicketSnapshot.self, from: Data(json.utf8))) ?? TicketSnapshot()
+    }()
     static let q3View = TicketSnapshot(
         title: "Q3 summary for the board", status: "done", agent: "Claude", summary: "Pulled the numbers, drew the charts, the board deck is ready.",
         checklist: ["Read the Q3 sheet", "Check the totals", "Prepare the summary", "Draw the charts", "Review the board deck"].map { .init(text: $0, done: true) },
@@ -156,7 +177,8 @@ actor MockRelay: RelayAPI {
         refs: [.init(rawKind: "url", url: "https://docs.pilatus.ch/board-q3", title: "Board deck draft"),
                .init(rawKind: "ticket", ticket: "t_7k3f9q"),
                .init(rawKind: "artifact", ticket: "t_q3sum1", name: "q3-chart.png"),
-               .init(rawKind: "file", path: "docs/board/q3.md", line: 12)])
+               .init(rawKind: "file", path: "docs/board/q3.md", line: 12)],
+        results: q3Results.results)
     static let invoiceView = TicketSnapshot(
         title: "Invoice CSV export", status: "active", agent: "Claude", summary: "Writing the export.",
         checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true),

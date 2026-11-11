@@ -49,8 +49,22 @@ def test_local_allowlist(root):
     save(root, 'tickets/t_general.json', dict(ticket(), id='t_general', general=True))
     state = success(root)
     assert tracked(root) == {TICKET}
-    assert '25 MB' in str(state['skipped'])
+    assert state['skipped'] == [f'{ART}: File exceeds 25 MB']
     assert state['last_ok'] == NOW
+
+
+def test_local_only_items_are_quiet(root):
+    configure(root)
+    save(root, value=ticket(general=True))
+    save(root, ART, b'private chat')
+    for path in ('me/x', 'secrets/x', 'tickets/t_abc123/evidence/x',
+                 'tickets/t_second/artifacts/.env.local'):
+        save(root, path, b'private')
+    for _ in range(2):
+        state = success(root)
+        assert state['skipped'] == []
+        assert state['notices'] == []
+        assert tracked(root) == set()
 
 
 @pytest.mark.parametrize('path', [ART, TICKET])
@@ -79,10 +93,12 @@ def test_missing_ticket_restored(root):
     success(root)
     original = p.read_bytes()
     p.unlink()
-    assert 'Restored' in str(success(root)['skipped'])
+    state = success(root)
+    assert state['skipped'] == []
+    assert state['notices'] == [f'Restored a missing ticket file: {TICKET}']
     assert p.read_bytes() == original
     assert tracked(root) == {TICKET}
-    success(root)
+    assert success(root)['notices'] == []
     assert tracked(root) == {TICKET}
 
 
@@ -93,9 +109,13 @@ def test_artifact_deletion_threshold(root):
     success(root)
     head = step.oid(root, 'HEAD')
     p.unlink()
-    success(root)
-    assert ART not in tracked(root)
-    assert step.oid(root, 'HEAD') != head
+    assert run(root)["paused"]["files"] == [ART]
+    assert ART in tracked(root)
+    assert step.oid(root, "HEAD") == head
+    from orch_sync.pause import resolve
+
+    assert not resolve(root, ART, "mine", now=NOW).get("last_error")
+    assert p.read_bytes() == b"hello"
 
 
 def test_invalid_ticket_skipped(root):
@@ -237,7 +257,7 @@ def test_general_ticket_preserves_existing_folder(root, value):
     success(root)
     before = step.entries(root, 'HEAD')
     save(root, value=value)
-    assert 'Ticket t_abc123 has a problem and was not synced' in str(success(root)['skipped'])
+    assert success(root)['skipped'] == []
     assert step.entries(root, 'HEAD') == before
     assert set(repo.git(root, 'ls-files').stdout.decode().splitlines()) == set(before)
     assert (root / '.orch/tickets/t_abc123/artifacts/0.txt').read_bytes() == b'local'
@@ -279,3 +299,13 @@ def test_unreadable_tracked_ticket_preserves_folder(root, monkeypatch):
     assert 'cannot be read' in str(success(root)['skipped'])
     assert step.entries(root, 'HEAD') == before
     assert set(repo.git(root, 'ls-files').stdout.decode().splitlines()) == {TICKET, ART}
+
+
+def test_merge_document_preserves_local_history_and_demotes_remote(root):
+    local_line = {"at": NOW, "by": "human:lindenmann", "text": "Answered q1: yes"}
+    remote_line = {"at": NOW, "by": "agent:relay from ph_abc", "text": "Approved"}
+    local = dict(ticket(), history=[local_line])
+    remote = dict(ticket(), history=[remote_line])
+    out = step.merge_document(root, TICKET, ticket(), local, remote, NOW)
+    assert local_line in out["history"]
+    assert {**remote_line, "by": "agent:sync", "text": "(synced, not verified here) Approved"} in out["history"]

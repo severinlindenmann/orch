@@ -1,13 +1,20 @@
 """Pure three-way merge of orch tickets (git step 2, design D8). No git, no files, no clock: the caller passes
 `now`. Two machines that merge the same three versions with the same `now` get byte-identical output, in either
-argument order: merge_ticket(base, a, b, now) == merge_ticket(base, b, a, now).
+argument order, except history attribution: upstream is remote, mine is local.
+Local history is trusted; a remote-only person line stays the person's only through ONE new verified decision
+that binds its author and time (human-proof.md "Person history lines over sync"), else it is demoted.
+Non-history content is symmetric; revision/updated_at may differ on no-op reuse.
 Shared vectors: contracts/vectors/ticket-merge-v1.json.
 """
 
+import hashlib
 import json
 import re
 from copy import deepcopy
 from datetime import datetime
+
+from orch.phone_view import is_agent_history_author
+from rfc3339_validator import validate_rfc3339
 
 FINAL = ("done", "dropped")
 LOSER_FIELDS = ("title", "note", "summary", "owner", "due", "key", "text")  # a replaced value goes to history
@@ -279,7 +286,7 @@ def _evidence(*lists):
 #   - authority is an undo: they take the decision fields (_DECISION); text and covers are then free (an undo
 #     record does not bind them);
 #   - no authority (nothing verifies, or no verifier): no Won't do at all.
-_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_mac")
+_SIGNED = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_by", "wont_at", "wont_line", "wont_mac")
 _DECISION = ("wont_do", "reason", "wont_nonce", "wont_mac")
 
 
@@ -292,7 +299,11 @@ def _person_wont(ctx, x):
 
 
 def _drop_wont(x):
-    return {k: v for k, v in x.items() if k not in ("wont_do", "reason", "wont_mac", "wont_nonce")}
+    return {
+        k: v
+        for k, v in x.items()
+        if k not in ("wont_do", "reason", "wont_mac", "wont_nonce", "wont_by", "wont_at", "wont_line")
+    }
 
 
 def _authority(ctx, *items):
@@ -382,18 +393,34 @@ def _ref_id(r):
 
 
 # The verdict entries a ticket carries (human-proof.md "Done needs a signed verdict"). The fields of a stored
-# entry: the core's humanproof.VERDICT_FIELDS (a test fails if the two drift apart). This module takes no
-# dependency on the core, so it keeps the list and the shape of the contract's ticket.schema.json.
+# entry: the core's humanproof.VERDICT_FIELDS (parity-tested).
 _VERDICT_FIELDS = ("kind", "nonce", "mac")
+_VERDICT_OPTIONAL = ("person", "at", "line")  # humanproof.VERDICT_OPTIONAL (drift-tested)
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+_ACTOR = re.compile(r"human:[A-Za-z0-9_.@ -]{1,58}")  # humanproof.ACTOR_PATTERN (drift-tested)
 VERDICT_CAP = 8
 _NONCE = re.compile(r"^[0-9a-f]{16}$")
 _MAC = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
+def _utc(s):
+    """Seconds since the epoch of an RFC 3339 UTC time ending in Z, else None."""
+    try:
+        if not (isinstance(s, str) and s.endswith("Z") and validate_rfc3339(s)):
+            return None
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
+
+
 def _verdict_shape(e):
     return (
         isinstance(e, dict)
-        and set(e) == set(_VERDICT_FIELDS)
+        and set(_VERDICT_FIELDS) <= set(e) <= set(_VERDICT_FIELDS) | set(_VERDICT_OPTIONAL)
+        and ("person" in e) == ("at" in e) == ("line" in e)
+        and ("line" not in e or (isinstance(e["line"], str) and bool(_DIGEST.fullmatch(e["line"]))))
+        and ("person" not in e or (isinstance(e["person"], str) and bool(_ACTOR.fullmatch(e["person"]))))
+        and ("at" not in e or (isinstance(e["at"], str) and _utc(e["at"]) is not None))
         and e["kind"] in ("person", "agent")
         and isinstance(e["nonce"], str)
         and bool(_NONCE.match(e["nonce"]))
@@ -428,8 +455,76 @@ def _verdicts(ctx, base, a, b, out):
     return sorted(keep, key=lambda e: e["mac"])
 
 
+LINE_WINDOW = 5  # seconds between a decision and the history line its writer adds in the same operation
+_LINE_KEYS = {"at", "by", "via", "text", "chat_message"}
+
+
+def history_digest(text, via):
+    """sha256 hex of the history line a decision's writer adds (humanproof.history_digest, drift-tested)."""
+    return hashlib.sha256(_canon({"text": text, "via": via}).encode()).hexdigest()
+
+
+def _decisions(ctx, ticket):
+    """Verified decisions that name their author, time and exact history line (new records only):
+    key -> (author, at, line digest)."""
+    found = {}
+    for check in ticket.get("checklist", []):
+        if _person_wont(ctx, check) and all(isinstance(check.get(k), str) for k in ("wont_by", "wont_line")):
+            found[("wont", check["id"], check.get("wont_mac"))] = (
+                check["wont_by"],
+                _utc(check.get("wont_at")),
+                check["wont_line"],
+            )
+    for entry in ticket.get("verdicts", []):
+        if (
+            _verdict_shape(entry)
+            and entry["kind"] == "person"
+            and "person" in entry
+            and ctx.verdict_state(entry, ticket) == "current"
+        ):
+            found[("verdict", entry["mac"])] = (entry["person"], _utc(entry["at"]), entry["line"])
+    return {
+        k: v
+        for k, v in found.items()
+        if v[1] is not None and _ACTOR.fullmatch(v[0]) and _DIGEST.fullmatch(v[2])
+    }
+
+
+def _attributed(unique, incoming, decisions):
+    """Canonical keys of the remote-only lines that stay the person's: per NEW verified decision at most ONE
+    line, whose `by` is the decision's author, whose {text, via} is EXACTLY the line the decision's MAC binds,
+    whose shape is the writer's and whose `at` is within LINE_WINDOW seconds of the decision's (the closest
+    wins)."""
+    kept = set()
+    for _, (author, at, digest) in sorted(decisions.items(), key=lambda kv: _canon(kv[0])):
+        best = None
+        for h in unique:
+            key = _canon(h)
+            t = _utc(h.get("at"))
+            if (
+                key in incoming
+                and key not in kept
+                and h.get("by") == author
+                and isinstance(h.get("text"), str)
+                and history_digest(h["text"], h.get("via")) == digest
+                and set(h) <= _LINE_KEYS
+                and h.get("chat_message") in (False, None)
+                and t is not None
+                and abs(t - at) <= LINE_WINDOW
+                and (best is None or (abs(t - at), key) < best[0])
+            ):
+                best = ((abs(t - at), key), key)
+        if best:
+            kept.add(best[1])
+    return kept
+
+
 def _merge(base, a, b, now, person=None, verdict=None):
     ctx = _Ctx(a, b, now, person, verdict)
+    # Provenance before the checklist merge imposes the authority locally: only decisions NEW to this machine
+    # (not verified in the base or here) may lend a person's name to a remote-only line.
+    known = _decisions(ctx, base).keys() | _decisions(ctx, b).keys()
+    decisions = {k: v for k, v in _decisions(ctx, a).items() if k not in known}
     # the same id added on both sides with different content: the newer side's item is renumbered
     ren = _renumber_clashes(
         ctx,
@@ -538,8 +633,25 @@ def _merge(base, a, b, now, person=None, verdict=None):
         ext = out.setdefault("ext", {})
         sync = ext["sync"] if isinstance(ext.get("sync"), dict) else ext.setdefault("sync", {})
         sync["old_keys"] = sorted(set(old_keys_of(out)) | ctx.old_keys)
+    # Attribution is directional: locally present lines are never demoted. A
+    # demoted local copy suppresses a returning remote original; a peer cannot
+    # use a fabricated demotion to erase a genuine local person's attribution.
+    histories = [{_canon(h) for h in t.get("history", [])} for t in (base, a, b)]
+    incoming = histories[1] - histories[2] - histories[0]
+    lines = base.get("history", []) + a.get("history", []) + b.get("history", [])
+    unique = sorted({_canon(h): h for h in lines}.values(), key=_canon)
+    kept = _attributed(unique, incoming, decisions)
     hist = {}
-    for h in base.get("history", []) + a.get("history", []) + b.get("history", []):
+    for h in unique:
+        key = _canon(h)
+        demoted = {**h, "by": SYNC_BY, "text": "(synced, not verified here) " + h.get("text", "")}
+        if (
+            not is_agent_history_author(h.get("by"))
+            and key not in histories[2]
+            and key not in kept
+            and (_canon(demoted) in histories[2] or key in incoming)
+        ):
+            h = demoted
         hist[_canon([h.get("at"), h.get("by"), h.get("text"), h.get("via"), h.get("lost")])] = h
     old = {
         (h.get("text"), _canon(h["lost"]) if "lost" in h else "")
@@ -566,7 +678,7 @@ def _valid(base, a, b):
         return False
     if not isinstance(a.get("id"), str):
         return False
-    for t in (base, a, b):
+    for side, t in enumerate((base, a, b)):
         if _too_deep(t):
             return False
         for f, cap in MAX_ITEMS.items():
@@ -574,6 +686,10 @@ def _valid(base, a, b):
             if not isinstance(lst, list) or len(lst) > cap or not all(isinstance(i, dict) for i in lst):
                 return False
         if len(_canon(t)) > MAX_BYTES:
+            return False
+        # Remote malformed text is discarded below; malformed local/base data
+        # still pauses the merge rather than silently deleting local history.
+        if side != 1 and any(not isinstance(h.get("text"), str) for h in t.get("history", [])):
             return False
         if not all(isinstance(x.get("id"), str) for f in ("checklist", "questions") for x in t.get(f, [])):
             return False
@@ -592,7 +708,8 @@ def _valid(base, a, b):
 def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     """Merge ticket dicts (`base` None = both sides created the file). Returns the merged dict, or None when the
     inputs cannot be merged (not objects, different ids, too deep or too big, duplicate item ids, malformed
-    lists): the caller pauses and keeps all three. Never raises. The inputs are not modified.
+    lists): the caller pauses and keeps all three. Remote history lines with missing or non-string text or
+    invalid timestamps are discarded. Never raises. The inputs are not modified.
     `person(step, ticket_id)` is the RECEIVING CORE's verdict on a step's Won't do decision (humanproof.
     wont_verifier); None = nobody counts as a person, so no Won't do is kept or removed on a peer's say-so. The
     verdict reads the core's ledger when asked: the sync caller must read, merge and write under the ticket's
@@ -607,9 +724,16 @@ def merge_ticket(base, upstream, mine, now, person=None, verdict=None):
     try:
         if not _valid({} if base is None else base, upstream, mine):
             return None
-        out = _merge(
-            {} if base is None else deepcopy(base), deepcopy(upstream), deepcopy(mine), now, person, verdict
-        )
+        remote = deepcopy(upstream)
+        remote["history"] = [
+            h
+            for h in remote.get("history", [])
+            if isinstance(h.get("text"), str)
+            and isinstance(h.get("at"), str)
+            and h["at"].endswith("Z")
+            and validate_rfc3339(h["at"])
+        ]
+        out = _merge({} if base is None else deepcopy(base), remote, deepcopy(mine), now, person, verdict)
         # Run the authority and normalization rules before reusing an input. A no-op
         # must never bypass the receiving core's verdict on signed decisions.
         matches = [t for t in (upstream, mine) if _content(t) == _content(out)]
@@ -668,12 +792,16 @@ def old_keys_of(ticket):
 
 
 def renumber_key_clashes(tickets, counter, now, held=()):
-    """Tickets (by id) where two different ids share a key. The ticket that already held the key here (`held` =
-    ids known locally before the merge) keeps it, so a backdated created_at cannot take over an existing key;
-    among equals the one created first (then the smaller id) keeps it. The others get the next numbers from the
-    counter, and their old key stays in ext.sync.old_keys so it still resolves ("DM1-13 moved to DM1-15").
-    Returns (changed tickets by id, new counter), or None when the input is malformed (bad key, ext or
-    created_at type, counter too large): the caller pauses. Pure: the inputs are not modified."""
+    """Renumber incoming-only collisions deterministically, retaining old keys and history.
+
+    Any collision involving an id in `held` (known locally before merging) returns None:
+    peer-controlled created_at must never displace a local key. Local-wins is unsafe too:
+    offline peers would each keep their own ticket and assign contradictory keys. Both
+    must pause for a person's choice instead. The step exposes the same key and
+    id-sorted title options on either peer; no speculative renumber reaches disk.
+    Only collisions with no locally known id use (created_at, id) as a tie-breaker.
+    None also means malformed input. Pure.
+    """
     try:
         if not isinstance(tickets, dict) or _too_deep(tickets) or _too_deep(counter):
             return None
@@ -700,9 +828,11 @@ def renumber_key_clashes(tickets, counter, now, held=()):
         for t in tickets.values():
             if t.get("key"):
                 by_key.setdefault(t["key"], []).append(t)
+        if any(len(group) > 1 and any(t["id"] in held for t in group) for group in by_key.values()):
+            return None
         changed = {}
         for key in sorted(by_key):
-            order = sorted(by_key[key], key=lambda t: (t["id"] not in held, t.get("created_at", ""), t["id"]))
+            order = sorted(by_key[key], key=lambda t: (t.get("created_at", ""), t["id"]))
             for t in order[1:]:
                 counter["last"] += 1
                 if counter["last"] > MAX_COUNTER:

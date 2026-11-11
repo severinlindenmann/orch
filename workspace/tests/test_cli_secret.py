@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import seed_profiles
 
 from orch import cli, keystore, secretrun
 from orch import humanproof as hp
@@ -78,17 +79,18 @@ def store(ws):
     keystore.add(
         ws, "sa.pem", "key-file", b"-----BEGIN KEY-----\nabcdefghijklmnopqrstuvwxyz0123\n-----END-----\n"
     )
-    keystore.write_profiles(
+    seed_profiles(
         ws,
         {
             "svc": {
                 "env": {"SVC_TOKEN": "api-token"},
                 "files": {"SVC_KEY": "sa.pem"},
                 "set": {"SVC_HOST": "https://example.test"},
+                "extra": ["SVC_KEY", "SVC_HOST"],
                 "run": [PY, "-c"],
             },
             "plain": {"env": {"PLAIN_TOKEN": "other-token"}},
-            "filesonly": {"files": {"ONLY_KEY": "sa.pem"}},
+            "filesonly": {"files": {"ONLY_KEY": "sa.pem"}, "extra": ["ONLY_KEY"]},
         },
     )
     return ws
@@ -335,7 +337,7 @@ def test_get_is_off_by_default_and_needs_the_record_not_only_the_file(store, run
     assert code == 2 and "does not allow printing" in err and TOKEN2 not in out + err
     prof = keystore.read_profiles(ws)
     prof["plain"]["allow_get"] = True
-    keystore.write_profiles(ws, prof)  # the file alone: no matching settings record
+    seed_profiles(ws, prof)  # the file alone: no matching settings record
     code, out, err = run("secret", "get", "plain", "other-token")
     assert code == 2 and TOKEN2 not in out
 
@@ -567,7 +569,7 @@ LOCK_RUN = [PY, "-c", "import os;print(len(os.environ['LOCK_TOKEN']))"]
 def lock(store, ws, in_run, monkeypatch):
     prof = keystore.read_profiles(ws)
     prof["lock"] = {"env": {"LOCK_TOKEN": "other-token"}, "files": {}, "run": LOCK_RUN}
-    keystore.write_profiles(ws, prof)
+    seed_profiles(ws, prof)
     monkeypatch.setenv("CLAUDECODE", "1")  # an agent tool in the environment
     return ws
 
@@ -709,7 +711,7 @@ def test_agent_exec_extra_arguments_cannot_reach_the_keys(lock, run, ws):
     # run is `python -c <prog>`: an appended argument would become sys.argv, here an output path
     prof = keystore.read_profiles(ws)
     prof["lock"]["run"] = [PY, "-c", "import os,sys;open(sys.argv[1],'w').write(os.environ['LOCK_TOKEN'])"]
-    keystore.write_profiles(ws, prof)
+    seed_profiles(ws, prof)
     _refused(run, str(marker), mode="exec")
     assert not marker.exists()
 
@@ -723,14 +725,15 @@ def test_agent_exec_by_flag_with_extra_arguments_is_refused(lock, run, monkeypat
 def test_agent_exec_with_the_switch_on_may_add_arguments(lock, run, ws, monkeypatch):
     _enable_agents(run, monkeypatch, ws)
     code, out, err = run("secret", "exec", "lock", "--", "--extra")
-    assert code == 0 or "agents may only" not in err, (code, out, err)
+    assert code == 0, (code, out, err)
+    assert "agents may only" not in err and out.strip().isdigit(), (code, out, err)
 
 
 def test_a_person_exec_with_extra_arguments_is_allowed(store, run, ws, monkeypatch):
     prof = keystore.read_profiles(ws)
     run_cmd = [PY, "-c", "import sys;print(sys.argv[1])"]
     prof["pl"] = {"env": {"T": "other-token"}, "files": {}, "run": run_cmd}
-    keystore.write_profiles(ws, prof)
+    seed_profiles(ws, prof)
     monkeypatch.delenv("CLAUDECODE", raising=False)
     code, out, _ = run("secret", "exec", "pl", "--", "hello")
     assert code == 0 and out.strip() == "hello"
@@ -740,7 +743,8 @@ def test_a_person_exec_with_extra_arguments_is_allowed(store, run, ws, monkeypat
 def test_all_three_modes_share_one_agent_gate(lock, run, ws, events, mode):
     prof = keystore.read_profiles(ws)
     prof["lock"]["files"] = {"F": "other-token"} if mode == "file" else {}
-    keystore.write_profiles(ws, prof)
+    prof["lock"]["extra"] = ["F"] if mode == "file" else []
+    seed_profiles(ws, prof)
     cmd = ["--eval", "x"] if mode == "exec" else ["/bin/sh", "-c", "echo $LOCK_TOKEN"]
     _refused(run, *cmd, mode=mode)
     assert {e["refused"] for e in events} == {"agent_command"}
@@ -751,8 +755,8 @@ def test_all_three_modes_share_one_agent_gate(lock, run, ws, events, mode):
 
 def test_file_mode_has_the_same_limit(lock, run, ws):
     prof = keystore.read_profiles(ws)
-    prof["flock"] = {"env": {}, "files": {"F": "sa.pem"}, "run": [PY, "-c", "pass"]}
-    keystore.write_profiles(ws, prof)
+    prof["flock"] = {"env": {}, "files": {"F": "sa.pem"}, "extra": ["F"], "run": [PY, "-c", "pass"]}
+    seed_profiles(ws, prof)
     _refused(run, "/bin/sh", "-c", "cat $F", profile="flock", mode="file")
     assert run("secret", "file", "flock", "--", PY, "-c", "pass")[0] == 0
 
@@ -760,7 +764,7 @@ def test_file_mode_has_the_same_limit(lock, run, ws):
 def test_switch_on_allows_any_command_and_needs_the_person_record(lock, run, ws, monkeypatch):
     prof = keystore.read_profiles(ws)
     prof["lock"]["agents_may_env"] = True
-    keystore.write_profiles(ws, prof)  # the file alone: no matching record
+    seed_profiles(ws, prof)  # the file alone: no matching record
     _refused(run, "/bin/sh", "-c", "echo hi")
     _enable_agents(run, monkeypatch, ws)
     code, out, _ = run("secret", "env", "lock", "--", "/bin/sh", "-c", "echo $LOCK_TOKEN")
@@ -808,10 +812,10 @@ def test_a_hand_edit_to_off_writes_the_off_record(store, run, ws, monkeypatch):
     _enable_get(run, monkeypatch, ws)
     prof = keystore.read_profiles(ws)
     prof["plain"]["allow_get"] = False
-    keystore.write_profiles(ws, prof)
+    seed_profiles(ws, prof)
     assert run("secret", "get", "plain", "other-token")[0] == 2  # writes the tombstone
     prof["plain"]["allow_get"] = True
-    keystore.write_profiles(ws, prof)  # back on in the file only: the old record must not come back
+    seed_profiles(ws, prof)  # back on in the file only: the old record must not come back
     assert run("secret", "get", "plain", "other-token")[0] == 2
 
 
@@ -840,7 +844,7 @@ def test_profile_set_never_finds_a_program_in_the_workspace(store, run, ws, monk
 def test_exec_refuses_a_profile_command_that_is_not_a_full_path(store, run, ws, tmp_path, monkeypatch):
     prof = keystore.read_profiles(ws)
     prof["rel"] = {"env": {"T": "other-token"}, "run": ["mytool"]}
-    keystore.write_profiles(ws, prof)
+    seed_profiles(ws, prof)
     planted = ws / "bin"
     planted.mkdir()
     (planted / "mytool").write_text("#!/bin/sh\necho planted\n")
@@ -883,7 +887,7 @@ def test_stream_releases_everything_but_a_possible_needle_start(store, ws):
 def test_binary_key_file_is_hidden_in_its_hex_form(ws, run):
     blob = bytes(range(256)) * 2
     keystore.add(ws, "blob.p12", "key-file", blob)
-    keystore.write_profiles(ws, {"bin": {"files": {"B": "blob.p12"}}})
+    seed_profiles(ws, {"bin": {"files": {"B": "blob.p12"}, "extra": ["B"]}})
     prog = "import os;print(open(os.environ['B'],'rb').read().hex())"
     code, out, _ = run("secret", "file", "bin", "--", PY, "-c", prog)
     assert code == 0 and blob.hex() not in out and "[hidden: blob.p12]" in out
@@ -1104,6 +1108,29 @@ def test_set_warns_about_an_interpreter_and_shows_the_resolved_path(store, run, 
     assert "can run any code" in err
     code, out, err = _set(run, monkeypatch, ws, "interp2", "--run", "/bin/sh", "--json")
     assert json.loads(out)["warnings"]
+
+
+@pytest.mark.parametrize(
+    "prog,warns",
+    [
+        ("psql", True),
+        ("mysql", True),
+        ("sqlite3", True),
+        ("redis-cli", True),
+        ("mongosh", True),
+        ("mytool", False),
+    ],
+)
+def test_set_warns_about_database_clients_only(store, run, ws, monkeypatch, tmp_path, prog, warns):
+    # a link named like the client to a harmless safe-folder program: matched by the name that was approved
+    exe = tmp_path / prog
+    exe.symlink_to(os.path.realpath("/usr/bin/true"))
+    code, out, err = _set(run, monkeypatch, ws, "db", "--run", str(exe))
+    assert code == 0, (code, out, err)
+    assert ("can run any code" in err) is warns
+    code, out, err = _set(run, monkeypatch, ws, "db2", "--run", str(exe), "--json")
+    assert code == 0, (code, out, err)
+    assert bool(json.loads(out).get("warnings")) is warns
 
 
 def test_a_large_key_with_a_diverging_byte_is_not_slow(ws):
@@ -1395,3 +1422,336 @@ def test_the_unattributed_run_has_a_daily_cap(store, run, ws, monkeypatch):
     monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)
     codes = [run("secret", "env", "plain", "--", PY, "-c", "pass")[0] for _ in range(4)]
     assert codes == [0, 0, 0, 2]
+
+
+# --------------------------------------------------------------------------- profile body MAC (W2b, HIGH)
+
+
+def _pfile(ws):
+    return hp.key_dir(ws) / "profiles.toml"
+
+
+def _edit_file(ws, old, new):
+    """What anything running as the user can do: edit the profile file directly (no proof, no ledger)."""
+    f = _pfile(ws)
+    text = f.read_text()
+    head, sep, tail = text.partition("[profile.good]")
+    block, sep2, rest = tail.partition("\n[")
+    assert old in block
+    f.write_text(head + sep + block.replace(old, new) + sep2 + rest)
+
+
+def _set_ok(run, monkeypatch, ws, name, *extra, proof_name=None):
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", proof_name or name), "secret", "profile", "set", name,
+        "--env", "T=other-token", *extra,
+    )  # fmt: skip
+    assert code == 0, out + err
+
+
+EDITED = "changed outside orch"
+
+
+def test_profile_set_with_proof_then_exec_still_works(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "A=b", "--extra", "A")
+    assert hp.profile_verified(ws, "good", keystore.read_profiles(ws)["good"])
+    code, out, err = run("secret", "exec", "good", "--", "-c", "import os;print(os.environ['T'])")
+    assert code == 0 and "[hidden: other-token]" in out, err
+
+
+def test_an_edited_run_in_the_profile_file_is_refused(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
+    for argv in (("exec", "good"), ("env", "good", "--", PY, "-c", "pass")):
+        code, out, err = run("secret", *argv)
+        assert code == 2 and EDITED in err, argv
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ('T = "other-token"', 'T = "api-token"'),  # another key into the same variable
+        ('T = "other-token"', 'T = "other-token", U = "api-token"'),  # an extra env variable
+        ("run = [", 'extra = ["F"]\nfiles = { F = "sa.pem" }\nrun = ['),  # an added file
+        ("run = [", 'extra = ["X"]\nset = { X = "1" }\nrun = ['),  # an added plain setting
+    ],
+)
+def test_an_edited_env_files_or_set_is_refused(store, run, ws, monkeypatch, old, new):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, old, new)
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_an_edited_profile_cannot_be_revived_by_a_switch_change(store, run, ws, monkeypatch):
+    """Turning a switch rewrites the file; it must not re-sign a body that was edited outside orch."""
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
+    code, out, err = _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "secret.profile", "good:allow_get"),
+        "secret",
+        "profile",
+        "get-enable",
+        "good",
+    )
+    assert code == 0, out + err
+    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+    assert run("secret", "get", "good", "other-token")[0] == 2
+
+
+def test_a_profile_without_a_mac_is_refused_even_for_get(store, run, ws, monkeypatch):
+    f = _pfile(ws)
+    f.write_text(f.read_text() + '\n[profile.forged]\nenv = { T = "other-token" }\nallow_get = true\n')
+    for argv in (("env", "forged", "--", PY, "-c", "pass"), ("get", "forged", "other-token")):
+        code, _, err = run("secret", *argv)
+        assert code == 2 and EDITED in err
+
+
+def test_a_copied_mac_from_another_profile_or_workspace_is_refused(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "one", "--run", PY)
+    # same body under another name: the ledger has no entry for it
+    text = _pfile(ws).read_text()
+    block = text[text.index("[profile.one]") :].split("\n[")[0]
+    _pfile(ws).write_text(text + "\n" + block.replace("profile.one", "profile.two"))
+    assert run("secret", "env", "two", "--", PY, "-c", "pass")[0] == 2
+    # the ledger entry of one name copied to another
+    ledger = hp.key_dir(ws) / hp.PROFILE_LEDGER
+    data = json.loads(ledger.read_text())
+    data["entries"]["two"] = data["entries"]["one"]
+    ledger.write_text(json.dumps(data))
+    code, _, err = run("secret", "env", "two", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+    # a MAC made for another workspace id does not verify here
+    body = keystore.read_profiles(ws)["one"]
+    other = hp.profile_mac(hp.human_key(ws), "f" * 32, "one", body)
+    data["entries"]["one"] = other
+    ledger.write_text(json.dumps(data))
+    assert run("secret", "env", "one", "--", PY, "-c", "pass")[0] == 2
+
+
+def test_a_profile_with_a_missing_ledger_is_refused(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    (hp.key_dir(ws) / hp.PROFILE_LEDGER).unlink()
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_remove_tombstones_the_mac(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    saved = _pfile(ws).read_text()
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
+    )
+    assert code == 0, out + err
+    _pfile(ws).write_text(saved)  # the old file put back
+    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+
+
+@pytest.mark.parametrize(
+    "var",
+    [
+        "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PATH", "Path", "NODE_OPTIONS", "BASH_ENV", "GIT_SSH_COMMAND",
+        "PYTHONPATH", "PYTHONSTARTUP", "PERL5OPT", "RUBYOPT", "NODE_PATH", "IFS", "SHELLOPTS", "PS4", "ENV",
+        "JAVA_TOOL_OPTIONS", "MY_OPTIONS", "PATHEXT", "COMSPEC", "ld_preload",
+    ],
+)  # fmt: skip
+def test_loader_and_interpreter_variables_are_refused_at_set_and_at_run(store, run, ws, monkeypatch, var):
+    for sect in ("--set", "--env"):
+        value = "x" if sect == "--set" else "other-token"
+        code, _, err = _cli(
+            run, monkeypatch, _proof(ws, "secret.profile", "bad"), "secret", "profile", "set", "bad",
+            "--env", "T=other-token", sect, f"{var}={value}",
+        )  # fmt: skip
+        assert code == 2 and "bad" not in keystore.read_profiles(ws), (var, sect)
+    # forged into the file of a signed profile: refused at run time as well
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, "run = [", f'set = {{ {var} = "x" }}\nrun = [')
+    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+
+
+def test_a_denied_variable_with_a_valid_mac_still_fails_at_run(store, run, ws, monkeypatch):
+    """Defence in depth: even a body someone managed to sign is refused when it is read and when it runs."""
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, "run = [", 'set = { NODE_OPTIONS = "--require x" }\nrun = [')
+    body = {"env": {"T": "other-token"}, "set": {"NODE_OPTIONS": "--require x"}, "run": [PY]}
+    hp.profile_sign(ws, "good", body)  # a forged-but-signed body (the signer being compromised)
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and "NODE_OPTIONS" in err
+    # and the run-time check alone, with the reader's check out of the way
+    monkeypatch.setattr(keystore, "read_profiles", lambda root: {"good": body})
+    monkeypatch.setattr(hp, "profile_verified", lambda *a: True)
+    with pytest.raises(Refused, match="may not set"):
+        secretrun._profile(ws, "good")
+
+
+def test_exec_checks_the_program_again_when_it_runs(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    monkeypatch.setattr(
+        secretrun, "approve_program", lambda root, name: (_ for _ in ()).throw(Refused("Refused: gone."))
+    )
+    code, _, err = run("secret", "exec", "good", "--", "-c", "pass")
+    assert code == 2 and "gone" in err
+
+
+def test_profile_set_without_a_proof_or_with_a_wrong_target_stores_no_mac(store, run, ws, monkeypatch):
+    before = (hp.key_dir(ws) / hp.PROFILE_LEDGER).exists()
+    args = ("secret", "profile", "set", "nope", "--env", "T=other-token")
+    assert run(*args)[0] == 2  # no proof
+    assert _cli(run, monkeypatch, _proof(ws, "secret.profile", "other"), *args)[0] == 2  # wrong target
+    assert _cli(run, monkeypatch, _proof(ws, "secret.add", "nope"), *args)[0] == 2  # wrong op
+    assert "nope" not in keystore.read_profiles(ws)
+    ent = hp._ledger_load(ws, hp.PROFILE_LEDGER) or {}
+    assert "nope" not in ent and (hp.key_dir(ws) / hp.PROFILE_LEDGER).exists() == before or "nope" not in ent
+
+
+def test_saving_one_profile_never_signs_an_edited_other_profile(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "a", "--run", PY)
+    _set_ok(run, monkeypatch, ws, "b", "--run", PY)
+    f = _pfile(ws)
+    text = f.read_text()
+    head, sep, tail = text.partition("[profile.b]")
+    f.write_text(head + sep + tail.replace('T = "other-token"', 'T = "api-token"', 1))
+    assert run("secret", "env", "b", "--", PY, "-c", "pass")[0] == 2
+    _set_ok(run, monkeypatch, ws, "a", "--run", PY, "--set", "X=1", "--extra", "X")  # the person sets A
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "a:allow_get"), "secret", "profile", "get-enable", "a"
+    )
+    assert code == 0, out + err
+    code, _, err = run("secret", "env", "b", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+    assert run("secret", "env", "a", "--", PY, "-c", "pass")[0] == 0
+
+
+def test_a_damaged_profiles_file_refuses_the_save_and_signs_nothing(store, run, ws, monkeypatch):
+    _pfile(ws).write_text("this is = not [ toml")
+    before = hp._ledger_load(ws, hp.PROFILE_LEDGER)
+    code, _, _ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "n"), "secret", "profile", "set", "n",
+        "--env", "T=other-token",
+    )  # fmt: skip
+    assert code == 2 and hp._ledger_load(ws, hp.PROFILE_LEDGER) == before
+
+
+def test_deleting_the_file_between_the_reads_does_not_get_a_body_signed(store, run, ws, monkeypatch):
+    """The reported race: the file vanishes (or is corrupted) while a switch is changed; nothing is signed."""
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, os.path.realpath(PY), "/bin/echo")
+    real = hp.record_set
+
+    def sabotage(*a, **k):
+        _pfile(ws).unlink(missing_ok=True)
+        return real(*a, **k)
+
+    monkeypatch.setattr(hp, "record_set", sabotage)
+    _cli(
+        run,
+        monkeypatch,
+        _proof(ws, "secret.profile", "good:allow_get"),
+        "secret",
+        "profile",
+        "get-enable",
+        "good",
+    )
+    monkeypatch.setattr(hp, "record_set", real)
+    assert run("secret", "exec", "good", "--", "PWNED")[0] == 2
+
+
+def test_remove_writes_the_tombstone_even_when_the_file_has_no_such_profile(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    saved = _pfile(ws).read_text()
+    f = _pfile(ws)
+    f.write_text(
+        saved.split("[profile.good]")[0] + '[profile.plain]\nenv = { PLAIN_TOKEN = "other-token" }\n'
+    )
+    code, _, _ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
+    )
+    assert code == 2  # "no such profile", but the tombstone is there
+    f.write_text(saved)
+    assert run("secret", "env", "good", "--", PY, "-c", "pass")[0] == 2
+
+
+def test_variable_names_clash_in_any_case(store, run, ws, monkeypatch):
+    code, _, _ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "dup"), "secret", "profile", "set", "dup",
+        "--env", "Tok=other-token", "--set", "TOK=x",
+    )  # fmt: skip
+    assert code == 2 and "dup" not in keystore.read_profiles(ws)
+
+
+def test_remove_on_a_damaged_file_still_tombstones(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    saved = _pfile(ws).read_text()
+    _pfile(ws).write_text("not [ toml")
+    code, _, _ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "good:remove"), "secret", "profile", "remove", "good"
+    )
+    assert code == 2  # the file is damaged
+    _pfile(ws).write_text(saved)
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_list_on_a_damaged_file_shows_the_keys_without_profiles(store, run, ws):
+    _pfile(ws).write_text("not [ toml")
+    code, out, _ = run("secret", "list", "--json")
+    assert code == 0 and "api-token" in out
+
+
+# --- `extra`: person-approved variable names (W2b) ---------------------------------------------
+
+
+def test_an_undeclared_set_name_is_refused_at_set_and_when_forged(store, run, ws, monkeypatch):
+    code, _, err = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "u"), "secret", "profile", "set", "u",
+        "--env", "T=other-token", "--set", "SOME_HOST=x",
+    )  # fmt: skip
+    assert code == 2 and "not an approved variable" in err and "--extra" in err
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY)
+    _edit_file(ws, "run = [", 'set = { SOME_HOST = "x" }\nrun = [')
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2
+
+
+def test_extra_with_proof_is_accepted_and_reaches_the_command(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "SOME_HOST=h1", "--extra", "SOME_HOST")
+    code, out, err = run("secret", "exec", "good", "--", "-c", "import os;print(os.environ['SOME_HOST'])")
+    assert code == 0 and "h1" in out, err
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["XDG_CONFIG_HOME", "VISUAL", "MANPAGER", "SSH_ASKPASS", "SUDO_ASKPASS", "LESSCLOSE", "lower", "PATH"],
+)
+def test_extra_with_a_denied_name_is_refused(store, run, ws, monkeypatch, name):
+    code, _, _ = _cli(
+        run, monkeypatch, _proof(ws, "secret.profile", "x"), "secret", "profile", "set", "x",
+        "--env", "T=other-token", "--set", f"{name}=v", "--extra", name,
+    )  # fmt: skip
+    assert code == 2 and "x" not in keystore.read_profiles(ws)
+
+
+def test_extra_edited_in_the_file_is_a_mac_mismatch(store, run, ws, monkeypatch):
+    _set_ok(run, monkeypatch, ws, "good", "--run", PY, "--set", "SOME_HOST=h1", "--extra", "SOME_HOST")
+    _edit_file(ws, 'extra = ["SOME_HOST"]', 'extra = ["SOME_HOST", "OTHER_HOST"]')
+    code, _, err = run("secret", "env", "good", "--", PY, "-c", "pass")
+    assert code == 2 and EDITED in err
+
+
+def test_forged_extra_without_a_proof_is_refused(store, run, ws, monkeypatch):
+    args = (
+        "secret",
+        "profile",
+        "set",
+        "f",
+        "--env",
+        "T=other-token",
+        "--set",
+        "SOME_HOST=x",
+        "--extra",
+        "SOME_HOST",
+    )
+    assert run(*args)[0] == 2
+    assert "f" not in keystore.read_profiles(ws)

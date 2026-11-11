@@ -292,6 +292,46 @@ def act_write_allowed(case):
     return False
 
 
+FILES_MAX, FILE_LEN = 8, 260
+
+
+def act_file_ok(p):
+    """One `files` entry (activity.md, Files): workspace-relative POSIX path, 1..260 chars, NFC, no leading /,
+    no .. segment, no backslash, no start with ~ $ or a scheme/drive (file: C:), no Unicode Cc, Cf, Zl, Zp."""
+    return (isinstance(p, str) and 1 <= len(p) <= FILE_LEN and unicodedata.is_normalized("NFC", p)
+            and not p.startswith("/") and not re.match(r"[~$]|[A-Za-z][A-Za-z0-9+.-]*:", p) and "\\" not in p
+            and ".." not in p.split("/")
+            and not any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in p))
+
+
+def act_files_store(kind, files):
+    """What the writer stores: None = no `files` field (not a step, not a list); else the valid entries, first 8."""
+    if kind != "step" or not isinstance(files, list):
+        return None
+    return [p for p in files if act_file_ok(p)][:FILES_MAX]
+
+
+def act_workspace_file(path, root):
+    """Producer normalisation (collectors, hook entry): workspace-relative or None (outside, the root, bad)."""
+    import posixpath
+    if not isinstance(path, str) or not path or "\\" in path or "\x00" in path:
+        return None
+    path = unicodedata.normalize("NFC", path)
+    if path.startswith("/"):
+        if not isinstance(root, str) or not root.startswith("/") or posixpath.normpath(root) == "/":
+            return None
+        prefix = posixpath.normpath(root).rstrip("/") + "/"
+        normal = posixpath.normpath(path)
+        if not normal.startswith(prefix):
+            return None
+        rel = normal[len(prefix):]
+    else:
+        rel = posixpath.normpath(path)
+    if rel in ("", ".", "..") or rel.startswith("../"):
+        return None
+    return rel if act_file_ok(rel) else None
+
+
 def _one_line(text, n):
     return " ".join(str(text).split())[:n]
 
@@ -372,6 +412,13 @@ def kind_activity():
         value = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + case["id"].encode()).hexdigest()[:32]
         _expect("activity hook namespace", value, case["stored"])
 
+    for c in vec.get("hook_default_id", []):
+        _expect("activity hook default id", "h_" + c["collector"], c["hook"])
+        _expect("activity hook default id is not the collector id", c["hook"] != c["collector"], True)
+
+    for c in vec.get("reserved_ids", []):
+        _expect("activity reserved id", "x_" + hashlib.sha256(c["id"].encode()).hexdigest()[:32], c["stored"])
+
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:
@@ -390,6 +437,21 @@ def kind_activity():
             for e in v.iter_errors(ev):
                 fails.append(f"activity stream_mapping {c['capture']} seq {ev['seq']}: {e.message}")
         _expect(f"activity stream_mapping {c['capture']}", got, c["events"])
+    for c in vec["files"]:
+        ev = dict(json.loads((HERE / "examples" / "activity" / f"{c['base']}.json").read_text()), files=c["files"])
+        _expect(f"activity files schema {c['name']}", v.is_valid(ev), c["schema"])
+        stored = act_files_store(ev["kind"], c["files"])
+        _expect(f"activity files stored {c['name']}", stored, c["stored"])
+        ev.pop("files")
+        if stored is not None:
+            ev["files"] = stored
+        for e in v.iter_errors(ev):
+            fails.append(f"activity files stored {c['name']}: {e.message}")
+        if c["schema"] and c["stored"] != c["files"]:  # only NFC is beyond the schema
+            _expect(f"activity files nfc {c['name']}", any(isinstance(p, str) and not unicodedata.is_normalized(
+                "NFC", p) for p in c["files"]), True)
+    for c in vec["files_normalise"]:
+        _expect(f"activity files_normalise {c['name']}", act_workspace_file(c["path"], c["root"]), c["file"])
 
 
 
@@ -728,7 +790,7 @@ def job_replay(events, binding, cap=JOB_EVENT_CAP):
         if t == "start" and state is not None:
             results.append("already_started")
             continue
-        if stored >= cap:
+        if stored >= cap and t != "end":  # one `end` may pass the cap so a job can always finish
             results.append("cap")
             continue
         if t == "step":

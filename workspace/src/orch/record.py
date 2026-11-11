@@ -26,13 +26,24 @@ from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
 from orch.phone_view import redact
+from orch.record_files import MAX_INPUT, file_ok
 
 _OFF = "Recording is off until key hiding is ready."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[0-9a-f]{32}"
 _PART = r"[A-Za-z0-9_.-]{1,80}"
-TAMPER_REASONS = ("link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped")
+_MAX_FILES = 8
+TAMPER_REASONS = (
+    "link",
+    "reparse",
+    "hardlink",
+    "foreign_owner",
+    "not_regular",
+    "not_dir",
+    "swapped",
+    "content",
+)
 _MESSAGES = {
     "tampered": (
         "Some records of this run were changed outside orch. "
@@ -41,6 +52,7 @@ _MESSAGES = {
     "io": "The records of this run cannot be read right now. Try again later.",
     "missing": "There are no records for this run.",
     "pending": "Some records of this run are waiting to be written.",
+    "torn": "The last entry of this job was cut off.",
 }
 
 
@@ -59,6 +71,10 @@ class RecordInvalid(RecordRefused):
 
 class RecordOff(RecordRefused):
     code = "refused"
+
+
+class RecordFull(RecordRefused):
+    code = "cap"
 
 
 class RecordBusy(RecordRefused):
@@ -398,7 +414,7 @@ def _unlink(ws, rel, *, expected=None):
         return False
 
 
-def _write_new(ws, rel, payload):
+def _write_new(ws, rel, payload, *, expected=None):
     temporary = (*rel[:-1], "tmp_" + uuid.uuid4().hex)
     with _walk(ws, rel[:-1], create=True) as directory:
         # Keep the same parent descriptor through creation and publication.
@@ -410,7 +426,22 @@ def _write_new(ws, rel, payload):
         try:
             _check_fd(fd)
             _write(fd, payload)
+            with _io():
+                os.fsync(fd)
             _verify_walk(directory)
+            if expected is not None:
+                # the file we read through `expected` must still be the one at this name (no swap in between)
+                with _io():
+                    current = os.stat(
+                        rel[-1] if _FD else directory.path / rel[-1], follow_symlinks=False, **kw
+                    )
+                    before = os.fstat(expected)
+                if (current.st_dev, current.st_ino, current.st_nlink) != (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_nlink,
+                ):
+                    raise RecordTampered("swapped")
             try:
                 existing = _open(ws, rel, "read", _directory=directory)
             except RecordUnavailable as error:
@@ -423,6 +454,9 @@ def _write_new(ws, rel, payload):
                 rel[-1] if _FD else directory.path / rel[-1],
                 **({"src_dir_fd": directory.fd, "dst_dir_fd": directory.fd} if _FD else {}),
             )
+            if _FD:
+                with _io():
+                    os.fsync(directory.fd)
         finally:
             os.close(fd)
             try:
@@ -531,9 +565,9 @@ def _release_lock(ws, rel, fd, *, _directory=None):
 
 
 @contextmanager
-def _lock(ws, run):
+def _lock(ws, run, wait=None):
     rel = ("runs", f"{run}.lock")
-    deadline = time.monotonic() + _LOCK_WAIT
+    deadline = time.monotonic() + (_LOCK_WAIT if wait is None else wait)
     while True:
         fd = _open(ws, rel, "create_excl", create_dirs=True)
         if fd is not None:
@@ -693,6 +727,205 @@ def _alert(ws, *, target, run, reason, seen_by):
         except (RecordTampered, RecordUnavailable):
             pass  # the returned alert still reaches the caller; never recurse
     return alert
+
+
+LOST_REASONS = (
+    "hider_off",
+    "invalid",
+    "too_large",
+    "other_run",
+    "job_activity",
+)  # after the caller is proven to be in the run
+UNPROVEN_REASONS = ("not_active", "other_run", "not_provable")  # before it is: never under a run id
+_LOST_RUN_LINES = 50  # per run and day; the next one is a "trimmed" marker, then nothing
+_LOST_FILE_BYTES = 1024**2  # per file; over it only a global "trimmed" marker is written
+
+
+def _note(ws, name, run, reason, now, run_lines):
+    now = datetime.now(UTC) if now is None else now
+    stamp = now.isoformat().replace("+00:00", "Z")
+    try:
+        fd = _open(ws, ("alerts", f"{name}-{stamp[:10]}.jsonl"), "read_append", create_dirs=True)
+        try:
+            raw = _read_bytes(fd)
+            rows = []
+            for line in raw.splitlines():
+                try:
+                    rows.append(json.loads(line))
+                except (ValueError, TypeError):
+                    continue
+            rows = [r for r in rows if isinstance(r, dict)]
+            if len(raw) > _LOST_FILE_BYTES:
+                if not any(r.get("run") is None and r.get("reason") == "trimmed" for r in rows):
+                    write = dict(run=None, reason="trimmed")
+                else:
+                    return
+            else:
+                mine = [r for r in rows if r.get("run") == run]
+                for old in mine[-200:]:
+                    try:
+                        if old["reason"] == reason and (
+                            timedelta(0) <= now - datetime.fromisoformat(old["at"]) < timedelta(minutes=1)
+                        ):
+                            return
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                if run_lines and len(mine) >= run_lines:
+                    if any(r.get("reason") == "trimmed" for r in mine):
+                        return
+                    write = dict(run=run, reason="trimmed")  # loud, never a silent stop (invariant I3)
+                else:
+                    write = dict(run=run, reason=reason)
+            note = dict(v=1, schema="orch.record-lost/1", at=stamp, **write)
+            _write(fd, (_json(note) + "\n").encode())
+        finally:
+            _close(fd)
+    except (RecordTampered, RecordUnavailable):
+        pass  # a trace that cannot be stored is not worth failing the hook
+
+
+def note_lost(ws, run, reason, *, now=None):
+    """A hook entry of a PROVEN caller (live claim, inside its process tree) that could not be written leaves
+    one short trace (orch.record-lost/1, no content): alerts/hook-lost-<day>.jsonl, at most one per run and
+    reason per minute, at most 50 lines per run, then one "trimmed" line. Never raises."""
+    if reason in LOST_REASONS and isinstance(run, str) and re.fullmatch(_RUN, run):
+        _note(ws, "hook-lost", run, reason, now, _LOST_RUN_LINES)
+
+
+def note_unattributed(ws, reason, *, now=None):
+    """A hook entry whose caller could not be proven to be in the run: nothing under any run id (the claimed
+    run is the caller's word), only the reason, in alerts/hook-lost-unattributed-<day>.jsonl, 1 per minute."""
+    if reason in UNPROVEN_REASONS:
+        _note(ws, "hook-lost-unattributed", None, reason, now, 0)
+
+
+_JOB = r"j_[a-z0-9]{6,32}"
+JOB_BYTES = 5 * 1024**2  # stored stream of one job (job-events.md caps)
+JOB_RUN_BYTES = 50 * 1024**2  # all job streams of one run
+JOB_REPLACE_BYTES = 64 * 1024  # a same-second progress line is replaced (file rewritten) only below this size
+
+
+def _job_events(raw, run, job, valid):
+    """The lines of one job stream. Strict: a line that is not a valid event of this job and run, in order,
+    means the file was changed outside orch (tampered), never quietly skipped or trusted."""
+    if raw and not raw.endswith(b"\n"):
+        raise RecordUnavailable("torn")
+    events = []
+    for line in raw.splitlines():
+        try:
+            event = json.loads(line)
+            ok = (event["run"], event["job"], event["seq"]) == (run, job, len(events) + 1) and valid(event)
+        except (ValueError, RecursionError, KeyError, TypeError):
+            ok = False
+        if not ok:
+            raise RecordTampered("content")
+        events.append(event)
+    return events
+
+
+def read_job(workspace, run, job, *, valid, seen_by="reader") -> ReadResult[list[dict]]:
+    """One job stream (jobs/<run>/<job>.jsonl), explicit status as read_run. `valid(event)` is the caller's
+    schema check of a stored line."""
+    _name(run, _RUN)
+    _name(job, _JOB)
+    try:
+        fd = _open(workspace, ("jobs", run, job + ".jsonl"), "read")
+        try:
+            return ReadResult("ok", _job_events(_read_bytes(fd), run, job, valid))
+        finally:
+            _close(fd)
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", run, seen_by)
+
+
+def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple[str, str]]]:
+    """(run, job) pairs that have a stream, for one run or for all runs."""
+    try:
+        runs = (
+            [_name(run, _RUN)]
+            if run
+            else [n for n in _entries(workspace, ("jobs",)) if re.fullmatch(_RUN, n)]
+        )
+        found = []
+        for name in sorted(runs):
+            try:
+                names = _entries(workspace, ("jobs", name))
+            except RecordUnavailable as error:
+                if error.reason == "missing":
+                    continue
+                raise
+            found += [(name, n[:-6]) for n in sorted(names) if re.fullmatch(_JOB + r"\.jsonl", n)]
+        return ReadResult("ok", found)
+    except RecordUnavailable as error:
+        if error.reason == "missing":
+            return ReadResult("ok", [])
+        return _report(workspace, error, "folder", run, seen_by)
+    except RecordTampered as error:
+        return _report(workspace, error, "folder", run, seen_by)
+
+
+def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
+    """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
+    inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
+    is stored only after the caller's own checks passed (every string already hidden). A cut-off last line (a
+    crash) is dropped under the lock. Caps are checked here, under the lock: the stream, the run's streams,
+    and (at the first line) the number of jobs of the run. Returns result."""
+    _name(run, _RUN)
+    _name(job, _JOB)
+    rel = ("jobs", run, job + ".jsonl")
+    try:
+        with _lock(workspace, run) as check_lock:
+            check_lock()
+            fd = _open(workspace, rel, "read_append", create_dirs=True)
+            stored, raw = False, None
+            try:
+                check_lock()
+                raw = _read_bytes(fd)
+                if raw and not raw.endswith(b"\n"):
+                    raw = raw[: raw.rfind(b"\n") + 1]
+                    _write_new(workspace, rel, raw, expected=fd)
+                    old, fd = fd, _open(workspace, rel, "read_append")
+                    _close(old)
+                    if _read_bytes(fd) != raw:  # the repaired file must be exactly what we wrote
+                        raise RecordTampered("swapped")
+                events = _job_events(raw, run, job, valid)
+                if (
+                    not events
+                    and max_jobs is not None
+                    and len(
+                        [n for n in _entries(workspace, ("jobs", run)) if re.fullmatch(_JOB + r"\.jsonl", n)]
+                    )
+                    > max_jobs
+                ):
+                    raise RecordFull("This run has reached its limit of jobs.")
+                event, replace_last, result = decide(events, len(raw))
+                if event is None:
+                    return result
+                data = (_json(event) + "\n").encode()
+                if len(data) > 16384:
+                    raise RecordInvalid("The job entry is too large.")
+                if len(raw) + len(data) > JOB_BYTES or (
+                    # the final `end` is always accepted (200 jobs x 16 KB at most)
+                    event["type"] != "end" and _size(workspace, ("jobs", run)) + len(data) > JOB_RUN_BYTES
+                ):
+                    raise RecordFull("This job has reached its limit of entries.")
+                check_lock()
+                if replace_last and len(raw) <= JOB_REPLACE_BYTES:
+                    rows = raw.splitlines(keepends=True)[:-1]
+                    _write_new(workspace, rel, b"".join(rows) + data, expected=fd)
+                else:
+                    _write(fd, data)
+                stored = True
+                return result
+            finally:
+                if not stored and raw == b"":  # a refused first line leaves no empty file behind
+                    _unlink(workspace, rel, expected=fd)
+                _close(fd)
+    except RecordBusy:
+        raise
+    except (RecordTampered, RecordUnavailable) as error:
+        _report(workspace, error, "folder", run, "writer")
+        raise
 
 
 def _report(ws, error, target, run, seen_by):
@@ -855,13 +1088,14 @@ class RecordWriter:
             event["detail_lost"] = True
             return None
 
-    def append(self, event, *, detail=None):
+    def append(self, event, *, detail=None, lock_wait=None):
+        """lock_wait: seconds to wait for the run lock before the write is spooled (default 30)."""
         try:
-            return self._append(event, detail)
+            return self._append(event, detail, lock_wait)
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             raise RecordInvalid() from None
 
-    def _append(self, event, detail):
+    def _append(self, event, detail, lock_wait=None):
         if not isinstance(event, dict):
             raise RecordInvalid()
         run = _name(event.get("run"), _RUN)
@@ -872,9 +1106,13 @@ class RecordWriter:
             raise RecordInvalid()
         eid = self.hider.hide_text(eid)
         if not default_id:
-            if event.get("via") == "hook" and re.fullmatch(_RUN + r":.*", eid):
+            if event.get("via") == "hook" and re.fullmatch(r"(?:h_)?" + _RUN + r":.*", eid):
                 eid = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + eid.encode()).hexdigest()[:32]
-            elif not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) or re.fullmatch(r"x_[0-9a-f]{32}", eid):
+            elif (
+                not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid)
+                or re.fullmatch(r"x_[0-9a-f]{32}", eid)
+                or re.fullmatch(r"h_" + _RUN + r":.*", eid)  # the hook's own default namespace: never sent
+            ):
                 eid = _hash(eid)
         event["id"] = eid
         if not isinstance(event.get("text"), str) or re.search(r"[\x00-\x1f\x7f]", event["text"]):
@@ -886,9 +1124,20 @@ class RecordWriter:
         event.pop("detail_lost", None)
         event.pop("conflict", None)
         event["detail"] = None
+        # files (activity.md, Files): only on a step; a bad entry is dropped, never the line.
+        files = event.pop("files", None)
+        if event.get("kind") != "step" or type(files) is not list:
+            files = None
+        else:
+            files = files[:MAX_INPUT]  # only the first 64 are looked at; the first 8 good ones are kept
         before = _json(event).count("[hidden: ")
         event = self.hider.hide_json(event)
         hidden = max(0, _json(event).count("[hidden: ") - before)
+        if files is not None:
+            # One shape check (record_files.file_ok, NFC included); a path that changes under the hider or the
+            # plain-text cleaner is dropped, never stored hidden.
+            good = [f for f in files if file_ok(f) and self.hider.hide_text(f) == f and redact(f) == f]
+            event["files"] = _files_in_budget(good[:_MAX_FILES])
         event["text"] = self.hider.hide_cut(" ".join(redact(event["text"]).split()), 500)
         if isinstance(event.get("outcome"), dict) and isinstance(event["outcome"].get("error"), str):
             event["outcome"]["error"] = self.hider.hide_cut(
@@ -900,15 +1149,26 @@ class RecordWriter:
                 event["data"] = {"cut": True}
         _validate(event)
         payload = self._prepare_detail(event, detail, hidden)
-        # Both possible line forms have passed the hider before taking the lock.
-        prepared = dict(event, seq=10**20, conflict=True)
-        if payload is not None:
-            prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
-        self._line(prepared)
-        self._line(dict(prepared, detail=None, detail_lost=True))
+        # Both possible line forms have passed the hider before taking the lock. The audit line is never
+        # dropped for its optional parts (I4): a line that is too large loses `files`, then `data` (cut).
+        for trim in (None, "files", "data"):
+            if trim == "files":
+                event.pop("files", None)
+            elif trim == "data" and "data" in event:
+                event["data"] = {"cut": True}
+            prepared = dict(event, seq=10**20, conflict=True)
+            if payload is not None:
+                prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+            try:
+                self._line(prepared)
+                self._line(dict(prepared, detail=None, detail_lost=True))
+                break
+            except RecordInvalid:
+                if trim == "data":
+                    raise
         self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
         try:
-            with _lock(self.workspace, run) as check_lock:
+            with _lock(self.workspace, run, lock_wait) as check_lock:
                 check_lock()
                 self._drain(run, check_lock=check_lock)
                 check_lock()
@@ -933,7 +1193,9 @@ class RecordWriter:
             previous, count, torn = _read_run_strict(self.workspace, run, fd)
             event = dict(event, seq=count + 1)
             if default_id:
-                event["id"] = f"{run}:{event['seq']}"
+                # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook
+                # line can never take the id of a collector line that is still to come (dedupe would drop it)
+                event["id"] = f"{'h_' if event.get('via') == 'hook' else ''}{run}:{event['seq']}"
                 if payload is not None:
                     wrapped = json.loads(payload)
                     wrapped["id"] = event["id"]
@@ -1001,9 +1263,7 @@ class RecordWriter:
                 _close(fd)
         except (RecordTampered, RecordUnavailable) as error:
             _report(self.workspace, error, "folder", event["run"], "writer")
-            busy = RecordBusy("The record is busy.")
-            busy.alert = error.alert
-            raise busy from None
+            raise  # the real cause (tampered / unavailable) stays visible to the caller
         result = dict(event, pending=True, seq=None)
         if default_id:
             result.pop("id", None)
@@ -1050,6 +1310,15 @@ class RecordWriter:
                 continue
             self._commit(event, payload, pending["default_id"], check_lock=check_lock)
             _unlink(self.workspace, rel)
+
+
+def _files_in_budget(files: list[str]) -> list[str]:
+    """Each entry at most 512 serialized bytes, all together at most 2048: trailing entries are dropped."""
+    sizes = [len(_json(f).encode()) + 1 for f in files]
+    keep = 0
+    while keep < len(files) and sizes[keep] <= 512 and sum(sizes[: keep + 1]) <= 2048:
+        keep += 1
+    return files[:keep]
 
 
 def hook_entry_filter(line: dict) -> dict | None:
@@ -1382,6 +1651,7 @@ _SCHEMA = {
             "type": "boolean",
             "description": "Hook and log finished outcomes disagree; both lines are kept.",
         },
+        "files": {"$ref": "#/$defs/files"},
     },
     "allOf": [
         {
@@ -1397,6 +1667,7 @@ _SCHEMA = {
                     "used": {"type": "object", "properties": {"kind": {"enum": ["skill", "tool", "mcp"]}}},
                 }
             },
+            "else": {"not": {"required": ["files"]}},
         },
         {
             "if": {"properties": {"kind": {"enum": ["task.start", "task.done"]}}},
@@ -1761,6 +2032,20 @@ _SCHEMA = {
             "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$",
         },
         "version": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "files": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {"$ref": "#/$defs/file_path"},
+            "description": "Only on kind step: the workspace files or folders the step named, display "
+            "only, never used for access decisions (activity.md, Files).",
+        },
+        "file_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 260,
+            "pattern": "^(?![A-Za-z]:)(?![A-Za-z][A-Za-z0-9+.-]*:)(?![~$])(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08e2\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb\\\\]+$",  # noqa: E501
+            "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash, no start with ~ $ or a scheme or drive letter (file: C:), no Unicode control or format character (Cc Cf Zl Zp: bidi overrides, zero-width), NFC. The writer enforces the full rule (record_files.file_ok); this pattern lists the BMP characters.",  # noqa: E501
+        },
         "detail_file": {
             "type": "object",
             "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"],

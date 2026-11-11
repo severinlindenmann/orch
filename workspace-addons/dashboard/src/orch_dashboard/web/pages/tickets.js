@@ -67,8 +67,8 @@ function ticketNext(t) {
   } else if (status === 'review') {
     text = 'Read the result'; action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
-    text = 'Let the agent begin';
-    if (!snapshot) action = button('Start agent', 'outline sm', async event => {
+    text = 'Let the helper begin';
+    if (!snapshot) action = button('Start helper', 'outline sm', async event => {
       if (changeUnavailable()) return;
       const control = event.currentTarget;
       if (control.disabled) return;
