@@ -35,14 +35,14 @@ const freePort = () => new Promise((ok, no) => {
   s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); });
 });
 
-/** Start the Focus fixture server; resolves { base, stop }. Kills only the process it started. */
-async function start() {
+/** Start a fixture server (default: Focus); resolves { base, stop }. Kills only the process it started. */
+async function start(project = 'workspace-addons/focus', script = 'e2e/focus_insights/server.py', tag = 'focus-shots') {
   fs.mkdirSync(path.join(os.homedir(), '.orch-test'), { recursive: true });
-  const dir = fs.mkdtempSync(path.join(os.homedir(), '.orch-test/focus-shots-'));
+  const dir = fs.mkdtempSync(path.join(os.homedir(), `.orch-test/${tag}-`));
   const port = await freePort();
   const env = { HOME: dir, PATH: process.env.PATH, UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache/uv') };
   const child = spawn('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
-    'uv', 'run', '--project', 'workspace-addons/focus', 'python', 'e2e/focus_insights/server.py', dir, String(port)],
+    'uv', 'run', '--project', project, 'python', script, dir, String(port)],
   { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   child.stderr.on('data', d => { log += d; });
@@ -53,14 +53,17 @@ async function start() {
   });
   const stop = () => {
     try { process.kill(child.pid); } catch (e) { /* already gone */ }
-    try { if (dir.includes('/.orch-test/focus-shots-')) fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+    try { if (dir.includes(`/.orch-test/${tag}-`)) fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
   };
   return { base: `http://127.0.0.1:${port}`, stop };
 }
 
 const settle = (page, ms = 4500) => page.waitForTimeout(ms); // polls run every 1.5-5 s
 
-// Add a screen here. setup(page, base) runs after the page loaded; return value is ignored.
+// Add a screen here. setup(page, base) runs after the page loaded; return value is ignored. `server: 'insights'`
+// puts the screen on the Insights fixture server (e2e/focus_insights/insights_server.py); default is Focus.
+const INS = { server: 'insights' };
+const insTab = tab => async p => { await settle(p, 800); await p.click(`#tab-${tab}`); await settle(p, 800); };
 const SCREENS = [
   { name: 'start', url: '/', wait: '.fx-ln-card', setup: p => settle(p) }, // strip + Live now + same-file line
   { name: 'start-areas', url: '/', wait: '.fx-areas button', async setup(p) {
@@ -76,6 +79,14 @@ const SCREENS = [
     if (!(await p.locator('.fx-agent').first().isVisible())) await p.click('.fx-mobile-tasks'); // the rail is folded on a phone
     await p.click('.fx-agent >> nth=1');
   } },
+  { name: 'insights-overview', url: '/', ...INS, wait: '#rows .row:not(.head)', setup: p => settle(p, 800) }, // cards + Skills list
+  { name: 'insights-connections', url: '/', ...INS, wait: '#rows .row:not(.head)', setup: insTab('connections') },
+  { name: 'insights-keys', url: '/', ...INS, wait: '#rows .row:not(.head)', setup: insTab('keys') },
+  { name: 'insights-detail', url: '/', ...INS, wait: '#rows .row:not(.head)', async setup(p) {
+    await settle(p, 800);
+    await p.click('#rows .row:not(.head)');
+    await settle(p, 500);
+  } },
 ];
 
 (async () => {
@@ -85,13 +96,21 @@ const SCREENS = [
   const out = path.resolve((args[0] || DEFAULT_OUT).replace(/^~/, os.homedir()));
   fs.mkdirSync(out, { recursive: true });
   const { chromium } = playwright();
-  const srv = await start();
+  const wanted = SCREENS.filter(x => !only || only.includes(x.name));
+  const servers = { focus: await start() };
+  if (wanted.some(x => x.server === 'insights')) {
+    servers.insights = await start('workspace-addons/insights', 'e2e/focus_insights/insights_server.py', 'insights-shots');
+  }
   const browser = await chromium.launch();
   let failed = 0;
   try {
-    for (const s of SCREENS.filter(x => !only || only.includes(x.name))) {
+    for (const s of wanted) {
+      const srv = servers[s.server || 'focus'];
       for (const [w, h] of WIDTHS) {
         const page = await browser.newPage({ viewport: { width: w, height: h } });
+        const problems = [];
+        page.on('pageerror', e => problems.push(`uncaught: ${e.message}`));
+        page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
         try {
           await page.goto(srv.base + s.url);
           if (s.wait) await page.waitForSelector(s.wait, { timeout: 20000 });
@@ -101,13 +120,14 @@ const SCREENS = [
           await page.screenshot({ path: path.join(out, `${s.name}-${w}.png`), fullPage: true });
           console.log(`${s.name} ${w}: ok${overflow ? ' (HORIZONTAL OVERFLOW)' : ''}`);
           if (overflow) failed++;
+          if (problems.length) { if (s.server === 'insights') failed++; console.log(`${s.name} ${w}: CONSOLE ERRORS${s.server === 'insights' ? '' : ' (not failing: Focus screens are checked by the Focus smoke test)'} ${problems.join(' | ').slice(0, 400)}`); }
         } catch (e) {
           failed++;
           console.log(`${s.name} ${w}: FAILED ${String(e.message).split('\n')[0]}`);
         } finally { await page.close(); }
       }
     }
-  } finally { await browser.close(); srv.stop(); }
+  } finally { await browser.close(); Object.values(servers).forEach(x => x.stop()); }
   console.log(`shots in ${out}`);
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
