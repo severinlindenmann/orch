@@ -57,7 +57,10 @@ def checked_tree(root, remote, index):
     for path in decisions:
         data = selected(root, path)
         live = repo.safe(root, path)
-        if not live.exists() or live.read_bytes() != data:
+        if decisions[path].get("incoming"):
+            if paths.TICKET.fullmatch(path) and live.exists():
+                raise repo.Refused(f"{path}: busy; the incoming ticket now exists locally")
+        elif not live.exists() or live.read_bytes() != data:
             raise repo.Refused(f"{path}: busy; the selected copy changed")
         step.put(root, index, path, data)
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
@@ -230,6 +233,13 @@ def keep_key(root, key, tid, args, *, now=None):
             repo.git(root, "fetch", "--no-tags", "origin", "+refs/heads/*:refs/remotes/origin/*", timeout=60)
             if step.oid(root, "refs/remotes/origin/orch-state") != remote:
                 raise repo.Refused("Remote changed; review again before choosing a key")
+        if cli.read(root, "theirs").get("remote_sha") != remote:
+            raise repo.Refused("Saved copy is no longer current")
+        checked = incoming.check(root, remote, base=None)
+        if checked.commit != remote or any(p.code in ("path", "size") for p in checked.problems):
+            raise repo.Refused("Incoming files could not be checked")
+        if any(p.code == "private" for p in checked.problems):
+            raise repo.Refused("General ticket stays local")
         by = humanproof.person_by(
             root, args, "addon.act", f"sync:keep-key:{key}:{tid}:{remote}",
             no_handoff="Choosing a ticket number needs a person's proof over stdin.",
@@ -246,6 +256,8 @@ def keep_key(root, key, tid, args, *, now=None):
             originals[path] = raw
             local = step.document(path, raw) if raw else {}
             other = step.document(path, step.blob(root, theirs[path])) if path in theirs else {}
+            if local.get("general") is True or other.get("general") is True:
+                raise repo.Refused("General ticket stays local")
             # Only this person's chosen group may be changed by this decision.
             docs[Path(path).stem] = local or other
         locks.enter_context(tickets.sync_apply(root, "key"))
@@ -259,6 +271,8 @@ def keep_key(root, key, tid, args, *, now=None):
             incoming.strict_load(step.blob(root, theirs.get(counter_path)) or b"{}"),
             [k for doc in docs.values() for k in [doc.get("key"), *merge.old_keys_of(doc)]],
         )
+        if counter_path in choices(root, remote):
+            counter = merge.merge_counter({}, counter, incoming.strict_load(selected(root, counter_path)))
         selected_docs = {}
         for i in sorted(group):
             doc = docs[i]
@@ -268,10 +282,6 @@ def keep_key(root, key, tid, args, *, now=None):
                 incoming_key = incoming_doc.get("key")
                 if incoming_key and incoming_key != key and key in merge.old_keys_of(incoming_doc):
                     new = incoming_key
-                    doc = merge.merge_ticket(None, incoming_doc, doc, now, person=humanproof.wont_verifier(root))
-                    if doc is None:
-                        raise repo.Refused("Ticket cannot be merged")
-                    docs[i] = doc
                 else:
                     counter["last"] += 1
                     if counter["last"] > merge.MAX_COUNTER:
@@ -280,9 +290,7 @@ def keep_key(root, key, tid, args, *, now=None):
                 doc.setdefault("ext", {}).setdefault("sync", {})["old_keys"] = sorted(set(merge.old_keys_of(doc)) | {key})
                 doc["key"] = new
                 doc.setdefault("history", []).append({"at": now, "by": by, "text": f"sync: key changed from {key} to {new} (person chose {tid})"})
-                doc["revision"] = doc.get("revision", 0) + 1
             path = f"tickets/{i}.json"
-            doc = step.held_ticket(root, path, doc, step.document(path, originals[path]) if originals[path] else {}, doc)
             data = step.encoded(doc)
             step.document(path, data)
             if findings(root, path, data):
@@ -296,13 +304,16 @@ def keep_key(root, key, tid, args, *, now=None):
         if decisions.get("remote_sha") != remote:
             decisions = {"remote_sha": remote, "files": {}}
         selected_docs[counter_path] = step.encoded(counter)
-        # Reserve numbers first, move losers next, publish the winner last. No live duplicate.
+        # Save the reservation first and move local losers before resuming the merge.
+        # Remote-only tickets stay in sync state until the verified incoming merge.
         order = [counter_path] + [p for p in selected_docs if p not in (counter_path, f"tickets/{tid}.json")] + [f"tickets/{tid}.json"]
         for path in order:
             data = selected_docs[path]
             step.write(root, "run/sync/choices/" + path, data)
-            step.write(root, path, data)
-            decisions["files"][path] = {"keep": "key", "at": now}
+            is_incoming = path == counter_path or originals[path] is None
+            if not is_incoming:
+                step.write(root, path, data)
+            decisions["files"][path] = {"keep": "key", "at": now, "incoming": is_incoming}
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
         paused["key_clashes"].pop(key)
         paused["files"] = [p for p in paused["files"] if p not in selected_docs]

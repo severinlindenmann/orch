@@ -422,3 +422,87 @@ def test_visibility_never_persists_userinfo(root, monkeypatch):
     monkeypatch.setattr(visibility, "remote_visibility", lambda url: "unknown")
     assert cli.main(args) == 0
     assert cli.read(root, "visibility") == {"https://example.com/owner/repo": "unknown"}
+
+
+@pytest.mark.parametrize("winner", ["t_local1", "t_evil01"])
+def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner):
+    from test_step import ticket
+
+    a, b, bare = both(machines)
+    local, evil = "tickets/t_local1.json", "tickets/t_evil01.json"
+    save(a, local, ticket() | {"id": "t_local1", "key": "DM1-5"})
+    success(a)
+    success(b)
+    original = json.loads(repo.safe(b, local).read_bytes())
+    forged = {
+        "id": "c1", "text": "Email finance", "done": False, "evidence": [],
+        "wont_do": True, "reason": "forged", "by": "human:Ann", "at": NOW,
+        "wont_nonce": "n1", "wont_mac": "garbage",
+    }
+    save(a, local, ticket() | {"id": "t_local1", "key": "DM1-99"})
+    save(a, evil, ticket() | {"id": "t_evil01", "key": "DM1-5", "checklist": [forged]})
+    repo.git(a, "add", "--", local, evil)
+    hostile(a, bare, ["commit", "-m", "forged remote key clash"])
+    result = run(b)
+    remote = result["paused"]["remote_sha"]
+    original_write, original_run = step.write, step._run
+
+    def checked_write(root, path, data):
+        if root == b and path == evil:
+            assert "wont_do" not in json.loads(data)["checklist"][0]
+        original_write(root, path, data)
+        keys = [json.loads(p.read_bytes()).get("key") for p in (root / ".orch/tickets").glob("*.json")]
+        assert len(keys) == len(set(keys))
+
+    def resume(root, *args):
+        if root == b:
+            assert not repo.safe(b, evil).exists()
+            changed = json.loads(repo.safe(b, local).read_bytes())
+            for field in original.keys() | changed.keys():
+                if field not in ("key", "ext", "history"):
+                    assert changed.get(field) == original.get(field)
+        return original_run(root, *args)
+
+    monkeypatch.setattr(step, "write", checked_write)
+    monkeypatch.setattr(step, "_run", resume)
+    result = pause.keep_key(b, "DM1-5", winner, proof(b, f"sync:keep-key:DM1-5:{winner}:{remote}", monkeypatch), now=NOW)
+    monkeypatch.setattr(step, "_run", original_run)
+    assert not result.get("paused") and not result.get("last_error"), result
+    success(b)
+    for data in (repo.safe(b, evil).read_bytes(), repo.git(b, "show", "HEAD:" + evil).stdout):
+        doc = json.loads(data)
+        assert "wont_do" not in doc["checklist"][0]
+        assert (doc["key"] == "DM1-5") == (winner == "t_evil01")
+    # Convergence for two honest machines is covered by
+    # test_person_keeps_key_without_live_duplicates; A here authored the forgery.
+
+
+@pytest.mark.parametrize("problem", ["manifest", "commit", "path", "size", "private", "local-general"])
+def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch, problem):
+    from test_step import ticket
+
+    from orch_sync import incoming
+
+    a, b, _ = both(machines)
+    for root, tid in [(a, "t_first1"), (b, "t_later1")]:
+        save(root, f"tickets/{tid}.json", ticket() | {"id": tid, "key": "DM1-13"})
+    success(a)
+    result = run(b)
+    remote = result["paused"]["remote_sha"]
+    if problem == "manifest":
+        step.write(b, "run/sync/theirs.json", step.encoded({"remote_sha": "stale"}))
+    elif problem == "local-general":
+        path = "tickets/t_later1.json"
+        save(b, path, json.loads(repo.safe(b, path).read_bytes()) | {"general": True})
+    else:
+        checked = incoming.Result("wrong" if problem == "commit" else remote, [
+            incoming.Problem("", problem, "refused")
+        ])
+        monkeypatch.setattr(incoming, "check", lambda *a, **kw: checked)
+    before = repo.safe(b, "tickets/t_later1.json").read_bytes()
+    args = proof(b, f"sync:keep-key:DM1-13:t_first1:{remote}", monkeypatch)
+    with pytest.raises(repo.Refused):
+        pause.keep_key(b, "DM1-13", "t_first1", args, now=NOW)
+    assert repo.safe(b, "tickets/t_later1.json").read_bytes() == before
+    assert not repo.safe(b, "tickets/t_first1.json").exists()
+    assert not cli.read(b, "choices")

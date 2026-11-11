@@ -346,6 +346,8 @@ def merged_tree(root, head, remote, index, now):
         document(path, data)
         put(root, index, path, data)
     for path in decisions:
+        if decisions[path].get("incoming") and paths.TICKET.fullmatch(path):
+            continue  # Incoming key choices must retain the verified normal merge.
         data = pause.selected(root, path)
         put(root, index, path, data)
         if paths.TICKET.fullmatch(path):
