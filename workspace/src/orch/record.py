@@ -976,7 +976,7 @@ class RecordWriter:
             # A path that changes under the hider or the plain-text cleaner (which also makes NFC) is dropped,
             # never stored hidden.
             files = [f for f in files if self.hider.hide_text(f) == f and redact(f) == f]
-            event["files"] = files[:_MAX_FILES]
+            event["files"] = _files_in_budget(files[:_MAX_FILES])
         event["text"] = self.hider.hide_cut(" ".join(redact(event["text"]).split()), 500)
         if isinstance(event.get("outcome"), dict) and isinstance(event["outcome"].get("error"), str):
             event["outcome"]["error"] = self.hider.hide_cut(
@@ -988,12 +988,23 @@ class RecordWriter:
                 event["data"] = {"cut": True}
         _validate(event)
         payload = self._prepare_detail(event, detail, hidden)
-        # Both possible line forms have passed the hider before taking the lock.
-        prepared = dict(event, seq=10**20, conflict=True)
-        if payload is not None:
-            prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
-        self._line(prepared)
-        self._line(dict(prepared, detail=None, detail_lost=True))
+        # Both possible line forms have passed the hider before taking the lock. The audit line is never
+        # dropped for its optional parts (I4): a line that is too large loses `files`, then `data` (cut).
+        for trim in (None, "files", "data"):
+            if trim == "files":
+                event.pop("files", None)
+            elif trim == "data" and "data" in event:
+                event["data"] = {"cut": True}
+            prepared = dict(event, seq=10**20, conflict=True)
+            if payload is not None:
+                prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+            try:
+                self._line(prepared)
+                self._line(dict(prepared, detail=None, detail_lost=True))
+                break
+            except RecordInvalid:
+                if trim == "data":
+                    raise
         self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
         try:
             with _lock(self.workspace, run, lock_wait) as check_lock:
@@ -1140,6 +1151,15 @@ class RecordWriter:
                 continue
             self._commit(event, payload, pending["default_id"], check_lock=check_lock)
             _unlink(self.workspace, rel)
+
+
+def _files_in_budget(files: list[str]) -> list[str]:
+    """Each entry at most 512 serialized bytes, all together at most 2048: trailing entries are dropped."""
+    sizes = [len(_json(f).encode()) + 1 for f in files]
+    keep = 0
+    while keep < len(files) and sizes[keep] <= 512 and sum(sizes[: keep + 1]) <= 2048:
+        keep += 1
+    return files[:keep]
 
 
 def hook_entry_filter(line: dict) -> dict | None:

@@ -150,6 +150,9 @@ keeps) and `files_normalise` (producer normalisation).
   make every path relative to the run's workspace root (`.` segments and inner `..` resolved, NFC); a path outside the
   workspace, the root itself, or one without a root to compare an absolute path with is **dropped**, never recorded.
   Repeats are dropped, at most 8 are kept.
+  Size budget: the writer keeps entries in order while each is at most 512 serialized bytes and all together at most
+  2048; the rest are dropped. A line that is still over the 8192-byte cap loses `files`, then `data` (replaced by
+  `{"cut": true}`), so the audit line is never dropped for its optional parts.
 - **The writer re-checks.** After the value hider the writer checks every entry again: an entry with a bad shape is
   dropped, and so is an entry the hider (or the plain-text cleaner) would change (a path containing a stored key value is
   never stored, not even hidden). Drops are not counted or flagged; the audit line is never dropped for a bad entry. Only

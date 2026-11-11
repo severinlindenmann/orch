@@ -103,6 +103,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "_json(dict(schema='orch.record/1', since=event['at'], keep_days=90, max_mb=2048)).encode",
     "_json(event).count",
     "_json(event['data']).encode",
+    "_json(f).encode",
     "_json(payload).count",
     "_json(wrapped).encode",
     "_read_bytes(fd).splitlines",

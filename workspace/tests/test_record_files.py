@@ -217,3 +217,29 @@ def test_normalise_against_the_real_root(tmp_path):
     assert workspace_file(f"{real.resolve()}/src/a.py", link) == "src/a.py"
     assert workspace_file(f"{link}/src/a.py", link) == "src/a.py"
     assert workspace_file(f"{tmp_path}/other/a.py", link) is None
+
+
+def test_multibyte_paths_are_trimmed_to_a_byte_budget_and_the_line_is_written(store):
+    ws, writer = store
+    files = [f"d{n}/" + "日本語" * 50 for n in range(8)]  # 8 x ~150 chars, ~450 bytes each
+    assert all(file_ok(f) for f in files)
+    stored = writer.append(example(files=files, data={"k": "v"}))
+    assert stored is not None
+    kept = read_run(ws, RUN).unwrap()[0]["files"]
+    assert 0 < len(kept) < 8 and kept == files[: len(kept)]
+    assert sum(len(f.encode()) for f in kept) <= 2048
+
+
+def test_extreme_line_still_writes_a_minimal_step(store):
+    ws, writer = store
+    files = ["x" * 250 + str(n) for n in range(8)]
+    big = {f"k{n}": "日本語" * 70 for n in range(30)}  # near the data cap, with files it overflows the line
+    stored = writer.append(example(files=files, data=big))
+    assert stored is not None
+    assert read_run(ws, RUN).unwrap()[0]["kind"] == "step"
+
+
+def test_an_entry_over_512_bytes_is_not_stored_but_the_line_is(store):
+    ws, writer = store
+    assert writer.append(example(files=["日本語" * 85])) is not None  # 260 chars, 765 bytes
+    assert read_run(ws, RUN).unwrap()[0]["files"] == []

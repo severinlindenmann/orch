@@ -359,3 +359,21 @@ def test_collect_passes_the_workspace_to_the_writer(store):
     events = steps(read_run(ws, CTX["run"]).unwrap())
     assert [e["files"] for e in events] == [["src/app.py"], ["src/app.py"], [], []]
     assert SECRET not in json.dumps(events)
+
+
+def test_collect_goes_on_after_a_refused_event():
+    from orch.record import RecordInvalid
+
+    class Writer:
+        def __init__(self):
+            self.n = 0
+
+        def append(self, event, detail=None):
+            self.n += 1
+            if self.n == 1:
+                raise RecordInvalid("too large")
+            return event
+
+    stream = [use("toolu_a", "Read", {"file_path": "a.py"}), use("toolu_b", "Read", {"file_path": "b.py"})]
+    stats = collect(stream, Writer(), CTX)
+    assert stats["invalid"] == 1 and stats["written"] >= 1
