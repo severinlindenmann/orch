@@ -282,6 +282,7 @@ async function act(op, args) {
   } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.'}; }
   finally {
     writing--;
+    if (!writing && refreshAgain) refresh();  // a change notice that came during the write
     if (before) {
       starting.delete(args.ticket);
       if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); window.orch.toast('Could not start the agent.', 'error'); }
@@ -289,21 +290,30 @@ async function act(op, args) {
     }
   }
 }
+// A notice that comes while a fetch or a change is under way is kept, never dropped: that fetch may have read the
+// tickets before the change (load_state reads tickets first, run status last), so one more fetch follows it.
+let refreshAgain = false;
 async function refresh() {
-  if (snapshot || fetching || writing) return;
+  if (snapshot) return;
+  if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
+  refreshAgain = false;
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
     const res = await fetch('/api/state', {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
     const next = await res.json();
-    if (writing || version !== mutation) return;
+    if (writing || version !== mutation) { refreshAgain = true; return; }
     connection.hidden = true;
-    if (!state || next.rev !== state.rev) accept(next);
+    // rev is the server's hash of the whole state (every ticket field, runs, needs ...); without one, always take it.
+    if (!state || !next.rev || next.rev !== state.rev) accept(next);
   } catch (_) {
     connectionNotice(connection, !!state);
-  } finally { fetching = false; }
+  } finally {
+    fetching = false;
+    if (refreshAgain && !writing) refresh();
+  }
 }
 function dialog(title, cls = 'dialog', lock = '') {
   const d = el('dialog', cls);
