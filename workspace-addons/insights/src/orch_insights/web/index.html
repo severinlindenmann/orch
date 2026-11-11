@@ -9,12 +9,26 @@
 <link rel="stylesheet" href="__P__/kit/components.css">
 <link rel="stylesheet" href="__P__/web/insights.css">
 <script src="__P__/web/insights.js" defer></script>
+<script src="__P__/web/settings.js" defer></script>
 </head>
 <body>
 <main>
 <header><h1>Insights <span class="preview">Preview</span></h1>
 <p>What your agents used in the last 30 days</p>
-<p id="sharing" class="sharing" hidden></p></header>
+<p id="sharing" class="sharing" hidden></p>
+<button id="settings-link" class="settings-link" type="button" aria-pressed="false" aria-controls="settings">Settings</button></header>
+<section id="settings" class="settings" aria-label="Insights settings" hidden>
+<h2>Insights settings</h2>
+<p id="settings-status" class="note" role="status"></p>
+<div id="settings-body"><p>Reading the settings…</p></div>
+<dialog id="confirm" aria-labelledby="confirm-text">
+<p id="confirm-title" class="name"></p>
+<p id="confirm-text">Delete the full detail of this ticket's runs? The counts stay. This cannot be undone.</p>
+<div class="confirm-buttons"><button id="confirm-cancel" type="button">Cancel</button>
+<button id="confirm-delete" type="button" class="primary">Delete</button></div>
+</dialog>
+</section>
+<div id="main-view">
 <p id="message" role="status">Reading the workspace record…</p>
 <section id="overview" hidden aria-label="Overview">
 <div id="needs" class="needs" aria-label="Needs a look"></div>
@@ -26,6 +40,7 @@
 <aside id="detail" class="detail" role="dialog" aria-label="Details of the selected item" hidden></aside>
 </div>
 </section>
+</div>
 </main>
 </body>
 </html>
