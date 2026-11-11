@@ -50,21 +50,24 @@ a path form; orch commands never contain one, so `orch record query` and `orch s
 **Format `patterns/1`** (tools with `--disallowedTools`, i.e. Claude Code): one comma-joined value merged into the tool's
 disallowed-tools flag (any spelling in the existing flags, `--disallowedTools X`, `--disallowed-tools X`, `--disallowedTools=X`, is
 merged into one; an existing list is extended, never replaced; added when there is none). The rules are added whatever the permission
-mode, including `full`. Without a workspace orch **refuses to start** such a tool; a tool older than 2.0.0 (patterns with `*` inside, `Read(//..)`)
-is refused too (`Update it, then try again`).
+mode, including `full`. Without a workspace orch **refuses to start** such a tool. The tool that is really started must be found and report a version of
+2.0.0 or newer (patterns with `*` inside, `Read(//..)`); not found, no output, unreadable output and older all **refuse** (deny by
+default, no override): `Claude could not be checked for the deny rules: update or reinstall it, then try again.` The one flag is placed
+**last** before the `--` that precedes the prompt (it takes a list, so nothing positional may follow it).
 - Candidate homes, always: `<account home>/.orch-tool` and `ORCH_HOME` (when set), plus the guarded/trusted home when it resolves. A
-  candidate that is or contains the workspace is **dropped** (stderr note): the workspace is never denied.
+  candidate that is or contains the workspace **refuses the start** (`orch's folder contains this workspace: move the workspace out of it,
+  then try again.`): it cannot be denied without denying the workspace. A home inside the workspace is fine (only that folder is denied).
 - file tools, per root path P (`/**` and P itself): `Read(f)` (rows with read denied only) and `Edit(f)` (every row; it covers
   every tool that changes a file, so there is no `Write` rule) for each form f of P: absolute `//<P without its leading />`; Windows
   drive form `//c/Users/..` and `C:/Users/..`; `~/<rest>` when P is under the account home; `./<rest>` when P is under the workspace
   (no `../` forms: not valid file patterns). Real path and as-given path (symlinked temp folders) both.
 - shell: `Bash(*<text>*)` for each text form of P: forward-slash and backslash absolute, `~/<rest>`, `$HOME/<rest>`,
   `${HOME}/<rest>`, `$env:USERPROFILE\<rest>` and `%USERPROFILE%\<rest>` (PowerShell, cmd), relative to the workspace (incl. `../..`),
-  and for `home` the folder's own name when it starts with `.` and has at least 6 characters (`.orch-tool`; never `orchestra`).
+  and for `home` the folder's own name (at least 6 characters, e.g. `.orch-tool`, `orch-tool`) and `<parent>/<name>`.
   `record`/`local-id`/`secrets` also the workspace-relative text `.orch/record` (and `.orch\record`, ...).
 - `,` `(` `)`, spaces and control characters in a path become `*` (a wildcard in both rule kinds: never a split list, never a
   literal). That over-blocks a few look-alike paths and never under-blocks the real one. Nothing is read from the workspace's own settings.
-- **Over-blocking:** a shell command that merely mentions `.orch/record` or the home folder's name (an `ls`, a `grep` for it) is
+- **Over-blocking:** a shell command that mentions the home folder's own name (any text containing `orch-tool`) or merely mentions `.orch/record` or the home folder's name (an `ls`, a `grep` for it) is
   refused. **Under-blocking:** matching is exact text and case-exact (a case-insensitive file system lets `.ORCH-TOOL` through),
   a symlink inside the workspace that points at the home is not followed, and variables, globs, `cd` plus a short name, or a built path
   are not seen.

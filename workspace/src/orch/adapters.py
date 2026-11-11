@@ -187,9 +187,6 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
 
     out = [fill(i) for i in items]
     extra: list[str] = permission_args(name, root, v.get("permissions"), v.get("person"))
-    if (a.get("deny") or {}).get("format", "none") != "none":
-        _deny_version_ok(a)
-    extra = denyrules.deny_args(a.get("deny"), extra, root)  # orch's own folders, every mode (secrets.md)
     if mode == "oneshot":
         if v.get("stream") and sect.get("stream_args"):
             extra += sect["stream_args"]
@@ -201,6 +198,11 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         if doc:
             blob = json.dumps(doc, separators=(",", ":"))
             extra += [x.replace("{reminder_json}", blob) for x in sect["settings_args"]]
+    if (a.get("deny") or {}).get("format", "none") != "none":
+        _deny_version_ok(a, out[0])  # the binary this run really starts
+    extra = denyrules.deny_args(
+        a.get("deny"), extra, root
+    )  # orch's own folders, every mode (secrets.md); last
     if extra:
         at = out.index("--") if "--" in out else len(out)
         out[at:at] = extra
@@ -219,11 +221,11 @@ def _binary_version(binary: str) -> str | None:
     return _version(binary)
 
 
-def deny_version_check(a: Mapping) -> None:
+def deny_version_check(a: Mapping, binary: str | None = None) -> None:
     """Fail closed (deny by default): the tool must be found and report a version >= DENY_MIN_VERSION.
     Not found, no output, garbage output and too old all refuse."""
     cannot = f"{a['label']} could not be checked for the deny rules: update or reinstall it, then try again."
-    binary = (a.get("detect") or {}).get("binary")
+    binary = binary or (a.get("detect") or {}).get("binary")
     path = shutil.which(binary) if binary else None
     v = _binary_version(path) if path else None
     found = re.findall(r"\d+", v)[:3] if v else []

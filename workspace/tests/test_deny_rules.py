@@ -212,6 +212,12 @@ def test_unknown_format_fails_closed():
 def test_vectors():
     doc = json.loads((CONTRACTS / "vectors/deny-v1.json").read_text("utf-8"))
     for c in doc["cases"]:
+        if "refuses" in c:
+            from orch.errors import Refused
+
+            with pytest.raises(Refused, match="move the workspace out of it"):
+                denyrules.rules(Path(c["workspace"]), homes=c["homes"], account_home=c.get("account_home"))
+            continue
         rl = denyrules.rules(Path(c["workspace"]), homes=c["homes"], account_home=c.get("account_home"))
         pats = set(_set(rl))
         for want in c.get("has", []):
@@ -262,14 +268,6 @@ def test_default_home_and_orch_home_are_always_rows(proj_ws, monkeypatch, tmp_pa
     assert any(p.endswith(".orch-tool") for p in paths)
 
 
-def test_a_home_that_contains_the_workspace_is_dropped_and_warned(capsys):
-    rl = denyrules.rules(Path(WS), homes=["/Users/bob/work", WS, HOME], account_home=ACCT)
-    homes = {r["path"] for r in rl if r["root"] == "home"}
-    assert homes == {HOME}
-    assert "contains this workspace" in capsys.readouterr().err
-    assert not any(p in _set(rl) for p in ("Read(//Users/bob/work/**)", "Read(//Users/bob/work/proj/**)"))
-
-
 def test_spaces_and_separators_become_wildcards_not_splits():
     rl = denyrules.rules(
         Path("/Users/My Projects/p"),
@@ -304,7 +302,8 @@ def test_every_spelling_of_the_flag_is_merged_into_one(extra):
     assert out.count("--disallowedTools") == 1
     assert not any(o.startswith("--disallowed-tools") or o.startswith("--disallowedTools=") for o in out)
     val = out[out.index("--disallowedTools") + 1].split(",")
-    assert {"A", "B", "C(d)"} <= set(val) and out[0] == "--x" and out[-1] == "--y"
+    assert {"A", "B", "C(d)"} <= set(val) and out[0] == "--x" and "--y" in out
+    assert out[-2] == "--disallowedTools"  # last: the flag is variadic, nothing may follow it
 
 
 @pytest.mark.parametrize("perm", ["ask", "auto", "full"])
@@ -368,7 +367,7 @@ def test_old_claude_is_refused(monkeypatch, tmp_path, out):
 def test_render_runs_the_version_check_for_patterns_adapters_only(proj_ws, monkeypatch):
     from orch.errors import Refused
 
-    def boom(a):
+    def boom(a, b=None):
         raise Refused("checked")
 
     monkeypatch.setattr(adapters, "_deny_version_ok", boom)
@@ -460,3 +459,55 @@ def test_real_claude_refuses_a_denied_read_and_a_denied_shell_text(perm):
         )
     finally:
         shutil.rmtree(iso, ignore_errors=True)  # the exact folder made above
+
+
+# ---- review round 3
+
+
+@pytest.mark.parametrize("perm", ["ask", "auto", "full"])
+@pytest.mark.parametrize(
+    "mode,kind", [("oneshot", "fresh"), ("oneshot", "resume"), ("live", "fresh"), ("live", "resume")]
+)
+def test_the_variadic_flag_is_last_before_the_prompt_separator(proj_ws, perm, mode, kind):
+    argv = _argv("claude", kind, mode, perm, proj_ws)
+    i = argv.index("--disallowedTools")
+    assert argv[i + 1].count("--") == 0  # a value, never a flag
+    if mode == "oneshot":
+        assert argv[i + 2 :] == ["--", "p"]  # the prompt is after `--`
+    else:
+        assert argv[i + 2 :] == []  # nothing positional can follow it
+
+
+def test_render_checks_the_binary_it_really_starts(proj_ws, monkeypatch):
+    seen = []
+    monkeypatch.setattr(adapters, "_deny_version_ok", lambda a, b=None: seen.append(b))
+    _argv("claude", "fresh", "oneshot", "ask", proj_ws)
+    assert seen == ["claude"]
+
+
+def test_two_part_version_is_padded_not_refused(monkeypatch, tmp_path):
+    _fake_tool(monkeypatch, tmp_path, "2.0 (Claude Code)")
+    assert adapters.deny_version_check(_A) is None
+
+
+def test_a_home_containing_or_equal_to_the_workspace_refuses_the_start():
+    from orch.errors import Refused
+
+    for home in ("/Users/bob/work/proj", "/Users/bob/work", "/Users/bob", "/Users/bob/work/"):
+        with pytest.raises(Refused, match="move the workspace out of it"):
+            denyrules.rules(Path(WS), homes=[home], account_home=ACCT)
+    deep = "/Users/bob/a/b/c"
+    with pytest.raises(Refused, match="move the workspace out of it"):
+        denyrules.rules(Path(deep + "/d/e/ws"), homes=[deep], account_home=ACCT)
+    # a home INSIDE the workspace is fine: only that subfolder is denied, never the workspace
+    rl = denyrules.rules(Path(WS), homes=[WS + "/.orch-tool"], account_home=ACCT)
+    assert "Read(//Users/bob/work/proj/.orch-tool/**)" in _set(rl)
+    assert "Read(//Users/bob/work/proj/**)" not in _set(rl)
+
+
+def test_a_non_dot_home_is_matched_in_shell_text_by_name_and_parent():
+    rl = denyrules.rules(Path("/Users/bob/work/proj"), homes=["/Users/bob/orch-tool"], account_home=ACCT)
+    pats = _set(rl)
+    assert "Bash(*orch-tool*)" in pats
+    assert "Bash(*bob/orch-tool*)" in pats
+    assert "Bash(*bob\\orch-tool*)" in pats

@@ -5,7 +5,6 @@ Pure string work on paths (no reads), so Windows forms can be tested anywhere.""
 
 import os
 import re
-import sys
 from pathlib import Path, PurePosixPath
 
 # (name, read denied, path under the workspace or None = every guarded orch home)
@@ -127,20 +126,18 @@ def _account_home() -> str | None:
 
 def rules(root: Path, homes: list[str] | None = None, account_home: str | None = None) -> list[dict]:
     """The deny set: [{"root", "path", "read", "file": [...], "text": [...]}]. The default home and ORCH_HOME
-    are always rows; a home that is or contains the workspace is dropped (the workspace is never denied)."""
+    are always rows. A home that is or contains the workspace cannot be denied without denying the workspace:
+    the start is refused (Refused). A home inside the workspace is fine: only that subfolder is denied."""
     ws_raw, ws_real = str(root), os.path.realpath(root)
     acct = account_home if account_home is not None else _account_home()
     homes = _candidates(root) if homes is None else homes
-    kept = []
     for h in homes:
         if _under(ws_raw, h) is not None or _under(ws_real, h) is not None:  # is, or contains, the workspace
-            print(
-                f"Note: orch's folder ({h}) contains this workspace, so it is not denied as a whole.",
-                file=sys.stderr,
+            from orch.errors import Refused
+
+            raise Refused(
+                "orch's folder contains this workspace: move the workspace out of it, then try again."
             )
-        else:
-            kept.append(h)
-    homes = kept
     out = []
     for name, read, sub in ROOTS:
         paths = (
@@ -152,8 +149,13 @@ def rules(root: Path, homes: list[str] | None = None, account_home: str | None =
             forms = path_forms(p, ws_raw, acct)
             if sub is None:
                 leaf = PurePosixPath(_norm(p)).name
-                if len(leaf) >= 6 and leaf.startswith("."):
+                if (
+                    len(leaf) >= 6
+                ):  # the home's own name, whatever it is (over-blocks look-alikes of that name only)
                     forms["text"].append(_clean(leaf))
+                    parent = PurePosixPath(_norm(p)).parent.name
+                    if parent:
+                        forms["text"] += [_clean(f"{parent}/{leaf}"), _clean(f"{parent}\\{leaf}")]
             else:
                 forms["text"] += [sub, sub.replace("/", "\\")]
             out.append({"root": name, "path": p, "read": read, **forms})
@@ -177,32 +179,24 @@ _FLAGS = ("--disallowedTools", "--disallowed-tools")
 
 def merge_flag(extra: list[str], patterns: list[str]) -> list[str]:
     """Add `patterns` to the tool's disallowed-tools flag in `extra`: spelled `--disallowedTools X`,
-    `--disallowed-tools X` or `--disallowedTools=X`. Extended, never replaced; all spellings become one."""
-    joined = ",".join(patterns)
+    `--disallowed-tools X` or `--disallowedTools=X`. Extended, never replaced; all spellings become ONE
+    `--disallowedTools` placed LAST in `extra`: the flag is variadic, so nothing positional may follow it
+    (render puts `extra` before `--`, or at the very end when there is no prompt)."""
     out: list[str] = []
     old: list[str] = []
-    at = None
     i = 0
     while i < len(extra):
         item = extra[i]
-        val = None
         if item in _FLAGS and i + 1 < len(extra):
-            val, i = extra[i + 1], i + 2
+            old.append(extra[i + 1])
+            i += 2
         elif any(item.startswith(f + "=") for f in _FLAGS):
-            val, i = item.split("=", 1)[1], i + 1
+            old.append(item.split("=", 1)[1])
+            i += 1
         else:
             out.append(item)
             i += 1
-            continue
-        if at is None:
-            at = len(out)
-        old.append(val)
-    value = ",".join([*old, joined])
-    out[at if at is not None else len(out) : at if at is not None else len(out)] = [
-        "--disallowedTools",
-        value,
-    ]
-    return out
+    return [*out, "--disallowedTools", ",".join([*old, ",".join(patterns)])]
 
 
 def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[str]:

@@ -83,7 +83,7 @@ def _no_tool_version_probe(monkeypatch):
     an argv must not depend on a tool being installed. tests/test_deny_rules.py tests the real check."""
     from orch import adapters
 
-    monkeypatch.setattr(adapters, "_deny_version_ok", lambda a: None)
+    monkeypatch.setattr(adapters, "_deny_version_ok", lambda a, b=None: None)
 
 
 @pytest.fixture(autouse=True)

@@ -43,22 +43,6 @@
       ]
     },
     {
-      "name": "home contains the workspace",
-      "workspace": "/Users/bob/work/proj",
-      "homes": [
-        "/Users/bob/work",
-        "/Users/bob/.orch-tool"
-      ],
-      "account_home": "/Users/bob",
-      "has": [
-        "Read(//Users/bob/.orch-tool/**)"
-      ],
-      "not": [
-        "Read(//Users/bob/work/**)",
-        "Edit(//Users/bob/work/**)"
-      ]
-    },
-    {
       "name": "spaces",
       "workspace": "/Users/My Projects/p",
       "homes": [
@@ -67,7 +51,8 @@
       "account_home": "/Users/My Projects",
       "has": [
         "Read(//Users/My*Projects/.orch-tool/**)",
-        "Bash(*$HOME/.orch-tool*)"
+        "Bash(*$HOME/.orch-tool*)",
+        "Bash(*/Users/My*Projects/.orch-tool*)"
       ],
       "not": [
         "Read(//Users/My Projects/.orch-tool/**)"
@@ -83,9 +68,68 @@
       "has": [
         "Read(//c/Users/Ann*Lee/.orch-tool/**)",
         "Bash(*%USERPROFILE%\\.orch-tool*)",
-        "Bash(*$env:USERPROFILE\\.orch-tool*)"
+        "Bash(*$env:USERPROFILE\\.orch-tool*)",
+        "Bash(*C:/Users/Ann*Lee/.orch-tool*)"
+      ],
+      "not": [
+        "Read(//c/Users/Ann Lee/.orch-tool/**)",
+        "Read(C:/Users/Ann Lee/.orch-tool/**)"
+      ]
+    },
+    {
+      "name": "non-dot home by name and parent",
+      "workspace": "/Users/bob/work/proj",
+      "homes": [
+        "/Users/bob/orch-tool"
+      ],
+      "account_home": "/Users/bob",
+      "has": [
+        "Bash(*orch-tool*)",
+        "Bash(*bob/orch-tool*)",
+        "Read(//Users/bob/orch-tool/**)"
       ],
       "not": []
+    },
+    {
+      "name": "home equals or contains the workspace 0",
+      "workspace": "/Users/bob/work/proj",
+      "homes": [
+        "/Users/bob/work/proj"
+      ],
+      "account_home": "/Users/bob",
+      "refuses": "orch's folder contains this workspace: move the workspace out of it, then try again."
+    },
+    {
+      "name": "home equals or contains the workspace 1",
+      "workspace": "/Users/bob/work/proj",
+      "homes": [
+        "/Users/bob/work"
+      ],
+      "account_home": "/Users/bob",
+      "refuses": "orch's folder contains this workspace: move the workspace out of it, then try again."
+    },
+    {
+      "name": "home equals or contains the workspace 2",
+      "workspace": "/Users/bob/a/b/c/d/e/ws",
+      "homes": [
+        "/Users/bob/a/b/c"
+      ],
+      "account_home": "/Users/bob",
+      "refuses": "orch's folder contains this workspace: move the workspace out of it, then try again."
+    },
+    {
+      "name": "home inside the workspace",
+      "workspace": "/Users/bob/work/proj",
+      "homes": [
+        "/Users/bob/work/proj/.orch-tool"
+      ],
+      "account_home": "/Users/bob",
+      "has": [
+        "Read(//Users/bob/work/proj/.orch-tool/**)"
+      ],
+      "not": [
+        "Read(//Users/bob/work/proj/**)"
+      ]
     }
   ]
 }
