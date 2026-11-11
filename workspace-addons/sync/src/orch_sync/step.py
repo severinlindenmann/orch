@@ -283,7 +283,7 @@ def step_lock(root):
         p.unlink()
 
 
-def _run(root, reason, now):
+def _run(root, reason, now, remote_allowed):
     state = cli.read(root, 'state') | {'last_error': None, 'skipped': [], 'reason': reason}
     try:
         repo.local_dir(root)
@@ -293,7 +293,7 @@ def _run(root, reason, now):
         if settings['mode'] == 'off':
             return state
         network = settings['mode'] == 'remote'
-        if network and os.environ.get('ORCH_SYNC_REMOTE_PREVIEW') != '1':
+        if network and not remote_allowed:
             raise repo.Refused('Remote sync is preview-only')
         repo.ensure(root)
         repo.recover(root)
@@ -319,10 +319,13 @@ def _run(root, reason, now):
                         common = repo.git(root, 'merge-base', head, remote, allowed_codes=(0, 1)) \
                             if head else None
                         base = (common.stdout.decode().strip() or None) if common else None
-                        problems = incoming.check(root, remote, base=base)
-                        problems = [p for p in problems if p.code != 'held-ext']
+                        result = incoming.check(root, remote, base=base)
+                        problems = [p for p in result.problems if p.code != 'held-ext']
                         if problems:
                             raise repo.Refused(problems[0].message)
+                        if not result.commit:
+                            raise repo.Refused('Incoming state has no checked commit')
+                        remote = result.commit
                         validate_tree(root, remote)
             scratch_root = repo.safe(root, 'run/tmp-sync')
             scratch_root.mkdir(parents=True, exist_ok=True)
@@ -385,12 +388,13 @@ def _run(root, reason, now):
 
 
 def run_once(root, reason, *, now=None):
+    remote_allowed = cli.remote_allowed()
     root = Path(root)
     now = now or datetime.now(UTC).isoformat().replace('+00:00', 'Z')
     try:
         repo.local_dir(root)
         with step_lock(root):
-            return _run(root, reason, now)
+            return _run(root, reason, now, remote_allowed)
     except (ValueError, OSError, CoreRefused) as e:
         # A competing step owns state.json too; do not overwrite its result.
         return {'last_error': str(e), 'skipped': [], 'reason': reason}

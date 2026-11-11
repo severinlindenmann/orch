@@ -87,8 +87,8 @@ function copiesDiskText(d) {
 }
 function copiesCard(settings) {
   const mode = COPY_CHOICES.some(c => c[0] === settings.copies) ? settings.copies : 'together', busy = settingsBusy.has('copies');
-  const setup = h('input', {type:'text', className:'input', style:'width:100%;margin-top:6px', maxLength:500, value:settings.copy_setup || '', placeholder:'e.g. npm ci', 'aria-label':'Prepare a copy with', 'data-key':'settings-copy-setup', disabled:snapshot || busy});
-  const cap = h('select', {className:'input', style:'flex:none;width:5.5rem', 'aria-label':'Most copies at once', 'data-key':'settings-copies-max', disabled:snapshot || busy},
+  const setup = h('input', {type:'text', className:'input copies-setup', maxLength:500, value:settings.copy_setup || '', placeholder:'e.g. npm ci', 'aria-label':'Prepare a copy with', 'data-key':'settings-copy-setup', disabled:snapshot || busy});
+  const cap = h('select', {className:'input copies-max', 'aria-label':'Most copies at once', 'data-key':'settings-copies-max', disabled:snapshot || busy},
     [1, 2, 3, 4, 5, 6, 8, 10, 20].map(n => h('option', {value:String(n)}, String(n))));
   cap.value = String(settings.copies_max || 3);
   return h('div', {className:'stack', 'data-key':'settings-copies'}, h('h2', {className:'set-sub'}, 'Separate copies'),
@@ -96,19 +96,19 @@ function copiesCard(settings) {
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Separate copies'),
         settingsText('p', {className:'meta'}, "Give an agent its own copy of the project so agents don't edit the same files."),
         settings.copies_locked ? settingsText('p', {className:'meta', 'data-key':'settings-copies-soon'}, 'Coming soon. For now every agent works in the project folder.') : null,
-        h('div', {className:'row', style:'flex-wrap:wrap;gap:8px;margin-top:8px', role:'radiogroup', 'aria-label':'Separate copies'}, COPY_CHOICES.map(([id, label]) =>
+        h('div', {className:'row copies-choices', role:'radiogroup', 'aria-label':'Separate copies'}, COPY_CHOICES.map(([id, label]) =>
           h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:snapshot || busy || !!settings.copies_locked}, label))))),
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Most copies at once'),
         settingsText('p', {className:'meta'}, 'When this many exist, the next agent works in your own folder.'), cap)),
       h('div', {className:'card-row', 'data-key':'settings-copies-disk'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Copies on this computer'),
         settingsText('p', {className:'meta'}, copiesDiskText(settings.copies_disk))),
-        h('div', {className:'row', style:'gap:8px;flex-wrap:wrap'},
+        h('div', {className:'row'},
           array(settings.copies_disk?.stuck).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-retry', 'data-action':'copies-retry', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Try again') : null,
           array(settings.copies_disk?.orphaned).length ? h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-copies-orphaned', 'data-action':'copies-orphaned', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Remove the moved ones') : null,
           h('button', {type:'button', className:'btn sm outline', 'data-key':'settings-copies-clean', 'data-action':'copies-clean', disabled:snapshot || busy || settingsBusy.has('copies-clean')}, 'Clean up now'))),
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Prepare a copy with'),
         settingsText('p', {className:'meta'}, 'Runs once in each new copy, e.g. installing packages. Leave empty for nothing.'), setup,
-        h('button', {type:'button', className:'btn sm outline', style:'margin-top:8px', 'data-key':'settings-copy-setup-save', 'data-action':'copies-setup', disabled:snapshot || busy}, 'Save'))),
+        h('button', {type:'button', className:'btn sm outline copies-setup-save', 'data-key':'settings-copy-setup-save', 'data-action':'copies-setup', disabled:snapshot || busy}, 'Save'))),
       h('p', {className:'meta card-row'}, 'Needs git. Without git you only get the warning line. When a copy is removed, its changes are kept in git; files git ignores (like .env or build folders) and the inside of nested repositories are not.')));
 }
 function settingsPage() {

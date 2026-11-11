@@ -299,3 +299,66 @@ def test_push_timeout_is_offline(machines, monkeypatch):
     monkeypatch.setattr(repo, 'git', timeout)
     assert run(a)['last_error'] == 'offline'
     assert b'Pending push' in repo.git(a, 'show', 'HEAD:' + TICKET).stdout
+
+
+@pytest.mark.parametrize('new_checked_commit', [False, True])
+def test_merge_uses_checked_commit_when_remote_ref_moves(machines, monkeypatch, new_checked_commit):
+    a, b, _ = both(machines)
+    edit(a, title='Checked update')
+    success(a)
+    check, merged_tree = step.incoming.check, step.merged_tree
+    checked, merged = [], []
+
+    def racing_check(root, ref, **kwargs):
+        if new_checked_commit:
+            # Also enforce the Result API: the returned commit is authoritative.
+            tree = step.oid(root, ref + '^{tree}')
+            ref = step.commit(root, tree, [ref], NOW)
+        result = check(root, ref, **kwargs)
+        assert not result.problems
+        checked.append(result.commit)
+        tree = step.oid(root, result.commit + '^{tree}')
+        moved = step.commit(root, tree, [result.commit], NOW)
+        repo.git(root, 'update-ref', 'refs/remotes/origin/orch-state', moved)
+        assert moved != result.commit
+        return result
+
+    def checked_merge(root, head, remote, index, now):
+        merged.append(remote)
+        assert remote == checked[-1]
+        return merged_tree(root, head, remote, index, now)
+
+    monkeypatch.setattr(step.incoming, 'check', racing_check)
+    monkeypatch.setattr(step, 'merged_tree', checked_merge)
+    success(b)
+    assert merged == checked and merged
+    assert load(b)['title'] == 'Checked update'
+
+
+@pytest.mark.parametrize('gate', ['environment', 'helper'])
+def test_remote_settings_require_preview_on_every_run(machines, monkeypatch, gate):
+    a, _, bare = both(machines)
+    settings = json.loads(repo.safe(a, 'run/sync/settings.json').read_text())
+    assert settings['mode'] == 'remote'
+    head, tip = step.oid(a, 'HEAD'), remote_sha(bare)
+    git, remote_allowed = repo.git, step.cli.remote_allowed
+    calls, network = [], []
+    if gate == 'environment':
+        monkeypatch.delenv('ORCH_SYNC_REMOTE_PREVIEW')
+
+    def allowed():
+        calls.append(True)
+        return remote_allowed() if gate == 'environment' else False
+
+    def no_network(root, *args, **kwargs):
+        if args[0] in ('fetch', 'push'):
+            network.append(args)
+            pytest.fail('Remote operation without preview permission')
+        return git(root, *args, **kwargs)
+
+    monkeypatch.setattr(step.cli, 'remote_allowed', allowed)
+    monkeypatch.setattr(repo, 'git', no_network)
+    for _ in range(2):
+        assert 'preview' in run(a)['last_error']
+    assert len(calls) == 2 and not network
+    assert step.oid(a, 'HEAD') == head and remote_sha(bare) == tip

@@ -6,12 +6,12 @@ const path = require('node:path');
 const KIT = path.resolve(__dirname, '../../src/orch_dashboard/web/kit');
 const {validate, render, isSafeHttps, LIMITS} = require('../../src/orch_dashboard/web/kit/blocks.js');
 class Element {
-  constructor(tag) { this.tagName = tag; this.className = ''; this.attributes = {}; this.children = []; this.text = ''; }
+  constructor(tag) { this.tagName = tag; this.className = ''; this.attributes = {}; this.style = {setProperty(k, v) { this[k] = v; }}; this.children = []; this.text = ''; }
   get childNodes() { return this.children; }
   get textContent() { return this.text + this.children.map(c => c.textContent).join(''); }
   set textContent(v) { this.text = String(v); this.children = []; }
   append(...nodes) { this.children.push(...nodes); }
-  setAttribute(k, v) { this.attributes[k] = String(v); }
+  setAttribute(k, v) { assert.notEqual(k.toLowerCase(), 'style', 'use CSSOM under the dashboard CSP'); this.attributes[k] = String(v); }
   getAttribute(k) { return this.attributes[k] ?? null; }
 }
 const document = {createElement: t => new Element(t), createElementNS: (_, t) => new Element(t)};
@@ -99,7 +99,7 @@ test('unknown total and clamped progress', () => {
   assert.equal(p.getAttribute('aria-valuemax'), null);
   assert.match(textOf(el), /7 so far/); assertNoJunk(el);
   const over = draw(docOf({type:'progress', label:'Files', done:80, total:40})).el;
-  assert.equal(find(over, tag('i')).getAttribute('style'), 'width:100%');
+  assert.equal(find(over, tag('i')).style.width, '100%');
 });
 test('pictures only use host supplied local urls', () => {
   const doc = fixture('picture-preview');
@@ -251,7 +251,7 @@ test('charts: legend, end labels and one axis caption; no stray single-series he
 test('unknown total is indeterminate: no inline width on the bar', () => {
   const el = draw(fixture('progress-unknown-total')).el;
   assert.ok(find(el, cls('b-indet')));
-  assert.equal(find(el, tag('i')).attributes.style, undefined);
+  assert.equal(find(el, tag('i')).style.width, undefined);
 });
 
 test('a picture that fails to load is hidden behind a note', () => {

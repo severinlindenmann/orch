@@ -63,6 +63,7 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
 
     rows = [r for r in addons.listing(root) if r["recommended"] and not r["active"]]
     mans = addons.discover()
+    installed = (set(addons.installed_names()) & set(mans)) | set(addons.CORE_ADDONS)
     for name, m in addons.shipped_recommended().items():  # shipped with orch, not installed yet
         mans[name] = m
         rows.append({"name": name})
@@ -84,12 +85,14 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
     out = io.StringIO()
     try:
         # one reinstall for all of them (on Windows a second background install is refused while one runs)
-        with contextlib.redirect_stdout(out), addons.batch_install(root):
+        batch = addons.batch_install(root) if set(names) - installed else contextlib.nullcontext()
+        with contextlib.redirect_stdout(out), batch:
             for n in names:
                 addons.add(root, n, yes=True)
                 if n not in addons.batched(root) and n not in before:
                     now.append(n)
     except Exception as e:
+        sys.stderr.write(out.getvalue())
         undone = list(getattr(e, "undone", []))
         for n in reversed(now):
             with contextlib.suppress(Exception):
