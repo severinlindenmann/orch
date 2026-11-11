@@ -101,7 +101,7 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   const card = c.privateCard(settings);
   assert.deepEqual(nodes(card, n => n.textContent != null).map(n => n.textContent),
     ['Private files are in your team repo', '<b>Two files.</b>', 'Move to private',
-     'This workspace asks to run a command', 'Agent: mine\nAdapter: generic\nCommand: run <x>\nLive command: live x\nPrompt: stdin', 'Allow on this computer']);
+     'This workspace asks to run a command', 'Helper: mine\nAdapter: generic\nCommand: run <x>\nLive command: live x\nPrompt: stdin', 'Allow on this computer']);
   const buttons = nodes(card, n => n.tag === 'button');
   assert.deepEqual(buttons.map(b => b.attrs['data-action']), ['private-move', 'private-allow']);
   vm.runInContext("settingsBusy.add('private')", c);
@@ -179,6 +179,85 @@ test('Copies on this computer line: count, size, "Counting…" then a real empty
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-orphaned').length, 1);
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-retry').length, 1);
   assert.equal(all(card, n => n.tag === 'details')[0].attrs.open, '', 'Details opens by itself when a copy needs a look');
+});
+
+test('Settings review step: Share, the copies switch, Clean up now and "Helpers may mark tickets Done" show a plain review, then one click', async () => {
+  const calls = [], focused = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:sel => ({focus:() => focused.push(sel)})},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  const settings = c.state.settings = {share:false, agents_may_finish:false, copies:'together', copies_max:4, copies_disk:{copies:3, bytes:0}};
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
+  const panels = n => nodes(n, x => String(x.attrs?.className || '').split(' ').includes('settings-review'));
+  assert.equal(panels(c.settingsPage()).length, 0, 'no review until a control is clicked');
+  const cases = [
+    ['share', 'shareCard', 'settings-switch-share', 'Share', /^Your team will see that this workspace uses orch\./, /AGENTS\.md/, ['share.set', {on:true}]],
+    ['workflow', 'workflowCard', 'settings-switch-workflow', 'Turn on', /^Helpers will mark their finished work Done themselves\./, /Review stay there/, ['workflow.set', {on:true}]],
+    ['copies-switch', 'copiesCard', 'settings-switch-copies', 'Turn off', /^Helpers will all work in your own folder/, /Your own files are not touched/, ['copies.set', {mode:'off'}]],
+    ['copies-clean', 'copiesCard', 'settings-copies-clean', 'Clean up', /no helper needs any more will be removed/, /^Up to 3 copies will be removed.*Your own files are not touched\.$/, ['copies.clean', {}]],
+  ];
+  for (const [i, [id, cardFn, key, verb, what, affects, call]] of cases.entries()) {
+    c.settingsReviewOpen(id, {disabled:false, dataset:{key}});
+    assert.equal(focused.at(-1), '[data-key="settings-review-' + id + '"]', id + ': focus moves to the review');
+    const shown = panels(c[cardFn](settings));
+    assert.equal(shown.length, 1, id + ': one review, in its own card');
+    const [panel] = shown;
+    assert.equal(panel.attrs.className, 'cmd-preview settings-review', id + ': the look of the existing command review');
+    assert.equal(panel.attrs.role, 'group'); assert.equal(panel.attrs.tabindex, '-1');
+    assert.equal(panel.attrs['aria-labelledby'], 'settings-review-what'); assert.equal(panel.attrs['aria-describedby'], 'settings-review-affects');
+    const [whatP, affectsP] = nodes(panel, n => n.tag === 'p');
+    assert.match(text(whatP), what); assert.match(text(affectsP), affects);
+    assert.doesNotMatch((text(whatP) + ' ' + text(affectsP)).replace('AGENTS.md', 'the file'), /\bagents?\b|relay|publish|\bgit\b|type .* to confirm/i);
+    const buttons = nodes(panel, n => n.tag === 'button');
+    assert.deepEqual(buttons.map(text), [verb, 'Cancel']);
+    assert.deepEqual(buttons.map(b => b.attrs['data-action']), ['settings-review-ok', 'settings-review-cancel']);
+    assert.equal(nodes(panel, n => n.tag === 'input').length, 0, id + ': no typed confirm word');
+    assert.equal(calls.length, i, id + ': nothing is sent before the click');
+    await c.settingsReviewRun();
+    assert.equal(calls.at(-1), JSON.stringify(call), id + ': the confirm button runs the existing action');
+    assert.equal(focused.at(-1), '[data-key="' + key + '"]', id + ': focus goes back to the control');
+    assert.equal(panels(c[cardFn](settings)).length, 0);
+  }
+  // Cancel (and Escape, which calls the same close) sends nothing and gives focus back
+  c.settingsReviewOpen('share', {disabled:false, dataset:{key:'settings-switch-share'}});
+  c.settingsReviewClose();
+  assert.equal(calls.length, cases.length);
+  assert.equal(focused.at(-1), '[data-key="settings-switch-share"]');
+  assert.equal(panels(c.shareCard(settings)).length, 0);
+  // the review words follow the current state: turning things off says what stays
+  Object.assign(settings, {share:true, agents_may_finish:true, copies:'off', copies_disk:{copies:0, bytes:0}});
+  for (const [id, cardFn, verb, re] of [['share', 'shareCard', 'Stop sharing', /taken out of AGENTS\.md/], ['workflow', 'workflowCard', 'Turn off', /already Done stay Done/],
+    ['copies-switch', 'copiesCard', 'Turn on', /At most 4 copies/], ['copies-clean', 'copiesCard', 'Clean up', /no copies right now, so nothing will be removed/]]) {
+    c.settingsReviewOpen(id, {disabled:false, dataset:{key:'x'}});
+    const [panel] = panels(c[cardFn](settings));
+    assert.equal(text(nodes(panel, n => n.tag === 'button')[0]), verb);
+    assert.match(text(panel.children[1]), re);
+    c.settingsReviewClose();
+  }
+  // a busy action keeps its confirm button off; a disabled control or a shared copy opens nothing
+  vm.runInContext("settingsBusy.add('share')", c);
+  c.settingsReviewOpen('share', {disabled:false, dataset:{}});
+  assert.equal(nodes(panels(c.shareCard(settings))[0], n => n.tag === 'button')[0].attrs.disabled, true);
+  await c.settingsReviewRun();
+  assert.equal(calls.length, cases.length, 'nothing is sent while the same change is still running');
+  c.settingsReviewClose(); vm.runInContext("settingsBusy.delete('share')", c);
+  c.settingsReviewOpen('share', {disabled:true, dataset:{}});
+  assert.equal(panels(c.shareCard(settings)).length, 0);
+  c.snapshot = true;
+  c.settingsReviewOpen('share', {disabled:false, dataset:{}});
+  assert.equal(panels(c.shareCard(settings)).length, 0);
+});
+
+test('app.js: the four Settings controls open the review; only the review buttons send; Escape cancels', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
+  for (const [action, id] of [['settings-share', 'share'], ['workflow-set', 'workflow'], ['copies-switch', 'copies-switch'], ['copies-clean', 'copies-clean']]) {
+    assert.ok(app.includes(`if (action === '${action}') { settingsReviewOpen('${id}', control); return; }`), action);
+  }
+  assert.doesNotMatch(app, /settingsSend\('(share\.set|workflow\.set|copies\.clean)'/, 'these actions are sent from the review only');
+  assert.ok(app.includes("if (event.key === 'Escape' && event.target.closest('.settings-review')) { event.preventDefault(); settingsReviewClose(); return; }"));
+  const css = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.css'), 'utf8');
+  assert.match(css, /\.settings \.settings-review\{/);
 });
 
 test('General phone messages belong in Chat, not Home Messages', () => {
