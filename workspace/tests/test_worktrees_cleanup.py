@@ -1453,3 +1453,79 @@ def test_task_e_failed_orphan_rmdir_restores_owner(repo):
     assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
     assert not d.exists()
     assert d.name not in worktrees._known_copies(d.parent)
+
+
+@pytest.mark.parametrize("owner", ["other", "missing"])
+def test_task_f_unbound_existing_copies_refused_without_store_change(repo, owner):
+    main = repo.parent / "already-known"
+    existing = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, existing, main)
+    store = addons.home(repo) / "keys" / "copies" / "registry.json"
+    before = store.read_bytes(), store.with_name("counter").read_bytes()
+    folder = addons.home(repo) / "worktrees" / wid8(repo)
+    (folder / repo.tids[0]).mkdir(parents=True)
+    if owner == "other":
+        (folder / ".owner").write_text(str(repo.parent / "other-main") + "\n")
+    with pytest.raises(Refused):
+        worktrees._remember_copies(repo, folder)
+    assert (store.read_bytes(), store.with_name("counter").read_bytes()) == before
+    assert (folder / repo.tids[0]).is_dir()
+
+
+def test_task_f_interrupted_store_write_heals_counter(repo, monkeypatch):
+    from orch import humanproof
+
+    p = make(repo)
+    store = addons.home(repo) / "keys" / "copies" / "registry.json"
+    counter = store.with_name("counter")
+    old = store.read_bytes()
+    before = int(counter.read_text())
+    write = humanproof._write_private
+
+    def crash(path, text):
+        if path == counter:
+            raise OSError("simulated counter write crash")
+        return write(path, text)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(humanproof, "_write_private", crash)
+        with pytest.raises(OSError, match="simulated"):
+            worktrees._remember_copies(repo, p.parent)
+    assert int(counter.read_text()) == before
+    assert json.loads(store.read_bytes())["counter"] == before + 1
+    assert worktrees._known_copies(p.parent.parent)[wid8(repo)]["main"] == str(repo.resolve())
+    assert int(counter.read_text()) == before + 1
+    store.write_bytes(old)
+    assert worktrees._known_copies(p.parent.parent) == {}
+
+
+@pytest.mark.parametrize("gap", [-1, 2])
+def test_task_f_other_counter_mismatches_remain_unknown(repo, gap):
+    from orch import humanproof
+
+    p = make(repo)
+    home = addons.home(repo)
+    store = home / "keys" / "copies" / "registry.json"
+    doc = json.loads(store.read_bytes())
+    doc["counter"] += gap
+    data = {k: doc[k] for k in ("version", "counter", "entries")}
+    doc["mac"] = worktrees._copies_mac(worktrees._copies_key(home), data)
+    humanproof._write_private(store, json.dumps(doc))
+    before = store.with_name("counter").read_bytes()
+    assert worktrees._known_copies(p.parent.parent) == {}
+    assert store.with_name("counter").read_bytes() == before
+
+
+def test_task_f_orphan_store_save_failure_returns_note(repo, monkeypatch):
+    main = repo.parent / "gone-save-failure"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+
+    def fail(*args):
+        raise OSError("simulated registry write failure")
+
+    monkeypatch.setattr(worktrees, "_save_copies_store", fail)
+    notes = worktrees.remove_orphaned(repo, d.name, discard=True)
+    assert not d.exists()
+    assert len(notes) == 1
+    assert d.name in notes[0] and "simulated registry write failure" in notes[0]

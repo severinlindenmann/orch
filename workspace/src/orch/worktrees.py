@@ -164,7 +164,8 @@ def _copies_mac(key: bytes, data: dict) -> str:
 def _copies_store(home: Path, key: bytes) -> tuple[int, dict]:
     """Read guarded state strictly. Only a never-created store may start at zero.
 
-    The counter is committed last: an interrupted update fails closed, like a replay.
+    Caller holds the home copies lock. A verified store one step ahead repairs an
+    interrupted counter commit; all other mismatches fail closed.
     Callers must never turn invalid state into an empty registry for a write.
     """
     d = home / "keys" / "copies"
@@ -185,7 +186,7 @@ def _copies_store(home: Path, key: bytes) -> tuple[int, dict]:
         or type(counter) is not int
         or counter < 1
         or type(data["counter"]) is not int
-        or data["counter"] != counter
+        or data["counter"] not in (counter, counter + 1)
         or not isinstance(mac, str)
         or not re.fullmatch(r"[0-9a-f]{64}", mac)
         or not hmac.compare_digest(mac, _copies_mac(key, data))
@@ -203,7 +204,9 @@ def _copies_store(home: Path, key: bytes) -> tuple[int, dict]:
             or entry["workspace_id"][:8] != ws8
         ):
             raise Refused("The copies identity store has an invalid identity.")
-    return counter, data["entries"]
+    if data["counter"] == counter + 1:
+        humanproof._write_private(d / "counter", str(data["counter"]) + "\n")
+    return data["counter"], data["entries"]
 
 
 def _save_copies_store(home: Path, key: bytes, counter: int, entries: dict) -> None:
@@ -218,7 +221,9 @@ def _save_copies_store(home: Path, key: bytes, counter: int, entries: dict) -> N
 def _known_copies(base: Path) -> dict:
     """Only the current, whole-store authenticated mapping is deletion authority."""
     try:
-        return _copies_store(base.parent, _copies_key(base.parent))[1]
+        key = _copies_key(base.parent)
+        with runs.locked(base.parent / ".copies-state", "_known_copies"):
+            return _copies_store(base.parent, key)[1]
     except (OSError, ValueError, Refused):
         return {}
 
@@ -297,6 +302,16 @@ def _remember_copies(root: Path, folder: Path) -> None:
             if entry["workspace_id"] != wid:
                 raise Refused("Another workspace uses the same copy folder.")
         else:
+            owner = folder / ".owner"
+            if os.path.lexists(owner):
+                if (
+                    owner.is_symlink()
+                    or not owner.is_file()
+                    or owner.read_text(encoding="utf-8").strip() != main
+                ):
+                    raise Refused("Another workspace uses the same copy folder.")
+            elif folder.exists() and any(folder.iterdir()):
+                raise Refused("The existing copies folder has no matching owner.")
             legacy = _legacy_copies_entry(folder.parent, folder.name)
             if legacy is not None and legacy != main:
                 raise Refused("Another workspace uses the same copy folder.")
@@ -1708,7 +1723,12 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
                     notes.append(f"{ws8}: kept: could not remove the copies folder: {e}")
                 else:
                     known.pop(ws8)
-                    _save_copies_store(base.parent, key, counter, known)
+                    try:
+                        _save_copies_store(base.parent, key, counter, known)
+                    except OSError as e:
+                        notes.append(
+                            f"{ws8}: copies folder removed, but could not update the identity store: {e}"
+                        )
     return notes
 
 
