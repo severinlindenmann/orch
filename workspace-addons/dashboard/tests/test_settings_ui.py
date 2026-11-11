@@ -25,10 +25,10 @@ def test_settings_navigation_and_cards():
         assert text in src
     assert "className:'settings-details'" not in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
-    # owner pass 11 Nov: no raw folder path in the primary text; the row says it in plain words, the path is under Details
-    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:400]
-    assert "h('p', {}, 'Stored on this computer')" in folder
-    assert folder.index("h('summary', {}, 'Details')") < folder.index("settings.folder")
+    # owner fb11 (11 Nov): the folder path is on the row without a click; plain words + full path under Details
+    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:700]
+    assert folder.index("middleShort(settings.folder)") < folder.index("h('summary', {}, 'Details')")
+    assert folder.index("h('summary', {}, 'Details')") < folder.index("'Stored on this computer'")
     assert "['agent', 'Helper']" in src and "['agent', 'Agent']" not in src
     css = (webjs.WEB / "pages/settings.css").read_text()
     assert "@media(max-width:760px)" in css
