@@ -36,7 +36,20 @@ def build(root: Path) -> Path:
             "type": "task",
         }
         if st == "waiting":
-            t.update(type="recurring", ext={"scheduler": {"cron": "0 8 * * 1"}})
+            # Screenshot case (owner pass 11 Nov): the Chat card shows "Weekly report · <due>", "Needs your OK"
+            # and the question's own buttons; the key sits behind Details.
+            question = {
+                "id": "q_weekly1",
+                "text": "Send the weekly report now?",
+                "options": ["Send it", "Not yet"],
+            }
+            question.update(recommended=None, answer=None, answered_by=None, via=None)
+            t.update(
+                type="recurring",
+                ext={"scheduler": {"cron": "0 8 * * 1"}},
+                due="2026-11-11",
+                questions=[question],
+            )
         (tdir / f"{t['id']}.json").write_text(json.dumps(t))
     (root / ".orch" / "inbox").mkdir(exist_ok=True)
     for m in json.loads((CONTRACTS / "message.examples.json").read_text()):

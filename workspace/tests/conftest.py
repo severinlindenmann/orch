@@ -12,6 +12,7 @@ import pytest
 from orch import addons, cli, winfinish
 
 _REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
+_TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp folder), before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
 
@@ -26,24 +27,26 @@ def _guard_bases() -> list[Path]:
 
 
 def _snapshot_real_tool_home():
-    """{path: (size, sha256, mtime_ns)} of the watched orch homes (read only), without the fallback trace; and
-    the trace lines. A path that can not be read maps to None."""
+    """{path: (size, sha256, mtime_ns)} of the watched orch homes (read only); and the fallback trace lines
+    (from the temp trace file: orch never writes the trace into the real home). A path that can not be read
+    maps to None."""
     files, trace = {}, []
     for base in _guard_bases():
-        _snapshot_one(base, files, trace)
+        _snapshot_one(base, files)
+    try:
+        if _TRACE_LOG.is_file() and not _TRACE_LOG.is_symlink():
+            trace = _TRACE_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        pass
     return files, trace
 
 
-def _snapshot_one(base: Path, files: dict, trace: list) -> None:
+def _snapshot_one(base: Path, files: dict) -> None:
     if base.exists():
         for p in (base, *base.rglob("*")):
             try:
-                if p.name.startswith(".fallback-trace.log"):
-                    if p.name == ".fallback-trace.log" and not p.is_symlink():
-                        trace += p.read_text(encoding="utf-8", errors="replace").splitlines()
-                    continue
                 if p.is_dir() and not p.is_symlink():
-                    files[str(p)] = "dir"  # a folder's mtime moves when the trace file is made or rotated
+                    files[str(p)] = "dir"  # a folder's mtime moves with its contents, which are checked
                     continue
                 st = p.stat()
                 digest = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
@@ -94,6 +97,10 @@ def _strict_orch_home(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(addons, "real_home", lambda: fake)
     monkeypatch.setenv("ORCH_HOME", str(fake / "toolhome"))
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    # a test that turns the fallback trace on writes its own file, never the shared one in the temp folder
+    trace = tmp_path_factory.mktemp("trace") / "orch-fallback-trace.log"
+    monkeypatch.setattr(addons, "_trace_log_path", lambda: trace)
+    monkeypatch.delenv("ORCH_TRACE_FALLBACKS", raising=False)  # the opt-in of a dev shell: tests turn it on
     # children and Path.home()/expanduser fallbacks must not find the real home through $HOME either
     monkeypatch.setenv("HOME", str(fake))
     monkeypatch.setenv("USERPROFILE", str(fake))
@@ -359,3 +366,19 @@ def stray_tmux(under: str) -> list[str]:
             if (m := _TMUX.search(line)) and m.group(2).startswith(under)
         }
     )
+
+
+def seed_profiles(root, profiles):
+    """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
+    write_profiles signs only the names it is told to)."""
+    from orch import humanproof as hp
+    from orch import keystore
+
+    try:
+        old = keystore.read_profiles(root)
+    except Exception:  # noqa: BLE001
+        old = {}
+    changed = frozenset(
+        n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
+    )
+    keystore.write_profiles(root, profiles, sign=changed)
