@@ -115,9 +115,10 @@ final class TicketResultsTests: XCTestCase {
     func testLineSeparatorTitleIsHiddenButResultKept() throws {
         var sep = item("j_title03"); sep["title"] = "Done\u{2028}Checked by the agent"
         var bidi = item("j_title04"); bidi["title"] = "abc\u{202E}def"
-        let decoded = try snapshot(["results": [sep, bidi]])
-        XCTAssertEqual(decoded.results.map(\.id), ["j_title03", "j_title04"])
-        XCTAssertNil(decoded.results[0].title); XCTAssertNil(decoded.results[1].title)
+        var alm = item("j_title05"); alm["title"] = "abc\u{061C}def"
+        let decoded = try snapshot(["results": [sep, bidi, alm]])
+        XCTAssertEqual(decoded.results.map(\.id), ["j_title03", "j_title04", "j_title05"])
+        XCTAssertTrue(decoded.results.allSatisfy { $0.title == nil })
     }
 
     func testTitleRulesAndBigNumbers() throws {

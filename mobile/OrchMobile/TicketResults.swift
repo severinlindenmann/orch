@@ -56,9 +56,7 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
     /// controls): the result stays, only its title is not shown.
     static func displaySafe(_ t: String) -> Bool {
         !t.unicodeScalars.contains { v in
-            let x = v.value
-            return (0x80...0x9F).contains(x) || x == 0x2028 || x == 0x2029 || x == 0x200E || x == 0x200F
-                || (0x202A...0x202E).contains(x) || (0x2066...0x2069).contains(x)
+            v.properties.isBidiControl || (0x80...0x9F).contains(v.value) || v.value == 0x2028 || v.value == 0x2029
         }
     }
 
