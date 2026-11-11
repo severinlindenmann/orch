@@ -261,7 +261,9 @@ def ensure_signing(root):
     try:
         addons.workspace_id(root, create=True)
         humanproof.human_key(root, create=True)
-    except Refused:  # a folder a test install may not use (not under ~/.orch-test): nothing can be signed there
+    except (
+        Refused
+    ):  # a folder a test install may not use (not under ~/.orch-test): nothing can be signed there
         pass
 
 
@@ -289,7 +291,9 @@ def _legacy_trust(request, monkeypatch):
             return "agent:" + str(tickets.agent_tool())
         who = tickets.current_actor(getattr(args, "by", None))
         if who.startswith("human:"):
-            ensure_signing(root)  # a person's Done is signed: the key and the local id exist, as after a real proof
+            ensure_signing(
+                root
+            )  # a person's Done is signed: the key and the local id exist, as after a real proof
         return who
 
     def test_home(root):
@@ -313,10 +317,10 @@ def _legacy_trust(request, monkeypatch):
         real = fn
 
         def call(*a, **kw):
+            ensure_signing(a[0])  # an agent finish under the grant is signed too: key + id exist after setup
             if len(a) <= proven_pos and "proven" not in kw:
                 by = a[proven_pos - 1] if len(a) >= proven_pos else kw.get("by", "")
                 if isinstance(by, str) and by.startswith("human:"):
-                    ensure_signing(a[0])
                     kw["proven"] = True
             return real(*a, **kw)
 

@@ -444,7 +444,11 @@ def apply_op(
             return ticket, None
         if ticket.get("status") == eff_status and raw_status == "done":
             ticket["status"] = "done"  # an unrelated op never rewrites a peer's Done into Review
-        elif ticket.get("status") == "done" and eff_status != "done" and not humanproof.verdict_ok(root, ticket):
+        elif (
+            ticket.get("status") == "done"
+            and eff_status != "done"
+            and not humanproof.verdict_ok(root, ticket)
+        ):
             raise Refused(humanproof.VERDICT_NEEDED)  # no op makes a ticket Done without signing it
         if was_review and ticket.get("status") != "review":
             # leaving Review closes the phones' review round in the same lock (fb8): an old "accept"
@@ -885,7 +889,8 @@ AGENT_FINISH_TEXT = "finished by the agent (agents may finish is on)"
 def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
     """The ticket is becoming Done (it was not Done for the reader): sign it, inside the ticket lock, with the
     checklist as it is now. Signers: an agent while the recorded grant `agents_may_finish` is effective (kind
-    "agent"), or a person with a verified proof (kind "person"). Anyone else: refused, never an unsigned Done."""
+    "agent"), or a person with a verified proof (kind "person"). Anyone else: refused, never an unsigned
+    Done."""
     if actor.startswith("agent:"):
         if not config.agents_may_finish(root):
             raise Refused(humanproof.VERDICT_NEEDED)

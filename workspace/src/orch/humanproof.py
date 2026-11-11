@@ -1166,7 +1166,8 @@ def _ledger_load(root: Path, name: str) -> dict | None:
 
 
 def _ledger_put(root: Path, name: str, schema: str, key: str, mac: str | None) -> bool:
-    """Make `mac` the current entry of `key` in ledger file `name`. A damaged ledger is NEVER overwritten (that
+    """Make `mac` the current entry of `key` in ledger file `name`. A damaged ledger is NEVER
+    overwritten (that
     would wipe every other entry): returns False and keeps the file. ONE writer for every ledger."""
     try:
         d = key_dir(root)
@@ -1256,7 +1257,8 @@ def wont_verifier(root: Path, relay_ok=None):
 # A ticket counts as Done on this machine only when it carries a verdict entry whose MAC is this core's own
 # verdict1 MAC over the ticket's current state AND is the CURRENT entry of this core's verdict ledger
 # (keys/<ws>/verdict.json, per ticket id the current MAC, null = tombstone). Every other raw "done" is Review.
-# Decided here (verdict_ok), applied in ONE read path (tickets._effective) and ONE write guard (tickets._write).
+# Decided here (verdict_ok), applied in ONE read path (tickets._effective) and ONE write guard
+# (tickets._write).
 # Leaving Done needs no proof (more work, never less): the core tombstones the entry on every non-done write
 # and whenever it reads a non-done ticket.
 VERDICT_LEDGER = "verdict.json"
@@ -1306,7 +1308,8 @@ def verdict_mac(key: bytes, workspace: str, ticket: str, record: dict) -> str:
 def verdict_is_human(
     key: bytes, workspace: str, ticket_id: str, ticket: dict, entry, ledger_current
 ) -> str | None:
-    """"current" when `entry` carries this key's MAC over the ticket's state AND that MAC is the current ledger
+    """ "current" when `entry` carries this key's MAC over the ticket's state AND that MAC is the
+    current ledger
     entry; "stale" when the MAC is ours but no longer current (replayed, tombstoned, superseded); None when it
     is not ours at all (another machine, forged, the checklist changed). Never raises."""
     try:
@@ -1399,14 +1402,16 @@ class VerdictChecker:
         return led
 
     def state(self, entry, ticket: dict) -> str | None:
-        """"current" | "stale" | None for one entry of `ticket` (see verdict_is_human)."""
+        """ "current" | "stale" | None for one entry of `ticket` (see verdict_is_human)."""
         ctx = self._context()
         tid = ticket.get("id") if isinstance(ticket, dict) else None
         if ctx is None or not isinstance(tid, str):
             return None
         led = self.ledger()
         if led is None:
-            return None  # damaged or loose ledger: nobody is vouched for, and nothing is judged "stale" either
+            return (
+                None  # damaged or loose ledger: nobody is vouched for, and nothing is judged "stale" either
+            )
         return verdict_is_human(ctx[1], ctx[0], tid, ticket, entry, led.get(tid))
 
     def ok(self, ticket: dict) -> bool:
@@ -1426,7 +1431,8 @@ def verdict_ok(root: Path, ticket: dict) -> bool:
 
 
 def verdict_verifier(root: Path):
-    """`verdict(entry, ticket) -> "current" | "stale" | None` for the sync merge: the ledger is read at each call,
+    """`verdict(entry, ticket) -> "current" | "stale" | None` for the sync merge: the ledger is read at
+    each call,
     so the sync caller must read, merge and write under the ticket's lock. Fails closed (no key, no workspace
     id, no readable ledger = None for everything)."""
     return VerdictChecker(root).state

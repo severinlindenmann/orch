@@ -65,7 +65,9 @@ def _edit(ws, tid, **kw):
 
 
 def _verdict(ws, run, monkeypatch, tid):
-    code, out, err = _cli(run, monkeypatch, _proof(ws, "ticket.verdict", tid), "ticket", "status", tid, "done")
+    code, out, err = _cli(
+        run, monkeypatch, _proof(ws, "ticket.verdict", tid), "ticket", "status", tid, "done"
+    )
     assert code == 0, out + err
 
 
@@ -135,7 +137,7 @@ def test_the_phone_accept_signs_through_the_relay_channel(ws, run):
     assert t["status"] == "done" and t["verdicts"][0]["kind"] == "person"
 
 
-# 3. who may finish --------------------------------------------------------------------------------------------
+# 3. who may finish -----------------------------------------------------------------------------------------
 
 
 def test_an_agent_finish_with_the_recorded_grant_is_done_kind_agent(ws, run):
@@ -170,7 +172,7 @@ def test_revoking_the_grant_does_not_undo_an_earlier_agent_done(ws, run, monkeyp
     assert tickets.load(ws, tid)["status"] == "done"
 
 
-# 4. no unsigned Done -----------------------------------------------------------------------------------------
+# 4. no unsigned Done ---------------------------------------------------------------------------------------
 
 
 def test_a_person_without_proof_gets_the_hand_off_and_nothing_is_written(ws, run):
@@ -185,7 +187,9 @@ def test_a_direct_write_of_a_new_done_without_a_verifying_entry_is_refused(ws, r
     with pytest.raises(Refused, match="Done needs your OK"):
         tickets._write(ws, {**t, "status": "done"})
     with pytest.raises(Refused, match="Done needs your OK"):
-        tickets._write(ws, {**t, "status": "done", "verdicts": [{"kind": "person", "nonce": "0" * 16, "mac": "A" * 43}]})
+        tickets._write(
+            ws, {**t, "status": "done", "verdicts": [{"kind": "person", "nonce": "0" * 16, "mac": "A" * 43}]}
+        )
     with pytest.raises(Refused, match="Done needs your OK"):
         tickets.apply_op(ws, tid, lambda x: x.update(status="done"))  # no op makes a ticket Done unsigned
     assert _raw(ws, tid)["status"] != "done"
@@ -200,7 +204,7 @@ def test_a_person_actor_cannot_sign_without_the_proof_flag(ws, run):
         tickets.patch(ws, tid, tickets.revision(tickets.load(ws, tid)), '{"status": "done"}', "human:me")
 
 
-# 5. reopen tombstones, replays do not come back --------------------------------------------------------------
+# 5. reopen tombstones, replays do not come back ------------------------------------------------------------
 
 
 def test_reopen_tombstones_and_the_old_file_content_is_review(ws, run, monkeypatch):
@@ -217,7 +221,8 @@ def test_reopen_tombstones_and_the_old_file_content_is_review(ws, run, monkeypat
 
 
 def test_editing_the_file_to_active_and_back_to_done_is_review_the_reader_tombstones(ws, run, monkeypatch):
-    """Manager adjustment 1: a core READ of a ticket whose file is not done tombstones its entry at that moment
+    """Manager adjustment 1: a core READ of a ticket whose file is not done tombstones its entry at that
+    moment
     (like effective() does), so the replay "active, then done again with the old verdict" is not Done."""
     tid = _finished(ws, run)
     _verdict(ws, run, monkeypatch, tid)
@@ -253,7 +258,7 @@ def test_a_newer_verdict_supersedes_an_older_one(ws, run, monkeypatch):
     assert tickets.load(ws, tid)["status"] == "review"
 
 
-# 6. what a verdict binds -------------------------------------------------------------------------------------
+# 6. what a verdict binds -----------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -336,10 +341,15 @@ def test_no_key_means_no_verdict(ws, run):
     tid = _finished(ws, run)
     with pytest.raises(Refused):
         hp.verdict_sign(ws, _raw(ws, tid), "person")
-    assert hp.verdict_ok(ws, {**_raw(ws, tid), "verdicts": [{"kind": "person", "nonce": "0" * 16, "mac": "A" * 43}]}) is False
+    assert (
+        hp.verdict_ok(
+            ws, {**_raw(ws, tid), "verdicts": [{"kind": "person", "nonce": "0" * 16, "mac": "A" * 43}]}
+        )
+        is False
+    )
 
 
-# the record ---------------------------------------------------------------------------------------------------
+# the record ------------------------------------------------------------------------------------------------
 
 
 def test_the_mac_binds_the_ticket_the_workspace_the_kind_and_the_nonce(ws, run, monkeypatch):
@@ -354,7 +364,9 @@ def test_the_mac_binds_the_ticket_the_workspace_the_kind_and_the_nonce(ws, run, 
     assert not ok.ok({**t, "verdicts": [{**entry, "kind": "agent"}]})
     assert not ok.ok({**t, "verdicts": [{**entry, "nonce": "f" * 16}]})
     assert not ok.ok({**t, "verdicts": "garbage"}) and not ok.ok({**t, "verdicts": [None, 3, {}]})
-    assert hp.verdict_mac(b"k", "w", "t", {"a": 1}) != hp.wontdo_mac(b"k", "w", "t", {"a": 1})  # prefix separation
+    assert hp.verdict_mac(b"k", "w", "t", {"a": 1}) != hp.wontdo_mac(
+        b"k", "w", "t", {"a": 1}
+    )  # prefix separation
     assert hp.verdict_mac(b"k", "w1", "t", {"a": 1}) != hp.verdict_mac(b"k", "w2", "t", {"a": 1})
 
 
@@ -367,7 +379,7 @@ def test_the_ledger_file_is_private_and_separate_from_the_wont_ledger(ws, run, m
     assert hp.LEDGER == "wont.json" and hp.VERDICT_LEDGER != hp.LEDGER
 
 
-# sync ----------------------------------------------------------------------------------------------------------
+# sync ------------------------------------------------------------------------------------------------------
 
 
 def _merge_mod():
@@ -388,7 +400,11 @@ def test_the_real_verifier_drives_the_merge_and_a_merged_reopen_tombstones_on_wr
     _verdict(ws, run, monkeypatch, tid)
     base = _raw(ws, tid)
     mine = {**base, "updated_at": "2030-01-01T00:00:00Z"}
-    peer_garbage = {**base, "verdicts": [{"kind": "person", "nonce": "1" * 16, "mac": "B" * 43}], "updated_at": "2030-01-02T00:00:00Z"}
+    peer_garbage = {
+        **base,
+        "verdicts": [{"kind": "person", "nonce": "1" * 16, "mac": "B" * 43}],
+        "updated_at": "2030-01-02T00:00:00Z",
+    }
     verdict = hp.verdict_verifier(ws)
     out = merge.merge_ticket(base, peer_garbage, mine, "2030-01-03T00:00:00Z", verdict=verdict)
     macs = [e["mac"] for e in out["verdicts"]]
