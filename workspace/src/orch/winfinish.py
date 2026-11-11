@@ -21,6 +21,8 @@ import json, os, subprocess, sys, time
 
 job = json.load(open(sys.argv[1], encoding="utf-8"))
 log = open(job["log"], "a", encoding="utf-8")
+registry_written = False
+registry_before = None
 
 
 def say(text):
@@ -55,6 +57,7 @@ def busy():
 
 
 def main():
+    global registry_written, registry_before
     busy()
     say("waiting for orch to exit (pid %d; folders: %s)" % (os.getpid(), ", ".join(job["free"])))
     deadline = time.time() + job["wait"]
@@ -87,10 +90,14 @@ def main():
             f.write(rtext)
     if job.get("registry"):
         path, data = job["registry"]
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                registry_before = f.read()
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(data)
         os.replace(tmp, path)
+        registry_written = True
     for cmd in job["then"]:
         r = subprocess.run(cmd["argv"], cwd=cmd["cwd"], capture_output=True, text=True)
         say((r.stdout + r.stderr).strip())
@@ -109,6 +116,13 @@ except Exception:
 
     say("RESULT fail: " + traceback.format_exc())
 finally:
+    if code != 0 and registry_written:
+        path = job["registry"][0]
+        if registry_before is None:
+            os.remove(path)
+        else:
+            with open(path, "wb") as f:
+                f.write(registry_before)
     try:
         os.remove(job["pending"])
     except OSError:

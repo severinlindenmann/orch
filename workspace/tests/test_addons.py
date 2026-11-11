@@ -971,10 +971,9 @@ def test_builtin_add_asks_on_a_tty_and_shows_what_it_adds(proj, run, tmp_path, m
     assert code == 2 and seen == ["hello"] and "Adds a dashboard tab: Hello" in err and "Add it? [y/N]" in err
     assert "Not confirmed" in err and not uv_calls
     monkeypatch.setattr(sys, "stdin", Tty("y\n"))
-    run("addon", "add", "hello")
+    assert run("addon", "add", "hello")[0] == 2  # the fake install exposes no package
     assert uv_calls and uv_calls[0][-1].endswith("#subdirectory=workspace-addons/hello")
-    reg = json.loads((Path(os.environ["ORCH_HOME"]) / "addons.json").read_text(encoding="utf-8"))
-    assert reg == [{"name": "hello", "source": "built-in", "version": "0.1.0"}]
+    assert not addons.registry_path().exists()
     # not a terminal (agents, CI): refused with the hint, nothing fetched
     seen.clear()
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -1181,3 +1180,61 @@ def test_install_repo_with_quotes_or_spaces_is_refused(monkeypatch):
     monkeypatch.setenv("ORCH_REPO", 'https://github.com/a/orch" --index-url x')
     with pytest.raises(Refused):
         addons.spec("workspace")
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("failure", ["install", "manifest", "unshipped"])
+def test_failed_add_preserves_registry(proj, tmp_path, monkeypatch, run, uv_calls, existing, failure):
+    path = addons.registry_path()
+    before = b'[  {"name": "automation", "source": "built-in", "version": "0.2.0"} ]\n'
+    if existing:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(before)
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    monkeypatch.setattr(addons, "repo", lambda: "https://github.com/example/orch")
+    source = "not-shipped"
+    if failure != "unshipped":
+        source = str(make_addon(tmp_path / "addon"))
+    if failure == "install":
+
+        def fail(args):
+            raise Refused("install failed")
+
+        monkeypatch.setattr(addons, "run_uv", fail)
+    assert run("addon", "add", source, "--yes")[0] == 2
+    assert path.read_bytes() == before if existing else not path.exists()
+    code, _, err = run("addon", "list")
+    assert code == 0
+    assert "add-on list entry" not in err
+
+
+@pytest.mark.parametrize("kind", ["normal", "test"])
+def test_sync_is_shipped_and_can_be_added(proj, monkeypatch, run, uv_calls, kind):
+    import tomllib
+
+    import jsonschema
+
+    from orch import humanproof
+
+    base = Path(__file__).resolve().parents[2]
+    folder = base / "workspace-addons" / "sync"
+    manifest = folder / "src" / "orch_sync" / addons.MANIFEST
+    jsonschema.validate(
+        tomllib.loads(manifest.read_text()),
+        json.loads((base / "contracts" / "addon-manifest.schema.json").read_text()),
+    )
+    assert "sync" in addons.SHIPPED_ADDONS
+    assert addons.folder_manifest(folder)["recommended"] is False
+    # proj fakes real_home: exercise the default home without touching the account home.
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    monkeypatch.setenv("ORCH_HOME", str(addons.real_home() / ".orch-tool"))
+    monkeypatch.setattr(humanproof, "install_kind", lambda: kind)
+    monkeypatch.setattr(addons, "repo", lambda: "https://github.com/example/orch")
+    monkeypatch.setattr(addons, "_entry_points", lambda: {"sync": "orch_sync"} if uv_calls else {})
+    monkeypatch.setattr(addons, "_manifest_file", lambda module: manifest)
+    code, _, err = run("addon", "add", "sync", "--yes")
+    assert code == 0, err
+    assert "sync" in addons.active(proj)
+    assert "--with" in uv_calls[0]
+    assert any("workspace-addons/sync" in arg for arg in uv_calls[0])
+    assert "add-on list entry" not in run("addon", "list")[2]

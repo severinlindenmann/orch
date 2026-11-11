@@ -123,7 +123,15 @@ struct ConversationInfoView: View {
                 Text(ticket.displayTitle).themeFont(22, .semibold).accessibilityAddTraits(.isHeader)
                 TicketStatusChip(status: TopicStatus(ticket)).accessibilityIdentifier("info-summary")
                 if let description = ticket.view?.summary, !description.isEmpty {
-                    Text(description).themeFont(13).foregroundStyle(Theme.muted)
+                    Text(ArtifactMentions.attributed(description, attachments: ticket.view?.attachments ?? []))
+                        .themeFont(13).foregroundStyle(Theme.muted)
+                        .environment(\.openURL, OpenURLAction { url in
+                            guard let id = ArtifactMentions.attachmentId(from: url) else { return .systemAction }
+                            if let attachment = ticket.view?.attachments.first(where: { $0.id == id }) {
+                                viewer = ArtifactItem(attachment, in: conversation)
+                            }
+                            return .handled
+                        })
                 }
                 Text("\(ticket.view?.totalCount ?? 0) tasks · \(refs.count) references")
                     .themeFont(13).foregroundStyle(Theme.muted)

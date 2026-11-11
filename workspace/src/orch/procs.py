@@ -17,6 +17,21 @@ def orch_python_argv(*args: str) -> list[str]:
     return [sys.executable, "-I", "-P", "-m", "orch", *args]
 
 
+def background_popen_kwargs() -> dict[str, int | bool]:
+    """Start a background process without a visible Windows console; callers supply log streams.
+
+    Windows: CREATE_NO_WINDOW gives the process a hidden console that its children inherit. Not
+    DETACHED_PROCESS: Windows ignores CREATE_NO_WINDOW next to it, and a venv's python.exe is a launcher
+    whose real-python child then allocates a NEW (visible) console, which is the stray terminal window."""
+    if sys.platform == "win32":
+        return {
+            "creationflags": 0x00000200 | 0x08000000,  # CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+    return {"start_new_session": True, "stdin": subprocess.DEVNULL}
+
+
 def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 

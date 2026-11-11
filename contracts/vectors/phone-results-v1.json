@@ -1,0 +1,1710 @@
+{
+ "name": "phone-results-v1",
+ "description": "Phone result snapshots (blocks.md, Phone; message.schema.json ticket_view.results). trim: what the sending workspace makes of one result before the value hider (in -> out); every out is a valid orch.blocks/1 document and a fixed point of the trim. Replayed by contracts/validate.py (phone-results) and the 2.6 sender test.",
+ "result_bytes": 2560,
+ "results_bytes": 8192,
+ "max_results": 5,
+ "table_rows": 20,
+ "more_text": "More on the computer",
+ "trim": [
+  {
+   "name": "job-export: log dropped, table cut to 20 rows, link without query, file by base name",
+   "in": {
+    "id": "j_export0001",
+    "from": "job",
+    "title": "Invoice export",
+    "at": "2026-11-11T08:40:00Z",
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "job",
+     "title": "Invoice export",
+     "blocks": [
+      {
+       "type": "summary",
+       "text": "Exported 45 invoices to CSV.",
+       "tone": "good"
+      },
+      {
+       "type": "steps",
+       "items": [
+        {
+         "label": "Read invoices",
+         "state": "done"
+        },
+        {
+         "label": "Write CSV",
+         "state": "done"
+        }
+       ]
+      },
+      {
+       "type": "stat",
+       "label": "Invoices",
+       "value": 45
+      },
+      {
+       "type": "table",
+       "title": "Invoices",
+       "columns": [
+        {
+         "key": "invoice",
+         "label": "Invoice"
+        },
+        {
+         "key": "customer",
+         "label": "Customer"
+        },
+        {
+         "key": "amount",
+         "label": "Amount",
+         "kind": "number"
+        }
+       ],
+       "rows": [
+        {
+         "invoice": "INV-1000",
+         "customer": "North shop 1",
+         "amount": 120.0
+        },
+        {
+         "invoice": "INV-1001",
+         "customer": "South shop 2",
+         "amount": 137.5
+        },
+        {
+         "invoice": "INV-1002",
+         "customer": "East shop 3",
+         "amount": 155.0
+        },
+        {
+         "invoice": "INV-1003",
+         "customer": "West shop 4",
+         "amount": 172.5
+        },
+        {
+         "invoice": "INV-1004",
+         "customer": "Centre shop 5",
+         "amount": 190.0
+        },
+        {
+         "invoice": "INV-1005",
+         "customer": "North shop 6",
+         "amount": 207.5
+        },
+        {
+         "invoice": "INV-1006",
+         "customer": "South shop 7",
+         "amount": 225.0
+        },
+        {
+         "invoice": "INV-1007",
+         "customer": "East shop 8",
+         "amount": 242.5
+        },
+        {
+         "invoice": "INV-1008",
+         "customer": "West shop 9",
+         "amount": 260.0
+        },
+        {
+         "invoice": "INV-1009",
+         "customer": "Centre shop 10",
+         "amount": 277.5
+        },
+        {
+         "invoice": "INV-1010",
+         "customer": "North shop 11",
+         "amount": 295.0
+        },
+        {
+         "invoice": "INV-1011",
+         "customer": "South shop 12",
+         "amount": 312.5
+        },
+        {
+         "invoice": "INV-1012",
+         "customer": "East shop 13",
+         "amount": 330.0
+        },
+        {
+         "invoice": "INV-1013",
+         "customer": "West shop 14",
+         "amount": 347.5
+        },
+        {
+         "invoice": "INV-1014",
+         "customer": "Centre shop 15",
+         "amount": 365.0
+        },
+        {
+         "invoice": "INV-1015",
+         "customer": "North shop 16",
+         "amount": 382.5
+        },
+        {
+         "invoice": "INV-1016",
+         "customer": "South shop 17",
+         "amount": 400.0
+        },
+        {
+         "invoice": "INV-1017",
+         "customer": "East shop 18",
+         "amount": 417.5
+        },
+        {
+         "invoice": "INV-1018",
+         "customer": "West shop 19",
+         "amount": 435.0
+        },
+        {
+         "invoice": "INV-1019",
+         "customer": "Centre shop 20",
+         "amount": 452.5
+        },
+        {
+         "invoice": "INV-1020",
+         "customer": "North shop 21",
+         "amount": 470.0
+        },
+        {
+         "invoice": "INV-1021",
+         "customer": "South shop 22",
+         "amount": 487.5
+        },
+        {
+         "invoice": "INV-1022",
+         "customer": "East shop 23",
+         "amount": 505.0
+        },
+        {
+         "invoice": "INV-1023",
+         "customer": "West shop 24",
+         "amount": 522.5
+        },
+        {
+         "invoice": "INV-1024",
+         "customer": "Centre shop 25",
+         "amount": 540.0
+        },
+        {
+         "invoice": "INV-1025",
+         "customer": "North shop 26",
+         "amount": 557.5
+        },
+        {
+         "invoice": "INV-1026",
+         "customer": "South shop 27",
+         "amount": 575.0
+        },
+        {
+         "invoice": "INV-1027",
+         "customer": "East shop 28",
+         "amount": 592.5
+        },
+        {
+         "invoice": "INV-1028",
+         "customer": "West shop 29",
+         "amount": 610.0
+        },
+        {
+         "invoice": "INV-1029",
+         "customer": "Centre shop 30",
+         "amount": 627.5
+        },
+        {
+         "invoice": "INV-1030",
+         "customer": "North shop 31",
+         "amount": 645.0
+        },
+        {
+         "invoice": "INV-1031",
+         "customer": "South shop 32",
+         "amount": 662.5
+        },
+        {
+         "invoice": "INV-1032",
+         "customer": "East shop 33",
+         "amount": 680.0
+        },
+        {
+         "invoice": "INV-1033",
+         "customer": "West shop 34",
+         "amount": 697.5
+        },
+        {
+         "invoice": "INV-1034",
+         "customer": "Centre shop 35",
+         "amount": 715.0
+        },
+        {
+         "invoice": "INV-1035",
+         "customer": "North shop 36",
+         "amount": 732.5
+        },
+        {
+         "invoice": "INV-1036",
+         "customer": "South shop 37",
+         "amount": 750.0
+        },
+        {
+         "invoice": "INV-1037",
+         "customer": "East shop 38",
+         "amount": 767.5
+        },
+        {
+         "invoice": "INV-1038",
+         "customer": "West shop 39",
+         "amount": 785.0
+        },
+        {
+         "invoice": "INV-1039",
+         "customer": "Centre shop 40",
+         "amount": 802.5
+        },
+        {
+         "invoice": "INV-1040",
+         "customer": "North shop 41",
+         "amount": 820.0
+        },
+        {
+         "invoice": "INV-1041",
+         "customer": "South shop 42",
+         "amount": 837.5
+        },
+        {
+         "invoice": "INV-1042",
+         "customer": "East shop 43",
+         "amount": 855.0
+        },
+        {
+         "invoice": "INV-1043",
+         "customer": "West shop 44",
+         "amount": 872.5
+        },
+        {
+         "invoice": "INV-1044",
+         "customer": "Centre shop 45",
+         "amount": 890.0
+        }
+       ]
+      },
+      {
+       "type": "file",
+       "path": "out/exports/invoices-2026-11.csv",
+       "label": "CSV file",
+       "size": 18234
+      },
+      {
+       "type": "link",
+       "url": "https://ci.example.ch/runs/812?token=abc123#log",
+       "label": "CI run"
+      },
+      {
+       "type": "log",
+       "title": "Output",
+       "lines": [
+        "reading 45 invoices",
+        "writing out/exports/invoices-2026-11.csv",
+        "done"
+       ]
+      }
+     ]
+    }
+   },
+   "out": {
+    "id": "j_export0001",
+    "from": "job",
+    "title": "Invoice export",
+    "at": "2026-11-11T08:40:00Z",
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "job",
+     "title": "Invoice export",
+     "blocks": [
+      {
+       "type": "summary",
+       "text": "Exported 45 invoices to CSV.",
+       "tone": "good"
+      },
+      {
+       "type": "steps",
+       "items": [
+        {
+         "label": "Read invoices",
+         "state": "done"
+        },
+        {
+         "label": "Write CSV",
+         "state": "done"
+        }
+       ]
+      },
+      {
+       "type": "stat",
+       "label": "Invoices",
+       "value": 45
+      },
+      {
+       "type": "table",
+       "title": "Invoices",
+       "columns": [
+        {
+         "key": "invoice",
+         "label": "Invoice"
+        },
+        {
+         "key": "customer",
+         "label": "Customer"
+        },
+        {
+         "key": "amount",
+         "label": "Amount",
+         "kind": "number"
+        }
+       ],
+       "rows": [
+        {
+         "invoice": "INV-1000",
+         "customer": "North shop 1",
+         "amount": 120.0
+        },
+        {
+         "invoice": "INV-1001",
+         "customer": "South shop 2",
+         "amount": 137.5
+        },
+        {
+         "invoice": "INV-1002",
+         "customer": "East shop 3",
+         "amount": 155.0
+        },
+        {
+         "invoice": "INV-1003",
+         "customer": "West shop 4",
+         "amount": 172.5
+        },
+        {
+         "invoice": "INV-1004",
+         "customer": "Centre shop 5",
+         "amount": 190.0
+        },
+        {
+         "invoice": "INV-1005",
+         "customer": "North shop 6",
+         "amount": 207.5
+        },
+        {
+         "invoice": "INV-1006",
+         "customer": "South shop 7",
+         "amount": 225.0
+        },
+        {
+         "invoice": "INV-1007",
+         "customer": "East shop 8",
+         "amount": 242.5
+        },
+        {
+         "invoice": "INV-1008",
+         "customer": "West shop 9",
+         "amount": 260.0
+        },
+        {
+         "invoice": "INV-1009",
+         "customer": "Centre shop 10",
+         "amount": 277.5
+        },
+        {
+         "invoice": "INV-1010",
+         "customer": "North shop 11",
+         "amount": 295.0
+        },
+        {
+         "invoice": "INV-1011",
+         "customer": "South shop 12",
+         "amount": 312.5
+        },
+        {
+         "invoice": "INV-1012",
+         "customer": "East shop 13",
+         "amount": 330.0
+        },
+        {
+         "invoice": "INV-1013",
+         "customer": "West shop 14",
+         "amount": 347.5
+        },
+        {
+         "invoice": "INV-1014",
+         "customer": "Centre shop 15",
+         "amount": 365.0
+        },
+        {
+         "invoice": "INV-1015",
+         "customer": "North shop 16",
+         "amount": 382.5
+        },
+        {
+         "invoice": "INV-1016",
+         "customer": "South shop 17",
+         "amount": 400.0
+        },
+        {
+         "invoice": "INV-1017",
+         "customer": "East shop 18",
+         "amount": 417.5
+        },
+        {
+         "invoice": "INV-1018",
+         "customer": "West shop 19",
+         "amount": 435.0
+        },
+        {
+         "invoice": "INV-1019",
+         "customer": "Centre shop 20",
+         "amount": 452.5
+        }
+       ],
+       "total_rows": 45
+      },
+      {
+       "type": "file",
+       "path": "invoices-2026-11.csv",
+       "label": "CSV file",
+       "size": 18234
+      },
+      {
+       "type": "link",
+       "url": "https://ci.example.ch/runs/812",
+       "label": "CI run"
+      },
+      {
+       "type": "summary",
+       "text": "More on the computer"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "agent proof: artifacts path sent as base name, nothing cut, no extra summary",
+   "in": {
+    "id": "a_3f2a9c0d1b7e",
+    "from": "agent",
+    "title": "Totals match the sheet",
+    "at": "2026-11-11T09:05:00Z",
+    "checked": true,
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "agent",
+     "blocks": [
+      {
+       "type": "summary",
+       "text": "Q3 totals match the finance sheet."
+      },
+      {
+       "type": "kv",
+       "items": [
+        {
+         "key": "Sheet total",
+         "value": "CHF 1 204 300"
+        },
+        {
+         "key": "Report total",
+         "value": "CHF 1 204 300"
+        }
+       ]
+      },
+      {
+       "type": "file",
+       "path": ".orch/tickets/t_rslt01/artifacts/q3-chart.png",
+       "label": "Q3 chart",
+       "size": 48213,
+       "preview": "image"
+      }
+     ]
+    }
+   },
+   "out": {
+    "id": "a_3f2a9c0d1b7e",
+    "from": "agent",
+    "title": "Totals match the sheet",
+    "at": "2026-11-11T09:05:00Z",
+    "checked": true,
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "agent",
+     "blocks": [
+      {
+       "type": "summary",
+       "text": "Q3 totals match the finance sheet."
+      },
+      {
+       "type": "kv",
+       "items": [
+        {
+         "key": "Sheet total",
+         "value": "CHF 1 204 300"
+        },
+        {
+         "key": "Report total",
+         "value": "CHF 1 204 300"
+        }
+       ]
+      },
+      {
+       "type": "file",
+       "path": "q3-chart.png",
+       "label": "Q3 chart",
+       "size": 48213,
+       "preview": "image"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "already small: unchanged",
+   "in": {
+    "id": "a_9b1c2d3e4f50",
+    "from": "orch",
+    "at": "2026-11-11T07:30:00Z",
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "orch",
+     "blocks": [
+      {
+       "type": "progress",
+       "label": "Steps done",
+       "done": 2,
+       "total": 3
+      }
+     ]
+    }
+   },
+   "out": {
+    "id": "a_9b1c2d3e4f50",
+    "from": "orch",
+    "at": "2026-11-11T07:30:00Z",
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "orch",
+     "blocks": [
+      {
+       "type": "progress",
+       "label": "Steps done",
+       "done": 2,
+       "total": 3
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "too big after the 20-row cut: blocks dropped from the end until 2560 bytes",
+   "in": {
+    "id": "j_bigtable01",
+    "from": "job",
+    "title": "Price check",
+    "at": "2026-11-11T06:00:00Z",
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "job",
+     "blocks": [
+      {
+       "type": "summary",
+       "text": "Checked 1 234 prices."
+      },
+      {
+       "type": "table",
+       "columns": [
+        {
+         "key": "item",
+         "label": "Item"
+        },
+        {
+         "key": "note",
+         "label": "Note"
+        }
+       ],
+       "rows": [
+        {
+         "item": "Article 0",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 1",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 2",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 3",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 4",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 5",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 6",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 7",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 8",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 9",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 10",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 11",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 12",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 13",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 14",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 15",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 16",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 17",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 18",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 19",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 20",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 21",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 22",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 23",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 24",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 25",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 26",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 27",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 28",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 29",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 30",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 31",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 32",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 33",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 34",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 35",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 36",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 37",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 38",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 39",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 40",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 41",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 42",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 43",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 44",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 45",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 46",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 47",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 48",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 49",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 50",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 51",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 52",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 53",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 54",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 55",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 56",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 57",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 58",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 59",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 60",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 61",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 62",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 63",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 64",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 65",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 66",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 67",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 68",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 69",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 70",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 71",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 72",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 73",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 74",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 75",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 76",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 77",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 78",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 79",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 80",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 81",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 82",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 83",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 84",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 85",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 86",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 87",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 88",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 89",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 90",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 91",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 92",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 93",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 94",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 95",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 96",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 97",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 98",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 99",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 100",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 101",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 102",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 103",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 104",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 105",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 106",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 107",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 108",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 109",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 110",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 111",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 112",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 113",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 114",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 115",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 116",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 117",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 118",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 119",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 120",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 121",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 122",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 123",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 124",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 125",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 126",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 127",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 128",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 129",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 130",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 131",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 132",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 133",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 134",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 135",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 136",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 137",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 138",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 139",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 140",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 141",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 142",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 143",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 144",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 145",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 146",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 147",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 148",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 149",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 150",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 151",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 152",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 153",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 154",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 155",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 156",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 157",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 158",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 159",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 160",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 161",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 162",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 163",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 164",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 165",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 166",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 167",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 168",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 169",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 170",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 171",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 172",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 173",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 174",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 175",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 176",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 177",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 178",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 179",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 180",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 181",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 182",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 183",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 184",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 185",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 186",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 187",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 188",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 189",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 190",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 191",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 192",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 193",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 194",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 195",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 196",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 197",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 198",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        },
+        {
+         "item": "Article 199",
+         "note": "Price differs from the list by more than five percent Price differs from the list by more than five percent "
+        }
+       ],
+       "total_rows": 1234
+      },
+      {
+       "type": "chart",
+       "kind": "line",
+       "title": "Prices",
+       "series": [
+        {
+         "name": "List",
+         "points": [
+          [
+           0,
+           10
+          ],
+          [
+           1,
+           11
+          ],
+          [
+           2,
+           12
+          ],
+          [
+           3,
+           13
+          ],
+          [
+           4,
+           14
+          ],
+          [
+           5,
+           15
+          ],
+          [
+           6,
+           16
+          ],
+          [
+           7,
+           17
+          ],
+          [
+           8,
+           18
+          ],
+          [
+           9,
+           19
+          ],
+          [
+           10,
+           20
+          ],
+          [
+           11,
+           21
+          ],
+          [
+           12,
+           22
+          ],
+          [
+           13,
+           23
+          ],
+          [
+           14,
+           24
+          ],
+          [
+           15,
+           25
+          ],
+          [
+           16,
+           26
+          ],
+          [
+           17,
+           27
+          ],
+          [
+           18,
+           28
+          ],
+          [
+           19,
+           29
+          ],
+          [
+           20,
+           30
+          ],
+          [
+           21,
+           31
+          ],
+          [
+           22,
+           32
+          ],
+          [
+           23,
+           33
+          ],
+          [
+           24,
+           34
+          ],
+          [
+           25,
+           35
+          ],
+          [
+           26,
+           36
+          ],
+          [
+           27,
+           37
+          ],
+          [
+           28,
+           38
+          ],
+          [
+           29,
+           39
+          ],
+          [
+           30,
+           40
+          ],
+          [
+           31,
+           41
+          ],
+          [
+           32,
+           42
+          ],
+          [
+           33,
+           43
+          ],
+          [
+           34,
+           44
+          ],
+          [
+           35,
+           45
+          ],
+          [
+           36,
+           46
+          ],
+          [
+           37,
+           47
+          ],
+          [
+           38,
+           48
+          ],
+          [
+           39,
+           49
+          ],
+          [
+           40,
+           50
+          ],
+          [
+           41,
+           51
+          ],
+          [
+           42,
+           52
+          ],
+          [
+           43,
+           53
+          ],
+          [
+           44,
+           54
+          ],
+          [
+           45,
+           55
+          ],
+          [
+           46,
+           56
+          ],
+          [
+           47,
+           57
+          ],
+          [
+           48,
+           58
+          ],
+          [
+           49,
+           59
+          ],
+          [
+           50,
+           60
+          ],
+          [
+           51,
+           61
+          ],
+          [
+           52,
+           62
+          ],
+          [
+           53,
+           63
+          ],
+          [
+           54,
+           64
+          ],
+          [
+           55,
+           65
+          ],
+          [
+           56,
+           66
+          ],
+          [
+           57,
+           67
+          ],
+          [
+           58,
+           68
+          ],
+          [
+           59,
+           69
+          ]
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "out": {
+    "id": "j_bigtable01",
+    "from": "job",
+    "title": "Price check",
+    "at": "2026-11-11T06:00:00Z",
+    "doc": {
+     "schema": "orch.blocks/1",
+     "from": "job",
+     "blocks": [
+      {
+       "type": "summary",
+       "text": "Checked 1 234 prices."
+      },
+      {
+       "type": "summary",
+       "text": "More on the computer"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

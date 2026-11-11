@@ -178,7 +178,7 @@ def test_query_bad_arguments(bad):
 
 def test_query_empty():
     rc, (page,) = fake("record", "query", "--json", scenario="empty")
-    assert rc == 0 and page == {"items": [], "next": None}
+    assert rc == 0 and page == {"items": [], "next": None, "unavailable": []}
 
 
 # --- record counts ---

@@ -460,7 +460,7 @@ struct ConversationView: View {
         } else {
             MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
                           quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
-                          onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
+                          onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, attachments: ticket?.view?.attachments ?? [], onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
         }
     }
     @ViewBuilder private var emptyState: some View {
