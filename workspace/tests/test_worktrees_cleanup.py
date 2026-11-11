@@ -1291,11 +1291,18 @@ def test_review_retry_bounds_remove_and_restores_deadline(repo, monkeypatch, rai
     assert worktrees._ctx.deadline == previous
 
 
+from orch import humanproof as _hp
+
+_REAL_GUARDED_HOME = _hp.guarded_home  # the true pairing check, before tests/conftest.py replaces it
+
+
 @pytest.fixture(autouse=True)
 def _copies_test_home(monkeypatch, request):
     from orch import humanproof
 
     if request.node.name.startswith("test_task_e_real_guard"):
+        # conftest's autouse patch gives every module a usable test home: these tests need the real pairing
+        monkeypatch.setattr(humanproof, "guarded_home", _REAL_GUARDED_HOME)
         return
 
     # Legacy proj fixtures live outside the fake account's .orch-test directory.
