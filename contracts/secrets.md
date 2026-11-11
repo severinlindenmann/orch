@@ -128,6 +128,12 @@ Person-only, proven by the human channel (invariant H1, human-proof.md: a proof 
 the local page; done from the dashboard): `orch secret add <name> --type T [--file F]` (value from stdin, never
 an argument), `orch secret remove <name>`, `orch secret profile <name> …`. These are additions to the five agent commands.
 
+- **Who may run what (Level 1, stated plainly).** `env` and `file` hand the profile's keys to **whatever command the
+  caller names**, including an interpreter (`python -c`, `sh -c`, `env`, `curl`) that can write a key to a file or the
+  network. Output hiding cannot stop that; it is a best-effort safety net for accidents (a CLI that echoes its token),
+  not a control against a caller that deliberately exfiltrates. Only `exec` is bound to a command a person approved
+  (the profile's `run`, set with a `secret.profile` proof). Skills and screens say so in plain words. Restricting
+  `env`/`file` to person-approved commands is a possible later opt-in (not part of Level 1).
 - **Hiding the child's output.** stdout and stderr of the child go through pipes and the streaming hider (below) before they
   reach the caller. Interactive programs see pipes, not a terminal; that is accepted.
 - **No shell.** argv is run as given; orch never builds a shell line from a key.
