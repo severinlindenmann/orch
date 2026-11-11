@@ -30,6 +30,7 @@ import time
 
 from orch import record
 from orch.errors import Refused
+from orch.record_files import workspace_files
 
 LOCK_WAIT = (
     1.0  # seconds: a busy run lock spools the line at once (a PreToolUse hook must not freeze the agent)
@@ -137,7 +138,7 @@ def _minimal() -> dict:
     }
 
 
-def _event(raw: dict, ids, tool) -> tuple[dict, dict | None]:
+def _event(raw: dict, ids, tool, root=None) -> tuple[dict, dict | None]:
     for key, mine in (("run", ids[0]), ("ticket", ids[1])):
         if key in raw and raw[key] != mine:
             raise NotRecorded("That entry belongs to another run; nothing was recorded.", "other_run")
@@ -166,6 +167,11 @@ def _event(raw: dict, ids, tool) -> tuple[dict, dict | None]:
     }
     if filtered["kind"] != "step":
         event.setdefault("used", None)  # only a step names the thing it used
+    files = filtered.get(
+        "files"
+    )  # display only (activity.md, Files): kept on a step, normalised like the collectors'
+    if filtered["kind"] == "step" and isinstance(files, list):
+        event["files"] = workspace_files(files, root)
     if event.get("id") is None:
         event.pop("id", None)  # the writer assigns h_<run>:<seq>
     payload = raw.get("payload")
@@ -209,10 +215,10 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
         from orch import tickets
 
         if too_large:
-            event, payload = _event(_minimal(), ids, tickets.agent_tool())
+            event, payload = _event(_minimal(), ids, tickets.agent_tool(), root)
             payload = _TOO_BIG
         else:
-            event, payload = _event(_parse(text), ids, tickets.agent_tool())
+            event, payload = _event(_parse(text), ids, tickets.agent_tool(), root)
         before_write()
         try:
             writer = _writer(root)
