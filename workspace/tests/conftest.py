@@ -307,6 +307,25 @@ def _legacy_trust(request, monkeypatch):
     monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
     monkeypatch.setattr(humanproof, "guarded_home", test_home)
 
+    def trusting(fn, proven_pos):
+        """TEST-ONLY, same trust as `legacy` above: a direct Python call as `human:` counts as the person's
+        proven verdict (key + ledger are real, only the proof ceremony is skipped)."""
+        real = fn
+
+        def call(*a, **kw):
+            if len(a) <= proven_pos and "proven" not in kw:
+                by = a[proven_pos - 1] if len(a) >= proven_pos else kw.get("by", "")
+                if isinstance(by, str) and by.startswith("human:"):
+                    ensure_signing(a[0])
+                    kw["proven"] = True
+            return real(*a, **kw)
+
+        return call
+
+    monkeypatch.setattr(tickets, "set_status", trusting(tickets.set_status, 4))
+    monkeypatch.setattr(tickets, "patch", trusting(tickets.patch, 5))
+    monkeypatch.setattr(tickets, "accept_review", trusting(tickets.accept_review, 3))
+
 
 _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
 
