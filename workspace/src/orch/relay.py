@@ -1933,6 +1933,8 @@ def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
     grouped = msg_group(msg) and msg["type"] == "delegate"
     options = ["once", "always", "no"] if grouped else list(ALLOW_OPTIONS)  # G11 wire words
     _, q = tickets.ask(root, tid, text, options, None, by, kind="relay:allow", action=json.dumps(action))
+    # the binding (guarded home) of this question to this message: ext.relay is synced, a peer can change it
+    humanproof.relay_allow_set(root, tid, q["id"], msg["id"])
     if (
         grouped and notify
     ):  # a task from a group: the host hears "waiting for approval", our phones the question
@@ -1980,11 +1982,35 @@ def apply_allow_answers(root: Path) -> list[str]:
                 (x for x in t["questions"] if x.get("kind") == "relay:allow" and x.get("answer") is not None),
                 None,
             )
-            if q is None or r.get("allow_applied") == q["id"]:
+            if q is None:
+                continue
+            # Which message a question allows, and whether it was applied, come from this machine's binding
+            # (guarded home, made when the question was asked here), never from the synced ext.relay: a peer
+            # can swap allow_message or reset allow_applied. Without sync (no peer) a question asked before
+            # the binding existed still goes by allow_applied, as before.
+            bound = humanproof.relay_allow_get(root, t["id"], q["id"])
+            synced = history.sync_enabled(root)
+            if (bound or {}).get("applied") or (not synced and r.get("allow_applied") == q["id"]):
                 continue
             raw_q = next((x for x in raw["questions"] if x.get("id") == q["id"]), None)
             given_here = any(g.get("message_id") == mid for g in allows(root)["given"])
-            if not given_here and not history.answer_proven(root, raw, raw_q):
+            ours = bound["message"] == mid if bound is not None else not synced  # asked here about mid
+            if not ours:
+                if r.get("allow_note") != q["id"]:
+
+                    def unbound(tk, qid=q["id"]):
+                        tk["ext"]["relay"]["allow_note"] = qid
+                        tickets.add_history(
+                            tk,
+                            "agent:relay",
+                            "This question was not asked on this computer for this message, so its answer "
+                            "is not applied - see: orch relay inbox",
+                            "relay",
+                        )
+
+                    tickets.apply_op(root, t["id"], unbound)
+                continue
+            if not (given_here or history.answer_proven(root, raw, raw_q)):
                 # an answer this machine cannot prove (e.g. synced from another computer) decides nothing here
                 if r.get("allow_note") != q["id"]:
 
@@ -2041,6 +2067,11 @@ def apply_allow_answers(root: Path) -> list[str]:
                     notes.append(f"could not allow {mid}: {e}")
                     continue
                 label, status = f"Allowed by {who} ({via})", None  # give_allow wrote the history line
+            # applied once: recorded in the binding (the synced allow_applied below is shown, never trusted)
+            if not humanproof.relay_allow_set(root, t["id"], q["id"], mid, applied=True) and (
+                bound is not None or synced
+            ):
+                notes.append(f"could not record that the answer to {mid} was applied")
 
             def op(tk, qid=q["id"], label=label, status=status, by=by):
                 tk["ext"]["relay"]["allow_applied"] = qid

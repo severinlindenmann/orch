@@ -1,9 +1,11 @@
 """Local sync provenance is the only authority for incoming automation blocks.
 
-Both records are local1-signed by the core (humanproof.local_sign / local_ok): the sync add-on's
-.orch/run/sync/local-ext.json (this machine's own add-on values per ticket it ever received) and this add-on's
-.orch/addons/automation/local-blocks.json (blocks it wrote here). Once sync is on, a missing, edited, planted or
-unreadable local-ext.json means no ticket's automation block is approved (fail closed)."""
+Both records are local1-signed by the core (humanproof.local_sign / local_ok) AND pinned in the guarded home
+(humanproof.pin_ok: a monotonic counter and the digest of the one current body, so an older signed copy never
+counts again): the sync add-on's .orch/run/sync/local-ext.json (this machine's own add-on values per ticket it
+ever received) and this add-on's .orch/addons/automation/local-blocks.json (blocks it wrote here). Once sync is
+on, a missing, edited, planted, rolled back or unreadable local-ext.json means no ticket's automation block is
+approved (fail closed), and a ticket that shows sync's traces is never "locally created"."""
 
 import hashlib
 import json
@@ -44,7 +46,7 @@ def _digest(block):
 
 
 def _signed(root, path, kind, schema, humanproof):
-    """The record's per-ticket map when this core signed it, else None."""
+    """The record's per-ticket map when this core signed it and it is the current pinned body, else None."""
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_BYTES:
             return None
@@ -58,7 +60,9 @@ def _signed(root, path, kind, schema, humanproof):
     ):
         return None
     body = {k: v for k, v in data.items() if k != "mac"}
-    return data["tickets"] if humanproof.local_ok(root, kind, body, data.get("mac")) else None
+    if not humanproof.local_ok(root, kind, body, data.get("mac")) or not humanproof.pin_ok(root, kind, body):
+        return None
+    return data["tickets"]
 
 
 def allowed(root, ticket):
@@ -71,15 +75,17 @@ def allowed(root, ticket):
         core = _core()
         if core is None:
             return False
-        humanproof = core[1]
+        history, humanproof = core
         local = _signed(
             root, root / ".orch/run/sync/local-ext.json", LOCAL_EXT_KIND, LOCAL_EXT_SCHEMA, humanproof
         )
         if local is None:
-            return False  # missing or not this core's record: no synced value counts as approved
+            return False  # missing, rolled back or not this core's record: no synced value counts as approved
         tid = ticket.get("id")
         if tid not in local:
-            return True  # Locally created ticket (sync records every ticket it receives first).
+            # Locally created ticket (sync records every ticket it receives first, and the record is the pinned
+            # current one), unless the ticket shows sync's own traces: then it came through sync.
+            return not history.doc_shows_sync(ticket)
         # approved.json is not read: its entries are the sync add-on's signed records, which only the core can
         # check. A person's approval makes the value this machine's own: sync records it in local-ext.json.
         created = _signed(
@@ -101,12 +107,15 @@ def record_local(root, ticket, block):
     humanproof = core[1]
     folder = root / ".orch/addons/automation"
     path = folder / "local-blocks.json"
+    # A record that is not the pinned current one starts empty (it can only lose entries: refuses more).
     created = _signed(root, path, BLOCKS_KIND, BLOCKS_SCHEMA, humanproof) or {}
     created[ticket["id"]] = _digest(block)
-    body = {"schema": BLOCKS_SCHEMA, "tickets": created}
-    mac = humanproof.local_sign(root, BLOCKS_KIND, body)
-    if not mac:
+    if humanproof.local_key(root) is None:
         return  # no key here: nothing is recorded (a synced ticket's block then stays refused)
+    body = humanproof.pin_next(root, BLOCKS_KIND, {"schema": BLOCKS_SCHEMA, "tickets": created})
+    mac = humanproof.local_sign(root, BLOCKS_KIND, body) if body else None
+    if not mac:
+        return  # no key or no usable pin: nothing is recorded
     folder.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=folder, delete=False) as f:
         json.dump({**body, "mac": mac}, f)

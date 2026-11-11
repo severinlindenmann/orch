@@ -31,10 +31,13 @@ def digest(block):
     ).hexdigest()
 
 
-def signed(root, kind, schema, tickets):
+def signed(root, kind, schema, tickets, pin=True):
+    """A local1-signed record; with `pin`, also made the current one in the guarded home (what core does)."""
     from orch import humanproof
 
     body = {"schema": schema, "tickets": tickets}
+    if pin:
+        body = humanproof.pin_next(root, kind, body)
     return json.dumps({**body, "mac": humanproof.local_sign(root, kind, body)})
 
 
@@ -116,7 +119,7 @@ def test_a_missing_or_unverified_record_allows_nothing(root, monkeypatch, damage
     elif damage == "edited":  # a signed record with a ticket taken out (it would then read as local)
         path.write_text(json.dumps({**data, "tickets": {"t_other1": {}}}))
     else:  # a MAC this core made for another record kind
-        path.write_text(signed(root, "automation-local-blocks", "orch.sync-local-ext/1", {}))
+        path.write_text(signed(root, "automation-local-blocks", "orch.sync-local-ext/1", {}, pin=False))
     for t in (synced, unknown):
         assert not syncapproval.allowed(root, t)
     no_start(monkeypatch, synced)
@@ -136,12 +139,78 @@ def test_a_forged_local_blocks_record_blesses_nothing(root):
     assert not syncapproval.allowed(root, ticket)
     path.write_text(json.dumps({"schema": "orch.automation-local-blocks/1", "tickets": {TID: digest(block)}}))
     assert not syncapproval.allowed(root, ticket)
-    path.write_text(signed(root, "sync-local-ext", "orch.automation-local-blocks/1", {TID: digest(block)}))
+    path.write_text(
+        signed(root, "sync-local-ext", "orch.automation-local-blocks/1", {TID: digest(block)}, pin=False)
+    )
     assert not syncapproval.allowed(root, ticket)  # another kind's MAC
     path.write_text(
         signed(root, "automation-local-blocks", "orch.automation-local-blocks/1", {TID: digest(block)})
     )
     assert syncapproval.allowed(root, ticket)
+
+
+def test_a_rolled_back_local_ext_copy_is_refused(root):
+    """An older signed copy (here the empty first-start one) verifies as signed but is not the pinned current
+    record: refused, and the ticket it would make "local" stays refused."""
+    block = {"enabled": True}
+    synced = {"id": TID, "ext": {"automation": block}}
+    path = write_ext(root, {})
+    first = path.read_bytes()
+    write_ext(root, {TID: {}})  # sync received TID (no block of this machine's)
+    assert not syncapproval.allowed(root, synced)
+    path.write_bytes(first)  # rollback: TID is not in the old copy, it would read as locally created
+    assert not syncapproval.allowed(root, synced)
+    assert not syncapproval.allowed(root, {"id": "t_new001", "ext": {"automation": block}})
+    syncapproval.record_local(root, synced, block)  # nothing is blessed through the rolled back record
+    assert not syncapproval.allowed(root, synced)
+
+
+def test_the_current_pinned_record_works(root):
+    block = {"enabled": True}
+    write_ext(root, {})
+    write_ext(root, {TID: {"automation": digest(block)}})
+    assert syncapproval.allowed(root, {"id": TID, "ext": {"automation": block}})
+    assert syncapproval.allowed(root, {"id": "t_new001", "ext": {"automation": block}})  # created here
+
+
+def test_a_missing_guarded_pin_while_sync_is_on_refuses(root):
+    from orch import humanproof
+
+    block = {"enabled": True}
+    write_ext(root, {TID: {"automation": digest(block)}})
+    (humanproof.key_dir(root, create=False) / humanproof.RECORD_PINS).unlink()
+    for t in ({"id": TID, "ext": {"automation": block}}, {"id": "t_new001", "ext": {"automation": block}}):
+        assert not syncapproval.allowed(root, t)
+    path = root / ".orch/run/sync/local-ext.json"
+    path.write_text(signed(root, "sync-local-ext", "orch.sync-local-ext/1", {}, pin=False))  # signed, never pinned
+    assert not syncapproval.allowed(root, {"id": "t_new001", "ext": {"automation": block}})
+
+
+def test_a_ticket_showing_sync_traces_is_never_local(root):
+    block = {"enabled": True}
+    write_ext(root, {})
+    by_sync = {"id": "t_new001", "ext": {"automation": block}, "history": [{"by": "agent:sync", "text": "x"}]}
+    with_ext = {"id": "t_new002", "ext": {"automation": block, "sync": {}}}
+    assert not syncapproval.allowed(root, by_sync)
+    assert not syncapproval.allowed(root, with_ext)
+
+
+def test_a_rolled_back_local_blocks_copy_is_refused(root):
+    write_ext(root, {TID: {}})
+    ticket = {"id": TID, "ext": {}}
+    old, new = {"enabled": True}, {"enabled": False}
+    syncapproval.record_local(root, ticket, old)
+    path = root / ".orch/addons/automation/local-blocks.json"
+    first = path.read_bytes()
+    ticket["ext"]["automation"] = old
+    syncapproval.record_local(root, ticket, new)
+    ticket["ext"]["automation"] = new
+    assert syncapproval.allowed(root, ticket)
+    path.write_bytes(first)  # the older signed copy that blessed `old`
+    ticket["ext"]["automation"] = old
+    assert not syncapproval.allowed(root, ticket)
+    ticket["ext"]["automation"] = new
+    assert not syncapproval.allowed(root, ticket)
 
 
 def test_without_a_key_nothing_is_approved(tmp_path, root):

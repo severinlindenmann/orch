@@ -240,6 +240,36 @@ def test_the_local_add_on_values_record_is_signed_and_never_started_again(machin
     assert not path.exists()
 
 
+def test_a_rolled_back_local_add_on_values_record_counts_for_nothing(machines):
+    """An older signed copy of local-ext.json is not the one pinned in the guarded home: it never verifies,
+    and nothing writes over it from it (no ticket of it could pass as locally created)."""
+    a, b, _ = both(machines)
+    path = repo.safe(b, approval.LOCAL_EXT)
+    known, ok = approval.local_ext(b)
+    assert ok and known == {"t_abc123": {}}
+    assert approval.write_local_ext(b, {})  # a signed copy without the received ticket (as at first start)
+    first = path.read_bytes()
+    assert approval.write_local_ext(b, known)
+    assert approval.local_ext(b) == ({"t_abc123": {}}, True)
+    current = path.read_bytes()
+    path.write_bytes(first)  # an agent rolls back to the older signed copy
+    old = json.loads(first)
+    assert humanproof.local_ok(b, approval.LOCAL_EXT_KIND, {k: v for k, v in old.items() if k != "mac"}, old["mac"])
+    assert approval.local_ext(b) == ({}, False)
+    edit(a, title="goes on", updated_at="2026-11-11T14:00:00Z")
+    success(a)
+    success(b)
+    assert path.read_bytes() == first  # never re-signed from the rolled back copy
+    path.write_bytes(current)
+    assert approval.local_ext(b) == ({"t_abc123": {}}, True)
+    pins = humanproof.key_dir(b, create=False) / humanproof.RECORD_PINS
+    pins.unlink()  # the guarded pin is gone: the record no longer verifies, and is not started again
+    assert approval.local_ext(b) == ({}, False)
+    path.unlink()
+    repo.ensure(b)
+    assert not path.exists()
+
+
 def test_records_need_the_workspace_key(root):
     try:
         records.make(root, "delete", "t_abc123", {"ticket": "t_abc123"})

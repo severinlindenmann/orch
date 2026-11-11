@@ -1220,6 +1220,46 @@ def _ledger_read(root: Path) -> dict | None:
     return _ledger_load(root, LEDGER)
 
 
+# The relay ALLOW BINDING (guarded home): keys/<ws>/relay-allow.json holds, per "<ticket>:<question>", the
+# allow_message id this core asked about when it made the relay:allow question HERE, and whether that answer
+# was applied. The ticket's ext.relay (allow_message, allow_applied) is synced, so a peer can swap the message
+# or reset "applied"; only this binding decides which message a proven answer allows, and only once.
+RELAY_ALLOW = "relay-allow.json"
+
+
+def relay_allow_get(root: Path, ticket: str, question: str) -> dict | None:
+    """{"message", "applied"} recorded here for this question, or None (none, or it cannot be told)."""
+    ent = _ledger_load(root, RELAY_ALLOW)
+    e = ent.get(f"{ticket}:{question}") if ent is not None else None
+    if not isinstance(e, dict) or not isinstance(e.get("message"), str):
+        return None
+    return e if isinstance(e.get("applied"), bool) else None
+
+
+def relay_allow_set(root: Path, ticket: str, question: str, message: str, applied: bool = False) -> bool:
+    """Record the question's message (when asked) or mark it applied. A recorded message is never replaced by
+    another one and "applied" never goes back. False when it could not be written."""
+    if not all(isinstance(x, str) and x for x in (ticket, question, message)):
+        return False
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            ent = _ledger_load(root, RELAY_ALLOW)
+            if ent is None:
+                return False
+            key = f"{ticket}:{question}"
+            old = ent.get(key)
+            if isinstance(old, dict):
+                if old.get("message") != message:
+                    return False
+                applied = applied or old.get("applied") is True
+            ent[key] = {"message": message, "applied": applied}
+            _write_private(d / RELAY_ALLOW, json.dumps({"schema": "orch.relay-allow/1", "entries": ent}))
+        return True
+    except (Refused, OSError):
+        return False
+
+
 def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
     return _ledger_put(root, LEDGER, "orch.wont-ledger/1", f"{ticket}:{check}", mac)
 
@@ -1356,6 +1396,70 @@ def local_ok(root: Path, kind: str, record, mac, ctx=None) -> bool:
         return False
     want = local_sign(root, kind, record, ctx)
     return want is not None and hmac.compare_digest(want, mac)
+
+
+# A local1 record in the workspace proves only that this core wrote it ONCE: an older signed copy verifies
+# too. A record whose older copy must never count again (the sync add-on's local-ext.json, automation's
+# local-blocks.json) is PINNED: the guarded home (keys/<ws>/record-pins.json, next to human.key and the
+# sync-enabled record's key) keeps per record kind a monotonic counter and the digest of the one current body,
+# and the body carries that counter. A body whose counter or digest is not the pinned one does not count
+# (a rolled back copy, a crash between the two writes, a missing pin): fail closed.
+RECORD_PINS = "record-pins.json"
+
+
+def _pin_digest(body) -> str | None:
+    try:
+        return hashlib.sha256(_canon_strict(["pin1", body]).encode()).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        return None
+
+
+def record_pin(root: Path, kind: str) -> dict | None:
+    """The current pin {"counter", "digest"} of record kind `kind`; {} when none was ever made; None when it
+    cannot be told (no key folder, a loose or damaged ledger)."""
+    pins = _ledger_load(root, RECORD_PINS)
+    if pins is None:
+        return None
+    pin = pins.get(kind)
+    if pin is None:
+        return {}
+    ok = (
+        isinstance(pin, dict)
+        and type(pin.get("counter")) is int
+        and pin["counter"] > 0
+        and isinstance(pin.get("digest"), str)
+    )
+    return pin if ok else None
+
+
+def pin_next(root: Path, kind: str, body: dict) -> dict | None:
+    """`body` with the next counter, made the pinned current body of `kind` (counter + 1, never back). Write
+    the record AFTER this; None (nothing pinned, write nothing) when the pin cannot be read or written."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            pins = _ledger_load(root, RECORD_PINS)
+            pin = record_pin(root, kind)
+            if pins is None or pin is None:
+                return None
+            out = {**body, "counter": pin.get("counter", 0) + 1}
+            digest = _pin_digest(out)
+            if digest is None:
+                return None
+            pins[kind] = {"counter": out["counter"], "digest": digest}
+            _write_private(d / RECORD_PINS, json.dumps({"schema": "orch.record-pins/1", "entries": pins}))
+        return out
+    except (Refused, OSError):
+        return None
+
+
+def pin_ok(root: Path, kind: str, body) -> bool:
+    """`body` (without its MAC) is the pinned current body of `kind`."""
+    pin = record_pin(root, kind)
+    if not pin or not isinstance(body, dict) or body.get("counter") != pin["counter"]:
+        return False
+    digest = _pin_digest(body)
+    return digest is not None and hmac.compare_digest(digest, pin["digest"])
 
 
 # The secret-profile BODY ledger (guarded home): keys/<ws>/profile.json holds, per profile name, the CURRENT

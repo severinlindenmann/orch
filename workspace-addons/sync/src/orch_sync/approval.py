@@ -51,9 +51,11 @@ LOCAL_EXT_BYTES = 16 * 1024 * 1024
 
 
 def local_ext(root):
-    """(this machine's own add-on value digests per ticket, True) from the local1-signed record this core wrote;
-    ({}, False) when it is missing, edited, planted or unreadable. The automation add-on reads the same record
-    and refuses every add-on value of a ticket while it does not verify (fail closed)."""
+    """(this machine's own add-on value digests per ticket, True) from the local1-signed record this core wrote
+    that is ALSO the current one pinned in the guarded home (humanproof.pin_ok: an older signed copy, e.g. the
+    empty first one, does not count); ({}, False) when it is missing, edited, planted, rolled back or unreadable.
+    The automation add-on reads the same record and refuses every add-on value of a ticket while it does not
+    verify (fail closed)."""
     p = repo.safe(root, LOCAL_EXT)
     try:
         data = json.loads(p.read_text()) if p.is_file() and p.stat().st_size <= LOCAL_EXT_BYTES else None
@@ -63,17 +65,24 @@ def local_ext(root):
         return {}, False
     known = data.get("tickets")
     body = {k: v for k, v in data.items() if k != "mac"}
-    if not isinstance(known, dict) or not humanproof.local_ok(root, LOCAL_EXT_KIND, body, data.get("mac")):
+    if (
+        not isinstance(known, dict)
+        or not humanproof.local_ok(root, LOCAL_EXT_KIND, body, data.get("mac"))
+        or not humanproof.pin_ok(root, LOCAL_EXT_KIND, body)
+    ):
         return {}, False
     return known, True
 
 
 def write_local_ext(root, known):
-    """Sign and write the record. False (nothing written) without a key: automation then refuses."""
+    """Pin (guarded counter + digest), sign and write the record. False (nothing written) without a key or a
+    usable pin: automation then refuses. A crash between the pin and the write refuses too (fail closed)."""
     from .step import encoded, write
 
-    body = {"schema": LOCAL_EXT_SCHEMA, "tickets": known}
-    mac = humanproof.local_sign(root, LOCAL_EXT_KIND, body)
+    if humanproof.local_key(root) is None:
+        return False
+    body = humanproof.pin_next(root, LOCAL_EXT_KIND, {"schema": LOCAL_EXT_SCHEMA, "tickets": known})
+    mac = humanproof.local_sign(root, LOCAL_EXT_KIND, body) if body else None
     if not mac:
         return False
     write(root, LOCAL_EXT, encoded({**body, "mac": mac}))
@@ -82,8 +91,9 @@ def write_local_ext(root, known):
 
 def start_local_ext(root):
     """Only when sync is first turned on here (core adopted this machine's tickets): an empty record. A record
-    that is later removed or broken is never started again (every synced ticket would look local)."""
-    if not os.path.lexists(repo.safe(root, LOCAL_EXT)):
+    that is later removed or broken is never started again (every synced ticket would look local): neither
+    while its file exists nor once a pin for it was ever made in the guarded home."""
+    if not os.path.lexists(repo.safe(root, LOCAL_EXT)) and humanproof.record_pin(root, LOCAL_EXT_KIND) == {}:
         write_local_ext(root, {})
 
 

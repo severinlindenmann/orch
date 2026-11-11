@@ -205,6 +205,18 @@ def enabled_recorded(root: Path) -> bool:
     return any(os.path.lexists(p) for p in _enabled_paths(Path(root)))
 
 
+def doc_shows_sync(doc) -> bool:
+    """This ticket document carries sync's own traces (ext.sync, or a line by the reserved sync label): it was
+    received through sync at some point, so it is never "locally created"."""
+    if not isinstance(doc, dict):
+        return False
+    ext = doc.get("ext")
+    hist = doc.get("history") if isinstance(doc.get("history"), list) else []
+    return (isinstance(ext, dict) and "sync" in ext) or any(
+        isinstance(h, dict) and is_reserved_label(h.get("by")) for h in hist
+    )
+
+
 def _ticket_shows_sync(p: Path) -> bool:
     try:
         st = os.lstat(p)
@@ -214,13 +226,7 @@ def _ticket_shows_sync(p: Path) -> bool:
         raw = p.read_bytes() if st.st_size <= 64 * 1024 * 1024 else b""
         hit = False
         if b"agent:sync" in raw or b'"sync"' in raw:
-            doc = json.loads(raw)
-            ext = doc.get("ext") if isinstance(doc, dict) else None
-            hist = doc.get("history") if isinstance(doc, dict) else None
-            hist = hist if isinstance(hist, list) else []
-            hit = (isinstance(ext, dict) and "sync" in ext) or any(
-                isinstance(h, dict) and is_reserved_label(h.get("by")) for h in hist
-            )
+            hit = doc_shows_sync(json.loads(raw))
     except (OSError, ValueError, RecursionError, AttributeError):
         return False
     if len(_TICKET_MARKS) > 20_000:

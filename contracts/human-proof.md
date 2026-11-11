@@ -342,15 +342,26 @@ pause, so a reason that lowers what needs a proof never counts), `sync-local-ext
 add-on values of every ticket sync received; started empty only when sync is first turned on here, never again
 once removed or broken) and `automation-local-blocks` (`addons/automation/local-blocks.json`,
 `{schema: "orch.automation-local-blocks/1", tickets: {<ticket>: <block sha256>}, mac}`: blocks the automation
-add-on wrote here). The MAC covers the whole file but `mac`. **Fail closed:** once sync is on, automation treats a
-missing, edited, planted or unreadable `local-ext.json` as "no synced value is approved" and starts nothing from
-an automation block; an unverified `local-blocks.json` blesses nothing.
+add-on wrote here). The MAC covers the whole file but `mac`. **Pinned (no rollback):** both carry a `counter`, and
+the guarded home (`keys/<ws>/record-pins.json`, `humanproof.pin_next` / `pin_ok`) keeps per kind the current counter
+(only ever up) and the sha256 of the one current body; a body whose counter or digest is not the pinned one (an older
+signed copy, e.g. the empty first-start record; a crash between the pin and the write; a missing pin) does not
+count. `local-ext.json` is started only when neither the file nor a pin exists. **Fail closed:** once sync is on,
+automation treats a missing, edited, planted, rolled back or unreadable `local-ext.json` as "no synced value is
+approved" and starts nothing from an automation block; a ticket not in the current record counts as created here
+only when it shows no sync traces (ext.sync, a line by `agent:sync`); an unverified `local-blocks.json` blesses
+nothing.
 
 **Answers as authority.** Once sync is on, an answer acts on this machine (`relay.apply_allow_answers`: a
 relay:allow question) only when `history.answer_proven`: the "Answered <id>: <answer>" line of exactly
 `answered_by` and `via` is in this machine's own-lines store (made here by `tickets.answer`, which the dashboard,
 phone and relay paths use), for any label, an agent's too; or the allow was already given here. A synced answer
 is not applied (it shows as `agent:sync`); the ticket gets one note naming `orch relay allow` / `orch relay done`.
+The message an answer allows is never read from the synced `ext.relay`: when the question is asked here, the guarded
+home records `(ticket, question) → allow_message` (`keys/<ws>/relay-allow.json`, `humanproof.relay_allow_set`; a
+recorded message is never replaced) and the answer is applied only when the ticket's `allow_message` is that one;
+"applied" is recorded there too (never reset), so a peer that swaps `allow_message` or clears `allow_applied`
+applies nothing. Once sync is on, a question with no record here applies nothing.
 
 **take-remote** (`orch sync take-remote --proof-stdin`, a person only, `addon.act`): the way out of a HISTORY pause
 (several merge bases, or none outside a machine's first join). It is the normal merge authority with this machine's
