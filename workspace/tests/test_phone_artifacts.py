@@ -436,7 +436,7 @@ def test_named_jpeg_gif_and_webp_are_not_sent_yet(proj, run, new_ticket, conn, n
 
 
 def jpeg(*segments: bytes, tail: bytes = b"") -> bytes:
-    """A structurally plain JPEG: SOI, the given (marker, payload) segments, a tiny SOS with entropy data, EOI."""
+    """A plain JPEG: SOI, the given (marker, payload) segments, a tiny SOS with entropy data, EOI."""
     out = b"\xff\xd8"
     for marker, payload in segments:
         out += b"\xff" + bytes([marker]) + (len(payload) + 2).to_bytes(2, "big") + payload
