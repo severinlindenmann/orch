@@ -611,7 +611,11 @@ def _update_title(root: Path, ticket: str) -> str | None:
     raw = str(title)
     if len(raw) > 4000:
         return None
-    line = " ".join(clean_untrusted(h.hide_text(raw), len(raw) * 3 + 64).split())
+    lim = len(raw) * 3 + 64  # cleaning only drops characters (NFC grows a text at most threefold)
+    cleaned = clean_untrusted(h.hide_text(raw), lim)
+    if len(cleaned) >= lim:  # never true; if it ever is, nothing was cut silently: no title
+        return None
+    line = " ".join(cleaned.split())
     line = "".join(c for c in line if unicodedata.category(c)[0] in "LMNPS" or c == " ")
 
     def stable(t: str) -> bool:
