@@ -413,6 +413,33 @@ def test_wont_do_from_a_person_syncs():
         assert list(SCHEMA.iter_errors(out)) == []
 
 
+def test_person_wont_do_keeps_attribution_against_newer_agent_rename():
+    base = tk(checklist=[_step()])
+    on = signed(_step(**WONT))
+    a = up(base, T2, checklist=[on], title="Person's ticket title")
+    b = up(base, T3, checklist=[_step(text="Email sales", by="agent:codex", at=T3)],
+           title="Agent's ticket title")
+    for x, y in ((a, b), (b, a)):
+        out = merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))
+        c = out["checklist"][0]
+        assert {k: c[k] for k in ("wont_do", "reason", "by")} == {
+            k: on[k] for k in ("wont_do", "reason", "by")
+        }
+        assert c["text"] == on["text"]  # the existing signed decision also binds text
+        assert out["title"] == "Agent's ticket title"
+        assert list(SCHEMA.iter_errors(out)) == []
+
+
+def test_two_verified_wont_do_copies_keep_newer_attribution():
+    base = tk(checklist=[_step()])
+    on = signed(_step(**WONT))
+    a = up(base, T2, checklist=[on])
+    b = up(base, T3, checklist=[{**on, "by": "human:Bob", "at": T3}])
+    for x, y in ((a, b), (b, a)):
+        c = merge_ticket(base, x, y, NOW, person_for(ledger_of(on)))["checklist"][0]
+        assert c["wont_do"] is True and c["reason"] == on["reason"] and c["by"] == "human:Bob"
+
+
 def test_wont_do_without_the_cores_say_so_is_dropped_whatever_by_says():
     base = tk(checklist=[_step()])
     for by in ("agent:claude", "human:Ann", None):  # `by: human:` alone is NOT the person
