@@ -30,7 +30,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    a real workspace never uses an env-chosen home; the nonce store and `human-settings.json` live there too) (32 random bytes, hex, 0600, in the key
    folder of secrets.md, under its rights checks and the agent deny rules). It is never put in argv, in any environment
    variable, in the workspace or in a log.
-2. **Who holds it.** Only the page servers a person starts (Focus, dashboard) read it, at start, into memory. They refuse
+2. **Who holds it.** Only the page servers a person starts (Focus, dashboard, Insights) read it, at start, into memory. They refuse
    to start when an agent tool is in their environment, and they never pass it to a child (agent runs, add-on commands
    get a cleaned environment as today).
 3. **Page session.** The session cookie is bootstrapped only from a **one-time launch token**: when a person starts or
@@ -39,20 +39,30 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    `http://127.0.0.1:<port>/#launch=<token>` (a URL fragment, never sent in a request line or logged). The page posts it
    once to `/session`; the server compares it with the file, deletes the file, and sets the cookie (`HttpOnly;
    SameSite=Strict; Path=/`, new on every server start). A first GET without a token gets a read-only page and no cookie.
+   The cookie is named per server AND per port, `orch_page_<server>_<port>` (`pageproof.cookie_name`; server name
+   `[a-z0-9_]`, port an integer): cookies on 127.0.0.1 reach every loopback port, so one shared name would let opening
+   Insights log the dashboard out. A server reads only its own name; another server's cookie is no session.
    **Mint routes exist only on the loopback listener**; every request, GET included, must carry `Host: 127.0.0.1:<port>` or
    `localhost:<port>`; any `X-Forwarded-*` or `Forwarded` header, or a request that arrived through a remote-access path
    (relay or any proxy, even when the peer is 127.0.0.1), never gets a proof: it is watch-only. Origin is checked on POST as today.
-   **Servers that may hold the key:** only the orch-shipped page servers of the Focus and dashboard add-ons
-   (`workspace-addons/focus`, `workspace-addons/dashboard`, installed from orch's own source; the core checks the installed
-   manifest hash against the shipped one before it writes a launch token for them). A local or marketplace add-on never gets a
-   launch token. (The key file itself is protected only by Level 1, below.)
+   **Servers that may hold the key:** only the orch-shipped page servers of the Focus, dashboard and Insights add-ons
+   (`workspace-addons/focus`, `workspace-addons/dashboard`, `workspace-addons/insights`, installed from orch's own source;
+   the core checks the installed manifest hash against the shipped one before it writes a launch token for them;
+   `humanproof.LAUNCH_SERVERS`, `pageproof.SERVERS`). A local or marketplace add-on never gets a launch token. (The key
+   file itself is protected only by Level 1, below.) The dashboard is a named proof server for the Focus page it embeds,
+   and for the Insights page it embeds (v1: Insights runs embedded under the dashboard); a standalone Insights page server
+   keeps its own session and mints `insights.settings` and `record.delete_detail` proofs from it, and ONLY those
+   (`pageproof.SERVER_OPS`, checked at mint time; Focus and dashboard are not limited by it). Its `insights.settings`
+   target is built by `config.insights_target`, the one form the core checks. Until this orch ships the Insights add-on
+   (`addons.SHIPPED_ADDONS`), no launch token is written or accepted for `insights`.
 4. **Mint.** For a human-only click the server builds `payload = {op, target, by, iat, exp, nonce}` (`$defs/payload`):
    `op` from the fixed table below, `target` the exact ticket / run / setting / key / connection / proposal, `by` =
    `human:<user>` of the OS account the server runs as, `exp − iat ≤ 60 s`, `nonce` 16 random bytes. Proof =
    `hp1.` + base64url(compact sorted JSON of payload) + `.` + base64url(HMAC-SHA256(human key, `hp1.` + that first part)),
    no padding.
    *Implementing slice 4.6 must* add `args_sha256` (sha256 of the canonical JSON of the values set: `keep_days`, the
-   connection actions, …) to the payload so a proof also binds the value, not only the target.
+   connection actions, …) to the payload so a proof also binds the value, not only the target. (`insights.settings`
+   is already value-bound without it: its target is `<setting>=<value>`, below; `args_sha256` stays for the other ops.)
 5. **Hand over.** The server runs the CLI with `--proof-stdin` and writes the proof as the **first line of stdin** (keys for
    `orch run type` follow on the next lines). Never argv, never env.
 6. **Verify (core).** Refuse unless: the proof parses; the HMAC matches (constant-time compare); `op` and `target` equal
@@ -74,11 +84,49 @@ keyed by the workspace's real path like `permissions.json` (`$defs/settings_reco
   **tombstone** record (`value: false`) on EVERY lowering, before it touches the file (one writer, `humanproof.record_set`,
   for every key; a grant through it needs a verified `human:` by). A tombstone's `by` is `human:...`, `file`
   (the core saw a lowered file value) or `reset` (a lowering by anything that is not a verified person, or a safe reset), see `$defs/settings_record`.
-  Workspace `workflow.agents_may_finish` is one of these keys (default off).
+  Workspace `workflow.agents_may_finish` is one of these keys (default off). `by: file` is written only for a PARSED
+  false (or a missing key whose default is off): a config.toml that cannot be read (not valid TOML, mid-write) or a
+  value that is not true / false reads off and writes nothing, so a transient bad file never ends a person's grant.
 - **Effective = file value AND (record value, or the owner default when no record ever existed).** Defaults: `live_session`
   on, `share_counts` on (owner decisions 3C, I5); everything else off.
 For list values (connection allow lists) a narrower file narrows the record (`grant ∩ file`), the list form of a
 tombstone (inventory.md).
+**Retention numbers** (`[record] keep_days` 30 · 90 · 365 and `[record] max_mb` 512 · 1024 · 2048 · 4096, set as
+`insights.keep_days` / `insights.max_mb`, record keys of the same names) are the number form: the record holds the value a
+person approved; **effective = the LOWER of the file value and the record** (the default record 90 / 2048 when none exists,
+or when the record holds anything but a whole number from the floor to the largest allowed value). A file value is first
+snapped DOWN to the allowed list with a **floor of 30 days / 512 MB** (`keep_days = 1` counts as 30, `100` as 90, `99999` as
+365; a whole number <= 0 means "as little as possible": the floor; a bool or a wrong type is the default), so an edit of config.toml can never make pruning delete nearly the
+whole record; a record value below the floor counts as no record. An unreadable settings record (a home or file that
+cannot be read) falls back to the lower of the file value and the default record 90 / 2048: never wider than the
+default, though it may be wider than a lowered record that can no longer be read (accepted). Raising above
+the record needs an `insights.settings` proof (target = `<setting>=<value>`, below); lowering is open to anyone and writes the lower
+record (`by: reset`, or `file` when the core saw a lower file value), so the file alone never keeps records longer or larger
+than a person approved. So a READ of a retention value (`orch config get`, `orch record settings`, pruning) may write:
+the lower record `by: file`, decided under keys.lock with the file and the record read again there (a person's widening
+writes record and file under that same lock, so a reader never writes an older file value over it). A protection reset
+keeps a retention record at or below its default (it only ever lowers).
+Lowering deletes nothing at once: the next pruning applies it (activity.md, Retention).
+CLI (`--json`): `orch config get insights.share_counts|insights.share_names|insights.keep_days|insights.max_mb`
+(`record.keep_days` / `record.max_mb` accepted too) answers the effective value (`{"insights.share_names": false}`; a file
+`true` without the person's record reads `false`). `orch config set insights.<key> <value> [--proof-stdin]
+[--if-current <old>]`: **the core decides** (the UI never does): under ONE lock (keys.lock, the lock of the settings
+record and of the nonce store) it reads its CURRENT effective value and compares it with `<value>`. A widening (a share
+switch off→`on`, a larger number) by an agent caller is refused before anything else (before any proof is read) and
+otherwise needs an `insights.settings` proof that is **value-bound**: target `<setting>=<value>` (`insights.keep_days=365`,
+`insights.share_names=on`; booleans `on`/`off`); it is verified and spent (verify_and_consume) in the same critical section
+as the record write, so a proof for another value or key, or one already used, is refused (`needs_person`) and nothing
+changes. The proof LINE is read from stdin (`--proof-stdin`) before keys.lock is taken, so a caller whose stdin never
+closes cannot hold the lock (keys.lock also gives up after 10 s, "The key store is busy"); an agent caller's stdin is
+never read. The same value succeeds without a proof and writes nothing (a given proof is not checked or spent). A narrowing needs no proof
+and writes the off / lower record. `--if-current <old>` (on/off or the number): if the current effective value is not
+`<old>` the command refuses with code `changed` ("This changed in the meantime: now <current>") and writes nothing, so a
+page that showed a stale value gets a clean refusal. `insights.share_counts on` is refused with code `not_available`
+(a plain message, nothing written, no proof read) while the share state (counts.md `sharing.counts`,
+`config.share_counts_state`) is `off_by_admin` or `not_connected`; `off` is always allowed. This check, the widening
+decision, the `--if-current` compare and the proof check are all inside the same lock; the page's own check is only a
+second layer. A value outside the list is `invalid`. Success answers
+`{"<key>": <effective value>, "changed": true|false, "widened": true|false}`.
 So an agent that edits `session_typing = true` changes nothing, and once a person switched `share_counts` or `live_session`
 off, an agent editing the file back to on changes nothing either. Reference `hp_settle`, vectors `settle`.
 
@@ -173,7 +221,7 @@ it can ask for a hand-off, which the person sees as a request from a command and
 
 ## Human-only actions (every op that trusts person detection or env today)
 
-Minted by: **page** = the local Focus or dashboard page (proof on stdin, steps 3–6); **phone** = the relay channel (above);
+Minted by: **page** = the local Focus, dashboard or Insights page (proof on stdin, steps 3–6); **phone** = the relay channel (above);
 **terminal** = the CLI hand-off to the page. Vector class: every op is covered by the same `verify` vectors (forged
 flags, missing, expired, other target, other op, replay, other key, tampered, untrusted home, dev on real); the op-specific
 rows add a named case.
@@ -182,8 +230,8 @@ rows add a named case.
 |---|---|---|---|---|
 | `run.takeover`, `run.type`, `run.release` | Session tab: Type in the session / Hand back (keys follow the proof on stdin) | ticket | page | screen `takeover` |
 | `focus.settings` | Settings > Add-ons > Focus: `live_session` / `session_typing` on | setting | page | `settle` |
-| `insights.settings` | Insights > Settings: `share_names`, `share_counts` on, `keep_days`, `max_mb` | setting | page | `settle` |
-| `record.delete_detail` | Delete detail for this ticket | ticket | page, terminal | `verify` delete detail |
+| `insights.settings` | Insights > Settings: `share_names`, `share_counts` on, `keep_days`, `max_mb` up; `orch config set insights.<key> … --proof-stdin` (the core decides what widens; lowering and the same value need no proof) | `<setting>=<value>`, value-bound (`insights.share_names=on`, `insights.keep_days=365`, `insights.max_mb=4096`) | page | `settle` |
+| `record.delete_detail` | Delete detail for this ticket: `orch record delete-detail <ticket> --proof-stdin --json` (an agent is refused before anything else) | ticket | page, terminal | `verify` delete detail |
 | `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get`, `agents_may_env` | key / profile (`<profile>`, `<profile>:remove`, `<profile>:allow_get`, `<profile>:agents_may_env`; switching a flag off needs no proof) | page, terminal | `verify` key profile, `settle` allow_get; a `profile set` also records the body MAC `profile1.<ws>.<profile>.<canon {env,files,set,run,extra}>` as the current entry of the ledger `profile.json` (tombstoned by `profile remove`; secrets.md, profile body) |
 | `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
 | `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<hash>` (proposal.md) / id | page | proposal `steps` |

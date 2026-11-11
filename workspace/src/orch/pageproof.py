@@ -1,4 +1,5 @@
-"""What the orch-shipped page servers (Focus, dashboard) use to mint human proofs (H1, human-proof.md).
+"""What the orch-shipped page servers (Focus, dashboard, Insights) use to mint human proofs (H1,
+human-proof.md).
 
 A page server holds the human key in memory, creates one session per start, and mints an hp1 proof only for a
 request that (1) carries the session cookie, (2) arrived on the loopback listener with a loopback Host and
@@ -24,8 +25,12 @@ from orch import humanproof, tickets
 from orch.errors import Refused
 
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
-COOKIE = "orch_page"
-SERVERS = ("focus", "dashboard")
+COOKIE_PREFIX = "orch_page"
+SERVERS = ("focus", "dashboard", "insights")
+_SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
+# The ops a page server may mint, enforced in PageSession.mint. A server not named here keeps every op (focus,
+# dashboard: their behaviour before 2.11); Insights mints only its two (human-proof.md, step 3).
+SERVER_OPS = {"insights": frozenset({"insights.settings", "record.delete_detail"})}
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 
@@ -46,6 +51,26 @@ def child_env(env: dict, orch_bin: str | None) -> dict:
     else:
         out["ORCH_BIN"] = str(orch_bin)
     return out
+
+
+def cookie_name(server: str, port: int) -> str:
+    """The session cookie of ONE page server on ONE port: `orch_page_<server>_<port>`. Cookies on 127.0.0.1
+    are shared by every loopback port (Path=/), so a single name would let one server's login replace (log
+    out) the other's. The per-server, per-port name keeps the SESSIONS of the servers apart on the same host
+    (one server's login never replaces another's, and a server only accepts its own name). It does NOT keep
+    the values apart: the browser still sends every cookie of the host to every localhost port, so any
+    local server the person visits (an agent-run dev server too) receives them (documented residual; the
+    mint route also checks Host, Origin and the absence of proxy headers)."""
+    if not isinstance(server, str) or not _SERVER_NAME_RE.fullmatch(server):
+        raise ValueError("not a page server name")
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
+        raise ValueError("not a port")
+    return f"{COOKIE_PREFIX}_{server}_{port}"
+
+
+def set_cookie_header(server: str, port: int, value: str) -> str:
+    """The Set-Cookie value of a page session (HttpOnly, SameSite=Strict, Path=/)."""
+    return f"{cookie_name(server, port)}={value}; HttpOnly; SameSite=Strict; Path=/"
 
 
 def forwarded(headers) -> bool:
@@ -102,13 +127,21 @@ class PageSession:
             self.revoked = False
             return self.cookie
 
-    def authed(self, headers) -> bool:
+    def cookie_name(self, port: int) -> str:
+        return cookie_name(self.server, port)
+
+    def set_cookie(self, port: int, value: str) -> str:
+        return set_cookie_header(self.server, port, value)
+
+    def authed(self, headers, port: int) -> bool:
+        """Only THIS server's cookie on THIS port counts (another loopback server's cookie is no session)."""
         raw = headers.get("Cookie") or ""
         try:
+            name = self.cookie_name(port)
             jar = SimpleCookie(raw)
-        except Exception:  # noqa: BLE001 - a broken cookie header is no session
+        except Exception:  # noqa: BLE001 - a broken cookie header (or port) is no session
             return False
-        c = jar.get(COOKIE)
+        c = jar.get(name)
         return bool(c and hmac.compare_digest(c.value, self.cookie))
 
     def can_mint(self, headers, port: int) -> bool:
@@ -117,14 +150,26 @@ class PageSession:
             self.key is not None
             and host_ok(headers, port)
             and not forwarded(headers)
-            and self.authed(headers)
+            and self.authed(headers, port)
         )
 
     def mint(self, op: str, target: str) -> str:
         if self.key is None:
             raise Refused("no key")
+        allowed = SERVER_OPS.get(self.server)
+        if allowed is not None and op not in allowed:
+            raise Refused("This page cannot approve that.")
         by = actor()
         return humanproof.mint(self.key, humanproof.new_payload(op, target, by))
+
+    def mint_insights_setting(self, setting: str, value: bool | int) -> str:
+        """An `insights.settings` proof: the target is built by config.insights_target, the ONE canonical form
+        the core checks against (`insights.keep_days=365`, `insights.share_names=on`)."""
+        from orch import config
+
+        if setting not in config.INSIGHTS_KEYS:
+            raise Refused("That is not an Insights setting.")
+        return self.mint("insights.settings", config.insights_target(setting, value))
 
 
 def actor() -> str:

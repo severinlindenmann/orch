@@ -1312,3 +1312,29 @@ def test_ticket_ext_inert_manifest_refuses_truthy_string(tmp_path):
     folder = make_addon(tmp_path / "a", extra='ticket_ext_inert = "true"')
     with pytest.raises(Refused, match="ticket_ext_inert"):
         addons.folder_manifest(folder)
+
+
+def test_failed_batch_puts_the_list_and_the_tool_env_back(proj, monkeypatch, uv_calls):
+    """#437: a POSIX batch whose project step fails leaves neither the add-on list nor orch's tool env with
+    the add-ons it collected."""
+    from orch import winfinish
+
+    monkeypatch.setattr(winfinish, "needed", lambda: False)
+    path = addons.registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    before = b'[{"name": "automation", "source": "built-in", "version": "1"}]'
+    path.write_bytes(before)
+
+    def reexec(args):
+        raise Refused("The project step failed (see above).")
+
+    monkeypatch.setattr(addons, "reexec", reexec)
+    with pytest.raises(Refused, match="project step failed"), addons.batch_install(proj):
+        for n in ("dashboard", "focus"):
+            entry = {"name": n, "source": "built-in", "version": "1"}
+            addons._batch_for(proj).items.append((entry, [["addon", "add", n, "--project-only"]]))
+    assert path.read_bytes() == before
+    assert len(uv_calls) == 2  # the batch's install, then the one that puts the previous add-ons back
+    assert uv_calls[0].count("--with") == 3
+    assert uv_calls[1].count("--with") == 1 and any("workspace-addons/automation" in a for a in uv_calls[1])
+    assert not addons.consented(proj, "dashboard") and not addons.consented(proj, "focus")

@@ -1506,6 +1506,25 @@ def _run_turn(
         return rc, f.read().decode("utf-8", "replace")
 
 
+def _record_turn(root: Path, run: str, tid: str, name: str, work: Path, out: str) -> None:
+    """One turn's stdout lines (this turn's only, stderr mixed in: the collector skips what is not its
+    format) to the run's record (run_record.collect_turn). Recording never stops a run: a refused record
+    (tampered, unavailable) has already left its integrity alert (record._report); anything else (a collector
+    that breaks on a new output format, a full disk) leaves one trace under the run, `collector_error` with
+    the exception's type (never its message), and the run goes on."""
+    try:
+        from orch import run_record
+
+        run_record.collect_turn(root, run, tid, name, work, out.splitlines())
+    except Refused:
+        pass
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            from orch import record
+
+            record.note_lost(root, run, "collector_error", error=type(e).__name__)
+
+
 def set_process_fields(root: Path, tid: str, run: str, **fields) -> None:
     with locked(root, tid):
         rec = read(root, tid)
@@ -1593,21 +1612,29 @@ def wrap(
     # only an agent that streams its steps is expected to say something at once; others may work quietly
     streams = adapters.caps(name, root).get("stream") and mode == "oneshot"
     watch = start_watchdog_seconds() if streams else None
+
+    def collected(result):  # a streamed turn's stdout lines go to the record (run_record), never stop the run
+        if streams:
+            _record_turn(root, run, tid, name, work, result[1])
+        return result
+
     turns = 0
     while True:
         ids = list(item_ids or [])
         turn_items = [i for i in _pending_read(root, tid) if i["id"] in ids]
         flags: dict = {}
-        rc, out = _run_turn(
-            argv,
-            work,
-            stdin,
-            log,
-            env,
-            (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
-            on_proc,
-            watch,
-            flags,
+        rc, out = collected(
+            _run_turn(
+                argv,
+                work,
+                stdin,
+                log,
+                env,
+                (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
+                on_proc,
+                watch,
+                flags,
+            )
         )
         if flags.get("hung"):  # no sign of life: stop it and start fresh once (its session was never saved)
             with contextlib.suppress(Exception):
@@ -1616,13 +1643,13 @@ def wrap(
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags.clear()
-            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             flags.clear()
-            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
         if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
             again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
             if undeliver(root, tid, again):

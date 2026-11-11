@@ -1182,7 +1182,12 @@ def test_history_verifier_failure_is_closed(decision):
         None,
     ],
 )
-def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by, root):
+def test_remote_person_labels_are_demoted_but_local_lines_are_preserved(by, root, monkeypatch):
+    # this workspace has no test orch folder: the view's stored-value hider (fail closed) is replaced by one
+    # over no values (no keys); what is tested here is the history rendering
+    from orch import hider, phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda r: hider.Hider({}))
     line = {"at": T2, "by": by, "text": "Approved"}
     peer = tk(history=[line])
     assert merge_ticket(tk(), peer, tk(), NOW)["history"] == [

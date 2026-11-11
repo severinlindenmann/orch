@@ -631,10 +631,13 @@ def _install_tool(entries: list[dict]) -> None:
         humanproof.write_install_record(plan["env"], plan["kind"])
 
 
-def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str) -> bool:
+def _reinstall(
+    entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str, consents: list[str] = ()
+) -> bool:
     """Reinstall orch with these add-ons, then (if `save`) store them as the registry and run the orch
     commands in `then` with the new code. Returns False when that happens later: on Windows orch can not
     replace its own files while it runs, so a finisher does it once this command has exited (winfinish.py).
+    `consents`: add-ons whose consent (in `root`) this install recorded; the finisher drops them if it fails.
     """
     from orch import winfinish
 
@@ -654,6 +657,12 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
                     path.unlink(missing_ok=True)
                 else:
                     path.write_bytes(before)
+                old = registry()
+                if old != entries:  # the tool env too: no package of this failed install stays
+                    try:
+                        _install_tool(old)
+                    except Exception as e:
+                        print(f"Note: could not put orch's add-ons back as they were: {e}", file=sys.stderr)
             raise
         return True
     if winfinish.pending(home()):
@@ -677,8 +686,10 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
                 "record": [str(plan["env"] / "orch-install.json"), _record_text(plan)],
             }
             if plan
-            else None
+            else {}
         )
+        if consents:
+            extra["consents"] = [str(consent_path()), workspace_id(root), sorted(consents)]
         argv = [uv, *_tool_args(entries)]
         log = (
             winfinish.start(home(), argv, then, root, done, reg, extra)
@@ -1468,6 +1479,7 @@ def batch_install(root: Path):
             then=[t for _, th in batch.items for t in th],
             root=root,
             done=f"{', '.join(sorted(taken))} installed and turned on",
+            consents=sorted(taken - before),  # a failed Windows finisher drops them, like the except below
         )
     except Exception as e:
         undone = []

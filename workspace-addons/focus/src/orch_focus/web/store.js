@@ -16,6 +16,9 @@
       if (k === 'class') el.className = v;
       else if (k === 'text') el.textContent = v;
       else if (k === 'icon') el.innerHTML = ic(v);
+      /* The page's CSP forbids a style attribute (style-src 'self'); the same declarations set one by one through the
+         style object are allowed. Only plain `name:value;` pairs are applied (custom properties too). */
+      else if (k === 'style') { for (const decl of String(v).split(';')) { const i = decl.indexOf(':'); if (i > 0) el.style.setProperty(decl.slice(0, i).trim(), decl.slice(i + 1).trim()); } }
       else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
       else el.setAttribute(k, v === true ? '' : v);
     }

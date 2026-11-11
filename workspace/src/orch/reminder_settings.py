@@ -34,27 +34,45 @@ _OURS = re.compile(r" (?:-I )?(?:-P )?-m orch work-check --hook [a-z][a-z0-9-]*(
 _BAD = set('"%$`!\n\r\0')
 
 
-def hook_argv(tool: str) -> list[str]:
-    """The hook as an argv: the ONE place that says how it starts (the check below runs the same prefix).
-    `-I -P`: isolated, no cwd on sys.path; orch needs Python 3.11+, which knows `-P`. ValueError for an
-    interpreter path no shell can carry safely."""
+def orch_argv(*args: str) -> list[str]:
+    """`orch <args>` as a hook's argv: the ONE place that says how a hook starts orch (the check below runs
+    the same prefix). `-I -P`: isolated, no cwd on sys.path; orch needs Python 3.11+, which knows `-P`.
+    ValueError for an interpreter path no shell can carry safely."""
     exe = sys.executable.replace("\\", "/")
     if not exe or _BAD & set(exe):
         raise ValueError("the Python path has a character a hook command cannot carry safely")
-    return [exe, "-I", "-P", "-m", "orch", "work-check", "--hook", tool]
+    return [exe, "-I", "-P", "-m", "orch", *args]
+
+
+def command_line(argv: list[str]) -> str:
+    """A hook argv as the command line the tool runs: the interpreter double-quoted, the rest plain words."""
+    return " ".join([f'"{argv[0]}"', *argv[1:]])
+
+
+def hook_argv(tool: str) -> list[str]:
+    """The work-check hook as an argv."""
+    return orch_argv("work-check", "--hook", tool)
 
 
 def hook_command(tool: str) -> str:
-    """The hook command for `tool` (an adapter name): the argv, the interpreter double-quoted."""
-    argv = hook_argv(tool)
-    return " ".join([f'"{argv[0]}"', *argv[1:]])
+    """The work-check hook command for `tool` (an adapter name): the argv, the interpreter double-quoted."""
+    return command_line(hook_argv(tool))
+
+
+def record_hook_argv() -> list[str]:
+    """The record hook as an argv (contracts/activity.md: the wiring calls exactly `orch record hook`)."""
+    return orch_argv("record", "hook")
+
+
+def record_hook_command() -> str:
+    return command_line(record_hook_argv())
 
 
 def can_import(root: Path | None) -> bool:
     """The hook's interpreter and flags (same argv up to `work-check`) can import orch (not so for a pip
     --user or PYTHONPATH install)."""
     try:
-        argv = hook_argv("x")[:-3] + ["--version"]
+        argv = orch_argv("--version")
         r = subprocess.run(argv, cwd=root, capture_output=True, timeout=10)
     except (ValueError, OSError, subprocess.SubprocessError):
         return False

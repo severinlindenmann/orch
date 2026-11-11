@@ -24,7 +24,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import history, net, refs, runs, safefile, tickets
+from orch import history, net, phone_results, refs, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -40,20 +40,280 @@ ARTIFACT_BYTES = 20 * 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic"}
 
 _SECRET_PATTERNS = [
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.S),
+    re.compile(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*?(-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z)",
+        re.S,
+    ),  # PEM and PGP (PRIVATE KEY BLOCK)
     re.compile(r"\b(?:orn|orp|ora|whk|opk|apv)_[A-Za-z0-9_-]{16,}"),
     re.compile(r"\b(?:sk|pk|rk)[-_](?:live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}"),
     re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}|\bxox[abprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"),  # JWT
+    # JWT: one start per run of its characters (`-` is one of them but no word character: a \b start after
+    # every `-` made "eyJ-eyJ-..." quadratic), the parts possessive
+    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{5,}"),
     re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"),
+    # Google API key, Hugging Face, npm, PyPI, SendGrid, DigitalOcean
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}|\bhf_[A-Za-z0-9]{30,}|\bnpm_[A-Za-z0-9]{36}"),
+    re.compile(r"\bpypi-AgE[A-Za-z0-9_-]{50,}|\bSG\.[\w-]{22}\.[\w-]{43}|\bdop_v1_[a-f0-9]{64}"),
+    # user:password@ in any URL (postgres://u:p@db, https://bob:pw@git...): one start per scheme run, the user
+    # part possessive and without `:`, the password part stops at the last `@` before the path (linear)
+    re.compile(r"(?i)(?<![\w+.-])[a-z][a-z0-9+.-]*+://[^\s/?#@:]*+:[^\s/?#]*@"),
+    # webhook path tokens: Slack /services/T../B../x, Discord /api/webhooks/<id>/<token>, Telegram /bot<id>:x
+    re.compile(
+        r"(?<=/services/)T\w++/B\w++/\w++|(?<=/api/webhooks/)\d++/[\w-]++|(?<![\w-])bot\d++:[\w-]{20,}"
+    ),
 ]
-_SECRET_KV = re.compile(
-    r"(?i)\b([\w-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[\w-]*)"
-    r"(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|\S+)"
+# The ONE list of secret-name words: the key=value pattern of redact/_has_secret and secret_name() (labels of
+# phone results) are both built from it, so a word added here reaches both (tests/test_phone_results.py).
+SECRET_NAME_WORDS = (
+    "passw", "passphrase", "passcode", "secret", "token", "credential", "bearer", "signature", "auth",
+    "authoriz", "api key", "access key", "private key", "db pass", "sessid", "sessionid",
+)  # fmt: skip
+# whole words only (not inside another word). A bare "pass" counts, and so does any word that ENDS in pass
+# (SSHPASS, DBPASS, smtppass; bypass and compass over-redact, accepted); secret_name drops the known harmless
+# test-result phrases first (Pass/Fail, pass rate, pass count).
+SECRET_LABEL_WORDS = (
+    "pass",
+    "key",
+    "keys",
+    "pin",
+    "pincode",
+    "pwd",
+    "pw",
+    "otp",
+    "totp",
+    "cookie",
+    "cookies",
+    "session",
+    "sessions",
+    "sig",  # an Azure SAS signature (&sig=), as in the query parameter names
+    "sid",  # connect.sid
 )
-_SECRET_PARAM = re.compile(r"(?i)token|secret|key|sig|signature|password|passwd|auth|code|credential")
+
+
+def _words_rx(sep: str) -> str:
+    """The alternation of SECRET_NAME_WORDS; a space inside a word is `sep`. `auth` leaves Author, Authored,
+    Authoring and Authority alone (Authorization is the word `authoriz`)."""
+    parts = []
+    for w in SECRET_NAME_WORDS:
+        rx = sep.join(re.escape(x) for x in w.split(" "))
+        parts.append(rx + (r"(?!or)" if w == "auth" else ""))
+    return "|".join(parts)
+
+
+# `name: value`. The name is captured as a whole run of name characters (letters, digits, _ - .) and
+# ONE predicate, secret_name() (NFKC, camelCase, _ - . split), decides whether it is a secret name;
+# no second regex. A name that is not secret never swallows a pair in its value: the scan goes on
+# right after its separator (Config: password=x, a=1,token=x, user=bob&secret=x). Linear: the
+# lookbehind allows one start per run, the run is possessive, and the value is only matched for a
+# secret name. Authorization: Bearer x takes scheme AND token.
+# A quoted or subscripted name counts ({"password": x}, config['token'] = x, os.environ["DB_PASSWORD"] = x):
+# one closing quote and one `]` may stand between the name and the separator (group 2 keeps them, so the
+# text around stays); the quote may be escaped by any number of backslashes (JSON inside a JSON string,
+# a logged request body: {\"password\":\"x\"}, {\\\"token\\\": x}). Separators: : = := ?= += => (Go, Make,
+# PHP/Ruby/Perl). A `:` value (YAML, headers, `password: correct horse battery`) and any cookie value
+# (Cookie: a=1; sessionid=x) is hidden to the end of its line; an `=` value is one token or one quoted string.
+_KV_HEAD = re.compile(r"(?<![\w.-])([\w.-]++)((?:\\*+[\"'`])?\]?\s*+(?P<sep>=>|:=|[?+]?=|:)\s*+)")
+_KV_VAL = re.compile(
+    r"(?:(?:bearer|basic|token|digest)\s++)?"
+    r"(?:\"(?:[^\"\\\n]|\\.)*+\"?|'(?:[^'\\\n]|\\.)*+'?|`[^`\n]*+`?|\S++)",
+    re.I,
+)  # a quote (\" escapes inside) to its closing quote, an unclosed one to the end of the line, else one token
+_TO_EOL = re.compile(r"(?i)cookie")
+
+
+class _Hit:
+    """What callers use of a regex match: group(0..3), start(), end() (1 name, 2 separator, 3 value)."""
+
+    def __init__(self, text, head, end):
+        self._g = (text[head.start() : end], head.group(1), head.group(2), text[head.end() : end])
+        self._span = (head.start(), end)
+
+    def group(self, i=0):
+        return self._g[i]
+
+    def start(self):
+        return self._span[0]
+
+    def end(self):
+        return self._span[1]
+
+
+class _KV:
+    """The `name: value` scan (finditer/search/sub like a compiled regex). finditer and search look at the raw
+    AND the NFKC form (a fullwidth name is caught); sub works on the text as given (redact normalizes)."""
+
+    @staticmethod
+    def _hits(text):
+        pos = 0
+        while (head := _KV_HEAD.search(text, pos)) is not None:
+            pos = head.end()
+            if not secret_name(head.group(1)):
+                continue
+            if head.group("sep") == ":" or _TO_EOL.search(head.group(1)):
+                end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it
+            else:
+                val = _KV_VAL.match(text, pos)
+                end = val.end() if val is not None else pos
+            if end > pos:
+                yield _Hit(text, head, end)
+                pos = end
+
+    @classmethod
+    def finditer(cls, text):
+        norm = unicodedata.normalize("NFKC", text)
+        yield from cls._hits(text)
+        if norm != text:
+            yield from cls._hits(norm)
+
+    @classmethod
+    def search(cls, text):
+        return next(cls.finditer(text), None)
+
+    @classmethod
+    def sub(cls, repl, text):
+        out, last = [], 0
+        for hit in cls._hits(text):
+            out.append(text[last : hit.start()])
+            out.append(repl(hit))
+            last = hit.end()
+        out.append(text[last:])
+        return "".join(out)
+
+
+_SECRET_KV = _KV()
+
+# Command-line flags. A long flag whose name secret_name() accepts (the one predicate, no second word list)
+# hides the value after it: --password x, --password=x, --token x, --api-key "a b" (an en or em dash for --
+# too: word processors make one of it). A short flag only after one of _FLAG_COMMANDS, anywhere on its line
+# (after a prompt, sudo, a path, `&&`, `|`, `docker compose exec db`; .exe too), and only that command's
+# password flag, case-sensitive (mysql -P is the port), alone or last in a cluster: mysql -pX / -p X,
+# sshpass -p x, redis-cli -a x, curl -u user:pass, curl -su user:pass. -p 8080, ls -a, psql -p 5432 and
+# --port 8080 stay. The value stays on the flag's line, and a command's flags end where the next command on
+# the line starts. A secret long flag followed by another long flag has no value (--password --token x: x
+# is hidden). Argv lists and quoted arguments count too (subprocess.run(["mysql", "-phunter2"]),
+# command: ["redis-server", "--requirepass", "x"], "args": ["--token", "x"], sh -c 'mysql "-px"'): a flag
+# may start right after a quote, `[`, `,` or `(`, its value may be the next quoted list item, and a value
+# inside the flag's own quotes ends at the closing quote. Linear: one lookbehind-guarded start per flag
+# and per path run, possessive runs, each line end is found once, and every scan goes on after the last
+# one (nothing is scanned twice).
+_FLAG_COMMANDS = {
+    "mysqldump": "p",
+    "mysql": "p",
+    "mariadb-dump": "p",
+    "mariadb": "p",
+    "mysqladmin": "p",
+    "mysqlimport": "p",
+    "mysqlcheck": "p",
+    "sshpass": "p",
+    "redis-cli": "a",
+    "curl": "u",
+}
+_LIST_SEP = r"[\"'`]\s*+,\s*+"  # "--token", "x": the end of one quoted list item and the start of the next
+_LONG_FLAG = re.compile(rf"(?<![\w.-])(?:--|[\u2013\u2014])([\w.-]++)(?:=|[ \t]++|(?P<item>{_LIST_SEP}))")
+# The boolean (argument-less) short flags per command, which may stand before the password letter in one
+# cluster (curl -su x, mysql -sNpX). A cluster whose earlier letter is not one of them is not a cluster: the
+# text after that letter is its value (mysql -upX: the user is pX), not a password.
+_BOOL_SHORT = {
+    "mysql": "ABCEGHINTUVWbfinqrstvw",
+    "mysqldump": "acdefklnqQRtvx",
+    "mariadb": "ABCEGHINTUVWbfinqrstvw",
+    "mariadb-dump": "acdefklnqQRtvx",
+    "mysqladmin": "EfrsvV",
+    "mysqlimport": "dfiLlrsv",
+    "mysqlcheck": "1aABcCeFfgmoqrsv",
+    "sshpass": "ev",
+    "redis-cli": "cex234",
+    "curl": "sSLkvifIOJgGNZaR#",
+}
+_SHORT_FLAGS = {  # the letter alone (-pX: X is the value) or after boolean letters only (-su x)
+    cmd: re.compile(rf"(?<![^\s\"'`\[,(])-[{re.escape(bools)}]*+{letter}(?:(?P<item>{_LIST_SEP})|[ \t]*+)")
+    for cmd, letter in _FLAG_COMMANDS.items()
+    for bools in (_BOOL_SHORT[cmd],)
+}
+# the next list item after "--token", : a quoted string, an already hidden value, else up to the item's end
+_ITEM_VAL = re.compile(r"\"(?:[^\"\\\n]|\\.)*+\"?|'[^'\n]*+'?|`[^`\n]*+`?|\[hidden\]|[^\s,\])]++")
+# the rest of a value inside the flag's own quotes ("-phunter2", "--token abc"): up to the closing quote
+_IN_QUOTES = {
+    '"': re.compile(r'(?:[^"\\\n]|\\.)++'),
+    "'": re.compile(r"[^'\n]++"),
+    "`": re.compile(r"[^`\n]++"),
+}
+_SHELL_OP = re.compile(r"(?:&&?|\|\|?|;|>>?|<)(?!\S)")
+_CMD = re.compile(
+    r"(?i)(?<![\w.~/\\-])(?:[\w.~/\\-]*[/\\])?("
+    + "|".join(re.escape(c) for c in _FLAG_COMMANDS)
+    + r")(?:\.exe)?(?![\w.-])"
+)  # any case: MYSQL.EXE on Windows; the flag letters stay case-sensitive (mysql -P is the port)
+
+
+def _line_end(text: str, pos: int) -> int:
+    end = text.find("\n", pos)
+    return len(text) if end == -1 else end
+
+
+def _flag_value(text: str, flag, end: int):
+    """The value match after a flag match, or None: the next quoted list item ("--token", "x"), the rest
+    inside the flag's own quotes ("-px", "--token x"), else one token or one quoted string."""
+    pos = flag.end()
+    quote = text[flag.start() - 1] if flag.start() else ""
+    if flag.group("item") is not None:
+        return _ITEM_VAL.match(text, pos, end)
+    if quote in _IN_QUOTES:
+        return _IN_QUOTES[quote].match(text, pos, end)
+    return _KV_VAL.match(text, pos, end)
+
+
+_NEXT_FLAG = ("--", '"--', "'--", "`--")
+
+
+def _flag_values(text: str) -> list[tuple[int, int]]:
+    """(start, end) of every secret flag value in text, unsorted; values may overlap."""
+    spans = []
+    pos, eol = 0, -1
+    while (flag := _LONG_FLAG.search(text, pos)) is not None:
+        pos = flag.end()
+        if pos > eol:
+            eol = _line_end(text, pos)
+        if not secret_name(flag.group(1)) or (text.startswith(_NEXT_FLAG, pos) and flag.group(0)[-1] != "="):
+            continue  # a plain flag, or a secret one with no value: --password --token x, "--password", "--x"
+        if (val := _flag_value(text, flag, eol)) is not None:
+            spans.append(val.span())
+            pos = val.end()
+    cmds, eol = list(_CMD.finditer(text)), -1
+    for i, cmd in enumerate(cmds):
+        flag_rx, pos = _SHORT_FLAGS[cmd.group(1).lower()], cmd.end()
+        if pos > eol:
+            eol = _line_end(text, pos)
+        end = min(eol, cmds[i + 1].start()) if i + 1 < len(cmds) else eol  # up to the next command
+        while (flag := flag_rx.search(text, pos, end)) is not None:
+            pos = flag.end()
+            if _SHELL_OP.match(text, pos, end):
+                continue  # mysql -p && next: no value (mysql asks for it)
+            if (val := _flag_value(text, flag, end)) is not None:
+                spans.append(val.span())
+                pos = val.end()
+    return spans
+
+
+def _hide_flag_values(t: str) -> str:
+    """Each secret flag value becomes [hidden] (overlapping values become one); the flag itself stays."""
+    out, last = [], 0
+    for start, end in sorted(_flag_values(t)):
+        if start >= last:
+            out += [t[last:start], HIDDEN]
+        last = max(last, end)
+    out.append(t[last:])
+    return "".join(out)
+
+
+# query parameter names: the secret-name words and a few old substrings anywhere, the label words (and a
+# bare pass) as whole words; secret_name() too (camelCase)
+_SECRET_PARAM = re.compile(
+    "(?i)" + _words_rx("[_-]?") + r"|key|sig|code|password|passwd"
+    r"|(?<![a-z])(?:" + "|".join(SECRET_LABEL_WORDS) + r")(?![a-z])"
+)
 HIDDEN = "[hidden]"
 _TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 
@@ -105,9 +365,20 @@ def _image_clean(data: bytes) -> bool:
     return False
 
 
+def _clean_full(t: str) -> str:
+    """clean_untrusted without its length cut (a whole file, a whole name); plain printable ASCII without a
+    comment is already clean (NFC changes nothing, nothing is dropped)."""
+    if t.isascii() and t.isprintable() and "<!--" not in t:
+        return t
+    return clean_untrusted(t, len(t) * 3 + 16)  # NFC grows a text by at most three times
+
+
 def _has_secret(data: bytes) -> bool:
     text = data.decode(errors="ignore")
-    return any(rx.search(text) for rx in _SECRET_PATTERNS) or bool(_SECRET_KV.search(text))
+    norm = unicodedata.normalize("NFKC", text)
+    if any(rx.search(t) for rx in _SECRET_PATTERNS for t in (text, norm)):
+        return True
+    return bool(_SECRET_KV.search(text))
 
 
 def _scan(data: bytes, name: str) -> str:
@@ -142,34 +413,180 @@ def _scan(data: bytes, name: str) -> str:
     return "secret" if _has_secret(data) else "ok"
 
 
+_ROUNDS = 3
+TEXT_CUT = 20000  # redact looks at this much of a text
+CUT_MARGIN = (
+    128  # ... and drops this much more where it cuts: no token prefix too short for its pattern stays
+)
+
+
+def _round(t: str) -> str:
+    """One round: clean, scrub the cleaned raw form, NFKC, scrub again; out = scrub(NFKC(scrub(clean(raw)))).
+    When the raw and the NFKC form of the cleaned text do not agree on whether there is a secret, the whole
+    value is hidden (fail closed); with no secret in either the cleaned text is returned unchanged. A text
+    longer than TEXT_CUT is scrubbed as cut (TEXT_CUT + 1 characters: a token inside is matched whole), then
+    its last CUT_MARGIN characters go and it ends in [hidden]: a token cut in two at the limit could leave a
+    prefix that no pattern knows any more."""
+    c = clean_untrusted(t, TEXT_CUT + 1)
+    out = _scrub_round(c)
+    if len(c) > TEXT_CUT and out != HIDDEN:
+        out = out[: max(0, len(out) - CUT_MARGIN)] + HIDDEN
+    return out
+
+
+def _scrub_round(c: str) -> str:
+    n = unicodedata.normalize("NFKC", c)
+    raw_hit, norm_hit = _scrub_text(c) != c, _scrub_text(n) != n
+    if raw_hit != norm_hit:
+        return HIDDEN
+    if not raw_hit:
+        return c  # nothing secret in either form: shown as it is (not NFKC: … stays …)
+    return _scrub_text(unicodedata.normalize("NFKC", _scrub_text(c)))
+
+
 def redact(text: str) -> str:
     """Plain, safe text for the phone: invisible/control characters and comments go (clean_untrusted), then
-    anything that looks like a key, token or password is replaced by [hidden]."""
-    t = clean_untrusted(str(text), 20000)
+    anything that looks like a key, token or password is replaced by [hidden]. One pipeline iterated to a
+    fixed point: scrub(NFKC(scrub(clean(raw)))) repeats until the text stops changing, because
+    cleaning or normalizing can join text into a new secret (a hidden comment between two halves, fullwidth
+    names). Not stable after _ROUNDS rounds: the whole value is hidden."""
+    t = str(text)
+    for _ in range(_ROUNDS):
+        nxt = _round(t)
+        if nxt == t:
+            return t
+        t = nxt
+    return HIDDEN
+
+
+# A label with a value but no separator, in fixed shapes only (never prose): SQL `PASSWORD 'x'` (quoted),
+# `IDENTIFIED BY x` / `IDENTIFIED BY PASSWORD 'x'`, .netrc `login u password x`, and a line that is only
+# `password x`. The value is hidden, the label stays. Linear: a lookbehind-guarded start per word or line,
+# possessive runs, the scan goes on after each value.
+_SPACED_VALUES = (
+    re.compile(
+        r"(?i)(?<![\w.-])(?:(?:password|passwd)[ \t]++(?=['\"])"
+        r"|identified[ \t]++by(?:[ \t]++password)?[ \t]++"
+        r"|login[ \t]++\S++[ \t]++(?:password|passwd)[ \t]++)(?P<v>'[^'\n]*+'?|\"[^\"\n]*+\"?|\S++)"
+    ),
+    re.compile(r"(?im)^[ \t]*+(?:password|passwd)[ \t]++(?P<v>\S++)(?=[ \t]*+$)"),
+)
+
+
+# ACCEPTED GAPS: the one list of known cases that redact, the file scan (_has_secret, _scan) and the value
+# hider (phone_results) do NOT catch; tests/test_phone_results.py pins what is covered.
+# - a secret split across lines (a flag value after a `\` continuation, a key wrapped over two lines),
+#   or base64, hex, URL-encoded or otherwise encoded so no pattern or label is visible (the value hider
+#   knows these forms of a STORED value, not of others);
+# - homoglyph or confusable names (Cyrillic `раssword=x`, a modifier-letter colon `password꞉x`): NFKC does
+#   not map them;
+# - short flags of commands not in _FLAG_COMMANDS (psql, docker, ...), long flags without a secret name
+#   (curl --user u:p), single-dash long flags (-password x), and a secret value that starts with `--`
+#   (--password --hunter2: read as a second flag);
+# - a secret in prose without a label or a known shape ("the new one is hunter2"), unless it is a stored
+#   value (the value hider);
+# - tokens in URL paths other than Slack, Discord and Telegram webhooks (a token as a path segment);
+# - a stored value in fullwidth/NFKC form, split over table cells, in base32, or as a host whose case
+#   differs (value hider);
+# - text drawn in pixels (a terminal screenshot) and bytes inside compressed image data (IDAT): only the raw
+#   bytes of an image are scanned; JPEG, GIF and WebP get no structural walk (_image_clean): they are
+#   "unknown" and not sent, never checked as clean;
+# - HTML and SVG artifacts are active content: entities (`&#112;assword=`) or script (atob) can build any
+#   text when the file is shown; the scan sees the source only;
+# - past TEXT_CUT redact shows nothing (the text ends in [hidden]); a file is scanned whole;
+# - attachments() clips its titles, labels and names without the value hider (a stored value across the
+#   cut leaves a prefix the final view check does not know), and _scan/_has_secret do not use it: owned by
+#   the upload-gate PR #541, not #497;
+# - a label that is not right before its separator (`The password is: x`, `DB password (staging): x`), XML
+#   and HTML element or attribute values (`<password>x</password>`, `key="DbPassword" value="x"`), and
+#   default-ignorable characters that are not Cf (CGJ U+034F, variation selectors, Hangul fillers) inside a
+#   name;
+# - URL userinfo with a raw `/`, `?`, `#` in the password or an `@` in the user (`redis://:pa#ss@h`,
+#   `https://bob@corp.ch:pw@h`) and scheme-less DSNs (`user:pw@tcp(h)/db`);
+# - other operators and languages: `password == "x"`, `||=`, `??=`, `->`, `<-`, Dockerfile `ENV PASSWORD x`,
+#   fish `set -x API_TOKEN x`, non-English labels (Kennwort, mot de passe), PuTTY `Private-Lines:`.
+# Over-redaction is accepted (fail safe): `--token-count 512`, `use --token to set it` hide the next word,
+# `bypass=1`, `compass: north` and the rest of a `token: ...` line are hidden.
+def _scrub_text(t: str) -> str:
     for rx in _SECRET_PATTERNS:
         t = rx.sub(HIDDEN, t)
-    return _SECRET_KV.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, t)
+    t = _SECRET_KV.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, t)
+    for rx in _SPACED_VALUES:
+        t = rx.sub(lambda m: m.group(0)[: m.start("v") - m.start()] + HIDDEN, t)
+    return _hide_flag_values(t)
 
 
-def _clip(text: str, n: int) -> str:
-    t = redact(text).strip()
+def _clip(text: str, n: int, h=None) -> str:
+    """Phone text, at most n characters. With a value hider `h` (every text of a view) each stored key value
+    is hidden too: before the scrub and again after it (cleaning can join a value split by an invisible
+    character), and before the cut (a cut never leaves part of one)."""
+    t = redact(text) if h is None else h.hide_text(redact(h.hide_text(str(text))))
+    t = t.strip()
     return t if len(t) <= n else t[: n - 1].rstrip() + "…"
 
 
+def _secret_param(name: str) -> bool:
+    """Does a query parameter name a secret? ?pwd=, ?pass=, ?otp=, ?api_key=, ?authToken=, fullwidth too."""
+    return bool(_SECRET_PARAM.search(unicodedata.normalize("NFKC", name))) or secret_name(name)
+
+
 def safe_url(url: str) -> str | None:
-    """http(s) URLs only, without user:password, secret-looking query values hidden. None otherwise."""
+    """http(s) URLs only, without user:password, secret-looking query values hidden, a query key that is
+    itself a secret (?eyJ..., ?sk_live_...) hidden with its value. None otherwise (also for a bad port)."""
     u = str(url).strip()
     try:
         p = urllib.parse.urlsplit(u)
+        port = p.port  # raises for :99999 or :x
     except ValueError:
         return None
     if p.scheme not in ("http", "https") or not p.hostname or any(c.isspace() for c in u):
         return None
-    host = p.hostname + (f":{p.port}" if p.port else "")
+    host = (f"[{p.hostname}]" if ":" in p.hostname else p.hostname) + (f":{port}" if port else "")  # IPv6
     q = urllib.parse.parse_qsl(p.query, keep_blank_values=True)
-    query = urllib.parse.urlencode([(k, HIDDEN if _SECRET_PARAM.search(k) else redact(v)) for k, v in q])
-    out = urllib.parse.urlunsplit((p.scheme, host, redact(p.path), query, ""))
+    pairs = [
+        (HIDDEN, HIDDEN) if redact(k) != k else (k, HIDDEN if _secret_param(k) else redact(v)) for k, v in q
+    ]
+    out = urllib.parse.urlunsplit((p.scheme, host, redact(p.path), urllib.parse.urlencode(pairs), ""))
     return out if len(out) <= 2000 else None
+
+
+def _url(url, h) -> str | None:
+    """safe_url for a view: None too when the address holds a stored key value (a link with a hole in it
+    opens nothing useful, so it is left out)."""
+    out = safe_url(url)
+    return out if out is not None and h.hide_text(out) == out else None
+
+
+_PASS_OK = re.compile(
+    r"(?<![a-z])pass\s*/\s*fail(?![a-z])|(?<![a-z])pass\s+(?:rate|count|total|percent|percentage)(?![a-z])"
+)
+_NAME_SUBSTR = re.compile(_words_rx(" ?"))
+_NAME_WORD = re.compile(
+    r"(?<![a-z])(" + "|".join(SECRET_LABEL_WORDS) + r")(?![a-z])"
+)  # letters only: key2, pin1
+_NAME_PASS = re.compile(r"pass(?![a-z])")  # a word that ends in pass: SSHPASS, DBPASS, smtppass
+# a word that ends in pwd, pw or pswd (ROOTPWD, ADMINPW, pswd), or in key after a known key kind (MASTERKEY,
+# privkey, HMACKEY): a bare key suffix would take Monkey, Hotkey and Turkey too
+_NAME_TAIL = re.compile(
+    r"(?:pwd|pw|pswd)(?![a-z])|(?:master|encryption|enc|signing|sign|hmac|jwt|license|licence|app|db|crypt"
+    r"|priv|aes|rsa|ssh|gpg|pgp)keys?(?![a-z])"
+)
+
+
+def secret_name(name: str) -> bool:
+    """Does a label (kv key, column key or label, stat label) name a secret? The name as given AND cleaned
+    (invisible characters and comments gone: to<ZWSP>ken, tok<!---->en), each NFKC, then camelCase, _ - .
+    split into words, so basic_auth, authCode, X-Api-Key, DB_PASS, SSHPASS, PHPSESSID, session_id, ROOTPWD
+    and MASTERKEY match; Author, Keyboard, Monkey, Hotkey, Turkey, Passed and Passage do not. The one
+    predicate for labelled values in results, for key=value names in text and for long flags."""
+    raw = str(name)
+    for form in dict.fromkeys((raw, _clean_full(raw))):
+        t = unicodedata.normalize("NFKC", form)
+        words = re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)).lower()
+        words = _PASS_OK.sub(" ", words)  # test-result phrases: Pass/Fail, pass rate, pass count (not passed)
+        if any(rx.search(words) for rx in (_NAME_SUBSTR, _NAME_WORD, _NAME_PASS, _NAME_TAIL)):
+            return True
+    return False
 
 
 def size_of(view: dict) -> int:
@@ -179,9 +596,10 @@ def size_of(view: dict) -> int:
 is_agent_history_author = history.is_agent_history_author  # ONE rule (orch.history)
 
 
-def _who(by: str) -> tuple[str, str]:
+def _who(by: str, h=None) -> tuple[str, str]:
+    """(display name, role) of a history author; `h`, the value hider, hides a stored value before the cut."""
     kind, _, name = str(by).strip().partition(":")
-    name = _clip(name or kind, 64) or "Someone"
+    name = _clip(name or kind, 64, h) or "Someone"
     if unicodedata.normalize("NFKC", kind).casefold() == "agent":
         # A sender suffix or raw phone id is not an agent display name.
         label = unicodedata.normalize("NFKC", name).casefold()
@@ -203,15 +621,15 @@ def internal_wakeup(entry: dict) -> bool:
     )
 
 
-def _agent(root: Path, ticket: dict) -> tuple[str | None, bool]:
-    """(agent display name, running now)."""
+def _agent(root: Path, ticket: dict, h=None) -> tuple[str | None, bool]:
+    """(agent display name, running now); `h`: the value hider for the name."""
     rec = runs.read(root, ticket["id"])
     running = bool(rec) and runs.state(rec) != "dead"
     name = (rec or {}).get("agent") if running else None
     if not name:
         sessions = sorted(ticket.get("sessions") or [], key=lambda s: str(s.get("last_used", "")))
         name = sessions[-1].get("agent") if sessions else None
-    return (_who(f"agent:{name}")[0] if name else None), running
+    return (_who(f"agent:{name}", h)[0] if name else None), running
 
 
 def phone_proof(root: Path, ticket: dict) -> list[dict]:
@@ -256,6 +674,42 @@ def _proof_file(root: Path, tid: str, ev: dict) -> tuple[str, bytes] | None:
     except safefile.TooLarge:
         return None
     return (parts[4], data) if data is not None else None
+
+
+def result_candidates(root: Path, ticket: dict) -> list[dict]:
+    """The block documents the ticket holds today, as phone_results candidates: the agent's proof (a copied
+    evidence file `<name>.json` holding an orch.blocks/1 document, role result or check). `from` is set here
+    to agent (the core overwrites a producer's own value), `checked` only for a step that is done with proof.
+    Job results (j_ ids) and results computed by orch have no store yet: nothing to add for them."""
+    tid = ticket["id"]
+    at0 = ticket["updated_at"] if _TIME.fullmatch(str(ticket.get("updated_at"))) else tickets.now()
+    out: list[dict] = []
+    for step in ticket.get("checklist") or []:
+        for ev in step.get("evidence") or []:
+            if ev.get("role") not in PHONE_ROLES or ev.get("type") != "file":
+                continue
+            f = _proof_file(root, tid, ev)
+            if not f or not f[0].lower().endswith(".json") or len(f[1]) > 256 * 1024:
+                continue  # a valid document is at most 64 KB
+            try:
+                doc = json.loads(f[1].decode("utf-8"))
+            except Exception:  # ValueError, UnicodeDecodeError, RecursionError: never a failed send
+                continue
+            if not isinstance(doc, dict) or doc.get("schema") != "orch.blocks/1":
+                continue
+            doc["from"] = "agent"
+            r = {
+                "id": artifact_id("file", str(ev.get("ref", ""))),
+                "from": "agent",
+                "at": ev["at"] if _TIME.fullmatch(str(ev.get("at"))) else at0,
+                "doc": doc,
+            }
+            if title := str(ev.get("title") or doc.get("title") or ""):
+                r["title"] = title  # cut only after the hider (phone_results)
+            if step.get("done") and step.get("evidence"):
+                r["checked"] = True
+            out.append(r)
+    return out
 
 
 def _state_path(root: Path) -> Path:
@@ -361,6 +815,92 @@ def update_state(root: Path, fn) -> dict:
         return st
 
 
+_JPEG_META_OK = {0xE0, 0xE1, 0xE2}  # APP0 (JFIF), APP1 (Exif/XMP), APP2 (ICC); COM and APP3+ are refused
+_JPEG_PLAIN = {0xDB, 0xC4, 0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xDD, 0xDA}
+JPEG_META_MAX = 128 * 1024  # all metadata segments together
+JPEG_PLAIN_MAX = 8 * 1024  # all table/frame segments together (real files use ~1 KB): no payload room
+
+
+def _jpeg_walk(data: bytes) -> list[bytes] | None:
+    """The metadata segments of a JPEG that is structurally plain, else None: only known segments, then the
+    entropy data up to one EOI that ends the file (NUL padding allowed). Nothing may follow (no archive behind
+    the picture), no COM / APP3+ segment, bounded metadata."""
+    if not data.startswith(b"\xff\xd8"):
+        return None
+    pos, meta, size, plain = 2, [], 0, 0
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            return None
+        m = data[pos + 1]
+        n = int.from_bytes(data[pos + 2 : pos + 4], "big")
+        if n < 2 or pos + 2 + n > len(data):
+            return None
+        if m in _JPEG_META_OK:
+            size += n
+            meta.append(data[pos + 4 : pos + 2 + n])
+            if size > JPEG_META_MAX:
+                return None
+        elif m not in _JPEG_PLAIN:
+            return None
+        else:
+            plain += n
+            if plain > JPEG_PLAIN_MAX:
+                return None
+        pos += 2 + n
+        if m == 0xDA:  # entropy-coded data: FF00 and RSTn are data, any other marker ends it
+            while pos + 1 < len(data):
+                if data[pos] == 0xFF and data[pos + 1] not in (0x00, *range(0xD0, 0xD8)):
+                    break
+                pos += 1
+            if data[pos : pos + 2] != b"\xff\xd9":
+                return None
+            return meta if not data[pos + 2 :].strip(b"\x00") else None
+    return None
+
+
+def _photo_verdict(data: bytes) -> str:
+    """ok / secret / unknown for an evidence JPEG `_scan` could not fully check: it must be structurally plain
+    (_jpeg_walk) and neither its bytes nor the UTF-16 readings of its metadata may hold a secret. Any other
+    format is unknown (fail closed)."""
+    meta = _jpeg_walk(data)
+    if meta is None:
+        return "unknown"
+    texts = [data]
+    for codec in ("utf-16-le", "utf-16-be"):  # both byte orders, both alignments, over the whole file
+        texts += [data[k:].decode(codec, "ignore").encode() for k in (0, 1)]
+    return "secret" if any(_has_secret(t) for t in texts) else "ok"
+
+
+def _gate(root: Path, tid: str, data: bytes, name: str, state: dict | None, photo_ok: bool = False) -> bool:
+    """The one secret gate in front of every phone upload (proof files and named artifacts alike): True when
+    `data` may be sent. A file that looks like a password or key, or can't be checked, is not sent and is
+    marked once in the ticket log and in state["secret_skipped"] (fail closed). `photo_ok` (evidence only): a
+    picture that can't be fully checked (a JPEG photo) still goes when its raw bytes hold no secret."""
+    try:
+        verdict = _scan(data, name)
+    except Exception:  # a malformed file skips only itself, never the whole view
+        verdict = "unknown"
+    if verdict == "unknown" and photo_ok and _is_image(data, name):
+        verdict = _photo_verdict(data)
+    name = Path(name).name
+    if verdict == "ok":
+        return True
+    why = (
+        "it looks like it holds a password or key"
+        if verdict == "secret"
+        else "it can't be checked for passwords"
+    )
+    if state is not None:
+        skipped = state.setdefault("secret_skipped", [])
+        key = f"{name}:{hashlib.sha256(data).hexdigest()}"
+        if key not in skipped:
+            with contextlib.suppress(Exception):
+                tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
+            skipped.append(key)
+            del skipped[:-200]
+    return False
+
+
 def _upload(root: Path, data: bytes, state: dict) -> dict | None:
     """Upload a proof file once (cached by content); {blob_id, size} or None when the relay says no."""
     from orch import relay
@@ -407,6 +947,29 @@ def _url_art(source: str, url: str, kind_hint: str | None = None) -> tuple[str, 
     return "link", _short(url)
 
 
+def _not_sent(root: Path, tid: str, state: dict | None, name: str, sha: str, verdict: str) -> None:
+    """A file the scan refused: one line in the ticket history per name and content, never a failed send."""
+    why = (
+        "it looks like it holds a password or key"
+        if verdict == "secret"
+        else "it can't be checked for passwords"
+    )
+    if state is None:
+        return
+    skipped = state.setdefault("secret_skipped", [])
+    key = f"{name}:{sha}"
+    if key not in skipped:
+        with contextlib.suppress(Exception):
+            tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
+        skipped.append(key)
+        del skipped[:-200]
+
+
+_ICON = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+_LINK_STATUS = re.compile(r"[a-z0-9][a-z0-9 -]{0,23}")
+STATUSES = ("open", "active", "waiting", "ready", "review", "done", "dropped")  # message.schema.json
+
+
 def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = True) -> list[dict]:
     """Proof files, named artifacts (uploaded), proof links and ticket links, newest first, at most 50."""
     tid = ticket["id"]
@@ -416,7 +979,11 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         at = ev["at"] if _TIME.fullmatch(str(ev.get("at"))) else at0
         if ev.get("type") == "file":
             f = _proof_file(root, tid, ev)
-            b = _upload(root, f[1], state) if (f and upload and state is not None) else None
+            b = (
+                _upload(root, f[1], state)
+                if (f and upload and state is not None and _gate(root, tid, f[1], f[0], state, photo_ok=True))
+                else None
+            )
             if not b:
                 continue
             kind = "image" if Path(f[0]).suffix.lower() in IMAGE_EXT else "file"
@@ -491,21 +1058,7 @@ def attachments(root: Path, ticket: dict, state: dict | None, upload: bool = Tru
         if data is None:
             continue
         sha = hashlib.sha256(data).hexdigest()
-        verdict = _scan(data, name)
-        if verdict != "ok":
-            why = (
-                "it looks like it holds a password or key"
-                if verdict == "secret"
-                else "it can't be checked for passwords"
-            )
-            if state is not None:
-                skipped = state.setdefault("secret_skipped", [])
-                key = f"{name}:{sha}"
-                if key not in skipped:
-                    with contextlib.suppress(Exception):
-                        tickets.log(root, tid, f"{name} was not sent to the phone: {why}.", "orch")
-                    skipped.append(key)
-                    del skipped[:-200]
+        if not _gate(root, tid, data, name, state):
             continue
         if sha in evidence_hashes:  # the same content is already in the view (evidence or an artifact)
             continue
@@ -569,19 +1122,24 @@ def pair_previews(atts: list[dict]) -> list[dict]:
     return out
 
 
-def artifact_title(root: Path, ticket: dict, aid: str) -> str | None:
-    """The title of the proof or link a phone feedback names (by artifact id), or None."""
+def artifact_title(root: Path, ticket: dict, aid: str, h=None) -> str | None:
+    """The title of the proof or link a phone feedback names (by artifact id), or None; `h`, the value hider,
+    hides a stored value before the cut."""
     for ev in phone_proof(root, ticket):
         if artifact_id(str(ev.get("type")), str(ev.get("ref", ""))) == aid:
-            return _clip(ev.get("title") or Path(str(ev.get("ref", ""))).name, 200) or None
+            return _clip(ev.get("title") or Path(str(ev.get("ref", ""))).name, 200, h) or None
     for ln in ticket.get("refs") or []:
         if isinstance(ln, dict) and artifact_id("link", str(ln.get("url", ""))) == aid:
-            return _clip(ln.get("title") or ln.get("url", ""), 200) or None
+            return _clip(ln.get("title") or ln.get("url", ""), 200, h) or None
     return None
 
 
-def reference_views(root: Path, ticket: dict) -> list[dict]:
-    """Shared references for the phone; local computer paths never leave this machine."""
+def reference_views(root: Path, ticket: dict, h=None) -> list[dict]:
+    """Shared references for the phone; local computer paths never leave this machine. `h`: the value hider
+    (built here when not given; none can be built: no references, fail closed)."""
+    h = h if h is not None else phone_results.value_hider(root)
+    if h is None:
+        return []
     out = []
     for ref in (ticket.get("refs") or [])[:ATTACHMENTS]:
         if not isinstance(ref, dict) or ref.get("local"):
@@ -594,26 +1152,28 @@ def reference_views(root: Path, ticket: dict) -> list[dict]:
             row = {"kind": kind, "ticket": tid}
             try:
                 other = tickets.load(root, tid)
-                row.update(title=_clip(other["title"], 200), status=other["status"])
+                row["title"] = _clip(other["title"], 200, h)
+                if other.get("status") in STATUSES:
+                    row["status"] = other["status"]
             except (Refused, OSError, ValueError, KeyError):
                 pass
             if kind == "artifact":
                 if safefile._parts(ref.get("name")) is None:
                     continue
-                row["name"] = _clip(ref["name"], 240)
+                row["name"] = _clip(ref["name"], 240, h)
         elif kind == "file":
             path = ref.get("path")
             if not safefile.file_ref_ok(root, path):
                 continue
-            row = {"kind": kind, "path": _clip(path, 240)}
+            row = {"kind": kind, "path": _clip(path, 240, h)}
             line = ref.get("line")
             if type(line) is int and line > 0:
                 row["line"] = line
         else:
-            url = safe_url(ref.get("url", ""))
+            url = _url(ref.get("url", ""), h)
             if not url or not isinstance(kind, str) or not refs.KIND_RE.fullmatch(kind):
                 continue
-            row = {"kind": kind, "url": url, "title": _clip(ref.get("title") or url, 200)}
+            row = {"kind": kind, "url": url, "title": _clip(ref.get("title") or url, 200, h)}
         out.append(row)
     return out
 
@@ -643,48 +1203,75 @@ def _shown_checklist(ticket: dict) -> list[dict]:
     ]
 
 
-def shown_summary(ticket: dict) -> str:
+def shown_summary(ticket: dict, h=None) -> str:
     """The line the phone shows on top of the ticket chat: the summary, else the ticket's note (what the
-    person asked for), so a fresh ticket made on the dashboard never shows an empty chat. Secrets cut."""
+    person asked for), so a fresh ticket made on the dashboard never shows an empty chat. Secrets cut (and
+    stored key values, with the value hider `h`)."""
     summary = str(ticket.get("summary") or "").strip()
     note = str(ticket.get("note") or "").strip()
     summary = _without_delivery(summary)
     text = summary or note
-    return _clip(redact(text), 200) if text else ""
+    return _clip(text, 200, h) if text else ""
 
 
-def _view_step(c: dict) -> dict:
-    step = {"text": _clip(c.get("text", ""), 500) or "Task", "done": bool(c.get("done"))}
+def _view_step(c: dict, h) -> dict:
+    step = {"text": _clip(c.get("text", ""), 500, h) or "Task", "done": bool(c.get("done"))}
     if c.get("wont_do") and not step["done"]:  # a person's "Won't do": struck through on the phone
         step["wont_do"] = True
-        if reason := _clip(redact(str(c.get("reason") or "")), 200):
+        if reason := _clip(str(c.get("reason") or ""), 200, h):
             step["reason"] = reason
     return step
 
 
-def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
+def _status(ticket: dict) -> str:
+    s = ticket.get("status", "open")
+    return s if s in STATUSES else "open"
+
+
+def _closed_view(ticket: dict, running: bool, done: int, total: int) -> dict:
+    """The full view when stored key values can not be hidden (no value hider) or a text still holds one
+    after hiding: no text from the ticket at all (fail closed), only counts and the status."""
+    return {
+        "title": "Ticket",
+        "status": _status(ticket),
+        "running": running,
+        "checklist": [],
+        "done": done,
+        "total": total,
+        "history_tail": [],
+        "attachments": [],
+    }
+
+
+def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
+    """The full view. Every text goes through the scrub and the value hider `h` (built here when not given):
+    a stored key value never leaves, also in prose without a label. No value hider, or a value still in the
+    finished view: _closed_view (fail closed)."""
     checklist = _shown_checklist(ticket)
     done, wont, total = tickets.checks_split({"checklist": checklist})
-    agent, running = _agent(root, ticket)
+    h = h if h is not None else phone_results.value_hider(root)
+    agent, running = _agent(root, ticket, h)
+    if h is None:
+        return _closed_view(ticket, running, done, total)
     hist = []
-    for h in history.lines(root, ticket)[-HISTORY:]:  # an unproven synced author is the sync role here
-        if internal_wakeup(h) or _ADMIN_NOTE.match(str(h.get("text", ""))):
+    for entry in history.lines(root, ticket)[-HISTORY:]:  # an unproven synced author is the sync role here
+        if internal_wakeup(entry) or _ADMIN_NOTE.match(str(entry.get("text", ""))):
             continue
         # Ticket history has no verified relay sender; raw labels cannot name a phone.
-        raw = str(h.get("text", ""))
-        text = _clip(tickets.history_line(raw, ticket.get("checklist") or []), 1000)
+        raw = str(entry.get("text", ""))
+        text = _clip(tickets.history_line(raw, ticket.get("checklist") or []), 1000, h)
         if not text:
             continue
-        at = str(h.get("at") or "")
+        at = str(entry.get("at") or "")
         if not _TIME.fullmatch(at):
             continue
-        who, role = _who(h.get("by", ""))
+        who, role = _who(entry.get("by", ""), h)
         hist.append({"at": at, "who": who, "role": role, "text": text})
     view: dict = {
-        "title": _clip(ticket.get("title", ""), 200) or "Ticket",
-        "status": ticket.get("status", "open"),
+        "title": _clip(ticket.get("title", ""), 200, h) or "Ticket",
+        "status": _status(ticket),
         "running": running,
-        "checklist": [_view_step(c) for c in checklist[:200]],
+        "checklist": [_view_step(c, h) for c in checklist[:200]],
         "done": done,
         "total": total,
         "history_tail": hist,
@@ -694,12 +1281,24 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
         view["wont_do"] = wont  # steps a person declined; "done" counts only steps done with proof
     if ticket.get("started") is True:
         view["started"] = True
-    if shared_refs := reference_views(root, ticket):
+    if shared_refs := reference_views(root, ticket, h):
         view["refs"] = shared_refs
     if agent:
         view["agent"] = agent
-    if summary := shown_summary(ticket):
+    if summary := shown_summary(ticket, h):
         view["summary"] = summary
+    try:
+        results = phone_results.prepare(root, result_candidates(root, ticket), h)
+    except Exception:  # whatever is wrong with a result: the snapshot goes without results
+        results = []
+    if results:
+        view["results"] = results  # full snapshots only: light_view never has them
+    try:
+        hidden_already = h.hide_json(view) == view  # names, agent, attachments given by the caller too
+    except ValueError:
+        hidden_already = False
+    if not hidden_already:
+        return _closed_view(ticket, running, done, total)
     return fit(view)
 
 
@@ -715,16 +1314,22 @@ def fit(view: dict) -> dict:
         if size_of(view) > BUDGET:
             for c in view["checklist"]:
                 c["text"] = c["text"] if len(c["text"]) <= n else c["text"][: n - 1] + "…"
+    while size_of(view) > BUDGET and len(view.get("results") or []) > 1:
+        view["results"].pop()  # the oldest first; the newest is never dropped
     while size_of(view) > BUDGET and view["checklist"]:
         view["checklist"].pop()
     return view
 
 
 def view_for(root: Path, tid: str) -> dict | None:
-    """The snapshot of a ticket now (uploads proof files on the way). None when the ticket can't be read."""
+    """The snapshot of a ticket now (uploads proof files on the way). None when the ticket can't be read, or
+    when no value hider can be built (stored key values could not be hidden: the text goes without a view)."""
     try:
         ticket = tickets.load(root, tid)
     except (Refused, ValueError, KeyError, OSError):
+        return None
+    h = phone_results.value_hider(root)
+    if h is None:
         return None
     state = load_state(root)
     atts = attachments(root, ticket, state)  # uploads: never under the lock
@@ -736,7 +1341,7 @@ def view_for(root: Path, tid: str) -> dict | None:
         del skipped[:-200]
 
     update_state(root, merge)
-    return build(root, ticket, atts)
+    return build(root, ticket, atts, h)
 
 
 def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
@@ -790,24 +1395,30 @@ def _light_sig(ticket: dict) -> str:
 
 def light_view(root: Path, ticket: dict) -> dict:
     """A LIGHT ticket_view (`light: true`): title, status, started, running, summary, agent, updated_at only.
-    The
-    phone overlays these on its last full snapshot. No questions, no checklist, history or files."""
-    agent, running = _agent(root, ticket)
+    The phone overlays these on its last full snapshot. No questions, no checklist, history or files. Texts
+    pass the scrub and the value hider; without a value hider (or a stored value still in it) Refused: the
+    light update is not sent (sync_light backs off), never sent with a value or with a blank title."""
+    h = phone_results.value_hider(root)
+    if h is None:
+        raise Refused("Stored key values can't be hidden right now, so no light update was sent.")
+    agent, running = _agent(root, ticket, h)
     view: dict = {
         "light": True,
-        "title": _clip(redact(ticket.get("title", "")), 200) or "Ticket",
-        "status": ticket.get("status", "open"),
+        "title": _clip(ticket.get("title", ""), 200, h) or "Ticket",
+        "status": _status(ticket),
         "running": running,
     }
     if ticket.get("started") is True:
         view["started"] = True
     if agent:
         view["agent"] = agent
-    if summary := shown_summary(ticket):
+    if summary := shown_summary(ticket, h):
         view["summary"] = summary
     at = str(ticket.get("updated_at") or "")
     if _TIME.fullmatch(at):
         view["updated_at"] = at
+    if h.hide_json(view) != view:
+        raise Refused("A stored key value is in this ticket's text, so no light update was sent.")
     return view
 
 
@@ -896,9 +1507,7 @@ def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
         if ph in bad_phones:
             continue
         try:
-            relay.send_text(
-                root, ph, f"Status: {t.get('status', 'open')}", tid, "note", view=light_view(root, t)
-            )
+            relay.send_text(root, ph, f"Status: {_status(t)}", tid, "note", view=light_view(root, t))
             sent.append((ph, tid))
             if ph in (load_state(root).get("light_phone") or {}):  # recovered: forget the backoff
                 update_state(root, lambda st, ph=ph: st.get("light_phone", {}).pop(ph, None))
@@ -925,12 +1534,16 @@ def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
 FINISHED = ("review", "done")
 
 
-def result_text(ticket: dict) -> str:
-    """The pushed "it is finished" text: the title, then where things stand."""
+def result_text(ticket: dict, h) -> str:
+    """The pushed "it is finished" text: the title, then where things stand; scrubbed and value-hidden (`h`,
+    phone_results.value_hider). relay.send_text hides nothing itself. No value hider (None): the word only,
+    fail closed."""
     word = "Ready for your review" if ticket.get("status") == "review" else "Done"
-    text = f"{word}: {_clip(ticket.get('title', ''), 120)}"
+    if h is None:
+        return word
+    text = f"{word}: {_clip(ticket.get('title', ''), 120, h)}"
     if summary := _without_delivery(ticket.get("summary") or ""):
-        text += f"\n{_clip(summary, 400)}"
+        text += f"\n{_clip(summary, 400, h)}"
     return text
 
 
@@ -1088,7 +1701,9 @@ def _send_result(root: Path, tid: str, to: str, t: dict, rec: dict) -> bool:
 
     ok = drop = False
     try:
-        relay.send_text(root, to, result_text(t), tid, "result", mid=rec["mid"])
+        relay.send_text(
+            root, to, result_text(t, phone_results.value_hider(root)), tid, "result", mid=rec["mid"]
+        )
         ok = True
     except Refused as e:
         if getattr(e, "status", None) == 409:

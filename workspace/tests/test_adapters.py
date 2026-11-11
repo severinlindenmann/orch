@@ -58,9 +58,17 @@ DENY = adapters.permission_args("claude", None, "ask")
 assert DENY[0] == "--disallowedTools" and "orch private" in DENY[1] and "agent-approvals" in DENY[1]
 # the reminder hooks go in inline for a one-shot run (`orch work-check --hook claude`, never blocks)
 _REMINDER_CMD = reminder_settings.hook_command("claude")  # absolute, quoted, never errors
+# ... and in the SAME blob the record hooks (`orch record hook`, before and after every tool call, W2b 1.7)
+_RECORD_CMD = reminder_settings.record_hook_command()
 _REMINDER = {
-    e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
-    for e in ("SessionStart", "UserPromptSubmit")
+    **{
+        e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
+        for e in ("SessionStart", "UserPromptSubmit")
+    },
+    **{
+        e: [{"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}]
+        for e in ("PreToolUse", "PostToolUse")
+    },
 }
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
 
@@ -560,7 +568,12 @@ def test_hooks_doc_comes_from_data():
     d = adapters.hooks_doc("claude", "r_8k2m")
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
-    assert set(cmds) == {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    assert set(cmds) == run_events | {"PreToolUse", "PostToolUse"}
+    for event in ("PreToolUse", "PostToolUse"):  # the record hook: the only group there, every tool
+        assert d["hooks"][event] == [
+            {"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}
+        ]
     for event in ("SessionStart", "UserPromptSubmit"):  # the reminder: a second command, with a timeout
         group = d["hooks"][event][1]  # its own group: the run-event group's matcher does not apply
         assert group == {
@@ -571,6 +584,84 @@ def test_hooks_doc_comes_from_data():
         assert "matcher" not in group and len(d["hooks"][event][0]["hooks"]) == 1
     assert len(d["hooks"]["Stop"]) == 1
     assert adapters.hooks_doc("codex", "r_1") is None
+
+
+def _orch_groups(doc, event):
+    return [h["command"] for g in doc["hooks"].get(event, []) for h in g["hooks"]]
+
+
+def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
+    """W2b 1.7: the record hook is in the SAME generated settings as the work-check reminder: one --settings
+    in the final argv of a oneshot and of a live run (two configs could override each other)."""
+    argv = reminder_settings.record_hook_argv()
+    exe = sys.executable.replace("\\", "/")
+    assert argv == [exe, "-I", "-P", "-m", "orch", "record", "hook"]  # exactly `orch record hook`, never PATH
+    assert os.path.isabs(argv[0]) and _RECORD_CMD == f'"{exe}" -I -P -m orch record hook'
+    if os.name != "nt":
+        import shlex
+
+        assert shlex.split(_RECORD_CMD) == argv  # the line the tool's shell runs is that very argv
+
+    def both(doc):
+        for event in ("SessionStart", "UserPromptSubmit"):
+            assert _REMINDER_CMD in _orch_groups(doc, event)
+        for event in ("PreToolUse", "PostToolUse"):
+            assert _orch_groups(doc, event) == [_RECORD_CMD]
+        assert not any(_RECORD_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
+
+    v = {"prompt": "p", "new_session": NEW, "session": OLD, "permissions": "ask", "stream": True}
+    for kind in ("fresh", "resume"):
+        one = adapters.render("claude", kind, "oneshot", v, proj)
+        assert one.count("--settings") == 1
+        both(json.loads(one[one.index("--settings") + 1]))
+    # live: the per-run hooks file (hooks_doc) is the one --settings; the same blob is merged into it
+    live = adapters.render("claude", "fresh", "live", {**v, "orch_hooks_file": "h.json"}, proj)
+    assert live.count("--settings") == 1 and live[live.index("--settings") + 1] == "h.json"
+    doc = adapters.hooks_doc("claude", "r_8k2m", proj)
+    both(doc)
+    # the run's own hooks stay
+    assert _orch_groups(doc, "Stop") == ["orch run event --run r_8k2m --kind idle"]
+    assert "orch run event --run r_8k2m --kind working" in _orch_groups(doc, "UserPromptSubmit")
+    # a tool without record or reminder hooks gets none
+    assert adapters.reminder_doc("codex") is None
+
+
+@pytest.mark.parametrize(
+    "exe, want",
+    [
+        ("C:\\Program Files\\Python312\\python.exe", '"C:/Program Files/Python312/python.exe"'),
+        ("C:\\Users\\Ann Lee\\AppData\\Local\\uv\\py.exe", '"C:/Users/Ann Lee/AppData/Local/uv/py.exe"'),
+        ("\\\\server\\share\\py\\python.exe", '"//server/share/py/python.exe"'),
+    ],
+)
+def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
+    """The Windows interpreter forms reminder_settings handles: forward slashes, double-quoted, one line that
+    Git Bash (Claude's hook shell on Windows) and cmd both split back into the same argv.
+    TODO(W2b 1.7, VM): prove on the Windows VM that the hook process is found in the claim's process tree
+    (record_hook._parents has no Windows reader yet: a Windows hook records nothing, reason not_provable)."""
+    import shlex
+
+    monkeypatch.setattr(sys, "executable", exe)
+    cmd = reminder_settings.record_hook_command()
+    assert cmd == f"{want} -I -P -m orch record hook" and "\\" not in cmd
+    argv = reminder_settings.record_hook_argv()
+    assert shlex.split(cmd) == argv  # bash (Git Bash)
+    cmd_words = [t[1:-1] if t[:1] == t[-1:] == '"' else t for t in shlex.split(cmd, posix=False)]
+    assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
+    monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
+    doc = adapters.reminder_doc("claude")
+    assert _orch_groups(doc, "PreToolUse") == _orch_groups(doc, "PostToolUse") == [cmd]
+    assert _orch_groups(doc, "SessionStart") == [f"{want} -I -P -m orch work-check --hook claude"]
+
+
+@pytest.mark.parametrize("bad", ["C:\\x%PATH%\\python.exe", 'C:\\a"b\\python.exe', "C:\\a!b\\python.exe"])
+def test_an_unsafe_windows_interpreter_path_gets_no_orch_hooks_at_all(monkeypatch, proj, bad):
+    monkeypatch.setattr(sys, "executable", bad)
+    with pytest.raises(ValueError):
+        reminder_settings.record_hook_command()
+    assert adapters.reminder_doc("claude") is None  # neither set: the run goes on without them
+    v = {"prompt": "p", "new_session": NEW}
+    assert "--settings" not in adapters.render("claude", "fresh", "oneshot", v, proj)
 
 
 def test_session_from_output_for_codex():

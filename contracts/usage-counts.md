@@ -13,7 +13,15 @@ relay-api.md (Usage counts and policy).
 
 - Settings: `[insights] share_counts = true`, `[insights] share_names = false` (`.orch/config.toml`). Turning sharing **on**
   (share_names, or share_counts again) needs an `insights.settings` proof and counts only with the settings record
-  (invariant H1, human-proof.md); turning it off works from the file. On `orch relay connect`
+  (invariant H1, human-proof.md); turning it off works from the file. The core reads them only as effective values
+  (`orch config get insights.share_counts|insights.share_names --json`, `orch record settings --json`): a file `true`
+  without the person's record reads `false` (`share_counts` stays on by the owner default while no record ever existed).
+  Set with `orch config set insights.share_counts|insights.share_names on|off [--proof-stdin] [--if-current <old>]`; `on`
+  from off needs the proof (value-bound target, e.g. `insights.share_names=on`; the core compares with its current value,
+  human-proof.md, Settings) and an agent caller is refused (`needs_person`). `share_counts on` is refused
+  (`not_available`) while the workspace is not connected to a relay or the last relay policy said `usage_counts: "off"`
+  (`orch relay refresh` keeps the snapshot's `policy` in `.orch/secrets/policy.json`; `orch relay connect` clears it once
+  the new connection is saved, a failed connect leaves the current one's policy). On `orch relay connect`
   a one-time notice says: "Daily counts go to your admin: how often skills, connections and keys are used. No text, no chats.
   This workspace's own names stay hidden. Turn it off in Insights > Settings." Insights shows a chip "Sharing counts with
   your admin" while it is on.
