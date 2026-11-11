@@ -648,3 +648,33 @@ def record_read(root: Path, record: str) -> dict | None:
     if data is not None and not isinstance(data, dict):
         raise Refused("A record in the orch folder is unreadable.")
     return data
+
+
+def all_needles(root: Path) -> dict[str, str | dict | list]:
+    """Every stored value, including shadowed admin keys, for output hiding."""
+    d = _existing_dir(root)
+    if d is None:
+        return {}
+    mine, theirs = _load(d), _load(d, admin=True)
+    out = {}
+    for entries, admin in ((mine, False), (theirs, True)):
+        for name, entry in entries.items():
+            label = name + "#admin" if admin and name in mine else name
+            if entry["type"] == "key-file":
+                try:
+                    value = _read(d / "files" / _name(name), FILE_MAX + 1).decode("utf-8")
+                except (UnicodeDecodeError, FileNotFoundError):
+                    continue
+            else:
+                value = entry.get("value")
+                if not isinstance(value, str):
+                    raise Refused("The key file is damaged.")
+                if entry["type"] == "json":
+                    try:
+                        value = json.loads(value)
+                    except ValueError:
+                        raise Refused("The key file is damaged.") from None
+                    if not isinstance(value, dict):
+                        raise Refused("The key file is damaged.")
+            out[label] = value
+    return out

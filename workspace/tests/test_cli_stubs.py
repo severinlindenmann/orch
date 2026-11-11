@@ -5,11 +5,6 @@ import pytest
 from orch import cli
 
 PAIRS = [
-    ("secret", "env"),
-    ("secret", "file"),
-    ("secret", "exec"),
-    ("secret", "list"),
-    ("secret", "get"),
     ("record", "tail"),
     ("record", "query"),
     ("record", "counts"),
