@@ -207,7 +207,8 @@ def stage(root, head, index, state, now):
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
     deletions({p: e for p, e in old.items() if p not in excluded}, entries(root, tree))
     validate_tree(root, tree)  # every byte, including unchanged staged blobs
-    renumber(root, index, now, live=True)
+    held = {Path(p).stem for p in entries(root, tree) if paths.TICKET.fullmatch(p)}
+    renumber(root, index, now, held=held, live=True)
     return repo.git(root, "write-tree", index=index).stdout.decode().strip()
 
 
@@ -325,21 +326,32 @@ def merged_tree(root, head, remote, index, now):
         put(root, index, path, data)
         if paths.TICKET.fullmatch(path):
             merges[path] = {"selected": incoming.strict_load(data), "now": now}
-    renumber(root, index, now, merges)
+    renumber(root, index, now, merges, held={Path(p).stem for p in ours if paths.TICKET.fullmatch(p)})
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
     validate_tree(root, tree)
     deletions(ours, entries(root, tree))
     return tree, merges
 
 
-def renumber(root, index, now, merges=None, live=False):
+def renumber(root, index, now, merges=None, *, held, live=False):
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
     rows = entries(root, tree)
     docs = {Path(p).stem: document(p, blob(root, e)) for p, e in rows.items() if paths.TICKET.fullmatch(p)}
     counter = incoming.strict_load(blob(root, rows.get("ticket-counter.json")) or b"{}")
     previous_counter = counter
-    result = merge.renumber_key_clashes(docs, counter, now)
+    result = merge.renumber_key_clashes(docs, counter, now, held=held)
     if result is None:
+        groups = {}
+        for tid, doc in sorted(docs.items()):
+            if doc.get("key"):
+                groups.setdefault(doc["key"], []).append({"id": tid, "title": doc["title"]})
+        clashes = {key: group for key, group in sorted(groups.items()) if len(group) > 1}
+        if clashes:
+            raise pause.Pause(
+                "Ticket numbers need a person's choice",
+                [f"tickets/{t['id']}.json" for group in clashes.values() for t in group],
+                key_clashes=clashes,
+            )
         raise pause.Pause("Ticket keys could not be combined", [f"tickets/{tid}.json" for tid in docs])
     changed, counter = result
     for tid, doc in changed.items():

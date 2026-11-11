@@ -217,25 +217,43 @@ def test_inert_manifest_is_local_authority(machines, monkeypatch):
     assert not approval.held(b)
 
 
-def test_concurrent_keys_renumber_later_ticket(machines):
+@pytest.mark.parametrize("incoming_at", ["2001-01-01T00:00:00Z", "2026-11-11T13:00:00Z"])
+def test_concurrent_keys_pause_identically_without_moving_local_keys(machines, incoming_at, tmp_path):
     from test_step import ticket
 
     a, b, _ = both(machines)
-    save(a, "tickets/t_first1.json", ticket() | {"id": "t_first1", "key": "DM1-13"})
+    first = "tickets/t_first1.json"
+    second = "tickets/t_later1.json"
     save(
-        b,
-        "tickets/t_later1.json",
-        ticket() | {"id": "t_later1", "key": "DM1-13", "created_at": "2026-11-11T13:00:00Z"},
+        a,
+        first,
+        ticket() | {"id": "t_first1", "key": "DM1-13", "title": "Incoming", "created_at": incoming_at},
     )
+    save(b, second, ticket() | {"id": "t_later1", "key": "DM1-13", "title": "Local"})
     save(b, "ticket-counter.json", {"last": 14})
     success(a)
-    success(b)
-    success(a)
-    for root in (a, b):
-        later = json.loads(repo.safe(root, "tickets/t_later1.json").read_text())
-        assert later["key"] == "DM1-15"
-        assert later["ext"]["sync"]["old_keys"] == ["DM1-13"]
-        assert json.loads(repo.safe(root, "ticket-counter.json").read_text())["last"] == 15
+    before = repo.safe(b, second).read_bytes()
+    result = run(b)
+    assert result["paused"]["files"] == [first, second]
+    assert repo.safe(b, second).read_bytes() == before
+    assert not repo.safe(b, first).exists()
+    assert json.loads(repo.safe(b, "ticket-counter.json").read_text())["last"] == 14
+    b_need = needs.rows(b)[0]
+    assert b_need["text"] == "Two tickets have the same number DM1-13. Which keeps it?"
+    assert b_need["answer"]["options"] == ["Incoming (t_first1)", "Local (t_later1)"]
+
+    # Exchange the offline heads in the opposite direction, before any resolution.
+    repo.git(a, "fetch", str(repo.safe(b, ".git")), "refs/heads/orch-state")
+    remote = step.oid(a, "FETCH_HEAD")
+    before = repo.safe(a, first).read_bytes()
+    with pytest.raises(pause.Pause) as caught:
+        step.merged_tree(a, step.oid(a, "HEAD"), remote, tmp_path / "opposite-index", NOW)
+    state = {}
+    pause.capture(a, state, caught.value, remote, NOW)
+    step.write(a, "run/sync/state.json", step.encoded(state))
+    assert needs.rows(a)[0] == b_need
+    assert repo.safe(a, first).read_bytes() == before
+    assert not repo.safe(a, second).exists()
 
 
 def test_missing_ticket_need_and_ack(machines):
@@ -278,3 +296,24 @@ def test_counter_reserves_old_keys_without_new_clash(machines):
     success(a)
     success(b)
     assert json.loads(repo.safe(b, "ticket-counter.json").read_text())["last"] == 99
+
+
+@pytest.mark.parametrize("count", [2, 9])
+def test_key_clash_need_respects_contract_with_long_titles(root, count):
+    from pathlib import Path
+
+    candidates = [{"id": f"t_test{i:03}", "title": "Long title " * 20} for i in range(count)]
+    state = {
+        "paused": {
+            "files": [f"tickets/{t['id']}.json" for t in candidates],
+            "key_clashes": {"DM1-13": candidates},
+            "since": NOW,
+            "reason": "Key clash",
+        }
+    }
+    step.write(root, "run/sync/state.json", step.encoded(state))
+    rows = needs.rows(root)
+    schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/needs.schema.json").read_text())
+    Draft202012Validator(schema).validate(rows)
+    assert len(rows) == 1
+    assert len(rows[0]["answer"]["options"]) == (count if count <= 8 else 0)

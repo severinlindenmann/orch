@@ -10,9 +10,10 @@ from . import cli, incoming, paths, repo, scan
 
 
 class Pause(repo.Refused):
-    def __init__(self, reason, files=()):
+    def __init__(self, reason, files=(), *, key_clashes=None):
         super().__init__(reason)
         self.files = list(files)
+        self.key_clashes = key_clashes
 
 
 def capture(root, state, error, remote, now):
@@ -23,6 +24,8 @@ def capture(root, state, error, remote, now):
     files = error.files or sorted(p for p in ours.keys() | theirs.keys() if ours.get(p) != theirs.get(p))
     files = sorted({p for p in files if paths.allowed(p)})
     state["paused"] = {"files": files, "since": now, "remote_sha": remote, "reason": str(error)}
+    if error.key_clashes:
+        state["paused"]["key_clashes"] = error.key_clashes
     # Manifest is written last by the step. Saved bytes are never used without matching its sha.
     for path in files:
         data = step.blob(root, theirs.get(path))

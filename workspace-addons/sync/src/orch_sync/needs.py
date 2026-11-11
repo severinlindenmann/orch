@@ -40,7 +40,27 @@ def rows(root):
                     ["Check address", "Stop sync"],
                 )
             )
+        clash_paths = set()
+        for key, candidates in sorted(paused.get("key_clashes", {}).items()):
+            clash_paths.update(f"tickets/{t['id']}.json" for t in candidates)
+            out.append(
+                row(
+                    "key-clash",
+                    key,
+                    f"Two tickets have the same number {key}. Which keeps it?",
+                    paused["since"],
+                    "orch sync status --json",
+                    (
+                        [f"{t['title'][:77 - len(t['id'])]} ({t['id']})" for t in candidates]
+                        if len(candidates) <= 8
+                        else []
+                    ),
+                    title=key,
+                )
+            )
         for path in paused["files"]:
+            if path in clash_paths:
+                continue
             key = hashlib.sha256(path.encode()).hexdigest()[:24]
             reason = paused["reason"]
             secret = "secret" in reason

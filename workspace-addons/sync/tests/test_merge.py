@@ -500,10 +500,11 @@ def test_key_clash_malformed_input_gives_none():
 def test_backdating_cannot_steal_a_key_the_local_ticket_holds():
     mine = tk(id="t_bbb222", key="DM1-13", created_at=T2)
     theirs = tk(id="t_aaa111", key="DM1-13", created_at="2001-01-01T00:00:00Z")
-    changed, _ = renumber_key_clashes(
-        {"t_aaa111": theirs, "t_bbb222": mine}, {"last": 13}, NOW, held=["t_bbb222"]
-    )
-    assert list(changed) == ["t_aaa111"]
+    docs = {"t_aaa111": theirs, "t_bbb222": mine}
+    before = deepcopy(docs)
+    for held in (["t_bbb222"], ["t_aaa111"], list(docs)):
+        assert renumber_key_clashes(docs, {"last": 13}, NOW, held=held) is None
+        assert docs == before
 
 
 def test_question_answered_by_differs_only_is_symmetric():

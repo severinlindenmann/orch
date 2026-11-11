@@ -377,21 +377,18 @@ def test_partial_apply_crash_is_idempotent(machines, monkeypatch):
     assert load(b)["title"] == "New title" and (b / ".orch" / ART).read_bytes() == b"new artifact"
 
 
-def test_key_clash_renumbers(machines):
+def test_live_key_clash_pauses_without_renumbering(machines):
     a, b, _ = both(machines)
     edit(a, key="AB1-1")
     success(a)
     success(b)
     from test_step import ticket
 
-    save(b, "tickets/t_second.json", dict(ticket(), id="t_second", key="AB1-1"))
-    success(b)
-    second = json.loads(repo.safe(b, "tickets/t_second.json").read_text())
-    assert second["key"] == "AB1-2"
-    assert second["ext"]["sync"]["old_keys"] == ["AB1-1"]
-    assert any("key changed" in h["text"] for h in second["history"])
-    success(a)
-    assert json.loads(repo.safe(a, "tickets/t_second.json").read_text())["key"] == "AB1-2"
+    path = "tickets/t_second.json"
+    save(b, path, dict(ticket(), id="t_second", key="AB1-1"))
+    before = {p: repo.safe(b, p).read_bytes() for p in (TICKET, path)}
+    assert run(b)["paused"]["key_clashes"]["AB1-1"]
+    assert {p: repo.safe(b, p).read_bytes() for p in before} == before
 
 
 def test_push_timeout_is_offline(machines, monkeypatch):
