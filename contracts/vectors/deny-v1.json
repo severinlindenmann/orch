@@ -11,16 +11,17 @@
       "account_home": "/Users/bob",
       "has": [
         "Read(//Users/bob/.orch-tool/**)",
-        "Write(~/.orch-tool/**)",
         "Bash(*$HOME/.orch-tool*)",
         "Edit(//Users/bob/work/proj/.orch/record/**)",
         "Bash(*.orch/record*)",
-        "Read(//Users/bob/work/proj/.orch/secrets/**)"
+        "Read(//Users/bob/work/proj/.orch/secrets/**)",
+        "Edit(~/.orch-tool/**)"
       ],
       "not": [
         "Read(//Users/bob/work/proj/.orch/record/**)",
         "Read(//Users/bob/work/proj/**)",
-        "Edit(//Users/bob/work/proj/**)"
+        "Edit(//Users/bob/work/proj/**)",
+        "Write(//Users/bob/.orch-tool/**)"
       ]
     },
     {
@@ -40,6 +41,51 @@
       "not": [
         "Read(C:/Users/bob/work/proj/.orch/record/**)"
       ]
+    },
+    {
+      "name": "home contains the workspace",
+      "workspace": "/Users/bob/work/proj",
+      "homes": [
+        "/Users/bob/work",
+        "/Users/bob/.orch-tool"
+      ],
+      "account_home": "/Users/bob",
+      "has": [
+        "Read(//Users/bob/.orch-tool/**)"
+      ],
+      "not": [
+        "Read(//Users/bob/work/**)",
+        "Edit(//Users/bob/work/**)"
+      ]
+    },
+    {
+      "name": "spaces",
+      "workspace": "/Users/My Projects/p",
+      "homes": [
+        "/Users/My Projects/.orch-tool"
+      ],
+      "account_home": "/Users/My Projects",
+      "has": [
+        "Read(//Users/My*Projects/.orch-tool/**)",
+        "Bash(*$HOME/.orch-tool*)"
+      ],
+      "not": [
+        "Read(//Users/My Projects/.orch-tool/**)"
+      ]
+    },
+    {
+      "name": "windows profile with space",
+      "workspace": "C:\\Users\\Ann Lee\\p",
+      "homes": [
+        "C:\\Users\\Ann Lee\\.orch-tool"
+      ],
+      "account_home": "C:\\Users\\Ann Lee",
+      "has": [
+        "Read(//c/Users/Ann*Lee/.orch-tool/**)",
+        "Bash(*%USERPROFILE%\\.orch-tool*)",
+        "Bash(*$env:USERPROFILE\\.orch-tool*)"
+      ],
+      "not": []
     }
   ]
 }

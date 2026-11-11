@@ -1,6 +1,9 @@
 """Deny rules for orch's own folders (contracts/secrets.md, "Deny rules"; slice 1.4)."""
 
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -81,7 +84,7 @@ def test_guarded_home_forms_posix():
     r = [x for x in _synthetic() if x["root"] == "home"][0]
     assert "//Users/bob/.orch-tool" in r["file"]
     assert "~/.orch-tool" in r["file"]
-    assert "../../.orch-tool" in r["file"]
+    assert not any(f.startswith("..") for f in r["file"])  # not a valid file pattern
     assert {"/Users/bob/.orch-tool", "~/.orch-tool", "$HOME/.orch-tool", "${HOME}/.orch-tool"} <= set(
         r["text"]
     )
@@ -134,7 +137,7 @@ def test_separator_characters_in_paths_cannot_break_a_pattern():
 def test_record_is_write_denied_but_not_read_denied_for_file_tools():
     pats = _set(_synthetic())
     assert "Edit(//Users/bob/work/proj/.orch/record/**)" in pats
-    assert "Write(//Users/bob/work/proj/.orch/record/**)" in pats
+    assert not any(p.startswith("Write(") for p in pats)  # Edit covers every edit/write tool
     assert "Read(//Users/bob/work/proj/.orch/record/**)" not in pats
     assert "Read(//Users/bob/work/proj/.orch/.local-id)" not in pats
     assert "Edit(//Users/bob/work/proj/.orch/.local-id)" in pats
@@ -215,3 +218,145 @@ def test_vectors():
             assert want in pats, (c["name"], want)
         for no in c.get("not", []):
             assert no not in pats, (c["name"], no)
+
+
+# ---- review round 1 (API Opus on 1e8ed0ad)
+
+
+def test_no_workspace_means_no_start_not_no_rules():
+    from orch.errors import Refused
+
+    with pytest.raises(Refused):
+        denyrules.deny_args({"format": "patterns/1"}, [], None)
+    assert denyrules.deny_args({"format": "none"}, ["x"], None) == ["x"]
+
+
+def test_every_render_call_site_passes_a_workspace():
+    import ast
+
+    src = Path(adapters.__file__).parent
+    seen = 0
+    for f in src.glob("*.py"):
+        for n in ast.walk(ast.parse(f.read_text("utf-8"))):
+            if (
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "render"
+                and isinstance(n.func.value, ast.Name)
+                and n.func.value.id == "adapters"
+            ):
+                seen += 1
+                assert len(n.args) >= 5 or any(k.arg == "root" for k in n.keywords), f"{f.name}:{n.lineno}"
+    assert seen >= 3
+
+
+def test_default_home_and_orch_home_are_always_rows(proj_ws, monkeypatch, tmp_path):
+    from orch import denyrules as d
+
+    monkeypatch.setattr("orch.humanproof.guarded_home", lambda r: (_ for _ in ()).throw(OSError("x")))
+    monkeypatch.setattr("orch.addons.home", lambda r=None: (_ for _ in ()).throw(OSError("x")))
+    other = tmp_path / "elsewhere"
+    monkeypatch.setenv("ORCH_HOME", str(other))
+    paths = {r["path"] for r in d.rules(proj_ws) if r["root"] == "home"}
+    assert str(other) in paths
+    assert any(p.endswith(".orch-tool") for p in paths)
+
+
+def test_a_home_that_contains_the_workspace_is_dropped_and_warned(capsys):
+    rl = denyrules.rules(Path(WS), homes=["/Users/bob/work", WS, HOME], account_home=ACCT)
+    homes = {r["path"] for r in rl if r["root"] == "home"}
+    assert homes == {HOME}
+    assert "contains this workspace" in capsys.readouterr().err
+    assert not any(p in _set(rl) for p in ("Read(//Users/bob/work/**)", "Read(//Users/bob/work/proj/**)"))
+
+
+def test_spaces_and_separators_become_wildcards_not_splits():
+    rl = denyrules.rules(
+        Path("/Users/My Projects/p"),
+        homes=["/Users/My Projects/.orch-tool"],
+        account_home="/Users/My Projects",
+    )
+    pats = _set(rl)
+    assert "Read(//Users/My*Projects/.orch-tool/**)" in pats
+    for p in pats:
+        assert " " not in p and "?" not in p
+    win = denyrules.rules(
+        Path("C:/Users/Ann Lee/p"),
+        homes=["C:\\Users\\Ann Lee\\.orch-tool"],
+        account_home="C:\\Users\\Ann Lee",
+    )
+    for p in _set(win):
+        assert " " not in p
+    assert "Read(//c/Users/Ann*Lee/.orch-tool/**)" in _set(win)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--disallowedTools", "A,B"],
+        ["--disallowed-tools", "A,B"],
+        ["--disallowedTools=A,B"],
+        ["--disallowedTools", "A", "--disallowed-tools", "B"],
+    ],
+)
+def test_every_spelling_of_the_flag_is_merged_into_one(extra):
+    out = denyrules.merge_flag(["--x", *extra, "--y"], ["C(d)"])
+    assert out.count("--disallowedTools") == 1
+    assert not any(o.startswith("--disallowed-tools") or o.startswith("--disallowedTools=") for o in out)
+    val = out[out.index("--disallowedTools") + 1].split(",")
+    assert {"A", "B", "C(d)"} <= set(val) and out[0] == "--x" and out[-1] == "--y"
+
+
+@pytest.mark.parametrize("perm", ["ask", "auto", "full"])
+@pytest.mark.parametrize(
+    "mode,kind", [("oneshot", "fresh"), ("oneshot", "resume"), ("live", "fresh"), ("live", "resume")]
+)
+def test_matrix_one_flag_and_old_entries_kept(proj_ws, perm, mode, kind):
+    argv = _argv("claude", kind, mode, perm, proj_ws)
+    assert argv.count("--disallowedTools") == 1
+    if perm != "full":
+        assert "Bash(orch private:*)" in _flag(argv)
+
+
+def test_old_claude_is_refused(proj_ws, monkeypatch):
+    from orch.errors import Refused
+
+    monkeypatch.setattr(adapters, "_binary_version", lambda b: "1.0.30")
+    monkeypatch.setattr(adapters.shutil, "which", lambda b: "/x/claude")
+    with pytest.raises(Refused):
+        _argv("claude", "fresh", "oneshot", "ask", proj_ws)
+
+
+def test_the_contract_states_the_codex_limit_honestly():
+    text = (CONTRACTS / "secrets.md").read_text("utf-8")
+    assert "home is write-protected there" not in text
+
+
+@pytest.mark.skipif(
+    not shutil.which("claude") or os.environ.get("CI"), reason="needs the real claude tool (not in CI)"
+)
+@pytest.mark.parametrize("perm", ["ask", "full"])
+def test_real_claude_refuses_a_denied_read_and_a_denied_shell_text(perm, tmp_path):
+    """One integration check: Read(//..) and Bash(*..*) denies refuse, also with permissions off (full)."""
+    ws = tmp_path / "ws"
+    secret = tmp_path / "orchhome"
+    ws.mkdir()
+    secret.mkdir()
+    (secret / "k.txt").write_text("CANARY-8f3a91\n")
+    rl = denyrules.rules(ws, homes=[str(secret)], account_home=str(tmp_path))
+    flag = ",".join(_set(rl))
+    base = ["claude", "-p", "--output-format", "text", "--disallowedTools", flag]
+    base += ["--dangerously-skip-permissions"] if perm == "full" else ["--permission-mode", "acceptEdits"]
+    prompts = (
+        f"Use the Read tool on {secret}/k.txt and print its content.",
+        f"Use the Bash tool to run: cat {secret}/k.txt . Print the output.",
+    )
+    plain = [
+        x for x in base if x not in ("--disallowedTools", flag)
+    ]  # control: without the rules it is readable
+    ctl = subprocess.run([*plain, "--", prompts[0]], cwd=ws, capture_output=True, text=True, timeout=120)
+    if "CANARY-8f3a91" not in ctl.stdout:
+        pytest.skip("claude is not logged in or cannot read the canary here: no proof possible")
+    for prompt in prompts:
+        r = subprocess.run([*base, "--", prompt], cwd=ws, capture_output=True, text=True, timeout=120)
+        assert "CANARY-8f3a91" not in r.stdout + r.stderr, prompt

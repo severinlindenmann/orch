@@ -187,6 +187,8 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
 
     out = [fill(i) for i in items]
     extra: list[str] = permission_args(name, root, v.get("permissions"), v.get("person"))
+    if (a.get("deny") or {}).get("format", "none") != "none":
+        _deny_version_ok(a)
     extra = denyrules.deny_args(a.get("deny"), extra, root)  # orch's own folders, every mode (secrets.md)
     if mode == "oneshot":
         if v.get("stream") and sect.get("stream_args"):
@@ -207,6 +209,28 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
             out.append("--")
         out.append(str(v["prompt"]))
     return out
+
+
+DENY_MIN_VERSION = (2, 0, 0)  # first build where Bash(*text*) patterns and Read(//path) rules are honoured
+
+
+@functools.cache
+def _binary_version(binary: str) -> str | None:
+    return _version(binary)
+
+
+def _deny_version_ok(a: Mapping) -> None:
+    """Refuse a tool too old to honour the deny patterns (an unreadable version is let through)."""
+    binary = (a.get("detect") or {}).get("binary")
+    path = shutil.which(binary) if binary else None
+    v = _binary_version(path) if path else None
+    if v:
+        nums = tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+        if nums and nums < DENY_MIN_VERSION:
+            raise Refused(
+                f"{a['label']} {v} is too old to keep orch's own folders out of reach "
+                f"(needs {'.'.join(map(str, DENY_MIN_VERSION))} or newer). Update it, then try again."
+            )
 
 
 @functools.cache

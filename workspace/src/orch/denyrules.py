@@ -5,6 +5,7 @@ Pure string work on paths (no reads), so Windows forms can be tested anywhere.""
 
 import os
 import re
+import sys
 from pathlib import Path, PurePosixPath
 
 # (name, read denied, path under the workspace or None = every guarded orch home)
@@ -14,12 +15,12 @@ ROOTS = (
     ("record", False, ".orch/record"),
     ("local-id", False, ".orch/.local-id"),
 )
-_BAD = re.compile(r"[,()\r\n\0]")
+_BAD = re.compile(r"[,() \t\r\n\0]")
 _DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
 
 
 def _clean(text: str) -> str:
-    return _BAD.sub("?", text)
+    return _BAD.sub("*", text)  # one wildcard char: never splits the list, never a literal "?"
 
 
 def _norm(path: str) -> str:
@@ -71,7 +72,8 @@ def path_forms(path: str, workspace: str, account_home: str | None) -> dict:
         text_forms.append(p)
     rel = _rel(p, workspace)
     if rel not in (None, "."):
-        file_forms.append(rel if rel.startswith("..") else "./" + rel)
+        if not rel.startswith(".."):
+            file_forms.append("./" + rel)
         text_forms += [rel, rel.replace("/", "\\")]
     if account_home:
         under = _under(p, account_home)
@@ -82,24 +84,39 @@ def path_forms(path: str, workspace: str, account_home: str | None) -> dict:
                 "$HOME/" + under,
                 "${HOME}/" + under,
                 "~\\" + under.replace("/", "\\"),
+                "$env:USERPROFILE\\" + under.replace("/", "\\"),
+                "$env:USERPROFILE/" + under,
+                "%USERPROFILE%\\" + under.replace("/", "\\"),
+                "%USERPROFILE%/" + under,
             ]
     return {"file": [_clean(f) for f in file_forms], "text": [_clean(t) for t in text_forms]}
 
 
 def _candidates(root: Path) -> list[str]:
+    """Every place orch's home can be. `<account home>/.orch-tool` and ORCH_HOME (when set) are ALWAYS
+    there, whatever the lookups below do; the guarded/trusted homes are added when they resolve."""
     from orch import addons, humanproof
     from orch.errors import Refused
 
     out: list[str] = []
+
+    def add(h) -> None:
+        for s in (str(h), os.path.realpath(h)):
+            if s and s not in out:
+                out.append(s)
+
+    acct = _account_home()
+    if acct:
+        add(Path(acct) / ".orch-tool")
+    if os.environ.get("ORCH_HOME"):
+        add(os.environ["ORCH_HOME"])
     for get in (lambda: humanproof.guarded_home(root), lambda: addons.home(root), addons.home_candidates):
         try:
             got = get()
         except (Refused, OSError):
             continue
         for h in got if isinstance(got, list) else [got]:
-            for s in (str(h), os.path.realpath(h)):
-                if s not in out:
-                    out.append(s)
+            add(h)
     return out
 
 
@@ -109,11 +126,21 @@ def _account_home() -> str | None:
 
 
 def rules(root: Path, homes: list[str] | None = None, account_home: str | None = None) -> list[dict]:
-    """The deny set: [{"root", "path", "read", "file": [...], "text": [...]}]. Fails closed: with no
-    guarded home known, the `home` row is empty but the workspace rows still apply."""
+    """The deny set: [{"root", "path", "read", "file": [...], "text": [...]}]. The default home and ORCH_HOME
+    are always rows; a home that is or contains the workspace is dropped (the workspace is never denied)."""
     ws_raw, ws_real = str(root), os.path.realpath(root)
     acct = account_home if account_home is not None else _account_home()
     homes = _candidates(root) if homes is None else homes
+    kept = []
+    for h in homes:
+        if _under(ws_raw, h) is not None or _under(ws_real, h) is not None:  # is, or contains, the workspace
+            print(
+                f"Note: orch's folder ({h}) contains this workspace, so it is not denied as a whole.",
+                file=sys.stderr,
+            )
+        else:
+            kept.append(h)
+    homes = kept
     out = []
     for name, read, sub in ROOTS:
         paths = (
@@ -125,7 +152,7 @@ def rules(root: Path, homes: list[str] | None = None, account_home: str | None =
             forms = path_forms(p, ws_raw, acct)
             if sub is None:
                 leaf = PurePosixPath(_norm(p)).name
-                if len(leaf) >= 6 and (leaf.startswith(".") or "orch" in leaf.lower()):
+                if len(leaf) >= 6 and leaf.startswith("."):
                     forms["text"].append(_clean(leaf))
             else:
                 forms["text"] += [sub, sub.replace("/", "\\")]
@@ -137,7 +164,7 @@ def tool_patterns(rule_list: list[dict]) -> list[str]:
     """patterns/1: Read/Edit/Write patterns and Bash text patterns, de-duplicated, in a stable order."""
     pats: list[str] = []
     for r in rule_list:
-        tools = ("Read", "Edit", "Write") if r["read"] else ("Edit", "Write")
+        tools = ("Read", "Edit") if r["read"] else ("Edit",)  # Edit covers every edit/write tool
         for f in r["file"]:
             for tool in tools:
                 pats += [f"{tool}({f})", f"{tool}({f}/**)"]
@@ -145,22 +172,48 @@ def tool_patterns(rule_list: list[dict]) -> list[str]:
     return list(dict.fromkeys(pats))
 
 
+_FLAGS = ("--disallowedTools", "--disallowed-tools")
+
+
 def merge_flag(extra: list[str], patterns: list[str]) -> list[str]:
-    """Add `patterns` to the --disallowedTools value in `extra` (extended, never replaced), or append one."""
+    """Add `patterns` to the tool's disallowed-tools flag in `extra`: spelled `--disallowedTools X`,
+    `--disallowed-tools X` or `--disallowedTools=X`. Extended, never replaced; all spellings become one."""
     joined = ",".join(patterns)
-    out = list(extra)
-    for i, item in enumerate(out):
-        if item == "--disallowedTools" and i + 1 < len(out):
-            out[i + 1] = out[i + 1] + "," + joined
-            return out
-    return out + ["--disallowedTools", joined]
+    out: list[str] = []
+    old: list[str] = []
+    at = None
+    i = 0
+    while i < len(extra):
+        item = extra[i]
+        val = None
+        if item in _FLAGS and i + 1 < len(extra):
+            val, i = extra[i + 1], i + 2
+        elif any(item.startswith(f + "=") for f in _FLAGS):
+            val, i = item.split("=", 1)[1], i + 1
+        else:
+            out.append(item)
+            i += 1
+            continue
+        if at is None:
+            at = len(out)
+        old.append(val)
+    value = ",".join([*old, joined])
+    out[at if at is not None else len(out) : at if at is not None else len(out)] = [
+        "--disallowedTools",
+        value,
+    ]
+    return out
 
 
 def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[str]:
     """`extra` (the tool's permission flags) plus the deny rules for the adapter's `deny.format`."""
     fmt = (deny or {}).get("format", "none")
-    if fmt == "none" or root is None:
+    if fmt == "none":
         return extra
+    if root is None:  # fail closed: no workspace, no way to tell the tool; never start it without the rules
+        from orch.errors import Refused
+
+        raise Refused("orch cannot start this tool without its deny rules (no workspace given).")
     if fmt == "patterns/1":
         return merge_flag(extra, tool_patterns(rules(root)))
     raise RuntimeError(f"unknown deny format {fmt}")

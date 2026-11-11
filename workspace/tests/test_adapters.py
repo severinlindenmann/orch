@@ -11,7 +11,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import adapters, agentsdata, config, reminder_settings
+from orch import adapters, agentsdata, config, denyrules, reminder_settings
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,20 +63,29 @@ _REMINDER = {
     for e in ("SessionStart", "UserPromptSubmit")
 }
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
-CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, *ORCH_OK, *DENY, *SETTINGS, "--", "Do it"]
-CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, *ORCH_OK, *DENY, *SETTINGS, "--", "Do it"]
 
 
-def test_claude_snapshots():
+def _claude_argvs(root):
+    """The snapshots: the permission flags plus the deny rules for this workspace (slice 1.4)."""
+    deny = denyrules.merge_flag(DENY, denyrules.tool_patterns(denyrules.rules(root)))
+    return (
+        ["claude", "-p", "--session-id", NEW, *ORCH_OK, *deny, *SETTINGS, "--", "Do it"],
+        ["claude", "-p", "--resume", OLD, *ORCH_OK, *deny, *SETTINGS, "--", "Do it"],
+        deny,
+    )
+
+
+def test_claude_snapshots(proj):
+    fresh, resume, deny = _claude_argvs(proj)
     v = {"prompt": "Do it", "new_session": NEW, "session": OLD, "permissions": "ask"}
-    assert adapters.render("claude", "fresh", "oneshot", v) == CLAUDE_FRESH
-    assert adapters.render("claude", "resume", "oneshot", v) == CLAUDE_RESUME
+    assert adapters.render("claude", "fresh", "oneshot", v, proj) == fresh
+    assert adapters.render("claude", "resume", "oneshot", v, proj) == resume
     v["orch_hooks_file"] = ".orch/run/hooks-r_1.json"
-    assert adapters.render("claude", "fresh", "live", v) == [
+    assert adapters.render("claude", "fresh", "live", v, proj) == [
         "claude", "--session-id", NEW, *ORCH_OK,
-        "--settings", ".orch/run/hooks-r_1.json", *DENY,
+        "--settings", ".orch/run/hooks-r_1.json", *deny,
     ]  # fmt: skip
-    assert adapters.render("claude", "resume", "live", v)[:3] == ["claude", "--resume", OLD]
+    assert adapters.render("claude", "resume", "live", v, proj)[:3] == ["claude", "--resume", OLD]
 
 
 @pytest.fixture
@@ -107,11 +116,11 @@ class FakeHelp:
 
 
 @pytest.mark.parametrize("mode", ["oneshot", "live"])
-def test_permission_modes_for_claude(claude_help, mode):
+def test_permission_modes_for_claude(claude_help, mode, proj):
     v = {"prompt": "p", "new_session": NEW, "orch_hooks_file": "h.json"}
 
     def flags(perm):
-        argv = adapters.render("claude", "fresh", mode, {**v, "permissions": perm})
+        argv = adapters.render("claude", "fresh", mode, {**v, "permissions": perm}, proj)
         assert "--allowedTools" in argv  # the orch list stays in every mode
         if mode == "oneshot":
             assert argv[-2:] == ["--", "p"]  # the prompt stays last
@@ -447,13 +456,13 @@ def test_permission_line_names_the_mode(proj):
     assert adapters.permission_line(proj).startswith("Permissions ask:")
 
 
-def test_no_blanket_orch_permission_in_any_argv():
+def test_no_blanket_orch_permission_in_any_argv(proj):
     v = {"prompt": "p", "new_session": NEW, "session": OLD, "orch_hooks_file": "h.json", "stream": True}
     for name in adapters.builtin_names():
         for mode in ("oneshot", "live"):
             for kind in ("fresh", "resume"):
                 try:
-                    argv = adapters.render(name, kind, mode, v) or []
+                    argv = adapters.render(name, kind, mode, v, proj) or []
                 except Refused:
                     continue
                 for at, item in enumerate(argv):
@@ -480,8 +489,10 @@ def test_codex_snapshots():
     assert adapters.render("codex", "fresh", "live", v) is None  # no live mode
 
 
-def test_prompt_starting_with_dash_is_not_an_option():
-    argv = adapters.render("claude", "fresh", "oneshot", {"prompt": "--dangerously-x", "new_session": NEW})
+def test_prompt_starting_with_dash_is_not_an_option(proj):
+    argv = adapters.render(
+        "claude", "fresh", "oneshot", {"prompt": "--dangerously-x", "new_session": NEW}, proj
+    )
     assert argv[-2:] == ["--", "--dangerously-x"]
 
 
@@ -534,7 +545,7 @@ def test_user_entry_picks_a_builtin_adapter(proj):
 
 def test_allow_goes_in_only_where_the_adapter_can_retry(proj):
     v = {"prompt": "p", "new_session": NEW, "allow": ["Bash(git push:*)", "Edit"]}
-    argv = adapters.render("claude", "fresh", "oneshot", v)
+    argv = adapters.render("claude", "fresh", "oneshot", v, proj)
     i = len(argv) - 1 - argv[::-1].index("--allowedTools")  # the run's own, after the built-in orch one
     assert argv[i + 1] == "Bash(git push:*),Edit" and i < argv.index("--")
     assert "--allowedTools" not in (adapters.render("codex", "fresh", "oneshot", v) or [])
@@ -542,7 +553,7 @@ def test_allow_goes_in_only_where_the_adapter_can_retry(proj):
     assert adapters.render("gen", "fresh", "oneshot", v, proj) == ["gen", "p"]
     assert adapters.permission_retry("claude") and not adapters.permission_retry("codex")
     with pytest.raises(Refused):
-        adapters.render("claude", "fresh", "oneshot", {**v, "allow": ["--dangerous"]})
+        adapters.render("claude", "fresh", "oneshot", {**v, "allow": ["--dangerous"]}, proj)
 
 
 def test_hooks_doc_comes_from_data():

@@ -47,20 +47,32 @@ The deny **set** is the same for every adapter; an adapter only says how its too
 itself, `.orch/` tickets, `.orch/run/`, anything `orch ...` prints. A shell command is refused when its **text** contains
 a path form; orch commands never contain one, so `orch record query` and `orch secret env <profile> -- ...` work.
 
-**Format `patterns/1`** (tools with `--disallowedTools`, i.e. Claude Code): one comma-joined value merged into the tool's `--disallowedTools` list (an existing
-list is extended, never replaced; added when there is none):
-- file tools, per root path P (`/**` and P itself): `Read(f)`, `Edit(f)`, `Write(f)` (`Read` only for rows with read denied;
-  `Edit`/`Write` for every row) for each form f of P: absolute `//<P without its leading />`; Windows drive form
-  `//c/Users/..` and `C:/Users/..`; `~/<rest>` when P is under the account home; relative to the workspace (`../..` form).
-  Real path and as-given path (symlinked temp folders) both.
+**Format `patterns/1`** (tools with `--disallowedTools`, i.e. Claude Code): one comma-joined value merged into the tool's
+disallowed-tools flag (any spelling in the existing flags, `--disallowedTools X`, `--disallowed-tools X`, `--disallowedTools=X`, is
+merged into one; an existing list is extended, never replaced; added when there is none). The rules are added whatever the permission
+mode, including `full`. Without a workspace orch **refuses to start** such a tool; a tool older than 2.0.0 (patterns with `*` inside, `Read(//..)`)
+is refused too (`Update it, then try again`).
+- Candidate homes, always: `<account home>/.orch-tool` and `ORCH_HOME` (when set), plus the guarded/trusted home when it resolves. A
+  candidate that is or contains the workspace is **dropped** (stderr note): the workspace is never denied.
+- file tools, per root path P (`/**` and P itself): `Read(f)` (rows with read denied only) and `Edit(f)` (every row; it covers
+  every tool that changes a file, so there is no `Write` rule) for each form f of P: absolute `//<P without its leading />`; Windows
+  drive form `//c/Users/..` and `C:/Users/..`; `~/<rest>` when P is under the account home; `./<rest>` when P is under the workspace
+  (no `../` forms: not valid file patterns). Real path and as-given path (symlinked temp folders) both.
 - shell: `Bash(*<text>*)` for each text form of P: forward-slash and backslash absolute, `~/<rest>`, `$HOME/<rest>`,
-  `${HOME}/<rest>`, relative to the workspace, and for `home` the folder's own name when it starts with `.` or contains
-  `orch`. `record`/`local-id`/`secrets` also the workspace-relative text `.orch/record` (and `.orch\record`, ...).
-- characters that break a pattern (`,` `(` `)`) in a path become `?`. Nothing is read from the workspace's own settings.
+  `${HOME}/<rest>`, `$env:USERPROFILE\<rest>` and `%USERPROFILE%\<rest>` (PowerShell, cmd), relative to the workspace (incl. `../..`),
+  and for `home` the folder's own name when it starts with `.` and has at least 6 characters (`.orch-tool`; never `orchestra`).
+  `record`/`local-id`/`secrets` also the workspace-relative text `.orch/record` (and `.orch\record`, ...).
+- `,` `(` `)`, spaces and control characters in a path become `*` (a wildcard in both rule kinds: never a split list, never a
+  literal). That over-blocks a few look-alike paths and never under-blocks the real one. Nothing is read from the workspace's own settings.
+- **Over-blocking:** a shell command that merely mentions `.orch/record` or the home folder's name (an `ls`, a `grep` for it) is
+  refused. **Under-blocking:** matching is exact text and case-exact (a case-insensitive file system lets `.ORCH-TOOL` through),
+  a symlink inside the workspace that points at the home is not followed, and variables, globs, `cd` plus a short name, or a built path
+  are not seen.
 
-**Format `none`** (`codex`, generic commands): orch cannot tell the tool. codex's own `workspace-write` sandbox already keeps
-writes inside the workspace (and `store_args`), so `home` is write-protected there; **reads of `home` and writes of `.orch/record`
-are not enforced** (Level 1: stops accidents, not a tool that deliberately goes there). Vectors: `vectors/deny-v1.json`.
+**Format `none`** (`codex`, generic commands): orch cannot tell the tool. codex's own `workspace-write` sandbox keeps *its
+writes* inside the workspace (and `store_args`): only that sandbox protects the home from writes, and only while it is on (a
+person's own config can change it). **Reads of `home` and writes of `.orch/record` are not enforced** (Level 1: stops
+accidents, not a tool that deliberately goes there). Vectors: `vectors/deny-v1.json`.
 
 ## Where
 

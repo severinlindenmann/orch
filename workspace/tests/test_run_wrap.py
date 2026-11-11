@@ -140,7 +140,9 @@ def _fake_claude(tmp_path, monkeypatch, resume_works):
     f = d / "claude"
     f.write_text(
         "#!/bin/sh\n"
-        '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'  # orch asks which modes it knows
+        # orch asks which modes and which version it knows
+        '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'
+        '[ "$1" = "--version" ] && { echo "2.1.0 (Claude Code)"; exit 0; }\n'
         f'printf "%s " "$@" | tr "\\n" " " >> {shlex.quote(str(out))}; echo >> {shlex.quote(str(out))}\n'
         + (
             ""
@@ -238,7 +240,10 @@ def test_a_plain_failure_does_not_fall_back_to_fresh(proj, run, tmp_path, monkey
     d.mkdir()
     out = tmp_path / "calls.txt"
     f = d / "claude"
-    f.write_text(f"#!/bin/sh\necho x >> {shlex.quote(str(out))}\necho 'rate limit reached'\nexit 1\n")
+    f.write_text(
+        '#!/bin/sh\n[ "$1" = --version ] && exit 0\n'
+        f"echo x >> {shlex.quote(str(out))}\necho 'rate limit reached'\nexit 1\n"
+    )
     f.chmod(f.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", str(d) + os.pathsep + os.environ["PATH"])
     config.set_key(proj, "workspace", "agent", "claude")
