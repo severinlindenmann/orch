@@ -2139,3 +2139,26 @@ def test_copies_identity_key_survives_workspace_deletion(ws, monkeypatch):
     assert worktrees.orphaned(other) == [{"ws8": wid[:8], "copies": 1}]
     assert worktrees.remove_orphaned(other, wid[:8], discard=True) == []
     assert not folder.exists()
+
+
+@pytest.mark.parametrize("result", ["ok", "fail", "missing"])
+def test_runner_waits_for_windows_result(ws, monkeypatch, result):
+    from orch import addons, winfinish
+
+    home = addons.home()
+    home.mkdir(parents=True, exist_ok=True)
+    log = winfinish.log_path(home)
+    log.write_text("RESULT ok: previous job\n")
+    monkeypatch.setattr(winfinish, "needed", lambda: True)
+    monkeypatch.setattr(winfinish, "pending", lambda h: True)
+    monkeypatch.setattr(winfinish, "updating", lambda h: True)
+    assert _run_runner(ws, monkeypatch, "import sys; sys.stdin.read()") == 0
+    assert hp.take_update_status(ws)["state"] == "running"
+    with log.open("a") as f:
+        if result != "missing":
+            f.write(f"RESULT {result}: this job\n")
+    monkeypatch.setattr(winfinish, "pending", lambda h: False)
+    assert hp.take_update_status(ws)["state"] == "running"  # RESULT alone is not enough
+    monkeypatch.setattr(winfinish, "updating", lambda h: False)
+    assert hp.take_update_status(ws)["state"] == ("finished" if result == "ok" else "failed")
+    assert hp.take_update_status(ws) is None
