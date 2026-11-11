@@ -184,3 +184,100 @@ def test_lines_of_another_run_or_ticket_are_ignored():
     assert to_events({**step, "run": "r_other001"}, TICKET, RUN) == []
     assert to_events({**step, "ticket": "t_other001"}, TICKET, RUN) == []
     assert to_events(step, TICKET, RUN)
+
+
+def test_steps_carry_what_they_used_and_the_board_counts_each_use_once():
+    skill = {
+        "kind": "skill",
+        "name": "newsletter-writing",
+        "action": None,
+        "source": "workspace",
+        "version": None,
+    }
+    conn = {"kind": "mcp", "name": "Slack", "action": "search", "source": "harness", "version": None}
+    evs = []
+    for i, used in enumerate([skill, conn, conn, None]):
+        e = example("valid-step-started.json", id=f"toolu_{i}", used=used)
+        evs += to_events(e, TICKET, RUN)
+        evs += to_events(
+            {**e, "outcome": {"ok": True, "error": None, "ms": 3}}, TICKET, RUN
+        )  # its end: same use
+    snap = Board.from_events(evs).snapshot()
+    assert [(u["kind"], u["name"], u["source"], u["count"]) for u in snap["used"]] == [
+        ("mcp", "Slack", "harness", 2),
+        ("skill", "newsletter-writing", "workspace", 1),
+    ]
+    assert snap["used"][0]["actions"] == ["search"]
+
+
+def test_an_unknown_kind_or_source_is_not_a_label():
+    odd = example(
+        "valid-step-started.json",
+        used={"kind": "key", "name": "k", "action": "env", "source": "x", "version": None},
+    )
+    assert "used" not in to_events(odd, TICKET, RUN)[0]["data"]
+    src = example(
+        "valid-step-started.json",
+        used={"kind": "tool", "name": "Read", "action": None, "source": "weird", "version": None},
+    )
+    assert to_events(src, TICKET, RUN)[0]["data"]["used"]["source"] == "harness"
+
+
+def test_helpers_keep_their_parent_and_stay_in_the_tree_when_finished():
+    start = example(
+        "valid-step-started.json",
+        id="h1",
+        kind="helper.start",
+        agent="h_1",
+        parent="main",
+        used={"kind": "helper", "name": "x", "action": None, "source": "builtin", "version": None},
+    )
+    end = {**start, "kind": "helper.end", "outcome": {"ok": True, "error": None, "ms": 5}}
+    snap = Board.from_events(to_events(start, TICKET, RUN) + to_events(end, TICKET, RUN)).snapshot()
+    assert snap["helpers"] == [] and [(h["agent"], h["parent"], h["open"]) for h in snap["helper_tree"]] == [
+        ("h_1", "main", False)
+    ]
+
+
+# PROVISIONAL FIXTURE SHAPE: `files` on step events (W2b decision 11 Nov; core lands later). Tests use exactly that shape.
+def stepf(files, name="Read", i=0, **kw):
+    used = {"kind": "tool", "name": name, "action": None, "source": "builtin", "version": None}
+    return example("valid-step-started.json", id=f"toolu_f{i}", used=used, files=files, **kw)
+
+
+def test_files_are_kept_only_when_they_are_workspace_relative_paths():
+    from orch_focus.record import clean_files
+
+    good = ["src/app.py", "budget-2026.xlsx", "a b/c.txt"]
+    bad = ["/etc/passwd", "../x", "a/../b", "a\\b", "C:/x", "a\x00b", "", "x" * 261, "a//b", "./a", 5, None]
+    assert clean_files(good + bad) == good
+    assert clean_files("src/app.py") == [] and clean_files(None) == []
+    assert len(clean_files([f"f{i}.txt" for i in range(20)])) == 8
+
+
+def test_the_board_tracks_files_read_and_changed_and_a_change_wins():
+    evs = to_events(stepf(["a.txt", "b.txt"], "Read", 1), TICKET, RUN) + to_events(
+        stepf(["a.txt"], "Edit", 2), TICKET, RUN
+    )
+    evs += to_events(stepf(["c.txt", "../evil"], "Bash", 3), TICKET, RUN)
+    files = {f["path"]: f["how"] for f in Board.from_events(evs).snapshot()["files"]}
+    assert files == {"a.txt": "changed", "b.txt": "read", "c.txt": "touched"}
+
+
+def test_same_file_needs_two_tickets_and_a_change():
+    from orch_focus.livecards import same_file
+
+    c1 = {
+        "key": "PIL-1",
+        "title": "x",
+        "files": [{"path": "budget.xlsx", "how": "read"}, {"path": "only1.txt", "how": "changed"}],
+    }
+    c2 = {"key": "PIL-2", "title": "y", "files": [{"path": "budget.xlsx", "how": "changed"}]}
+    assert same_file([c1, c2]) == [
+        {
+            "path": "budget.xlsx",
+            "tickets": [{"key": "PIL-1", "how": "read"}, {"key": "PIL-2", "how": "changed"}],
+        }
+    ]
+    c2["files"][0]["how"] = "read"
+    assert same_file([c1, c2]) == []  # two readers are not a clash

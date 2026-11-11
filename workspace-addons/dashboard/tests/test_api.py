@@ -324,6 +324,48 @@ def test_artifact_list_says_unavailable_when_orch_cannot_list(ws, act_orch):
     assert ticketfiles.listing(ws, None, "t_other000x")["available"] is False
 
 
+def test_artifact_list_from_the_real_core_for_a_ticket_with_only_artifacts(tmp_path):
+    """#351: a ticket whose only files are in its artifacts folder (no evidence/, no proofs) lists them, end
+    to end through the real `orch ticket artifacts --json` (a workspace made by `orch init` + `ticket new`)."""
+    import os
+    import subprocess
+    import sys
+
+    from orch_dashboard import ticketfiles
+
+    pytest.importorskip("cryptography")  # the real CLI runs in a subprocess; this venv may lack the core deps
+    command = tmp_path / "orch-core"
+    src = Path(__file__).resolve().parents[3] / "workspace" / "src"
+    command.write_text(
+        f"#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(src)!r})\n"
+        "from orch.cli import main\nraise SystemExit(main())\n"
+    )
+    command.chmod(0o700)
+    root = tmp_path / "Demo"
+    root.mkdir()
+    env = {k: v for k, v in os.environ.items() if k not in ("ORCH_ROOT", "ORCH_BIN")}
+
+    def orch(*argv):
+        r = subprocess.run(
+            [str(command), *argv], check=False, cwd=root, capture_output=True, text=True, env=env
+        )
+        assert r.returncode == 0, r.stderr + r.stdout
+        return r.stdout
+
+    orch("init", "--yes", "--json")
+    tid = json.loads(orch("ticket", "new", "Demo with files", "--json"))["id"]
+    d = root / ".orch" / "tickets" / tid
+    (d / "artifacts" / "sub").mkdir(parents=True)
+    (d / "artifacts" / "report.md").write_text("# report")
+    (d / "artifacts" / "sub" / "data.csv").write_text("a,b\n")
+    assert not (d / "evidence").exists()
+    got = ticketfiles.listing(root, str(command), tid)
+    assert got["available"] is True
+    assert sorted(f["name"] for f in got["files"]) == ["report.md", "sub/data.csv"]
+    assert {f["name"]: f["size"] for f in got["files"]} == {"report.md": 8, "sub/data.csv": 4}
+    assert all(f["mtime"] for f in got["files"])
+
+
 def test_files_are_shown_as_text_or_picture_only(art):
     q = "/api/file?t=t_other000x&k=artifacts&n="
     code, body, h = _get(art, q + "notes.md")

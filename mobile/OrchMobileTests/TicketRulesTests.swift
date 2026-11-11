@@ -7,8 +7,8 @@ final class TicketRulesTests: XCTestCase {
     }
 
     func testNeedsYouWords() {
-        XCTAssertEqual(ConversationRules.needsYouText(position: 1, of: 1), "Needs you")
-        XCTAssertEqual(ConversationRules.needsYouText(position: 2, of: 3), "Needs you · 2 of 3")
+        XCTAssertEqual(ConversationRules.needsYouText(position: 1, of: 1), "Needs your OK")
+        XCTAssertEqual(ConversationRules.needsYouText(position: 2, of: 3), "Needs your OK · 2 of 3")
     }
 
     func testOpenPositionCountsOnlyOpenQuestions() {
@@ -28,7 +28,7 @@ final class TicketRulesTests: XCTestCase {
     }
 
     func testStatusWordsAreTheDashboardWords() {
-        XCTAssertEqual(TopicStatus.waitingOnYou.label, "Needs you")
+        XCTAssertEqual(TopicStatus.waitingOnYou.label, "Needs your OK")
         XCTAssertEqual(TopicStatus.working.label, "Working")
         XCTAssertEqual(TopicStatus.paused.label, "Paused")
         XCTAssertEqual(TopicStatus.review.label, "Ready for review")

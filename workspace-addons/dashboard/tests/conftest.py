@@ -17,7 +17,7 @@ def _ticket(i, title, status, **kw):
 @pytest.fixture(autouse=True, scope="session")
 def _isolated_orch_home():
     """`orch` children of these tests (run_orch, the act ops) must never fall back to the real ~/.orch-tool
-    (ORCH_HOME unset = real folder, and a trace line in its .fallback-trace.log). One private home for the
+    (ORCH_HOME unset = real folder, and maybe a line in the temp fallback trace). One private home for the
     session, under ~/.orch-test (a trusted place: under the user's home, outside every cwd and any .git/.orch
     parent), removed by its exact path at the end."""
     import os

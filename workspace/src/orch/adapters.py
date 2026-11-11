@@ -22,7 +22,7 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
-from orch import agentsdata, config
+from orch import agentsdata, config, denyrules
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE, valid_session_id
 
@@ -204,6 +204,11 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         if doc:
             blob = json.dumps(doc, separators=(",", ":"))
             extra += [x.replace("{reminder_json}", blob) for x in sect["settings_args"]]
+    if (a.get("deny") or {}).get("format", "none") != "none":
+        _deny_version_ok(a, out[0])  # the binary this run really starts
+    extra = denyrules.deny_args(
+        a.get("deny"), extra, root
+    )  # orch's own folders, every mode (secrets.md); last
     if extra:
         at = out.index("--") if "--" in out else len(out)
         out[at:at] = extra
@@ -212,6 +217,34 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
             out.append("--")
         out.append(str(v["prompt"]))
     return out
+
+
+DENY_MIN_VERSION = (2, 0, 0)  # first build where Bash(*text*) patterns and Read(//path) rules are honoured
+
+
+@functools.cache
+def _binary_version(binary: str) -> str | None:
+    return _version(binary)
+
+
+def deny_version_check(a: Mapping, binary: str | None = None) -> None:
+    """Fail closed (deny by default): the tool must be found and report a version >= DENY_MIN_VERSION.
+    Not found, no output, garbage output and too old all refuse."""
+    cannot = f"{a['label']} could not be checked for the deny rules: update or reinstall it, then try again."
+    binary = binary or (a.get("detect") or {}).get("binary")
+    path = shutil.which(binary) if binary else None
+    v = _binary_version(path) if path else None
+    found = re.findall(r"\d+", v)[:3] if v else []
+    if len(found) < 2:  # _version only returns dotted numbers, so this is "nothing readable"
+        raise Refused(cannot)
+    if tuple(int(x) for x in found) + (0,) * (3 - len(found)) < DENY_MIN_VERSION:
+        raise Refused(
+            f"{a['label']} {v} is too old to keep orch's own folders out of reach "
+            f"(needs {'.'.join(map(str, DENY_MIN_VERSION))} or newer). Update it, then try again."
+        )
+
+
+_deny_version_ok = deny_version_check  # render calls this name (tests that fake a tool replace it)
 
 
 @functools.cache

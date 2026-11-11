@@ -16,7 +16,7 @@ struct NowLine: View {
     }
 
     private static func joined(running: Int, fresh: String?) -> String? {
-        let parts = [running > 0 ? "\(running) running" : nil, fresh].compactMap { $0 }
+        let parts = [running > 0 ? "Working on \(running) tickets" : nil, fresh].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

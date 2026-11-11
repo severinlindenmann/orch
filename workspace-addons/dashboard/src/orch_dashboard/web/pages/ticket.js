@@ -584,7 +584,7 @@ function taskRows(t) {
       menu = h('div', {className:'stack'}, more, form);
     }
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
-      h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Agent is working', 'aria-label':'Agent is working'}) : null, clean(task.text)),
+      h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Helper is working', 'aria-label':'Helper is working'}) : null, clean(task.text)),
         task.wont_do ? h('span', {className:'chip'}, "Won't do") : null,
         task.wont_do && task.reason ? h('details', {}, h('summary', {className:'meta'}, 'Reason'), h('p', {className:'meta'}, clean(task.reason))) : null,
         meta ? h('p', {className:'meta'}, meta) : null,
@@ -689,7 +689,7 @@ let ticketHistoryTechnical = false;
 let ticketHistoryActor = 'All';
 function ticketHistoryWho(entry) {
   const by = String(entry.by || entry.actor || '');
-  return /^human:/.test(by) ? 'People' : /^agent:/.test(by) ? 'Agent' : 'System';
+  return /^human:/.test(by) ? 'People' : /^agent:/.test(by) ? 'Helper' : 'System';
 }
 function ticketHistoryIsTechnical(entry) {
   const kind = String(entry.kind || entry.type || '').toLowerCase(), text = String(entry.text || '');
@@ -719,7 +719,7 @@ function ticketHistoryPanel(t) {
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
       h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
-  const controls = snapshot ? null : h('div', {className:'ticket-history-filters'}, ['All', 'People', 'Agent'].map(label => ticketButton(label, 'outline', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':ticketHistoryActor === label})),
+  const controls = snapshot ? null : h('div', {className:'ticket-history-filters'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':ticketHistoryActor === label})),
     ticketButton('Show technical steps', 'ghost', () => { ticketHistoryTechnical = !ticketHistoryTechnical; render(); }, {role:'switch', 'aria-checked':ticketHistoryTechnical}));
   return card('history', 'History', '', [controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow('No history yet.')]);
 }
@@ -731,7 +731,7 @@ function ticketStepState(t, run) {
 function ticketStepper(t, run) {
   const current = ticketStepState(t, run);
   return h('nav', {className:'ticket-stepper', 'aria-label':'Ticket progress'}, ['Plan', 'Work', 'Check', 'Done'].map(label => {
-    const who = label === current.step ? current.who : '', hint = who === 'person' ? 'You are needed' : who === 'agent' ? 'Agent is working' : who === 'done' ? 'Done' : label;
+    const who = label === current.step ? current.who : '', hint = who === 'person' ? 'You are needed' : who === 'agent' ? 'Helper is working' : who === 'done' ? 'Done' : label;
     return h(label === current.step ? 'strong' : 'span', {className:'step-' + who, title:hint, 'aria-label':label + ' · ' + hint, 'aria-current':label === current.step ? 'step' : null}, who ? ticketGlyph(who === 'person' ? 'user' : who === 'agent' ? 'robot' : 'check') : null, label);
   }));
 }
@@ -882,7 +882,7 @@ function ticketProofLine(t) {
     return h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-' + cls}, glyph), ' ', clean(task.text), ' ', h('span', {className:'meta'}, PROOF_WORD[per[task.id]] || PROOF_WORD.missing)); });
   return h('div', {className:'ticket-proof', 'data-key':'ticket-proof-' + t.id},
     h('p', {className:'ticket-proof-line'}, h('span', {className:'proof-mark proof-' + level}, mark), ' ', h('span', {className:'grow'}, p.line)),
-    Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask the agent to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
+    Object.values(per).includes('changed') && t.status === 'review' && !snapshot ? ticketButton('Ask the helper to check again', 'outline sm', () => ticketSendChanges(t, RECHECK_TEXT), {'data-key':'ticket-recheck-' + t.id}) : null,
     (rows.length || array(p.uncovered).length) && !snapshot ? h('details', {className:'ticket-proof-details'}, h('summary', {}, 'Details'), h('ul', {}, rows, array(p.uncovered).map(part => h('li', {className:'proof-row'}, h('span', {className:'proof-mark proof-warn'}, '!'), ' “' + clean(part) + '” ', h('span', {className:'meta'}, 'No task covers this'))))) : null);
 }
 
@@ -929,7 +929,7 @@ function detail(t) {
       t.verdict_needed ? h('p', {className:'meta', 'data-key':'ticket-verdict-needed'}, 'Marked done without your OK. Check the work, then click Looks good.') : null,
       ticketReviewTile(t, file), ticketProofLine(t), snapshot ? null : ticketChangesEditor(t)) : null;
     if (openQuestions.length || review) next = [openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null, review];
-    else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start agent', 'primary', () => act('run.start', {ticket:t.id})));
+    else if (fresh) next = h('section', {className:'card next-step'}, h('p', {className:'meta'}, 'Next step'), h('h2', {}, 'Ready to work on ' + clean(t.title) + '?'), snapshot ? null : ticketButton('Start helper', 'primary', () => act('run.start', {ticket:t.id})));
   }
   const menu = snapshot ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? ticketButton('Reopen', 'menu-item', () => moveTicket(t.id, 'active'), {role:'menuitem'}) : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
@@ -948,7 +948,7 @@ function detail(t) {
       panel('questions', [(snapshot || selected === 'questions') ? openQuestions.slice(t.status === 'done' ? 0 : 1).map(q => ticketQuestion(t, q)) : null, openQuestions.length <= (t.status === 'done' ? 0 : 1) ? emptyRow('No other open questions') : null, answered.length ? h('section', {}, h('h2', {}, 'Earlier answers'), answered) : null]),
       panel('artifacts', artifactsPanel(t)), panel('history', ticketHistoryPanel(t))),
     h('div', {className:'stack ticket-side'}, h('aside', {className:'card ticket-aside'}, h('div', {className:'card-h'}, h('h2', {}, 'Details')),
-      h('dl', {className:'ticket-details ed-list'}, field('Step of', parent ? h('a', {href:href(parent.id)}, partName(parent)) : h('span', {className:'muted'}, 'No parent ticket')), field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when')), field('Agent', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
+      h('dl', {className:'ticket-details ed-list'}, field('Step of', parent ? h('a', {href:href(parent.id)}, partName(parent)) : h('span', {className:'muted'}, 'No parent ticket')), field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when')), field('Helper', agent), field('Created', date(t.created_at)), field('Updated', t.updated_at ? window.DashHelpers.ago(t.updated_at, Date.now()) : ''))), linksCard(t), fieldSections(t)))));
 }
 
 const MULTILINE = ['note', 'done_when'];

@@ -64,7 +64,7 @@ final class ConversationViewTests: XCTestCase {
                     ack("a22", replyTo: "m_topic", ticket: "t_2"), ack("a333", replyTo: "m1", ticket: nil)]
         let chips = ConversationRules.startedChips(messages: msgs, workspace: "ws_a", key: { _ in nil })
         XCTAssertEqual(chips.map(\.id), ["a1"], "duplicate ack id shown once; acks of topic texts and acks without a ticket never")
-        XCTAssertEqual(chips.first?.label, "PIL-15 started")
+        XCTAssertEqual(chips.first?.label, "Topic started")
         XCTAssertEqual(chips.first?.ticket, "t_1")
     }
 
@@ -79,9 +79,9 @@ final class ConversationViewTests: XCTestCase {
 
     func testTopicSummaryHidesTheCountWithoutAChecklist() {
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Working"), "")
-        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 tasks done")
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Ready for review"), "")
-        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 tasks done")
     }
 
     func testSummaryRepeatsResultAfterTrimming() {

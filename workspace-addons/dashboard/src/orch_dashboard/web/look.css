@@ -44,6 +44,9 @@ a.sw-item:hover{background:var(--surface-2)}.sw-item.off{color:var(--text-muted)
 
 /* v3-pages: switcher + mobile mode */
 .workspace.ws-switch{min-height:44px}
+/* In the open Menu on a narrow screen the kit shows the box as a block; the switcher stays one row:
+   icon, name with its sub-label, chevron right. */
+.sidebar[data-open=true] .workspace.ws-switch{display:flex}
 .sw-menu{max-height:70vh;overflow:auto}
 .sw-menu .sw-item{width:100%;min-height:64px;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer}
 .sw-menu .sw-item:hover,.sw-menu .sw-item:focus-visible{background:var(--surface-2)}
