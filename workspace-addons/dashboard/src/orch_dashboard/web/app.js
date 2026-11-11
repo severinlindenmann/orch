@@ -388,11 +388,11 @@ main.addEventListener('change', async event => {
     const mode = perm.dataset.settingsPermissions;
     const send = async () => {
       const result = await settingsSend('config.permissions', mode === 'full' ? {mode, confirm:true} : {mode}, 'permissions');
-      if (result.ok) window.orch.toast('Saved. New agent runs use ' + capitalise(mode) + '.', 'ok');
+      if (result.ok) window.orch.toast('Saved. New helper runs use ' + capitalise(mode) + '.', 'ok');
     };
     if (mode !== 'full') { await send(); return; }
     perm.checked = false;  // stays on the old choice until the person says Yes
-    settingsConfirm('Let the agent do everything?', FULL_WARNING, '', 'Yes, use Full', send);
+    settingsConfirm('Let the helper do everything?', FULL_WARNING, '', 'Yes, use Full', send);
     return;
   }
   const control = event.target.closest('[data-settings-agent]');
@@ -400,9 +400,10 @@ main.addEventListener('change', async event => {
   const agent = array(state.settings?.agents).find(agent => agent.name === control.dataset.settingsAgent);
   if (!agent) return;
   const result = await settingsSend('config.agent', {name:agent.name}, 'agent');
-  if (result.ok) window.orch.toast(agent.label + ' is now the default agent.', 'ok');
+  if (result.ok) window.orch.toast(agent.label + ' is now the default helper.', 'ok');
 });
 main.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && event.target.closest('.settings-review')) { event.preventDefault(); settingsReviewClose(); return; }
   const settingsTabControl = event.target.closest('[data-action="settings-tab"]');
   if (settingsTabControl && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
     event.preventDefault();
@@ -410,6 +411,7 @@ main.addEventListener('keydown', event => {
     const index = tabs.indexOf(settingsTabControl);
     const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
     settingsTab = next.dataset.tab;
+    settingsReview = null;
     render();
     document.getElementById(next.id)?.focus();
     return;
@@ -453,15 +455,16 @@ main.addEventListener('click', async event => {
   if (snapshot) return;
   if (action === 'settings-tab') {
     settingsTab = control.dataset.tab;
+    settingsReview = null;
     render(); return;
   }
-  if (action === 'settings-share') {
-    if (snapshot || settingsBusy.has('share')) return;
-    const on = state.settings?.share !== true;
-    const result = await settingsSend('share.set', {on}, 'share');
-    if (result.ok) window.orch.toast(on ? 'Shared. Your team can now see this workspace.' : 'Not shared any more.', 'ok');
-    return;
-  }
+  // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
+  if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
+  if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
+  if (action === 'copies-switch') { settingsReviewOpen('copies-switch', control); return; }
+  if (action === 'copies-clean') { settingsReviewOpen('copies-clean', control); return; }
+  if (action === 'settings-review-ok') { await settingsReviewRun(); return; }
+  if (action === 'settings-review-cancel') { settingsReviewClose(); return; }
   if (action === 'private-allow') {
     if (settingsBusy.has('private')) return;
     const p = array(state.settings?.git_private?.pending).find(x => x.name === control.dataset.name);
@@ -524,7 +527,6 @@ main.addEventListener('click', async event => {
     (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
     return;
   }
-  if (action === 'copies-clean') { settingsSend('copies.clean', {}, 'copies-clean'); return; }
   if (action === 'copies-setup-edit') { copySetupEditing = true; render(); document.querySelector('[data-key="settings-copy-setup"]')?.focus(); return; }
   if (action === 'copies-setup-cancel') { copySetupEditing = false; render(); return; }
   if (action === 'copies-setup') {
@@ -532,7 +534,6 @@ main.addEventListener('click', async event => {
     if (result.ok) { copySetupEditing = false; render(); }
     return;
   }
-  if (action === 'workflow-set') { settingsSend('workflow.set', {on:!state.settings?.agents_may_finish}, 'workflow'); return; }
   if (action === 'link-add') startLinkAdd(control);
   if (action === 'link-remove') { event.preventDefault(); removeLink(control); return; }
   if (action === 'link-refresh') { refreshLinks(control); return; }

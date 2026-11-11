@@ -58,6 +58,12 @@
 .settings .copies-max{flex:none;width:5.5rem}
 .settings .copies-max,.settings .copies-setup{font-size:13px;min-height:36px;padding:5px 10px}
 .settings .folder-details p{margin-top:4px;overflow-wrap:anywhere}
+/* Review step: the shown review before a change (the .cmd-preview look of the Add your own helper review). */
+.settings .settings-review{margin:0 16px 16px;border-radius:8px}
+.settings .settings-review p{margin:0;overflow-wrap:anywhere}
+.settings .settings-review .settings-review-what{font-weight:600}
+.settings .settings-review:focus-visible{outline-offset:-2px}
+.settings .copies-sub>.settings-review{justify-self:stretch;margin:0}
 /* Narrow: every labelled row puts its label above the value (no label running into the value). */
 @media(max-width:720px){
   .settings .card-row:has(>.set-label){flex-wrap:wrap}
