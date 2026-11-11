@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 import time
+import types
+from pathlib import Path
 
 import pytest
 
@@ -11,22 +13,116 @@ from orch import addons, winfinish
 
 
 def test_paths_agree(monkeypatch, tmp_path):
-    monkeypatch.setenv("ORCH_HOME", str(tmp_path))
+    home = addons.real_home() / "toolhome"
+    home.mkdir()
+    monkeypatch.setenv("ORCH_HOME", str(home))
     monkeypatch.setattr(orch_entry, "real_home", addons.real_home)
     assert orch_entry.home_candidates() == addons.home_candidates()
     assert orch_entry.marker_path(tmp_path) == winfinish.marker_path(tmp_path)
     # Outside pytest's account-home fixture, verify the duplicated account lookup too.
     r = _entry(
         tmp_path,
-        "import orch_entry; from orch import addons; "
-        "assert orch_entry.home_candidates() == addons.home_candidates()",
+        "import orch_entry; from orch import addons; assert orch_entry.real_home() == addons.real_home()",
+        fake_home=False,
     )
     assert r.returncode == 0, r.stderr
 
 
-def _entry(tmp_path, code):
+def _entry(tmp_path, code, *, fake_home=True):
     env = dict(os.environ, ORCH_HOME=str(tmp_path))
+    if fake_home:
+        code = (
+            "import orch_entry; from pathlib import Path; "
+            f"orch_entry.real_home = lambda: Path({str(tmp_path.parent)!r}); " + code
+        )
     return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=10)
+
+
+@pytest.mark.parametrize("case", ["trusted", "outside", "home", "cwd", ".git", ".orch", ".agents"])
+def test_home_trust_agrees_with_core(monkeypatch, tmp_path, case):
+    top = addons.real_home()
+    home = top / "parent" / "tool"
+    home.mkdir(parents=True)
+    if case == "outside":
+        home = tmp_path
+    elif case == "home":
+        home = top
+    elif case == "cwd":
+        monkeypatch.chdir(home.parent)
+    elif case.startswith("."):
+        (home.parent / case).mkdir()
+    monkeypatch.setattr(orch_entry, "real_home", lambda: top)
+    monkeypatch.setenv("ORCH_HOME", str(home))
+    trusted = case == "trusted"
+    assert addons._trusted_home(home.resolve()) == trusted
+    assert orch_entry.trusted_home(home) == trusted
+    expected = [home.resolve()] if trusted else []
+    assert orch_entry.home_candidates() == [*expected, (top / ".orch-tool").resolve()]
+
+
+@pytest.mark.parametrize("case", ["outside", "cwd", "repo", "world-writable", "symlink", "owner"])
+def test_untrusted_home_marker_runs_normally(monkeypatch, tmp_path, case):
+    top = addons.real_home()
+    home = top / "tool"
+    home.mkdir()
+    if case == "outside":
+        home = tmp_path
+    elif case == "cwd":
+        monkeypatch.chdir(home)
+    elif case == "repo":
+        (home / ".git").mkdir()
+    elif case in {"world-writable", "owner", "symlink"}:
+        if sys.platform == "win32":
+            pytest.skip("POSIX permissions and symlinks")
+        if case == "world-writable":
+            home.chmod(0o777)
+        elif case == "symlink":
+            link = top / "link"
+            link.symlink_to(home, target_is_directory=True)
+            home = link
+        else:
+            original = Path.lstat
+
+            def lstat(path, *args, **kwargs):
+                result = original(path, *args, **kwargs)
+                if path == home:
+                    return types.SimpleNamespace(st_mode=result.st_mode, st_uid=os.getuid() + 1)
+                return result
+
+            monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(orch_entry, "real_home", lambda: top)
+    monkeypatch.setenv("ORCH_HOME", str(home))
+    orch_entry.marker_path(home).write_text(str(os.getpid()))
+    cli = types.ModuleType("orch.cli")
+    cli.main = lambda: 17
+    monkeypatch.setitem(sys.modules, "orch.cli", cli)
+    assert orch_entry.home_candidates() == [(top / ".orch-tool").resolve()]
+    assert orch_entry.main() == 17
+    # Even with an untrusted override, the account default remains guarded.
+    default = top / ".orch-tool"
+    default.mkdir()
+    orch_entry.marker_path(default).write_text(str(os.getpid()))
+    assert orch_entry.main() == 3
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX marker ownership")
+@pytest.mark.parametrize("stage", ["lstat", "fstat"])
+def test_foreign_marker_owner_runs_normally(monkeypatch, tmp_path, stage):
+    orch_entry.marker_path(tmp_path).write_text(str(os.getpid()))
+    original = Path.lstat if stage == "lstat" else os.fstat
+
+    def foreign_stat(*args, **kwargs):
+        result = original(*args, **kwargs)
+        fields = list(result)
+        fields[4] = os.getuid() + 1
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(Path if stage == "lstat" else os, stage, foreign_stat)
+    monkeypatch.setattr(orch_entry, "home_candidates", lambda: [tmp_path])
+    cli = types.ModuleType("orch.cli")
+    cli.main = lambda: 17
+    monkeypatch.setitem(sys.modules, "orch.cli", cli)
+    assert orch_entry.main() == 17
 
 
 def test_live_marker_never_imports_orch(tmp_path):

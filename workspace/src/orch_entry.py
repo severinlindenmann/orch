@@ -51,10 +51,37 @@ def marker_path(home: Path) -> Path:
     return home / "finish.updating"
 
 
+def trusted_home(home: Path) -> bool:
+    """Mirror addons._untrusted_rule, with extra checks for an existing marker home."""
+    try:
+        info = home.lstat()
+        if not stat.S_ISDIR(info.st_mode):  # also rejects symlinks before resolving
+            return False
+        if sys.platform != "win32" and (info.st_uid != os.getuid() or info.st_mode & stat.S_IWOTH):
+            return False
+        h = home.resolve()
+        top = real_home().resolve()
+        if str(h).casefold() == str(top).casefold():
+            return False
+        cwd = Path.cwd().resolve()
+        if h.is_relative_to(cwd) or Path(str(h).casefold()).is_relative_to(Path(str(cwd).casefold())):
+            return False
+        if not h.is_relative_to(top):
+            return False
+        for p in (h, *h.parents):
+            if p == top:
+                break
+            if any((p / name).exists() for name in (".orch", ".agents", ".git")):
+                return False
+        return True
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 def home_candidates() -> list[Path]:
-    # Check both: orch may reject an untrusted ORCH_HOME and use the account home.
     env = os.environ.get("ORCH_HOME")
-    return [*([Path(env).resolve()] if env else []), (real_home() / ".orch-tool").resolve()]
+    homes = [Path(env).resolve()] if env and trusted_home(Path(env)) else []
+    return [*homes, (real_home() / ".orch-tool").resolve()]
 
 
 def alive(pid: int) -> bool:
@@ -92,6 +119,8 @@ def updating(home: Path) -> bool:
         before = mark.lstat()
         if not stat.S_ISREG(before.st_mode):
             return False
+        if sys.platform != "win32" and before.st_uid != os.getuid():
+            return False
         flags = os.O_RDONLY
         if sys.platform != "win32":
             flags |= os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
@@ -102,6 +131,8 @@ def updating(home: Path) -> bool:
                 opened.st_dev,
                 opened.st_ino,
             ):
+                return False
+            if sys.platform != "win32" and opened.st_uid != os.getuid():
                 return False
             if not 0 <= time.time() - opened.st_mtime < MAX_AGE:
                 return False
