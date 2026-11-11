@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
@@ -26,6 +27,7 @@ from orch.record import (
     read_events,
     record_dir,
     registered_writer,
+    run_readable,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -544,3 +546,76 @@ def test_finished_detail_is_write_once(store):
     started = writer.append(event(id="w2"), detail={"input": "a", "output": "early"})
     writer.append(event(id="w2", outcome=done), detail={"input": "a", "output": "final"})
     assert json.loads((record_dir(ws) / started["detail"]).read_text())["output"] == "final"
+
+
+def _foreign_owner(monkeypatch):
+    from types import SimpleNamespace
+
+    real = os.fstat
+
+    def fake(fd):
+        info = real(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size == 0:  # only files that already hold data
+            return info
+        fields = {k: getattr(info, k) for k in dir(info) if k.startswith("st_")}
+        fields["st_uid"] = info.st_uid + 1
+        return SimpleNamespace(**fields)
+
+    monkeypatch.setattr(record.os, "fstat", fake)
+
+
+def _hardlink(path, tmp_path, name):
+    other = tmp_path / name
+    os.link(path, other)
+    return other
+
+
+@pytest.mark.parametrize("how", ["foreign", "hardlink"])
+def test_every_read_path_distrusts_foreign_and_hardlinked_files(store, tmp_path, monkeypatch, how):
+    ws, writer = store
+    done = {"ok": True, "error": None, "ms": 1}
+    stored = writer.append(event(id="p1", outcome=done), detail={"input": "i", "output": "o"})
+    state = event(id="rs1", kind="run.state", via="core", data={"state": "done"}, text="Done", used=None)
+    writer.append(state)
+    run_file = record_dir(ws) / "runs/r_8k2m01.jsonl"
+    detail_file = record_dir(ws) / stored["detail"]
+    name = Path(stored["detail"]).stem
+    assert len(read_events(ws, "r_8k2m01")) == 2 and run_readable(ws, "r_8k2m01")
+    if how == "hardlink":
+        _hardlink(run_file, tmp_path, "l1")
+        _hardlink(detail_file, tmp_path, "l2")
+    else:
+        _foreign_owner(monkeypatch)
+    assert read_events(ws, "r_8k2m01") == []  # skipped, no crash
+    assert not run_readable(ws, "r_8k2m01")
+    assert read_detail(ws, "r_8k2m01", name) is None  # unavailable
+    # a new append over the untrusted run file is refused and writes nothing
+    with pytest.raises(RecordRefused):
+        writer.append(event(id="p2"))
+    # an existing untrusted detail target gives detail_lost for a new event with the same name, line kept
+    # (run file untouched: use another run)
+    # retention: an unreadable run is never folded, never deleted
+    folded = []
+    plan = apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda run, evs: folded.append(run))
+    assert folded == [] and plan["delete_run"] == []
+    assert run_file.exists() and detail_file.exists()
+
+
+@pytest.mark.parametrize("how", ["foreign", "hardlink"])
+def test_store_detail_with_untrusted_existing_target_is_lost(store, tmp_path, monkeypatch, how):
+    ws, writer = store
+    from orch.collect_execjson import detail_name
+
+    target = record_dir(ws) / f"detail/r_8k2m02/{detail_name('r_8k2m02', 'step', 'q1')}.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            dict(v=1, id="q1", run="r_8k2m02", kind="step", input="a", output="b", truncated=False, hidden=0)
+        )
+    )
+    if how == "hardlink":
+        _hardlink(target, tmp_path, "l3")
+    else:
+        _foreign_owner(monkeypatch)
+    kept = writer.append(event(id="q1", run="r_8k2m02"), detail={"input": "x", "output": "y"})
+    assert kept is not None and kept["detail"] is None and kept["detail_lost"] is True

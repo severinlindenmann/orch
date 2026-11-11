@@ -155,12 +155,15 @@ def _open(path: Path, flags: int) -> int:
         fd = os.open(path, flags, 0o600)
     info = os.fstat(fd)
     writing = bool(flags & (os.O_WRONLY | os.O_RDWR))
+    # ONE check for every open in this module (reads, appends, detail, lock, meta): a regular file with
+    # a single link, owned by us on POSIX. A hardlink to a file elsewhere, a device or another user's file
+    # is never read or written.
     if (
         not stat.S_ISREG(info.st_mode)
-        or (writing and info.st_nlink != 1)
-        or (os.name == "posix" and writing and info.st_uid != os.geteuid())
+        or info.st_nlink != 1
+        or (os.name == "posix" and info.st_uid != os.geteuid())
     ):
-        os.close(fd)  # a hardlink to a file elsewhere, a device or a file of another user: never written
+        os.close(fd)
         raise RecordRefused(_NOT_SAFE)
     if writing and hasattr(os, "fchmod"):
         os.fchmod(fd, 0o600)
@@ -211,7 +214,7 @@ def _lines(path: Path) -> list[dict]:
     _safe(path)
     try:
         fd = _open(path, os.O_RDONLY)
-    except FileNotFoundError:
+    except (FileNotFoundError, RecordRefused):  # missing, or unsafe: reported by run_readable, never trusted
         return []
     result = []
     with os.fdopen(fd, "rb") as stream:
@@ -450,6 +453,19 @@ def read_events(workspace: Path, run: str) -> list[dict]:
         if key not in kept or _precedence(event) > _precedence(kept[key]):
             kept[key] = event
     return sorted(kept.values(), key=lambda e: e["seq"])
+
+
+def run_readable(workspace: Path, run: str) -> bool:
+    """False when the run file exists but cannot be trusted (foreign owner, hardlink, not a regular file):
+    its events are then skipped (read_events returns none) and the person sees "records unavailable"."""
+    path = record_dir(workspace) / "runs" / f"{_name(run, _RUN)}.jsonl"
+    try:
+        os.close(_open(path, os.O_RDONLY))
+    except FileNotFoundError:
+        return True
+    except (OSError, RecordRefused):
+        return False
+    return True
 
 
 def read_detail(workspace: Path, run: str, file_id: str) -> dict | None:
