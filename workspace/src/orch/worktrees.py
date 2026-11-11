@@ -24,9 +24,9 @@ The registry (.orch/run/worktrees.json, local, gitignored) says which copies orc
 [{path, branch, base, sub}], created_at}. `sub` is the workspace's folder below the git top folder (""
 when the
 workspace is the top): the agent starts in <path>/<sub>. `<ws8>/.owner` holds the workspace folder, for
-cleanup. The home-level worktrees/.known.json independently records the workspace path after verifying
-its id, signed with a home-level key in the guarded keys area. Neither a forged .owner nor an
-unsigned history entry can authorize orphan removal.
+cleanup. The guarded keys/copies/ registry independently records full workspace ids and paths, signed as
+a whole with a home-level key and checked against a separately guarded monotonic counter. Neither a
+forged .owner nor an unsigned history entry can authorize orphan removal.
 """
 
 from __future__ import annotations
@@ -121,18 +121,6 @@ def copies_dir(root: Path) -> Path | None:
     return ((addons.home(root) / "worktrees").resolve()) / wid[:8]
 
 
-def _known_copies(base: Path) -> dict:
-    """Untrusted history; only _known_main authenticates an entry, never .owner alone."""
-    path = base / ".known.json"
-    try:
-        if path.is_symlink():
-            return {}
-        doc = json.loads(path.read_text(encoding="utf-8"))
-        return doc if isinstance(doc, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
 def _copies_key(home: Path, *, create: bool = False) -> bytes:
     """Account/home key, independent of workspace ids and path bindings; never in a copy."""
     guarded = humanproof.guarded_home(home)
@@ -163,50 +151,131 @@ def _copies_key(home: Path, *, create: bool = False) -> bytes:
     return key
 
 
-def _copies_mac(key: bytes, ws8: str, main: str) -> str:
-    data = json.dumps(["orch.copies/1", ws8, main], ensure_ascii=True).encode("ascii")
-    return hmac.new(key, data, hashlib.sha256).hexdigest()
+def _copies_mac(key: bytes, data: dict) -> str:
+    raw = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return hmac.new(key, raw, hashlib.sha256).hexdigest()
 
 
-def _known_main(base: Path, ws8: str, entry) -> str | None:
-    """Unsigned, altered or replayed entries are unknown, never deletion authority."""
-    if not isinstance(entry, dict) or not _WS8.fullmatch(ws8):
-        return None
-    main, mac = entry.get("main"), entry.get("mac")
-    if not isinstance(main, str) or not Path(main).is_absolute():
-        return None
-    if not isinstance(mac, str) or not re.fullmatch(r"[0-9a-f]{64}", mac):
+def _copies_store(home: Path, key: bytes) -> tuple[int, dict]:
+    """Read guarded state strictly. Only a never-created store may start at zero.
+
+    The counter is committed last: an interrupted update fails closed, like a replay.
+    Callers must never turn invalid state into an empty registry for a write.
+    """
+    d = home / "keys" / "copies"
+    try:
+        raw = humanproof._read_guarded(d / "registry.json")
+    except FileNotFoundError:
+        if os.path.lexists(d / "counter"):
+            raise Refused("The copies identity store is missing.") from None
+        return 0, {}
+    doc = json.loads(raw)
+    counter = json.loads(humanproof._read_guarded(d / "counter"))
+    if not isinstance(doc, dict):
+        raise Refused("The copies identity store is damaged.")
+    data = {k: doc.get(k) for k in ("version", "counter", "entries")}
+    mac = doc.get("mac")
+    if (
+        data["version"] != "orch.copies/2"
+        or type(counter) is not int
+        or counter < 1
+        or type(data["counter"]) is not int
+        or data["counter"] != counter
+        or not isinstance(mac, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", mac)
+        or not hmac.compare_digest(mac, _copies_mac(key, data))
+        or not isinstance(data["entries"], dict)
+    ):
+        raise Refused("The copies identity store is damaged or out of date.")
+    for ws8, entry in data["entries"].items():
+        if (
+            not _WS8.fullmatch(ws8)
+            or not isinstance(entry, dict)
+            or not isinstance(entry.get("main"), str)
+            or not Path(entry["main"]).is_absolute()
+            or not isinstance(entry.get("workspace_id"), str)
+            or not addons.ID_RE.fullmatch(entry["workspace_id"])
+            or entry["workspace_id"][:8] != ws8
+        ):
+            raise Refused("The copies identity store has an invalid identity.")
+    return counter, data["entries"]
+
+
+def _save_copies_store(home: Path, key: bytes, counter: int, entries: dict) -> None:
+    """Caller holds the home copies lock; guarded atomic replacements, counter last."""
+    d = home / "keys" / "copies"
+    data = {"version": "orch.copies/2", "counter": counter + 1, "entries": entries}
+    doc = {**data, "mac": _copies_mac(key, data)}
+    humanproof._write_private(d / "registry.json", json.dumps(doc) + "\n")
+    humanproof._write_private(d / "counter", str(counter + 1) + "\n")
+
+
+def _known_copies(base: Path) -> dict:
+    """Only the current, whole-store authenticated mapping is deletion authority."""
+    try:
+        return _copies_store(base.parent, _copies_key(base.parent))[1]
+    except (OSError, ValueError, Refused):
+        return {}
+
+
+def _known_main(base: Path, ws8: str) -> str | None:
+    entry = _known_copies(base).get(ws8)
+    return entry["main"] if entry is not None else None
+
+
+def _legacy_copies_entry(base: Path, ws8: str):
+    """Untrusted migration hint only; never used by any deletion/listing reader."""
+    path = base / ".known.json"
+    if not os.path.lexists(path):
         return None
     try:
-        expected = _copies_mac(_copies_key(base.parent), ws8, main)
-        return main if hmac.compare_digest(mac, expected) else None
-    except (OSError, ValueError, Refused):
-        return None
+        if path.is_symlink():
+            raise ValueError
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict):
+            raise ValueError
+        if ws8 not in doc:
+            return None
+        if not isinstance(doc[ws8], str):
+            raise ValueError
+        return doc[ws8]
+    except (OSError, ValueError):
+        raise Refused("The legacy copies record cannot be migrated.") from None
 
 
 def _remember_copies(root: Path, folder: Path) -> None:
-    # Validate identity while the workspace exists; the record survives a move/deletion.
-    if (addons.workspace_id(root) or "")[:8] != folder.name:
+    wid = addons.workspace_id(root)
+    if not wid or _ws8(wid) != folder.name:
         raise Refused("The copies folder does not match this workspace's id.")
+    home = folder.parent.parent
     with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
-        known = _known_copies(folder.parent)
+        try:
+            key = _copies_key(home, create=True)
+            counter, known = _copies_store(home, key)
+        except (OSError, ValueError) as e:
+            raise Refused("The copies identity store cannot be read.") from e
         main = str(root.resolve())
-        old = _known_main(folder.parent, folder.name, known.get(folder.name))
-        if old is not None and old != main and os.path.lexists(old):
-            raise Refused("Another workspace uses the same copy folder.")
-        key = _copies_key(folder.parent.parent, create=True)
-        known[folder.name] = {"main": main, "mac": _copies_mac(key, folder.name, main)}
+        entry = known.get(folder.name)
+        old = entry["main"] if entry is not None else None
+        if entry is not None:
+            if entry["workspace_id"] != wid:
+                raise Refused("Another workspace uses the same copy folder.")
+        else:
+            legacy = _legacy_copies_entry(folder.parent, folder.name)
+            if legacy is not None and legacy != main:
+                raise Refused("Another workspace uses the same copy folder.")
         if old is not None and old != main:
             if _is_link(folder) or (folder / ".owner").is_symlink():
                 raise Refused("orch cannot use that folder for copies.")
             runs._atomic(folder / ".owner", main + "\n")
-        runs._atomic(folder.parent / ".known.json", json.dumps(known) + "\n")
+        known[folder.name] = {"main": main, "workspace_id": wid}
+        _save_copies_store(home, key, counter, known)
 
 
 def _known_gone(d: Path) -> bool:
     """The marker agrees with a signed historical identity, and that workspace is gone."""
     try:
-        main = _known_main(d.parent, d.name, _known_copies(d.parent).get(d.name))
+        main = _known_main(d.parent, d.name)
         if main is None:
             return False
         owner = d / ".owner"
@@ -1591,9 +1660,10 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
                 (d / ".owner").unlink()
                 with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
                     d.rmdir()
-                    known = _known_copies(base)
+                    key = _copies_key(base.parent)
+                    counter, known = _copies_store(base.parent, key)
                     known.pop(ws8, None)
-                    runs._atomic(base / ".known.json", json.dumps(known) + "\n")
+                    _save_copies_store(base.parent, key, counter, known)
     return notes
 
 

@@ -1062,7 +1062,7 @@ def test_missing_closed_copy_without_owner_is_clearable(repo, run, action):
     git(repo, "worktree", "remove", str(p))
     (p.parent / ".owner").unlink()
     p.parent.rmdir()
-    (p.parent.parent / ".known.json").unlink()
+    (addons.home(repo) / "keys" / "copies" / "registry.json").unlink()
     p.parent.parent.rmdir()
     tickets.ticket_path(repo, t).unlink()
     if action == "clean":
@@ -1146,10 +1146,15 @@ def remember_gone(repo, folder, main):
 
 def test_known_copy_record_is_created_outside_ws8_and_owner_must_agree(repo):
     p = make(repo)
-    known = json.loads((p.parent.parent / ".known.json").read_text())
+    known = worktrees._known_copies(p.parent.parent)
     entry = known[addons.workspace_id(repo)[:8]]
     assert entry["main"] == str(repo.resolve())
-    assert len(entry["mac"]) == 64
+    assert entry["workspace_id"] == addons.workspace_id(repo)
+    guarded = addons.home(repo) / "keys" / "copies"
+    assert guarded.stat().st_mode & 0o777 == 0o700
+    for name in ("registry.json", "counter"):
+        assert (guarded / name).stat().st_mode & 0o777 == 0o600
+    assert not (p.parent.parent / ".known.json").exists()
     other = repo.parent / "gone-other"
     d = _gone_folder(repo, owner=str(other))
     remember_gone(repo, d, other)
@@ -1206,7 +1211,7 @@ def test_review_forged_identity_cannot_remove_live_workspace(repo, record):
     missing = str(repo.parent / "missing-b")
     d = _gone_folder(repo, ws8="bbbbbbbb", owner=missing)
     path = d.parent / ".known.json"
-    known = json.loads(path.read_text())
+    known = worktrees._known_copies(d.parent)
     known[d.name] = (
         missing
         if record == "unsigned"
@@ -1219,6 +1224,8 @@ def test_review_forged_identity_cannot_remove_live_workspace(repo, record):
         worktrees.remove_orphaned(repo, d.name, discard=True)
     assert (d / "t_abcdef12").is_dir()
     assert worktrees.orphaned(repo) == []
+    with pytest.raises(Refused):
+        worktrees._remember_copies(live, d)
 
 
 def test_review_unknown_owner_is_not_listed(repo):
@@ -1228,13 +1235,13 @@ def test_review_unknown_owner_is_not_listed(repo):
 
 def test_review_moved_workspace_refreshes_identity_and_owner(repo):
     p = make(repo)
-    before = json.loads((p.parent.parent / ".known.json").read_text())
+    before = worktrees._known_copies(p.parent.parent)
     moved = repo.parent / "moved-project"
     repo.rename(moved)
     try:
         worktrees._remember_copies(moved, p.parent)
         assert (p.parent / ".owner").read_text().strip() == str(moved.resolve())
-        after = json.loads((p.parent.parent / ".known.json").read_text())
+        after = worktrees._known_copies(p.parent.parent)
         assert after[p.parent.name] != before[p.parent.name]
         assert not worktrees._known_gone(p.parent)
     finally:
@@ -1248,7 +1255,7 @@ def test_review_deleted_orphan_forgets_signed_identity(repo):
     assert worktrees.orphaned(repo) == [{"ws8": d.name, "copies": 1}]
     assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
     assert not d.exists()
-    assert d.name not in json.loads((d.parent / ".known.json").read_text())
+    assert d.name not in worktrees._known_copies(d.parent)
 
 
 def test_review_retry_forged_gitdir_keeps_other_copys_lock(repo):
@@ -1301,3 +1308,66 @@ def test_review_retry_linked_gitdir_keeps_lock(repo):
     (p / ".git").write_text(f"gitdir: {alias}\n")
     worktrees.retry(repo, repo.tids[0])
     assert lock.exists()
+
+
+@pytest.mark.parametrize("moved", [False, True])
+def test_task_d_missing_main_cannot_rebind_different_full_id(repo, moved):
+    main = repo.parent / "old-main"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    other = repo / "new-main"
+    (other / ".orch").mkdir(parents=True)
+    (other / ".orch" / ".local-id").write_text(d.name + "1" * 24)
+    if moved:
+        # A moved directory whose full id differs still cannot claim the old binding.
+        destination = repo / "moved-main"
+        other.rename(destination)
+        other = destination
+    with pytest.raises(Refused):
+        worktrees._remember_copies(other, d)
+    assert (d / ".owner").read_text().strip() == str(main)
+
+
+@pytest.mark.parametrize("equal", [False, True])
+def test_task_d_legacy_string_migration_requires_same_main(repo, equal):
+    folder = addons.home(repo) / "worktrees" / wid8(repo)
+    folder.mkdir(parents=True)
+    main = str(repo.resolve())
+    (folder.parent / ".known.json").write_text(json.dumps({folder.name: main if equal else main + "-gone"}))
+    if not equal:
+        with pytest.raises(Refused):
+            worktrees._remember_copies(repo, folder)
+    else:
+        worktrees._remember_copies(repo, folder)
+        store = addons.home(repo) / "keys" / "copies" / "registry.json"
+        entry = json.loads(store.read_text())["entries"][folder.name]
+        assert entry == {"main": main, "workspace_id": addons.workspace_id(repo)}
+
+
+@pytest.mark.parametrize("update", ["move", "remove"])
+def test_task_d_replayed_store_is_unknown(repo, update):
+    main = repo.parent / "replay-main"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    store = addons.home(repo) / "keys" / "copies" / "registry.json"
+    old = store.read_bytes()
+    counter = store.with_name("counter")
+    before = int(counter.read_text())
+    assert json.loads(old)["counter"] == before
+    if update == "move":
+        moved = repo.parent / "replay-moved"
+        remember_gone(repo, d, moved)  # same full id, legitimate rebind
+    else:
+        assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
+        d = _gone_folder(repo, owner=str(main))
+    assert int(counter.read_text()) > before
+    assert json.loads(store.read_bytes())["counter"] == int(counter.read_text())
+    store.write_bytes(old)
+    (d / ".owner").write_text(str(main))
+    assert not worktrees._known_gone(d)
+    assert worktrees.orphaned(repo) == []
+    with pytest.raises(Refused):
+        worktrees.remove_orphaned(repo, d.name, discard=True)
+    # A replay must not become a fresh empty registry on the next write either.
+    with pytest.raises(Refused):
+        worktrees._remember_copies(repo, addons.home(repo) / "worktrees" / wid8(repo))
