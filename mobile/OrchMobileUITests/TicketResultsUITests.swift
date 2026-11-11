@@ -9,7 +9,8 @@ final class TicketResultsUITests: XCTestCase {
                                 "-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1", "-openInfo", "YES"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["info-summary"].firstMatch.waitForExistence(timeout: 20))
-        let checked = app.staticTexts["Checked by the helper"].firstMatch
+        // Label line is "Checked by the helper · <date>" (visual challenge #4).
+        let checked = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Checked by the helper")).firstMatch
         XCTAssertTrue(checked.waitForExistence(timeout: 10))
         app.reveal(checked)
         XCTAssertTrue(checked.isHittable)

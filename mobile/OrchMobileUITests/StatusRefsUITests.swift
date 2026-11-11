@@ -63,7 +63,9 @@ final class StatusRefsUITests: XCTestCase {
         // The Results section (draft 02, 2.6) sits above the references and the list is lazy: scroll down to them.
         for _ in 0..<4 where !el(app, "info-ref-ref0").exists { app.swipeUp() }
         XCTAssertTrue(el(app, "info-ref-ref0").waitForExistence(timeout: 5), "web address card")
-        XCTAssertTrue(app.staticTexts["Rename field X in ingestion job"].exists, "ticket row with title")
+        let ticketRow = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Rename field X in ingestion job")).firstMatch
+        for _ in 0..<3 where !ticketRow.exists { app.swipeUp() }
+        XCTAssertTrue(ticketRow.waitForExistence(timeout: 5), "ticket row with title (key behind Details)")
         let fileReference = el(app, "info-ref-ref3")
         app.reveal(fileReference)
         fileReference.buttons["Details"].tap()
