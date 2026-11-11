@@ -3,7 +3,6 @@ entries and never the line."""
 
 import copy
 import json
-import re
 from pathlib import Path
 
 import jsonschema
@@ -98,15 +97,16 @@ def test_every_invalid_shape_is_dropped_line_kept(store, bad):
     assert not file_ok(bad)
 
 
-def test_writer_check_matches_the_shared_check_and_the_schema():
+def test_writer_check_matches_the_shared_check_and_the_schema(store):
+    ws, writer = store
     entries = [f for c in VECTORS["files"] if isinstance(c["files"], list) for f in c["files"]]
-    entries += ["src/\u00e9.py", "e\u0301.py", "a:b", "1:/x", ".", "./a", "a//b", "x" * 260]
+    entries += ["src/\u00e9.py", "e\u0301.py", "a:b", "1:/x", ".", "./a", "a//b", "x" * 260, "a\U000e0041b"]
     item = jsonschema.Draft202012Validator({"$ref": "#/$defs/file_path", "$defs": SCHEMA["$defs"]})
-    for f in entries:
-        writer_ok = type(f) is str and bool(re.fullmatch(record._FILE_PATH, f)) and redact(f) == f
-        assert writer_ok == file_ok(f), f
+    for n, f in enumerate(entries):
+        stored = writer.append(example(id=f"e{n}", files=[f]))["files"]
+        assert (stored == [f]) == (file_ok(f) and redact(f) == f), f  # the writer uses the one shared check
         if file_ok(f):
-            assert item.is_valid(f), f
+            assert item.is_valid(f), f  # the schema never refuses what the writer takes
 
 
 def test_a_path_with_a_key_value_is_dropped_not_stored_hidden(store):
@@ -214,9 +214,11 @@ def test_normalise_against_the_real_root(tmp_path):
     (real / "src").mkdir(parents=True)
     link = tmp_path / "link"
     link.symlink_to(real)
-    assert workspace_file(f"{real.resolve()}/src/a.py", link) == "src/a.py"
-    assert workspace_file(f"{link}/src/a.py", link) == "src/a.py"
-    assert workspace_file(f"{tmp_path}/other/a.py", link) is None
+    roots = [link, real.resolve()]  # the caller passes the root and its resolved form (no I/O here)
+    assert workspace_file(f"{real.resolve()}/src/a.py", roots) == "src/a.py"
+    assert workspace_file(f"{link}/src/a.py", roots) == "src/a.py"
+    assert workspace_file(f"{tmp_path}/other/a.py", roots) is None
+    assert workspace_file(f"{real.resolve()}/src/a.py", link) is None  # a single root is taken as given
 
 
 def test_multibyte_paths_are_trimmed_to_a_byte_budget_and_the_line_is_written(store):
@@ -243,3 +245,34 @@ def test_an_entry_over_512_bytes_is_not_stored_but_the_line_is(store):
     ws, writer = store
     assert writer.append(example(files=["日本語" * 85])) is not None  # 260 chars, 765 bytes
     assert read_run(ws, RUN).unwrap()[0]["files"] == []
+
+
+def test_root_slash_is_refused():
+    assert workspace_file("/etc/passwd", "/") is None and workspace_file("/etc/passwd", ["/", "//"]) is None
+
+
+@pytest.mark.parametrize(
+    "path", ["~/x", "$HOME/x", "file:///etc/passwd", "https://x/y", "C:x", "a\u202eb", "a\u200bb"]
+)
+def test_producer_drops_non_paths_and_hidden_characters(path):
+    assert workspace_file(path, "/work/proj") is None
+
+
+def test_astral_format_characters_are_refused_by_the_shared_check():
+    assert not file_ok("a\U000e0041b") and not file_ok("a\U000110bdb")
+
+
+def test_only_the_first_64_inputs_are_read(store):
+    ws, writer = store
+    files = ["../bad"] * 64 + ["late.py"]
+    assert workspace_files(files, "/work/proj") == []
+    assert writer.append(example(files=files))["files"] == []
+    good = [f"f{n}" for n in range(70)]
+    assert writer.append(example(id="e2", files=good))["files"] == good[:8]
+
+
+def test_a_hash_named_path_is_dropped_silently(store):
+    ws, writer = store
+    name = "ghp_" + "a" * 30  # token-looking: the plain-text cleaner hides it, so the entry changes and goes
+    stored = writer.append(example(files=[f"out/{name}.bin", "keep.py"]))
+    assert stored["files"] == ["keep.py"] and redact(f"out/{name}.bin") != f"out/{name}.bin"

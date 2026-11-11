@@ -12,38 +12,45 @@ from typing import Any
 
 MAX_FILES = 8
 MAX_LEN = 260
-_BAD = re.compile(r"[\x00-\x1f\x7f\\]")
-_DRIVE = re.compile(r"[A-Za-z]:")
+MAX_INPUT = 64  # a producer's list is read only this far (the first 8 valid entries are kept)
+_BAD = re.compile(r"\\")
+_NOT_PLAIN = re.compile(
+    r"[~$]|[A-Za-z][A-Za-z0-9+.-]*:"
+)  # `~/x`, `$HOME/x`, `file:///x`, `C:x`: not paths of ours
+_HIDDEN = ("Cc", "Cf", "Zl", "Zp")  # control, format (bidi, zero-width), line/paragraph separators: spoofing
 
 
 def file_ok(value: Any) -> bool:
-    """1..260 chars, NFC, no leading `/`, no `..` segment, no backslash, drive letter or control character."""
+    """1..260 chars, NFC, no leading `/`, no `..` segment, no backslash, no start with `~`, `$` or a
+    scheme/drive (`file:`, `C:`), no control or format character (Unicode Cc, Cf, Zl, Zp)."""
     return (
         isinstance(value, str)
         and 1 <= len(value) <= MAX_LEN
         and unicodedata.is_normalized("NFC", value)
         and not value.startswith("/")
-        and not _DRIVE.match(value)
+        and not _NOT_PLAIN.match(value)
         and not _BAD.search(value)
         and ".." not in value.split("/")
+        and not any(unicodedata.category(c) in _HIDDEN for c in value)
     )
 
 
 def _roots(root: Any) -> list[str]:
-    if not isinstance(root, (str, Path)) or not str(root).startswith("/"):
-        return []
-    found = [posixpath.normpath(str(root))]
-    try:
-        real = posixpath.normpath(str(Path(root).resolve()))
-    except (OSError, RuntimeError, ValueError):
-        real = found[0]
-    return found + ([real] if real != found[0] else [])
+    """The workspace root(s) an absolute path may start with: one path, or a list (the caller passes the root
+    and its resolved form; this module does no filesystem access). A root that is `/` is refused."""
+    found: list[str] = []
+    for item in root if isinstance(root, (list, tuple)) else [root]:
+        if isinstance(item, (str, Path)) and str(item).startswith("/"):
+            base = posixpath.normpath(str(item))
+            if base.strip("/") and base not in found:
+                found.append(base)
+    return found
 
 
 def workspace_file(path: Any, root: Any) -> str | None:
     """`path` as a workspace-relative POSIX path, or None (empty, outside the workspace, the root itself, or
     a shape the record does not take). An absolute path needs `root`; a relative one is relative to it."""
-    if not isinstance(path, str) or not path or "\\" in path or "\x00" in path:
+    if not isinstance(path, str) or not path or "\\" in path or "\x00" in path or _NOT_PLAIN.match(path):
         return None
     path = unicodedata.normalize("NFC", path)
     if path.startswith("/"):
@@ -67,7 +74,7 @@ def workspace_file(path: Any, root: Any) -> str | None:
 def workspace_files(paths: Any, root: Any) -> list[str]:
     """Normalise a producer's list: drop what is outside or malformed, keep order, no repeats, at most 8."""
     out: list[str] = []
-    for path in paths if isinstance(paths, (list, tuple)) else []:
+    for path in paths[:MAX_INPUT] if isinstance(paths, (list, tuple)) else []:
         rel = workspace_file(path, root)
         if rel is not None and rel not in out:
             out.append(rel)

@@ -297,10 +297,11 @@ FILES_MAX, FILE_LEN = 8, 260
 
 def act_file_ok(p):
     """One `files` entry (activity.md, Files): workspace-relative POSIX path, 1..260 chars, NFC, no leading /,
-    no .. segment, no backslash, drive letter or control character."""
+    no .. segment, no backslash, no start with ~ $ or a scheme/drive (file: C:), no Unicode Cc, Cf, Zl, Zp."""
     return (isinstance(p, str) and 1 <= len(p) <= FILE_LEN and unicodedata.is_normalized("NFC", p)
-            and not p.startswith("/") and not re.match(r"[A-Za-z]:", p) and not re.search(r"[\x00-\x1f\x7f\\]", p)
-            and ".." not in p.split("/"))
+            and not p.startswith("/") and not re.match(r"[~$]|[A-Za-z][A-Za-z0-9+.-]*:", p) and "\\" not in p
+            and ".." not in p.split("/")
+            and not any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in p))
 
 
 def act_files_store(kind, files):
@@ -317,7 +318,7 @@ def act_workspace_file(path, root):
         return None
     path = unicodedata.normalize("NFC", path)
     if path.startswith("/"):
-        if not isinstance(root, str) or not root.startswith("/"):
+        if not isinstance(root, str) or not root.startswith("/") or posixpath.normpath(root) == "/":
             return None
         prefix = posixpath.normpath(root).rstrip("/") + "/"
         normal = posixpath.normpath(path)

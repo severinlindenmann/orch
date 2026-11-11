@@ -230,7 +230,8 @@ from orch import hider as hiding
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
-from orch.phone_view import redact""".splitlines()
+from orch.phone_view import redact
+from orch.record_files import MAX_INPUT, file_ok""".splitlines()
 )
 SAFE_EXCEPTIONS = {
     "ValueError",

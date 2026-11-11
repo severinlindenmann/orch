@@ -26,14 +26,13 @@ from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
 from orch.phone_view import redact
+from orch.record_files import MAX_INPUT, file_ok
 
 _OFF = "Recording is off until key hiding is ready."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[0-9a-f]{32}"
 _PART = r"[A-Za-z0-9_.-]{1,80}"
-# One `files` entry (activity.md, Files; $defs/file_path); NFC is checked by redact() leaving it unchanged.
-_FILE_PATH = r"(?![A-Za-z]:)(?!/)(?!(?:.*/)?\.\.(?:/|$))[^\x00-\x1f\x7f\\]{1,260}"
 _MAX_FILES = 8
 TAMPER_REASONS = ("link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped")
 _MESSAGES = {
@@ -968,15 +967,15 @@ class RecordWriter:
         if event.get("kind") != "step" or type(files) is not list:
             files = None
         else:
-            files = [f for f in files if type(f) is str and re.fullmatch(_FILE_PATH, f)]
+            files = files[:MAX_INPUT]  # only the first 64 are looked at; the first 8 good ones are kept
         before = _json(event).count("[hidden: ")
         event = self.hider.hide_json(event)
         hidden = max(0, _json(event).count("[hidden: ") - before)
         if files is not None:
-            # A path that changes under the hider or the plain-text cleaner (which also makes NFC) is dropped,
-            # never stored hidden.
-            files = [f for f in files if self.hider.hide_text(f) == f and redact(f) == f]
-            event["files"] = _files_in_budget(files[:_MAX_FILES])
+            # One shape check (record_files.file_ok, NFC included); a path that changes under the hider or the
+            # plain-text cleaner is dropped, never stored hidden.
+            good = [f for f in files if file_ok(f) and self.hider.hide_text(f) == f and redact(f) == f]
+            event["files"] = _files_in_budget(good[:_MAX_FILES])
         event["text"] = self.hider.hide_cut(" ".join(redact(event["text"]).split()), 500)
         if isinstance(event.get("outcome"), dict) and isinstance(event["outcome"].get("error"), str):
             event["outcome"]["error"] = self.hider.hide_cut(
@@ -1882,9 +1881,8 @@ _SCHEMA = {
             "type": "string",
             "minLength": 1,
             "maxLength": 260,
-            "pattern": "^(?![A-Za-z]:)(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f\\\\]+$",
-            "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash or "
-            "drive letter, no control character, NFC (the writer checks NFC).",
+            "pattern": "^(?![A-Za-z]:)(?![A-Za-z][A-Za-z0-9+.-]*:)(?![~$])(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08e2\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb\\\\]+$",  # noqa: E501
+            "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash, no start with ~ $ or a scheme or drive letter (file: C:), no Unicode control or format character (Cc Cf Zl Zp: bidi overrides, zero-width), NFC. The writer enforces the full rule (record_files.file_ok); this pattern lists the BMP characters.",  # noqa: E501
         },
         "detail_file": {
             "type": "object",

@@ -140,8 +140,10 @@ text, output was cut, helpers are not visible). Capability flags per adapter (ag
 
 A `step` (any via) may carry `files`: an array of 0..8 strings, the workspace files or folders the step named. Every entry
 is a **workspace-relative POSIX path** (`src/app.py`): 1..260 characters, NFC, no leading `/`, no `..` segment, no
-backslash, drive letter or UNC form, no NUL or other control character (schema `$defs/file_path`; NFC is checked by the
-writer). Any other kind never carries `files` (the schema refuses it there). Vectors `files` (shape, what the writer
+backslash, drive letter, scheme (`file:`) or UNC form, no start with `~` or `$`, no Unicode control or format character
+(categories Cc, Cf, Zl, Zp: NUL, C1, bidi overrides and isolates, zero-width, line/paragraph separators: they spoof what a
+person reads). The schema `$defs/file_path` lists the BMP characters; the writer's check (`record_files.file_ok`, the one
+shared check) is the full rule and also checks NFC. Any other kind never carries `files` (the schema refuses it there). Vectors `files` (shape, what the writer
 keeps) and `files_normalise` (producer normalisation).
 
 - **Who fills it.** Collectors: the stream-json collector from the file-tool inputs (`file_path`, `notebook_path`,
@@ -149,14 +151,17 @@ keeps) and `files_normalise` (producer normalisation).
   of a `file_change` item. The hook entry takes `files` from the caller's line (the hook filter keeps it). Producers
   make every path relative to the run's workspace root (`.` segments and inner `..` resolved, NFC); a path outside the
   workspace, the root itself, or one without a root to compare an absolute path with is **dropped**, never recorded.
-  Repeats are dropped, at most 8 are kept.
+  Repeats are dropped, at most 8 are kept, and only the first 64 entries of a producer's list are looked at. A root
+  that is `/` is refused (it would make every absolute path a workspace path). The caller of a collector passes the
+  workspace as `ctx["workspace"]`, one root or a list (the root and its resolved form); this module does no I/O.
   Size budget: the writer keeps entries in order while each is at most 512 serialized bytes and all together at most
   2048; the rest are dropped. A line that is still over the 8192-byte cap loses `files`, then `data` (replaced by
   `{"cut": true}`), so the audit line is never dropped for its optional parts.
 - **The writer re-checks.** After the value hider the writer checks every entry again: an entry with a bad shape is
   dropped, and so is an entry the hider (or the plain-text cleaner) would change (a path containing a stored key value is
   never stored, not even hidden). Drops are not counted or flagged; the audit line is never dropped for a bad entry. Only
-  the first 8 valid entries are kept; `files` on another kind, or not an array, is removed.
+  the first 8 valid entries are kept; `files` on another kind, or not an array, is removed. A path the plain-text
+  cleaner changes (a name that looks like a key or token) is lost silently: acceptable, `files` is display only.
 - **Display only.** `files` is never used for an access decision; an agent can name any workspace-relative path
   (Level 1, like `text`). Readers (`orch record tail | query --json`) return it as stored; the detail file is unchanged.
 
