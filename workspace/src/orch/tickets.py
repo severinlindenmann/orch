@@ -536,9 +536,11 @@ def apply_op(
         closed_now = ticket.get("status") in CLOSED and eff_status not in CLOSED and not restored
     if closed_now:
         # THE one place a ticket becomes done/dropped, whatever op did it (accept, status, patch from the
-        # dashboard, ...): its separate copy goes, after the ticket lock is released (never raises)
-        from orch import worktrees
+        # dashboard, ...): its live agent run stops (#542) and its separate copy goes, after the ticket lock
+        # is released (never raises)
+        from orch import runs_live, worktrees  # both import tickets
 
+        runs_live.stop_closed(root, tid)
         worktrees.on_closed(root, tid)
     return ticket, result
 
@@ -1415,12 +1417,22 @@ def _clean_covers(covers: str | None) -> str | None:
     return line
 
 
+CLOSED_AGENT = "This ticket is closed, so the agent can't add or change checks."
+
+
+def _refuse_closed_agent(ticket: dict, by: str) -> None:
+    """An agent never writes checks into a done/dropped ticket (#542); a person still can. Under the lock."""
+    if by.startswith("agent:") and ticket.get("status") in CLOSED:
+        raise Refused(CLOSED_AGENT)
+
+
 def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = None) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A checklist item needs text.")
     covers = _clean_covers(covers)
 
     def op(ticket):
+        _refuse_closed_agent(ticket, by)
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
         if covers:
             item["covers"] = covers
@@ -1527,6 +1539,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
     _item(ticket, cid)
 
     def op(t):
+        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         _refuse_if_wont_do(item, tid, cid)
         for ev in evs:
@@ -1655,6 +1668,7 @@ def check_record(
     ev["by"], ev["at"] = by, now()
 
     def op(t):
+        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         item["evidence"] = trim_runs([*item["evidence"], ev])
         add_history(
@@ -1701,6 +1715,7 @@ def check_edit(
     covers = _clean_covers(covers)
 
     def op(t):
+        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)
@@ -1725,6 +1740,7 @@ def check_edit(
 
 def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dict, dict]:
     def op(t):
+        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         _item(t, after)
         if after == cid:
@@ -1743,6 +1759,7 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
     under the lock). The history line keeps the step text and its proof."""
 
     def op(t):
+        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
@@ -1767,6 +1784,7 @@ def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
     gap, and a ticket that cannot be read refuses)."""
 
     def op(t):
+        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)
@@ -1792,6 +1810,7 @@ def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     """Mark a step as being worked on; the mark on any other step goes."""
 
     def op(t):
+        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("done"):
             raise Refused(f"{cid} is already done. Reopen it first: orch check reopen {tid} {cid}")

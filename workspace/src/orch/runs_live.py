@@ -1060,6 +1060,19 @@ def stop(root: Path, tid: str) -> bool:
     return True
 
 
+def stop_closed(root: Path, tid: str) -> bool:
+    """A ticket was closed (done/dropped, tickets.apply_op): its live session stops now, so its agent writes
+    nothing more into it (#542). A one-shot run ends by itself (its copy waits for it); the run this command
+    runs inside is never stopped from within. Never raises."""
+    try:
+        rec = runs.read(root, tid)
+        if rec and rec.get("mode") == "live" and os.environ.get("ORCH_TICKET") != tid:
+            return stop(root, tid)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def cleanup(root: Path) -> list[str]:
     """Close live sessions that have waited (idle, or for a person) for more than the limit, or whose ticket
     has been Done that long (no daemon: this runs on every `orch run` call), and remove tmux sessions whose

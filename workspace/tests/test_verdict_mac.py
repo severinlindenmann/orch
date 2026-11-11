@@ -568,6 +568,9 @@ def test_a_step_reopened_and_redone_does_not_bring_the_old_done_back(ws, run, mo
     _verdict(ws, run, monkeypatch, tid)
     assert tickets.load(ws, tid)["status"] == "done"
     code, out, err = run("check", "reopen", tid, "c1", "--by", "agent:x")
+    assert code == 2 and "ticket is closed" in out + err  # an agent changes no check of a Done ticket (#542)
+    assert hp.verdict_ledger(ws)[tid] is not None
+    code, out, err = run("check", "reopen", tid, "c1", "--by", "human:x")
     assert code == 0, out + err
     assert hp.verdict_ledger(ws)[tid] is None
     code, out, err = run("check", "done", tid, "c1", "--note", "other", "--by", "agent:x", "--json")

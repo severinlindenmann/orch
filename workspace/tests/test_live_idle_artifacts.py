@@ -60,10 +60,11 @@ def test_live_idle_minutes_is_configurable(proj, run, closed):
     assert config.live_idle_minutes(proj) == 60
 
 
-def test_a_ticket_done_for_an_hour_closes_its_session(proj, run, closed):
+def test_a_ticket_done_for_an_hour_closes_its_session(proj, run, closed, monkeypatch):
     tid = _live(proj, run, "idle", 1)  # idle only a minute
     runs_live.cleanup(proj)
     assert closed == []
+    monkeypatch.setenv("ORCH_TICKET", tid)  # Done from inside its own run: not stopped at once (#542)
     tickets.set_status(proj, tid, "done", "human:t")
     runs_live.cleanup(proj)
     assert closed == []  # Done just now
@@ -185,7 +186,7 @@ def test_init_prints_the_permission_mode_in_one_line(proj, run):
 
 
 @pytest.mark.parametrize("status", ["review", "done", "dropped"])
-def test_finished_tickets_do_not_count_toward_the_live_limit(proj, run, status):
+def test_finished_tickets_do_not_count_toward_the_live_limit(proj, run, closed, status):
     tids = [_live(proj, run, "idle", 1) for _ in range(runs_live.MAX_LIVE)]
     assert len(runs_live.live_alive(proj)) == runs_live.MAX_LIVE
     for t in tids:
@@ -229,7 +230,7 @@ def test_a_working_session_on_a_review_ticket_still_counts(proj, run):
     assert runs_live._full(proj)
 
 
-def test_hard_cap_over_all_sessions(proj, run):
+def test_hard_cap_over_all_sessions(proj, run, closed):
     for _ in range(runs_live.MAX_LIVE + runs_live.HARD_EXTRA):
         tid = _live(proj, run, "idle", 1)
         tickets.set_status(proj, tid, "done", "human:t")

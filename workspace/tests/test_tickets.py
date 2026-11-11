@@ -1,10 +1,11 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
 from conftest import CONTRACTS
 
-from orch import tickets
+from orch import runs, runs_live, tickets
 from orch.errors import Refused
 
 
@@ -472,3 +473,61 @@ def test_proof_state_levels():
     stale = _c("c1")
     stale["evidence"][0]["stale"] = True  # a stored flag is never trusted
     assert tickets.proof_state(_t([stale]))["per_item"]["c1"] == "passed"
+
+
+@pytest.fixture
+def stopped(monkeypatch):
+    """runs_live.stop's real work (kill the agent, tmux) faked: records the ticket ids it closed."""
+    got = []
+    monkeypatch.setattr(runs_live, "_close", lambda root, rec, interrupt: got.append(rec["ticket"]))
+    monkeypatch.setattr(runs_live, "start_waiting", lambda root: None)
+    return got
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_by_a_person_stops_the_live_run_and_refuses_agent_checks(proj, new_ticket, stopped, status):
+    """#542: a person closes the ticket: its live run is stopped, and the agent can no longer write checks."""
+    tid = new_ticket()
+    tickets.check_add(proj, tid, "first step", "agent:claude")
+    runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    tickets.set_status(proj, tid, status, "human:t")
+    assert stopped == [tid]
+    assert runs.read(proj, tid)["stop_requested"]
+    before = tickets.load(proj, tid)
+    for write in (
+        lambda: tickets.check_add(proj, tid, "late step", "agent:claude"),
+        lambda: tickets.check_done(proj, tid, "c1", ['{"type":"note","ref":"ran it"}'], "agent:claude"),
+        lambda: tickets.check_edit(proj, tid, "c1", "renamed", "agent:claude"),
+        lambda: tickets.check_record(proj, tid, "c1", "pytest -q", 0, None, "agent:claude"),
+        lambda: tickets.check_start(proj, tid, "c1", "agent:claude"),
+        lambda: tickets.check_remove(proj, tid, "c1", "agent:claude"),
+    ):
+        with pytest.raises(Refused, match="This ticket is closed, so the agent can't add or change checks."):
+            write()
+    assert tickets.load(proj, tid) == before
+    item = tickets.check_add(proj, tid, "a person's note", "human:t")[1]  # a person still can
+    assert tickets.load(proj, tid)["checklist"][-1]["id"] == item["id"]
+
+
+def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(
+    proj, new_ticket, stopped, monkeypatch
+):
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "dropped", "human:t")
+    assert stopped == []  # no run: nothing to stop
+    other = new_ticket()
+    runs.claim(proj, other, "human:t", "claude", "live", pid=os.getpid())
+    monkeypatch.setenv("ORCH_TICKET", other)  # the command runs inside that ticket's own run
+    tickets.set_status(proj, other, "dropped", "human:t")
+    assert stopped == [] and not runs.read(proj, other)["stop_requested"]
+    monkeypatch.delenv("ORCH_TICKET")
+    once = new_ticket()
+    runs.claim(proj, once, "human:t", "claude", "oneshot", pid=os.getpid())
+    tickets.set_status(proj, once, "dropped", "human:t")
+    assert stopped == []  # a one-shot run ends by itself (its copy waits for it)
+
+
+def test_closed_ticket_agent_check_open_ticket_still_allowed(proj, new_ticket):
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:t")  # Review is not closed
+    assert tickets.check_add(proj, tid, "more work", "agent:claude")[1]["id"] == "c1"
