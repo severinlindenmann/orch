@@ -2145,13 +2145,13 @@ def test_copy_approve_binds_tip_and_refuses_agents(ws, run, monkeypatch):
     from orch import worktrees
 
     tid = _review_ticket(ws, run)
-    target = f"approve:{tid}:{'a' * 40}:2"
+    target = f"approve:{tid}:{'a' * 40}:2:12345678"
     called = []
-    monkeypatch.setattr(worktrees, "approval_target", lambda *a: (target, "a" * 40, 2))
+    monkeypatch.setattr(worktrees, "approval_view", lambda *a: (target, "a" * 40, [".orch/a", ".orch/b"]))
     monkeypatch.setattr(worktrees, "approve_copy", lambda *a: called.append(a) or {"state": "merged"})
     assert run("copy", "approve", tid, "--by", "agent:x")[0] == 2
     assert not called
-    stale = _proof(ws, "copy.retry", f"approve:{tid}:{'b' * 40}:2")
+    stale = _proof(ws, "copy.retry", f"approve:{tid}:{'b' * 40}:2:12345678")
     assert _cli(run, monkeypatch, stale, "copy", "approve", tid, "--json")[0] == 2
     assert not called
     proof = _proof(ws, "copy.retry", target)

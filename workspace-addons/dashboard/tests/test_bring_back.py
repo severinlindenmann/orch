@@ -28,12 +28,12 @@ def test_waiting_state_reaches_ticket_status_line(tmp_path, monkeypatch):
 def test_approve_binds_ticket_tip_and_control_count():
     from orch_dashboard import actions
 
-    args = {"ticket": "t_abcdef", "tip": "a" * 40, "control_paths": 2}
+    args = {"ticket": "t_abcdef", "tip": "a" * 40, "control_paths": 2, "paths_hash": "12345678"}
     argv = actions.build_argv("copies.approve", args)
     assert argv[:3] == ["copy", "approve", "t_abcdef"]
     op, target = actions.PROOF_OPS["copies.approve"]
     assert op == "copy.retry"
-    assert target(args) == f"approve:t_abcdef:{'a' * 40}:2"
+    assert target(args) == f"approve:t_abcdef:{'a' * 40}:2:12345678"
 
 
 def test_review_metadata_comes_from_core_command(tmp_path, monkeypatch):
@@ -43,7 +43,16 @@ def test_review_metadata_comes_from_core_command(tmp_path, monkeypatch):
 
     def core(binary, args, root):
         seen.append(args)
-        return [ticket] if args[0] == "ticket" else {"tip": "a" * 40, "control_paths": 2}
+        return (
+            [ticket]
+            if args[0] == "ticket"
+            else {
+                "tip": "a" * 40,
+                "control_paths": 2,
+                "paths_hash": "12345678",
+                "paths_summary": ".orch/a, .orch/b",
+            }
+        )
 
     monkeypatch.setattr(data, "run_orch", core)
     rows, _ = data.load_tickets(tmp_path, "orch")

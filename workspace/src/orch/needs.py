@@ -46,6 +46,14 @@ def _asked_at(t: dict, qid: str) -> str:
 
 
 def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
+    """The text comes from the fixed reason table by CODE (unknown code: the generic text); never the free
+    `reason`/`at` of a record (the pending file is unsigned and agent-writable)."""
+    from orch.worktrees import BRING_BACK_REASONS
+
+    code = back.get("reason_code")
+    reason = BRING_BACK_REASONS.get(
+        code if isinstance(code, str) else "waiting", BRING_BACK_REASONS["waiting"]
+    )
     return {
         "id": f"core:bring-back:{tid}",
         "source": "core",
@@ -53,9 +61,9 @@ def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
         "ticket": tid,
         "title": _clip(f"Your work from {title} is on its own branch", 200),
         "text": "Bring it back into your project?",
-        "reason": back.get("reason", ""),
+        "reason": reason,
         "tone": "needs-you",
-        "since": back.get("at") or now,
+        "since": now,
         "cli": f"orch copy approve {tid}",
         "button": "Review and bring back",
     }

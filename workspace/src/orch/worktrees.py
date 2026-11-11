@@ -773,6 +773,38 @@ BRING_BACK_TIMEOUT = 300
 
 APPROVAL_NEEDED = "New changes were added after you marked this done: they need your approval"
 CONFLICT_PENDING = "The agent has not finished resolving a conflict"
+CRISS_CROSS = "bring it back by hand"
+# The Need row shows text from THIS table only (by code); the free reason text is never displayed from the
+# unsigned pending file. Unknown codes show the generic "waiting" text.
+BRING_BACK_REASONS = {
+    "approval": APPROVAL_NEEDED,
+    "conflict": CONFLICT_PENDING,
+    "manual": CRISS_CROSS,
+    "controls": "Your work touches control files. A person has to review it before it is brought back.",
+    "agent": "an agent is still working in the copy",
+    "agent-folder": "an agent is still working in your folder",
+    "not-copy": "git could not confirm this is your copy",
+    "unreadable": "git could not read your folder",
+    "journal": "the recovery record is not safe to use",
+    "merging": "a merge is in progress in your folder",
+    "busy": "a merge or another git operation is in progress in your folder",
+    "changed": "your folder changed while saving - nothing was removed",
+    "origin": "The original project branch was not recorded. A person needs to check it.",
+    "branch": "your project is on another branch",
+    "filename": "git could not read a changed filename",
+    "overlap": "your folder has changes in the same places",
+    "attributes": "files need special handling: bring them back by hand",
+    "time": "saving needs more time; the next sweep will try again",
+    "update": "your project changed in the same places; ask the agent to update",
+    "more": "the agent added more changes while saving; nothing was removed",
+    "waiting": "Your work is waiting to be brought back.",
+}
+
+
+def _reason_code(reason: str) -> str:
+    if reason.startswith("Your work touches files that control"):
+        return "controls"
+    return next((k for k, v in BRING_BACK_REASONS.items() if v == reason), "waiting")
 
 
 def _copy_conflict(want: Path) -> bool:
@@ -781,6 +813,27 @@ def _copy_conflict(want: Path) -> bool:
         if (want / path).exists():
             return True
     return bool(_bb_read(want, ["ls-files", "--unmerged", "-z"], strip=False))
+
+
+def _safety_ranges(top: Path, tip: str) -> list[tuple[list[str], bool]]:
+    """What the merge would really change, as diff ranges: `HEAD...tip` and HEAD against the tree the merge
+    would write (`merge-tree --write-tree`, git >= 2.38). Every safety check reads ALL ranges. Each range
+    carries whether its added lines are real content (a conflicted merge-tree result contains markers git
+    generated itself: only its paths count). Criss-cross history (more than one merge base) is refused: the
+    virtual base could revert files no single-base diff shows."""
+    bases = _bb_read(top, ["merge-base", "--all", "HEAD", tip]).splitlines()
+    if len(bases) > 1:
+        raise Refused(CRISS_CROSS)
+    ranges = [([f"HEAD...{tip}"], True)]
+    rc, out, _ = _git(["merge-tree", "--write-tree", "HEAD", tip], top, read_only=True)
+    if rc in (0, 1) and out:
+        tree = out.splitlines()[0]
+        if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
+            raise Refused("git could not read your folder")
+        ranges.append((["HEAD", tree], rc == 0))
+    elif rc not in (125, 129):  # an older git without --write-tree: the criss-cross refusal above stands
+        raise Refused("git could not read your folder")
+    return ranges
 
 
 def _control_paths(top: Path, tip: str) -> list[str]:
@@ -797,52 +850,66 @@ def _control_paths(top: Path, tip: str) -> list[str]:
         ".agents",
         ".claude",
         ".codex",
+        ".mcp.json",
+        ".envrc",
+        ".github",
+        ".vscode",
+        ".devcontainer",
+        "agents.md",
+        "agents.orch.md",
+        "claude.md",
+        "claude.local.md",
+        ".cursor",
+        ".windsurf",
     }
-    raw = _bb_read(top, ["diff", "--raw", "--no-renames", "-z", f"HEAD...{tip}"], strip=False)
-    fields = raw.split("\0")
-    found = []
-    for meta, path in zip(fields[0::2], fields[1::2], strict=False):
-        parts = unicodedata.normalize("NFC", path.replace("\\", "/")).casefold().split("/")
-        modes = meta.split()[:2]
-        if controls.intersection(parts) or any(m.lstrip(":") in ("120000", "160000") for m in modes):
-            found.append(path)
-    return found
+    found = set()
+    for revs, _ in _safety_ranges(top, tip):
+        raw = _bb_read(top, ["diff", "--raw", "--no-renames", "-z", *revs], strip=False)
+        fields = raw.split("\0")
+        for meta, path in zip(fields[0::2], fields[1::2], strict=False):
+            normalized = unicodedata.normalize("NFC", path.replace("\\", "/"))
+            odd = any(c in normalized for c in "\u200c\u200d\ufeff\u200b")
+            normalized = normalized.translate(dict.fromkeys(map(ord, "\u200c\u200d\ufeff\u200b")))
+            parts = normalized.casefold().split("/")
+            odd |= any(re.search(r"~\d", p) or p.endswith((".", " ")) or ":" in p for p in parts)
+            modes = meta.split()[:2]
+            if (
+                odd
+                or controls.intersection(parts)
+                or any(p.startswith(".aider") for p in parts)
+                or any(m.lstrip(":") in ("120000", "160000") for m in modes)
+            ):
+                found.add(path)
+    return sorted(found)
 
 
 def _committed_conflict(top: Path, tip: str) -> bool:
-    marker = r"^\+((?:<{7}|={7}|>{7})(?: .*|$))"
-    diff = _bb_read(top, ["diff", "--no-renames", "-a", "--unified=0", f"HEAD...{tip}"], strip=False)
-    if not re.search(marker, diff, re.MULTILINE):
-        return False
-    base = _bb_read(top, ["merge-base", "HEAD", tip])
-    paths = _bb_read(top, ["diff", "--name-only", "--no-renames", "-a", "-z", f"HEAD...{tip}"], strip=False)
-    for path in filter(None, paths.split("\0")):
-        change = _bb_read(
-            top,
-            [
-                "--literal-pathspecs",
-                "diff",
-                "--no-renames",
-                "-a",
-                "--unified=0",
-                f"{base}..{tip}",
-                "--",
-                path,
-            ],
-            strip=False,
-        )
-        markers = set(re.findall(marker, change, re.MULTILINE))
-        if not markers:
+    """Committed conflict markers: a `<<<<<<< ` line, a `=======` line and a `>>>>>>> ` line, in that order,
+    among one file's added lines (a bare `=======` is a Markdown underline, not a conflict)."""
+    for revs, content in _safety_ranges(top, tip):
+        if not content:
             continue
-        rc, content, _ = _git(["show", f"{base}:{path}"], top, read_only=True, strip=False)
-        if rc == 0:
-            markers.difference_update(content.splitlines())
-        if markers:
-            return True
+        diff = _bb_read(top, ["diff", "--no-renames", "-a", "--unified=0", *revs], strip=False)
+        state = 0
+        for line in diff.splitlines():
+            if line.startswith("diff --git "):
+                state = 0
+            elif line.startswith("+<<<<<<< "):
+                state = 1
+            elif state == 1 and line == "+=======":
+                state = 2
+            elif state == 2 and line.startswith("+>>>>>>> "):
+                return True
     return False
 
 
-def approval_target(root: Path, ticket: str) -> tuple[str, str, int]:
+def control_summary(paths: list[str]) -> str:
+    return ", ".join(paths[:5]) + (f" and {len(paths) - 5} more" if len(paths) > 5 else "")
+
+
+def approval_view(root: Path, ticket: str) -> tuple[str, str, list[str]]:
+    """(target, tip, control paths). The target binds the tip, the count and a hash of the full sorted
+    path list: approve:<ticket>:<sha>:<count>:<hash8>."""
     if not _TID.fullmatch(ticket):
         raise Refused("That is not a ticket id.")
     with _scoped(root):
@@ -850,8 +917,14 @@ def approval_target(root: Path, ticket: str) -> tuple[str, str, int]:
         if top is None:
             raise Refused("git could not read your folder")
         tip = _bb_read(top, ["rev-parse", "--verify", f"refs/heads/orch/{ticket}"])
-        count = len(_control_paths(top, tip))
-        return f"approve:{ticket}:{tip}:{count}", tip, count
+        paths = sorted(_control_paths(top, tip))
+        digest = hashlib.sha256(json.dumps(paths, ensure_ascii=True).encode()).hexdigest()[:8]
+        return f"approve:{ticket}:{tip}:{len(paths)}:{digest}", tip, paths
+
+
+def approval_target(root: Path, ticket: str) -> tuple[str, str, int]:
+    target, tip, paths = approval_view(root, ticket)
+    return target, tip, len(paths)
 
 
 def approve_copy(root: Path, ticket: str, target: str) -> dict:
@@ -875,9 +948,18 @@ def _record_done_tip(root: Path, ticket: str) -> None:
         # Persist the first call even if saving fails: a retry is never a fresh review.
         _copy_authority(root, ticket, lambda r: r.update(done_seen=True))
         top, want = _top_of(root), _want(root, ticket)
-        if top is None:
+        if top is None or _alive_here(root, ticket):
             return
-        if want is not None and want.exists() and not _alive_here(root, ticket):
+        # Only a person-signed Done is a review of the tip: an agent's own Done (agents_may_finish) is not.
+        t = tickets.load(root, ticket)
+        checker = humanproof.VerdictChecker(root)
+        verdicts = t.get("verdicts")
+        if not isinstance(verdicts, list) or not any(
+            isinstance(v, dict) and v.get("kind") == "person" and checker.state(v, t) == "current"
+            for v in verdicts
+        ):
+            return
+        if want is not None and want.exists():
             if not _owned(root, want) or not _is_our_worktree(top, want):
                 return
             ok, _ = _save_leftovers(want, ticket)
@@ -888,19 +970,27 @@ def _record_done_tip(root: Path, ticket: str) -> None:
 
 
 def _bb_state(root: Path, ticket: str, state: str, reason: str = "", commit: str | None = None) -> dict:
-    value = {"state": state, "reason": reason, "at": tickets.now()}
+    code = _reason_code(reason)
+    value = {"state": state, "reason": reason, "reason_code": code, "at": tickets.now()}
     if commit:
         value["commit"] = commit
     tickets.apply_op(root, ticket, lambda t: t.setdefault("work", {}).update(bring_back=value))
     # Local retention survives deletion of the ticket itself.
-    _mark(root, "kept", ticket, reason=reason, bring_back=state == "waiting")
+    _mark(root, "kept", ticket, reason=reason, reason_code=code, bring_back=state == "waiting")
     return value
 
 
 def _unmerged_done_work(root: Path, ticket: str) -> bool:
     """Deletion gate: stored flags never authorize deletion; unreadable git means keep."""
     try:
-        retained = any(i.get("bring_back") for i in _pending(root)["kept"] if i["ticket"] == ticket)
+        # The signed store counts too: the pending file is unsigned and agent-writable.
+        try:
+            authority = _copy_authority(root, ticket)
+        except (OSError, ValueError, Refused):
+            authority = {"done_seen": True}  # unreadable store: only git (merged or not) decides
+        retained = bool(authority.get("done_seen") or authority.get("reviewed_tip")) or any(
+            i.get("bring_back") for i in _pending(root)["kept"] if i["ticket"] == ticket
+        )
         t = tickets.load(root, ticket) if tickets.ticket_path(root, ticket).exists() else {}
         if (
             t.get("status") != "done"
@@ -1019,6 +1109,13 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             if not ok:
                 return wait(why)
         tip = _bb_read(top, ["rev-parse", "--verify", f"refs/heads/orch/{ticket}"])
+        if (
+            _git(["rev-parse", "--verify", "MERGE_HEAD"], top, read_only=True)[0] != 0
+            and _git(["merge-base", "--is-ancestor", tip, "HEAD"], top, read_only=True)[0] == 0
+        ):
+            # Nothing to bring back (the saved tip is already in the project): no merge, no approval needed.
+            head = _bb_read(top, ["rev-parse", "HEAD"])
+            return _bb_state(root, ticket, "none" if tip == head else "merged", commit=head)
         if _committed_conflict(top, tip):
             return wait(CONFLICT_PENDING)
         try:
@@ -1083,10 +1180,16 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 and any(_same(runs.workdir_for(root, rec, record.stem), p) for p in (root, top))
             ):
                 return wait("an agent is still working in your folder")
-        touched = _bb_read(
-            top, ["diff", "--name-only", "--no-renames", "-z", f"HEAD...{tip}"], strip=False
-        ).split("\0")
-        touched = [p for p in touched if p]
+        touched = sorted(
+            {
+                p
+                for revs, _ in _safety_ranges(top, tip)
+                for p in _bb_read(
+                    top, ["diff", "--name-only", "--no-renames", "-z", *revs], strip=False
+                ).split("\0")
+                if p
+            }
+        )
         _ctx.snapshot_touched = touched
         pre = _bb_snapshot(top)
         if any("\ufffd" in p for p in touched):
@@ -1225,6 +1328,10 @@ def ask_update(root: Path, ticket: str) -> str:
     from orch import runs_live
 
     tickets.load(root, ticket)
+    own = os.environ.get("ORCH_TICKET")
+    agent = any(os.environ.get(k) for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")) or tickets.agent_tool()
+    if agent and own != ticket:
+        raise Refused("Only a person or this ticket's agent can ask it to update.")
     if not runs_live.session_exists(root, ticket):
         raise Refused("There is no session for this ticket; start the agent again.")
     text = f"Your project changed in the same places. Run `orch copy update {ticket}`, resolve and commit."
@@ -1878,7 +1985,10 @@ def on_closed(root: Path, ticket: str) -> None:
                 try:
                     _record_done_tip(root, ticket)
                 except (OSError, ValueError, Refused):
-                    _bb_state(root, ticket, "waiting", APPROVAL_NEEDED)
+                    # No reviewed tip was recorded, so bring_back cannot merge: it records WHY it waits
+                    # (e.g. criss-cross history); approval is only the fallback reason.
+                    if not bring_back(root, ticket):
+                        _bb_state(root, ticket, "waiting", APPROVAL_NEEDED)
                     return
             bring_back(root, ticket)
             remove(root, ticket, wait=SWEEP_WAIT)

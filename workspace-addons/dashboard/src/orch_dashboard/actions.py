@@ -123,7 +123,7 @@ PROOF_OPS = {
     "copies.retry": ("copy.retry", lambda a: a.get("ticket")),
     "copies.approve": (
         "copy.retry",
-        lambda a: f"approve:{a.get('ticket')}:{a.get('tip')}:{a.get('control_paths')}",
+        lambda a: f"approve:{a.get('ticket')}:{a.get('tip')}:{a.get('control_paths')}:{a.get('paths_hash')}",
     ),
     "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
@@ -556,7 +556,7 @@ def _copies_ask_update(a):
 
 
 def _copies_approve(a):
-    _only(a, ("ticket", "tip", "control_paths"))
+    _only(a, ("ticket", "tip", "control_paths", "paths_hash"))
     tid, tip, count = a.get("ticket"), a.get("tip"), a.get("control_paths")
     if (
         not isinstance(tid, str)
@@ -565,6 +565,8 @@ def _copies_approve(a):
         or not re.fullmatch(r"[0-9a-f]{40,64}", tip)
         or type(count) is not int
         or count < 0
+        or not isinstance(a.get("paths_hash"), str)
+        or not re.fullmatch(r"[0-9a-f]{8}", a["paths_hash"])
     ):
         raise BadRequest("Review the copy again before bringing it back.")
     return ["copy", "approve", tid, "--json"], [], []

@@ -41,6 +41,7 @@ def add_parsers(sub, common) -> None:
     rt.add_argument("ticket")
     rt.add_argument("--approve-tip", help=argparse.SUPPRESS)
     rt.add_argument("--control-paths", type=int, help=argparse.SUPPRESS)
+    rt.add_argument("--paths-hash", help=argparse.SUPPRESS)
     ro = c.add_parser(
         "remove-orphaned",
         parents=[common],
@@ -187,13 +188,25 @@ def _copy_clean(args, root: Path) -> None:
         _out(args, {"message": message}, message)
         return
     if args.sub == "review":
-        target, tip, count = worktrees.approval_target(root, args.ticket)
-        result = {"target": target, "tip": tip, "control_paths": count}
-        _out(args, result, f"Tip {tip}: {count} orch or git control paths.")
+        target, tip, paths = worktrees.approval_view(root, args.ticket)
+        summary = worktrees.control_summary(paths)
+        result = {
+            "target": target,
+            "tip": tip,
+            "control_paths": len(paths),
+            "paths_hash": target.rsplit(":", 1)[1],
+            "paths": paths[:5],
+            "paths_summary": summary,
+        }
+        text = f"Tip {tip}: {len(paths)} orch or git control paths." + (f" {summary}" if summary else "")
+        _out(args, result, text)
         return
     if args.sub == "approve" or (args.sub == "retry" and getattr(args, "approve_tip", None)):
-        target, tip, count = worktrees.approval_target(root, args.ticket)
-        if args.sub == "retry" and (args.approve_tip != tip or args.control_paths != count):
+        target, tip, paths = worktrees.approval_view(root, args.ticket)
+        count, digest = len(paths), target.rsplit(":", 1)[1]
+        if args.sub == "retry" and (
+            args.approve_tip != tip or args.control_paths != count or args.paths_hash != digest
+        ):
             raise Refused("The copy changed after it was shown. Review it again.")
         who = humanproof.person_by(
             root,
@@ -201,8 +214,23 @@ def _copy_clean(args, root: Path) -> None:
             "copy.retry",
             target,
             label="Review and bring back",
-            argv=["copy", "retry", args.ticket, "--approve-tip", tip, "--control-paths", str(count)],
-            parts={"title": humanproof.ticket_name(root, args.ticket), "tip": tip, "control_paths": count},
+            argv=[
+                "copy",
+                "retry",
+                args.ticket,
+                "--approve-tip",
+                tip,
+                "--control-paths",
+                str(count),
+                "--paths-hash",
+                digest,
+            ],
+            parts={
+                "title": humanproof.ticket_name(root, args.ticket),
+                "tip": tip,
+                "control_paths": count,
+                "paths": humanproof.part(worktrees.control_summary(paths)),
+            },
         )
         if not who.startswith("human:"):
             raise Refused("Only a person can approve changes to bring back.")

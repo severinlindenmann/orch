@@ -894,7 +894,17 @@ def test_approval_without_proof_has_bound_handoff(done_copy, run, monkeypatch):
     code, _, _ = run("copy", "approve", tid, "--by", "human:pat")
     assert code == 2
     handoff = next(h for h in humanproof.handoffs(root) if h["target"] == target)
-    assert handoff["argv"] == ["copy", "retry", tid, "--approve-tip", tip, "--control-paths", str(count)]
+    assert handoff["argv"] == [
+        "copy",
+        "retry",
+        tid,
+        "--approve-tip",
+        tip,
+        "--control-paths",
+        str(count),
+        "--paths-hash",
+        target.rsplit(":", 1)[1],
+    ]
 
 
 @pytest.mark.parametrize("phase", ["before", "after"])
@@ -1032,3 +1042,220 @@ def test_done_without_copy_does_not_need_bring_back(repo):
     tickets.set_status(repo, tid, "done", "human:test", proven=True)
     assert not tickets.load(repo, tid).get("work", {}).get("bring_back")
     assert not any(row["kind"] == "copies:bring-back" for row in needs.core_rows(repo))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ODD~1/config",
+        "odd./x",
+        "odd /x",
+        "a:b",
+        ".or\u200bch/x",
+        "a\u200cx",
+        "a\u200dx",
+        "a\ufeffx",
+        ".mcp.json",
+        ".envrc",
+        ".github/x",
+        ".vscode/x",
+        ".devcontainer/x",
+        "AGENTS.md",
+        "AGENTS.orch.md",
+        "CLAUDE.md",
+        "CLAUDE.local.md",
+        ".cursor/x",
+        ".windsurf/x",
+        ".aider.conf",
+    ],
+)
+def test_b13d_control_components(done_copy, name):
+    root, tid, copy = done_copy
+    p = copy / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("instructions\n")
+    git(copy, "add", "-f", name)
+    before = project_hashes(root)
+    result = finish(root, tid)
+    assert result["state"] == "waiting"
+    assert project_hashes(root) == before
+    assert name in worktrees._control_paths(root, git(copy, "rev-parse", "HEAD"))
+
+
+def test_b13d_setext_is_not_conflict(done_copy):
+    root, tid, copy = done_copy
+    (copy / "README.md").write_text("Summary\n=======\n")
+    assert finish(root, tid)["state"] == "merged"
+
+
+def test_b13d_live_done_never_reviews(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_alive_here", lambda *a: {"live": True})
+        finish(root, tid)
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+    assert worktrees.bring_back(root, tid)["reason"] == worktrees.APPROVAL_NEEDED
+
+
+def test_b13d_deleted_ticket_empty_pending_keeps_branch(done_copy):
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("personal\n")
+    finish(root, tid)
+    tickets.ticket_path(root, tid).unlink()
+    (root / ".orch/run/worktrees-pending.json").write_text("{}")
+    assert not worktrees._delete_branch(root, tid, force=True)
+    assert git(root, "branch", "--list", f"orch/{tid}")
+
+
+def test_b13d_pending_text_is_not_displayed():
+    from orch import needs
+
+    row = needs._bring_back_row(
+        "t_abcdef",
+        "title",
+        {"reason": "forged", "at": "forged", "reason_code": "unknown"},
+        "2026-11-11T00:00:00Z",
+    )
+    assert row["reason"] != "forged"
+    assert row["since"] == "2026-11-11T00:00:00Z"
+
+
+def test_b13d_approval_binds_paths(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    monkeypatch.setattr(worktrees, "_control_paths", lambda *a: [".orch/a"])
+    first = worktrees.approval_target(root, tid)[0]
+    monkeypatch.setattr(worktrees, "_control_paths", lambda *a: [".orch/b"])
+    assert first != worktrees.approval_target(root, tid)[0]
+
+
+def test_b13d_cross_ticket_ask_update_refused(done_copy, monkeypatch):
+    from orch import runs_live
+    from orch.errors import Refused
+
+    root, tid, copy = done_copy
+    monkeypatch.setenv("ORCH_TICKET", root.tids[1])
+    monkeypatch.setenv("ORCH_AGENT", "test")
+    monkeypatch.setattr(runs_live, "session_exists", lambda *a: True)
+    monkeypatch.setattr(runs_live, "send", lambda *a: pytest.fail("sent across tickets"))
+    with pytest.raises(Refused):
+        worktrees.ask_update(root, tid)
+
+
+def test_b13d_criss_cross_refused(repo):
+    copy = make(repo)
+    tid = repo.tids[0]
+    (copy / ".orch").mkdir(exist_ok=True)
+    (copy / ".orch/cfg").write_text("old\n")
+    git(copy, "add", "-f", ".orch/cfg")
+    git(copy, "commit", "-qm", "X")
+    x = git(copy, "rev-parse", "HEAD")
+    (repo / "main-file").write_text("main\n")
+    git(repo, "add", "main-file")
+    git(repo, "commit", "-qm", "P0")
+    p0 = git(repo, "rev-parse", "HEAD")
+    git(repo, "merge", "--no-ff", "-m", "merge X", x)
+    (repo / ".orch/cfg").write_text("new\n")
+    git(repo, "add", "-f", ".orch/cfg")
+    git(repo, "commit", "-qm", "new config")
+    git(copy, "merge", "--no-ff", "-m", "merge P0", p0)
+    (copy / "harmless").write_text("hi\n")
+    git(copy, "add", "harmless")
+    git(copy, "commit", "-qm", "tip")
+    assert len(git(repo, "merge-base", "--all", "HEAD", f"orch/{tid}").splitlines()) == 2
+    head = git(repo, "rev-parse", "HEAD")
+    assert finish(repo, tid)["reason"] == "bring it back by hand"
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert (repo / ".orch/cfg").read_text() == "new\n"
+    # The plain reason survives into the Need row (from the fixed code table, not free text).
+    from orch import needs
+
+    rows = [r for r in needs.core_rows(repo) if r.get("ticket") == tid]
+    assert rows and rows[0]["reason"] == "bring it back by hand"
+    # An approval cannot get past it either.
+    with pytest.raises(worktrees.Refused, match="bring it back by hand"):
+        worktrees.approval_target(repo, tid)
+    assert git(repo, "rev-parse", "HEAD") == head
+
+
+def test_b13d_agent_done_never_reviews(done_copy, monkeypatch):
+    from orch import config
+
+    root, tid, copy = done_copy
+    monkeypatch.setattr(config, "agents_may_finish", lambda *a: True)
+    tickets.set_status(root, tid, "done", "agent:test")
+    assert tickets.load(root, tid)["status"] == "done"
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+    assert worktrees.bring_back(root, tid)["reason"] == worktrees.APPROVAL_NEEDED
+
+
+@pytest.mark.parametrize("kind", ["control", "overlap", "markers"])
+def test_b13d_merge_result_is_checked(done_copy, monkeypatch, kind):
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    original = git(copy, "rev-parse", "HEAD")
+    name = ".orch/cfg" if kind == "control" else "result-only"
+    p = copy / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n" if kind == "markers" else "result\n")
+    git(copy, "add", "-f", name)
+    tree = git(copy, "write-tree")
+    git(copy, "reset", "--mixed", original)
+    p.unlink()
+    real = worktrees._git
+
+    def merge_result(args, *a, **kw):
+        if args[0] == "merge-tree":
+            return 0, tree, ""
+        return real(args, *a, **kw)
+
+    monkeypatch.setattr(worktrees, "_git", merge_result)
+    if kind == "overlap":
+        (root / name).write_text("personal bytes\n")
+    head = git(root, "rev-parse", "HEAD")
+    before = project_hashes(root)
+    result = finish(root, tid)
+    assert result["state"] == "waiting"
+    assert git(root, "rev-parse", "HEAD") == head
+    assert project_hashes(root) == before
+    if kind == "control":
+        assert name in worktrees._control_paths(root, original)
+    if kind == "markers":
+        assert result["reason"] == worktrees.CONFLICT_PENDING
+
+
+def test_b13d_real_merge_tree(done_copy, monkeypatch):
+    from orch import safegit
+
+    root, tid, copy = done_copy
+    # Exercise the driver allow-list addition without modifying safegit.py.
+    monkeypatch.setattr(safegit, "ALLOWED", safegit.ALLOWED | {"merge-tree"})
+    assert worktrees._save_leftovers(copy, tid)[0]
+    ranges = worktrees._safety_ranges(root, git(copy, "rev-parse", "HEAD"))
+    assert len(ranges) == 2
+    assert finish(root, tid)["state"] == "merged"
+
+
+def test_b13d_unsaved_done_never_reviews(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_save_leftovers", lambda *a: (False, "could not save"))
+        finish(root, tid)
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+    assert worktrees.bring_back(root, tid)["reason"] == worktrees.APPROVAL_NEEDED
+
+
+def test_b13d_review_shows_first_five_paths(done_copy, run):
+    import json
+
+    root, tid, copy = done_copy
+    for i in range(7):
+        (copy / f".aider{i}").write_text("config\n")
+    finish(root, tid)
+    code, out, err = run("copy", "review", tid, "--json")
+    assert code == 0, err
+    review = json.loads(out)
+    assert review["paths"] == [f".aider{i}" for i in range(5)]
+    assert review["paths_summary"].endswith("and 2 more")
+    assert review["target"].endswith(":" + review["paths_hash"])
