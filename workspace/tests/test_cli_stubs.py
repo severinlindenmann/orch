@@ -4,8 +4,7 @@ import pytest
 
 from orch import cli
 
-PAIRS = [
-    ("record", "delete-detail"),
+PAIRS = [  # `record delete-detail` is built (test_insights_settings.py)
     ("job", "run"),
     ("conn", "list"),
     ("conn", "show"),

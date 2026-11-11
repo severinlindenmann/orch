@@ -514,6 +514,28 @@ def _rmtree(ws, rel):
         os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
 
 
+def _rmdir_empty(ws, rel):
+    """Remove the folder only if it is empty, in ONE step: rmdir itself fails on a folder that is not empty,
+    so a file another writer created in between is never removed with it (no check-then-delete). True when
+    it went; False when it is not empty or already gone."""
+    _parts(rel)
+    try:
+        with _walk(ws, rel[:-1]) as directory:
+            try:
+                os.rmdir(
+                    rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {})
+                )
+            except OSError as error:
+                if error.errno in (errno.ENOTEMPTY, errno.EEXIST, errno.ENOENT):
+                    return False
+                raise
+            return True
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return False
+
+
 def _try_lock(fd):
     with _io():
         try:
@@ -1044,7 +1066,11 @@ def _read_json(ws, rel):
         _close(fd)
 
 
-def read_detail(workspace, run, file_id):
+def read_detail(workspace, run, file_id, *, ticket=None):
+    """The detail file `file_id` of `run`. Its name must be the one made from the payload's own (run, kind,
+    id, ticket), else it is refused as swapped. `ticket`: the ticket of the line that points at the file; a
+    file whose payload belongs to another ticket is refused as swapped too (a planted line of ticket B
+    cannot read A's detail through its own `detail` pointer)."""
     _name(run, _RUN)
     _name(file_id, _FILE)
     try:
@@ -1052,7 +1078,8 @@ def read_detail(workspace, run, file_id):
         if (
             not _DETAIL_VALIDATOR.is_valid(value)
             or value["run"] != run
-            or detail_name(run, value["kind"], value["id"]) != file_id
+            or detail_name(run, value["kind"], value["id"], value["ticket"]) != file_id
+            or (ticket is not None and value["ticket"] != ticket)
         ):
             raise RecordTampered("swapped")
         return ReadResult("ok", value)
@@ -1096,11 +1123,12 @@ def _store_detail(ws, event, payload, previous):
             if error.reason != "missing":
                 raise
         if exists:
-            if not isinstance(stored, dict) or (stored.get("run"), stored.get("kind"), stored.get("id")) != (
-                event["run"],
-                event["kind"],
-                event["id"],
-            ):
+            if not isinstance(stored, dict) or (
+                stored.get("run"),
+                stored.get("kind"),
+                stored.get("id"),
+                stored.get("ticket"),
+            ) != (event["run"], event["kind"], event["id"], event["ticket"]):
                 return _Detail(reason="collision")
             finished = any(
                 old.get("detail") == event["detail"]
@@ -1132,8 +1160,8 @@ class RecordWriter:
         return line.encode("utf-8")
 
     def _prepare_detail(self, event, detail, hidden=0):
-        if detail is None:
-            return None
+        if detail is None or not event.get("ticket"):
+            return None  # an event with no ticket gets no detail file (not detail_lost: activity.md, I4)
         try:
             before = _json(detail).count("[hidden: ")
             payload = self.hider.hide_json(detail)
@@ -1142,6 +1170,7 @@ class RecordWriter:
                 id=event["id"],
                 run=event["run"],
                 kind=event["kind"],
+                ticket=event["ticket"],
                 input=payload["input"],
                 output=payload["output"],
                 truncated=False,
@@ -1227,7 +1256,9 @@ class RecordWriter:
                 event["data"] = {"cut": True}
             prepared = dict(event, seq=10**20, conflict=True)
             if payload is not None:
-                prepared["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+                prepared["detail"] = (
+                    f"detail/{run}/{detail_name(run, event['kind'], event['id'], event['ticket'])}.json"
+                )
             try:
                 self._line(prepared)
                 self._line(dict(prepared, detail=None, detail_lost=True))
@@ -1272,7 +1303,9 @@ class RecordWriter:
             if not _decision(previous, event):
                 return None
             if payload is not None:
-                event["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
+                event["detail"] = (
+                    f"detail/{run}/{detail_name(run, event['kind'], event['id'], event['ticket'])}.json"
+                )
             line = (_json(event) + "\n").encode()
             lost_line = (_json(dict(event, detail=None, detail_lost=True)) + "\n").encode()
             check_lock()
@@ -1455,16 +1488,264 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
     return plan
 
 
+def _detail_parts(workspace, run, seen_by):
+    """(what is in detail/<run> that is safe to delete, its size in bytes). One entry that is not safe (a
+    link, FIFO or hardlink, a name orch never writes, one that cannot be read: anything with file access can
+    plant one) is reported and left out: it stays, never a veto of the run's other detail. The run's folder
+    itself not being safe (a link, not a folder) raises; no folder has nothing."""
+    try:
+        names = _entries(workspace, ("detail", run))
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return [], 0
+    found, total = [], 0
+    for name in sorted(names):
+        try:
+            if not re.fullmatch(_PART, name):
+                raise RecordInvalid()
+            total += _size(workspace, ("detail", run, name))
+        except RecordInvalid:
+            _report(workspace, RecordTampered("swapped"), "folder", run, seen_by)
+            continue
+        except RecordTampered as error:
+            _report(workspace, error, "folder", run, seen_by)
+            continue
+        except RecordUnavailable as error:
+            if error.reason != "missing":  # cannot be read (e.g. a planted mode-000 file or folder): it stays
+                _report(workspace, error, "folder", run, seen_by)
+            continue
+        found.append(("detail", run, name))
+    return found, total
+
+
 def delete_detail(workspace, runs, *, seen_by="cli"):
+    """Retention: delete the detail of these runs. Every run's folder is checked first (nothing is deleted
+    when one is a link or not a folder); in each, what is safe goes and what is not (a planted link, FIFO or
+    hardlink) stays, reported (_detail_parts): a planted file never keeps the run's real detail past
+    retention. The run's folder goes when rmdir finds it empty."""
     rels = [("detail", _name(run, _RUN)) for run in runs]
     try:
         for rel in rels:
-            _size(workspace, rel)
+            _detail_parts(workspace, rel[-1], seen_by)
         for rel in rels:
-            _rmtree(workspace, rel)
+            for part in _detail_parts(workspace, rel[-1], seen_by)[0]:
+                _rmtree(workspace, part)
+            _rmdir_empty(workspace, rel)
     except (RecordTampered, RecordUnavailable) as error:
         _report(workspace, error, "folder", rel[-1], seen_by)
         raise
+
+
+def _detail_file(run, file_id):
+    return ("detail", _name(run, _RUN), _name(file_id, _FILE) + ".json")
+
+
+@dataclass(frozen=True)
+class DetailFiles:
+    """What find_detail_files found, or what delete_detail_files deleted. `files`: (run, detail id) pairs
+    (found: there and safe; deleted: gone). `unreadable`: runs whose detail FOLDER is not safe (a link, not a
+    folder, cannot be read): every pair of them skipped. `kept`: pairs whose single FILE is not safe (a link,
+    FIFO or hardlink at its name) or cannot be read: only that pair skipped, the safe files of its run are
+    not. Not a tuple, so
+    a caller that still unpacks an older answer fails loudly."""
+
+    files: tuple = ()
+    unreadable: tuple = ()
+    kept: tuple = ()
+
+
+def find_detail_files(workspace, items, *, seen_by="cli") -> ReadResult[DetailFiles]:
+    """Of `items` ((run, detail id) pairs), the ones whose detail file is there, through the hardened walk:
+    ReadResult of DetailFiles. Anything with file access can plant a line and a file there, so what is not
+    safe is reported and skipped at its own level, never a veto of the others: a run whose detail folder is
+    not safe skips that run (`unreadable`); a single file that is not safe or cannot be read skips only that
+    pair (`kept`). Only the detail folder itself not being safe refuses."""
+    found, unreadable, kept, runs = [], [], [], []
+    try:
+        try:
+            _entries(workspace, ("detail",))
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+            return ReadResult("ok", DetailFiles())  # no detail at all: nothing to find
+        for run, file_id in items:
+            if run in unreadable:
+                continue
+            if run not in runs:
+                try:
+                    _entries(workspace, ("detail", run))  # the run's folder: a link or not a folder
+                except RecordUnavailable as error:
+                    if error.reason != "missing":
+                        unreadable.append(run)
+                        continue
+                except RecordTampered as error:
+                    _report(workspace, error, "folder", run, seen_by)
+                    unreadable.append(run)
+                    continue
+                runs.append(run)
+            try:
+                fd = _open(workspace, _detail_file(run, file_id), "read")
+            except RecordUnavailable as error:
+                if error.reason != "missing":  # cannot be read (e.g. mode 000): only that pair is skipped
+                    _report(workspace, error, "folder", run, seen_by)
+                    kept.append((run, file_id))
+                continue
+            except RecordTampered as error:
+                _report(workspace, error, "folder", run, seen_by)
+                kept.append((run, file_id))
+                continue
+            _close(fd)
+            found.append((run, file_id))
+        return ReadResult("ok", DetailFiles(tuple(found), tuple(unreadable), tuple(kept)))
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", None, seen_by)
+
+
+def ticket_detail_files(workspace, ticket, *, skip=(), seen_by="cli"):
+    """ReadResult of ((run, detail id) pairs, runs whose detail folder cannot be read): every file in
+    detail/<run>/ whose STORED payload belongs to `ticket` and whose name is the I4 name of its own stored
+    (run, kind, id, ticket). So this ticket's own files are found also when no line points at them (orphans: a
+    crash between the detail write and its line). A file of another ticket, a name orch never writes, or a
+    file that is not valid is left alone, silently (it is not read as this ticket's: no alert). Runs in `skip`
+    (their run file cannot be read) are not looked at; a run's detail folder that is not safe is skipped and
+    returned as unreadable (no veto). The detail folder itself not being safe refuses."""
+    found, unreadable = [], []
+    try:
+        try:
+            runs = _entries(workspace, ("detail",))
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+            return ReadResult("ok", ([], []))
+        for run in sorted(runs):
+            if not re.fullmatch(_RUN, run) or run in skip:
+                continue
+            try:
+                names = _entries(workspace, ("detail", run))
+            except RecordUnavailable as error:
+                if error.reason != "missing":
+                    unreadable.append(run)
+                continue
+            except RecordTampered as error:
+                _report(workspace, error, "folder", run, seen_by)
+                unreadable.append(run)
+                continue
+            for name in sorted(names):
+                if not re.fullmatch(_FILE + r"\.json", name):
+                    continue  # a name orch never writes for a detail file (a writer's tmp_ file too)
+                file_id = name[: -len(".json")]
+                try:
+                    value = _read_json(workspace, ("detail", run, name))
+                except (RecordTampered, RecordUnavailable):
+                    continue
+                if (
+                    _DETAIL_VALIDATOR.is_valid(value)
+                    and value["run"] == run
+                    and value["ticket"] == ticket
+                    and detail_name(run, value["kind"], value["id"], ticket) == file_id
+                ):
+                    found.append((run, file_id))
+        return ReadResult("ok", (found, unreadable))
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", None, seen_by)
+
+
+def delete_detail_files(workspace, items, *, seen_by="cli") -> DetailFiles:
+    """Delete exactly these detail files ((run, detail id) pairs), run by run UNDER THE RUN'S LOCK (the writer
+    stores detail under it). Returns DetailFiles: `files` the pairs deleted by this call. A file can be
+    swapped after find_detail_files, so the same levels apply here, never a veto of the others: a run whose
+    detail folder (or lock) is not safe now is reported and skipped (`unreadable`); a single file that is not
+    safe now (a link, FIFO, hardlink, one that cannot be read or unlinked) is reported and stays (`kept`), its
+    safe siblings go. A run's detail folder goes only when rmdir finds it empty, so detail of other tickets in
+    the same run (also one written in between) and a kept file stay. A file or run folder that is missing
+    (retention pruned it since it was found) is already gone: not counted, never a failure. Raises only for
+    the detail folder itself, a busy lock or an I/O error on a run's folder or lock."""
+    found, unreadable, kept = [], [], []
+    run = None
+    try:
+        _entries(workspace, ("detail",))  # the detail folder itself not safe: refuse with nothing deleted
+        for run in dict.fromkeys(ref[0] for ref in items):
+            try:
+                with _lock(workspace, run) as check_lock:
+                    check_lock()
+                    _entries(workspace, ("detail", run))  # the run's folder: a link or not a folder skips it
+                    for ref in items:
+                        if ref[0] != run:
+                            continue
+                        check_lock()
+                        try:
+                            _size(workspace, _detail_file(*ref))  # missing: 0, already gone
+                        except RecordTampered as error:
+                            _report(workspace, error, "folder", run, seen_by)
+                            kept.append(ref)
+                            continue
+                        except RecordUnavailable as error:
+                            if error.reason != "missing":  # cannot be read now (e.g. mode 000): only it stays
+                                _report(workspace, error, "folder", run, seen_by)
+                                kept.append(ref)
+                            continue
+                        check_lock()
+                        try:
+                            gone = _unlink(workspace, _detail_file(*ref))  # missing: False, already gone
+                        except RecordUnavailable as error:
+                            _report(workspace, error, "folder", run, seen_by)
+                            kept.append(ref)
+                            continue
+                        if gone:
+                            found.append(ref)
+                    check_lock()
+                    _rmdir_empty(workspace, ("detail", run))
+            except RecordUnavailable as error:
+                if error.reason != "missing":
+                    raise
+            except RecordTampered as error:
+                _report(workspace, error, "folder", run, seen_by)
+                unreadable.append(run)
+    except RecordUnavailable as error:
+        if error.reason != "missing":  # missing: no detail at all (retention pruned it), nothing to delete
+            _report(workspace, error, "folder", run, seen_by)
+            raise
+    except RecordTampered as error:
+        _report(workspace, error, "folder", run, seen_by)
+        raise
+    return DetailFiles(tuple(found), tuple(unreadable), tuple(kept))
+
+
+def record_sizes(workspace):
+    """ReadResult of {"record": bytes, "detail": bytes} through the hardened walk (no record yet: zeros). A
+    name orch never writes inside the record counts as changed outside orch."""
+    try:
+        try:
+            names = _entries(workspace, ())
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+            names = []
+        total = sum(_size(workspace, (name,)) for name in names)
+        return ReadResult("ok", dict(record=total, detail=_size(workspace, ("detail",))))
+    except RecordInvalid:
+        return _report(workspace, RecordTampered("swapped"), "folder", None, "reader")
+    except (RecordTampered, RecordUnavailable) as error:
+        return _report(workspace, error, "folder", None, "reader")
+
+
+def note_change(workspace, *, change, by, ticket, deleted):
+    """One audit line for a person's change to the record (`orch.record-change/1`, e.g.
+    record.delete_detail) in the unattributed daily file alerts/<day>.jsonl. Raises when it cannot be stored
+    (the caller then changes nothing)."""
+    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    line = dict(
+        v=1, schema="orch.record-change/1", at=now, change=change, by=by, ticket=ticket, deleted=deleted
+    )
+    if not _CHANGE_VALIDATOR.is_valid(line):
+        raise RecordInvalid()
+    fd = _open(workspace, ("alerts", now[:10] + ".jsonl"), "append", create_dirs=True)
+    try:
+        _write(fd, (_json(line) + "\n").encode())
+    finally:
+        _close(fd)
+    return line
 
 
 def _ended(events):
@@ -1514,7 +1795,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 dict(
                     run=run,
                     ended=_ended_run(run, read.value, now),
-                    detail_mb=_size(workspace, ("detail", run)) / 1024**2,
+                    detail_mb=_detail_parts(workspace, run, "retention")[1] / 1024**2,
                     file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
                     / 1024**2,
                 )
@@ -1536,8 +1817,11 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 ended_now = _ended_run(run, read.value, now)
                 if not ended_now or ended_now != snapshots[run]:
                     continue
-                # Check every deletion target before invoking the irreversible fold.
-                for rel in (("pending", run), ("detail", run), ("jobs", run), ("runs", run + ".jsonl")):
+                # Check every deletion target before invoking the irreversible fold. In detail/<run> only the
+                # run's folder can refuse; a planted file in it is skipped (delete_detail), never a veto.
+                check_lock()
+                _detail_parts(workspace, run, "retention")
+                for rel in (("pending", run), ("jobs", run), ("runs", run + ".jsonl")):
                     check_lock()
                     _size(workspace, rel)
                 check_lock()
@@ -2150,18 +2434,23 @@ _SCHEMA = {
         },
         "detail_file": {
             "type": "object",
-            "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"],
+            "required": ["v", "id", "run", "kind", "ticket", "input", "output", "truncated", "hidden"],
             "additionalProperties": False,
             "description": "One file .orch/record/detail/<run>/<file name>.json: "
             "the full payload of one event, key values hidden. The "
             "file name is lowercase hex only (activity.md, Detail "
-            "files); id and kind are stored here so a reader can "
+            "files); id, kind and ticket are stored here so a reader can "
             "verify the file belongs to the event.",
             "properties": {
                 "v": {"const": 1},
                 "id": {"$ref": "#/$defs/event_id"},
                 "run": {"$ref": "#/$defs/run"},
                 "kind": {"$ref": "#/$defs/kind"},
+                "ticket": {
+                    "type": "string",
+                    "pattern": "^t_[a-z0-9]{6,16}$",
+                    "description": "The ticket of the event; part of the file name (activity.md, I4).",
+                },
                 "input": {"description": "What went in (tool input, prompt, command), any JSON."},
                 "output": {"description": "What came out (tool result, chat text), any JSON."},
                 "truncated": {"type": "boolean", "description": "true = cut at the 1 MB per-file cap."},
@@ -2200,6 +2489,22 @@ _SCHEMA = {
                     "orch does not show them. Nothing "
                     "was deleted."
                 },
+            },
+        },
+        "record_change": {
+            "type": "object",
+            "additionalProperties": False,
+            "description": "One audit line in alerts/<YYYY-MM-DD>.jsonl for a person's proven change to the "
+            "record (activity.md, Delete detail). No path, no record content.",
+            "required": ["v", "schema", "at", "change", "by", "ticket", "deleted"],
+            "properties": {
+                "v": {"const": 1},
+                "schema": {"const": "orch.record-change/1"},
+                "at": {"$ref": "#/$defs/time"},
+                "change": {"enum": ["record.delete_detail"]},
+                "by": {"type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$"},
+                "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"},
+                "deleted": {"type": "integer", "minimum": 0},
             },
         },
         "read_status": {
@@ -2248,4 +2553,7 @@ _DETAIL_VALIDATOR = Draft202012Validator(
 )
 _META_VALIDATOR = Draft202012Validator(
     {"$ref": "#/$defs/record_meta", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
+)
+_CHANGE_VALIDATOR = Draft202012Validator(
+    {"$ref": "#/$defs/record_change", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
 )

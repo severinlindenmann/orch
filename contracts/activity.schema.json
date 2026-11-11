@@ -114,13 +114,14 @@
     "files": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/file_path" }, "description": "Only on kind step: the workspace files or folders the step named, display only, never used for access decisions (activity.md, Files)." },
     "file_path": { "type": "string", "minLength": 1, "maxLength": 260, "pattern": "^(?![A-Za-z]:)(?![A-Za-z][A-Za-z0-9+.-]*:)(?![~$])(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08e2\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb\\\\]+$", "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash, no start with ~ $ or a scheme or drive letter (file: C:), no Unicode control or format character (Cc Cf Zl Zp: bidi overrides, zero-width), NFC. The writer enforces the full rule (record_files.file_ok); this pattern lists the BMP characters." },
     "detail_file": {
-      "type": "object", "required": ["v", "id", "run", "kind", "input", "output", "truncated", "hidden"], "additionalProperties": false,
-      "description": "One file .orch/record/detail/<run>/<file name>.json: the full payload of one event, key values hidden. The file name is lowercase hex only (activity.md, Detail files); id and kind are stored here so a reader can verify the file belongs to the event.",
+      "type": "object", "required": ["v", "id", "run", "kind", "ticket", "input", "output", "truncated", "hidden"], "additionalProperties": false,
+      "description": "One file .orch/record/detail/<run>/<file name>.json: the full payload of one event, key values hidden. The file name is lowercase hex only (activity.md, Detail files); id, kind and ticket are stored here so a reader can verify the file belongs to the event.",
       "properties": {
         "v": { "const": 1 },
         "id": { "$ref": "#/$defs/event_id" },
         "run": { "$ref": "#/$defs/run" },
         "kind": { "$ref": "#/$defs/kind" },
+        "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "The ticket of the event; part of the file name (activity.md, I4)." },
         "input": { "description": "What went in (tool input, prompt, command), any JSON." },
         "output": { "description": "What came out (tool result, chat text), any JSON." },
         "truncated": { "type": "boolean", "description": "true = cut at the 1 MB per-file cap." },
@@ -128,6 +129,7 @@
       }
     },
     "record_alert": {"type": "object", "additionalProperties": false, "required": ["v", "schema", "at", "target", "run", "reason", "seen_by", "message"], "properties": {"v": {"const": 1}, "schema": {"const": "orch.record-alert/1"}, "at": {"$ref": "#/$defs/time"}, "target": {"enum": ["run", "detail", "meta", "lock", "folder", "alerts"]}, "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]}, "reason": {"enum": ["link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"]}, "seen_by": {"enum": ["writer", "reader", "retention", "cli"]}, "message": {"const": "Some records of this run were changed outside orch. To be safe, orch does not show them. Nothing was deleted."}}},
+    "record_change": {"type": "object", "additionalProperties": false, "description": "One audit line in alerts/<YYYY-MM-DD>.jsonl for a person's proven change to the record (activity.md, Delete detail). No path, no record content.", "required": ["v", "schema", "at", "change", "by", "ticket", "deleted"], "properties": {"v": {"const": 1}, "schema": {"const": "orch.record-change/1"}, "at": {"$ref": "#/$defs/time"}, "change": {"enum": ["record.delete_detail"]}, "by": {"type": "string", "pattern": "^human:[^\\u0000-\\u001f]{1,58}$"}, "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"}, "deleted": {"type": "integer", "minimum": 0}}},
     "read_status": {"type": "object", "additionalProperties": false, "required": ["run", "status", "reason", "message"], "properties": {"pending": {"type": "integer", "minimum": 0}, "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]}, "status": {"enum": ["ok", "unavailable", "tampered"]}, "reason": {"enum": ["missing", "io", "skipped", "pending", "link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"]}, "message": {"type": "string", "maxLength": 500}}},
     "record_meta": {"type": "object", "additionalProperties": false, "required": ["schema", "since", "keep_days", "max_mb"], "properties": {"schema": {"const": "orch.record/1"}, "since": {"$ref": "#/$defs/time"}, "keep_days": {"type": "integer", "minimum": 0}, "max_mb": {"type": "integer", "minimum": 0}}}
   }

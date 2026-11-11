@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .collect_execjson import _hash, _hide, _now, _one_line, detail_name
+from .collect_execjson import _hash, _hide, _now, _one_line, detail_path
 from .record import RecordInvalid
 from .record_files import workspace_files
 
@@ -277,8 +277,8 @@ class StreamJsonMapper:
         eid = ":".join([self.run, *map(str, parts)])
         return {"id": eid} if _valid_id(eid) else {}
 
-    def _detail(self, kind: str, eid: str) -> str:
-        return f"detail/{self.run}/{detail_name(self.run, kind, eid)}.json"
+    def _detail(self, kind: str, eid: str) -> str | None:
+        return detail_path(self.run, kind, eid, self.ticket)  # None: an event with no ticket has no detail
 
     def feed_with_detail(self, line: str | bytes) -> list[tuple[dict, dict | None]]:
         try:
