@@ -86,7 +86,8 @@
     els.phoneInput = h('input', {type: 'checkbox', role: 'switch'});
     els.phone = h('label', {class: 'fx-phone', hidden: true}, els.phoneInput, 'Send questions to my phone');
     els.steps = h('div', {class: 'fx-stepper'});
-    const top = h('header', {class: 'fx-top'}, els.rail, h('div', {class: 'fx-title'}, h('div', {class: 'meta'}, 'Focus / ', els.key), els.title, els.steps), h('div', {class: 'fx-prog'}, els.count, els.prog), els.liveWrap,
+    els.back = S.views.used ? S.views.used.backLink() : null;
+    const top = h('header', {class: 'fx-top'}, els.back, els.rail, h('div', {class: 'fx-title'}, h('div', {class: 'meta'}, 'Focus / ', els.key), els.title, els.steps), h('div', {class: 'fx-prog'}, els.count, els.prog), els.liveWrap,
       h('div', {class: 'fx-tools'}, els.phone, els.stop, els.more, h('a', {class: 'btn ghost sm fx-exit', 'aria-label': 'Exit Focus', href: INAPP ? '/#ticket/' + TID : '/', target: INAPP ? '_top' : '_self', title: INAPP ? 'Back to the ticket' : 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
     els.tasks = h('div', {id: 'fx-tasks'});
     els.helpers = h('div');
@@ -94,7 +95,7 @@
     els.addInput = h('input', {class: 'input', type: 'text', maxlength: '500', placeholder: 'Add a task', 'aria-label': 'Add a task', name: 'task'});
     els.addForm = h('form', {class: 'fx-add-task'}, els.addInput, h('button', {class: 'btn ghost icon sm', type: 'submit', 'aria-label': 'Add task', icon: 'plus'}));
     const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks), els.helpers, els.railNote, els.addForm);
-    els.tabs = [['live', 'Live'], ['proof', 'Results']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
+    els.tabs = [['live', 'Live'], ['proof', 'Results'], ['used', 'Used'], ['files', 'Files']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
     els.sub = h('span', {class: 'meta', text: ''});
     els.feed = h('div', {class: 'fx-feed', role: 'log', 'aria-label': 'What the agent is doing'});
     els.working = h('div', {class: 'fx-working', hidden: true});
@@ -102,6 +103,8 @@
     els.qs = h('div', {class: 'fx-qwrap'});
     els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.qs, els.line, els.feed, els.working);
     els.paneProof = h('div', {class: 'fx-pane', id: 'fx-p-proof', role: 'tabpanel', 'aria-labelledby': 'fx-t-proof', hidden: true});
+    els.paneFiles = h('div', {class: 'fx-pane', id: 'fx-p-files', role: 'tabpanel', 'aria-labelledby': 'fx-t-files', hidden: true});
+    els.paneUsed = h('div', {class: 'fx-pane', id: 'fx-p-used', role: 'tabpanel', 'aria-labelledby': 'fx-t-used', hidden: true});
     els.attachBox = h('div', {class: 'fx-attach', hidden: true});
     els.msg = h('textarea', {id: 'fx-msg', rows: '1', placeholder: 'Message the agent…', 'aria-label': 'Message to the agent'});
     els.form = h('form', {id: 'fx-form'}, els.msg, h('button', {class: 'btn sm', 'aria-label': 'Send', text: 'Send ↑'}));
@@ -111,7 +114,7 @@
     els.review = h('div', {class: 'fx-review', hidden: true}, h('div', {}, h('p', {text: 'Finished. Looks good?'}), h('p', {class: 'meta', text: 'Next step · Check result'})),
       h('button', {class: 'btn', 'data-act': 'changes', text: 'Ask for changes'}), h('button', {class: 'btn primary', 'data-act': 'done', text: 'Accept'}));
     els.complete = h('div', {class: 'fx-review', hidden: true}, h('p', {text: 'You’re all set here.'}));
-    const stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, compose, els.review, els.complete, els.help);
+    const stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, els.paneUsed, els.paneFiles, compose, els.review, els.complete, els.help);
     els.mobileTasks = h('button', {class: 'fx-mobile-tasks', 'data-act': 'rail', 'aria-controls': 'fx-tasks', 'aria-expanded': 'false'});
     root.replaceChildren(top, els.mobileTasks, h('div', {class: 'fx-body'}, rail, stage));
     els.stopIc.innerHTML = ic('pause');
@@ -163,9 +166,7 @@
   }
 
   function renderHelpers(v) {
-    const hs = v.board.helpers;
-    els.helpers.replaceChildren(...(hs.length ? [h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Helpers'}), h('span', {text: String(hs.length)})),
-      ...hs.map(x => h('div', {class: 'fx-helper'}, h('div', {class: 'row'}, h('span', {class: 'dot working'}), h('span', {class: 'grow', text: x.text})))))] : []));
+    S.views.used.renderTree(v);  // the main agent and its helpers as a tree; a row filters the Details steps
   }
 
   function renderProof(v) {

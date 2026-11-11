@@ -29,6 +29,39 @@ def _used(e: dict) -> dict:
     return u if isinstance(u, dict) else {}
 
 
+LABEL_KINDS = ("skill", "tool", "mcp")
+SOURCES = ("harness", "admin", "workspace", "builtin", "marketplace")
+
+
+def _label(e: dict) -> dict | None:
+    """What a step used, for the page's Skill / Tool / Connection label: kind, name, action, source."""
+    u = _used(e)
+    if u.get("kind") not in LABEL_KINDS or not isinstance(u.get("name"), str) or not u["name"]:
+        return None
+    action = u.get("action") if isinstance(u.get("action"), str) else None
+    source = u.get("source") if u.get("source") in SOURCES else "harness"
+    return {"kind": u["kind"], "name": u["name"], "action": action, "source": source}
+
+
+MAX_FILES = 8
+FILE_PATH = re.compile(r"[^\\\x00-\x1f\x7f:]{1,260}")  # no backslash, no control character, no drive colon
+
+
+def clean_files(raw) -> list[str]:
+    """The `files` of a step (contracts: 0..8 workspace-relative POSIX paths). Anything that is not exactly that
+    is dropped. Display only: Focus never opens these paths."""
+    out: list[str] = []
+    for p in raw if isinstance(raw, list) else []:
+        if (
+            isinstance(p, str) and FILE_PATH.fullmatch(p) and not p.startswith("/")
+            and ".." not in p.split("/") and "" not in p.split("/") and "." not in p.split("/")
+        ):  # fmt: skip
+            out.append(p)
+        if len(out) == MAX_FILES:
+            break
+    return out
+
+
 def _data(e: dict) -> dict:
     d = e.get("data")
     return d if isinstance(d, dict) else {}
@@ -56,11 +89,12 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
             return events.make(run, ticket, agent, k, text, source, at=at, **data)
 
         if kind == "step":
+            used, files = _label(e), clean_files(e.get("files")) or None
             if done is None:
-                return [make("tool.start", id=eid)]
-            return [make("tool.end", id=eid, ok=done.get("ok") is not False)]
+                return [make("tool.start", id=eid, used=used, files=files)]
+            return [make("tool.end", id=eid, ok=done.get("ok") is not False, used=used, files=files)]
         if kind == "helper.start":
-            return [make("helper.start", id=eid)]
+            return [make("helper.start", id=eid, parent=e.get("parent"))]
         if kind == "helper.end":
             return [make("helper.end", id=eid, ok=(done or {}).get("ok") is not False)]
         if kind == "run.state":
