@@ -1806,6 +1806,40 @@ def test_find_detail_files_skips_an_unsafe_file_or_run_and_refuses_only_an_unsaf
     assert got.status == "tampered" and got.reason == "link"
 
 
+@pytest.mark.parametrize("how", ["file", "folder"])
+def test_detail_that_cannot_be_read_is_kept_never_a_veto(ws, rec, how):
+    """B1: a planted file or folder in a run's detail that cannot be read (mode 000) is reported and stays
+    (`kept`); the run's other detail goes: in find_detail_files, delete_detail_files and retention's
+    delete_detail (_detail_parts). Never a whole refusal."""
+    from orch import record
+
+    if os.name != "posix" or os.geteuid() == 0:
+        pytest.skip("mode 000 blocks reading only for a non-root POSIX user")
+    items = [(r, p.stem) for r in (RUN_A, RUN_B) for p in sorted(_detail(ws, r).iterdir())]  # A's real files
+    planted = "f" * 32
+    targets = [_detail(ws, r) / f"{planted}.json" for r in (RUN_A, RUN_C)]
+    for target in targets:
+        if how == "file":
+            target.write_text("{}")
+        else:
+            target.mkdir()
+        target.chmod(0)
+    try:
+        want = record.DetailFiles(tuple(items), (), ((RUN_A, planted),))
+        got = record.find_detail_files(ws, [*items, (RUN_A, planted)])
+        assert got.status == "ok" and got.value == want
+        assert record.delete_detail_files(ws, [*items, (RUN_A, planted)]) == want
+        # only the planted one stays
+        assert [p.name for p in _detail(ws, RUN_A).iterdir()] == [targets[0].name]
+        assert not _detail(ws, RUN_B).exists()
+        assert len(list(_detail(ws, RUN_C).iterdir())) == 3
+        record.delete_detail(ws, [RUN_C], seen_by="retention")  # no raise: only the planted entry is left out
+        assert [p.name for p in _detail(ws, RUN_C).iterdir()] == [targets[1].name]
+    finally:
+        for target in targets:
+            target.chmod(0o700)
+
+
 def test_delete_detail_files_a_run_pruned_in_between_is_already_gone(ws, rec, run, monkeypatch):
     """L4: retention pruned a run between finding the files and deleting them: already gone, not a partial
     delete; the other run's files go."""

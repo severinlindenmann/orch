@@ -1389,9 +1389,9 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
 
 def _detail_parts(workspace, run, seen_by):
     """(what is in detail/<run> that is safe to delete, its size in bytes). One entry that is not safe (a
-    link, FIFO or hardlink, a name orch never writes: anything with file access can plant one) is reported
-    and left out: it stays, never a veto of the run's other detail. The run's folder itself not being safe (a
-    link, not a folder) raises; no folder has nothing."""
+    link, FIFO or hardlink, a name orch never writes, one that cannot be read: anything with file access can
+    plant one) is reported and left out: it stays, never a veto of the run's other detail. The run's folder
+    itself not being safe (a link, not a folder) raises; no folder has nothing."""
     try:
         names = _entries(workspace, ("detail", run))
     except RecordUnavailable as error:
@@ -1409,6 +1409,10 @@ def _detail_parts(workspace, run, seen_by):
             continue
         except RecordTampered as error:
             _report(workspace, error, "folder", run, seen_by)
+            continue
+        except RecordUnavailable as error:
+            if error.reason != "missing":  # cannot be read (e.g. a planted mode-000 file or folder): it stays
+                _report(workspace, error, "folder", run, seen_by)
             continue
         found.append(("detail", run, name))
     return found, total
@@ -1441,7 +1445,8 @@ class DetailFiles:
     """What find_detail_files found, or what delete_detail_files deleted. `files`: (run, detail id) pairs
     (found: there and safe; deleted: gone). `unreadable`: runs whose detail FOLDER is not safe (a link, not a
     folder, cannot be read): every pair of them skipped. `kept`: pairs whose single FILE is not safe (a link,
-    FIFO or hardlink at its name): only that pair skipped, the safe files of its run are not. Not a tuple, so
+    FIFO or hardlink at its name) or cannot be read: only that pair skipped, the safe files of its run are
+    not. Not a tuple, so
     a caller that still unpacks an older answer fails loudly."""
 
     files: tuple = ()
@@ -1449,12 +1454,12 @@ class DetailFiles:
     kept: tuple = ()
 
 
-def find_detail_files(workspace, items, *, seen_by="cli"):
+def find_detail_files(workspace, items, *, seen_by="cli") -> ReadResult[DetailFiles]:
     """Of `items` ((run, detail id) pairs), the ones whose detail file is there, through the hardened walk:
     ReadResult of DetailFiles. Anything with file access can plant a line and a file there, so what is not
     safe is reported and skipped at its own level, never a veto of the others: a run whose detail folder is
-    not safe skips that run (`unreadable`); a single file that is not safe skips only that pair (`kept`). Only
-    the detail folder itself not being safe refuses."""
+    not safe skips that run (`unreadable`); a single file that is not safe or cannot be read skips only that
+    pair (`kept`). Only the detail folder itself not being safe refuses."""
     found, unreadable, kept, runs = [], [], [], []
     try:
         try:
@@ -1481,7 +1486,8 @@ def find_detail_files(workspace, items, *, seen_by="cli"):
             try:
                 fd = _open(workspace, _detail_file(run, file_id), "read")
             except RecordUnavailable as error:
-                if error.reason != "missing":
+                if error.reason != "missing":  # cannot be read (e.g. mode 000): only that pair is skipped
+                    _report(workspace, error, "folder", run, seen_by)
                     kept.append((run, file_id))
                 continue
             except RecordTampered as error:
@@ -1544,16 +1550,16 @@ def ticket_detail_files(workspace, ticket, *, skip=(), seen_by="cli"):
         return _report(workspace, error, "folder", None, seen_by)
 
 
-def delete_detail_files(workspace, items, *, seen_by="cli"):
+def delete_detail_files(workspace, items, *, seen_by="cli") -> DetailFiles:
     """Delete exactly these detail files ((run, detail id) pairs), run by run UNDER THE RUN'S LOCK (the writer
     stores detail under it). Returns DetailFiles: `files` the pairs deleted by this call. A file can be
     swapped after find_detail_files, so the same levels apply here, never a veto of the others: a run whose
     detail folder (or lock) is not safe now is reported and skipped (`unreadable`); a single file that is not
-    safe now (a link, FIFO, hardlink) is reported and stays (`kept`), its safe siblings go. A run's detail
-    folder goes only when rmdir finds it empty, so detail of other tickets in the same run (also one written
-    in between) and a kept file stay. A file or run folder that is missing (retention pruned it since it was
-    found) is already gone: not counted, never a failure. Raises only for the detail folder itself, a busy
-    lock or an I/O error."""
+    safe now (a link, FIFO, hardlink, one that cannot be read or unlinked) is reported and stays (`kept`), its
+    safe siblings go. A run's detail folder goes only when rmdir finds it empty, so detail of other tickets in
+    the same run (also one written in between) and a kept file stay. A file or run folder that is missing
+    (retention pruned it since it was found) is already gone: not counted, never a failure. Raises only for
+    the detail folder itself, a busy lock or an I/O error on a run's folder or lock."""
     found, unreadable, kept = [], [], []
     run = None
     try:
@@ -1573,8 +1579,19 @@ def delete_detail_files(workspace, items, *, seen_by="cli"):
                             _report(workspace, error, "folder", run, seen_by)
                             kept.append(ref)
                             continue
+                        except RecordUnavailable as error:
+                            if error.reason != "missing":  # cannot be read now (e.g. mode 000): only it stays
+                                _report(workspace, error, "folder", run, seen_by)
+                                kept.append(ref)
+                            continue
                         check_lock()
-                        if _unlink(workspace, _detail_file(*ref)):
+                        try:
+                            gone = _unlink(workspace, _detail_file(*ref))  # missing: False, already gone
+                        except RecordUnavailable as error:
+                            _report(workspace, error, "folder", run, seen_by)
+                            kept.append(ref)
+                            continue
+                        if gone:
                             found.append(ref)
                     check_lock()
                     _rmdir_empty(workspace, ("detail", run))
