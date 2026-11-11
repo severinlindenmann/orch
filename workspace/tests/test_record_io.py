@@ -5,6 +5,7 @@ here without changing or importing that consumer.
 """
 
 import ast
+import builtins
 import errno
 import json
 import os
@@ -26,6 +27,9 @@ ROOT = Path(__file__).resolve().parents[2]
 RUN = "r_8k2m01"
 DETAIL = {"input": "hello", "output": "world"}
 CORE = {
+    "_io_setup",
+    "_try_lock",
+    "_lock_check",
     "_io_error",
     "_io",
     "_parts",
@@ -78,32 +82,267 @@ def plant(ws, kind):
     return path
 
 
+# Exact call expressions keep arbitrary Path receivers out of the allowlist.
+SAFE_ATTRIBUTE_CALLS = {
+    "' '.join",
+    "(_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid",
+    "(_json(alert) + '\\n').encode",
+    "(_json(dict(event, detail=None, detail_lost=True)) + '\\n').encode",
+    "(_json(event) + '\\n').encode",
+    "ReadResult.from_error",
+    "_ALERTED.add",
+    "_DETAIL_VALIDATOR.is_valid",
+    "_META_VALIDATOR.is_valid",
+    "_json(detail).count",
+    "_json(dict(event=event, payload=payload.decode() if payload else None, default_id=default_id)).encode",
+    "_json(dict(schema='orch.record/1', since=event['at'], keep_days=90, max_mb=2048)).encode",
+    "_json(event).count",
+    "_json(event['data']).encode",
+    "_json(payload).count",
+    "_json(wrapped).encode",
+    "_read_bytes(fd).splitlines",
+    "datetime.fromisoformat",
+    "datetime.now",
+    "datetime.now(UTC).isoformat",
+    "datetime.now(UTC).isoformat().replace",
+    "dict.fromkeys",
+    "eid.encode",
+    "event.get",
+    "event.pop",
+    "event.update",
+    "event['detail'].split",
+    "event['outcome'].get",
+    "events.append",
+    "hashlib.sha256",
+    "hashlib.sha256(b'orch.id.hook/1\\x00' + eid.encode()).hexdigest",
+    "hiding._check",
+    "hiding.current_hider",
+    "json.dumps",
+    "json.loads",
+    "kept.append",
+    "last.get",
+    "last.get('data', {}).get",
+    "line.encode",
+    "line.get",
+    "obj.items",
+    "old.get",
+    "outcome.keys",
+    "payload.decode",
+    "payload.encode",
+    "plan['delete_detail'].append",
+    "plan['delete_run'].append",
+    "plan['delete_run'].copy",
+    "plan[field].append",
+    "previous.append",
+    "raw.endswith",
+    "raw.splitlines",
+    "re.fullmatch",
+    "re.search",
+    "redact(event['outcome']['error']).split",
+    "redact(event['text']).split",
+    "result.pop",
+    "result.update",
+    "result['delete_detail'].append",
+    "result['delete_run'].append",
+    "result['fold_first'].append",
+    "runs.append",
+    "self._append",
+    "self._commit",
+    "self._drain",
+    "self._line",
+    "self._prepare_detail",
+    "self._serialized",
+    "self._spool",
+    "self.hider.hide_cut",
+    "self.hider.hide_json",
+    "self.hider.hide_text",
+    "stored.get",
+    "super().__init__",
+    "time.time_ns",
+    "uuid.uuid4",
+}
+SAFE_ATTRIBUTE_VALUES = {
+    "busy.alert",
+    "error.alert",
+    "error.reason",
+    "listed.status",
+    "listed.value",
+    "read.alert",
+    "read.message",
+    "read.pending",
+    "read.reason",
+    "read.status",
+    "read.value",
+    "result.alert",
+    "self.alert",
+    "self.hider",
+    "self.reason",
+    "self.status",
+    "self.value",
+    "self.workspace",
+    "stored.created",
+    "stored.reason",
+    "uuid.uuid4().hex",
+}
+ERROR_BOUNDARIES = {
+    "_alert",
+    "read_run",
+    "_pending_count",
+    "apply_retention",
+    "read_detail",
+    "_commit",
+    "_drain",
+    "_append",
+    "read_meta",
+    "_read_json",
+    "_store_detail",
+    "delete_detail",
+    "list_runs",
+    "_spool",
+}
+
+
+def scan_record_source(source):
+    sensitive = {"os", "shutil", "io", "builtins", "pathlib", "fcntl", "msvcrt", "_FCNTL", "_MSVCRT"}
+    tree = ast.parse(source)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
+    class Scan(ast.NodeVisitor):
+        function = None
+        core = False
+
+        def visit_FunctionDef(self, node):
+            # Nested functions and lambdas do not inherit an I/O exemption.
+            previous = self.function, self.core
+            self.function, self.core = node.name, node in tree.body and node.name in CORE
+            self.generic_visit(node)
+            self.function, self.core = previous
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Lambda(self, node):
+            previous = self.function, self.core
+            self.function, self.core = "<lambda>", False
+            self.generic_visit(node)
+            self.function, self.core = previous
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                if alias.name.split(".")[0] in sensitive:
+                    assert alias.asname is None and (
+                        self.core or (node in tree.body and alias.name == "os")
+                    ), ast.unparse(node)
+
+        def visit_ImportFrom(self, node):
+            if (node.module or "").split(".")[0] in sensitive:
+                assert self.core or (
+                    node in tree.body
+                    and node.module == "pathlib"
+                    and [(a.name, a.asname) for a in node.names] == [("Path", None)]
+                ), ast.unparse(node)
+
+        def visit_Name(self, node):
+            if not self.core:
+                assert node.id not in sensitive, ast.unparse(node)
+                if node.id == "Path":
+                    parent = parents[node]
+                    assert (
+                        isinstance(parent, ast.Call)
+                        and parent.func is node
+                        or isinstance(parent, ast.AnnAssign)
+                        and parent.annotation is node
+                        or isinstance(parent, ast.arg)
+                        and parent.annotation is node
+                        or isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and parent.returns is node
+                    ), ast.unparse(parent)
+
+        def visit_Attribute(self, node):
+            if not self.core:
+                assert ast.unparse(node) in SAFE_ATTRIBUTE_CALLS | SAFE_ATTRIBUTE_VALUES, ast.unparse(node)
+            self.generic_visit(node)
+
+        def visit_Call(self, node):
+            if not self.core:
+                if isinstance(node.func, ast.Attribute):
+                    assert ast.unparse(node.func) in SAFE_ATTRIBUTE_CALLS, ast.unparse(node)
+                elif isinstance(node.func, ast.Name):
+                    assert node.func.id not in {"open", "__import__", "eval", "exec"}
+                    if node.func.id == "Path":
+                        assert self.function in {"record_dir", "__init__"}
+            self.generic_visit(node)
+
+        def visit_Assign(self, node):
+            if ast.unparse(node) == "_FD, _DIR, _NOFOLLOW, _FCNTL, _MSVCRT = _io_setup()":
+                return
+            if not self.core:
+                assert not (isinstance(node.value, ast.Name) and node.value.id == "Path")
+            self.generic_visit(node)
+
+        def visit_ExceptHandler(self, node):
+            def check(kind):
+                if isinstance(kind, ast.Tuple):
+                    for item in kind.elts:
+                        check(item)
+                    return
+                assert isinstance(kind, ast.Name), ast.unparse(node)
+                assert kind.id not in {"Exception", "BaseException", "Refused", "RecordRefused"}
+                builtin = getattr(builtins, kind.id, None)
+                if isinstance(builtin, type) and issubclass(builtin, OSError):
+                    assert self.core, kind.id
+                if kind.id in {"RecordTampered", "RecordUnavailable"}:
+                    assert self.core or self.function in ERROR_BOUNDARIES, self.function
+
+            check(node.type)
+            self.generic_visit(node)
+
+    Scan().visit(tree)
+
+
 def test_01_io_core_is_the_only_fs_user():
-    tree = ast.parse(Path(record.__file__).read_text())
-    fs = {"open", "mkdir", "unlink", "rmdir", "replace", "scandir", "stat", "lstat", "fstat", "listdir"}
-    path_fs = {
-        "exists",
-        "glob",
-        "iterdir",
-        "read_text",
-        "read_bytes",
-        "write_text",
-        "write_bytes",
-        "is_file",
-        "is_dir",
-        "is_symlink",
-    }
-    for fn in tree.body:
-        if not isinstance(fn, (ast.FunctionDef, ast.ClassDef)) or fn.name in CORE:
-            continue
-        for node in ast.walk(fn):
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name):
-                    assert node.func.id != "open", fn.name
-                elif isinstance(node.func, ast.Attribute):
-                    assert node.func.attr not in path_fs, fn.name
-                    if isinstance(node.func.value, ast.Name) and node.func.value.id == "os":
-                        assert node.func.attr not in fs, (fn.name, node.func.attr)
+    scan_record_source(Path(record.__file__).read_text())
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "(path / 'x').unlink()",
+        "os.remove(p)",
+        "os.path.isfile(p)",
+        "_o = os.open\n_o('x')",
+        "f = path.unlink\nf()",
+        "alias = (Path,)",
+        "import os as x",
+        "from os import open",
+        "getattr(os, 'open')('x')",
+        "f = lambda: os.remove(p)",
+        "async def evil():\n    os.remove(p)",
+        *[
+            f"try:\n    pass\nexcept {kind}:\n    pass"
+            for kind in (
+                "Refused",
+                "RecordRefused",
+                "Exception",
+                "BaseException",
+                "FileNotFoundError",
+                "PermissionError",
+                "IOError",
+                "EnvironmentError",
+                "errors.Custom",
+                "(ValueError, OSError)",
+                "RecordTampered",
+                "RecordUnavailable",
+            )
+        ],
+    ],
+)
+def test_allowlist_scanner_rejects_planted_evil(source):
+    with pytest.raises(AssertionError):
+        scan_record_source(source)
+
+
+def test_allowlist_scanner_accepts_clean_source():
+    scan_record_source("def clean(value):\n    return len(value)\n")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX directory descriptor race")
@@ -313,17 +552,7 @@ def test_08_untrusted_run_precedes_every_write(store, monkeypatch, kind):
 
 
 def test_09_no_broad_catches(store, monkeypatch):
-    tree = ast.parse(Path(record.__file__).read_text())
-    for fn in tree.body:
-        if not isinstance(fn, (ast.FunctionDef, ast.ClassDef)):
-            continue
-        for node in ast.walk(fn):
-            if isinstance(node, ast.ExceptHandler):
-                names = (
-                    {n.id for n in ast.walk(node.type) if isinstance(n, ast.Name)} if node.type else {"bare"}
-                )
-                assert "RecordRefused" not in names and "bare" not in names
-                assert "OSError" not in names or fn.name in CORE
+    scan_record_source(Path(record.__file__).read_text())
     ws, writer = store
 
     def invalid(*args):
@@ -633,8 +862,8 @@ def test_27_retention_rechecks_under_lock(store, monkeypatch):
         if threading.current_thread() is not thread:
             barrier.wait(timeout=2)
             assert done.wait(timeout=2)
-        with real(workspace, run):
-            yield
+        with real(workspace, run) as check_lock:
+            yield check_lock
 
     monkeypatch.setattr(record, "_lock", late)
     thread.start()
@@ -722,3 +951,169 @@ def test_detail_delete_preflights_all_runs(store):
     with pytest.raises(record.RecordTampered):
         record.delete_detail(ws, [RUN, "r_other1"])
     assert (record.record_dir(ws) / a["detail"]).exists() and target.exists()
+
+
+def test_live_aged_lock_never_allows_second_writer(store, monkeypatch):
+    ws, writer = store
+    writer.append(event(id="initial"))
+    acquired, release = threading.Event(), threading.Event()
+
+    def hold():
+        with record._lock(ws, RUN):
+            acquired.set()
+            assert release.wait(5)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    try:
+        assert acquired.wait(5)
+        lock = runfile(ws).with_suffix(".lock")
+        os.utime(lock, (time.time() - 31, time.time() - 31))
+        monkeypatch.setattr(record, "_LOCK_WAIT", 0.02)
+        result = writer.append(event(id="waiting"))
+        assert result["pending"] is True and result["seq"] is None
+        assert len(runfile(ws).read_text().splitlines()) == 1
+    finally:
+        release.set()
+        thread.join(5)
+
+
+def test_read_run_reports_pending_count(store, monkeypatch):
+    ws, writer = store
+    writer.append(event())
+    monkeypatch.setattr(record, "_LOCK_WAIT", 0)
+    with record._lock(ws, RUN):
+        writer.append(event(id="waiting"))
+    read = record.read_run(ws, RUN)
+    assert (read.status, read.reason, read.pending) == ("ok", "pending", 1)
+    schema = record._SCHEMA
+    Draft202012Validator({"$ref": "#/$defs/read_status", "$defs": schema["$defs"]}).validate(
+        dict(run=RUN, status=read.status, reason=read.reason, pending=read.pending, message=read.message)
+    )
+
+
+def test_retention_skips_pending_run_and_other_runs_proceed(store):
+    ws, writer = store
+    for run in (RUN, "r_other1"):
+        writer.append(event(run=run, kind="run.state", via="core", used=None, data={"state": "done"}))
+    writer._spool(event(id="waiting"), None, False)
+    folds = []
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda r, es: folds.append(r))
+    assert (result["status"], result["reason"]) == ("unavailable", "pending")
+    assert folds == ["r_other1"]
+    assert runfile(ws).exists()
+    assert list((record.record_dir(ws) / "pending" / RUN).iterdir())
+
+
+def test_retention_preflights_pending_folder(store):
+    ws, writer = store
+    writer.append(event(kind="run.state", via="core", used=None, data={"state": "done"}))
+    pending = record.record_dir(ws) / "pending"
+    pending.mkdir()
+    (pending / RUN).symlink_to(ws, target_is_directory=True)
+    folds = []
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda r, es: folds.append(r))
+    assert result["status"] == "tampered"
+    assert not folds and runfile(ws).exists()
+
+
+@pytest.mark.parametrize("outcome", ["garbage", {}, {"ok": True}, [1]])
+def test_strict_read_skips_garbage_outcome_before_hook_append(store, outcome):
+    ws, writer = store
+    writer.append(event(id="initial"))
+    bad = event(id="same", via="hook", outcome=outcome)
+    with runfile(ws).open("a") as stream:
+        stream.write(json.dumps(bad) + "\n")
+    assert writer.append(event(id="same", via="hook", outcome={"ok": True, "error": None, "ms": None}))
+    assert record.read_run(ws, RUN).skipped == 1
+
+
+def test_read_run_counts_foreign_run_as_skipped(store):
+    ws, writer = store
+    writer.append(event())
+    with runfile(ws).open("a") as stream:
+        stream.write(json.dumps(event(run="r_other1")) + "\n")
+    read = record.read_run(ws, RUN)
+    assert read.skipped == 1 and len(read.unwrap()) == 1
+
+
+def test_spool_receipt_has_no_placeholder_default_id(store):
+    _, writer = store
+    receipt = writer._spool(event(), None, True)
+    assert receipt["pending"] is True and receipt["seq"] is None and "id" not in receipt
+
+
+@pytest.mark.parametrize("seen_by", [None, "retention", "writer"])
+def test_delete_detail_alert_uses_callers_role(store, seen_by):
+    ws, writer = store
+    line = writer.append(event(), detail=DETAIL)
+    os.link(record.record_dir(ws) / line["detail"], ws / "outside")
+    with pytest.raises(record.RecordTampered) as caught:
+        record.delete_detail(ws, [RUN], **({"seen_by": seen_by} if seen_by else {}))
+    assert caught.value.alert["seen_by"] == (seen_by or "cli")
+
+
+def test_tampered_pending_alert_targets_folder(store):
+    ws, writer = store
+    writer.append(event())
+    pending = record.record_dir(ws) / "pending" / RUN
+    pending.mkdir(parents=True)
+    (pending / "bad.json").write_text("{}")
+    writer.append(event(id="next"))
+    alerts = [
+        json.loads(line)
+        for path in (record.record_dir(ws) / "alerts").iterdir()
+        for line in path.read_text().splitlines()
+    ]
+    assert alerts and all(alert["target"] == "folder" for alert in alerts)
+
+
+def test_pending_first_write_is_visible_without_run_file(store):
+    ws, writer = store
+    writer._spool(event(), None, False)
+    read = record.read_run(ws, RUN)
+    assert (read.status, read.reason, read.pending, read.value) == ("ok", "pending", 1, [])
+
+
+def test_fallback_lock_refreshes_mtime(store, monkeypatch):
+    ws, _ = store
+    monkeypatch.setattr(record, "_FCNTL", None)
+    monkeypatch.setattr(record, "_MSVCRT", None)
+    with record._lock(ws, RUN) as check_lock:
+        lock = runfile(ws).with_suffix(".lock")
+        os.utime(lock, (time.time() - 31, time.time() - 31))
+        check_lock()
+        assert time.time() - lock.stat().st_mtime < 2
+
+
+def test_retention_rechecks_lock_identity_after_fold(store, monkeypatch):
+    ws, writer = store
+    ended(writer)
+    monkeypatch.setattr(record, "_FCNTL", None)
+    monkeypatch.setattr(record, "_MSVCRT", None)
+
+    def fold(run, events):
+        lock = runfile(ws).with_suffix(".lock")
+        lock.rename(lock.with_suffix(".old"))
+        lock.touch()
+
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, fold)
+    assert result["status"] == "tampered" and result["reason"] == "swapped"
+    assert runfile(ws).exists()
+
+
+def test_retention_rechecks_pending_after_preflight(store, monkeypatch):
+    ws, writer = store
+    ended(writer)
+    original = record._size
+
+    def size(workspace, rel):
+        if rel == ("pending", RUN):
+            writer._spool(event(id="late"), None, False)
+        return original(workspace, rel)
+
+    monkeypatch.setattr(record, "_size", size)
+    folds = []
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda r, es: folds.append(r))
+    assert (result["status"], result["reason"]) == ("unavailable", "pending")
+    assert not folds and runfile(ws).exists()

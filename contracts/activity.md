@@ -51,7 +51,8 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
 
 - The run's own orch process (the oneshot wrapper or the live run's watcher) is the only writer of `runs/<run>.jsonl`.
   Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch run event`
-  call that appends under the per-run lock `runs/<run>.lock`, O_EXCL, released in a `finally`). Each event is one line, one
+  call that appends under the per-run lock `runs/<run>.lock`, named with O_EXCL and
+  held with a kernel lock, released in a `finally`). Each event is one line, one
   `write()` of at most 8 KB (text is cut, never the line split), so lines never mix.
 - **The hook entry is narrow.** `orch run event` (the only out-of-process way in) accepts only `step`, `denial`,
   `helper.start`, `helper.end` and `usage`, and always writes `via: hook` whatever the caller sent. `task.*`, `ask`,
@@ -115,7 +116,8 @@ text, output was cut, helpers are not visible). Capability flags per adapter (ag
    oldest ended run file. A running run is never pruned.
 4. Counts are kept until "Delete all records". "Delete detail for this ticket" (`orch record delete-detail <ticket>`, a
    person only: `record.delete_detail` proof, invariant H1) deletes the detail folders of that ticket's runs and sets nothing else; events then show "details not available".
-Any non-ok run is skipped without folding or deleting it; other runs proceed. Under the run lock, read again
+A run that is not ok or has pending lines is skipped; other runs proceed.
+Pending runs report `status: unavailable, reason: pending` to retention. Under the run lock, read again
 and verify the run still ended. The result retains the first non-ok status, reason, message and alert.
 Vectors `retention` fix the order.
 
@@ -209,9 +211,19 @@ line has `conflict: true`.
 
 Lock waits cover the 30-second stale window. A timed-out write is spooled in
 `pending/<run>/` and drained in name-time order by the next append, under the
-same run lock. Stale locks are removed only if their identity still matches.
+same run lock. The spool receipt has `pending: true` and `seq: null`; a default
+id is omitted until the line is committed. `read_run` reports `status: ok`,
+`reason: pending`, and `pending: n` while prepared writes remain. Readers show
+this status alongside committed events.
 
-Retention skips only the unavailable or tampered run: it folds and deletes
+POSIX uses `flock` on the lock fd for mutual exclusion, released by the kernel
+on process death; Windows uses `msvcrt.locking` when available. Stale lock names
+are removed only after acquiring the kernel lock and checking identity. Without
+kernel locking, the holder refreshes mtime before slow steps and retention checks
+lock identity again before deleting. Retention preflights `pending/<run>` under
+the lock and skips runs with pending files without folding or deleting them.
+
+Retention skips a run that is unavailable, tampered, or has pending lines: it folds and deletes
 nothing for that run and keeps the alert; other runs proceed. The result carries
 the first non-ok status, reason, and message. Under each run lock, retention
 reads again and checks the run still ended before folding or deleting.

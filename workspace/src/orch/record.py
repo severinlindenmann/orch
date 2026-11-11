@@ -24,7 +24,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from orch import hider as hiding
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
-from orch.hider import Hider
+from orch.hider import Hider, NoHiderError
 from orch.phone_view import redact
 
 _OFF = "Recording is off until key hiding is ready."
@@ -40,6 +40,7 @@ _MESSAGES = {
     ),
     "io": "The records of this run cannot be read right now. Try again later.",
     "missing": "There are no records for this run.",
+    "pending": "Some records of this run are waiting to be written.",
 }
 
 
@@ -89,6 +90,7 @@ class ReadResult(Generic[T]):
     reason: str | None = None
     message: str | None = None
     skipped: int = 0
+    pending: int = 0
     alert: dict | None = None
 
     def unwrap(self) -> T:
@@ -124,7 +126,7 @@ def record_dir(workspace: Path) -> Path:
 def registered_writer(workspace: Path) -> "RecordWriter":
     try:
         return RecordWriter(workspace, hider=hiding.current_hider())
-    except hiding.NoHiderError:
+    except NoHiderError:
         raise RecordOff(_OFF) from None
 
 
@@ -137,13 +139,27 @@ def _name(value: Any, pattern: str) -> str:
 # I/O core. Only this section uses filesystem operations, including fd operations.
 # os.replace uses rename's dir_fd implementation but is absent from supports_dir_fd
 # on some Python builds; os.rename is the corresponding capability probe.
-_FD = (
-    os.name == "posix"
-    and {os.open, os.mkdir, os.unlink, os.rmdir, os.rename, os.stat} <= os.supports_dir_fd
-    and os.scandir in os.supports_fd
-)
-_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
-_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+def _io_setup():
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    try:
+        import msvcrt
+    except ImportError:
+        msvcrt = None
+    return (
+        os.name == "posix"
+        and {os.open, os.mkdir, os.unlink, os.rmdir, os.rename, os.stat} <= os.supports_dir_fd
+        and os.scandir in os.supports_fd,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        getattr(os, "O_NOFOLLOW", 0),
+        fcntl,
+        msvcrt,
+    )
+
+
+_FD, _DIR, _NOFOLLOW, _FCNTL, _MSVCRT = _io_setup()
 _REPARSE = 0x400
 _SURROGATE = 0x20000000
 _LOCK_WAIT = 30.0
@@ -279,6 +295,7 @@ def _verify_walk(directory):
 def _open(ws, rel, mode, *, create_dirs=False, _directory=None):
     _parts(rel)
     flags = {
+        "lock": os.O_RDWR,
         "read": os.O_RDONLY,
         "append": os.O_WRONLY | os.O_APPEND | os.O_CREAT,
         "create_excl": os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -457,6 +474,35 @@ def _rmtree(ws, rel):
         os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
 
 
+def _try_lock(fd):
+    with _io():
+        try:
+            if _FCNTL is not None:
+                _FCNTL.flock(fd, _FCNTL.LOCK_EX | _FCNTL.LOCK_NB)
+            elif _MSVCRT is not None:
+                os.lseek(fd, 0, os.SEEK_SET)
+                _MSVCRT.locking(fd, _MSVCRT.LK_NBLCK, 1)
+            return True
+        except OSError as error:
+            if error.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                return False
+            raise
+
+
+def _lock_check(ws, rel, fd):
+    with _io("lock"), _walk(ws, rel[:-1]) as directory:
+        current = os.stat(
+            rel[-1] if _FD else directory.path / rel[-1],
+            follow_symlinks=False,
+            **({"dir_fd": directory.fd} if _FD else {}),
+        )
+        before = os.fstat(fd)
+        if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+            raise RecordTampered("swapped")
+        if _FCNTL is None and _MSVCRT is None:
+            os.utime(fd)
+
+
 @contextmanager
 def _lock(ws, run):
     rel = ("runs", f"{run}.lock")
@@ -464,25 +510,35 @@ def _lock(ws, run):
     while True:
         fd = _open(ws, rel, "create_excl", create_dirs=True)
         if fd is not None:
-            break
-        try:
-            old = _open(ws, rel, "read")
-        except RecordUnavailable as error:
-            if error.reason == "missing":
-                continue
-            raise
-        try:
-            with _io():
-                stale = time.time() - os.fstat(old).st_mtime > 30
-            if stale:
-                _unlink(ws, rel, expected=old)
-        finally:
-            _close(old)
+            acquired = False
+            try:
+                acquired = _try_lock(fd)
+            finally:
+                if not acquired:
+                    _close(fd)
+            if acquired:
+                break
+        else:
+            try:
+                old = _open(ws, rel, "lock")
+            except RecordUnavailable as error:
+                if error.reason == "missing":
+                    continue
+                raise
+            try:
+                with _io():
+                    stale = time.time() - os.fstat(old).st_mtime > 30
+                # A live kernel lock wins over age. Keep it until unlink completes.
+                if stale and _try_lock(old):
+                    _unlink(ws, rel, expected=old)
+            finally:
+                _close(old)
         if time.monotonic() >= deadline:
             raise RecordBusy("The record is busy.")
         time.sleep(0.005)
     try:
-        yield
+        _lock_check(ws, rel, fd)
+        yield lambda: _lock_check(ws, rel, fd)
     finally:
         try:
             _unlink(ws, rel, expected=fd)
@@ -550,12 +606,14 @@ def _dedupe(events, run):
     return sorted(kept, key=lambda e: e["seq"])
 
 
-def _parse(fd):
+def _parse(fd, run):
     events, skipped = [], 0
     for line in _read_bytes(fd).splitlines():
         try:
             event = json.loads(line)
             _validate(event)
+            if event["run"] != run:
+                raise RecordInvalid()
             events.append(event)
         except (ValueError, TypeError, UnicodeError, RecursionError, RecordInvalid):
             skipped += 1
@@ -570,6 +628,11 @@ def _read_run_strict(ws, run, fd):
         try:
             event = json.loads(line)
             if isinstance(event, dict) and event.get("run") == run:
+                outcome = event.get("outcome")
+                if outcome is not None and not (
+                    isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()
+                ):
+                    continue
                 _key(event)
                 previous.append(event)
         except (ValueError, TypeError, KeyError, RecursionError):
@@ -610,16 +673,38 @@ def _report(ws, error, target, run, seen_by):
     return ReadResult.from_error(error, ws, getattr(error, "target", target), run, seen_by)
 
 
+def _pending_count(workspace, run):
+    try:
+        with _io("folder"):
+            return len(_entries(workspace, ("pending", run)))
+    except RecordUnavailable as error:
+        if error.reason == "missing":
+            return 0
+        raise
+
+
 def read_run(workspace, run, *, seen_by="reader") -> RunRead:
     _name(run, _RUN)
+    pending = 0
     try:
+        pending = _pending_count(workspace, run)
         fd = _open(workspace, ("runs", run + ".jsonl"), "read")
         try:
-            events, skipped = _parse(fd)
+            events, skipped = _parse(fd, run)
         finally:
             _close(fd)
-        return ReadResult("ok", _dedupe(events, run), skipped=skipped)
+        pending = _pending_count(workspace, run)
+        return ReadResult(
+            "ok",
+            _dedupe(events, run),
+            skipped=skipped,
+            pending=pending,
+            reason="pending" if pending else None,
+            message=_MESSAGES["pending"] if pending else None,
+        )
     except (RecordTampered, RecordUnavailable) as error:
+        if isinstance(error, RecordUnavailable) and error.reason == "missing" and pending:
+            return ReadResult("ok", [], reason="pending", message=_MESSAGES["pending"], pending=pending)
         return _report(workspace, error, "run", run, seen_by)
 
 
@@ -797,9 +882,11 @@ class RecordWriter:
         self._line(dict(prepared, detail=None, detail_lost=True))
         self._serialized(dict(schema="orch.record/1", since=event["at"], keep_days=90, max_mb=2048))
         try:
-            with _lock(self.workspace, run):
-                self._drain(run)
-                return self._commit(event, payload, default_id)
+            with _lock(self.workspace, run) as check_lock:
+                check_lock()
+                self._drain(run, check_lock=check_lock)
+                check_lock()
+                return self._commit(event, payload, default_id, check_lock=check_lock)
         except RecordBusy:
             return self._spool(event, payload, default_id)
         except (RecordTampered, RecordUnavailable) as error:
@@ -812,10 +899,11 @@ class RecordWriter:
             raise RecordInvalid("The record entry is too large.")
         return line
 
-    def _commit(self, event, payload, default_id):
+    def _commit(self, event, payload, default_id, *, check_lock=lambda: None):
         run = event["run"]
         fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
         try:
+            check_lock()
             previous, count, torn = _read_run_strict(self.workspace, run, fd)
             event = dict(event, seq=count + 1)
             if default_id:
@@ -830,6 +918,7 @@ class RecordWriter:
                 event["detail"] = f"detail/{run}/{detail_name(run, event['kind'], event['id'])}.json"
             line = (_json(event) + "\n").encode()
             lost_line = (_json(dict(event, detail=None, detail_lost=True)) + "\n").encode()
+            check_lock()
             meta = _open(self.workspace, ("meta.json",), "create_excl")
             if meta is not None:
                 try:
@@ -847,11 +936,13 @@ class RecordWriter:
                 _close(check)
             stored = _Detail()
             if payload is not None:
+                check_lock()
                 stored = _store_detail(self.workspace, event, payload, previous)
                 if stored.reason:
                     event.update(detail=None, detail_lost=True)
                     line = lost_line
             try:
+                check_lock()
                 _write(fd, (b"\n" if torn else b"") + line)
             except (RecordUnavailable, RecordTampered):
                 if stored.created:
@@ -887,9 +978,12 @@ class RecordWriter:
             busy = RecordBusy("The record is busy.")
             busy.alert = error.alert
             raise busy from None
-        return event
+        result = dict(event, pending=True, seq=None)
+        if default_id:
+            result.pop("id", None)
+        return result
 
-    def _drain(self, run):
+    def _drain(self, run, *, check_lock=lambda: None):
         try:
             names = _entries(self.workspace, ("pending", run))
         except RecordUnavailable as error:
@@ -897,6 +991,7 @@ class RecordWriter:
                 return
             raise
         for name in sorted(names):
+            check_lock()
             if not re.fullmatch(_PART, name) or name in (".", ".."):
                 _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
                 continue
@@ -904,7 +999,7 @@ class RecordWriter:
             try:
                 pending = _read_json(self.workspace, rel)
             except (RecordTampered, RecordUnavailable) as error:
-                _report(self.workspace, error, "run", run, "writer")
+                _report(self.workspace, error, "folder", run, "writer")
                 continue
             try:
                 event = pending["event"]
@@ -925,9 +1020,9 @@ class RecordWriter:
                 self._serialized(pending)
                 self._line(event)
             except (KeyError, TypeError, ValueError, RecursionError, RecordInvalid):
-                _alert(self.workspace, target="run", run=run, reason="swapped", seen_by="writer")
+                _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
                 continue
-            self._commit(event, payload, pending["default_id"])
+            self._commit(event, payload, pending["default_id"], check_lock=check_lock)
             _unlink(self.workspace, rel)
 
 
@@ -964,7 +1059,7 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
     return plan
 
 
-def delete_detail(workspace, runs):
+def delete_detail(workspace, runs, *, seen_by="cli"):
     rels = [("detail", _name(run, _RUN)) for run in runs]
     try:
         for rel in rels:
@@ -972,7 +1067,7 @@ def delete_detail(workspace, runs):
         for rel in rels:
             _rmtree(workspace, rel)
     except (RecordTampered, RecordUnavailable) as error:
-        _report(workspace, error, "folder", rel[-1], "reader")
+        _report(workspace, error, "folder", rel[-1], seen_by)
         raise
 
 
@@ -1017,22 +1112,35 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
     snapshots = {r["run"]: r["ended"] for r in runs}
     for run in dict.fromkeys(plan["fold_first"] + plan["delete_detail"]):
         try:
-            with _lock(workspace, run):
+            with _lock(workspace, run) as check_lock:
                 read = read_run(workspace, run, seen_by="retention")
                 if read.status != "ok":
                     failed(read)
                     continue
+                if read.pending:
+                    failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
+                    continue
                 if not _ended(read.value) or _ended(read.value) != snapshots[run]:
                     continue
                 # Check every deletion target before invoking the irreversible fold.
-                for rel in (("detail", run), ("jobs", run), ("runs", run + ".jsonl")):
+                for rel in (("pending", run), ("detail", run), ("jobs", run), ("runs", run + ".jsonl")):
+                    check_lock()
                     _size(workspace, rel)
+                check_lock()
+                if _pending_count(workspace, run):
+                    failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
+                    continue
                 fold(run, read.value)
+                check_lock()
+                if _pending_count(workspace, run):
+                    failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
+                    continue
                 if run in plan["delete_detail"]:
-                    delete_detail(workspace, [run])
+                    delete_detail(workspace, [run], seen_by="retention")
                     result["delete_detail"].append(run)
                 if run in plan["delete_run"]:
                     _rmtree(workspace, ("jobs", run))
+                    check_lock()
                     _unlink(workspace, ("runs", run + ".jsonl"))
                     result["delete_run"].append(run)
                     result["fold_first"].append(run)
@@ -1620,6 +1728,7 @@ _SCHEMA = {
             "additionalProperties": False,
             "required": ["run", "status", "reason", "message"],
             "properties": {
+                "pending": {"type": "integer", "minimum": 0},
                 "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]},
                 "status": {"enum": ["ok", "unavailable", "tampered"]},
                 "reason": {
@@ -1627,6 +1736,7 @@ _SCHEMA = {
                         "missing",
                         "io",
                         "skipped",
+                        "pending",
                         "link",
                         "reparse",
                         "hardlink",
