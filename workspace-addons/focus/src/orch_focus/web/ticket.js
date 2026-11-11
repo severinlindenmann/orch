@@ -40,7 +40,9 @@
         search.addEventListener('input', paint); paint();
         box.append(h('section', {class: 'fx-pick-group fx-group-done'}, h('div', {class: 'row'}, h('h2', {class: 'grow'}, 'Done ', h('span', {class: 'meta', text: '(' + done.length + ')'})), done.length > 5 ? search : null), card));
       }
+      S.views.livenow.hideListed();
     }).catch(() => root.querySelector('.fx-pick').append(h('p', {role: 'alert', text: 'Could not load tickets. Reload to try again.'})));
+    S.views.livenow.mount(root.querySelector('.fx-pick'));
     S.views.jobs.mount(root.querySelector('.fx-pick'));
     const help = helpPanel(); root.append(help);
     const helpButton = root.querySelector('[data-act=help]');
