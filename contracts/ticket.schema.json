@@ -113,7 +113,7 @@
       "required": ["kind", "nonce", "mac"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "enum": ["person", "agent"], "description": "person = a proven verdict (page or terminal proof, the phone through the relay channel, the dev test human); agent = an agent finished while agents_may_finish was effective." },
+        "kind": { "enum": ["person", "agent"], "description": "person = a proven verdict (page or terminal proof, the phone through its own signed channel, the dev test human); agent = an agent finished while agents_may_finish was effective." },
         "nonce": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "Random, fresh for every signing, so equal decisions get different MACs." },
         "mac": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "base64url HMAC-SHA256(human.key, \"verdict1.\" + workspace id + \".\" + ticket id + \".\" + canonical JSON of {status: \"done\", kind, checks, nonce}); checks = sha256 hex of canonical JSON [[step id, text, done is true, wont_do is true], ...]." }
       }
