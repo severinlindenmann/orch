@@ -4,7 +4,7 @@
  "now": "2026-11-11T13:05:00",
  "workspace": "pilatus",
  "who": "me",
- "look": {"icon": "office", "color": "teal", "workspaces": [{"name": "pilatus", "here": true, "needs": 7}]},
+ "look": {"icon": "office", "color": "teal", "workspaces": [{"name": "pilatus", "here": true, "needs": 8}]},
  "addons": [{"name": "automation", "dashboard": {"panel": "repeats", "label": "Automation"}}],
  "needs": [
   {"id": "n_1", "ticket": "t_xcl5y8", "answer": {"question": "q_w71"}},
@@ -13,7 +13,8 @@
   {"id": "n_4", "ticket": "t_9dz65z", "answer": {"question": "q_lunch"}},
   {"id": "n_5", "ticket": "t_6cbxce"},
   {"id": "n_6", "ticket": "t_rev001"},
-  {"id": "n_7", "ticket": "t_hbneed"}
+  {"id": "n_7", "ticket": "t_hbneed"},
+  {"id": "n_8", "ticket": "t_klj17l", "answer": {"question": "q_w79"}}
  ],
  "runs": {},
  "tickets": [
@@ -42,8 +43,27 @@
   {"id": "t_grp911", "key": "PIL-80", "title": "Team lunch 20 Nov", "status": "active",
    "created_at": "2026-11-11T09:11:00Z", "updated_at": "2026-11-11T09:36:00Z", "checklist": [], "children": [], "parent": null, "questions": [],
    "history": [{"at": "2026-11-11T09:36:00Z", "by": "agent:Home", "text": "Tuesday works for us.", "in_chat": true}]},
-  {"id": "t_grp040", "key": "PIL-81", "title": "Team lunch 20 Nov", "status": "done",
-   "created_at": "2026-11-10T10:40:00Z", "updated_at": "2026-11-10T16:20:00Z", "checklist": [], "children": [], "parent": null, "questions": []}
+  {"id": "t_grp040", "key": "PIL-83", "title": "Team lunch 20 Nov", "status": "done",
+   "created_at": "2026-11-10T10:40:00Z", "updated_at": "2026-11-10T16:20:00Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_klj17l", "key": "PIL-79", "title": "Water office plants in planter 0928-45B4C236 on Thu 12 Nov", "status": "waiting", "due": "2026-11-12",
+   "created_at": "2026-11-11T08:54:40Z", "updated_at": "2026-11-11T08:55:00Z", "checklist": [], "children": [], "parent": null,
+   "questions": [{"id": "q_w79", "text": "Were the plants watered?", "options": ["Watered", "Not yet"], "answer": null}]},
+  {"id": "t_cb32cs", "key": "PIL-75", "title": "Team lunch 20 Nov [0911]", "status": "open", "due": "2026-11-20",
+   "created_at": "2026-11-11T09:11:00Z", "updated_at": "2026-11-11T09:11:00Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_ewa1zs", "key": "PIL-76", "title": "Team lunch 20 Nov [0928]", "status": "open", "due": "2026-11-20",
+   "created_at": "2026-11-11T09:28:00Z", "updated_at": "2026-11-11T09:28:00Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_se4jg8", "key": "PIL-77", "title": "Check the backups of server mwbvn2j7 on Friday 13 Nov", "status": "open", "due": "2026-11-13",
+   "created_at": "2026-11-11T08:50:00Z", "updated_at": "2026-11-11T08:50:00Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_ynjgjn", "key": "PIL-78", "title": "Check the backups of server mwbvpa6n on Friday 13 Nov", "status": "open", "due": "2026-11-13",
+   "created_at": "2026-11-11T08:50:30Z", "updated_at": "2026-11-11T08:50:30Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_gxkfvr", "key": "PIL-81", "title": "Check the backups of server mwbwz4ho on Friday 13 Nov", "status": "open", "due": "2026-11-13",
+   "created_at": "2026-11-11T09:26:20Z", "updated_at": "2026-11-11T09:26:20Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_7288ga", "key": "PIL-82", "title": "Check the backups of server mwbwzvbb on Friday 13 Nov", "status": "open", "due": "2026-11-13",
+   "created_at": "2026-11-11T09:26:45Z", "updated_at": "2026-11-11T09:26:45Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_cbkk39", "key": "PIL-85", "title": "Check the backups of server mwbzgkii on Friday 13 Nov", "status": "open", "due": "2026-11-13",
+   "created_at": "2026-11-11T10:35:50Z", "updated_at": "2026-11-11T10:35:50Z", "checklist": [], "children": [], "parent": null, "questions": []},
+  {"id": "t_7l5s32", "key": "PIL-86", "title": "Check the backups of server mwbzhh6t on Friday 13 Nov", "status": "open", "due": "2026-11-13",
+   "created_at": "2026-11-11T10:36:25Z", "updated_at": "2026-11-11T10:36:25Z", "checklist": [], "children": [], "parent": null, "questions": []}
  ],
  "groups": {
   "hosted": [

@@ -14,14 +14,20 @@ function context() {
   vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/chat.js'), 'utf8'), c);
   return c;
 }
-test('proposal offers a person Make ticket, then a ticket chip', () => {
+test('proposal offers a person Make ticket, then the same ticket card as every other ticket', () => {
   const c = context();
   const card = c.chatRefs([{kind:'proposal', title:'Fish'}], 'message-m_abcdefghij', 'm_abcdefghij')[0];
   assert.equal(card.tag, 'button');
   assert.equal(card.attrs['data-id'], 'm_abcdefghij');
   assert.match(JSON.stringify(card), /Make ticket: Fish/);
-  const made = c.chatRefs([{kind:'proposal', made:{id:'t_fish', key:'FS-1'}}], 'x')[0];
-  assert.equal(made.tag, 'a'); assert.equal(made.attrs.href, '#ticket/t_fish');
+  c.window.DashHelpers = {statusWord:s => ({open:'Not started'}[s] || s)};
+  c.ticketOf = id => id === 't_fish' ? {id:'t_fish', key:'FS-1', status:'open', title:'Fish', questions:[]} : null;
+  const made = c.chatRefs([{kind:'proposal', title:'Fish', made:{id:'t_fish', key:'FS-1'}}], 'x')[0];
+  const ticket = c.chatRefs([{kind:'ticket', id:'t_fish', key:'FS-1', title:'Fish'}], 'x')[0];
+  assert.equal(made.tag, 'article'); assert.equal(made.attrs.className, ticket.attrs.className);
+  assert.equal(nodes(made, n => n.tag === 'a')[0].attrs.href, '#ticket/t_fish');
+  assert.equal(nodes(made, n => /chat-status/.test(n.attrs?.className || ''))[0].textContent, 'Not started');
+  assert.match(nodes(made, n => n.tag === 'details')[0].textContent, /FS-1/);
   c.snapshot = true;
   assert.equal(c.chatRefs([{kind:'proposal',title:'Fish'}], 'x')[0].attrs.disabled, true);
 });
@@ -44,7 +50,7 @@ test('moved conversation renders its banner and header ticket link', () => {
   assert.match(thread, /Open ticket/);
   assert.match(JSON.stringify(c.chatHeader(null, false)), /FS-1/);
 });
-test('one name for the AI: "Your helper" in the title, the bubble, the composer and the thinking line', () => {
+test('the workspace name is the thread title and the Chat row title; "Your helper" in the bubble, the composer and the thinking line', () => {
   const c = context();
   c.state.workspace = 'pilatus'; c.state.chat.helper = 'pilatus helper';
   c.state.chat.messages = [{id:'m1', by:'ws_x', via:'helper', text:'Hi', at:'2026-11-09T10:00:00Z'}, {id:'m2', by:'you', via:'phone', text:'Yo', at:'2026-11-09T10:01:00Z'}];
@@ -58,7 +64,10 @@ test('one name for the AI: "Your helper" in the title, the bubble, the composer 
   assert.match(thread, /Starts fresh each day at 04:00/);
   assert.doesNotMatch(thread, /Context cleared/);
   const head = JSON.stringify(c.chatHeader(null, false));
-  assert.match(head, /Your helper/); assert.doesNotMatch(head, /Chat · /);
+  const title = nodes(c.chatHeader(null, false), n => n.attrs?.['data-key'] === 'chat-title')[0].textContent;
+  assert.equal(title, 'Pilatus'); assert.doesNotMatch(head, /[Hh]elper|Chat · /);
+  const row = nodes(c.chatListRow(null), n => n.tag === 'strong')[0].textContent;
+  assert.equal(row, 'Pilatus');
   assert.match(JSON.stringify(c.chatThinking('Your helper', true)), /Your helper is thinking/);
 });
 
@@ -105,6 +114,69 @@ test('ticket card: plain title and due first, "Needs your OK" in the accent, the
   assert.doesNotMatch(outside, /PIL-71|FFE2A659/);
   const readOnly = c.chatRefs([{kind:'ticket', id:'t_plant1', key:'PIL-71', title:'x'}], 'm', 'm_x', true)[0];
   assert.equal(nodes(readOnly, n => n.attrs?.['data-chat-action'] === 'answer').length, 0, 'a day you can only read has no buttons');
+});
+
+test('ticket card title: ids and tags leave the shown title, Details keeps the full one, the stored title is untouched', () => {
+  const c = context();
+  assert.equal(c.chatPlainTitle('Check the backups of server mwbzgkii on Friday 13 Nov'), 'Check the backups of server on Friday 13 Nov');
+  assert.equal(c.chatPlainTitle('Check the backups of server mwbvn2j7 on Friday 13 Nov'), 'Check the backups of server on Friday 13 Nov');
+  assert.equal(c.chatPlainTitle('Team lunch 20 Nov [0911]'), 'Team lunch 20 Nov');
+  for (const plain of ['Schwarz strengths and lengths', 'covid19 test at 4pm, 2nd floor', 'Print 100x200 posters', 'Rhythm workshop']) assert.equal(c.chatPlainTitle(plain), plain);
+  c.ticketOf = () => null;
+  const ref = {kind:'ticket', id:'t_cbkk39', key:'PIL-85', title:'Check the backups of server mwbzgkii on Friday 13 Nov'};
+  const card = c.chatRefs([ref], 'm', 'm_x')[0];
+  const details = nodes(card, n => n.tag === 'details')[0];
+  const outside = card.children.filter(n => n !== details).map(n => typeof n === 'object' ? n.textContent : n).join(' ');
+  assert.doesNotMatch(outside, /mwbzgkii|PIL-85/);
+  assert.match(details.textContent, /PIL-85 · Check the backups of server mwbzgkii on Friday 13 Nov/);
+  assert.equal(ref.title, 'Check the backups of server mwbzgkii on Friday 13 Nov');
+});
+
+test('previews use the first line that says something, never a dangling colon', async () => {
+  const c = context();
+  const answer = 'Still open this week:\n• Today (Wed 11): 4 planters wait for your OK.\n• Fri 13: team lunch.';
+  assert.equal(c.chatPreview(answer), 'Today (Wed 11): 4 planters wait for your OK.');
+  assert.equal(c.chatPreview('\n\nThanks, all set for Monday.'), 'Thanks, all set for Monday.');
+  assert.equal(c.chatPreview('Done:'), 'Done');
+  assert.equal(c.chatPreview(''), '');
+  c.state.chat = {day:'2026-11-11', messages:[{id:'m1', by:'ws_x', text:answer}]};
+  const row = c.chatListRow(null);
+  assert.match(row.textContent, /Today \(Wed 11\): 4 planters/); assert.doesNotMatch(row.textContent, /this week:/);
+  c.fetch = async () => ({ok:true, json:async () => [{day:'2026-11-10', count:2, last:'Still open this week:\n• Fri 13: team lunch.'}]});
+  vm.runInContext("chatUi.open = 'history'", c);
+  await c.chatLoad();
+  const day = nodes(c.chatHistory(), n => n.attrs?.['data-key'] === 'day-2026-11-10')[0];
+  assert.match(day.textContent, /Fri 13: team lunch\.$/); assert.doesNotMatch(day.textContent, /:$/);
+});
+
+test('a finished group is only under Earlier, a live one only under Groups', () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', messages:[]};
+  const tickets = {t_live:{id:'t_live', status:'active'}, t_done:{id:'t_done', status:'done'}, t_closed:{id:'t_closed', status:'active'}};
+  c.ticketOf = id => tickets[id] || null;
+  const member = {ws:'ws_a', name:'Home', joined_at:'2026-11-10T09:11:00'};
+  c.state.groups = {hosted:[{id:'g_live', ticket:'t_live', title:'Live group', closed:false, members:[member], tasks:[]},
+    {id:'g_done', ticket:'t_done', title:'Ticket done group', closed:false, members:[member], tasks:[]},
+    {id:'g_closed', ticket:'t_closed', title:'Closed group', closed:true, members:[member], tasks:[]}],
+    joined:[{id:'g_left', title:'Left group', left:true, members:[member], log:[]}]};
+  const list = c.chatList().textContent;
+  vm.runInContext("chatUi.open = 'history'", c);
+  const earlier = c.chatHistory().textContent;
+  assert.match(list, /Live group/); assert.doesNotMatch(earlier, /Live group/);
+  for (const finished of ['Ticket done group', 'Closed group', 'Left group']) {
+    assert.doesNotMatch(list, new RegExp(finished)); assert.match(earlier, new RegExp(finished));
+  }
+});
+
+test('thread header: Earlier on the title row, "Working on N tickets" on the Show row (no extra row)', () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', activity:{running:2}, messages:[]};
+  const head = c.chatHeader(null, false);
+  const top = nodes(head, n => n.attrs?.className === 'chat-head-top')[0];
+  assert.deepEqual(top.children.map(n => n.textContent), ['‹ Chats', 'Fish', 'Earlier']);
+  const row = nodes(head, n => n.attrs?.className === 'chat-head-row')[0];
+  assert.match(row.textContent, /^Show:AllFrom my phoneWorking on 2 tickets$/);
+  assert.equal(head.children.length, 2, 'the title row and the Show row');
 });
 
 test('Earlier: one entry point, past days first without today, then finished groups with their day', async () => {

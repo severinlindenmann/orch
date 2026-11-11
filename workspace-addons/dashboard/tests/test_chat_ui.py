@@ -130,6 +130,17 @@ def test_open_agent_proposal_and_moved_conversation():
         assert text in JS
 
 
+def test_open_helper_is_a_menu_item_on_a_narrow_screen():
+    app = (webjs.WEB / "app.js").read_text(encoding="utf-8")
+    css = (webjs.WEB / "style.css").read_text(encoding="utf-8")
+    assert "'data-nav':'open-agent'}, iconEl('spark'), 'Open helper')" in app
+    assert "if (helper) chatOpenAgent();" in app  # the Menu closes, then the helper opens
+    # hidden in the wide sidebar (the header has the button), shown in the Menu where the header has none
+    base = css.index(".nav-item.nav-helper{display:none;")
+    assert css.index("@media(max-width:720px){.nav-item.nav-helper{display:flex}}") > base
+    assert ".topbar-actions>#open-agent{display:none}" in css
+
+
 def test_open_agent_button_sits_directly_left_of_new_ticket():
     from pathlib import Path
 

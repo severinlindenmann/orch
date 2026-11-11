@@ -36,6 +36,22 @@ def test_settings_navigation_and_cards():
     assert "min-height:44px" in css
 
 
+def test_switch_rows_choices_and_closed_details_owner_pass():
+    look = (webjs.WEB / "look.js").read_text(encoding="utf-8")
+    css = (webjs.WEB / "pages/settings.css").read_text(encoding="utf-8")
+    # Shared pages: like every other switch row (no label line above, so nothing wraps at 390 px)
+    row = look[look.index("'data-key': 'lk-shared-row'") :][:500]
+    assert "set-label" not in row and "className: 'switch'" in row
+    # "When": the unselected choice is outlined like the hours choice; full width when stacked
+    assert ".settings .copies-choices .btn.ghost{border-color:var(--border-strong);color:var(--text)}" in css
+    narrow = css[css.index("@media(max-width:720px)") :]
+    stacked = ".settings .copies-choices{justify-self:stretch;flex-direction:column;align-items:stretch}"
+    assert stacked in narrow
+    # a closed Details has no empty band under it
+    assert ".settings .copies-details{padding:0 16px;" in css
+    assert ".settings .copies-details[open]{padding-bottom:8px}" in css
+
+
 def test_repeat_uses_only_presets_and_open_tickets():
     src = webjs.all_js()
     assert "['every day at 9', 'every weekday at 9', 'every monday at 9', 'every hour']" in src

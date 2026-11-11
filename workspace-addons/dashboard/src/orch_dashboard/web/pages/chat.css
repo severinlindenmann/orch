@@ -8,6 +8,8 @@
 .chat-page h2{font-size:13px;font-weight:600}
 .chat-page button,.chat-page input,.chat-page textarea{font:inherit;color:inherit}
 .chat-page button,.chat-page summary{cursor:pointer}
+/* A closed Details is its 44 px summary line with the word in the middle, no empty band under it. */
+.chat-page summary{align-content:center}
 .chat-page button,.chat-page a,.chat-page summary,.chat-page input{min-height:44px;touch-action:manipulation}
 .chat-page :focus-visible{outline:2px solid var(--brand);outline-offset:3px;box-shadow:var(--focus-ring)}
 .chat-page button:disabled{cursor:default;color:var(--disabled-text);opacity:.65}
@@ -41,11 +43,12 @@
 .chat-page .chat-member-chip .chat-avatar{height:22px;width:22px;font-size:10px}
 .chat-page .chat-stopped .chat-avatar{color:var(--text-muted)!important;background:var(--surface-3)}
 .chat-page .chat-ticket-link{display:flex;align-items:center;width:fit-content;font-size:12px;color:var(--brand);overflow-wrap:anywhere}
-.chat-page .chat-filter{display:flex;align-items:center;flex-wrap:nowrap;gap:6px;margin-top:8px}
+.chat-page .chat-head-row{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;margin-top:8px}
+.chat-page .chat-filter{display:flex;align-items:center;flex-wrap:nowrap;gap:6px}
 .chat-page .chat-filter-label{color:var(--text-muted);font-size:12px;flex:none}
 .chat-page .chat-seg{padding:6px 12px;font-size:12px;white-space:nowrap;background:transparent;color:var(--text-muted)}
 .chat-page .chat-seg[aria-pressed=true]{border-color:var(--brand);background:var(--brand-soft);color:var(--text)}
-.chat-page .chat-running{margin-top:6px;font-size:12px}
+.chat-page .chat-running{margin-left:auto;font-size:12px;white-space:nowrap}
 .chat-page .chat-log{display:flex;flex-direction:column;gap:12px;padding:22px 20px;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;overflow-anchor:none}
 .chat-page .chat-divider{display:flex;align-items:center;gap:12px;justify-content:center;color:var(--text-muted);font-size:11px;flex:none}
 .chat-page .chat-divider:before,.chat-page .chat-divider:after{content:'';height:1px;flex:1;background:var(--border)}
@@ -72,6 +75,7 @@
 .chat-page .chat-needs-ok{color:var(--brand);background:var(--brand-soft);font-weight:600}
 .chat-page .chat-ticket .chat-actions{margin-top:2px}
 .chat-page .chat-ticket-more summary{font-size:11px;color:var(--text-muted)}
+.chat-page .chat-ticket:has(>.chat-ticket-more:not([open])){padding-bottom:0}
 .chat-page .chat-ticket-more small{margin-top:0}
 .chat-page .chat-from-phone{color:var(--info)}
 .chat-page .chat-task-title{display:flex;align-items:center;gap:8px;margin:10px 0}
@@ -129,8 +133,10 @@
   .chat-page.chat-thread-open .chat-list{display:none}
   .chat-page .chat-list{border-right:0}
   .chat-page .chat-back{display:inline-flex}
-  .chat-page .chat-head-top{flex-wrap:wrap}
-  .chat-page .chat-head-top h1{flex-basis:calc(100% - 110px)}
+  /* One title row: "‹ Chats", the title, then Earlier (or Members) on the right. */
+  .chat-page .chat-head-top{flex-wrap:nowrap}
+  .chat-page .chat-head-top h1{flex:1 1 0;min-width:0}
+  .chat-page .chat-head-top>.chat-button{flex:none;white-space:nowrap}
   .chat-page .chat-message{max-width:86%}
   .chat-page .chat-log{padding:16px 12px}
   .chat-page .chat-thread-head{padding:10px 12px}

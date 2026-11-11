@@ -20,7 +20,9 @@ function chatHostedGroup(g) {
   });
   const tasks = chatObjects(g.tasks).filter(t => t.delegate).map(t => ({id:'task-' + t.delegate, text:'', by:host?.ws || 'host', name:clean(host?.name) + ' helper', task:{...t, name:nameOf(t.ws) || 'Workspace'}}));
   const messages = [...talk, ...tasks], last = talk[talk.length - 1], times = chatTimes([...chatObjects(g.members).map(m => m.joined_at), ...talk.map(m => m.at)]);
-  return {id:g.id, ticket:g.ticket, host:host?.ws, title:g.title || ticket?.title, key:typeof ticket?.key === 'string' ? ticket.key : '', closed:g.closed, done:g.closed,
+  // A group whose ticket is done or dropped is finished too, even before the group itself is closed.
+  return {id:g.id, ticket:g.ticket, host:host?.ws, title:g.title || ticket?.title, key:typeof ticket?.key === 'string' ? ticket.key : '', closed:g.closed,
+    done:!!g.closed || ['done', 'dropped'].includes(ticket?.status),
     members, messages, last:last?.text || '', last_at:last?.at, unread:0, connectable:array(g.connectable),
     started:times[0], finished:chatTimes([...times, ticket?.updated_at]).at(-1)};
 }
@@ -35,11 +37,19 @@ function chatJoinedGroup(g) {
 }
 const chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
 const chatGroup = () => chatGroups().find(g => g.id === chatUi.open);
+// One rule for both places: a finished group is only under Earlier → Finished groups, a live one only under Groups.
+const chatFinished = g => !!(g.done || g.closed);
 // The name people see: look name when the switcher has one, else the workspace name with a capital.
 const chatWorkspace = () => { const n = clean(state?.look?.workspaces?.find(w => w.here)?.name || state?.workspace) || 'Workspace'; return n.charAt(0).toUpperCase() + n.slice(1); };
 const chatHost = g => clean(chatObjects(g.members).find(m => m.ws === g.host)?.name || g.host_name) || chatWorkspace();
 const chatCount = n => Math.max(0, Number(n) || 0);
 const chatText = (tag, cls, text) => h(tag, {className:cls}, clean(text));
+// A one-line preview (sidebar, Earlier): the first line that says something, without its bullet. A lead-in such as
+// "Still open this week:" is skipped, so a preview never ends on a colon.
+function chatPreview(text) {
+  const lines = String(text ?? '').split(/\r?\n/).map(line => line.replace(/^\s*(?:[-*•·–]|\d+[.)])\s+/, '').trim()).filter(Boolean);
+  return (lines.find(line => !/:$/.test(line)) || lines[0] || '').replace(/\s*:$/, '');
+}
 const chatLink = id => '#ticket/' + encodeURIComponent(String(id || ''));
 function chatHttp(value) { try { const url = new URL(value); return /^https?:$/.test(url.protocol) ? url.href : null; } catch { return null; } }
 function chatBadge() {
@@ -66,7 +76,7 @@ function chatSearch(history = false) {
     'data-chat-input':history ? 'historySearch' : 'search', 'aria-label':history ? 'Search earlier chats' : 'Search chats',
     placeholder:history ? 'Search earlier chats' : 'Search chats', value:history ? chatUi.historySearch : chatUi.search});
 }
-// One name for the AI a person talks to: "your helper" (the workspace name stays on the avatar only).
+// The thread title and the Chat row carry the workspace name; body text and labels call the AI "your helper".
 const CHAT_HELPER = 'Your helper';
 const chatLocalDay = d => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
 const chatToday = () => state?.chat?.day || chatLocalDay(new Date(state?.now || Date.now()));
@@ -78,14 +88,14 @@ function chatListRow(g) {
   return h('button', {type:'button', className:'chat-list-row', 'data-key':'row-' + id, 'data-chat-action':'select', 'data-id':id,
     'aria-current':(chatUi.open === id || (id === 'chat' && chatUi.open !== 'history' && !chatGroup())) ? 'true' : null},
     g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : chatAvatar(chatWorkspace()),
-    h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : CHAT_HELPER),
+    h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : chatWorkspace()),
       g ? chatText('small', 'chat-row-meta', [chatHelpers(g), g.started ? 'started ' + chatWhen(g.started) : ''].filter(Boolean).join(' · ')) : null,
-      chatText('small', '', g ? g.last : last?.text || 'No messages yet.')),
+      chatText('small', '', chatPreview(g ? g.last : last?.text) || (g ? '' : 'No messages yet.'))),
     h('span', {className:'chat-row-time'}, time(g ? g.last_at : last?.at), g && chatCount(g.unread) ? h('span', {className:'count', 'aria-label':chatCount(g.unread) + ' unread'}, chatCount(g.unread)) : null));
 }
 function chatList() {
   const groups = chatGroups(), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
-  const rows = [chatListRow(null), ...groups.filter(g => !g.done && !g.closed).map(chatListRow)];
+  const rows = [chatListRow(null), ...groups.filter(g => !chatFinished(g)).map(chatListRow)];
   rows.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
   return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'), history ? null : chatSearch(), rows[0],
     rows.length > 1 ? h('h2', {}, 'Groups') : null, rows.slice(1),
@@ -116,16 +126,17 @@ function chatFilter() {
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const running = !g && !history && !agent ? chatCount(state?.chat?.activity?.running) : 0;
-  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent ? 'New conversation with your helper' : CHAT_HELPER);
+  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent ? 'New conversation with your helper' : chatWorkspace());
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}),
       h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null,
       history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g ? null : chatButton('Earlier', 'history')),
-    !g && !history && !agent ? chatFilter() : null,
-    running ? chatText('p', 'chat-muted chat-running', 'Working on ' + running + (running === 1 ? ' ticket' : ' tickets')) : null,
+    // Few header rows: "Working on N tickets" sits on the Show row, right.
+    !g && !history && !agent ? h('div', {className:'chat-head-row'}, chatFilter(),
+      running ? chatText('span', 'chat-muted chat-running', 'Working on ' + running + (running === 1 ? ' ticket' : ' tickets')) : null) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
-    moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(moved.title)) : null,
+    moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
     g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
       h('span', {className:'chat-member-chip' + (m.running === false ? ' chat-stopped' : '')}, chatAvatar(m), clean(m.name), m.running === false ? ' · not running' : ''))) : null,
     g && ticketOf(g.ticket) ? h('a', {className:'chat-ticket-link', href:chatLink(g.ticket)}, 'Open the ticket ›') : null);
@@ -138,7 +149,9 @@ function chatPhoneOnly(messages) {
 function chatRefs(refs, prefix, mid, readOnly = false) {
   return chatObjects(refs).map((ref, i) => {
     const key = prefix + '-ref-' + i;
-    if (ref.kind === 'proposal') return ref.made ? h('a', {className:'chat-member-chip', 'data-key':key, href:chatLink(ref.made.id)}, clean(ref.made.key)) : chatButton('Make ticket: ' + clean(ref.title).slice(0, 80), 'make-ticket', {className:'btn outline', 'data-key':key, 'data-id':mid, disabled:snapshot || readOnly || chatUi.pending.has(mid)});
+    // A made proposal is a ticket like any other: the same card, with its status and actions.
+    if (ref.kind === 'proposal' && ref.made?.id) return chatTicketCard({kind:'ticket', id:ref.made.id, key:ref.made.key, title:ref.title}, key, readOnly);
+    if (ref.kind === 'proposal') return ref.made ? null : chatButton('Make ticket: ' + clean(ref.title).slice(0, 80), 'make-ticket', {className:'btn outline', 'data-key':key, 'data-id':mid, disabled:snapshot || readOnly || chatUi.pending.has(mid)});
     if (ref.kind === 'ticket' && ref.id) return chatTicketCard(ref, key, readOnly);
     if (ref.kind === 'reference' && chatHttp(ref.url)) return h('a', {className:'chat-card', 'data-key':key, href:chatHttp(ref.url), target:'_blank', rel:'noopener noreferrer'}, chatText('strong', '', ref.title || 'Reference'), chatText('small', '', new URL(ref.url).hostname));
     if (ref.kind === 'file') return h('div', {'data-key':key}, chatButton(clean(ref.title || 'File') + ' · ' + clean(String(ref.path || '').split('/').pop()), 'file', {className:'chat-card', 'data-id':key, 'aria-expanded':String(chatUi.files.has(key)), 'aria-controls':key + '-path'}), h('small', {className:'chat-file-path', id:key + '-path', hidden:!chatUi.files.has(key)}, clean(ref.path)));
@@ -150,9 +163,14 @@ function chatRefs(refs, prefix, mid, readOnly = false) {
 // (often an instruction to the helper) and a trailing date that the due word repeats do too.
 const CHAT_CODE = '\\b(?=[0-9A-F-]*\\d)[0-9A-F]{4,}-[0-9A-F]{6,}\\b';
 const CHAT_DAY = /,?\s+(?:on\s+)?(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+\d{1,2}\s+[A-Z][a-z]{2,}\.?$/;
+// Machine ids leave the shown title too (Details keeps the full one): a tag such as "[0911]", and a lowercase
+// generated name such as "mwbzgkii" or "mwbvn2j7" (five consonants up front, or letters with a digit inside).
+const CHAT_TAG = /\s*\[[A-Za-z0-9_-]{1,16}\]/g;
+const CHAT_ID = /\s*\b(?=[a-z0-9]{6,16}\b)(?:[bcdfghjklmnpqrstvwxz]{5}[a-z0-9]*|(?=(?:\d*[a-z]){4})[a-z]+\d[a-z0-9]*[a-z])\b/g;
 function chatPlainTitle(title, key = '', due = false) {
   let text = clean(title).split(/(?<=[.!?])\s+(?=[A-Z])/)[0];
   if (key) text = text.split(key).join('');
+  text = text.replace(CHAT_TAG, '').replace(CHAT_ID, '');
   text = text.replace(new RegExp('\\s*\\([^()]*' + CHAT_CODE + '[^()]*\\)', 'g'), '')
     .replace(new RegExp('\\s*[–—-]\\s+[^,–—()]*?' + CHAT_CODE, 'g'), '').replace(new RegExp('\\s*' + CHAT_CODE, 'g'), '');
   if (due) text = text.replace(CHAT_DAY, '');
@@ -276,8 +294,8 @@ function chatHistory() {
     return fragment(h('div', {className:'chat-archive-banner'}, chatText('span', '', chatDayLabel(chatUi.day) + ' · you can read, not reply'), chatButton('Back to today', 'today')),
       archive?.status === 'ready' ? chatThread(null, archive.data) : chatHistoryStatus(archive?.status, 'retry-day'));
   }
-  const groups = chatGroups().filter(g => g.done || g.closed), query = chatUi.historySearch.toLowerCase(), today = chatToday();
-  const dayRows = chatObjects(chatDays.rows).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.day || '') && d.day !== today).map(d => h('button', {type:'button', className:'chat-day-row', 'data-chat-action':'day', 'data-day':d.day, 'data-key':'day-' + d.day}, chatDayLabel(d.day) + ' · ' + chatCount(d.count) + ' messages', chatText('small', '', d.last)));
+  const groups = chatGroups().filter(chatFinished), query = chatUi.historySearch.toLowerCase(), today = chatToday();
+  const dayRows = chatObjects(chatDays.rows).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.day || '') && d.day !== today).map(d => h('button', {type:'button', className:'chat-day-row', 'data-chat-action':'day', 'data-day':d.day, 'data-key':'day-' + d.day}, chatDayLabel(d.day) + ' · ' + chatCount(d.count) + ' messages', chatText('small', '', chatPreview(d.last))));
   const groupRows = groups.map(g => chatButton([g.title, g.finished ? 'finished ' + chatWhen(g.finished) : 'finished'].filter(Boolean).join(' · '), 'select', {className:'chat-day-row', 'data-key':'history-' + g.id, 'data-id':g.id}));
   [...dayRows, ...groupRows].forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
   const ready = chatDays.status === 'ready';
