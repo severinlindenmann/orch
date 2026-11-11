@@ -23,19 +23,19 @@
 </head>
 <body class="has-shell">
 <div class="shell">
-<aside class="sidebar">
+<aside class="sidebar" id="side-menu">
 <div class="sidebar-top">
 <a class="brand" href="#home" aria-label="orch dashboard"><img src="logo.svg" alt="">orch</a>
-<button type="button" class="btn ghost mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-nav">Menu</button>
 </div>
 <div class="workspace"><span id="workspace-name">Workspace</span><p class="meta">Workspace</p></div>
 <nav id="side-nav" aria-label="Main"></nav>
+<button type="button" class="mm-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><span class="mm-label">Send questions to my phone</span><i class="mm-sw"></i></button>
 <nav id="side-settings" class="side-settings" aria-label="Settings"></nav>
 <div class="side-foot"><p class="meta" id="workspace-mode"></p></div>
 </aside>
 <div>
 <div id="mm-bar" class="mm-bar" hidden></div>
-<header class="topbar"><span id="crumb">Home</span><button type="button" class="mm-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><i class="mm-sw"></i>Mobile mode</button><span class="topbar-actions"><button type="button" class="btn outline sm" id="open-agent" data-action="open-agent" hidden>Open agent</button><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button></span></header>
+<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="#home" aria-label="Home"><img src="logo.svg" alt=""></a><span id="crumb">Home</span><span class="topbar-actions"><button type="button" class="btn outline sm" id="open-agent" data-action="open-agent" hidden>Open helper</button><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
 <div id="connection" class="banner attn" role="status" hidden></div>
 <main id="content" class="page" aria-label="Dashboard"><div class="loading-home" role="status" aria-busy="true" aria-label="Loading"><div class="skeleton lh-title"></div><div class="skeleton lh-card"></div><div class="skeleton lh-card"></div></div></main>
 </div>

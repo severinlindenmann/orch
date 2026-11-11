@@ -10,7 +10,7 @@ final class FileMentionUITests: XCTestCase {
         app.launch()
 
         let bubble = app.staticTexts.matching(NSPredicate(
-            format: "label BEGINSWITH %@ AND label CONTAINS %@", "artifacts/test-report.pdf", "notes/old-plan.md"
+            format: "label BEGINSWITH %@ AND label CONTAINS %@", "Q3 summary is ready.", "notes/old-plan.md"
         )).firstMatch
         XCTAssertTrue(bubble.waitForExistence(timeout: 20))
         XCTAssertFalse(app.links.matching(NSPredicate(format: "label CONTAINS %@", "old-plan")).firstMatch.exists)

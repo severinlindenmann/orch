@@ -110,7 +110,7 @@ final class RealRelayUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'info' OR label CONTAINS[c] 'details'")).firstMatch.tap()
         sleep(2)
         shot("15-info")
-        if app.buttons["History"].exists { app.buttons["History"].tap(); sleep(1); shot("16-info-history") }
+        if app.buttons["Earlier"].exists { app.buttons["Earlier"].tap(); sleep(1); shot("16-info-history") }
     }
 
     /// Relay goes down while the chat is open: the text waits on the phone.

@@ -36,7 +36,8 @@ def _stub(tmp_path, monkeypatch, hang_first: bool):
     f.write_text(
         "#!/bin/sh\n"
         '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'
-        f'echo "$*" | tr "\\n" " " >> {shlex.quote(str(calls))}; echo >> {shlex.quote(str(calls))}\n'
+        '[ "$1" = "--version" ] && { echo "2.1.0 (Claude Code)"; exit 0; }\n'
+        f'printf "%s " "$@" | tr "\\n" " " >> {shlex.quote(str(calls))}; echo >> {shlex.quote(str(calls))}\n'
         + (
             f"if [ ! -f {shlex.quote(str(first))} ]; then : > {shlex.quote(str(first))}; "
             "trap '' TERM; sleep 30; exit 0; fi\n"
@@ -145,6 +146,7 @@ def test_input_is_kept_when_the_fresh_start_after_a_missing_session_hangs(proj, 
     f.write_text(
         "#!/bin/sh\n"
         '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'
+        '[ "$1" = "--version" ] && { echo "2.1.0 (Claude Code)"; exit 0; }\n'
         'for a in "$@"; do [ "$a" = "--resume" ] && '
         '{ echo "No conversation found with session ID: x"; exit 1; }; done\n'
         "sleep 30; exit 0\n"

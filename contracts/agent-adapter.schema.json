@@ -117,6 +117,7 @@
           ],
           "description": "null = no live mode; runs are oneshot."
         },
+        "deny": {"type": "object", "additionalProperties": false, "required": ["format"], "description": "Optional. How orch tells the tool the deny rules for orch's own folders (secrets.md, Deny rules). The deny set is the same for every adapter; only the format differs. `patterns/1` = merged into --disallowedTools; `none` = the tool cannot be told (Level 1 note).", "properties": {"format": {"enum": ["patterns/1", "none"]}, "note": {"type": "string", "maxLength": 400}}},
         "mcp_settings": {
           "type": "array", "maxItems": 8,
           "description": "Optional. Where the tool keeps its own connection (MCP) settings, read only (inventory.md, source harness). {home} = the account's home folder, {folder} = the workspace folder.",

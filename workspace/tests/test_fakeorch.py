@@ -91,6 +91,18 @@ def test_tail_events_valid_with_cursors():
     assert [ln["cursor"] for ln in lines] == [f"c{i}" for i in range(1, len(lines) + 1)]
 
 
+def test_tail_and_query_replay_files_from_the_vectors():
+    vectors = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text())["files"]
+    want = [c["stored"] for c in vectors if c["schema"] and c["stored"] == c["files"]]
+    assert want and [] in want and any(len(f) == 8 for f in want)
+    _, lines = tail_all()
+    got = [ln["event"]["files"] for ln in lines if "files" in ln["event"]]
+    assert got == want
+    assert all(ln["event"]["kind"] == "step" for ln in lines if "files" in ln["event"])
+    _, (page,) = fake("record", "query", "--json")
+    assert [e["files"] for e in reversed(page["items"]) if "files" in e] == want
+
+
 def test_tail_follow_pings_then_ends():
     rc, lines = tail_all("--follow")
     assert rc == 0 and lines[-1]["type"] == "ping" and lines[-1]["cursor"] == lines[-2]["cursor"]

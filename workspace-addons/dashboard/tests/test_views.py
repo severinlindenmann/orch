@@ -408,20 +408,58 @@ def test_ticket_details_hide_raw_id_and_home_badge_is_named():
 def test_settings_wording_and_one_toast_at_a_time():
     js = webjs.all_js()
     for text in (
-        "Off: agents send finished work to Review and you decide when it is Done.",
-        "'Workflow'",
+        "Off: helpers send finished work to Review and you decide when it is Done.",
+        "On: a helper marks its finished work Done.",
+        "'Finished work'",
         "Shared. Your team can now see this workspace.",
-        "The agent is not signed in yet.",
+        "The helper is not signed in yet.",
         "Type the command you use to start your tool. {prompt} is where the ticket text goes.",
         "Only use this if you trust it.",
         "Stored on this computer",
         "'Details'",
     ):
         assert text in js, text
+    assert "'Workflow'" not in js  # a plain word for the heading
     assert "AGENTS.md has the orch entry" not in js.split("settings-share")[1][:400]
     motion = (WEBDIR / "kit" / "motion.js").read_text()
     assert "toastQueue" not in motion and "host.replaceChildren()" in motion and "remaining=4000" in motion
     assert ".mm-hours .btn.ghost:hover{background:transparent" in (WEBDIR / "style.css").read_text()
+
+
+def test_one_name_for_the_ai_and_plain_description_help():
+    """Owner rule: a person reads "helper", never "agent"; the Description help says what it is for, without
+    relay/publish jargon. Code words (data-action, CSS classes, op names) stay as they are."""
+    js = webjs.all_js() + (webjs.WEB / "look.js").read_text(encoding="utf-8")
+    for text in (
+        "'+ Add your own helper'",
+        "'Your own helper'",
+        "button('Add helper'",
+        "'Let the helper do everything?'",
+        "' is now the default helper.'",
+        "ticketButton('Start helper'",
+        "'Ask the helper to check again'",
+        "field('Helper', agent)",
+        "['All', 'People', 'Helper']",
+        "'Helper is working'",
+        "plainWhy(question, 'The helper')",
+        "A short line about this workspace, shown on your phone and on pages you share.",
+    ):
+        assert text in js, text
+    for gone in (
+        "Add your own agent",
+        "'Your own agent'",
+        "'Add agent'",
+        "'Start agent'",
+        "Ask the agent",
+        "'Agent is working'",
+        "field('Agent'",
+        "'People', 'Agent'",
+        "'The agent'",
+        "default agent.",
+        "relay or publish to describe it",
+    ):
+        assert gone not in js, gone
+    assert "'data-action':'agent-add'" in js  # code identifiers are not renamed
 
 
 def test_no_waiting_for_your_answer_wording_left():

@@ -18,7 +18,7 @@ struct ChatsListView: View {
     // Concatenated Text can't take themeFont: these follow Dynamic Type live (ScaledMetric reads the environment).
     @ScaledMetric private var questionKeySize: CGFloat = 13
     @ScaledMetric private var questionTitleSize: CGFloat = 17
-    private let filters = ["All", "Unread", "Needs you"]
+    private let filters = ["All", "Unread", "Needs your OK"]
 
     var body: some View {
         let _ = aliasRevision
@@ -49,6 +49,7 @@ struct ChatsListView: View {
                     case .info(let ws, let ticket):
                         ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))
                     case .group(let host, let id): GroupRoomView(key: GroupKey(host: host, id: id))
+                    case .groupHistory: GroupHistoryView()
                     case .newChat: NewTopicScreen(workspaceId: nil)
                     case .newTopic(let ws): NewTopicScreen(workspaceId: ws)
                     }
@@ -106,7 +107,7 @@ struct ChatsListView: View {
                         .foregroundStyle(filter == option ? Theme.text : Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44).padding(.vertical, 2)
                         .background(filter == option ? Theme.surface3 : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.m - 4, style: .continuous))
-                }.buttonStyle(PressStyle()).accessibilityIdentifier("filter-\(option)")
+                }.buttonStyle(PressStyle()).accessibilityIdentifier("filter-\(option == "Needs your OK" ? "Needs you" : option)")
                     .accessibilityAddTraits(filter == option ? .isSelected : [])
             }
         }.padding(4).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
@@ -171,24 +172,22 @@ struct ChatsListView: View {
 
     @ViewBuilder private var attentionCards: some View {
         let questions = model.questions.filter { !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil }
-        if !questions.isEmpty && (filter == "All" || filter == "Needs you") {
+        if !questions.isEmpty && (filter == "All" || filter == "Needs your OK") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Needs you · \(questions.count)").themeFont(13, .semibold).foregroundStyle(Theme.warn)
+                Text("Needs your OK · \(questions.count)").themeFont(13, .semibold).foregroundStyle(Theme.warn)
                     .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
                     ForEach(questions) { question in
                         let ws = question.message.from
                         let summary = model.workspaceSummaries.first { $0.id == ws }
                         let topic = summary?.topics.first { $0.id.ticket == question.message.ticket && question.message.ticket != nil }
-                        let key = topic?.key ?? question.message.key
                         let title = topic?.title ?? question.message.body.title ?? summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? question.workspaceName
                         NavigationLink(value: question.message.ticket.map { ChatRoute.ticket(workspace: ws, ticket: $0) } ?? .workspace(ws)) {
                             HStack(spacing: 14) {
                                 Image(systemName: "bubble.left").themeFont(20).foregroundStyle(Theme.warn).accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("\(key.map { "\($0) " } ?? "")")
-                                        .font(.system(size: questionKeySize)).foregroundColor(Theme.muted)
-                                    + Text(title).font(.system(size: questionTitleSize, weight: .semibold)).foregroundColor(Theme.text)
+                                    Text(title).font(.system(size: questionTitleSize, weight: .semibold)).foregroundColor(Theme.text)
+                                    Text(ShellTime.day(question.message.createdAt)).themeFont(13).foregroundStyle(Theme.muted)
                                     Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
                                 }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
                                 ShellChevron()
@@ -205,6 +204,10 @@ struct ChatsListView: View {
         let name = WorkspaceAlias.name(for: summary.workspace)
         let newest = summary.topics.max { ($0.lastAt ?? "") < ($1.lastAt ?? "") }
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
+        let shownQuestions = (filter == "All" || filter == "Needs your OK") ? model.questions.filter {
+            !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil && $0.message.from == summary.id
+        } : []
+        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, shownQuestionCount: shownQuestions.count)
         return TimelineView(.everyMinute) { context in
             let muted = model.notificationsMuted(workspace: summary.id, now: context.date)
             NavigationLink(value: ChatRoute.workspace(summary.id)) {
@@ -212,11 +215,11 @@ struct ChatsListView: View {
                     WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text("Chat · \(name)").themeFont(17, .semibold).lineLimit(2)
+                            Text(name).themeFont(17, .semibold).lineLimit(2)
                             if muted { MutedIcon() }
                         }
-                        Text(starting ? "Getting started…" : summary.lastLine).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
-                        if summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs you" : "\(summary.openQuestions) need you").themeFont(13).foregroundStyle(Theme.warn) }
+                        Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                        if shownQuestions.isEmpty && summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs your OK" : "\(summary.openQuestions) need your OK").themeFont(13).foregroundStyle(Theme.warn) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .trailing, spacing: 10) {
                         Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
@@ -247,8 +250,8 @@ struct ChatsListView: View {
                 NavigationLink(value: ChatRoute.ticket(workspace: row.ticket.workspace, ticket: row.ticket.ticket ?? "")) {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text([row.ticket.key, row.ticket.displayTitle].compactMap { $0 }.joined(separator: " · ")).themeFont(16, .semibold)
-                            Text(row.ticket.workspaceName + " · " + row.ticket.stateLine).themeFont(13).foregroundStyle(Theme.muted)
+                            Text(row.ticket.displayTitle).themeFont(16, .semibold)
+                            Text([ShellTime.day(row.ticket.at), row.ticket.workspaceName, row.ticket.stateLine].filter { !$0.isEmpty }.joined(separator: " · ")).themeFont(13).foregroundStyle(Theme.muted)
                         }
                         Spacer(); ShellBadge(count: row.unread); ShellChevron()
                     }.orchCard()
@@ -349,5 +352,14 @@ struct ChatsListView: View {
                 ShellChevron()
             }.frame(minHeight: 56).padding(.vertical, 8).contentShape(Rectangle())
         }.buttonStyle(PressStyle()).accessibilityIdentifier(identifier)
+    }
+}
+
+
+enum ChatsRowRules {
+    static func preview(_ text: String, starting: Bool = false, shownQuestionCount: Int = 0) -> String {
+        if shownQuestionCount > 0 { return shownQuestionCount == 1 ? "1 needs your OK" : "\(shownQuestionCount) need your OK" }
+        if starting { return "Getting started…" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No messages yet" : text
     }
 }

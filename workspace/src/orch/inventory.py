@@ -209,7 +209,7 @@ def _profile_state(root: Path, orch_home: Path, profile: str | None) -> str:
     wid = addons.workspace_id(root)
     base = orch_home / "keys" / wid if wid else None
     prof = _dig(_read(base / "profiles.toml", "toml"), ["profile", profile]) if base else {}
-    if not prof:
+    if not prof or not humanproof.profile_verified(root, profile, prof):  # changed outside orch: cannot run
         return "missing-key"
     keys = _dig(_read(base / "keys.json"), ["keys"])
     for field in ("env", "files"):

@@ -84,7 +84,7 @@ enum RefRow: Equatable, Identifiable {
             case .ticket?:
                 guard let t = ref.ticket else { continue }
                 if let found = lookup(t) {
-                    out.append(.ticket(id: id, label: [found.key, found.title].compactMap { $0 }.joined(separator: " · "), known: true))
+                    out.append(.ticket(id: id, label: found.title, known: true))
                 } else {
                     out.append(.ticket(id: id, label: ref.title ?? "Another topic", known: false))
                 }
