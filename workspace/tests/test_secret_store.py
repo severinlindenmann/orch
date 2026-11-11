@@ -890,3 +890,20 @@ def test_loader_variables_are_refused_in_any_case(tws, var):
 
 def test_a_normal_setting_name_is_accepted(tws):
     keystore.write_profiles(tws, {"p": {"env": {"A": "k"}, "set": {"DATABRICKS_HOST": "https://h.test"}}})
+
+
+@pytest.mark.parametrize(
+    "var",
+    ["NPM_TOKEN", "NODE_AUTH_TOKEN", "CARGO_REGISTRY_TOKEN", "CARGO_REGISTRIES_FOO_TOKEN", "GPG_PASSPHRASE"],
+)
+def test_ordinary_secret_names_are_allowed_in_env_only(tws, var):
+    keystore.write_profiles(tws, {"p": {"env": {var: "k"}}})
+    for sect in ("set", "files"):
+        with pytest.raises(Refused):
+            keystore.write_profiles(
+                tws, {"p": {"env": {"A": "k"}, sect: {var: "k" if sect == "files" else "x"}}}
+            )
+
+
+def test_lesson_key_is_an_ordinary_name(tws):
+    keystore.write_profiles(tws, {"p": {"env": {"LESSON_KEY": "k"}, "set": {"LESSON_HOST": "h"}}})

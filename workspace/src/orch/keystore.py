@@ -54,8 +54,8 @@ ENV_DENY = frozenset(
     "BROWSER LESSOPEN".split()
 )
 ENV_DENY_PREFIX = (
-    "LD_", "DYLD_", "PATH", "GIT_", "ORCH_", "PYTHON", "PERL", "RUBY", "NODE_", "BASH", "XDG_", "LESS",
-    "LUA_", "GCONV", "GLIBC", "COR_", "CORECLR", "DOTNET", "NPM_", "RUSTC", "CARGO_", "SSH_", "GPG_", "SUDO_",
+    "LD_", "DYLD_", "PATH", "GIT_", "ORCH_", "PYTHON", "PERL", "RUBY", "NODE_", "BASH", "XDG_",
+    "LUA_", "GCONV", "GLIBC", "COR_", "CORECLR", "DOTNET", "RUSTC", "CARGO_", "SSH_", "GPG_", "SUDO_",
     "PSMODULEPATH", "NPM_CONFIG", "GNUPG", "PHPRC", "TCLLIBPATH", "R_PROFILE", "CLASSPATH",
 )  # fmt: skip
 ENV_DENY_SUFFIX = ("_OPTIONS",)
@@ -64,16 +64,25 @@ _ENV_DENY_UP = frozenset(
     {
         *(v.upper() for v in ENV_DENY),
         "SHELLOPTS", "PS4", "PATHEXT", "COMSPEC", "PROMPT_COMMAND", "VISUAL", "MANPAGER", "LOCPATH",
-        "TMPDIR", "TEMP", "TMP",
+        "TMPDIR", "TEMP", "TMP", "NPM_TOKEN", "LESS", "LESSOPEN", "LESSCLOSE", "LESSKEY", "LESSHISTFILE",
     }
 )  # fmt: skip
 SET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
-def env_denied(var: str) -> bool:
+# Ordinary secret variable names that look like control prefixes: allowed in `env` ONLY (they carry a key's
+# value; a person's `set` and `files` never get them).
+ENV_SECRET_NAMES = re.compile(
+    r"^(NPM_TOKEN|NODE_AUTH_TOKEN|CARGO_REGISTRY_TOKEN|CARGO_REGISTRIES_[A-Z0-9_]+_TOKEN|GPG_PASSPHRASE)$"
+)
+
+
+def env_denied(var: str, sect: str = "set") -> bool:
     """Control variables a profile may never name in env, files or set (case-insensitive: Windows folds
     names): loader, interpreter, shell, git, ssh, editor, proxy, home/config locations. The ONE hard-deny,
     at profile set AND on every read and run."""
+    if sect == "env" and ENV_SECRET_NAMES.fullmatch(var):
+        return False
     up = var.upper()
     return (
         up in _ENV_DENY_UP
@@ -567,7 +576,7 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             for var, tgt in m.items():
                 if not isinstance(var, str) or not ENV_RE.match(var):
                     raise Refused(f"The profile {pn} names an unusable variable.")
-                if env_denied(var) or (sect == "set" and not set_name_ok(var)):
+                if env_denied(var, sect) or (sect == "set" and not set_name_ok(var)):
                     raise Refused(f"The profile {pn} may not set the variable {var}.")
                 if var.upper() in seen:
                     raise Refused(f"The profile {pn} uses the variable {var} twice.")

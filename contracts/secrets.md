@@ -109,8 +109,8 @@ A profile maps variables to key names (`env`: the value in the variable; `files`
 plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false), and may let agents use its keys in any command (`agents_may_env`, default false).
 Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
 ORCH_*, PATH*, PYTHON*, PERL*, RUBY*, NODE_*, LUA_*, BASH*, XDG_*, SSH_*, GPG_*, SUDO_*, `*ASKPASS*`, `*_OPTIONS`, SHELLOPTS, PS4,
-ENV, IFS, HOME, EDITOR/VISUAL/PAGER/MANPAGER/BROWSER, LESS*, PSModulePath, CLASSPATH, PHPRC, TCLLIBPATH, R_PROFILE*, GNUPG*, NPM_CONFIG*, TMPDIR, COMSPEC, proxies, CA bundles, …; see `keystore.ENV_DENY`; matched in
-any letter case; `set` names are also structural: `^[A-Z][A-Z0-9_]{0,63}$` (follow-up: only names the profile declares or a person approves as `extra`, part of the MAC), at `profile set` AND again every time the profile is read or run). Profiles are
+ENV, IFS, HOME, EDITOR/VISUAL/PAGER/MANPAGER/BROWSER, LESS, LESSOPEN, LESSCLOSE, LESSKEY, LESSHISTFILE, PSModulePath, CLASSPATH, PHPRC, TCLLIBPATH, R_PROFILE*, GNUPG*, NPM_CONFIG*, TMPDIR, COMSPEC, proxies, CA bundles, …; see `keystore.ENV_DENY`; matched in
+any letter case; `set` names are also structural: `^[A-Z][A-Z0-9_]{0,63}$` (ordinary secret names NPM_TOKEN, NODE_AUTH_TOKEN, CARGO_REGISTRY_TOKEN, CARGO_REGISTRIES_*_TOKEN and GPG_PASSPHRASE are allowed in `env` only, never in `files` or `set`; the deny list is not complete, and the planned `extra` allowlist is the real control; follow-up: only names the profile declares or a person approves as `extra`, part of the MAC), at `profile set` AND again every time the profile is read or run). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
 only with a matching settings record (human-proof.md, Settings: records and tombstones), so editing the file alone does not enable `get`.
 
