@@ -37,7 +37,11 @@ def add_parsers(sub, common) -> None:
     def add(name):
         p = r.add_parser(name, parents=[common], help=argparse.SUPPRESS)
         p.add_argument("--job")
-        p.add_argument("--token", help="the job's write key (default: ORCH_JOB_TOKEN)")
+        p.add_argument(
+            "--token",
+            help="the job's write key; prefer ORCH_JOB_TOKEN (a flag shows in the process list "
+            "and shell history), or - to read it from stdin",
+        )
         return p
 
     p = add("start")
@@ -144,6 +148,10 @@ def _input(args) -> dict:
     return out
 
 
+def _token(args):
+    return sys.stdin.readline().strip() if args.token == "-" else args.token
+
+
 def _emit(obj) -> None:
     sys.stdout.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
     sys.stdout.flush()
@@ -169,11 +177,12 @@ def dispatch(args, root: Path) -> bool:
                     raise jobs.JobError("no_job")
                 _emit(jobs.show_job(root, job_id))
             return True
-        stored = jobs.ingest(root, _input(args), job=args.job, token=args.token)
+        stored = jobs.ingest(root, _input(args), job=args.job, token=_token(args))
     except record.RecordRefused as e:
         raise jobs.JobError(e.code, str(e)) from None
     if args.json:
         _emit({"job": stored["job"], "token": stored["token"]} if sub == "start" else stored)
     elif sub == "start":
-        print(f"job {stored['job']}\nkey {stored['token']}  (shown once: set ORCH_JOB_TOKEN)")
+        print(f"job {stored['job']}\nkey {stored['token']}")
+        print("(shown once: set ORCH_JOB_TOKEN; do not log or echo it)", file=sys.stderr)
     return True

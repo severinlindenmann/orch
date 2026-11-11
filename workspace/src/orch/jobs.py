@@ -329,8 +329,6 @@ def ingest(root, inp, *, environ=None, job=None, now=None, token=None) -> dict:
         body.pop("quiet_minutes", None)
     if not _INPUT.is_valid(body):
         raise JobError("invalid")
-    if body["type"] == "artifact" and not _artifact_exists(root, body["path"], ticket):
-        raise JobError("invalid", "that file does not exist in this workspace.")
     token = token or environ.get("ORCH_JOB_TOKEN")
     minted = secrets.token_hex(16) if is_start else None
     at = _now() if now is None else now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -372,6 +370,8 @@ def ingest(root, inp, *, environ=None, job=None, now=None, token=None) -> dict:
                 }
                 ctx.update(events=events, ev=lost, refuse="ended")
                 return lost, False, None
+            if body["type"] == "artifact" and not _artifact_exists(root, body["path"], ticket):
+                raise JobError("invalid", "that file does not exist in this workspace.")
             code = _rule(events, ev, EVENT_CAP)
             if code is None and ev["type"] != "end" and size + 2048 > record.JOB_BYTES - 16384:
                 code = "cap"

@@ -83,7 +83,10 @@ A job whose id belongs to another run is `other_run`.
 **One writer per job:** `start` makes a random 128-bit write token and returns it once (`{"job": "j_…", "token": "…"}`); only
 its sha256 is stored (`token_hash` in the `start` line). Every later write must present it (`ORCH_JOB_TOKEN` or `--token`),
 compared in constant time; a missing or wrong token is refused `token` and the token is never echoed or recorded, so another
-process of the same run cannot write into a sibling job by guessing its id. Reads need no token. A job started inside an agent run is bound by its first stored line
+process of the same run cannot write into a sibling job by guessing its id. Reads need no token. Prefer the environment
+variable: `--token` shows in the process list and shell history (`--token -` reads it from stdin). `start` prints the token on
+stdout once: do not log or echo it (a tool output the record keeps would hold it). The final `end` is accepted even when the
+run's streams are full (a job can always finish). A job started inside an agent run is bound by its first stored line
 (`.orch/record/jobs/<run>/<job>.jsonl` names run and job; ticket and run are stored in every line), so no separate binding
 file is needed until `orch job run` (which needs `pid`, `events_path`) is built.
 

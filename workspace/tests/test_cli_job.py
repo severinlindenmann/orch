@@ -688,3 +688,62 @@ def test_a_failed_record_line_leaves_a_gap_marker(live, monkeypatch):
     assert len(stream(root, run, job)) == 1  # the job line is stored
     notes = "".join(p.read_text() for p in (root / ".orch/record/alerts").glob("hook-lost-2*.jsonl"))
     assert "job_activity" in notes
+
+
+def test_the_final_end_is_accepted_when_the_run_is_full(live, monkeypatch):
+    root, run, _ = live
+    job, other = start(root), start(root)
+    monkeypatch.setattr(record, "JOB_RUN_BYTES", 1)
+    refused("cap", send, root, job, type="log", text="x")
+    send(root, job, type="end", status="failed")
+    send(root, other, type="end", status="ok")
+    assert jobs.state_of(stream(root, run, job)) == "failed"
+
+
+def test_a_refused_start_leaves_no_empty_file_and_noise_is_not_counted(live, monkeypatch):
+    root, run, _ = live
+    start(root)
+    d = root / ".orch/record/jobs" / run
+    (d / "tmp_abc").write_text("x")
+    (d / "notes.txt").write_text("x")
+    monkeypatch.setattr(jobs, "JOBS_PER_RUN", 2)
+    start(root)  # the 2nd job still fits: tmp_ and other names do not count
+    monkeypatch.setattr(jobs, "_all", lambda root, run=None: [])
+    refused("cap", start, root)
+    assert len([p for p in d.glob("j_*.jsonl")]) == 2
+    # a first line that is refused inside the lock (too big for the stream) leaves nothing
+    monkeypatch.setattr(jobs, "_all", lambda root, run=None: [])
+    monkeypatch.setattr(jobs, "JOBS_PER_RUN", 10)
+    monkeypatch.setattr(record, "JOB_BYTES", 10)
+    refused("cap", start, root)
+    assert len(list(d.glob("j_*.jsonl"))) == 2
+
+
+def test_artifact_check_comes_after_the_token_check(live):
+    root, run, _ = live
+    job = start(root)
+    refused("token", jobs.ingest, root, {"type": "artifact", "path": "missing.csv"}, job=job, token="bad")
+
+
+def test_token_can_come_from_stdin(live, capsys, monkeypatch):
+    import io
+
+    started = json.loads(run_cli(capsys, "start", "--title", "X", "--json")[1])
+    monkeypatch.setattr("sys.stdin", io.StringIO(started["token"] + "\n"))
+    code, out, _ = run_cli(capsys, "log", "hi", "--job", started["job"], "--token", "-", "--json")
+    assert code == 0 and json.loads(out)["text"] == "hi"
+
+
+def test_a_repaired_torn_file_is_reread(live, monkeypatch):
+    root, run, _ = live
+    job = start(root)
+    f = stream_file(root, run, job)
+    f.write_text(f.read_text() + "cut")
+    real = record._write_new
+
+    def other(ws, rel, payload, *, expected=None):
+        real(ws, rel, payload, expected=expected)
+        f.write_text("planted\n")  # replaced again right after the repair
+
+    monkeypatch.setattr(record, "_write_new", other)
+    refused("tampered", send, root, job, type="log", text="x")

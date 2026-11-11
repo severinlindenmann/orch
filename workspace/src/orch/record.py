@@ -875,6 +875,7 @@ def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
         with _lock(workspace, run) as check_lock:
             check_lock()
             fd = _open(workspace, rel, "read_append", create_dirs=True)
+            stored, raw = False, None
             try:
                 check_lock()
                 raw = _read_bytes(fd)
@@ -883,9 +884,17 @@ def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
                     _write_new(workspace, rel, raw, expected=fd)
                     old, fd = fd, _open(workspace, rel, "read_append")
                     _close(old)
+                    if _read_bytes(fd) != raw:  # the repaired file must be exactly what we wrote
+                        raise RecordTampered("swapped")
                 events = _job_events(raw, run, job, valid)
-                if not events and max_jobs is not None and len(_entries(workspace, ("jobs", run))) > max_jobs:
-                    _unlink(workspace, rel, expected=fd)
+                if (
+                    not events
+                    and max_jobs is not None
+                    and len(
+                        [n for n in _entries(workspace, ("jobs", run)) if re.fullmatch(_JOB + r"\.jsonl", n)]
+                    )
+                    > max_jobs
+                ):
                     raise RecordFull("This run has reached its limit of jobs.")
                 event, replace_last, result = decide(events, len(raw))
                 if event is None:
@@ -893,9 +902,9 @@ def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
                 data = (_json(event) + "\n").encode()
                 if len(data) > 16384:
                     raise RecordInvalid("The job entry is too large.")
-                if (
-                    len(raw) + len(data) > JOB_BYTES
-                    or _size(workspace, ("jobs", run)) + len(data) > JOB_RUN_BYTES
+                if len(raw) + len(data) > JOB_BYTES or (
+                    # the final `end` is always accepted (200 jobs x 16 KB at most)
+                    event["type"] != "end" and _size(workspace, ("jobs", run)) + len(data) > JOB_RUN_BYTES
                 ):
                     raise RecordFull("This job has reached its limit of entries.")
                 check_lock()
@@ -904,8 +913,11 @@ def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
                     _write_new(workspace, rel, b"".join(rows) + data, expected=fd)
                 else:
                     _write(fd, data)
+                stored = True
                 return result
             finally:
+                if not stored and raw == b"":  # a refused first line leaves no empty file behind
+                    _unlink(workspace, rel, expected=fd)
                 _close(fd)
     except RecordBusy:
         raise
