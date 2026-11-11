@@ -303,6 +303,8 @@ def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> l
         "-c", "core.untrackedCache=false",
         "-c", "protocol.allow=never",
         "-c", "core.longpaths=true",
+        "-c", "merge.autoStash=false",
+        "-c", "rerere.enabled=false",
         "-c", "commit.gpgSign=false",
         "-c", "tag.gpgSign=false",
         "-c", "core.sshCommand=",
@@ -558,9 +560,11 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
 ALLOWED = {
     "worktree", "read-tree", "update-index", "checkout-index", "ls-files", "rev-parse", "config", "branch",
     "symbolic-ref", "cat-file", "merge-base", "show-ref", "for-each-ref", "status", "diff", "log", "show",
-    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore",
+    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore", "rev-list", "check-attr",
 }  # fmt: skip
 # (check-ignore reads ignore rules only: no content, no filters; --stdin is refused below)
+# (rev-list and check-attr only read: commit graph / attribute names. B13 uses them for ancestry counts and to
+# refuse files that need filters. Neither runs a filter, textconv or external program.)
 _CHECK_IGNORE_OK = {"-q", "--quiet", "-v", "--verbose", "-n", "--non-matching", "--no-index"}
 _WORKTREE_OK = {"add", "remove", "prune", "list"}
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}

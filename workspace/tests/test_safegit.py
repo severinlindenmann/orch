@@ -238,6 +238,8 @@ def test_diff_like_calls_get_no_ext_diff_and_the_future_defaults(tmp_path, monke
     for want in (
         "diff.external=",
         "commit.gpgSign=false",
+        "merge.autoStash=false",
+        "rerere.enabled=false",
         "tag.gpgSign=false",
         "core.sshCommand=",
         "credential.helper=",
@@ -751,6 +753,8 @@ def test_external_tools_and_interactive_modes_are_refused(args, tmp_path):
         ["stash", "list"],
         ["commit", "-m", "msg"],
         ["worktree", "add", "p"],
+        ["rev-list", "--count", "a..b"],
+        ["check-attr", "filter", "diff", "text", "--", "f.txt"],
     ],
 )
 def test_ordinary_calls_are_not_refused(args):
