@@ -292,7 +292,7 @@ def test_artifact_both_changed_even_when_text_merge_is_clean(machines):
 
 def test_counter_reserves_old_keys_without_new_clash(machines):
     a, b, _ = both(machines)
-    edit(a, key="DM1-2", ext={"sync": {"old_keys": ["DM1-99"]}})
+    edit(a, ext={"sync": {"old_keys": ["DM1-99"]}})
     success(a)
     success(b)
     assert json.loads(repo.safe(b, "ticket-counter.json").read_text())["last"] == 99
@@ -317,3 +317,108 @@ def test_key_clash_need_respects_contract_with_long_titles(root, count):
     Draft202012Validator(schema).validate(rows)
     assert len(rows) == 1
     assert len(rows[0]["answer"]["options"]) == (count if count <= 8 else 0)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_remote_cannot_steal_known_key(machines, reverse):
+    from test_step import ticket
+
+    a, b, bare = both(machines)
+    if reverse:
+        a, b = b, a
+    local = "tickets/t_local1.json"
+    evil = "tickets/t_evil01.json"
+    save(a, local, ticket() | {"id": "t_local1", "key": "DM1-5"})
+    success(a)
+    success(b)
+    before = repo.safe(b, local).read_bytes()
+    save(a, local, ticket() | {"id": "t_local1", "key": "DM1-99"})
+    save(a, evil, ticket() | {"id": "t_evil01", "key": "DM1-5"})
+    repo.git(a, "add", "--", local, evil)
+    hostile(a, bare, ["commit", "-m", "steal key"])
+    result = run(b)
+    assert result["paused"]["key_clashes"]["DM1-5"]
+    assert repo.safe(b, local).read_bytes() == before
+    assert not repo.safe(b, evil).exists()
+    assert needs.rows(b)[0]["cli"].startswith("orch sync keep-key DM1-5")
+
+
+@pytest.mark.parametrize("winner", ["t_first1", "t_later1"])
+def test_person_keeps_key_without_live_duplicates(machines, monkeypatch, winner):
+    from test_step import ticket
+
+    a, b, _ = both(machines)
+    for root, tid in [(a, "t_first1"), (b, "t_later1")]:
+        save(root, f"tickets/{tid}.json", ticket() | {"id": tid, "key": "DM1-13"})
+    success(a)
+    assert run(b)["paused"]
+    for keep in ("mine", "theirs"):
+        with pytest.raises(repo.Refused, match="keep-key"):
+            pause.resolve(b, "tickets/t_first1.json", keep, now=NOW)
+    with pytest.raises(Refused):
+        pause.keep_key(b, "DM1-13", winner, SimpleNamespace(proof_stdin=False, by="agent:test"), now=NOW)
+    original_write = step.write
+
+    def checked_write(root, path, data):
+        original_write(root, path, data)
+        keys = [json.loads(p.read_bytes()).get("key") for p in (root / ".orch" / "tickets").glob("*.json")]
+        assert len(keys) == len(set(keys))
+
+    monkeypatch.setattr(step, "write", checked_write)
+    remote = cli.read(b, "state")["paused"]["remote_sha"]
+    result = pause.keep_key(b, "DM1-13", winner, proof(b, f"sync:keep-key:DM1-13:{winner}:{remote}", monkeypatch), now=NOW)
+    assert not result.get("last_error"), result
+    assert not result.get("paused")
+    loser = "t_later1" if winner == "t_first1" else "t_first1"
+    moved = json.loads(repo.safe(b, f"tickets/{loser}.json").read_bytes())
+    assert moved["key"] != "DM1-13"
+    assert "DM1-13" in moved["ext"]["sync"]["old_keys"]
+    assert any("key changed" in h["text"] for h in moved["history"])
+    # A locally known number requires the other computer's own person decision too.
+    result = run(a)
+    if result.get("paused"):
+        remote = result["paused"]["remote_sha"]
+        pause.keep_key(a, "DM1-13", winner, proof(a, f"sync:keep-key:DM1-13:{winner}:{remote}", monkeypatch), now=NOW)
+    success(a)
+    success(b)
+    success(a)
+    for tid in (winner, loser):
+        assert repo.safe(a, f"tickets/{tid}.json").read_bytes() == repo.safe(b, f"tickets/{tid}.json").read_bytes()
+
+
+def test_ignore_requires_person(machines):
+    a, b, _ = both(machines)
+    edit(a, ext={"automation": {"enabled": True}})
+    success(a)
+    success(b)
+    with pytest.raises(Refused):
+        approval.approve(b, "t_abc123", "automation", SimpleNamespace(ignore=True, proof_stdin=False, by="agent:test"))
+    assert approval.held(b)
+    assert not cli.read(b, "ignored")
+
+
+@pytest.mark.parametrize("value", [{"command": "run"}, {"old_keys": ["bad"]}, {"old_keys": [f"DM1-{i}" for i in range(1, 102)]}])
+def test_invalid_sync_extension_refused(machines, value):
+    a, b, bare = both(machines)
+    edit(a, ext={"sync": value})
+    repo.git(a, "add", "--", TICKET)
+    hostile(a, bare, ["commit", "-m", "invalid sync extension"])
+    before = repo.safe(b, TICKET).read_bytes()
+    assert run(b)["paused"]
+    assert repo.safe(b, TICKET).read_bytes() == before
+
+
+def test_visibility_never_persists_userinfo(root, monkeypatch):
+    from orch_sync import visibility
+
+    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
+    address = "https://person:credential@example.com/owner/repo"
+    args = ["--dir", str(root), "set", "--mode", "remote", "--remote", address]
+    assert cli.main(args) == 2
+    assert not cli.read(root, "visibility")
+    # Defense in depth: even if remote validation changes, visibility is sanitized.
+    monkeypatch.setattr(repo, "validate_url", lambda url: None)
+    monkeypatch.setattr(repo, "set_remote", lambda *a: None)
+    monkeypatch.setattr(visibility, "remote_visibility", lambda url: "unknown")
+    assert cli.main(args) == 0
+    assert cli.read(root, "visibility") == {"https://example.com/owner/repo": "unknown"}

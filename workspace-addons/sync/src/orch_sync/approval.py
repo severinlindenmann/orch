@@ -94,17 +94,17 @@ def approve(root, tid, addon, args):
             raise repo.Refused("No single held change for this ticket and add-on")
         p, block = candidates[0]
         hashed = digest(block["value"])
+        target = f"sync:{tid}:{addon}:{hashed}"
+        by = humanproof.person_by(
+            root, args, "addon.act", target, no_handoff="This approval needs a person's proof over stdin."
+        )
+        config.require_person(by, "approve this synced change")
         if getattr(args, "ignore", False):
             ignored = cli.read(root, "ignored")
             ignored.setdefault(tid, {})[addon] = hashed
             write(root, "run/sync/ignored.json", encoded(ignored))
             p.unlink()
             return {"ignored": addon, "ticket": tid}
-        target = f"sync:{tid}:{addon}:{hashed}"
-        by = humanproof.person_by(
-            root, args, "addon.act", target, no_handoff="This approval needs a person's proof over stdin."
-        )
-        config.require_person(by, "approve this synced change")
         path = f"tickets/{tid}.json"
         doc = document(path, repo.safe(root, path).read_bytes())
         ext = doc.setdefault("ext", {})

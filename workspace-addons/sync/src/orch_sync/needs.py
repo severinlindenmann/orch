@@ -49,7 +49,7 @@ def rows(root):
                     key,
                     f"Two tickets have the same number {key}. Which keeps it?",
                     paused["since"],
-                    "orch sync status --json",
+                    f"orch sync keep-key {key} <ticket-id> --proof-stdin",
                     (
                         [f"{t['title'][:77 - len(t['id'])]} ({t['id']})" for t in candidates]
                         if len(candidates) <= 8

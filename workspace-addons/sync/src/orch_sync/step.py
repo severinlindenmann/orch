@@ -258,6 +258,28 @@ def merged_tree(root, head, remote, index, now):
     base_rows = entries(root, ancestor or None)
     local_rows, remote_rows = entries(root, head), entries(root, checked_remote)
     decisions = pause.choices(root, remote)
+    known = {}
+    changed_keys = set()
+    for path in sorted(base_rows.keys() | local_rows.keys() | remote_rows.keys()):
+        if not paths.TICKET.fullmatch(path):
+            continue
+        local = document(path, blob(root, local_rows.get(path) or base_rows.get(path))) if path in local_rows or path in base_rows else {}
+        incoming_doc = document(path, blob(root, remote_rows[path])) if path in remote_rows else {}
+        doc = local or incoming_doc
+        if doc.get("key"):
+            known.setdefault(doc["key"], []).append({"id": doc["id"], "title": doc["title"]})
+        if local and incoming_doc and local.get("key") != incoming_doc.get("key") and path not in decisions:
+            clash_key = local.get("key") or incoming_doc.get("key")
+            if clash_key not in known:
+                known[clash_key] = [{"id": local["id"], "title": local["title"]}]
+            changed_keys.add(clash_key)
+    if changed_keys:
+        clashes = {key: known[key] for key in sorted(changed_keys)}
+        raise pause.Pause(
+            "Ticket numbers need a person's choice",
+            [f"tickets/{t['id']}.json" for group in clashes.values() for t in group],
+            key_clashes=clashes,
+        )
     both_changed = [
         p
         for p in local_rows.keys() | remote_rows.keys()

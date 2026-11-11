@@ -15,11 +15,13 @@ description: Check or change how this computer keeps a private copy of the works
 - See decisions waiting for the person: `orch sync needs --json`.
 - After the person chooses a copy: `orch sync resolve <path> --keep mine` or `orch sync resolve <path> --keep theirs`. A changed remote asks for another review. Keeping theirs preserves the local artifact with a dated name, or records a ticket history summary.
 - A held add-on change needs `orch sync approve <ticket> <addon> --proof-stdin`, with the person's single-use proof over stdin. Never manufacture a proof or write an approval store; agents are refused. The proof is for `addon.act` and the target `sync:<ticket>:<addon>:<canonical-block-sha256>`.
-- Use `orch sync approve <ticket> <addon> --ignore` to dismiss the held block; changed content asks again.
+- Use `orch sync approve <ticket> <addon> --ignore --proof-stdin` with the same person proof to dismiss the held block; changed content asks again.
 - Acknowledge a restored ticket: `orch sync deleted <ticket> --keep`.
 - See the settings and the last result: `orch sync status --json`.
 - Turn it on for this computer only, every 15 minutes: `orch sync set --mode local --interval 15`.
 - Turn it off: `orch sync set --mode off`.
+
+- For a ticket number clash, use `orch sync keep-key <key> <ticket-id> --proof-stdin`. The person chooses which ticket keeps the number; the others receive new numbers with old keys and history preserved. Agents are refused, and `resolve` cannot choose clash files. The single-use person proof target is `sync:keep-key:<key>:<ticket-id>:<paused-remote-sha>` for `addon.act`. Each computer must authorize changes to its locally known keys.
 
 ## Rules
 

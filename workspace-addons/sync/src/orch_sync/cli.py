@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from orch.errors import Refused as CoreRefused
 
@@ -42,6 +43,12 @@ def main(argv=None):
     p = sub.add_parser("resolve")
     p.add_argument("path")
     p.add_argument("--keep", choices=("mine", "theirs"), required=True)
+    p.add_argument("--proof-stdin", action="store_true")
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("keep-key")
+    p.add_argument("key")
+    p.add_argument("ticket")
     p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
@@ -83,10 +90,12 @@ def main(argv=None):
                 settings["remote"] = args.remote
                 from .visibility import remote_visibility
 
+                address = urlsplit(args.remote)
+                safe_url = urlunsplit(address._replace(netloc=address.netloc.rsplit("@", 1)[-1]))
                 notices = read(root, "visibility")
-                if args.remote not in notices:
+                if safe_url not in notices:
                     visibility = remote_visibility(args.remote)
-                    notices[args.remote] = visibility
+                    notices[safe_url] = visibility
                     from .step import encoded, write
 
                     write(root, "run/sync/visibility.json", encoded(notices))
@@ -126,6 +135,10 @@ def main(argv=None):
             from .pause import resolve
 
             result = resolve(root, args.path, args.keep, args)
+        elif args.cmd == "keep-key":
+            from .pause import keep_key
+
+            result = keep_key(root, args.key, args.ticket, args)
         elif args.cmd == "approve":
             from .approval import approve
 

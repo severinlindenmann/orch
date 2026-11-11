@@ -380,6 +380,7 @@ def test_partial_apply_crash_is_idempotent(machines, monkeypatch):
 def test_live_key_clash_pauses_without_renumbering(machines):
     a, b, _ = both(machines)
     edit(a, key="AB1-1")
+    edit(b, key="AB1-1")
     success(a)
     success(b)
     from test_step import ticket

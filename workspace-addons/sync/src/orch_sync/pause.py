@@ -82,6 +82,8 @@ def resolve(root, path, keep, args=None, *, now=None):
         paused = state.get("paused")
         if not paths.allowed(path) or not paused or path not in paused["files"]:
             raise repo.Refused("This file is not waiting for a choice")
+        if any(path == f"tickets/{t['id']}.json" for group in paused.get("key_clashes", {}).values() for t in group):
+            raise repo.Refused("Use orch sync keep-key for a ticket number clash")
         settings = cli.DEFAULTS | cli.read(root, "settings")
         remote = paused["remote_sha"]
         if settings["mode"] == "remote":
@@ -204,3 +206,106 @@ def resolve(root, path, keep, args=None, *, now=None):
         if state["paused"]:
             return state
         return step._run(root, "resolved", now, cli.remote_allowed())
+
+
+def keep_key(root, key, tid, args, *, now=None):
+    """A local person's choice, pinned to the reviewed remote and live ticket bytes."""
+    from contextlib import ExitStack
+
+    from . import merge, step
+
+    now = now or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    with step.step_lock(root), syncgate.hold(root), ExitStack() as locks:
+        state = cli.read(root, "state")
+        paused = state.get("paused") or {}
+        candidates = paused.get("key_clashes", {}).get(key, [])
+        if tid not in {t["id"] for t in candidates}:
+            raise repo.Refused("No such ticket in this key clash")
+        remote = paused["remote_sha"]
+        settings = cli.DEFAULTS | cli.read(root, "settings")
+        if settings["mode"] == "remote":
+            if not cli.remote_allowed():
+                raise repo.Refused("Remote sync is preview-only")
+            repo.check(root)
+            repo.git(root, "fetch", "--no-tags", "origin", "+refs/heads/*:refs/remotes/origin/*", timeout=60)
+            if step.oid(root, "refs/remotes/origin/orch-state") != remote:
+                raise repo.Refused("Remote changed; review again before choosing a key")
+        by = humanproof.person_by(
+            root, args, "addon.act", f"sync:keep-key:{key}:{tid}:{remote}",
+            no_handoff="Choosing a ticket number needs a person's proof over stdin.",
+        )
+        config.require_person(by, "choose a ticket number")
+        ours, theirs = step.entries(root, "HEAD"), step.entries(root, remote)
+        docs, originals = {}, {}
+        for path in sorted(ours.keys() | theirs.keys()):
+            if not paths.TICKET.fullmatch(path):
+                continue
+            locks.enter_context(tickets.sync_apply(root, Path(path).stem))
+            live = repo.safe(root, path)
+            raw = live.read_bytes() if live.exists() else None
+            originals[path] = raw
+            local = step.document(path, raw) if raw else {}
+            other = step.document(path, step.blob(root, theirs[path])) if path in theirs else {}
+            # Only this person's chosen group may be changed by this decision.
+            docs[Path(path).stem] = local or other
+        locks.enter_context(tickets.sync_apply(root, "key"))
+        group = {t["id"] for t in candidates}
+        if any(i not in docs or docs[i].get("key") != key for i in group):
+            raise repo.Refused("Ticket numbers changed; review again")
+        counter_path = "ticket-counter.json"
+        live_counter = repo.safe(root, counter_path)
+        counter = merge.merge_counter(
+            {}, incoming.strict_load(live_counter.read_bytes()) if live_counter.exists() else {},
+            incoming.strict_load(step.blob(root, theirs.get(counter_path)) or b"{}"),
+            [k for doc in docs.values() for k in [doc.get("key"), *merge.old_keys_of(doc)]],
+        )
+        selected_docs = {}
+        for i in sorted(group):
+            doc = docs[i]
+            if i != tid:
+                path = f"tickets/{i}.json"
+                incoming_doc = step.document(path, step.blob(root, theirs[path])) if path in theirs else {}
+                incoming_key = incoming_doc.get("key")
+                if incoming_key and incoming_key != key and key in merge.old_keys_of(incoming_doc):
+                    new = incoming_key
+                    doc = merge.merge_ticket(None, incoming_doc, doc, now, person=humanproof.wont_verifier(root))
+                    if doc is None:
+                        raise repo.Refused("Ticket cannot be merged")
+                    docs[i] = doc
+                else:
+                    counter["last"] += 1
+                    if counter["last"] > merge.MAX_COUNTER:
+                        raise repo.Refused("Ticket counter exhausted")
+                    new = f"{key.rsplit('-', 1)[0]}-{counter['last']}"
+                doc.setdefault("ext", {}).setdefault("sync", {})["old_keys"] = sorted(set(merge.old_keys_of(doc)) | {key})
+                doc["key"] = new
+                doc.setdefault("history", []).append({"at": now, "by": by, "text": f"sync: key changed from {key} to {new} (person chose {tid})"})
+                doc["revision"] = doc.get("revision", 0) + 1
+            path = f"tickets/{i}.json"
+            doc = step.held_ticket(root, path, doc, step.document(path, originals[path]) if originals[path] else {}, doc)
+            data = step.encoded(doc)
+            step.document(path, data)
+            if findings(root, path, data):
+                raise repo.Refused("Ticket cannot be accepted; edit it first")
+            selected_docs[path] = data
+        keys = [docs[i].get("key") for i in group]
+        other_keys = {doc.get("key") for i, doc in docs.items() if i not in group}
+        if len(keys) != len(set(keys)) or any(k in other_keys for k in keys):
+            raise repo.Refused("The chosen numbers conflict with another ticket")
+        decisions = cli.read(root, "choices")
+        if decisions.get("remote_sha") != remote:
+            decisions = {"remote_sha": remote, "files": {}}
+        selected_docs[counter_path] = step.encoded(counter)
+        # Reserve numbers first, move losers next, publish the winner last. No live duplicate.
+        order = [counter_path] + [p for p in selected_docs if p not in (counter_path, f"tickets/{tid}.json")] + [f"tickets/{tid}.json"]
+        for path in order:
+            data = selected_docs[path]
+            step.write(root, "run/sync/choices/" + path, data)
+            step.write(root, path, data)
+            decisions["files"][path] = {"keep": "key", "at": now}
+        step.write(root, "run/sync/choices.json", step.encoded(decisions))
+        paused["key_clashes"].pop(key)
+        paused["files"] = [p for p in paused["files"] if p not in selected_docs]
+        state["paused"] = paused if paused["files"] else None
+        step.write(root, "run/sync/state.json", step.encoded(state))
+    return state if state["paused"] else step._run(root, "key chosen", now, cli.remote_allowed())
