@@ -102,8 +102,6 @@ def account_home() -> Path:
 
     if _is_windows():  # the profile folder from the process token (winacl), never the environment
         try:
-            from orch import winacl
-
             return Path(winacl.profile_dir())
         except (ImportError, AttributeError, OSError, Refused):
             pass
