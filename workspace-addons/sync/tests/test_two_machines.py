@@ -61,6 +61,34 @@ def test_two_fields_status_counter(machines):
     assert any(h['at'] == NOW and 'status' in h['text'] for h in load(b)['history'])
 
 
+def test_tracked_turned_general(machines):
+    a, b, bare = both(machines)
+    save(a, ART, b'original artifact')
+    success(a)
+    before = step.entries(a, 'HEAD')
+    edit(a, general=True)
+    save(a, ART, b'local artifact change')
+    chat = 'tickets/t_abc123/artifacts/chat.txt'
+    save(a, chat, b'private chat text')
+    other = 'tickets/t_second.json'
+    save(a, other, ticket() | {'id': 't_second'})
+    state = success(a)
+    assert 'Ticket t_abc123 has a problem and was not synced' in str(state['skipped'])
+    assert load(a)['general'] is True
+    for path in (TICKET, ART):
+        assert step.entries(a, 'HEAD')[path] == before[path]
+        remote_blob = subprocess.run(['git', '--git-dir', str(bare), 'show', 'orch-state:' + path],
+                                     capture_output=True, check=True).stdout
+        assert remote_blob == step.blob(a, before[path])
+    reachable = subprocess.run(['git', '--git-dir', str(bare), 'rev-list', '--objects', 'orch-state'],
+                               capture_output=True, check=True).stdout
+    assert chat.encode() not in reachable
+    success(b)
+    assert tracked(b) == {TICKET, ART, other}
+    assert load(b).get('general') is not True
+    assert (b / '.orch' / ART).read_bytes() == b'original artifact'
+
+
 def test_offline_then_online(machines):
     a, b, bare = both(machines)
     moved = bare.with_name('offline.git')

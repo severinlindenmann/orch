@@ -168,10 +168,7 @@ def stage(root, head, index, state):
                     except (ValueError, RecursionError):
                         raise ValueError('Ticket has a problem') from None
                     if doc.get('general') is True:
-                        generals.add(Path(path).stem)
-                        if path in old:
-                            repo.git(root, 'update-index', '--force-remove', '--', path, index=index)
-                        continue
+                        raise ValueError('General ticket stays local')
                 repo.git(root, 'add', '-f', '--', ':(literal)' + path, index=index)
             except FileNotFoundError:
                 if paths.TICKET.fullmatch(path):
@@ -191,7 +188,7 @@ def stage(root, head, index, state):
                     raise
                 else:
                     state['skipped'].append(f'{path}: {e}')
-    # Purge the whole excluded ticket, including blobs inherited from HEAD.
+    # Purge only excluded folders whose ticket JSON was never tracked in HEAD.
     excluded = {p for p in names if any(
         p == f'tickets/{tid}.json' or p.startswith(f'tickets/{tid}/') for tid in generals
     )}

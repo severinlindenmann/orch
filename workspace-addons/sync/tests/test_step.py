@@ -229,16 +229,17 @@ def test_tree_refuses_artifact_without_valid_owner(root, owner):
 
 
 @pytest.mark.parametrize('value', [ticket(general=True, unknownfield='x'), ticket(general=True)])
-def test_general_ticket_untracks_existing_folder(root, value):
+def test_general_ticket_preserves_existing_folder(root, value):
     configure(root)
     save(root)
     for n in range(7):
         save(root, f'tickets/t_abc123/artifacts/{n}.txt', b'local')
     success(root)
+    before = step.entries(root, 'HEAD')
     save(root, value=value)
-    success(root)
-    assert tracked(root) == set()
-    assert not repo.git(root, 'ls-files').stdout
+    assert 'Ticket t_abc123 has a problem and was not synced' in str(success(root)['skipped'])
+    assert step.entries(root, 'HEAD') == before
+    assert set(repo.git(root, 'ls-files').stdout.decode().splitlines()) == set(before)
     assert (root / '.orch/tickets/t_abc123/artifacts/0.txt').read_bytes() == b'local'
 
 
