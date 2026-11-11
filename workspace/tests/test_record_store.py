@@ -86,7 +86,21 @@ def test_ids(store, case):
     value.pop("id")
     if case["tool_call_id"] is not None:
         value["id"] = case["tool_call_id"]
+    else:
+        value["via"] = (
+            "log"  # <run>:<seq> is the default id of a collector line; a hook line gets h_<run>:<seq>
+        )
     assert writer.append(value)["id"] == case["id"]
+
+
+@pytest.mark.parametrize("case", VECTORS["hook_default_id"])
+def test_hook_default_id_is_not_the_collector_id(store, case):
+    _, writer = store
+    for n in range(1, case["seq"]):
+        writer.append(event(run=case["run"], id=f"prefix{n}"))
+    value = event(run=case["run"])
+    value.pop("id")
+    assert writer.append(value)["id"] == case["hook"] != case["collector"]
 
 
 @pytest.mark.parametrize("case", [c for c in VECTORS["detail_names"] if c["kind"] == "step"])

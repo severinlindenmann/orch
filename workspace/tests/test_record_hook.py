@@ -5,6 +5,7 @@ import io
 import json
 import os
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,10 @@ def line(**kw):
     value = {"kind": "step", "id": "toolu_01X", "text": "Read a.pdf", "used": USED, "outcome": None}
     value.update(kw)
     return json.dumps(value)
+
+
+def lost_notes(root):
+    return "".join(p.read_text() for p in (root / ".orch/record/alerts").glob("hook-lost-*.jsonl"))
 
 
 def events(root, run):
@@ -87,7 +92,7 @@ def test_forged_events(live):
         with pytest.raises(record_hook.NotRecorded):
             record_hook.hook(root, forged)
     # bad ids and fields: the writer refuses, nothing is written
-    for bad in (line(id=5), line(agent="x y"), line(at="yesterday"), line(text="a\x00b")):
+    for bad in (line(id=5), line(agent="x y"), line(text="a\x00b")):
         with pytest.raises(record.RecordRefused):
             record_hook.hook(root, bad)
     assert record.read_run(root, run).status == "unavailable"
@@ -105,7 +110,7 @@ def test_run_namespace_ids_are_rehashed(live):
     root, run, _ = live
     got = record_hook.hook(root, line(id=f"{run}:7"))
     assert got["id"].startswith("x_") and len(got["id"]) == 34
-    assert record_hook.hook(root, line(id=None))["id"] == f"{run}:2"
+    assert record_hook.hook(root, line(id=None))["id"] == f"h_{run}:2"
 
 
 def test_no_run_env_is_a_plain_noop(proj, monkeypatch):
@@ -130,7 +135,7 @@ def test_run_must_be_live_and_match(live, monkeypatch, which):
         monkeypatch.setattr(runs, "state", lambda rec, at=None: "dead")
     with pytest.raises(record_hook.NotRecorded, match="not active"):
         record_hook.hook(root, line())
-    assert not (root / ".orch/record").exists()
+    assert not (root / ".orch/record/runs").exists()
 
 
 def test_no_hider_refuses_and_writes_nothing(proj, monkeypatch):
@@ -139,9 +144,10 @@ def test_no_hider_refuses_and_writes_nothing(proj, monkeypatch):
     monkeypatch.setenv("ORCH_RUN", rec["run"])
     monkeypatch.setenv("ORCH_TICKET", t["id"])
     monkeypatch.setattr(hider, "_registered", None)
-    with pytest.raises(record.RecordOff):
+    with pytest.raises(record_hook.NotRecorded, match="key hiding"):
         record_hook.hook(proj, line())
-    assert not (proj / ".orch/record").exists()
+    assert not (proj / ".orch/record/runs").exists()
+    assert "hider_off" in lost_notes(proj)
 
 
 def test_cli_never_blocks_the_agent_but_strict_refuses(live, monkeypatch, capsys):
@@ -273,3 +279,122 @@ def test_cli_hook_command_exit_zero(live, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(line(id="toolu_cli") + "\n"))
     assert cli.main(["record", "hook"]) == 0
     assert [e["id"] for e in events(root, run)] == ["toolu_cli"]
+
+
+def collector_line(run, tid, seq):
+    return dict(
+        json.loads(line(id=f"{run}:{seq}", used=USED)),
+        run=run,
+        ticket=tid,
+        via="log",
+        v=1,
+        session=None,
+        agent="main",
+        parent=None,
+        at="2026-11-16T09:12:05Z",
+        harness="claude",
+        coverage="full",
+        detail=None,
+    )
+
+
+def test_hook_default_id_never_takes_a_collector_id(live):
+    """H1: an id-less hook line must not pre-claim <run>:<seq>, the next collector line's id."""
+    root, run, tid = live
+    first = record_hook.hook(root, line(id=None))
+    assert first["id"] == f"h_{run}:1" and not first["id"].startswith(f"{run}:")
+    with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+        got = record.registered_writer(root).append(collector_line(run, tid, 2))
+    assert got is not None and got["id"] == f"{run}:2"  # the collector line is still written
+    assert [e["via"] for e in events(root, run)] == ["hook", "log"]
+    # a caller-sent id in the hook's own namespace is hashed like a run-namespace id
+    sent = record_hook.hook(root, line(id=f"h_{run}:9"))
+    assert sent["id"].startswith("x_")
+
+
+def test_call_from_outside_the_claims_process_tree_is_refused(proj, monkeypatch):
+    """H2: the same ORCH_RUN/ORCH_TICKET set by a process that is not inside the run writes nothing."""
+    import subprocess
+    import sys
+
+    t = tickets.create(proj, "Elsewhere", "human:t")
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=other.pid)
+        monkeypatch.setenv("ORCH_RUN", rec["run"])
+        monkeypatch.setenv("ORCH_TICKET", t["id"])
+        with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+            with pytest.raises(record_hook.NotRecorded, match="not from inside"):
+                record_hook.hook(proj, line())
+    finally:
+        other.kill()
+        other.wait()
+    assert not (proj / ".orch/record/runs").exists()
+    assert "other_run" in lost_notes(proj)
+
+
+def test_too_large_entry_still_leaves_an_audit_line(live, capsys):
+    """M1: never drop the line; the detail is what is lost."""
+    root, run, _ = live
+    big = io.StringIO("x" * (record_hook.MAX_LINE + 10))
+    record_hook.cli(root, big)
+    got = events(root, run)
+    assert len(got) == 1 and got[0]["kind"] == "step" and got[0]["detail"] is None
+    raw = (root / f".orch/record/runs/{run}.jsonl").read_text()
+    assert '"detail_lost":true' in raw.replace(" ", "")
+    assert capsys.readouterr().err == ""
+    # a big but readable line (4 MB payload) is also written, detail lost
+    payload = {"input": "i" * (4 * 1024**2), "output": "o"}
+    record_hook.cli(root, io.StringIO(line(id="toolu_big", payload=payload) + "\n"))
+    assert events(root, run)[-1]["id"] == "toolu_big"
+
+
+def test_lost_entries_leave_a_rate_limited_trace(live, proj):
+    root, run, _ = live
+    for _ in range(3):
+        with pytest.raises(record_hook.NotRecorded):
+            record_hook.hook(root, line(kind="run.state"))
+    with pytest.raises(record_hook.NotRecorded):
+        record_hook.hook(root, "not json")
+    rows = [json.loads(x) for x in lost_notes(root).splitlines()]
+    assert sorted((r["run"], r["reason"]) for r in rows) == [
+        (run, "invalid")
+    ]  # one per run and reason per minute
+    assert rows[0]["schema"] == "orch.record-lost/1" and set(rows[0]) == {
+        "v",
+        "schema",
+        "at",
+        "run",
+        "reason",
+    }
+    # a later minute writes again
+    record.note_lost(root, run, "invalid", now=datetime.now(UTC) + timedelta(minutes=2))
+    assert len(lost_notes(root).splitlines()) == 2
+
+
+def test_no_run_leaves_no_trace(proj, monkeypatch):
+    monkeypatch.delenv("ORCH_RUN", raising=False)
+    monkeypatch.delenv("ORCH_TICKET", raising=False)
+    with pytest.raises(record_hook.NotRecorded):
+        record_hook.hook(proj, line())
+    assert not (proj / ".orch/record").exists()
+
+
+def test_harness_and_time_come_from_the_process_not_the_caller(live):
+    root, run, _ = live
+    got = record_hook.hook(root, line(harness="codex", at="2001-01-01T00:00:00Z", coverage="full"))
+    assert got["harness"] in ("generic", "claude") and got["harness"] != "codex"
+    assert got["at"] != "2001-01-01T00:00:00Z"
+
+
+def test_every_failure_ends_quietly_unless_strict(live, monkeypatch, capsys):
+    root, run, _ = live
+
+    def boom(*a, **k):
+        raise OSError("disk exploded")
+
+    monkeypatch.setattr(record_hook, "hook", boom)
+    record_hook.cli(root, io.StringIO(line()))  # no exception
+    assert capsys.readouterr().err.startswith("orch: ")
+    with pytest.raises(record_hook.Refused):
+        record_hook.cli(root, io.StringIO(line()), strict=True)

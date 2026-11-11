@@ -5,10 +5,13 @@ line on stdin. It must be fast and must never get in the agent's way, so by defa
 says in one plain stderr line why nothing was recorded. What it never does:
 - write a kind the hook may not write (record.hook_entry_filter: no run.state, ask, task.*, key.use, job,
   session.input) or any `via` but "hook";
-- trust the caller for the run or the ticket: both come from ORCH_RUN / ORCH_TICKET and must name a live
-  claim that belong together (the rule of secretrun.require_run); a line naming another run is dropped;
+- trust the caller for the run, the ticket, the harness or the time: the run and ticket come from ORCH_RUN /
+  ORCH_TICKET and must name a live claim that belong together AND the calling process must be a descendant of
+  that claim's process (the wrapper or the agent), so a process outside the run cannot write into it by
+  setting the same variables; a line naming another run is dropped;
 - write when key hiding is not ready (no registered hider: nothing is written, never raw);
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
+A hook line that cannot be written leaves a short trace (record.note_lost) unless there was no run at all.
 --strict turns every "not recorded" into a refusal (exit 2) for scripts and tests.
 """
 
@@ -17,37 +20,26 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
 from orch import record
 from orch.errors import Refused
 
-MAX_LINE = 256 * 1024  # a larger payload is not read further
-_FIELDS = (
-    "id",
-    "kind",
-    "text",
-    "session",
-    "agent",
-    "parent",
-    "at",
-    "harness",
-    "coverage",
-    "used",
-    "outcome",
-    "data",
-)
+MAX_LINE = 8 * 1024 * 1024  # a larger payload is not read further; the line is still recorded, detail lost
+_FIELDS = ("id", "kind", "text", "session", "agent", "parent", "coverage", "used", "outcome", "data")
 _HARNESS = re.compile(r"[a-z][a-z0-9-]{0,31}")
 _BAD = "The record entry is not valid; nothing was recorded."
+_TOO_BIG = {"input": "x" * (1024**2 + 1), "output": ""}  # a detail over 1 MB: the writer marks detail_lost
 
 
 class NotRecorded(Exception):
-    """Nothing was written. `note` is the plain sentence for stderr."""
+    """Nothing was written. `note` is the plain sentence for stderr; `reason` is the trace code (or None)."""
 
-    def __init__(self, note: str):
+    def __init__(self, note: str, reason: str | None = None):
         super().__init__(note)
-        self.note = note
+        self.note, self.reason = note, reason
 
 
 def _ids(environ):
@@ -55,47 +47,110 @@ def _ids(environ):
     return (run, ticket) if run and ticket else None
 
 
+def _parents() -> dict[int, int] | None:
+    """pid -> parent pid for this machine, or None when it cannot be read (then nothing can be proven)."""
+    table: dict[int, int] = {}
+    pid = os.getpid()
+    if os.path.isdir("/proc/self"):
+        for _ in range(64):
+            try:
+                with open(f"/proc/{pid}/stat", "rb") as f:
+                    fields = f.read().rsplit(b")", 1)[1].split()
+                parent = int(fields[1])
+            except (OSError, ValueError, IndexError):
+                return table or None
+            table[pid] = parent
+            if parent <= 1 or parent in table:
+                break
+            pid = parent
+        return table
+    if os.name == "nt":
+        return None
+    try:
+        out = subprocess.run(
+            ["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=5, check=True
+        ).stdout
+        for row in out.splitlines():
+            a, b = row.split()
+            table[int(a)] = int(b)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return table
+
+
+def _ancestors() -> set[int] | None:
+    table = _parents()
+    if table is None:
+        return None
+    found, pid = {os.getpid()}, os.getpid()
+    while pid in table and table[pid] > 0 and table[pid] not in found:
+        pid = table[pid]
+        found.add(pid)
+    return found
+
+
 def require_run(root, ids) -> None:
-    """ORCH_RUN + ORCH_TICKET must name a live claim that belong together (secretrun's check)."""
-    from orch import secretrun
+    """ORCH_RUN + ORCH_TICKET must name a live claim (secretrun's check) and this process must be inside the
+    claim's process tree (its wrapper pid or its agent pid is an ancestor, with the recorded start time)."""
+    from orch import procs, runs, secretrun
 
     try:
-        secretrun.check_live_run(root, *ids)
+        rec = secretrun.check_live_run(root, *ids)
     except Refused:
-        raise NotRecorded("This run is not active, so nothing was recorded.") from None
+        raise NotRecorded("This run is not active, so nothing was recorded.", "not_active") from None
+    mine = _ancestors()
+    if mine is not None:
+        for pid_key, started_key in (("pid", "pid_started"), ("agent_pid", "agent_pid_started")):
+            pid = rec.get(pid_key)
+            if isinstance(pid, int) and pid in mine:
+                started = rec.get(started_key)
+                now = procs.pid_started(pid) if started else None
+                if not (started and now and not runs.same_start(now, started)):
+                    return
+        raise NotRecorded("This call is not from inside that run, so nothing was recorded.", "other_run")
+    raise NotRecorded("Cannot tell where this call comes from, so nothing was recorded.", "not_provable")
 
 
 def _parse(text: str) -> dict:
-    if len(text) > MAX_LINE:
-        raise NotRecorded("The record entry is too large; nothing was recorded.")
     try:
         value = json.loads(text)
     except (ValueError, RecursionError):
-        raise NotRecorded(_BAD) from None
+        raise NotRecorded(_BAD, "invalid") from None
     if not isinstance(value, dict):
-        raise NotRecorded(_BAD)
+        raise NotRecorded(_BAD, "invalid")
     return value
+
+
+def _minimal() -> dict:
+    """The audit line of a payload too large to read: the fact that a tool call happened, detail lost."""
+    return {
+        "kind": "step",
+        "text": "A tool call (its entry was too large to keep)",
+        "used": {"kind": "tool", "name": "unknown", "action": None, "source": "harness", "version": None},
+    }
 
 
 def _event(raw: dict, ids, tool) -> tuple[dict, dict | None]:
     for key, mine in (("run", ids[0]), ("ticket", ids[1])):
         if key in raw and raw[key] != mine:
-            raise NotRecorded("That entry belongs to another run; nothing was recorded.")
+            raise NotRecorded("That entry belongs to another run; nothing was recorded.", "other_run")
     try:
         filtered = record.hook_entry_filter(raw)  # kind allowed, via forced to hook
     except record.RecordRefused:
-        raise NotRecorded("This kind of record is not allowed here; nothing was recorded.") from None
+        raise NotRecorded(
+            "This kind of record is not allowed here; nothing was recorded.", "invalid"
+        ) from None
     harness = tool if isinstance(tool, str) and _HARNESS.fullmatch(tool) else "generic"
     event = {
         "session": None,
         "agent": "main",
         "parent": None,
-        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "harness": harness,
         "coverage": "full",
         "outcome": None,
         "text": "",
         **{k: filtered[k] for k in _FIELDS if k in filtered},
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),  # the caller's time is never kept
+        "harness": harness,  # nor its harness: it is the tool this process runs under
         "v": 1,
         "run": ids[0],
         "ticket": ids[1],
@@ -105,10 +160,10 @@ def _event(raw: dict, ids, tool) -> tuple[dict, dict | None]:
     if filtered["kind"] != "step":
         event.setdefault("used", None)  # only a step names the thing it used
     if event.get("id") is None:
-        event.pop("id", None)  # the writer assigns <run>:<seq>
+        event.pop("id", None)  # the writer assigns h_<run>:<seq>
     payload = raw.get("payload")
     if payload is not None and not (isinstance(payload, dict) and {"input", "output"} <= payload.keys()):
-        raise NotRecorded(_BAD)
+        raise NotRecorded(_BAD, "invalid")
     return event, payload
 
 
@@ -127,30 +182,48 @@ def _writer(root):
         raise record.RecordOff("Recording is off until key hiding is ready.") from None
 
 
-def hook(root, text: str, environ=None) -> dict | None:
+def hook(root, text: str, environ=None, *, too_large: bool = False) -> dict | None:
     """Record one event line; raises NotRecorded (or a RecordRefused) when nothing was written."""
     environ = os.environ if environ is None else environ
     ids = _ids(environ)
     if ids is None:
         raise NotRecorded("Not inside an orch run; nothing was recorded.")
-    raw = _parse(text)
-    from orch import tickets
+    try:
+        require_run(root, ids)
+        from orch import tickets
 
-    event, payload = _event(raw, ids, tickets.agent_tool())
-    require_run(root, ids)
-    return _writer(root).append(event, detail=payload)
+        if too_large:
+            event, payload = _event(_minimal(), ids, tickets.agent_tool())
+            payload = _TOO_BIG
+        else:
+            event, payload = _event(_parse(text), ids, tickets.agent_tool())
+        try:
+            writer = _writer(root)
+        except record.RecordOff:
+            raise NotRecorded("Recording is off until key hiding is ready.", "hider_off") from None
+        return writer.append(event, detail=payload)
+    except NotRecorded as e:
+        if e.reason:
+            record.note_lost(root, ids[0], e.reason)
+        raise
+    except record.RecordInvalid:
+        record.note_lost(root, ids[0], "invalid")
+        raise
 
 
 def cli(root, stream=None, strict: bool = False) -> None:
     """Exit 0 with one plain stderr line when nothing was recorded; with strict a Refused (exit 2) instead."""
     stream = sys.stdin if stream is None else stream
     try:
-        hook(root, stream.readline(MAX_LINE + 1))
+        text = stream.readline(MAX_LINE + 1)
+        hook(root, text, too_large=len(text) > MAX_LINE)
         return
     except NotRecorded as e:
         note = e.note
     except record.RecordRefused as e:
         note = str(e) or "Nothing was recorded."
+    except Exception:  # never get in the agent's way, whatever went wrong
+        note = "Nothing was recorded."
     if strict:
         raise Refused(note)
     sys.stderr.write(f"orch: {note}\n")

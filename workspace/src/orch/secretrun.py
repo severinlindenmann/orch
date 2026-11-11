@@ -57,8 +57,8 @@ def require_run(root, agent) -> None:
     check_live_run(root, *ids)
 
 
-def check_live_run(root, run, ticket) -> None:
-    """run and ticket name a live claim that belong together, or Refused (BAD_RUN)."""
+def check_live_run(root, run, ticket) -> dict:
+    """run and ticket name a live claim that belong together: the claim, or Refused (BAD_RUN)."""
     from orch import runs
 
     try:
@@ -68,6 +68,7 @@ def check_live_run(root, run, ticket) -> None:
         ok = False
     if not ok:
         raise Refused(BAD_RUN)
+    return rec
 
 
 def _record_event(root, ev):

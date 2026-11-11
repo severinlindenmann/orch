@@ -695,6 +695,38 @@ def _alert(ws, *, target, run, reason, seen_by):
     return alert
 
 
+LOST_REASONS = ("hider_off", "not_active", "other_run", "invalid", "too_large", "not_provable")
+
+
+def note_lost(ws, run, reason, *, now=None):
+    """A hook entry that could not be written leaves one short trace (orch.record-lost/1, no content), at most
+    one per run and reason per minute, in alerts/hook-lost-<day>.jsonl. Never raises."""
+    if reason not in LOST_REASONS or not isinstance(run, str) or not re.fullmatch(_RUN, run):
+        return
+    now = datetime.now(UTC) if now is None else now
+    stamp = now.isoformat().replace("+00:00", "Z")
+    try:
+        fd = _open(ws, ("alerts", f"hook-lost-{stamp[:10]}.jsonl"), "read_append", create_dirs=True)
+        try:
+            raw = _read_bytes(fd)
+            if len(raw) > 256 * 1024:
+                return
+            for line in raw.splitlines()[-200:]:
+                try:
+                    old = json.loads(line)
+                    if old["run"] == run and old["reason"] == reason:
+                        if timedelta(0) <= now - datetime.fromisoformat(old["at"]) < timedelta(minutes=1):
+                            return
+                except (ValueError, KeyError, TypeError):
+                    continue
+            note = dict(v=1, schema="orch.record-lost/1", at=stamp, run=run, reason=reason)
+            _write(fd, (_json(note) + "\n").encode())
+        finally:
+            _close(fd)
+    except (RecordTampered, RecordUnavailable):
+        pass  # a trace that cannot be stored is not worth failing the hook
+
+
 def _report(ws, error, target, run, seen_by):
     return ReadResult.from_error(error, ws, getattr(error, "target", target), run, seen_by)
 
@@ -872,7 +904,7 @@ class RecordWriter:
             raise RecordInvalid()
         eid = self.hider.hide_text(eid)
         if not default_id:
-            if event.get("via") == "hook" and re.fullmatch(_RUN + r":.*", eid):
+            if event.get("via") == "hook" and re.fullmatch(r"(?:h_)?" + _RUN + r":.*", eid):
                 eid = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + eid.encode()).hexdigest()[:32]
             elif not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", eid) or re.fullmatch(r"x_[0-9a-f]{32}", eid):
                 eid = _hash(eid)
@@ -933,7 +965,9 @@ class RecordWriter:
             previous, count, torn = _read_run_strict(self.workspace, run, fd)
             event = dict(event, seq=count + 1)
             if default_id:
-                event["id"] = f"{run}:{event['seq']}"
+                # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook
+                # line can never take the id of a collector line that is still to come (dedupe would drop it)
+                event["id"] = f"{'h_' if event.get('via') == 'hook' else ''}{run}:{event['seq']}"
                 if payload is not None:
                     wrapped = json.loads(payload)
                     wrapped["id"] = event["id"]

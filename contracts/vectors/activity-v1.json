@@ -1229,6 +1229,19 @@
   {
    "id": "r_abcdef:3",
    "stored": "x_bcd60fea08471a8c5c1552b1c17a316f"
+  },
+  {
+   "id": "h_r_abcdef:3",
+   "stored": "x_3b969c1eb5e8da6c6a203b61effb0f60"
+  }
+ ],
+ "hook_default_id": [
+  {
+   "run": "r_abcdef",
+   "seq": 3,
+   "collector": "r_abcdef:3",
+   "hook": "h_r_abcdef:3",
+   "about": "a hook line without an id gets h_<run>:<seq>, never <run>:<seq>, which only collectors use"
   }
  ]
 }
