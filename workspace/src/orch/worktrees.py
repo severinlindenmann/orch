@@ -321,10 +321,15 @@ def _remember_copies(root: Path, folder: Path) -> None:
         _save_copies_store(home, key, counter, known)
 
 
-def _known_gone(d: Path) -> bool:
-    """The marker agrees with a signed historical identity, and that workspace is gone."""
+def _known_gone(d: Path, known: dict | None = None) -> bool:
+    """The marker agrees with a signed historical identity, and that workspace is gone. `known`: the store
+    already read by a caller that holds the copies-state lock (so this does not take that lock again)."""
     try:
-        main = _known_main(d.parent, d.name)
+        if known is None:
+            main = _known_main(d.parent, d.name)
+        else:
+            entry = known.get(d.name)
+            main = entry["main"] if entry is not None else None
         if main is None:
             return False
         owner = d / ".owner"
@@ -1708,7 +1713,7 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
             with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
                 key = _copies_key(base.parent)
                 counter, known = _copies_store(base.parent, key)
-                if ws8 not in known or not _known_gone(d):
+                if ws8 not in known or not _known_gone(d, known):
                     raise Refused("The copies identity changed. Nothing more was removed.")
                 try:
                     with contextlib.suppress(FileNotFoundError):

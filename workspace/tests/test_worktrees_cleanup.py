@@ -1,6 +1,7 @@
 """B12: copies are always taken back (remove, sweep, pending list, branches, agent traces). DATA-LOSS CLASS:
 the decoy tests prove that nothing but this workspace's own, exactly-named copies is ever deleted."""
 
+import contextlib
 import json
 import os
 import subprocess
@@ -1529,3 +1530,28 @@ def test_task_f_orphan_store_save_failure_returns_note(repo, monkeypatch):
     assert not d.exists()
     assert len(notes) == 1
     assert d.name in notes[0] and "simulated registry write failure" in notes[0]
+
+
+def test_remove_orphaned_does_not_nest_the_copies_state_lock(repo, monkeypatch):
+    """Opus: a nested lock take released the outer lock early, so the store save ran unlocked."""
+    main = repo.parent / "gone-nest"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    held = []
+    real = worktrees.runs.locked
+
+    @contextlib.contextmanager
+    def spy(root, name, *a, **k):
+        if "copies-state" in str(root):
+            assert not held, "nested copies-state lock"
+            held.append(1)
+        try:
+            with real(root, name, *a, **k):
+                yield
+        finally:
+            if "copies-state" in str(root):
+                held.clear()
+
+    monkeypatch.setattr(worktrees.runs, "locked", spy)
+    assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
+    assert not d.exists()
