@@ -53,18 +53,12 @@
     if (min < 60) return min + ' min ago';
     return Math.floor(min / 60) + ' h ago';
   }
-  /* One stable colour per agent: Claude orange, Codex blue, others a colour from the name. */
+  /* One stable colour per agent, from its name (no agent tool is named here: the names live in the adapter data). */
+  const PALETTE = ['#d97745', '#3b82f6', '#8b5cf6', '#14a37f', '#d6478a', '#b88a1a'];
   function agentColor(name) {
-    const n = String(name || '').toLowerCase();
-    if (n.includes('claude')) return '#d97745';
-    if (n.includes('codex')) return '#3b82f6';
     let hash = 0;
-    for (const ch of n) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-    return 'hsl(' + (hash % 360) + ' 55% 45%)';
-  }
-  /* Why a live run waits before orch types into its window: the core's own words, only while the run runs. */
-  function holdText(v) {
-    return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+    for (const ch of String(name || '').toLowerCase()) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    return PALETTE[hash % PALETTE.length];
   }
   root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, attentionText, pickerLine, fileIcon, ago, agentColor, holdText};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
