@@ -502,7 +502,9 @@ def _gone_folder(repo, ws8="aaaaaaaa", owner="/nonexistent/workspace", old=True)
 
 
 def test_a_moved_project_keeps_its_copies_however_old_and_they_are_reported(repo):
-    d = _gone_folder(repo)
+    main = repo.parent / "moved-old"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
     notes = worktrees.sweep(repo)
     assert (d / "t_abcdef12" / "sub" / "f.txt").is_file() and not notes
     assert worktrees.orphaned(repo) == [{"ws8": "aaaaaaaa", "copies": 1}]
@@ -1145,7 +1147,9 @@ def remember_gone(repo, folder, main):
 def test_known_copy_record_is_created_outside_ws8_and_owner_must_agree(repo):
     p = make(repo)
     known = json.loads((p.parent.parent / ".known.json").read_text())
-    assert known == {addons.workspace_id(repo)[:8]: str(repo.resolve())}
+    entry = known[addons.workspace_id(repo)[:8]]
+    assert entry["main"] == str(repo.resolve())
+    assert len(entry["mac"]) == 64
     other = repo.parent / "gone-other"
     d = _gone_folder(repo, owner=str(other))
     remember_gone(repo, d, other)
@@ -1191,3 +1195,109 @@ def test_known_orphan_removal_only_trashes_ticket_folders_without_following_link
     assert moved == [d / "t_abcdef12"]
     assert (decoy / "keep").read_text() == "keep"
     assert (d / "t_12345678").is_symlink() and (d / "not-a-ticket").is_dir()
+
+
+@pytest.mark.parametrize("record", ["unsigned", "bad-signature", "replayed"])
+def test_review_forged_identity_cannot_remove_live_workspace(repo, record):
+    p = make(repo)
+    live = repo / "live-b"
+    (live / ".orch").mkdir(parents=True)
+    (live / ".orch" / ".local-id").write_text("bbbbbbbb" + "0" * 24)
+    missing = str(repo.parent / "missing-b")
+    d = _gone_folder(repo, ws8="bbbbbbbb", owner=missing)
+    path = d.parent / ".known.json"
+    known = json.loads(path.read_text())
+    known[d.name] = (
+        missing
+        if record == "unsigned"
+        else {"main": missing, "mac": "0" * 64}
+        if record == "bad-signature"
+        else known[p.parent.name]
+    )
+    path.write_text(json.dumps(known))
+    with pytest.raises(Refused):
+        worktrees.remove_orphaned(repo, d.name, discard=True)
+    assert (d / "t_abcdef12").is_dir()
+    assert worktrees.orphaned(repo) == []
+
+
+def test_review_unknown_owner_is_not_listed(repo):
+    _gone_folder(repo)
+    assert worktrees.orphaned(repo) == []
+
+
+def test_review_moved_workspace_refreshes_identity_and_owner(repo):
+    p = make(repo)
+    before = json.loads((p.parent.parent / ".known.json").read_text())
+    moved = repo.parent / "moved-project"
+    repo.rename(moved)
+    try:
+        worktrees._remember_copies(moved, p.parent)
+        assert (p.parent / ".owner").read_text().strip() == str(moved.resolve())
+        after = json.loads((p.parent.parent / ".known.json").read_text())
+        assert after[p.parent.name] != before[p.parent.name]
+        assert not worktrees._known_gone(p.parent)
+    finally:
+        moved.rename(repo)
+
+
+def test_review_deleted_orphan_forgets_signed_identity(repo):
+    main = repo.parent / "gone-review"
+    d = _gone_folder(repo, owner=str(main))
+    remember_gone(repo, d, main)
+    assert worktrees.orphaned(repo) == [{"ws8": d.name, "copies": 1}]
+    assert worktrees.remove_orphaned(repo, d.name, discard=True) == []
+    assert not d.exists()
+    assert d.name not in json.loads((d.parent / ".known.json").read_text())
+
+
+def test_review_retry_forged_gitdir_keeps_other_copys_lock(repo):
+    p, q = make(repo, 0), make(repo, 1)
+    lock = _stale_lock(q, 30)
+    (p / ".git").write_text((q / ".git").read_text())
+    worktrees.retry(repo, repo.tids[0])
+    assert lock.exists()
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_review_retry_bounds_remove_and_restores_deadline(repo, monkeypatch, raises):
+    make(repo)
+    previous = time.monotonic() + 1000
+    monkeypatch.setattr(worktrees._ctx, "deadline", previous, raising=False)
+    seen = []
+
+    def remove(root, ticket):
+        seen.append(worktrees._ctx.deadline)
+        if raises:
+            raise RuntimeError("remove failed")
+        return []
+
+    monkeypatch.setattr(worktrees, "_remove_locked", remove)
+    start = time.monotonic()
+    if raises:
+        with pytest.raises(RuntimeError, match="remove failed"):
+            worktrees.retry(repo, repo.tids[0])
+    else:
+        worktrees.retry(repo, repo.tids[0])
+    assert start + worktrees.SWEEP_BUDGET <= seen[0] <= time.monotonic() + worktrees.SWEEP_BUDGET
+    assert worktrees._ctx.deadline == previous
+
+
+@pytest.fixture(autouse=True)
+def _copies_test_home(monkeypatch):
+    from orch import humanproof
+
+    # Legacy proj fixtures live outside the fake account's .orch-test directory.
+    # Keep the real private-directory, file, and key checks on their isolated home.
+    monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
+
+
+def test_review_retry_linked_gitdir_keeps_lock(repo):
+    p = make(repo)
+    g = worktrees._gitdir_of(p)
+    lock = _stale_lock(p, 30)
+    alias = g.with_name("linked-copy")
+    alias.symlink_to(g, target_is_directory=True)
+    (p / ".git").write_text(f"gitdir: {alias}\n")
+    worktrees.retry(repo, repo.tids[0])
+    assert lock.exists()

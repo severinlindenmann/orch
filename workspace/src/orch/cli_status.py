@@ -177,6 +177,8 @@ def _copy_clean(args, root: Path) -> None:
     from orch import worktrees
 
     if args.sub == "remove-orphaned":
+        if not isinstance(args.ws8, str) or not worktrees._WS8.fullmatch(args.ws8):
+            raise Refused("That is not a copies folder.")
         who = humanproof.person_by(
             root,
             args,
@@ -191,6 +193,8 @@ def _copy_clean(args, root: Path) -> None:
         _out(args, {"notes": notes}, "\n".join(notes) or "Removed.")
         return
     if args.sub == "retry":
+        if not isinstance(args.ticket, str) or not worktrees._TID.fullmatch(args.ticket):
+            raise Refused("That is not a ticket id.")
         who = humanproof.person_by(
             root,
             args,

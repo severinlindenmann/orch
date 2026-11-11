@@ -25,12 +25,15 @@ The registry (.orch/run/worktrees.json, local, gitignored) says which copies orc
 when the
 workspace is the top): the agent starts in <path>/<sub>. `<ws8>/.owner` holds the workspace folder, for
 cleanup. The home-level worktrees/.known.json independently records the workspace path after verifying
-its id, so a forged .owner cannot authorize orphan removal.
+its id, signed with a home-level key in the guarded keys area. Neither a forged .owner nor an
+unsigned history entry can authorize orphan removal.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -45,7 +48,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from orch import adapters, addons, config, harness, runs, safegit, sharedfolder, tickets
+from orch import adapters, addons, config, harness, humanproof, runs, safegit, sharedfolder, tickets
 from orch.errors import Refused
 
 REGISTRY = Path(".orch") / "run" / "worktrees.json"
@@ -119,7 +122,7 @@ def copies_dir(root: Path) -> Path | None:
 
 
 def _known_copies(base: Path) -> dict:
-    """Orch-owned history outside the agent's ws8 folder; never inferred from .owner."""
+    """Untrusted history; only _known_main authenticates an entry, never .owner alone."""
     path = base / ".known.json"
     try:
         if path.is_symlink():
@@ -130,6 +133,57 @@ def _known_copies(base: Path) -> dict:
         return {}
 
 
+def _copies_key(home: Path, *, create: bool = False) -> bytes:
+    """Account/home key, independent of workspace ids and path bindings; never in a copy."""
+    guarded = humanproof.guarded_home(home)
+    if guarded.resolve() != home.resolve():
+        raise Refused("The copies record is outside the guarded home.")
+    humanproof.winacl.no_reparse(home)
+    if create:
+        home.mkdir(parents=True, exist_ok=True)
+    humanproof._check_dir(home)
+    d = home / "keys" / "copies"
+    if create:
+        humanproof._private_dir(d, home)
+    else:
+        humanproof._check_dir(d.parent)
+        humanproof._check_dir(d)
+    f = d / "identity.key"
+    with humanproof._key_lock(d) if create else contextlib.nullcontext():
+        try:
+            raw = humanproof._read_guarded(f)
+        except FileNotFoundError:
+            if not create:
+                raise
+            humanproof._write_private(f, secrets.token_hex(32) + "\n")
+            raw = humanproof._read_guarded(f)
+    key = bytes.fromhex(raw.decode("ascii").strip())
+    if len(key) != 32:
+        raise Refused("The copies identity key is damaged.")
+    return key
+
+
+def _copies_mac(key: bytes, ws8: str, main: str) -> str:
+    data = json.dumps(["orch.copies/1", ws8, main], ensure_ascii=True).encode("ascii")
+    return hmac.new(key, data, hashlib.sha256).hexdigest()
+
+
+def _known_main(base: Path, ws8: str, entry) -> str | None:
+    """Unsigned, altered or replayed entries are unknown, never deletion authority."""
+    if not isinstance(entry, dict) or not _WS8.fullmatch(ws8):
+        return None
+    main, mac = entry.get("main"), entry.get("mac")
+    if not isinstance(main, str) or not Path(main).is_absolute():
+        return None
+    if not isinstance(mac, str) or not re.fullmatch(r"[0-9a-f]{64}", mac):
+        return None
+    try:
+        expected = _copies_mac(_copies_key(base.parent), ws8, main)
+        return main if hmac.compare_digest(mac, expected) else None
+    except (OSError, ValueError, Refused):
+        return None
+
+
 def _remember_copies(root: Path, folder: Path) -> None:
     # Validate identity while the workspace exists; the record survives a move/deletion.
     if (addons.workspace_id(root) or "")[:8] != folder.name:
@@ -137,25 +191,30 @@ def _remember_copies(root: Path, folder: Path) -> None:
     with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
         known = _known_copies(folder.parent)
         main = str(root.resolve())
-        if folder.name in known and known[folder.name] != main:
+        old = _known_main(folder.parent, folder.name, known.get(folder.name))
+        if old is not None and old != main and os.path.lexists(old):
             raise Refused("Another workspace uses the same copy folder.")
-        known[folder.name] = main
+        key = _copies_key(folder.parent.parent, create=True)
+        known[folder.name] = {"main": main, "mac": _copies_mac(key, folder.name, main)}
+        if old is not None and old != main:
+            if _is_link(folder) or (folder / ".owner").is_symlink():
+                raise Refused("orch cannot use that folder for copies.")
+            runs._atomic(folder / ".owner", main + "\n")
         runs._atomic(folder.parent / ".known.json", json.dumps(known) + "\n")
 
 
 def _known_gone(d: Path) -> bool:
-    """The marker agrees with orch's historical identity proof, and that workspace is gone."""
+    """The marker agrees with a signed historical identity, and that workspace is gone."""
     try:
-        main = _known_copies(d.parent).get(d.name)
-        if not isinstance(main, str) or not Path(main).is_absolute():
+        main = _known_main(d.parent, d.name, _known_copies(d.parent).get(d.name))
+        if main is None:
             return False
         owner = d / ".owner"
         if owner.is_symlink() or owner.read_text(encoding="utf-8").strip() != main:
             return False
-        # An existing workspace with a different id is not proof of a missing workspace.
         if addons.workspace_id(Path(main)) is not None:
             return False
-        return not Path(main).exists()
+        return not os.path.lexists(main)
     except (OSError, ValueError, RuntimeError):
         return False
 
@@ -931,7 +990,7 @@ def _gitdir_of(want: Path) -> Path | None:
         if not line.startswith("gitdir:"):
             return None
         g = Path(line.split(":", 1)[1].strip())
-        return (g if g.is_absolute() else want / g).resolve()
+        return Path(os.path.abspath(g if g.is_absolute() else want / g))
     except (OSError, ValueError, RuntimeError):
         return None
 
@@ -1465,7 +1524,7 @@ def orphaned(root: Path) -> list[dict]:
         d = base / ent.name
         if not _WS8.fullmatch(ent.name) or _is_link(d) or not d.is_dir() or d == mine:
             continue
-        if _owner_workspace_here(d) is not False:
+        if not _known_gone(d):
             continue
         try:
             n = sum(1 for e in os.scandir(d) if _TID.fullmatch(e.name) and e.is_dir(follow_symlinks=False))
@@ -1530,7 +1589,11 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
             with contextlib.suppress(OSError):
                 (d / TRASH).rmdir()
                 (d / ".owner").unlink()
-                d.rmdir()
+                with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
+                    d.rmdir()
+                    known = _known_copies(base)
+                    known.pop(ws8, None)
+                    runs._atomic(base / ".known.json", json.dumps(known) + "\n")
     return notes
 
 
@@ -1562,12 +1625,28 @@ def retry(root: Path, ticket: str) -> list[str]:
                 try:
                     common = top / ".git"
                     wt = lock.parent
-                    if wt.parent.resolve() == (common / "worktrees").resolve() and not lock.is_symlink():
+                    expected = common / "worktrees" / wt.name
+                    backlink = wt / "gitdir"
+                    if (
+                        not _is_link(wt)
+                        and not _is_link(common / "worktrees")
+                        and wt == expected
+                        and lock.resolve() == expected.resolve() / "index.lock"
+                        and not lock.is_symlink()
+                        and not backlink.is_symlink()
+                        and Path(backlink.read_text(encoding="utf-8").strip()).resolve()
+                        == (want / ".git").resolve()
+                    ):
                         lock.unlink()
                         _log(root, f"{ticket}: removed a stale index.lock at a person's request")
                 except OSError as e:
                     raise Refused(f"The old lock file could not be removed: {e}") from None
-        notes = _remove_locked(root, ticket)
+        before = getattr(_ctx, "deadline", None)
+        _ctx.deadline = time.monotonic() + SWEEP_BUDGET
+        try:
+            notes = _remove_locked(root, ticket)
+        finally:
+            _ctx.deadline = before
     spawn_trash_clean(root)
     return notes
 

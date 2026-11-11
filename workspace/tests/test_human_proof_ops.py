@@ -2063,7 +2063,7 @@ def test_conn_grant_keys_are_exact_and_need_a_person(ws):
     [
         ("remove-orphaned", "deadbeef", []),
         ("remove-orphaned", "deadbeef:discard", ["--discard"]),
-        ("retry", "T-1", []),
+        ("retry", "t_abcdef12", []),
     ],
 )
 def test_copy_cleanup_requires_target_bound_person_proof(ws, run, monkeypatch, sub, target, extra):
@@ -2091,3 +2091,52 @@ def test_copy_cleanup_requires_target_bound_person_proof(ws, run, monkeypatch, s
     assert len(calls) == 1
     assert _cli(run, monkeypatch, proof, *argv)[0] == 2
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "sub,value",
+    [
+        ("remove-orphaned", "../deadbeef"),
+        ("remove-orphaned", "DEADBEEF"),
+        ("retry", "T-1"),
+        ("retry", "t_abcdef/../x"),
+    ],
+)
+def test_review_copy_invalid_target_never_requests_proof(ws, monkeypatch, sub, value):
+    from types import SimpleNamespace
+
+    from orch import cli_status
+
+    calls = []
+    monkeypatch.setattr(hp, "person_by", lambda *a, **kw: calls.append(a) or "human:pat")
+    args = SimpleNamespace(sub=sub, ws8=value, ticket=value, discard=False)
+    with pytest.raises(Refused):
+        cli_status._copy_clean(args, ws)
+    assert calls == []
+    assert hp.handoffs(ws) == []
+
+
+def test_copies_identity_key_survives_workspace_deletion(ws, monkeypatch):
+    from orch import addons, worktrees
+
+    wid = addons.workspace_id(ws, create=True)
+    home = hp.guarded_home(ws)
+    folder = home / "worktrees" / wid[:8]
+    folder.mkdir(parents=True)
+    (folder / ".owner").write_text(str(ws.resolve()))
+    worktrees._remember_copies(ws, folder)
+    keyfile = home / "keys" / "copies" / "identity.key"
+    assert keyfile.is_file()
+    assert keyfile.stat().st_mode & 0o777 == 0o600
+    assert keyfile.parent.stat().st_mode & 0o777 == 0o700
+    (ws / ".orch" / ".local-id").unlink()
+    (ws / ".orch").rmdir()
+    ws.rmdir()
+    other = ws.parent / "another-workspace"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    assert worktrees._known_gone(folder)
+    (folder / "t_abcdef12").mkdir()
+    assert worktrees.orphaned(other) == [{"ws8": wid[:8], "copies": 1}]
+    assert worktrees.remove_orphaned(other, wid[:8], discard=True) == []
+    assert not folder.exists()
