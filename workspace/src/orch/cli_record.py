@@ -20,8 +20,8 @@ from pathlib import Path
 from orch import record
 from orch.errors import Refused
 
-SUBCOMMANDS = ("tail", "query", "counts", "delete-detail")
-_BUILT = ("tail", "query", "counts")
+SUBCOMMANDS = ("tail", "query", "counts", "delete-detail", "hook")
+_BUILT = ("tail", "query", "counts", "hook")
 _RUN = re.compile(r"^r_[a-z0-9_]{6,32}$")
 _TICKET = re.compile(r"^t_[a-z0-9]{6,16}$")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
@@ -73,6 +73,8 @@ def add_parsers(sub, common) -> None:
     q.add_argument("--limit")
     q.add_argument("--after")
     q.add_argument("--detail")
+    h = r.add_parser("hook", parents=[common], help=argparse.SUPPRESS)
+    h.add_argument("--strict", action="store_true")
     c = r.add_parser("counts", parents=[common], help=argparse.SUPPRESS)
     c.add_argument("--days")
     c.add_argument("--from", dest="from_")
@@ -89,6 +91,11 @@ def dispatch(args, root: Path) -> bool:
         return False
     if not args.sub:
         raise Refused("`orch record` needs a subcommand. Subcommands: " + ", ".join(SUBCOMMANDS) + ".")
+    if args.sub == "hook":  # one event line on stdin from a live session's tool hook; never blocks the agent
+        from orch import record_hook
+
+        record_hook.cli(root, strict=args.strict)
+        return True
     if args.sub not in _BUILT:
         raise Refused(f"`orch record {args.sub}` is not built yet.")
     if not args.json:
