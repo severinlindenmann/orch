@@ -1302,3 +1302,23 @@ def test_own_junction_accepts_the_resolved_target(proj, monkeypatch):
     monkeypatch.setattr(type(target), "absolute", lambda self: proj / "alias" / "x")
     assert h._own_junction(base / "orch", target)
     assert seen == [base / "orch"]  # readlink on the junction; resolve() was only called on the target
+
+
+def test_fresh_init_disables_session_adoption(proj, run, new_ticket):
+    from orch import runs, tickets
+
+    assert not (proj / ".orch").exists()
+    assert run("init")[0] == 0
+    marker = proj / ".orch" / "run" / "own-sessions.adopted"
+    assert marker.is_file()
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    ticket["sessions"] = [{"id": "old", "agent": "agent", "host": runs.host()}]
+    tickets.save(proj, ticket)
+    assert tickets._own_sessions(proj) == []
+
+
+def test_init_preserves_legacy_adoption_eligibility(proj, run):
+    (proj / ".orch").mkdir()
+    assert run("init")[0] == 0
+    assert not (proj / ".orch" / "run" / "own-sessions.adopted").exists()

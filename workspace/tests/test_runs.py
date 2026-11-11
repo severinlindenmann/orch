@@ -610,3 +610,23 @@ def test_plan_first_with_done_when_does_not_say_then_start(proj):
     assert "Which step, and what should change?" in prompt
     plain = tickets.create(proj, "Other", "human:me", fields={"done_when": "x"})
     assert "then start" in runs.fresh_prompt(plain, []).lower()
+
+
+@pytest.mark.parametrize("sid", ["-x", "--help"])
+@pytest.mark.parametrize("agent,mode", [("claude", "oneshot"), ("claude", "live"), ("codex", "oneshot")])
+@pytest.mark.parametrize("owned", [False, True])
+def test_option_like_session_never_resumed(proj, new_ticket, sid, agent, mode, owned):
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    entry = {"id": sid, "agent": agent, "host": runs.host()}
+    ticket["sessions"] = [entry]
+    tickets.save(proj, ticket)
+    if owned:
+        path = proj / ".orch/run/own-sessions.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([entry | {"ticket_id": tid, "first_seen": tickets.now()}]))
+        path.with_name("own-sessions.adopted").write_text("{}")
+    plan = runs.plan(proj, tid, agent=agent, mode=mode, hooks_file=str(proj / "hooks.json"))
+    assert not plan["resumed"]
+    assert plan["session"] != sid
+    assert sid not in plan["argv"]

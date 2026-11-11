@@ -24,8 +24,9 @@ from pathlib import Path
 
 from orch import agentsdata, config
 from orch.errors import Refused
+from orch.session_ids import SESSION_ID_RE, valid_session_id
 
-SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$")
+SESSION_RE = SESSION_ID_RE
 _SESSION_ARG = re.compile(r"^(\{session\}|--[a-z][a-z0-9-]*=\{session\})$")
 _PLACEHOLDER = re.compile(r"\{(prompt|session|new_session|orch_hooks_file|allow)\}")
 _VERSION = re.compile(r"\d+(?:\.\d+)+\S*")
@@ -169,7 +170,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
         items = list(tpl)
     has_prompt = any("{prompt}" in i for i in items)
     sid = v.get("session")
-    if sid is not None and not SESSION_RE.match(str(sid)):
+    if sid is not None and not valid_session_id(sid):
         raise Refused("That session id cannot be passed to an agent.")
 
     def fill(item: str) -> str:
@@ -634,8 +635,10 @@ def transcript_exists(
     None = cannot tell (nothing declared, or the tool has no folder for this workspace at all, e.g. a path it
     names differently): orch then trusts the recorded id. False = the folder is there but not this session:
     resuming it would only fail with "no conversation found"."""
+    if not valid_session_id(sid):
+        return False  # an id orch would never record or resume: never "trust" it
     t = (load(name, root).get("session") or {}).get("transcript")
-    if not t or not SESSION_RE.match(sid or ""):
+    if not t:
         return None
     env = os.environ if environ is None else environ
     base = Path(env.get(t.get("dir_env") or "", "") or Path(env.get("HOME") or Path.home()) / t["home"])
@@ -672,7 +675,7 @@ def parse_session(name: str, output: str, root: Path | None = None) -> str | Non
             continue
         for key in ("thread_id", "session_id"):
             sid = ev.get(key)
-            if isinstance(sid, str) and SESSION_RE.match(sid):
+            if valid_session_id(sid):
                 return sid
     return None
 

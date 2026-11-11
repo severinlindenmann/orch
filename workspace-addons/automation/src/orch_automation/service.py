@@ -7,7 +7,6 @@ from __future__ import annotations
 import os
 import re
 import secrets
-import signal
 import subprocess
 import sys
 import time
@@ -112,16 +111,16 @@ def start(root: Path) -> int:
 
 def stop(root: Path) -> str:
     """ "stopped", "not running", or "not verified" (a pid file that is not our scheduler: nothing is signalled)."""
+    from orch.procs import stop_tree
+
     try:
-        had = runfiles.read_json(_dir(root) / "automation.json") is not None
+        rec = runfiles.read_json(_dir(root) / "automation.json")
     except RuntimeError:
         return "not verified"
-    pid = running_pid(root)
-    if not pid:
-        return "not verified" if had else "not running"
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        pass
+    if not rec:
+        return "not running"
+    if not stop_tree(rec.get("pid"), verified=lambda: _verified(root, rec) is not None):
+        runfiles.remove(_dir(root) / "automation.json")
+        return "not verified"
     runfiles.remove(_dir(root) / "automation.json")
     return "stopped"
