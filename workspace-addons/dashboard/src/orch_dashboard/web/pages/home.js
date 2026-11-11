@@ -47,7 +47,7 @@ function needRow(row, newest, questionCount = 1) {
   const question = array(t?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text;
   return h('div', {className:'card-row home-need', 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
     t ? ticketTitle(t, true) : h('h3', {}, clean(row.title)),
-    questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null, h('p', {}, clean(window.DashHelpers.plainWhy(question, 'The agent'))),
+    questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null, h('p', {}, clean(window.DashHelpers.plainWhy(question, 'The helper'))),
     actions, t ? parentLine(t) : null);
 }
 function startFailedRow(t, sf) {
@@ -89,7 +89,7 @@ let needsOpen = false;
 function needsFold(rows, count) {
   const oldest = rows.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))[0]?.row;
   const t = oldest && ticketOf(oldest.ticket);
-  const text = !oldest ? 'Some tickets did not start' : clean(window.DashHelpers.plainWhy(array(t?.questions).find(q => q.id === oldest.answer?.question)?.text || oldest.title || oldest.text, 'The agent'));
+  const text = !oldest ? 'Some tickets did not start' : clean(window.DashHelpers.plainWhy(array(t?.questions).find(q => q.id === oldest.answer?.question)?.text || oldest.title || oldest.text, 'The helper'));
   return h('div', {className:'card-row home-need needs-fold', 'data-key':'needs-fold'},
     h('div', {className:'row'}, h('p', {className:'grow'}, h('span', {className:'meta'}, 'Oldest · '), text), button('Show all', 'outline sm', () => { needsOpen = true; render(); })));
 }
@@ -105,7 +105,7 @@ function home() {
     return at && at.toDateString() === now().toDateString();
   })());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const agent = window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, state.runs?.[working[0]?.id]?.claim) : capitalise(name(state.runs?.[working[0]?.id]?.claim?.label || state.runs?.[working[0]?.id]?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'Agent'));
+  const agent = window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, state.runs?.[working[0]?.id]?.claim) : capitalise(name(state.runs?.[working[0]?.id]?.claim?.label || state.runs?.[working[0]?.id]?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'Helper'));
   const hour = now().getHours();
   const stopped = array(state.services).some(s => s.running === false);
   const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;

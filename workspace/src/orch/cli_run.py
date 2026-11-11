@@ -420,8 +420,10 @@ def dispatch(args, root: Path) -> bool:
 
 def after_command(args, root: Path, stdout_is_json: bool) -> None:
     """Runs after every command inside an agent run: the footer, on stderr only (stdout stays as it was)."""
-    if getattr(args, "cmd", None) == "run":
-        return
+    if getattr(args, "cmd", None) == "run" or (
+        getattr(args, "cmd", None) == "record" and getattr(args, "sub", None) == "hook"
+    ):
+        return  # the hook entry runs before every tool call and stays silent
     try:
         line = runs.footer(root, getattr(args, "by", None), getattr(args, "id", None))
     except Exception:  # a footer must never break the command it follows

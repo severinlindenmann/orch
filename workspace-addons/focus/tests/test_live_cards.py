@@ -75,7 +75,7 @@ def test_recommended_must_be_one_of_the_options():
 
 
 def test_api_live_lists_running_tickets_and_nothing_when_none_run(server, fake_orch):
-    assert json.loads(req(server, "GET", "/api/live")[1]) == {"cards": []}
+    assert json.loads(req(server, "GET", "/api/live")[1]) == {"cards": [], "same_file": []}
     ev = {
         "v": 1, "id": "toolu_1", "seq": 1, "run": "r_live0001", "agent": "main", "at": "2026-11-16T09:12:05Z",
         "ticket": TID, "via": "log", "kind": "step", "text": "Read the March report",

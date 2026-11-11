@@ -43,6 +43,7 @@ def _always_hangs(tmp_path, monkeypatch, ignore_term=True):
     f.write_text(
         "#!/bin/sh\n"
         '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'
+        '[ "$1" = "--version" ] && { echo "2.1.0 (Claude Code)"; exit 0; }\n'
         f"echo x >> {shlex.quote(str(calls))}\n"
         + ("trap '' TERM; " if ignore_term else "")
         + "sleep 30; exit 0\n"

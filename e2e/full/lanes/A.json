@@ -410,7 +410,7 @@
   },
   {
    "id": "A12",
-   "name": "Settings tabs: General, Agent, Add-ons",
+   "name": "Settings tabs: General, Helper, Add-ons",
    "page": "settings",
    "expect": "each tab shows its page",
    "actions": [
@@ -420,7 +420,7 @@
     },
     {
      "do": "click",
-     "sel": "role=tab[name='Agent']"
+     "sel": "role=tab[name='Helper']"
     },
     {
      "do": "wait",
@@ -901,6 +901,14 @@
      "sel": "[aria-label='Share with team']"
     },
     {
+     "do": "expect_text",
+     "text": "Your team will see that this workspace uses orch."
+    },
+    {
+     "do": "click",
+     "sel": "[data-key='settings-review-ok']"
+    },
+    {
      "do": "wait",
      "ms": 1500
     },
@@ -911,6 +919,10 @@
     {
      "do": "click",
      "sel": "[aria-label='Share with team']"
+    },
+    {
+     "do": "click",
+     "sel": "[data-key='settings-review-ok']"
     },
     {
      "do": "wait",
@@ -946,7 +958,7 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add your own agent')"
+     "sel": "button:has-text('Add your own helper')"
     },
     {
      "do": "click",
@@ -954,7 +966,7 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add your own agent')"
+     "sel": "button:has-text('Add your own helper')"
     },
     {
      "do": "fill",
@@ -992,7 +1004,7 @@
     },
     {
      "do": "click",
-     "sel": "button:has-text('Add agent')"
+     "sel": "button:has-text('Add helper')"
     },
     {
      "do": "wait",
@@ -1180,7 +1192,7 @@
     },
     {
      "do": "click",
-     "sel": "role=tab[name='Agent']"
+     "sel": "role=tab[name='Helper']"
     },
     {
      "do": "click_all_census",
