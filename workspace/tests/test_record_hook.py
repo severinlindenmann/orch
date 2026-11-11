@@ -650,3 +650,37 @@ def test_a_chat_helper_records_only_into_its_own_run(proj, monkeypatch):
             proj
         )  # the env is the same-user boundary; the process-tree proof still applies
     assert [e["id"] for e in events(proj, own)] == ["toolu_own"]
+
+
+def test_a_held_run_lock_spools_the_hook_line_within_two_seconds(live):
+    """A PreToolUse hook must never freeze the agent: a busy lock waits 1 s, then the line is spooled."""
+    root, run, _ = live
+    record_hook.hook(root, line(id="toolu_first"))  # the run file and folders exist
+    lock = root / ".orch/record/runs" / f"{run}.lock"
+    fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)  # somebody else's fresh lock
+    try:
+        t0 = time.perf_counter()
+        got = record_hook.hook(root, line(id="toolu_busy"))
+        elapsed = time.perf_counter() - t0
+    finally:
+        os.close(fd)
+        lock.unlink()
+    assert elapsed < 2 and got["pending"] is True and got["seq"] is None
+    assert len(list((root / ".orch/record/pending" / run).glob("*.json"))) == 1
+
+
+def test_helper_env_with_the_parent_claim_among_ancestors_writes_only_its_own_run(proj, monkeypatch):
+    """The claim comes from the environment (ORCH_RUN/ORCH_TICKET), not from whatever pid is an ancestor."""
+    gid = tickets.ensure_general(proj, "phone:Marco")
+    parent_t = tickets.create(proj, "Parent", "human:t")
+    parent = runs.claim(
+        proj, parent_t["id"], "agent:x", "claude", pid=os.getpid()
+    )  # this process: an ancestor
+    helper = runs.claim(proj, gid, "agent:helper", "claude", pid=os.getpid())
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ORCH_TICKET", gid)
+    monkeypatch.setenv("ORCH_RUN", helper["run"])
+    with hider.use_hider(hider.Hider({"deploy-key": SECRET})):
+        assert record_hook.hook(proj, line(id="toolu_h"))["run"] == helper["run"]
+    assert [e["id"] for e in events(proj, helper["run"])] == ["toolu_h"]
+    assert record.read_run(proj, parent["run"]).status == "unavailable"  # the parent's log is untouched

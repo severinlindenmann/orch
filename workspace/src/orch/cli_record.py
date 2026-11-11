@@ -128,8 +128,14 @@ def dispatch(args, root: Path) -> bool:
         raise Refused("`orch record` needs a subcommand. Subcommands: " + ", ".join(SUBCOMMANDS) + ".")
     if args.sub == "hook":  # one event line on stdin from a live session's tool hook; never blocks the agent
         # reached only by a form hook_main does not take (a global flag before `record`): same exit-0 rule
-        if _run_hook(lambda: root, args.strict):
-            raise Refused("Nothing was recorded.")
+        from orch import workcheck
+
+        timer = workcheck.start_watchdog()
+        try:
+            if _run_hook(lambda: root, args.strict, before_write=timer.cancel):
+                raise Refused("Nothing was recorded.")
+        finally:
+            timer.cancel()
         return True
     if args.sub not in _BUILT:
         raise Refused(f"`orch record {args.sub}` is not built yet.")

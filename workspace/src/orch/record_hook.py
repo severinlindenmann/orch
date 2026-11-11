@@ -31,6 +31,9 @@ import time
 from orch import record
 from orch.errors import Refused
 
+LOCK_WAIT = (
+    1.0  # seconds: a busy run lock spools the line at once (a PreToolUse hook must not freeze the agent)
+)
 MAX_LINE = 8 * 1024 * 1024  # a larger payload is not read further; the line is still recorded, detail lost
 _FIELDS = ("id", "kind", "text", "session", "agent", "parent", "coverage", "used", "outcome", "data")
 _HARNESS = re.compile(r"[a-z][a-z0-9-]{0,31}")
@@ -194,6 +197,7 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
     ids = _ids(environ)
     if ids is None:
         raise NotRecorded("Not inside an orch run; nothing was recorded.")
+    # require_run, _parse and _event below never write; the first write is behind before_write
     try:
         require_run(root, ids)
     except NotRecorded as e:  # the caller is not proven: the claimed run id is its word, so nothing under it
@@ -214,7 +218,7 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
             writer = _writer(root)
         except record.RecordOff:
             raise NotRecorded("Recording is off until key hiding is ready.", "hider_off") from None
-        return writer.append(event, detail=payload)
+        return writer.append(event, detail=payload, lock_wait=LOCK_WAIT)
     except NotRecorded as e:
         if e.reason:
             before_write()

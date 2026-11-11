@@ -938,11 +938,11 @@ def test_27_retention_rechecks_under_lock(store, monkeypatch):
     thread = threading.Thread(target=append_late)
 
     @contextmanager
-    def late(workspace, run):
+    def late(workspace, run, wait=None):
         if threading.current_thread() is not thread:
             barrier.wait(timeout=2)
             assert done.wait(timeout=2)
-        with real(workspace, run) as check_lock:
+        with real(workspace, run, wait) as check_lock:
             yield check_lock
 
     monkeypatch.setattr(record, "_lock", late)
