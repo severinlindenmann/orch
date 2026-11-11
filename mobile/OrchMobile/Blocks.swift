@@ -132,7 +132,8 @@ enum BlockRow {
 enum BlocksFormat {
     nonisolated(unsafe) private static let formatter: NumberFormatter = {
         let f = NumberFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
-        f.numberStyle = .decimal; f.groupingSeparator = " "; f.maximumFractionDigits = 12
+        // Plain digits, no grouping: same as the web kit (String(n)), so web and phone show the same numbers.
+        f.numberStyle = .decimal; f.usesGroupingSeparator = false; f.maximumFractionDigits = 12
         return f
     }()
     static func number(_ value: Double) -> String {

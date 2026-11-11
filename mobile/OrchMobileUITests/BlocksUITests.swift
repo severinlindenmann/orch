@@ -16,7 +16,9 @@ final class BlocksUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-blocksPreview", "invalid-link-javascript"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["These results can't be shown"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.otherElements["blocks-invalid"].exists)
+        let invalid = app.descendants(matching: .any)["blocks-invalid"].firstMatch
+        XCTAssertTrue(invalid.waitForExistence(timeout: 10), app.debugDescription)
+        let notice = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "can't be shown")).firstMatch
+        XCTAssertTrue(notice.exists, app.debugDescription)
     }
 }

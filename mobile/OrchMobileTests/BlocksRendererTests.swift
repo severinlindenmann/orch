@@ -90,7 +90,7 @@ final class BlocksRendererTests: XCTestCase {
             ["type": "file", "path": "reports/output.csv", "size": 1024]
         ])
         guard case .shown(let shown) = BlocksResult.decode(doc) else { return XCTFail("Valid document") }
-        for text in ["12 of 40 files", "1 204", "1 m 5 s", "1 of 2 000 rows", "output.csv", "1 KB"] {
+        for text in ["12 of 40 files", "1204", "1 m 5 s", "1 of 2000 rows", "output.csv", "1 KB"] {
             XCTAssertTrue(shown.texts.contains(text), text)
         }
     }
