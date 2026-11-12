@@ -138,8 +138,10 @@ def _write_record(root, ev):
     if _run_ids() is None:  # a script cannot grow the unattributed run without bound
         read = record.read_run(root, line["run"], seen_by="writer")
         # verified lines only (a planted line can neither raise nor lower it); a legacy run is not counted
-        own = [e for e in read.value or [] if record.is_sealed(e, legacy=read.legacy)]
-        if read.status == "ok" and len(own) >= OUTSIDE_DAY_CAP:
+        own = [e for e in read.value or [] if record.is_sealed(e)]
+        fresh = read.status == "unavailable" and read.reason == "missing"  # nothing recorded yet today
+        # anything else that is not a clean read counts as the cap reached (fail closed)
+        if (read.status != "ok" and not fresh) or len(own) >= OUTSIDE_DAY_CAP:
             raise Refused("Refused: too many key uses outside a run today.")
     record_writer(root).append(line)
 

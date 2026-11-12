@@ -48,6 +48,7 @@ CORE = {
     "_unlink",
     "_write_new",
     "_size",
+    "_mtime_iso",
     "_rmtree",
     "_rename_aside",
     "_rmdir_empty",
@@ -235,6 +236,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "humanproof.record_rejects_bump",
     "humanproof.record_rejects_read",
     "name.startswith",
+    "run.get",
+    "raw.split",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",

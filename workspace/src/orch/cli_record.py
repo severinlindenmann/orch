@@ -396,7 +396,7 @@ def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False, tell
             # `checked` is computed, never stored: a hook line is the agent's word, and every line of a run
             # made before orch checked it is unchecked too
             out[run] = [
-                {**e, "checked": record.is_checked(e, legacy=result.legacy)}
+                {**e, "checked": record.is_checked(e)}
                 for e in result.value
                 if ticket is None or e.get("ticket") == ticket
             ]
@@ -628,7 +628,7 @@ def _detail(root: Path, args) -> dict:
         raise RecordError(str(record.RecordTampered("swapped")), "tampered")
     # computed in this one place, never stored: a detail of a line made before orch checked it is not checked
     # (the line's own marker too: a detail written by the hook entry is the agent's word)
-    own = record.is_checked(line, legacy=result.legacy) and detail.reason != "unchecked"
+    own = record.is_checked(line) and detail.reason != "unchecked"
     return {**detail.value, "checked": own}
 
 

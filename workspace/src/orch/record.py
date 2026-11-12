@@ -546,15 +546,32 @@ def _rmtree(ws, rel):
         os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
 
 
-def _rename_aside(ws, rel):
-    """Rename one entry (of any kind, a link is not followed) to a hidden name in its own folder, atomically,
-    so that nothing reads or walks it again. No recursion, nothing is deleted."""
+def _mtime_iso(ws, rel):
+    """When the file was last written (UTC, whole seconds), or None when there is no such file."""
+    try:
+        fd = _open(ws, rel, "read")
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            raise
+        return None
+    try:
+        with _io():
+            stamp = os.fstat(fd).st_mtime
+    finally:
+        _close(fd)
+    return datetime.fromtimestamp(stamp, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _rename_aside(ws, rel, run):
+    """Move one entry (of any kind, a link is not followed) out of pending/<run>/ into quarantine/<run>/ (a
+    folder only orch writes and nothing reads), atomically, under a name orch makes. No recursion, nothing is
+    deleted, and the entry can no longer be mistaken for a spool entry."""
     _parts(rel)
-    aside = ".quarantine_" + uuid.uuid4().hex
-    with _walk(ws, rel[:-1]) as directory:
-        kw = {"src_dir_fd": directory.fd, "dst_dir_fd": directory.fd} if _FD else {}
-        src = rel[-1] if _FD else directory.path / rel[-1]
-        dst = aside if _FD else directory.path / aside
+    aside = "q_" + uuid.uuid4().hex
+    with _walk(ws, ("quarantine", run), create=True) as target, _walk(ws, rel[:-1]) as source:
+        kw = {"src_dir_fd": source.fd, "dst_dir_fd": target.fd} if _FD else {}
+        src = rel[-1] if _FD else source.path / rel[-1]
+        dst = aside if _FD else target.path / aside
         with _io():
             os.rename(src, dst, **kw)
 
@@ -896,6 +913,13 @@ def _verified(workspace, run, raw) -> _View:
         view.changed += view.rejected
         return view
     old, _skipped = _legacy_parse_prefix(pre, run)
+    gone = 0
+    if (head or {}).get("legacy_lines") and not pre:
+        first = next((x for x in raw.split(b"\n") if x), b"")
+        if (
+            record_auth.split(first) is not None
+        ):  # the file now starts with a sealed line: the old ones are gone
+            gone = head["legacy_lines"]
     # two counters, never folded or deleted (so nothing can be lost or counted twice): the head's, and the
     # guarded one a run keeps from before its first head
     rejected = int((head or {}).get("rejected") or 0) + humanproof.record_rejects_read(workspace, run)
@@ -904,8 +928,11 @@ def _verified(workspace, run, raw) -> _View:
     return _View(
         verified.events,
         verified.changed + rejected,  # a refused spool entry is a change outside orch, though it is gone
-        verified.removed,
-        verified.reason or ("content" if rejected else None) or ("unchecked" if old else None),
+        verified.removed + gone,
+        verified.reason
+        or ("content" if rejected else None)
+        or ("removed" if gone else None)
+        or ("unchecked" if old else None),
         unchecked=len(old),
         last_seq=verified.last_seq,
         last_mac=verified.last_mac,
@@ -917,7 +944,7 @@ def _verified(workspace, run, raw) -> _View:
 def _legacy_view(raw, run):
     events, skipped = _legacy_parse(raw, run)
     return _View(
-        events,
+        [dict(e, before_protection=True) for e in events],  # every line of a legacy run is tagged: one rule
         changed=0,  # unreadable lines of a legacy run are part of "not checked", not a change
         reason="unchecked" if events or skipped else None,
         legacy=True,
@@ -925,6 +952,7 @@ def _legacy_view(raw, run):
     )
 
 
+_SPOOL_MAX_BYTES = 3 * 1024**2  # one line (8 KB), its detail (1 MB) and the escaping of both
 _SPOOL_NAME = re.compile(r"\d{20}_[0-9a-f]{32}\.json")
 _ALERTED = set()
 
@@ -1321,7 +1349,7 @@ def read_detail(workspace, run, file_id, *, line_id, ticket=None):
         lines = [e for e in view.value if e.get("id") == line_id and e.get("detail") == point]
         if not lines:
             raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
-        unchecked = not is_sealed(lines[-1], legacy=view.legacy)
+        unchecked = not is_sealed(lines[-1])
         want = None
         if not unchecked:
             want = lines[-1].get("detail_hash")
@@ -1759,7 +1787,7 @@ class RecordWriter:
                 _unlink(self.workspace, rel)
         except (RecordTampered, RecordUnavailable, RecursionError):
             try:
-                _rename_aside(self.workspace, rel)
+                _rename_aside(self.workspace, rel, run)
             except (RecordTampered, RecordUnavailable, RecursionError) as error:
                 if isinstance(error, RecursionError):
                     return
@@ -1809,12 +1837,13 @@ class RecordWriter:
         for name in sorted(names):
             check_lock()
             rel = ("pending", run, name)
-            if name.startswith(".quarantine_"):
-                continue  # renamed aside by _reject: nothing reads it
             if not _SPOOL_NAME.fullmatch(name):  # orch never names an entry so: left, alerted, not counted
                 _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
                 continue
             try:
+                if _size(self.workspace, rel) > _SPOOL_MAX_BYTES:
+                    self._reject(run, rel, check_lock)  # orch never spools more than a line and its detail
+                    continue
                 pending = _read_json(self.workspace, rel)
             except (RecordTampered, RecordUnavailable) as error:
                 _report(self.workspace, error, "folder", run, "writer")
@@ -1908,17 +1937,20 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
     plan: dict[str, list[str]] = dict(fold_first=[], delete_detail=[], delete_run=[])
     cutoff = datetime.fromisoformat(now) - timedelta(days=keep_days)
     ended = sorted((r for r in runs if r["ended"]), key=lambda r: datetime.fromisoformat(r["ended"]))
-    total = sum(r["detail_mb"] + r["file_mb"] for r in runs)
+    # a run orch cannot check (legacy, unverified: `counted` false) is pruned only by age, and its size never
+    # counts toward max_mb: planted big files must not push genuine runs out
+    total = sum(r["detail_mb"] + r["file_mb"] for r in runs if r.get("counted", True))
     for run in ended:
         if datetime.fromisoformat(run["ended"]) < cutoff:
             plan["delete_detail"].append(run["run"])
             plan["delete_run"].append(run["run"])
-            total -= run["detail_mb"] + run["file_mb"]
+            if run.get("counted", True):
+                total -= run["detail_mb"] + run["file_mb"]
     for field, size in (("delete_detail", "detail_mb"), ("delete_run", "file_mb")):
         for run in ended:
             if total <= max_mb:
                 break
-            if run["run"] not in plan[field] and run[size] > 0:
+            if run.get("counted", True) and run["run"] not in plan[field] and run[size] > 0:
                 plan[field].append(run["run"])
                 total -= run[size]
     plan["fold_first"] = plan["delete_run"].copy()
@@ -2207,18 +2239,18 @@ def _ended_run(run, events, now):
     return f"{end:%Y-%m-%dT%H:%M:%SZ}" if over else None
 
 
-def is_sealed(line, *, legacy=False) -> bool:
+def is_sealed(line) -> bool:
     """The ONE definition of "orch verified this line": it is a line of a run read through the verified view,
     not a line of a legacy run and not one made before protection. What retention, caps, counts and run state
     may believe (a hook line is sealed too: it is verified to be the hook entry's, see is_checked)."""
-    return not (legacy or line.get("before_protection"))
+    return not line.get("before_protection")
 
 
-def is_checked(line, *, legacy=False) -> bool:
+def is_checked(line) -> bool:
     """The ONE definition of the computed `checked` marker (never stored): True only for a sealed, verified
     line that is not a hook line (a verified `via: hook` line is still the agent's word). Every screen,
     count and detail that shows or reads a trust marker uses this and nothing else."""
-    return is_sealed(line, legacy=legacy) and line.get("via") != "hook"
+    return is_sealed(line) and line.get("via") != "hook"
 
 
 def _own(events):
@@ -2232,6 +2264,20 @@ def _tombstone(workspace, run, now):
     if head is None and humanproof.record_head_state(workspace, run) != "present":
         return
     humanproof.record_head_try_write(workspace, run, dict(head or {"seq": 0}, pruned=now))
+
+
+def _retention_end(workspace, run, read, now):
+    """(when the run ended, whether its size counts toward max_mb), or None when retention must leave it.
+    A checked run ends with its checked core run.state. A run orch cannot check (a legacy run, or one whose
+    records are unverified or from before a protection reset) ends when its file was last written: it is
+    pruned once that is older than keep_days, and its size never counts toward max_mb."""
+    if read.status == "ok" and not read.legacy:
+        return _ended_run(run, _own(read.value), now), True
+    if (read.status == "ok" and read.legacy) or (
+        read.status == "tampered" and read.reason in ("unverified", "old_key")
+    ):
+        return _mtime_iso(workspace, ("runs", run + ".jsonl")), False
+    return None
 
 
 def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list[dict]], Any]):
@@ -2251,14 +2297,20 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
     runs = []
     for run in listed.value:
         read = read_run(workspace, run, seen_by="retention")
-        if read.status != "ok":
+        try:
+            end = _retention_end(workspace, run, read, now)
+        except (RecordTampered, RecordUnavailable) as error:
+            failed(_report(workspace, error, "folder", run, "retention"))
+            continue
+        if end is None:
             failed(read)
             continue
         try:
             runs.append(
                 dict(
                     run=run,
-                    ended=None if read.legacy else _ended_run(run, _own(read.value), now),
+                    ended=end[0],
+                    counted=end[1],
                     detail_mb=_detail_parts(workspace, run, "retention")[1] / 1024**2,
                     file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
                     / 1024**2,
@@ -2272,13 +2324,14 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
         try:
             with _lock(workspace, run) as check_lock:
                 read = read_run(workspace, run, seen_by="retention")
-                if read.status != "ok":
+                end = _retention_end(workspace, run, read, now)
+                if end is None:
                     failed(read)
                     continue
                 if read.pending:
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
-                ended_now = None if read.legacy else _ended_run(run, _own(read.value), now)
+                ended_now = end[0]
                 if not ended_now or ended_now != snapshots[run]:
                     continue
                 # Check every deletion target before invoking the irreversible fold. In detail/<run> only the
@@ -2294,7 +2347,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 if _pending_count(workspace, run):
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
-                fold(run, _own(read.value))
+                fold(run, _own(read.value or []))
                 check_lock()
                 if _pending_count(workspace, run):
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
@@ -2306,9 +2359,9 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 if run in plan["delete_run"]:
                     check_lock()
                     _rmtree(workspace, ("jobs", run))
+                    _tombstone(workspace, run, now)  # first: a run file that is gone without it is `removed`
                     check_lock()
                     _unlink(workspace, ("runs", run + ".jsonl"))
-                    _tombstone(workspace, run, now)
                     result["delete_run"].append(run)
                     result["fold_first"].append(run)
         except RecordBusy:

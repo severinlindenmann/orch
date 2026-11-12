@@ -709,10 +709,11 @@ def test_a_deep_or_linking_planted_folder_in_pending_is_reported_never_walked_or
     (linking / "to_file").symlink_to(outside / "keep.txt")
     writer.append(example(id="toolu_4", at=at(4)))  # no crash
     assert (outside / "keep.txt").read_text() == "keep"  # nothing outside was touched
-    assert [p.name for p in d.iterdir() if p.name.startswith("0")] == []  # renamed aside, not in the spool
+    assert list(d.iterdir()) == []  # renamed aside, not in the spool
     assert record._pending_count(ws, RUN) == 0  # so retention is not blocked
     assert read_run(ws, RUN).changed == 2  # told: counted as changed outside orch
-    assert len([p for p in d.iterdir() if p.name.startswith(".quarantine_")]) == 2
+    q = record_dir(ws) / "quarantine" / RUN  # only orch writes there; nothing reads it
+    assert len(list(q.iterdir())) == 2 and all(p.name.startswith("q_") for p in q.iterdir())
 
 
 def test_nothing_recursive_ever_touches_pending():
@@ -778,3 +779,92 @@ def test_add_ons_that_read_record_lines_use_the_computed_checked_marker():
             seen += 1
             assert 'get("checked")' in text, p
     assert seen >= 1  # the Focus reader
+
+
+@pytest.mark.parametrize("kind", ["file", "folder", "symlink"])
+def test_a_planted_dot_or_quarantine_name_in_pending_alerts_like_any_other_odd_name(store, kind):
+    ws, writer = store
+    write3(writer)
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    odd = d / ".quarantine_x"
+    if kind == "file":
+        odd.write_text("x")
+    elif kind == "folder":
+        odd.mkdir()
+    else:
+        odd.symlink_to(ws / "nothing")
+    writer.append(example(id="toolu_4", at=at(4)))
+    alerts = "".join(p.read_text() for p in (record_dir(ws) / "alerts").glob("*.jsonl"))
+    assert '"reason":"swapped"' in alerts  # not skipped: an odd name in the spool folder is told
+    assert record._pending_count(ws, RUN) == 0
+
+
+def _mtime(path, iso):
+    t = time.mktime(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
+    os.utime(path, (t, t))
+
+
+def test_unchecked_runs_are_pruned_by_age_and_never_count_toward_the_size_cap(store):
+    ws, writer = store
+    _legacy_run(ws, writer)  # OTHER: legacy
+    write3(writer)  # RUN: checked
+    writer.append(
+        example(
+            run=RUN, id="r_end", kind="run.state", via="core", at=at(5), used=None, data={"state": "done"}
+        )
+    )
+    folds = []
+    now = "2027-03-01T00:00:00Z"
+    _mtime(runfile(ws, OTHER), "2027-02-20T00:00:00Z")  # written recently: kept, whatever its size
+    res = record.apply_retention(ws, now, 90, 2048, lambda r, es: folds.append((r, len(es))))
+    assert res["delete_run"] == [RUN] and runfile(ws, OTHER).exists()
+    _mtime(runfile(ws, OTHER), "2026-10-01T00:00:00Z")  # its file is older than keep_days: pruned
+    res = record.apply_retention(ws, now, 90, 2048, lambda r, es: folds.append((r, len(es))))
+    assert res["delete_run"] == [OTHER] and not runfile(ws, OTHER).exists() and (OTHER, 0) in folds
+
+
+def test_the_size_cap_ignores_runs_orch_cannot_check():
+    runs = [
+        dict(run="r_genuine1", ended="2026-12-01T00:00:00Z", detail_mb=0.0, file_mb=0.5, counted=True),
+        dict(run="r_planted1", ended="2026-12-02T00:00:00Z", detail_mb=0.0, file_mb=900.0, counted=False),
+    ]
+    plan = record.plan_retention(runs, "2026-12-10T00:00:00Z", 90, 1)
+    assert plan["delete_run"] == []  # the planted size did not push the genuine run out
+
+
+def test_a_pruned_run_gets_its_tombstone_before_the_file_goes(store, monkeypatch):
+    ws, writer = store
+    write3(writer)
+    writer.append(
+        example(id="r_end", kind="run.state", via="core", at=at(5), used=None, data={"state": "done"})
+    )
+    order = []
+    real = record._tombstone
+    monkeypatch.setattr(record, "_tombstone", lambda *a: (order.append(runfile(ws).exists()), real(*a)))
+    record.apply_retention(ws, "2030-01-01T00:00:00Z", 90, 2048, lambda r, es: None)
+    assert order == [True]  # the run file still existed when the tombstone was written
+
+
+def test_a_removed_legacy_prefix_is_counted_as_removed(store):
+    ws, writer = store
+    _legacy_run(ws, writer)
+    writer.append(example(run=OTHER, id="toolu_n", via="log", at=at(9)))
+    lines = runfile(ws, OTHER).read_bytes().splitlines(keepends=True)
+    runfile(ws, OTHER).write_bytes(b"".join(lines[2:]))  # both old lines deleted
+    r = read_run(ws, OTHER)
+    assert (r.removed, r.reason) == (2, "removed") and [e["id"] for e in r.unwrap()] == ["toolu_n"]
+
+
+def test_the_outside_day_cap_fails_closed_when_the_run_cannot_be_read(store, monkeypatch):
+    from orch import secretrun
+    from orch.errors import Refused
+
+    ws, writer = store
+    monkeypatch.setattr(secretrun, "_run_ids", lambda: None)
+    monkeypatch.setattr(secretrun, "require_run", lambda *a: None)
+    monkeypatch.setattr(secretrun, "_record_event", lambda root, ev: dict(example(run="r_outside_20261116")))
+    bad = record.ReadResult("tampered", reason="unverified", message="m")
+    monkeypatch.setattr(record, "read_run", lambda *a, **k: bad)
+    with pytest.raises(Refused, match="too many key uses"):
+        secretrun._write_record(ws, {})
