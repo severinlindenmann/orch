@@ -536,6 +536,17 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
     return {"shown": shown, "changed": changed, "removed": removed, "reason": reason}
 
 
+def ra_legacy(raw, head):
+    """Reference of record_auth.legacy_split + the head state: {mode, unchecked}. "unknown" is never legacy."""
+    if head == "unknown":
+        return {"mode": "unverified", "unchecked": 0}
+    lines = [x for x in raw.split(b"\n") if x]
+    sealed = [x for x in lines if len(x) > 125 and _RA_TAIL.search(x) and _RA_TAIL.search(x).start() == len(x) - 125]
+    if not sealed and head == "absent":
+        return {"mode": "legacy", "unchecked": len(lines)}
+    return {"mode": "sealed", "unchecked": 0}
+
+
 def ra_check(vec):
     """Replay vectors/activity-v1.json record_auth."""
     r = vec["record_auth"]
@@ -553,6 +564,9 @@ def ra_check(vec):
     for c in r["verify"]:
         raw = b"".join(bytes.fromhex(x) for x in c["lines"])
         _expect(f"activity record_auth verify {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"]), c["expect"])
+    for c in r["legacy"]:
+        raw = b"".join(bytes.fromhex(x) + b"\n" if not bytes.fromhex(x).endswith(b"\n") else bytes.fromhex(x) for x in c["lines"])
+        _expect(f"activity record_auth legacy {c['name']}", ra_legacy(raw, c["head"]), c["expect"])
     for c in r["job_streams"]:
         raw = b"".join(bytes.fromhex(x) for x in c["lines"])
         _expect(f"activity record_auth job {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], c["job"]), c["expect"])

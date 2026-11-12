@@ -445,3 +445,22 @@ def seal_lines(root, run, events, *, start=1, link=None):
         out += line
         prev = ra.split(line)[3]
     return out
+
+
+def seal_append(root, run, event):
+    """Append ONE sealed line to the run file as code that holds orch's key could (the Level 1 residual of the
+    record MAC): the next seq after the file's last sealed line, chained to it. For tests of what the readers
+    do with a line that verifies but is wrong in content (a pointer to another ticket's detail file, ...)."""
+    from orch import record
+    from orch import record_auth as ra
+
+    path = record.record_dir(root) / "runs" / f"{run}.jsonl"
+    raw = path.read_bytes() if path.exists() else b""
+    last = [x for x in raw.splitlines() if x][-1:]
+    if last:
+        body, _kid, _p, mac = ra.split(last[0])
+        seq, link = json.loads(body)["seq"] + 1, mac
+    else:
+        seq, link = 1, None
+    with path.open("ab") as f:
+        f.write(seal_lines(root, run, [event], start=seq, link=link))

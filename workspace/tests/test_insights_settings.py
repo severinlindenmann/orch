@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import seal_append
 from jsonschema import Draft202012Validator, FormatChecker
 
 from orch import cli_record, config, hider, pageproof
@@ -1623,19 +1624,17 @@ def test_delete_detail_keeps_other_tickets_detail_in_a_shared_run(ws, rec, run, 
 
 
 def _plant(ws, run_id, line):
-    """An agent with file access appends a raw line to a run file (no writer, no hider)."""
-    path = record_dir(ws) / "runs" / f"{run_id}.jsonl"
-    # a planted line readers trust carries its physical line number as seq (G1 H2); a wrong seq is skipped
-    seq = len(path.read_bytes().splitlines()) + 1 if path.exists() else 1
-    with path.open("a") as f:
-        f.write(json.dumps(dict(line, seq=seq)) + "\n")
+    """A line that verifies but is wrong in content: sealed as code holding orch's key could (conftest). A raw
+    unsigned line is never shown at all (test_record_mac.py)."""
+    seal_append(ws, run_id, line)
 
 
 def _own_line(ws, run_id, n):
     path = record_dir(ws) / "runs" / f"{run_id}.jsonl"
-    return next(
+    line = next(
         e for e in map(json.loads, path.read_text().splitlines()) if e["id"] == f"toolu_{run_id[2:]}{n}"
     )
+    return {k: v for k, v in line.items() if k != "auth"}
 
 
 def _planted_b_line(ws, b):

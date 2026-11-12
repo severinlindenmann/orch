@@ -136,7 +136,9 @@ class ReadResult(Generic[T]):
     def unwrap(self) -> T:
         if self.status != "ok":
             error = (
-                RecordTampered(self.reason) if self.status == "tampered" else RecordUnavailable(self.reason)
+                RecordTampered(self.reason, self.message)
+                if self.status == "tampered"
+                else RecordUnavailable(self.reason)
             )
             error.alert = self.alert
             raise error

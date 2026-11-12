@@ -137,7 +137,8 @@ def _write_record(root, ev):
     line = _record_event(root, ev)
     if _run_ids() is None:  # a script cannot grow the unattributed run without bound
         read = record.read_run(root, line["run"], seen_by="writer")
-        if read.status == "ok" and len(read.value) >= OUTSIDE_DAY_CAP:
+        # verified lines only (a planted line can neither raise nor lower it); a legacy run is not counted
+        if read.status == "ok" and not read.legacy and len(read.value) >= OUTSIDE_DAY_CAP:
             raise Refused("Refused: too many key uses outside a run today.")
     record_writer(root).append(line)
 

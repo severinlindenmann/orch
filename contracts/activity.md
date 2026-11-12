@@ -421,9 +421,11 @@ are not hidden. File identity checks (above) do not authenticate content; the re
 
 ## Authenticated record (Gate G1 H1, issue #563)
 
-Slice S1 defines the contract and the pure core (`workspace/src/orch/record_auth.py`, independent reference in
-`validate.py`, vectors `record_auth` in `vectors/activity-v1.json`). The writer and the readers adopt it in S2/S3; until
-then the files and screens behave as before and the limits below apply to the whole record.
+Slice S1 defined the contract and the pure core (`workspace/src/orch/record_auth.py`, independent reference in
+`validate.py`, vectors `record_auth` in `vectors/activity-v1.json`). Slice S2 adopts it in the writer
+(`record.RecordWriter._commit`, the only place that seals a run line) and in the one read path
+(`record._verified`, behind `read_run`, `run_lines` and every CLI view). Job streams, retention, alerts and
+counts files follow in S3 and are not sealed yet.
 
 **Invariant A1.** A record line counts (shown, deduped, counted, used for retention, run state or caps) only when it
 carries this workspace's record MAC over its exact bytes, its run, its seq and its predecessor's MAC, AND it links into
@@ -507,6 +509,43 @@ The MACed object is exactly `{event, payload, default_id}`: an entry with any ot
 **Job streams** (`jobs/<run>/<job>.jsonl`) use the same seal with domain `orch.record.job/1\0`, scope run + job, genesis
 `orch.record.job.genesis/1` and the head entry `jobs.<job>`; `replace_last` re-seals the new last line with the same seq. A job line carries its `job` inside the MACed body (the
 reader checks it equals the stream's job), as it carries `run`.
+
+**Writer (S2).** Under the run lock, `_commit` takes the next `seq` and `p` from the LAST VERIFIED line of the
+current key id in the file; only when the chain head (current key id, MAC ok) is ahead of it (the file was cut
+short) does it continue at `head.seq + 1` with `p = head.mac`; with no verified line of the current key and no such
+head it starts at seq 1 with the genesis. A head of another key id, a damaged head or a deleted head never restarts
+a chain in the middle of a run. The line is sealed, written with one `write()`, then the head is written (a head
+write that fails is alerted, not raised). No key, no recording (`RecordOff`, nothing written, not even a spool
+entry). The key is made when a run is claimed (`humanproof.ensure_record_key`), never by a writer.
+
+**Foreign key ids (LOW-A).** Lines with a key id other than the current one are held pending while no line of the
+current key has verified. At the end they are `old_key` only when the rotation shape holds: the first verified line
+of the current key is seq 1, or no line verifies and no head of the current key with `seq >= 1` exists. Otherwise
+(the first verified line has `seq != 1`, a gap; or no line verifies but a current-key head says there were lines)
+they are `changed`, reason `content`. After a verified line they are always `changed`.
+
+**Legacy runs.** A run file made before orch sealed lines is a legacy run, decided in ONE place (the read status,
+`ReadResult.legacy`): the guarded home, the workspace id and the key folder resolve cleanly, the head file is truly
+absent, and no line of the file carries `auth`. Its lines are read as before (schema check, `seq` = line number),
+shown, each marked `checked: false`, with the read reason `unchecked` and the text "These records were made before
+orch checked them." (`record.UNCHECKED_TEXT`); they are never counted as orch-checked (counts exclude the run and
+say `complete: false`), never used for permissions, retention or shared counts. Any other state is never legacy:
+a run with a head or a sealed line is verified as a whole and its unsigned lines (stripped, prepended, appended) are
+`changed`, reason `content`, and not shown; an unknown state of the guarded home (a missing or forged local id, a
+key folder that is missing, linked, loose or unreadable) is `tampered`, reason `unverified`, for every run. A legacy
+run that gets a new line becomes a sealed run: its old lines are then `changed` (no migration). Vectors
+`record_auth.legacy`.
+
+**Readers (S2).** `orch record tail` shows the events of the verified view with a computed `checked` (false for
+`via: hook` and for every line of a legacy run, true otherwise; never stored), the cursor is the verified seq, and
+one marker per change of `(reason, changed, removed)`. `query` and `counts` use the same view; any run with changed,
+removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete` and `protected`: `protected`
+is false for a run by a tool orch cannot give deny rules (codex, generic: the adapter's `deny.format` is `none`) and
+whenever the tool is not known from an orch-written verified line (the core's `run.state`, never a hook line); those
+runs show "Records from this helper can't be fully checked." (`record.UNPROTECTED_TEXT`). `--detail` takes the
+`detail_hash` from the verified line that points at the file (never from the caller): a file with other bytes, or a
+sealed line that has a detail pointer but no `detail_hash`, is refused as `swapped` ("Details changed outside orch.");
+only a legacy run reads a detail with no hash.
 
 ### Known limit (Level 1)
 
