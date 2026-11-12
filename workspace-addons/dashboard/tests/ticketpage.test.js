@@ -521,7 +521,8 @@ test('the Accept button is keyed by the shown tip, so a refresh never keeps a st
 });
 
 test('a file is listed once per list, and Overview chips skip the file already in the review card', () => {
-  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), append(...more){this.children.push(...more);}});
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), append(...more){this.children.push(...more);},
+    setAttribute(k, v){this.attrs[k] = v;}, addEventListener(){}, focus(){}, contains(){return false;}});
   const shot = {type:'file', ref:'.orch/tickets/t_dup/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
   const t = {id:'t_dup', title:'Dup', status:'review', checklist:[{id:'a', text:'One', done:true, evidence:[shot, {...shot}]}, {id:'b', text:'Two', done:true, evidence:[{...shot}]}]};
   const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
@@ -529,7 +530,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
     el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids), button:(label, cls) => h('button',{className:cls},label),
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:() => [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
-    statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[]};
+    statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[], locks:new Set()};
   vm.createContext(ctx); vm.runInContext(source,ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;" +
