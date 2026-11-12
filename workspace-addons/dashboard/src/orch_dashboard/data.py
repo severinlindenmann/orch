@@ -298,7 +298,10 @@ def _review_tip(root: Path, tid: str, branches: dict) -> str | None:
         from orch import worktrees
 
         if "set" not in branches:
-            branches["set"] = worktrees.work_branches(root)
+            from orch import config
+
+            # copies off: no branch is listed (a registered copy is still looked up by review_tip itself)
+            branches["set"] = set() if config.copies_mode(root) == "off" else worktrees.work_branches(root)
         tip = worktrees.review_tip(root, tid, branches["set"])
     except Exception:  # noqa: BLE001 - no tip shown: the Done is judged as without one
         return None

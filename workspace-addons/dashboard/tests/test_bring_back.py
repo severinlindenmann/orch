@@ -191,4 +191,4 @@ def test_load_state_with_100_tickets_in_review_makes_at_most_two_git_calls(tmp_p
         rows, _ = data.load_tickets(tmp_path, "orch")
         assert len(rows) == 100
         git_calls = [a for a in calls if "git" in str(a[0])]
-        assert len(git_calls) <= 2 and len(git_calls) <= most + 1, (mode, len(git_calls))
+        assert len(git_calls) == most, (mode, len(git_calls))
