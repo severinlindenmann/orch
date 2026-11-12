@@ -7,7 +7,7 @@ import json
 
 from orch import humanproof
 from test_pause import proof
-from test_step import NOW, TICKET, run, save, success
+from test_step import NOW, TICKET, at, run, save, success
 from test_two_machines import both, edit, load, machines
 
 from orch_sync import approval, cli, needs, pause, records, repo, step
@@ -122,7 +122,7 @@ def test_an_approval_is_never_replayed_and_a_planted_one_applies_nothing(machine
     assert load(b)["ext"]["automation"] == value
     edit(b, ext={"automation": {"enabled": False}})  # the person changes it here afterwards
     success(b)
-    edit(a, ext={"automation": value}, updated_at="2026-11-11T14:00:00Z")  # the peer re-sends the approved value
+    edit(a, ext={"automation": value}, updated_at=at(14))  # the peer re-sends the approved value
     success(a)
     success(b)
     assert load(b)["ext"]["automation"] == {"enabled": False}  # B12/#540: no replay of the old approval
@@ -130,7 +130,7 @@ def test_an_approval_is_never_replayed_and_a_planted_one_applies_nothing(machine
     store = cli.read(b, "approved")
     store["t_abc123"]["automation"] = {**store["t_abc123"]["automation"], "hash": approval.digest(other)}
     step.write(b, "run/sync/approved.json", step.encoded(store))  # planted for a new value
-    edit(a, ext={"automation": other}, updated_at="2026-11-11T15:00:00Z")
+    edit(a, ext={"automation": other}, updated_at=at(15))
     success(a)
     success(b)
     assert load(b)["ext"]["automation"] == {"enabled": False}
@@ -156,7 +156,7 @@ def test_a_stale_held_candidate_goes_when_the_peer_reverts(machines):
     assert approval.held(b, "t_abc123")
     doc = load(a)
     doc.pop("ext")
-    save(a, value={**doc, "updated_at": "2026-11-11T14:00:00Z"})  # the peer goes back to no block
+    save(a, value={**doc, "updated_at": at(14)})  # the peer goes back to no block
     success(a)
     success(b)
     assert not approval.held(b, "t_abc123")
@@ -263,7 +263,7 @@ def test_the_local_add_on_values_record_is_signed_and_never_started_again(machin
     path.write_bytes(signed)
     assert approval.local_ext(b)[1]
     path.unlink()  # removed: neither turning sync on again nor a merge starts a new (all-local) record
-    edit(a, title="goes on", updated_at="2026-11-11T14:00:00Z")
+    edit(a, title="goes on", updated_at=at(14))
     success(a)
     success(b)
     assert load(b)["title"] == "goes on"
@@ -288,7 +288,7 @@ def test_a_rolled_back_local_add_on_values_record_counts_for_nothing(machines):
     old = json.loads(first)
     assert humanproof.local_ok(b, approval.LOCAL_EXT_KIND, {k: v for k, v in old.items() if k != "mac"}, old["mac"])
     assert approval.local_ext(b) == ({}, False)
-    edit(a, title="goes on", updated_at="2026-11-11T14:00:00Z")
+    edit(a, title="goes on", updated_at=at(14))
     success(a)
     success(b)
     assert path.read_bytes() == first  # never re-signed from the rolled back copy
@@ -325,7 +325,7 @@ def test_an_approved_removal_leaves_no_own_value(machines, monkeypatch):
     assert approval.local_ext(b)[0]["t_abc123"] == {"automation": approval.digest(value)}
     doc = load(a)
     doc.pop("ext")
-    save(a, value={**doc, "updated_at": "2026-11-11T14:00:00Z"})  # the peer removes the block
+    save(a, value={**doc, "updated_at": at(14)})  # the peer removes the block
     success(a)
     success(b)
     assert load(b)["ext"]["automation"] == value  # held until a person decides

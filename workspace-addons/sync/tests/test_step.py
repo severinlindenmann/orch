@@ -1,12 +1,22 @@
 import io
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from orch import humanproof
 
 from orch_sync import cli, repo, step
 
-NOW = '2026-11-11T12:00:00Z'
+# clock-relative (a fixed day expires: sync's 24 h future check would pause everything): 12:00 of the old fixed
+# day is "the start of this hour", the other times keep their distance from it.
+BASE = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+
+
+def at(hour, minute=0):
+    return (BASE + timedelta(hours=hour - 12, minutes=minute)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+NOW = at(12)
 TICKET = 'tickets/t_abc123.json'
 ART = 'tickets/t_abc123/artifacts/a.txt'
 
@@ -324,11 +334,11 @@ def test_future_dated_remote_ticket_does_not_win(root):
     from orch_sync import pause
 
     base = ticket()
-    local = dict(ticket(), title='Local title', updated_at='2026-11-11T12:30:00Z')
+    local = dict(ticket(), title='Local title', updated_at=at(12, 30))
     remote = dict(ticket(), title='Remote title', updated_at='9999-12-31T23:59:59Z')
     with pytest.raises(pause.Pause, match='future'):
         step.merge_document(root, TICKET, base, local, remote, NOW)
-    near = dict(remote, updated_at='2026-11-11T12:40:00Z')  # small clock skew is normal
+    near = dict(remote, updated_at=at(12, 40))  # small clock skew is normal
     assert step.merge_document(root, TICKET, base, local, near, NOW)['title'] == 'Remote title'
 
 
