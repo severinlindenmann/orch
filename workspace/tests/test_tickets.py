@@ -1,10 +1,13 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from conftest import CONTRACTS
 
-from orch import tickets
+from orch import runs, runs_live, tickets
 from orch.errors import Refused
 
 
@@ -472,6 +475,254 @@ def test_proof_state_levels():
     stale = _c("c1")
     stale["evidence"][0]["stale"] = True  # a stored flag is never trusted
     assert tickets.proof_state(_t([stale]))["per_item"]["c1"] == "passed"
+
+
+@pytest.fixture
+def stopped(monkeypatch):
+    """runs_live.stop's real work (kill the agent, tmux) faked: records the ticket ids it closed."""
+    got = []
+    monkeypatch.setattr(runs_live, "_close", lambda root, rec, interrupt: got.append(rec["ticket"]))
+    monkeypatch.setattr(runs_live, "start_waiting", lambda root: None)
+    return got
+
+
+@pytest.fixture
+def outside_pid():
+    """A live process outside this test's own process tree (a child is never an ancestor): a run's pid."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    yield child.pid
+    child.kill()
+    child.wait()
+
+
+def _files(proj):
+    """Every stored file under .orch (tickets, history, verdict and won't-do ledgers), lock files aside."""
+    base = proj / ".orch"
+    return {
+        str(p.relative_to(base)): p.read_bytes()
+        for p in sorted(base.rglob("*"))
+        if p.is_file() and "lock" not in p.name
+    }
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_by_a_person_stops_the_live_run_and_refuses_agent_checks(
+    proj, new_ticket, stopped, outside_pid, status
+):
+    """#542: a person closes the ticket: its live run is stopped, and the agent can no longer write checks."""
+    tid = new_ticket()
+    tickets.check_add(proj, tid, "first step", "agent:claude")
+    runs.claim(proj, tid, "human:t", "claude", "live", pid=outside_pid)
+    tickets.set_status(proj, tid, status, "human:t")
+    assert stopped == [tid]
+    assert runs.read(proj, tid)["stop_requested"]
+    before = tickets.load(proj, tid)
+    for write in (
+        lambda: tickets.check_add(proj, tid, "late step", "agent:claude"),
+        lambda: tickets.check_done(proj, tid, "c1", ['{"type":"note","ref":"ran it"}'], "agent:claude"),
+        lambda: tickets.check_edit(proj, tid, "c1", "renamed", "agent:claude"),
+        lambda: tickets.check_record(proj, tid, "c1", "pytest -q", 0, None, "agent:claude"),
+        lambda: tickets.check_start(proj, tid, "c1", "agent:claude"),
+        lambda: tickets.check_remove(proj, tid, "c1", "agent:claude"),
+    ):
+        with pytest.raises(Refused, match="This ticket is closed, so the agent can't change it."):
+            write()
+    assert tickets.load(proj, tid) == before
+    item = tickets.check_add(proj, tid, "a person's note", "human:t")[1]  # a person still can
+    assert tickets.load(proj, tid)["checklist"][-1]["id"] == item["id"]
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_ticket_refuses_every_agent_op_and_leaves_everything_untouched(proj, new_ticket, status):
+    """#542, ONE guard in apply_op: no op an agent can call changes a closed ticket (stop, won't do, proof,
+    log, ref, patch of several fields, re-opening); the ticket, its history and the ledgers stay as they
+    were."""
+    tid = new_ticket()
+    tickets.check_add(proj, tid, "first step", "human:t")
+    tickets.check_add(proj, tid, "second step", "human:t")
+    tickets.check_start(proj, tid, "c1", "human:t")
+    tickets.set_status(proj, tid, status, "human:t")
+    before, files = tickets.load(proj, tid), _files(proj)
+    rev = before["revision"]
+    for write in (
+        lambda: tickets.check_stop(proj, tid, "c1", "agent:claude"),
+        lambda: tickets.check_wont_do(proj, tid, "c2", "agent:claude", "not needed"),
+        lambda: tickets.check_done(proj, tid, "c2", ['{"type":"note","ref":"ran it"}'], "agent:claude"),
+        lambda: tickets.check_reopen(proj, tid, "c1", "agent:claude"),
+        lambda: tickets.check_move(proj, tid, "c1", "c2", "agent:claude"),
+        lambda: tickets.log(proj, tid, "late line", "agent:claude"),
+        lambda: tickets.ref_add(proj, tid, "https://example.com/x", "agent:claude"),
+        lambda: tickets.patch(proj, tid, rev, '{"title": "New", "note": "late"}', "agent:claude"),
+        lambda: tickets.edit(proj, tid, "Renamed", "agent:claude"),
+        lambda: tickets.set_summary(proj, tid, "late summary", "agent:claude"),
+        lambda: tickets.ask(proj, tid, "Go on?", [], None, "agent:claude"),
+        lambda: tickets.wait(proj, tid, None, "external:x", "agent:claude"),
+    ):
+        with pytest.raises(Refused):
+            write()
+    assert tickets.load(proj, tid) == before and _files(proj) == files
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_an_agent_cannot_reopen_a_closed_ticket_a_person_can(proj, new_ticket, monkeypatch, status):
+    tid = new_ticket()
+    tickets.set_status(proj, tid, status, "human:t")
+    before, files = tickets.load(proj, tid), _files(proj)
+    for write in (
+        lambda: tickets.set_status(proj, tid, "ready", "agent:claude"),
+        lambda: tickets.set_status(proj, tid, "review", "agent:claude"),
+        lambda: tickets.patch(proj, tid, before["revision"], '{"status": "active"}', "agent:claude"),
+    ):
+        with pytest.raises(Refused, match="This ticket is closed, so the agent can't change it."):
+            write()
+    assert tickets.load(proj, tid) == before and _files(proj) == files
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # inside an agent run a person's name is not a person
+    with pytest.raises(Refused, match="This ticket is closed, so the agent can't change it."):
+        tickets.set_status(proj, tid, "ready", "human:t")
+    with pytest.raises(Refused, match="This ticket is closed, so the agent can't change it."):
+        tickets.log(proj, tid, "late line", "human:t")
+    assert _files(proj) == files
+    monkeypatch.delenv("ORCH_AGENT")
+    assert tickets.set_status(proj, tid, "ready", "human:t")["status"] == "ready"  # a person re-opens it
+    assert tickets.check_add(proj, tid, "more work", "agent:claude")[1]["id"] == "c1"  # open again: allowed
+
+
+def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(
+    proj, new_ticket, stopped, monkeypatch, outside_pid
+):
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "dropped", "human:t")
+    assert stopped == []  # no run: nothing to stop
+    other = new_ticket()
+    runs.claim(proj, other, "human:t", "claude", "live", pid=outside_pid)
+    monkeypatch.setenv("ORCH_TICKET", other)  # the command runs inside that ticket's own run
+    tickets.set_status(proj, other, "dropped", "human:t")
+    assert stopped == [] and not runs.read(proj, other)["stop_requested"]
+    monkeypatch.delenv("ORCH_TICKET")
+    once = new_ticket()
+    runs.claim(proj, once, "human:t", "claude", "oneshot", pid=outside_pid)
+    tickets.set_status(proj, once, "dropped", "human:t")
+    assert stopped == []  # a one-shot run ends by itself (its copy waits for it)
+
+
+def test_closed_from_inside_the_runs_process_tree_stops_nothing(proj, new_ticket, stopped):
+    """No ORCH_TICKET, but this process is the run's own (its pid is an ancestor): not stopped from within."""
+    tid = new_ticket()
+    runs.claim(proj, tid, "human:t", "claude", "live", pid=os.getpid())
+    tickets.set_status(proj, tid, "dropped", "human:t")
+    assert stopped == [] and not runs.read(proj, tid)["stop_requested"]
+
+
+def test_closed_by_an_agent_stops_no_run(proj, new_ticket, stopped, outside_pid):
+    """An agent closing a ticket never stops that ticket's run (its writes are refused instead)."""
+    tid = new_ticket()
+    runs.claim(proj, tid, "human:t", "claude", "live", pid=outside_pid)
+    tickets.set_status(proj, tid, "dropped", "agent:other")
+    assert tickets.load(proj, tid)["status"] == "dropped"
+    assert stopped == [] and not runs.read(proj, tid)["stop_requested"]
+
+
+def test_stop_closed_stops_nothing_when_the_ticket_was_reopened(proj, new_ticket, stopped, outside_pid):
+    tid = new_ticket()
+    runs.claim(proj, tid, "human:t", "claude", "live", pid=outside_pid)
+    tickets.set_status(proj, tid, "dropped", "human:t")
+    assert stopped == [tid]
+    tickets.set_status(proj, tid, "ready", "human:t")  # re-opened before the (late) stop came
+    runs.release(proj, tid, runs.read(proj, tid)["run"])
+    runs.claim(proj, tid, "human:t", "claude", "live", pid=outside_pid)
+    assert runs_live.stop_closed(proj, tid, "human:t") is False
+    assert stopped == [tid] and not runs.read(proj, tid)["stop_requested"]
+
+
+def test_closed_the_copy_goes_even_when_stopping_the_run_fails_and_the_reverse(proj, new_ticket, monkeypatch):
+    from orch import worktrees
+
+    gone = []
+
+    def boom(*a):
+        raise RuntimeError("stop failed")
+
+    monkeypatch.setattr(runs_live, "stop_closed", boom)
+    monkeypatch.setattr(worktrees, "on_closed", lambda root, tid: gone.append(tid))
+    tid = new_ticket()
+    assert tickets.set_status(proj, tid, "dropped", "human:t")["status"] == "dropped"
+    assert gone == [tid]
+    stops = []
+    monkeypatch.setattr(runs_live, "stop_closed", lambda root, tid, by: stops.append((tid, by)))
+    monkeypatch.setattr(worktrees, "on_closed", boom)
+    other = new_ticket()
+    assert tickets.set_status(proj, other, "done", "human:t")["status"] == "done"
+    assert stops == [(other, "human:t")]
+
+
+def test_closed_ticket_agent_check_open_ticket_still_allowed(proj, new_ticket):
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:t")  # Review is not closed
+    assert tickets.check_add(proj, tid, "more work", "agent:claude")[1]["id"] == "c1"
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_ticket_refuses_agent_ext_attach_and_attach_file_before_writing(proj, new_ticket, status):
+    """#542: ext set/unset, attach, attach file take the real actor; a closed ticket refuses an agent before
+    anything is written (no file copied), the ticket and the disk stay as they were; a person can."""
+    tid = new_ticket()
+    tickets.ext_set(proj, tid, "demo", '{"a": 1, "b": 2}', "human:t")
+    (proj / "proof.txt").write_text("proof\n")
+    tickets.set_status(proj, tid, status, "human:t")
+    before, files = tickets.load(proj, tid), _files(proj)
+    msg = "This ticket is closed, so the agent can't change it."
+    for write in (
+        lambda: tickets.ext_set(proj, tid, "demo", '{"a": 9}', "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "demo.a", "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "demo", "agent:claude"),
+        lambda: tickets.attach(proj, tid, "note.md", b"late", "agent:claude"),
+        lambda: tickets.attach_file(proj, tid, str(proj / "proof.txt"), None, None, by="agent:claude"),
+    ):
+        with pytest.raises(Refused, match=msg):
+            write()
+    assert tickets.load(proj, tid) == before and _files(proj) == files
+    tickets.ext_set(proj, tid, "demo", '{"a": 9}', "human:t")  # a person can
+    assert tickets.attach(proj, tid, "note.md", b"by a person", "human:t")["name"] == "note.md"
+    assert tickets.attach_file(proj, tid, str(proj / "proof.txt"), None, None, by="human:t")
+    tickets.ext_unset(proj, tid, "demo.a", "human:t")
+
+
+def test_agent_ext_attach_and_attach_file_work_on_an_open_ticket(proj, new_ticket):
+    tid = new_ticket()
+    (proj / "proof.txt").write_text("proof\n")
+    tickets.ext_set(proj, tid, "demo", '{"a": 1, "b": 2}', "agent:claude")
+    tickets.ext_unset(proj, tid, "demo.a", "agent:claude")
+    assert tickets.attach(proj, tid, "note.md", b"hello", "agent:claude")["name"] == "note.md"
+    assert tickets.attach_file(proj, tid, str(proj / "proof.txt"), None, None, by="agent:claude")
+
+
+def test_no_agent_callable_op_writes_as_system():
+    """An op with a `by` parameter writes as that actor: none of its apply_op calls passes SYSTEM, so an
+    agent op can never be disguised as a system write (which the guard does not look at)."""
+    import ast
+
+    # the only ops with a `by` that may write as SYSTEM: run bookkeeping of the automation host, and the
+    # person-only ask_for_changes (refuses any non-person `by` before it writes)
+    bookkeeping = {
+        "mark_working",
+        "agent_stopped",
+        "wait_for_start",
+        "resume_after_start_wait",
+        "ask_for_changes",
+    }
+    tree = ast.parse(Path(tickets.__file__).read_text(encoding="utf-8"))
+    bad = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef) or fn.name in bookkeeping:
+            continue
+        if "by" not in {a.arg for a in fn.args.args + fn.args.kwonlyargs}:
+            continue
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "apply_op":
+                for k in n.keywords:
+                    if k.arg == "by" and isinstance(k.value, ast.Name) and k.value.id == "SYSTEM":
+                        bad.append(f"{fn.name}:{n.lineno}")
+    assert not bad, f"ops with a `by` that write as SYSTEM: {bad}"
 
 
 def test_every_apply_op_call_names_its_actor():

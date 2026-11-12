@@ -36,4 +36,5 @@ testpaths = ["tests"]
 markers = [
     "slow: starts a local server",
     "real_start_guard: keep the real adapters.check_start_folder (see conftest)",
+    "real_checks: keep the real program-location checks (no trusted test interpreter)",
 ]

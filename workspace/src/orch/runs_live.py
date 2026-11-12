@@ -1063,6 +1063,43 @@ def stop(root: Path, tid: str) -> bool:
     return True
 
 
+def _inside_run(rec: dict) -> bool:
+    """This process runs inside the run's own process tree: the run's wrapper or agent pid (the identity
+    stop() checks before it kills anything) is one of its ancestors. Unknown ancestry: False (ORCH_TICKET
+    still keeps a run from stopping itself)."""
+    from orch import record_hook  # the same ancestry the record hook proves a caller with
+
+    mine = record_hook._ancestors()
+    return mine is not None and any(
+        isinstance(rec.get(k), int) and rec[k] in mine for k in ("pid", "agent_pid")
+    )
+
+
+def stop_closed(root: Path, tid: str, by: str | None) -> bool:
+    """A person closed a ticket (done/dropped, tickets.apply_op): its live session stops now, so its agent
+    writes nothing more into it (#542). Only for a person (`by` human:* outside an agent): an agent closing
+    one ticket never stops another ticket's run, and an unknown closer stops nothing. The ticket is read
+    again and must STILL be closed (a reopen in between wins). A one-shot run ends by itself (its copy waits
+    for it); the run this command runs inside (ORCH_TICKET, or its process tree) is never stopped from within.
+    stop() is the identity-checked path: it ends the run only while the claim is still the same run, kills a
+    pid only when its recorded start time matches, and writes the run record, never the ticket's status (its
+    settle only moves a Working ticket, a closed one stays). Never raises."""
+    try:
+        if not by or not by.startswith("human:") or tickets.agent_tool():
+            return False
+        if tickets.load(root, tid).get("status") not in tickets.CLOSED:
+            return False
+        rec = runs.read(root, tid)
+        if not rec or rec.get("mode") != "live" or os.environ.get("ORCH_TICKET") == tid:
+            return False
+        if _inside_run(rec):
+            return False
+        return stop(root, tid)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def cleanup(root: Path) -> list[str]:
     """Close live sessions that have waited (idle, or for a person) for more than the limit, or whose ticket
     has been Done that long (no daemon: this runs on every `orch run` call), and remove tmux sessions whose

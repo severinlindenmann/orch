@@ -343,6 +343,64 @@ def test_an_answer_counts_as_authority_only_when_made_here(synced):
     assert not history.answer_proven(root, raw, None)
 
 
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        {"text": "Delete everything?"},
+        {"options": ["a", "b", "c"]},
+        {"kind": "relay:allow"},
+        {"action": {"kind": "relay:allow", "message": "m_other0000000001"}},
+    ],
+)
+def test_an_answer_is_bound_to_the_question_content(synced, rewrite):
+    root, tid = synced
+    tickets.ask(root, tid, "Which?", ["a", "b"], None, "agent:claude")
+    tickets.answer(root, tid, "q1", "a", "human:tester", "cli")
+    raw = _raw(root, tid)
+    assert history.shown_ticket(root, raw)["questions"][0]["answered_by"] == "human:tester"
+    assert history.answer_proven(root, raw, raw["questions"][0])
+    _plant(root, tid, lambda d: d["questions"][0].update(rewrite))
+    raw = _raw(root, tid)
+    assert history.shown_ticket(root, raw)["questions"][0]["answered_by"] == history.SYNC_BY
+    assert not history.answer_proven(root, raw, raw["questions"][0])
+
+
+def test_a_step_is_bound_to_its_text(synced):
+    root, tid = synced
+    tickets.check_start(root, tid, "c1", "human:tester")
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == "human:tester"
+    _plant(root, tid, lambda d: d["checklist"][0].update({"text": "Something else entirely"}))
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == history.SYNC_BY
+
+
+def test_evidence_is_bound_to_the_step_content(synced):
+    root, tid = synced
+    tickets.check_done(root, tid, "c1", ['{"type":"note","ref":"done by me"}'], "human:tester")
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["evidence"][0]["by"] == "human:tester"
+    _plant(root, tid, lambda d: d["checklist"][0].update({"text": "Rewritten step"}))
+    ev = history.shown_ticket(root, _raw(root, tid))["checklist"][0]["evidence"][0]
+    assert ev["by"] == history.SYNC_BY
+
+
+def test_adoption_covers_answers_steps_and_evidence(proj):
+    ensure_signing(proj)
+    t = tickets.create(proj, "Before sync", "human:tester")
+    tid = t["id"]
+    tickets.check_add(proj, tid, "Step one", "agent:claude")
+    tickets.check_start(proj, tid, "c1", "human:tester")
+    tickets.check_done(proj, tid, "c1", ['{"type":"note","ref":"mine"}'], "human:tester")
+    tickets.ask(proj, tid, "Which?", ["a", "b"], None, "agent:claude")
+    tickets.answer(proj, tid, "q1", "a", "human:tester", "cli")
+    history.enable_sync(proj, adopt=True)
+    raw = _raw(proj, tid)
+    shown = history.shown_ticket(proj, raw)
+    assert shown["questions"][0]["answered_by"] == "human:tester"
+    assert shown["checklist"][0]["evidence"][0]["by"] == "human:tester"
+    assert history.answer_proven(proj, raw, raw["questions"][0])
+    _plant(proj, tid, lambda d: d["questions"][0].update({"text": "changed"}))
+    assert history.shown_ticket(proj, _raw(proj, tid))["questions"][0]["answered_by"] == history.SYNC_BY
+
+
 def test_a_sync_free_answer_is_authority_as_before(proj):
     t = tickets.create(proj, "Plain", "human:tester")
     tickets.ask(proj, t["id"], "Allow?", ["Allow once"], None, "agent:claude")
@@ -470,3 +528,31 @@ def test_sync_free_outputs_are_what_they_were(proj, run, monkeypatch, capsys):
     assert got == want
     assert "human:alice" in got["show_json"]
     assert not Path(proj, *history.OWN_LINES).exists()
+
+
+def test_a_step_is_bound_to_its_covers(synced):
+    """Opus review LOW: the doing mark also binds what the step covers."""
+    root, tid = synced
+    tickets.check_start(root, tid, "c1", "human:tester")
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == "human:tester"
+    _plant(root, tid, lambda d: d["checklist"][0].update({"covers": ["something else"]}))
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == history.SYNC_BY
+
+
+def test_a_store_without_answers_verifies_and_removing_answers_breaks_its_mac(synced):
+    """Store format: `answers` is written only once it holds a digest (older stores verify); a store that has
+    answers and loses the key fails its MAC, so the whole store stops verifying (fail closed)."""
+    root, tid = synced
+    tickets.check_start(root, tid, "c1", "human:tester")  # a store without any answer
+    p = history._own_path(root, tid)
+    assert "answers" not in json.loads(p.read_text())
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == "human:tester"
+    tickets.ask(root, tid, "Which?", ["a", "b"], None, "agent:claude")
+    tickets.answer(root, tid, "q1", "a", "human:tester", "cli")
+    data = json.loads(p.read_text())
+    assert data.get("answers")
+    assert history.shown_ticket(root, _raw(root, tid))["questions"][0]["answered_by"] == "human:tester"
+    p.write_text(json.dumps({k: v for k, v in data.items() if k != "answers"}))
+    shown = history.shown_ticket(root, _raw(root, tid))
+    assert shown["questions"][0]["answered_by"] == history.SYNC_BY
+    assert shown["checklist"][0]["by"] == history.SYNC_BY  # the whole store no longer verifies
