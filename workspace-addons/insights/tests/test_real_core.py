@@ -113,9 +113,8 @@ def srv(core, session):
 
     ws, shim = core
     server = make_server(ws, 0, orch_bin=shim, session=session)
-    server.page_secret = (
-        SECRET  # as if /session succeeded (the launch-token flow is covered by test_settings)
-    )
+    session.secret = SECRET  # as if /session succeeded (the launch-token flow is covered by test_settings)
+    server.page_secret = SECRET
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield server
