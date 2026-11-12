@@ -283,7 +283,32 @@ def test_a_legacy_run_still_reads_its_detail(store, proj_cli, capsys):
     hp.key_dir(ws, create=False)  # the key folder is clean
     (hp.key_dir(ws, create=False) / "record-heads" / f"{RUN}.json").unlink()
     code, (got,) = _query_detail(capsys, RUN, "toolu_d")
-    assert code == 0 and got["output"] == "b"
+    assert code == 0 and got["output"] == "b" and got["checked"] is False  # never shown as verified
+
+
+def test_a_detail_of_a_before_protection_line_is_not_checked_and_a_plant_at_its_name_too(
+    store, proj_cli, capsys
+):
+    ws, writer = store
+    stored = writer.append(example(run=OTHER, id="toolu_d"), detail={"input": "a", "output": "b"})
+    legacy = {k: v for k, v in stored.items() if k not in ("detail_hash", "replaced_hook")}
+    runfile(ws, OTHER).write_text(json.dumps(dict(legacy, seq=1)) + "\n")
+    (hp.key_dir(ws, create=False) / "record-heads" / f"{OTHER}.json").unlink()
+    writer.append(example(run=OTHER, id="toolu_new", via="log", at=at(9)))  # the upgrade: the head records it
+    assert hp.record_head_read(ws, OTHER)[0]["legacy_lines"] == 1
+    code, (got,) = _query_detail(capsys, OTHER, "toolu_d")
+    assert code == 0 and got["output"] == "b" and got["checked"] is False
+    target = record_dir(ws) / stored["detail"]  # a planted file at the legacy line's name
+    forged = json.loads(target.read_text())
+    forged["output"] = "forged"
+    target.write_text(json.dumps(forged))
+    code, (got,) = _query_detail(capsys, OTHER, "toolu_d")
+    assert code == 0 and got["output"] == "forged" and got["checked"] is False  # shown, but never as verified
+    sealed = writer.append(
+        example(run=OTHER, id="toolu_s", via="log", at=at(10)), detail={"input": "x", "output": "y"}
+    )
+    code, (got,) = _query_detail(capsys, OTHER, "toolu_s")
+    assert code == 0 and got["checked"] is True and sealed["detail_hash"]
 
 
 # ------------------------------------------------------------------ the legacy rule

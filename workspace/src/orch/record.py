@@ -1272,8 +1272,8 @@ def read_detail(workspace, run, file_id, *, line_id, ticket=None):
         lines = [e for e in view.value if e.get("id") == line_id and e.get("detail") == point]
         if not lines:
             raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
-        want = None
-        if not view.legacy and not lines[-1].get("before_protection"):
+        want, unchecked = None, view.legacy or bool(lines[-1].get("before_protection"))
+        if not unchecked:
             want = lines[-1].get("detail_hash")
             if not isinstance(want, str):
                 raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
@@ -1288,6 +1288,8 @@ def read_detail(workspace, run, file_id, *, line_id, ticket=None):
             or (ticket is not None and value["ticket"] != ticket)
         ):
             raise RecordTampered("swapped")
+        if unchecked:  # made before orch checked it: shown, never as verified
+            return ReadResult("ok", value, reason="unchecked", message=UNCHECKED_TEXT, unchecked=1)
         return ReadResult("ok", value)
     except (RecordTampered, RecordUnavailable) as error:
         return _report(workspace, error, "detail", run, "reader")
@@ -2955,6 +2957,13 @@ _SCHEMA = {
                     "type": "integer",
                     "minimum": 0,
                     "description": ("How many key values were hidden in this file."),
+                },
+                "checked": {
+                    "type": "boolean",
+                    "description": (
+                        "Computed by the reader, never stored: false when the detail was made before orch "
+                        "checked it (not checked, before protection)."
+                    ),
                 },
             },
         },

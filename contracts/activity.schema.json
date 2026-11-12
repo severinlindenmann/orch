@@ -134,7 +134,8 @@
         "input": { "description": "What went in (tool input, prompt, command), any JSON." },
         "output": { "description": "What came out (tool result, chat text), any JSON." },
         "truncated": { "type": "boolean", "description": "true = cut at the 1 MB per-file cap." },
-        "hidden": { "type": "integer", "minimum": 0, "description": "How many key values were hidden in this file." }
+        "hidden": { "type": "integer", "minimum": 0, "description": "How many key values were hidden in this file." },
+        "checked": { "type": "boolean", "description": "Computed by the reader, never stored: false when the detail was made before orch checked it (not checked, before protection)." }
       }
     },
     "record_alert": {"type": "object", "additionalProperties": false, "required": ["v", "schema", "at", "target", "run", "reason", "seen_by", "message"], "properties": {"v": {"const": 1}, "schema": {"const": "orch.record-alert/1"}, "at": {"$ref": "#/$defs/time"}, "target": {"enum": ["run", "detail", "meta", "lock", "folder", "alerts"]}, "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]}, "reason": {"enum": ["link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped", "content", "removed", "unverified", "old_key"]}, "seen_by": {"enum": ["writer", "reader", "retention", "cli"]}, "message": {"const": "Some records of this run were changed outside orch. To be safe, orch does not show them. Nothing was deleted."}}},

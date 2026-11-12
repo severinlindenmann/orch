@@ -622,7 +622,8 @@ def _detail(root: Path, args) -> dict:
     stored = (detail.value.get("ticket"), detail.value.get("id"))
     if stored != (line.get("ticket"), line["id"]) or line["id"] != args.detail:
         raise RecordError(str(record.RecordTampered("swapped")), "tampered")
-    return detail.value
+    # computed in this one place, never stored: a detail of a line made before orch checked it is not checked
+    return {**detail.value, "checked": detail.reason != "unchecked"}
 
 
 # --- settings (read only) ---
