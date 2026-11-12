@@ -814,8 +814,9 @@ INTERRUPTED_BB = (
 MERGING = "a merge is in progress in your folder"
 FILES_CHANGED = "The copy's files changed during the merge; nothing was merged"
 UNVERIFIED = (
-    "The work is already in your branch, but orch could not check that its files are right. "
-    "Look at your project; if something is wrong, undo that last commit or reopen this ticket."
+    "The work is already in your branch, but orch could not check that its files are right. Look at your "
+    "project. If it is fine, use Review and bring back to check again. If not, move your project back to the "
+    "commit before the merge (git reset), then bring it back again."
 )
 VERIFY_TIME = (
     "The work is already in your branch. Checking it takes longer; orch will check again on its own."
@@ -1037,19 +1038,29 @@ def _blob_id(data: bytes, sha: str) -> str:
     return (hashlib.sha1 if len(sha) == 40 else hashlib.sha256)(b"blob %d\0" % len(data) + data).hexdigest()
 
 
-def _bytes_match_blob(data: bytes, sha: str) -> bool:
-    """`data` is the content of blob `sha`, or that content with CRLF line ends (git for Windows checks out
-    with core.autocrlf=true: the file on disk has CRLF, the blob LF). The ONE comparison for every check
-    of files against blob ids (before and after the merge)."""
-    return _blob_id(data, sha) == sha or (
-        b"\r\n" in data and _blob_id(data.replace(b"\r\n", b"\n"), sha) == sha
-    )
+def _crlf_checkout(top: Path) -> bool:
+    """The project's git writes CRLF line ends on checkout (core.autocrlf=true, git for Windows' default, or
+    core.eol=crlf): only then is a CRLF form of a blob what the folder should hold."""
+    rc, out, _ = _git(["config", "--get", "core.autocrlf"], top, read_only=True)
+    if rc == 0 and out.strip().lower() == "true":
+        return True
+    rc, out, _ = _git(["config", "--get", "core.eol"], top, read_only=True)
+    return rc == 0 and out.strip().lower() == "crlf"
+
+
+def _bytes_match_blob(data: bytes, sha: str, crlf: bool = False) -> bool:
+    """`data` is the content of blob `sha`, or (`crlf`: the checkout writes CRLF) that content with CRLF line
+    ends. The ONE comparison for every check of files against blob ids (before and after the merge)."""
+    if _blob_id(data, sha) == sha:
+        return True
+    return crlf and b"\r\n" in data and _blob_id(data.replace(b"\r\n", b"\n"), sha) == sha
 
 
 def _index_mismatch(top: Path, touched: list[str]) -> bool:
     """The project's index (shared with every agent) is not trusted for the paths the merge writes: each
     touched entry must be a plain cached entry (no assume-unchanged, skip-worktree, unmerged) whose bytes
     on disk hash to the recorded blob. A forged index or stat cache that hides a person's edit is caught."""
+    crlf = _crlf_checkout(top)
     for chunk in _chunks(touched):
         tags = _bb_read(top, ["--literal-pathspecs", "ls-files", "-v", "-z", "--", *chunk], strip=False)
         if any(f and not f.startswith("H ") for f in tags.split("\0")):
@@ -1078,7 +1089,7 @@ def _index_mismatch(top: Path, touched: list[str]) -> bool:
                     data = p.read_bytes()
             except OSError:
                 return True
-            if not _bytes_match_blob(data, sha):
+            if not _bytes_match_blob(data, sha, crlf):
                 return True
     return False
 
@@ -1278,8 +1289,13 @@ def approve_copy(root: Path, ticket: str, target: str) -> dict:
                 r["origin_branch"] = branch
             if not r.get("base"):
                 r["base"] = base
-            if not merging and not (r.get("journal") or {}).get("post_check"):
-                r.pop("journal", None)  # (a merge whose check has not passed keeps its verdict)
+            j = r.get("journal")
+            if isinstance(j, dict) and j.get("post_check"):
+                # a merge whose check has not passed keeps its journal (ancestry never certifies it); the
+                # person's approval is the explicit "look again": a failed verdict is checked once more
+                r["journal"] = {**j, "post_check": "pending"}
+            elif not merging:
+                r.pop("journal", None)
 
         _copy_authority(root, ticket, record)
         return _bring_back_locked(root, ticket)
@@ -1713,6 +1729,7 @@ def _files_match(top: Path, touched, commit: str) -> bool:
         parts = meta.split()
         if name and len(parts) == 3 and parts[2] == "0":
             index[name] = (parts[0], parts[1])
+    crlf = _crlf_checkout(top)
     for name in touched:
         mode, blob = index.get(name, (None, None))
         if mode not in ("100644", "100755"):
@@ -1733,7 +1750,7 @@ def _files_match(top: Path, touched, commit: str) -> bool:
                         h.update(chunk)
                 ok = h.hexdigest() == blob
             else:
-                ok = _bytes_match_blob(path.read_bytes(), blob)
+                ok = _bytes_match_blob(path.read_bytes(), blob, crlf)
         except OSError:
             return False
         if not ok:
