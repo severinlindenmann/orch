@@ -132,15 +132,21 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 - **Hook lines are inside the agent's trust boundary.** The hook runs as a child of the agent, and the agent can run
   the same command itself with any payload and read its own tool-call ids (the process-tree proof only shows it
   comes from inside the run). So a hook line is the agent's word:
-  - **The hook entry never says how a call ended.** On every path (the tool's payload or an event-shaped line) it
-    writes any line with an outcome as **provisional**: `outcome` `{ok: null, error: null, ms: null}`,
-    whatever the caller sent. Without a log (a live run) the call stays "finished, result unknown".
+  - **The hook entry never says a call ended well.** On every path (the tool's payload or an event-shaped line) it
+    writes a line with an outcome as **provisional**: `outcome` `{ok: null, error: null, ms: null}`, whatever the
+    caller sent (a claimed `ok: true` included). Only a claimed **failure** is kept, since it only narrows trust:
+    `{ok: false, error: <fixed code>, ms: null}`, the code `interrupted` or `tool_failed` (any other error the
+    caller sent becomes `tool_failed`); the tool's own error text is never in the line, only in the detail file
+    (hidden and cut like any output). Claude's `PostToolUseFailure` hook (`is_interrupt: true` → `interrupted`)
+    is such a failure; its `PostToolUse` is provisional. Without a log (a live run) a successful call stays
+    "finished, result unknown" and a failed one is recorded as failed (vectors `hook_entry`).
   - **The log line wins, started and finished alike.** For a key that a log line also has, the log line replaces the
     hook line (it is written, with its own detail file over the hook's, and readers keep it), and a hook line after
     any log line of that call (run, id, kind; started or finished) is dropped (vectors `dedupe`).
   - **Disagreement is kept, never hidden.** When a hook line of the call says something else than the log line
     (`used`, `text`, `files`, whether either is finished; or, both finished and the hook's not provisional, `ok` or
-    `error`), both lines are kept and the log line carries `conflict: true`; the log line is the one to believe:
+    `error`, where a hook's fixed failure code is never compared with the log's error text: a hook failure and the
+    log's failure agree), both lines are kept and the log line carries `conflict: true`; the log line is the one to believe:
     counts take its line of the call, even a started one over a hook end (result unknown). A kept hook line and its
     `conflict` log line share one detail file name: when the log line has a detail, the file is the log's.
   - The writer removes the hook's detail file when the log line that replaced it has none of its own (lost or none),
@@ -375,7 +381,8 @@ SHA-256 of `b"orch.id.hook/1\0" + hidden_id.encode("utf-8")`. For one hook/log
 key the log line replaces the hook line and a later hook line is dropped; when
 they disagree (`used`, `text`, `files`, or a non-provisional `ok`/`error`), both
 lines remain and the log line has `conflict: true`. A provisional hook end
-(`ok: null`) never disagrees on its outcome.
+(`ok: null`) never disagrees on its outcome; a hook end with a fixed failure code
+(`tool_failed`, `interrupted`) is compared on `ok` only (vectors `dedupe`).
 
 Lock waits cover the 30-second stale window. A timed-out write is spooled in
 `pending/<run>/` and drained in name-time order by the next append, under the
@@ -412,3 +419,13 @@ OneDrive placeholders are allowed. Secrets shorter than the hider's minimum
 are not hidden. In-place edits by the same user are not detected: trust is based
 on file identity, not content authentication. Tests compare the bundled schema
 with this contract to detect drift.
+
+### Known limit: record content is not authenticated yet (Gate G1, issue #563)
+
+The checks above stop planted special files, links and foreign owners. They do not
+authenticate the CONTENT of a record line. Anything that runs as the same user can
+append a schema-valid line to `runs/<run>.jsonl` or put one in `pending/<run>/`,
+including a line with `via: "log"` or `via: "core"`. Until the per-line MAC and
+hash chain land (planned next, keyed from a subkey of the guarded key), readers
+must not derive permissions, retention or shared counts from record content, and
+screens show what an agent reported and what orch checked as two different things.

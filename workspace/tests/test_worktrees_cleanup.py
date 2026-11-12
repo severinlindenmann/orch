@@ -1702,7 +1702,7 @@ def test_an_unrelated_op_on_an_unsigned_done_does_not_try_to_release_the_copy(re
     assert tickets.load(repo, t)["status"] == "review"
     calls = []
     monkeypatch.setattr(worktrees, "on_closed", lambda *a, **k: calls.append(a))
-    tickets.apply_op(repo, t, lambda tk: tk.setdefault("notes_probe", 1))
+    tickets.apply_op(repo, t, lambda tk: tk.setdefault("notes_probe", 1), by=tickets.SYSTEM)
     assert calls == []
 
 

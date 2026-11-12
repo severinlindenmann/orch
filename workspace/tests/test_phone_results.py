@@ -125,7 +125,7 @@ def _evidence_ticket(proj, new_ticket, docs, done=True):
     def op(t):
         t["checklist"] = [{"id": "c1", "text": "Export", "done": done, "evidence": evs}]
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     return tid
 
 
@@ -285,7 +285,7 @@ def test_deeply_nested_or_huge_proof_file_never_fails_the_send(proj, new_ticket,
             }
         ]
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     assert "results" not in phone_view.view_for(proj, tid)
 
 
@@ -783,7 +783,7 @@ def _evidence_files(proj, new_ticket, files, title="Deploy"):
     def op(t):
         t["checklist"] = [{"id": "c1", "text": "Deploy", "done": True, "evidence": evs}]
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     return tid
 
 
@@ -820,6 +820,25 @@ H4_FORMS = [
 ]
 
 
+@pytest.mark.parametrize("form", H4_FORMS)
+def test_h4_forms_are_also_caught_by_the_file_scan(form):
+    """The attachment scan (_has_secret) uses the same detection as redact: every form redact hides hits."""
+    assert phone_view.redact(form) != form
+    assert phone_view._has_secret(form.encode())
+    assert phone_view._has_secret(f"notes\n{form}\nend".encode())
+
+
+@pytest.mark.parametrize(
+    "text", ["mysql --password hunter2", "psql://bob:hunter2@db.example.ch/x", "login bob password hunter2"]
+)
+def test_flag_form_userinfo_and_spaced_values_are_file_hits(text):
+    assert phone_view._has_secret(text.encode()), text
+
+
+def test_ordinary_text_is_not_a_file_hit():
+    assert not phone_view._has_secret(b"Quarterly summary: 3 charts, all checks passed.\n")
+
+
 VALUE = "Xk93-pq7Lm-aa21"  # a stored key value, written in prose without any label
 
 
@@ -834,7 +853,7 @@ def test_h5_stored_values_never_leave_in_any_text_of_the_view(proj, run, new_tic
         t["summary"] = f"Done, new value {VALUE}"
         # url/file evidence: covered by the backlog upload-gate PR (phone_view.attachments), not #497
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     code, _, err = run("relay", "send", "phones", "Finished", "--ticket", tid, "--update", "result")
     assert code == 0, err
     assert VALUE not in json.dumps(conn.sent, ensure_ascii=False), "no message at all carries it"
@@ -1260,6 +1279,6 @@ def test_r3_l7_more_mysql_family_commands(text, want):
 def test_update_title_no_prefix_of_a_stored_value_after_a_collapse(proj, new_ticket):
     keystore.add(proj, "db-cred", "token", VALUE)
     tid = new_ticket("Title")
-    tickets.apply_op(proj, tid, lambda t: t.update(title="a" + " " * 365 + VALUE))
+    tickets.apply_op(proj, tid, lambda t: t.update(title="a" + " " * 365 + VALUE), by=tickets.SYSTEM)
     title = relay._update_title(proj, tid)
     assert title is None or VALUE[:8] not in title

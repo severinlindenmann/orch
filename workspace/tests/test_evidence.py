@@ -141,7 +141,7 @@ def test_mark_falls_back_to_history_line(proj, run, tid):
     def strip(t):
         t["checklist"][0]["evidence"][0].pop("by")
 
-    tickets.apply_op(proj, tid, strip)
+    tickets.apply_op(proj, tid, strip, by=tickets.SYSTEM)
     assert "● You" in run("ticket", "show", tid)[1]
 
 

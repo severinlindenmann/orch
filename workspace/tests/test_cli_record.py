@@ -805,3 +805,39 @@ def test_deeply_nested_cursors_are_invalid(ws, capsys):
         for args in (("tail", "--since", cursor), ("query", "--after", cursor)):
             code, (line,) = cli_lines(capsys, *args)
             assert code == 2 and line["code"] == "invalid"
+
+
+def _plant(ws, run, **changes):
+    """Append a schema-valid line the agent could write itself (not through the writer)."""
+    path = record_dir(ws) / "runs" / f"{run}.jsonl"
+    line = json.dumps(example(run=run, id="toolu_planted", at=at(50), **changes))
+    with open(path, "a") as f:
+        f.write(line + "\n")
+
+
+def test_planted_huge_seq_does_not_freeze_the_tail_cursor(ws, capsys):
+    _plant(ws, RUN_A, seq=10**18)
+    _, before = cli_lines(capsys, "tail", "--run", RUN_A)
+    assert any(ln["type"] == "unavailable" and ln["reason"] == "skipped" for ln in before)
+    before = [ln for ln in before if ln["type"] == "event"]
+    assert [ln["event"]["seq"] for ln in before] == [1, 2, 3, 4]  # the planted line is skipped
+    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(example(run=RUN_A, id="toolu_a9", at=at(55)))
+    _, rest = cli_lines(capsys, "tail", "--run", RUN_A, "--since", before[-1]["cursor"])
+    rest = [ln for ln in rest if ln["type"] == "event"]
+    assert [ln["event"]["id"] for ln in rest] == ["toolu_a9"]
+    assert rest[0]["event"]["seq"] == 6  # the planted line still counts as physical line 5
+
+
+def test_duplicate_seq_does_not_break_query_paging(ws, capsys):
+    for _ in range(2):
+        _plant(ws, RUN_A, seq=2)  # repeats of an earlier line number
+    seen, after = [], []
+    for _ in range(20):
+        code, (page,) = cli_lines(capsys, "query", "--run", RUN_A, "--limit", "2", *after)
+        assert code == 0
+        seen += [(e["run"], e["seq"]) for e in page["items"]]
+        if not page["next"]:
+            break
+        after = ["--after", page["next"]]
+    assert sorted(seen) == [(RUN_A, n) for n in range(1, 5)]

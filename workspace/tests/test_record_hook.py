@@ -4,8 +4,10 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 import time
+import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -806,6 +808,116 @@ def test_pre_and_post_tool_use_of_one_call_make_one_step_with_its_detail(tool_ru
     model = cli_record.run_model(run, events(root, run))
     assert [(u["name"], u["result"]) for u in model["uses"]] == [("Read", "unknown")]  # one call, one use
     assert "/elsewhere" not in (root / f".orch/record/runs/{run}.jsonl").read_text()  # nothing else is kept
+
+
+FAILED_TEXT = f"Exit code 1\nrm: build: Permission denied {SECRET}"
+
+
+def failure_hook(tid=TOOL_ID, interrupt=False, **kw):
+    """What the tool's PostToolUseFailure hook sends: like PostToolUse, the error text instead of a result."""
+    return tool_hook("PostToolUseFailure", tid=tid, error=FAILED_TEXT, is_interrupt=interrupt, **kw)
+
+
+@pytest.mark.parametrize("interrupt, code", [(False, "tool_failed"), (True, "interrupted")])
+def test_a_failed_tool_call_in_a_live_run_is_recorded_as_failed(tool_run, interrupt, code):
+    """No log in a live run: the failure hook is all there is. Its end says `ok: false` with a fixed code (a
+    claimed failure only narrows trust), never the error text; the text is in the detail, hidden."""
+    from orch import cli_record
+
+    root, run, _ = tool_run
+    record_hook.hook(root, tool_hook("PreToolUse"))
+    end = record_hook.hook(root, failure_hook(interrupt=interrupt))
+    assert end["id"] == TOOL_ID and end["kind"] == "step" and end["via"] == "hook"
+    assert end["outcome"] == {"ok": False, "error": code, "ms": None}
+    assert end["used"] == READ and end["text"] == "Read notes.txt" and end["files"] == ["notes.txt"]
+    detail = record.read_detail(root, run, end["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    assert detail["input"] == {"file_path": "notes.txt"}
+    assert detail["output"] == "Exit code 1\nrm: build: Permission denied [hidden: deploy-key]"
+    stored = (root / f".orch/record/runs/{run}.jsonl").read_text()
+    assert "Permission denied" not in stored and "Exit code" not in stored  # the text is never in the line
+    assert SECRET not in "".join(p.read_text() for p in (root / ".orch/record").rglob("*") if p.is_file())
+    assert record_hook.hook(root, failure_hook(interrupt=interrupt)) is None  # delivered twice: one line
+    model = cli_record.run_model(run, events(root, run))
+    assert [(u["name"], u["result"]) for u in model["uses"]] == [("Read", "failed")]
+
+
+def test_a_big_failure_text_is_cut_in_the_detail(tool_run):
+    root, run, _ = tool_run
+    end = record_hook.hook(root, tool_hook("PostToolUseFailure", error="x" * 100_000))
+    assert end["outcome"] == {"ok": False, "error": "tool_failed", "ms": None}
+    detail = record.read_detail(root, run, end["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    assert len(detail["output"]) < 33_000 and detail["output"].endswith("more characters]")
+
+
+def test_a_failed_helper_start_is_left_to_the_log(tool_run):
+    root, run, _ = tool_run
+    with pytest.raises(record_hook.NotRecorded, match="helper"):
+        record_hook.hook(root, failure_hook(name="Task", inp={"description": "Look around"}))
+    assert record.read_run(root, run).status == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "sent, stored",
+    [
+        ({"ok": True, "error": None, "ms": 5}, {"ok": None, "error": None, "ms": None}),  # never "ended well"
+        ({"ok": None, "error": "x", "ms": 5}, {"ok": None, "error": None, "ms": None}),
+        ({"ok": False, "error": "interrupted", "ms": 9}, {"ok": False, "error": "interrupted", "ms": None}),
+        (
+            {"ok": False, "error": f"failed {SECRET}", "ms": 1},
+            {"ok": False, "error": "tool_failed", "ms": None},
+        ),
+        ({"ok": False}, {"ok": False, "error": "tool_failed", "ms": None}),
+    ],
+)
+def test_the_generic_path_keeps_only_a_claimed_failure_with_a_fixed_code(live, sent, stored):
+    root, run, _ = live
+    got = record_hook.hook(root, line(outcome=sent))
+    assert got["outcome"] == stored and events(root, run)[0]["outcome"] == stored
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_a_hook_failure_and_the_logs_failure_agree_the_logs_line_replaces_it(tool_run, interrupt):
+    from orch import cli_record, collect_claude
+
+    root, run, tid = tool_run
+    record_hook.hook(root, tool_hook("PreToolUse"))
+    record_hook.hook(root, failure_hook(interrupt=interrupt))
+    failed = dict(type="tool_result", tool_use_id=TOOL_ID, content="Exit code 1\nboom", is_error=True)
+    end = json.dumps(dict(type="user", session_id=SID, uuid="u-2", message=dict(content=[failed])))
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    stats = collect_claude.collect([use_line(), end], record.registered_writer(root), ctx)
+    assert (stats["written"], stats["tool_calls"], stats["hook_seen"]) == (2, 1, 1)
+    seen = events(root, run)
+    assert [(e["via"], e["outcome"] and (e["outcome"]["ok"], e["outcome"]["error"])) for e in seen] == [
+        ("log", None),
+        ("log", (False, "Exit code 1")),
+    ]
+    assert not any("conflict" in e for e in seen)
+    detail = record.read_detail(root, run, seen[1]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    assert detail["output"] == "Exit code 1\nboom"  # the log's detail replaced the hook's
+    assert [u["result"] for u in cli_record.run_model(run, seen)["uses"]] == ["failed"]
+    assert record_hook.hook(root, failure_hook(interrupt=interrupt)) is None  # late: dropped
+
+
+@pytest.mark.parametrize("hook_first", [True, False])
+def test_the_logs_success_wins_over_a_hook_failure_in_both_orders(tool_run, hook_first):
+    """A claimed failure the log contradicts: hook first, both are kept and the log line carries `conflict`
+    (counts believe it); log first, the late hook end is dropped."""
+    from orch import cli_record, collect_claude
+
+    root, run, tid = tool_run
+    ctx = dict(run=run, ticket=tid, harness="claude", workspace=str(root))
+    if hook_first:
+        assert record_hook.hook(root, failure_hook()) is not None
+    collect_claude.collect([use_line(), result_line()], record.registered_writer(root), ctx)
+    if not hook_first:
+        assert record_hook.hook(root, failure_hook()) is None
+    seen = [e for e in events(root, run) if e["outcome"] is not None]
+    want = [("hook", False, None), ("log", True, True)] if hook_first else [("log", True, None)]
+    assert [(e["via"], e["outcome"]["ok"], e.get("conflict")) for e in seen] == want
+    every = events(root, run)
+    for order in (every, every[::-1]):
+        assert [u["result"] for u in cli_record.run_model(run, order)["uses"]] == ["ok"]
 
 
 def test_hook_and_collector_of_one_tool_call_the_logs_lines_replace_the_hooks(tool_run):
@@ -1735,3 +1847,117 @@ def test_every_lost_reason_is_named_in_the_contract():
     text = (ROOT / "contracts/activity.md").read_text()
     for reason in (*record.LOST_REASONS, *record.UNPROVEN_REASONS, "trimmed"):
         assert reason in text, reason
+
+
+# --- G1 H3: the hider derives every escaped form; hide and backstop use the same set ---
+_QUOTED = 'p@ss"w0rd\\ZZ-9'  # a quote and a backslash
+_PEM = "\n".join(
+    [
+        "-----BEGIN KEY-----",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+        "abcdEFGHijklMNOPqrstUVWXyz0123456789",
+        "-----END KEY-----",
+    ]
+)
+
+
+def _variants(value):
+    """Forms of a key a tool, a shell or a JSON layer can print (the search test looks for every one)."""
+    raw = value.encode()
+    forms = {value, json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]}
+    forms.add(json.dumps(json.dumps(value))[1:-1][1:-1])  # JSON inside JSON
+    forms.add(value.replace("\\", "\\\\").replace('"', '\\"'))  # shell style backslash escapes
+    forms.add(urllib.parse.quote(value, safe=""))
+    forms.add(urllib.parse.quote_plus(value))
+    for pad in range(3):
+        enc = base64.b64encode(b"\0" * pad + raw).decode().rstrip("=")
+        forms.add(enc[(8 * pad + 5) // 6 : 8 * (pad + len(raw)) // 6])
+    forms.add(raw.hex())
+    # twice escaped: non-ASCII as \\u00e4, and a "/" written \/ at the first level and escaped again
+    forms.add(json.dumps(json.dumps({"p": value}))[1:-1].split('\\"p\\": \\"', 1)[1].rsplit('\\"}', 1)[0])
+    forms.add(json.dumps(json.dumps(value, ensure_ascii=False), ensure_ascii=False)[1:-1][1:-1])
+    forms.add(json.dumps(json.dumps(value).replace("/", "\\/"))[1:-1][1:-1])
+    forms.add(re.sub(r'([$`"\\])', r"\\\1", value))  # shell double quotes
+    return {f for f in forms if len(f) >= 8}
+
+
+def _record_blob(root):
+    return b"".join(p.read_bytes() for p in (root / ".orch/record").rglob("*") if p.is_file())
+
+
+def _record_strings(root):
+    """Every decoded string value and key of every JSON line under .orch/record/."""
+    found = []
+
+    def walk(value):
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                walk(k)
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+
+    for p in (root / ".orch/record").rglob("*"):
+        if p.is_file():
+            content = p.read_text()
+            for text in content.splitlines() or [content]:
+                try:
+                    walk(json.loads(text))
+                except ValueError:
+                    found.append(text)
+    return found
+
+
+_UNICODE = 'pä/ss"w0rd\\é+/ZZ-9$`'
+
+
+@pytest.mark.parametrize("secret", [_QUOTED, _PEM, _UNICODE], ids=["quote-backslash", "pem", "unicode-slash"])
+def test_escaped_and_encoded_forms_never_reach_the_record_folder(proj, monkeypatch, secret):
+    t = tickets.create(proj, "Hook me", "human:t")
+    rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", t["id"])
+    forms = sorted(_variants(secret))
+    assert len(forms) >= 6
+    with hider.use_hider(hider.Hider({"deploy-key": secret})):
+        for n, form in enumerate(forms):
+            record_hook.hook(
+                proj,
+                line(
+                    id=f"toolu_{n}",
+                    text="Run with " + form.replace("\n", " "),
+                    data={"note": f"token {form}"},
+                    outcome={"ok": False, "error": f"failed {form}", "ms": 1},
+                    payload={
+                        "input": {"command": f"curl -H {form}", form: "as a key"},
+                        "output": f"leaked {form}",
+                    },
+                ),
+            )
+    blob = _record_blob(proj)
+    assert b"[hidden: " in blob
+    strings = _record_strings(proj)
+    for form in forms:
+        assert form.encode() not in blob, form
+        assert json.dumps(form)[1:-1].encode() not in blob, form  # as the file spells a string holding it
+        assert not any(form in s for s in strings), form
+
+
+def test_the_decoded_value_check_catches_what_the_serialized_check_misses():
+    """Removing Hider.leaks from the writer's backstop must fail this: a hider whose scan of the serialized
+    line sees nothing (as when an escape form was not derived) still cannot get a key into a line."""
+
+    class Blind(hider.Hider):
+        def hide_text(self, s):
+            return s if s.startswith("{") else super().hide_text(s)
+
+    blind = Blind({"deploy-key": SECRET})
+    obj = {"text": f"x {SECRET}", "data": {SECRET: 1}}
+    line = record._json(obj)
+    assert blind.hide_text(line) == line  # the serialized check alone passes it
+    with pytest.raises(record.RecordInvalid):
+        record._hidden_line(blind, obj)
+    assert record._hidden_line(blind, {"text": "clean"}) == b'{"text":"clean"}'
