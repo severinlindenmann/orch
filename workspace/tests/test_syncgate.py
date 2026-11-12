@@ -61,7 +61,7 @@ def _writers(proj, tid):
         "create": lambda: tickets.create(proj, "N", "human:t"),
         "next_key": lambda: tickets.next_key(proj),
         "ensure_general": lambda: tickets.ensure_general(proj, "human:t"),
-        "attach_file": lambda: tickets.attach_file(proj, tid, str(proj / "f.txt"), None, None),
+        "attach_file": lambda: tickets.attach_file(proj, tid, str(proj / "f.txt"), None, None, by="human:t"),
         "files_dir": lambda: tickets.files_dir(proj, tid),
         "artifacts_dir": lambda: tickets.artifacts_dir(proj, tid),
         "attach": lambda: tickets.attach(proj, tid, "a.md", b"hello", "human:t"),
@@ -465,7 +465,9 @@ def test_attach_works_without_dir_fds_and_never_self_deadlocks(proj, monkeypatch
     monkeypatch.setattr(os, "supports_dir_fd", set())
     assert tickets.attach(proj, tid, "b.md", b"two", "human:t")["name"] == "b.md"
     assert (
-        tickets.attach_file(proj, tid, str(proj / "a.md"), None, None) if (proj / "a.md").exists() else True
+        tickets.attach_file(proj, tid, str(proj / "a.md"), None, None, by="human:t")
+        if (proj / "a.md").exists()
+        else True
     )
 
 

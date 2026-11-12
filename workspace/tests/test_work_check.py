@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from orch import filesig, procs, runs, safegit, tickets, workcheck
+from orch import filesig, procs, runs, runs_live, safegit, tickets, workcheck
 from orch import init as init_mod
 
 
@@ -68,7 +68,8 @@ def test_active_claim_keeps_it_quiet(ws):
     assert workcheck.check(ws)["remind"] is False
 
 
-def test_closed_ticket_with_claim_does_not_count(ws):
+def test_closed_ticket_with_claim_does_not_count(ws, monkeypatch):
+    monkeypatch.setattr(runs_live, "stop", lambda root, tid: False)  # the claim stays (no real stop, #542)
     t = tickets.create(ws, "Old", "human:t")
     runs.claim(ws, t["id"], "agent:claude", "claude", "live", pid=os.getpid())
     tickets.set_status(ws, t["id"], "dropped", "human:t")
