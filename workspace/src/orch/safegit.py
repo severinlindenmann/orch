@@ -621,6 +621,43 @@ def refusal(args: list[str]) -> str | None:
     return None
 
 
+# filters=False skips the check of the repository's filter drivers, so it is ONLY for subcommands that never
+# hash, clean, smudge or check out file content (git re-hashes a stat-dirty file through the clean filter in
+# anything that refreshes the index or compares the work tree: rm, add, status, diff, ls-files -m).
+# Subcommand -> the flags it may carry (None = any); worktree is checked by hand in filters_off_refusal.
+_LS_FILES_OK = {"-z", "-s", "--stage", "-o", "--others", "--exclude-standard", "--error-unmatch"}
+FILTERS_OFF_OK = {
+    "rev-parse": None,  # resolves names and paths; reads refs only
+    "symbolic-ref": None,  # reads / writes HEAD
+    "branch": None,  # refs only
+    "check-ignore": None,  # ignore rules only (already limited by refusal())
+    "worktree": None,  # only prune, list, add --no-checkout (no checkout: no content is written)
+    "ls-files": _LS_FILES_OK,  # names from the index / directory walk; never -m/-d/--eol (stat + hash)
+}
+
+
+def filters_off_refusal(args: list[str]) -> str | None:
+    """Why filters=False is not allowed for this git call (None = fine): only FILTERS_OFF_OK subcommands,
+    with their flags checked, may skip the filter-driver check. Everything else runs with filters=True."""
+    k = subcommand_index(args)
+    if k >= len(args):
+        return None  # nothing to run: refusal() decides
+    cmd, rest = args[k], args[k + 1 :]
+    flags = rest[: rest.index("--")] if "--" in rest else rest
+    why = f"git {cmd} may read or hash file content: it runs only with filters=True"
+    if cmd not in FILTERS_OFF_OK:
+        return why
+    if cmd == "worktree":
+        sub = rest[0] if rest else ""
+        if sub in ("prune", "list") or (sub == "add" and "--no-checkout" in flags):
+            return None
+        return why
+    ok = FILTERS_OFF_OK[cmd]
+    if ok is not None and not set(flags) <= ok:
+        return why
+    return None
+
+
 def subcommand_index(args: list[str]) -> int:
     """Index of the git subcommand in `args`, past leading global options (-C x, -c k=v, --literal-pathspecs,
     --opt=value ...); len(args) when there is none."""
@@ -672,7 +709,8 @@ def driver_args(
 
 def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
     """(argv, config) for git `args`, or (None, (rc, reason)) when orch refuses to run it."""
-    why = refusal(args) or unusable_root(guard if guard is not None else root)
+    why = refusal(args) or (None if filters else filters_off_refusal(args))
+    why = why or unusable_root(guard if guard is not None else root)
     if why:
         return None, (REFUSED, why)
     top: list[str] = []  # options before the subcommand
