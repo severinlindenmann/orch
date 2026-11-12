@@ -2185,19 +2185,32 @@ def test_nothing_uses_keys_as_root_in_run_or_get(store, ws, monkeypatch):
         secretrun.get(ws, "plain", "other-token", stdout_is_tty=False, out=io.BytesIO(), agent=False)
 
 
-def test_urls_are_not_paths_unless_file_or_unix_or_they_hide_a_path_behind_a_space(ws):
-    secretrun.check_arguments(ws, ["https://example.test/x", "postgres://u@h/db", "git+https://h/r"])
+def test_only_plain_web_and_git_addresses_are_not_paths(ws):
+    secretrun.check_arguments(
+        ws,
+        ["https://example.test/a?b=c", "http://h/x", "ssh://git@h/repo.git", "git://h/r.git", "10:30"],
+    )
     for bad, why in (
+        ("sqlite3:x.db", "full path"),
+        ("jdbc:sqlite:/x", "full path"),
+        ("postgres://h/db?host=/tmp/sock", "full path"),
+        ("postgres://h/db", "full path"),
+        ("mailto:x@y", "full path"),
+        ("a://b", "full path"),
+        ("git+file:///nonexistent/r", "full path"),
+        ("redis+unix:///nonexistent/s", "full path"),
         ("a://b /Users/me/ws/evil", "full path"),
+        ("HTTPS://h/x", "full path"),
         ("file://relative/x", "full path"),
-        ("file:///nonexistent/x", "does not exist"),
-        ("unix:///nonexistent/sock", "does not exist"),
-        ("git+file:///nonexistent/r", "does not exist"),
-        ("redis+unix:///nonexistent/s", "does not exist"),
-        ("sqlite:///nonexistent/db", "does not exist"),
+        ("https://h/?file=/etc/x", "full path"),
+        ("https://h/?file=%2Fetc%2Fx", "full path"),
+        ("https://h/?f=~/x", "full path"),
+        ("https://h/?f=../x", "full path"),
     ):
         with pytest.raises(Refused, match=why):
             secretrun.check_arguments(ws, [bad])
+    with pytest.raises(Refused, match="does not exist"):
+        secretrun.check_arguments(ws, ["/nonexistent/place"])
 
 
 def test_a_folder_is_not_accepted_as_a_command_argument(ws):
@@ -2210,3 +2223,36 @@ def test_a_folder_is_not_accepted_as_a_command_argument(ws):
 
 def test_the_developer_variables_are_never_handed_to_a_command():
     assert all(keystore.env_denied(v) for v in ("DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"))
+
+
+@pytest.mark.real_checks
+@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
+def test_a_differently_cased_stub_path_is_still_a_stub(ws, monkeypatch, tmp_path):
+    tmp = Path(os.path.realpath(tmp_path))
+    stubs = tmp / "stubs"
+    stubs.mkdir()
+    (stubs / "git").write_bytes(b"libxcselect")
+    dev = tmp / "Developer"
+    dev.mkdir()
+    link = tmp / "link"
+    link.symlink_to(dev)
+    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
+    monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(stubs))
+    shout = str(stubs).upper() + "/git"
+    if not os.path.exists(shout):  # a case-sensitive file system: the odd spelling is simply not there
+        with pytest.raises(Refused, match="not found"):
+            secretrun.approve_program(ws, shout)
+        return
+    with pytest.raises(Refused, match=LOCATION):
+        secretrun._check_xcode(shout, str(ws))
+
+
+@pytest.mark.real_checks
+@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
+def test_a_stub_is_refused_when_no_developer_folder_exists(ws, monkeypatch, tmp_path):
+    tmp = Path(os.path.realpath(tmp_path))
+    (tmp / "git").write_bytes(b"libxcselect")
+    monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(tmp))
+    monkeypatch.setattr(secretrun, "_developer_dir", lambda: str(tmp / "nothing-here"))
+    with pytest.raises(Refused, match="developer folder it runs from is missing"):
+        secretrun._check_xcode(str(tmp / "git"), str(ws))

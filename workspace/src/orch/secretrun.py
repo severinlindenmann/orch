@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 
 from orch import hider, keystore, launchenv, term
 from orch import humanproof as hp
@@ -223,6 +224,9 @@ SHEBANG_REFUSED = (
     "program in a folder you own). Approve the interpreter itself as the command and give the script as an "
     "argument."
 )
+USER_OWNED_DEV = (
+    "Refused: this program is a macOS developer-tools stub and the developer folder it runs from is missing."
+)
 USER_OWNED = (
     "Refused: the program or a folder above it belongs to your own user, so an agent running as you could "
     "replace it. Choose a program in a system folder, or approve this exact file as the person."
@@ -304,16 +308,26 @@ def _is_xcrun_stub(path: str) -> bool:
         return True
 
 
+def _in_stub_dir(path: str) -> bool:
+    """Is the program in the xcrun stub folder? Compared by file identity (the file system ignores case);
+    any error counts as yes."""
+    try:
+        return os.path.samefile(os.path.dirname(path), XCRUN_STUB_DIR)
+    except OSError:
+        return True
+
+
 def _check_xcode(path: str, ws: str) -> None:
     """macOS: /usr/bin/git, make, python3, clang ... are stubs that run the real tool from the developer
     folder (chosen by xcode-select, never by the caller's environment). For such a stub that folder must be
     safe whether or not a tool of that name is found there, and so must the tool. Other /usr/bin programs
     do not depend on it."""
-    if sys.platform != "darwin" or os.path.dirname(path) != XCRUN_STUB_DIR or not _is_xcrun_stub(path):
+    if sys.platform != "darwin" or not _in_stub_dir(path) or not _is_xcrun_stub(path):
         return
     dev = _developer_dir()
-    if os.path.isdir(dev):
-        _check_chain(dev, ws)
+    if not os.path.isdir(dev):  # no developer folder to run the real tool from: not a program to approve
+        raise Refused(USER_OWNED_DEV)
+    _check_chain(dev, ws)
     name = os.path.basename(path)
     candidates = [os.path.join(dev, "usr", "bin", name)]
     toolchains = os.path.join(dev, "Toolchains")
@@ -375,21 +389,45 @@ def _check_shebang(root, real: str, depth: int) -> None:
     approve_program(root, parts[0], _depth=depth + 1)
 
 
-_URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")  # looks like scheme:... (jdbc:, sqlite3:, mailto:)
+_WEB_SCHEMES = ("http", "https", "ssh", "git")  # the only schemes whose values are not looked at as paths
+
+
+def _is_plain_address(value: str) -> bool:
+    """A web or git address with no path hidden in it: scheme://..., exact lowercase scheme from the list, no
+    whitespace, and no query value that looks like a path (also percent-encoded). Anything else is not an
+    address: it goes through the path rules. A value that cannot be parsed is refused."""
+    m = re.match(r"^([a-z]+)://", value)
+    if not m or m[1] not in _WEB_SCHEMES or re.search(r"\s", value):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(value)
+        query = parts.query
+        pairs = urllib.parse.parse_qsl(query, keep_blank_values=True)
+    except ValueError:
+        raise Refused("Refused: an address in the command could not be read.") from None
+    if "%2f" in query.lower() or "%5c" in query.lower():
+        return False
+    return not any(
+        "/" in v or "\\" in v or v[:1] in ("~", ".", "/") for v in (x for pair in pairs for x in pair)
+    )
 
 
 def check_arguments(root, arguments) -> None:
     """One fail-closed rule for the arguments of a profile's command and for its `set` values: one with a path
     separator must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative path), must not
     go through a link, and neither it nor any parent may be inside the workspace or changeable by you (an
-    agent running as you could change it). Web addresses (scheme://) are not paths."""
+    agent running as you could change it). Only plain http, https, ssh and git addresses are not paths."""
     ws = os.path.realpath(root)
     for arg in arguments:
-        if _URL.match(arg) and not re.search(r"\s", arg):
-            scheme, _, arg = arg.partition("://")
-            if not set(scheme.lower().split("+")) & {"file", "unix", "sqlite"}:  # a web address is not a path
-                continue
-        if "/" not in arg and "\\" not in arg and not (os.altsep and os.altsep in arg):
+        if _is_plain_address(arg):
+            continue
+        if (
+            "/" not in arg
+            and "\\" not in arg
+            and not (os.altsep and os.altsep in arg)
+            and not _SCHEME.match(arg)
+        ):
             continue
         if not os.path.isabs(arg) or "\0" in arg or "\\" in arg:
             raise Refused(
