@@ -85,6 +85,13 @@ pub struct App {
     pub upload_inflight: Mutex<HashMap<String, i64>>,
     /// phone id -> (window start, calls in window) for `POST /v1/phone/invitations/redeem`
     pub redeem_rate: Mutex<HashMap<String, (i64, u32)>>,
+    /// webhook id -> (window start, accepted calls in window); see `webhook_admit`
+    pub webhook_rate: Mutex<HashMap<String, (i64, u32)>>,
+    /// webhook id -> (UTC day number, accepted payload bytes that day)
+    pub webhook_bytes: Mutex<HashMap<String, (i64, u64)>>,
+    /// Limits for `webhook_admit` (fields so tests can lower them).
+    pub webhook_calls_per_minute: std::sync::atomic::AtomicU32,
+    pub webhook_bytes_per_day: std::sync::atomic::AtomicU64,
     /// "workspace|phone" -> text-push budget state
     pub push_budget: Mutex<HashMap<String, PushBudget>>,
     /// Subscribers: open streams, rate limits, push rounds (subs.rs).
@@ -119,6 +126,20 @@ impl PushBudget {
 
 pub type AppState = Arc<App>;
 
+/// Accepted calls per webhook per fixed one-minute window.
+pub const WEBHOOK_CALLS_PER_MINUTE: u32 = 60;
+/// Accepted payload bytes per webhook per UTC day (20 MB).
+pub const WEBHOOK_BYTES_PER_DAY: u64 = 20 * 1024 * 1024;
+/// Above this many entries, the webhook rate maps drop entries of past windows/days.
+const WEBHOOK_RATE_PRUNE_AT: usize = 1024;
+
+/// Why `webhook_admit` refused a call; carries the seconds until it may be retried.
+#[derive(Debug, PartialEq)]
+pub enum WebhookLimit {
+    Calls(i64),
+    Bytes(i64),
+}
+
 impl App {
     pub fn new(cfg: Config, key: Key, pusher: Arc<dyn Pusher>) -> Result<AppState, String> {
         Self::with_transcriber(cfg, key, pusher, Arc::new(Deepgram::default()))
@@ -149,6 +170,10 @@ impl App {
             upload_grace_ms: 30_000.into(),
             upload_inflight: Mutex::new(HashMap::new()),
             push_budget: Mutex::new(HashMap::new()),
+            webhook_rate: Mutex::new(HashMap::new()),
+            webhook_bytes: Mutex::new(HashMap::new()),
+            webhook_calls_per_minute: WEBHOOK_CALLS_PER_MINUTE.into(),
+            webhook_bytes_per_day: WEBHOOK_BYTES_PER_DAY.into(),
             subs: Default::default(),
         }))
     }
@@ -165,6 +190,40 @@ impl App {
             self.upload_idle_ms
                 .load(std::sync::atomic::Ordering::Relaxed),
         )
+    }
+
+    /// Counts one call of `bytes` payload against webhook `id` at time `now`, or refuses it without counting.
+    /// Call only after the token was verified, so a caller without the token cannot use up the limit.
+    pub fn webhook_admit(&self, id: &str, bytes: u64, now: i64) -> Result<(), WebhookLimit> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let per_min = self.webhook_calls_per_minute.load(Relaxed);
+        let per_day = self.webhook_bytes_per_day.load(Relaxed);
+        let day = now.div_euclid(86_400);
+        let mut rate = self.webhook_rate.lock().unwrap();
+        let mut used = self.webhook_bytes.lock().unwrap();
+        if rate.len() > WEBHOOK_RATE_PRUNE_AT {
+            rate.retain(|_, e| now - e.0 < 60);
+        }
+        if used.len() > WEBHOOK_RATE_PRUNE_AT {
+            used.retain(|_, e| e.0 == day);
+        }
+        let r = rate.entry(id.to_string()).or_insert((now, 0));
+        if now - r.0 >= 60 {
+            *r = (now, 0);
+        }
+        let u = used.entry(id.to_string()).or_insert((day, 0));
+        if u.0 != day {
+            *u = (day, 0);
+        }
+        if r.1 >= per_min {
+            return Err(WebhookLimit::Calls((r.0 + 60 - now).max(1)));
+        }
+        if u.1.saturating_add(bytes) > per_day {
+            return Err(WebhookLimit::Bytes((day + 1) * 86_400 - now));
+        }
+        r.1 += 1;
+        u.1 += bytes;
+        Ok(())
     }
 
     pub fn blob_path(&self, id: &str) -> PathBuf {

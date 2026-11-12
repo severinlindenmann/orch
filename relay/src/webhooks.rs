@@ -1,12 +1,13 @@
 //! Webhooks: created by workspaces, called by the outside world, delivered as `webhook` messages.
 use crate::error::*;
-use crate::state::AppState;
+use crate::state::{AppState, WebhookLimit};
 use crate::store;
 use crate::util::*;
 use crate::{api::parse_body, auth};
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
@@ -95,10 +96,29 @@ pub async fn call(
     State(app): State<AppState>,
     method: Method,
     Path(id): Path<String>,
-    Query(mut q): Query<HashMap<String, String>>,
+    Query(q): Query<HashMap<String, String>>,
     headers: HeaderMap,
     body: Bytes,
-) -> Res<StatusCode> {
+) -> Response {
+    let (err, secs) = match deliver(app, method, id, q, headers, body) {
+        Ok(Ok(s)) => return s.into_response(),
+        Err(e) => return e.into_response(),
+        Ok(Err(WebhookLimit::Calls(s))) => (webhook_limited(false), s),
+        Ok(Err(WebhookLimit::Bytes(s))) => (webhook_limited(true), s),
+    };
+    let mut r = err.into_response();
+    r.headers_mut().insert(header::RETRY_AFTER, secs.into());
+    r
+}
+
+fn deliver(
+    app: AppState,
+    method: Method,
+    id: String,
+    mut q: HashMap<String, String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Res<Result<StatusCode, WebhookLimit>> {
     let token = q.remove("token").unwrap_or_default();
     if body.len() > MAX_PAYLOAD {
         return Err(too_large("The body can be at most 1 MB."));
@@ -134,6 +154,10 @@ pub async fn call(
     if !ct_eq(&hash, &token_hash(&token)) {
         return Err(unauthorized());
     }
+    // Counted only after the token check and before anything is stored or a `once` webhook is used up.
+    if let Err(limit) = app.webhook_admit(&id, body.len() as u64, now()) {
+        return Ok(Err(limit));
+    }
     // One transaction: a `once` webhook is used up in the same step that stores the message.
     let tx = c.transaction()?;
     let n = tx.execute(
@@ -158,5 +182,5 @@ pub async fn call(
     tx.commit()?;
     drop(c);
     app.notify.notify_waiters();
-    Ok(StatusCode::ACCEPTED)
+    Ok(Ok(StatusCode::ACCEPTED))
 }

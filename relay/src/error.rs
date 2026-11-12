@@ -68,6 +68,18 @@ pub fn rate_limited() -> ApiError {
         "Too many transcriptions. Try again in a minute.",
     )
 }
+/// 429 for a webhook over its per-minute call limit or its daily size limit.
+pub fn webhook_limited(daily: bool) -> ApiError {
+    e(
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limited",
+        if daily {
+            "This webhook reached its daily size limit. Try again tomorrow."
+        } else {
+            "Too many calls to this webhook. Try again in a minute."
+        },
+    )
+}
 pub fn internal(m: impl std::fmt::Display) -> ApiError {
     tracing::error!("internal error: {m}");
     e(
