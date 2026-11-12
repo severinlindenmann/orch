@@ -1,10 +1,14 @@
 """What the orch-shipped page servers (Focus, dashboard, Insights) use to mint human proofs (H1,
 human-proof.md).
 
-A page server holds the human key in memory, creates one session per start, and mints an hp1 proof only for a
-request that (1) carries the session cookie, (2) arrived on the loopback listener with a loopback Host and
-(3) carries no X-Forwarded-* / Forwarded header. The core is run as `sys.executable -I -m orch`, never through
-ORCH_BIN or PATH, so a planted command never sees a proof.
+A page server holds the human key in memory, creates one session per start, and mints an hp1 proof (or acts
+with the session at all) only for a request that (1) carries the session cookie AND the page secret in the
+X-Orch-Page header, (2) arrived on the loopback listener with a loopback Host and (3) carries no
+X-Forwarded-* / Forwarded header. The cookie alone is never enough: browsers send a host's cookies to every
+loopback port, so another local page could replay it. The secret is handed to the page once, in the body of
+the launch answer (never in a cookie, the HTML or a URL) and lives in that page's sessionStorage (per origin,
+so per port). The core is run as `sys.executable -I -m orch`, never through ORCH_BIN or PATH, so a planted
+command never sees a proof.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from pathlib import Path
 from orch import humanproof, tickets
 from orch.errors import Refused
 
+PAGE_HEADER = "X-Orch-Page"  # the header that carries the page secret (the second half of a page session)
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE_PREFIX = "orch_page"
 SERVERS = ("focus", "dashboard", "insights")
@@ -59,8 +64,8 @@ def cookie_name(server: str, port: int) -> str:
     out) the other's. The per-server, per-port name keeps the SESSIONS of the servers apart on the same host
     (one server's login never replaces another's, and a server only accepts its own name). It does NOT keep
     the values apart: the browser still sends every cookie of the host to every localhost port, so any
-    local server the person visits (an agent-run dev server too) receives them (documented residual; the
-    mint route also checks Host, Origin and the absence of proxy headers)."""
+    local server the person visits (an agent-run dev server too) receives them. That is why a cookie alone
+    is no session: PageSession.authed also needs the page secret (PAGE_HEADER), which is not a cookie."""
     if not isinstance(server, str) or not _SERVER_NAME_RE.fullmatch(server):
         raise ValueError("not a page server name")
     if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
@@ -91,6 +96,7 @@ class PageSession:
             raise ValueError("not a page server")
         self.root, self.server = root, server
         self.cookie = secrets.token_urlsafe(32)  # new on every start (but see the resume below)
+        self.secret = secrets.token_urlsafe(32)  # the page secret: sent as PAGE_HEADER, never as a cookie
         self.key: bytes | None = None
         self.spent: set[str] = set()  # sha256 of launch tokens already used in this server run
         self.revoked = False
@@ -102,19 +108,22 @@ class PageSession:
         except (Refused, OSError):
             self.key = None
         if self.key is not None:  # a restart the person asked for (update) keeps the open tab's session
-            self.cookie = humanproof.take_resume_cookie(root, server) or self.cookie
+            resumed = humanproof.take_resume_session(root, server)
+            if resumed:
+                self.cookie, self.secret = resumed
 
     # -- the launch token (one time, 120 s) ----------------------------------------------------------
     def launch(self, token) -> str | None:
-        """Spend the launch token. Returns the cookie value to set, or None. A SECOND use of a token that was
-        already spent revokes the session minted from it (new cookie secret: the old cookie is dead) and logs
-        one line without any token value."""
+        """Spend the launch token. Returns the cookie value to set, or None; the page secret for the answer
+        body is `self.secret`. A SECOND use of a token that was already spent revokes the session minted from
+        it (new cookie and secret: the old ones are dead) and logs one line without any token value."""
         if self.key is None or not isinstance(token, str) or not _TOKEN_RE.fullmatch(token):
             return None
         digest = hashlib.sha256(token.encode()).hexdigest()
         with self._lock:
             if digest in self.spent:
                 self.cookie = secrets.token_urlsafe(32)
+                self.secret = secrets.token_urlsafe(32)
                 self.revoked = True
                 print(
                     f"orch {self.server}: a sign-in link was used twice; the page session was ended.",
@@ -134,7 +143,13 @@ class PageSession:
         return set_cookie_header(self.server, port, value)
 
     def authed(self, headers, port: int) -> bool:
-        """Only THIS server's cookie on THIS port counts (another loopback server's cookie is no session)."""
+        """A page session = THIS server's cookie on THIS port AND the page secret in PAGE_HEADER, both
+        compared in constant time. A cookie alone (another loopback server's, or one replayed from a foreign
+        local page) is no session. This is the one place the rule lives: every route that mints or acts with
+        the session asks authed() or can_mint()."""
+        sent = headers.get(PAGE_HEADER) or ""
+        if not isinstance(sent, str) or not hmac.compare_digest(sent.encode(), self.secret.encode()):
+            return False
         raw = headers.get("Cookie") or ""
         try:
             name = self.cookie_name(port)
@@ -145,7 +160,7 @@ class PageSession:
         return bool(c and hmac.compare_digest(c.value, self.cookie))
 
     def can_mint(self, headers, port: int) -> bool:
-        """Session cookie + loopback Host + no proxy headers + a key."""
+        """Session (cookie + page secret) + loopback Host + no proxy headers + a key."""
         return (
             self.key is not None
             and host_ok(headers, port)

@@ -51,6 +51,9 @@ def live(tmp_path, monkeypatch):
     srv.server_close()
 
 
+SECRETS = {}  # cookie -> page secret of the sessions this module signed in
+
+
 def post(port, path, body, headers=None, host=None):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     h = {
@@ -59,6 +62,10 @@ def post(port, path, body, headers=None, host=None):
         "Content-Type": "application/json",
         **(headers or {}),
     }
+    if "X-Orch-Page" not in h and h.get("Cookie") in SECRETS:  # a signed-in page sends its secret
+        h["X-Orch-Page"] = SECRETS[h["Cookie"]]
+    if h.get("X-Orch-Page") is None:
+        h.pop("X-Orch-Page", None)  # {"X-Orch-Page": None} = a request with the cookie only
     c.request("POST", path, json.dumps(body), h)
     r = c.getresponse()
     return r.status, r.getheader("Set-Cookie"), r.read()
@@ -66,16 +73,18 @@ def post(port, path, body, headers=None, host=None):
 
 def session(root, port):
     tok = hp.write_launch_token(root, "focus")
-    st, ck, _ = post(port, "/session", {"token": tok})
-    assert st == 204
-    return ck.split(";")[0]
+    st, ck, body = post(port, "/session", {"token": tok})
+    assert st == 200
+    cookie = ck.split(";")[0]
+    SECRETS[cookie] = json.loads(body)["secret"]
+    return cookie
 
 
 def test_launch_token_bootstraps_the_cookie_once(live):
     root, port = live
     tok = hp.write_launch_token(root, "focus")
     st, ck, _ = post(port, "/session", {"token": tok})
-    assert st == 204 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith(f"orch_page_focus_{port}=")
+    assert st == 200 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith(f"orch_page_focus_{port}=")
     assert post(port, "/session", {"token": tok})[0] == 403  # single use
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 
@@ -159,3 +168,54 @@ def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
             "check.wont_do_undo",
             f"t_a:c1:{action}",
         )
+
+
+# ---- #539: the cookie alone is never a session (browsers send it to every loopback port) -------------------------
+
+ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+
+
+def test_session_answer_hands_over_the_secret_in_the_body_not_in_a_cookie(live):
+    root, port = live
+    tok = hp.write_launch_token(root, "focus")
+    st, ck, body = post(port, "/session", {"token": tok})
+    secret = json.loads(body)["secret"]
+    assert st == 200 and len(secret) >= 40 and secret not in ck
+
+
+@pytest.mark.parametrize("body", [ANSWER, {"op": "area.accept", "args": {"area": "x"}}], ids=lambda b: b["op"])
+def test_every_mint_route_refuses_the_cookie_alone(live, monkeypatch, body):
+    root, port = live
+    ck = session(root, port)
+    ran = []
+    monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
+    for h in (
+        {"Cookie": ck, "X-Orch-Page": None},  # a foreign local page that got the cookie
+        {"Cookie": ck, "X-Orch-Page": "x" * 43},
+        {"Cookie": ck, "X-Orch-Page": ck.split("=", 1)[1]},
+    ):
+        assert post(port, "/api/act", body, h)[0] == 403, h
+    assert ran == []
+
+
+def test_the_secret_with_the_cookie_still_mints(live, monkeypatch):
+    root, port = live
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    ck = session(root, port)
+    ran = []
+    monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: ran.append(proof) or R())
+    assert post(port, "/api/act", ANSWER, {"Cookie": ck})[0] == 200
+    assert len(ran) == 1 and ran[0].startswith("hp1.")
+    assert post(port, "/api/act", ANSWER, {"X-Orch-Page": SECRETS[ck]})[0] == 403  # the secret alone: no
+
+
+def test_a_page_on_another_port_cannot_act_even_with_cookie_and_secret(live, monkeypatch):
+    root, port = live
+    ck = session(root, port)
+    ran = []
+    monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
+    foreign = {"Cookie": ck, "Origin": f"http://127.0.0.1:{port + 1}", "Sec-Fetch-Site": "cross-site"}
+    assert post(port, "/api/act", ANSWER, foreign)[0] == 403 and ran == []

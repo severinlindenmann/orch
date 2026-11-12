@@ -197,6 +197,7 @@ class FakeSession:
     def __init__(self, folder=None):
         self.minted = []
         self.revoked = False
+        self.secret = "fake-page-secret-" + "s" * 30  # the core's page secret (PageSession.secret)
         self.folder = folder  # the fake orch's folder: minted proofs are what its core accepts
 
     def cookie_name(self, port):
@@ -212,7 +213,10 @@ class FakeSession:
         except Exception:  # noqa: BLE001 - a broken cookie header is no session
             return False
         c = jar.get(self.cookie_name(port))
-        return bool(c and hmac.compare_digest(c.value, self.cookie))
+        sent = headers.get("X-Orch-Page") or ""
+        return bool(c and hmac.compare_digest(c.value, self.cookie)) and hmac.compare_digest(
+            sent.encode(), self.secret.encode()
+        )
 
     def can_mint(self, headers, port):
         from orch.pageproof import forwarded, host_ok

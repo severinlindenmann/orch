@@ -716,7 +716,13 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "Focus"), "text/plain; charset=utf-8")
-        self._send(204, b"", "text/plain", {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)})
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
+        self._send(
+            200,
+            json.dumps({"secret": self.session.secret}).encode(),
+            "application/json",
+            {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
+        )
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]

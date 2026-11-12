@@ -754,12 +754,16 @@ def real_session(ws):
 
 
 def cookie_headers(port, cookie, **extra):
-    return {"Host": f"127.0.0.1:{port}", "Cookie": cookie, **extra}
+    return {"Host": f"127.0.0.1:{port}", "Cookie": cookie, "X-Orch-Page": SESSION_SECRET[0], **extra}
+
+
+SESSION_SECRET = [""]  # the page secret of the session under test (set by test_cookie_parsing_matches_the_core)
 
 
 @pytest.mark.parametrize("session_kind", ["real", "fake"])
 def test_cookie_parsing_matches_the_core(real_session, session_kind):
     session = real_session if session_kind == "real" else FakeSession()
+    SESSION_SECRET[0] = session.secret
     value = session.cookie
     name = session.cookie_name(8431)
     good = [f"{name}={value}", f"a=b; {name}={value}", f'{name}="{value}"; x=y']
