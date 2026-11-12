@@ -55,3 +55,7 @@ test('PNG, JPEG and WebP API content types authorize image tiles', async () => {
     assert.ok(img); assert.ok(img.src.startsWith('blob:')); img.attrs.onload();
   }
 });
+test('the page preview caption uses plain words', () => {
+  assert.ok(source.includes("'Helper preview. Scripts in this page run in a closed box"));
+  assert.ok(!source.includes('Agent preview'));
+});

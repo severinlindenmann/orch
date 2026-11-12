@@ -54,6 +54,14 @@ test('the favicon is a data SVG with the icon, and the letter is escaped', () =>
   assert.ok(letter.includes('>?</text>') || letter.includes('>B</text>'));
 });
 
+test('the icon picker names places in plain words, not relay or publish', () => {
+  const s = fs.readFileSync(path.join(WEB, 'look.js'), 'utf8');
+  assert.ok(s.includes("prev(32, 'Dashboard and shared pages')"));
+  assert.ok(s.includes("'Shown in the dashboard, on your phone and on shared pages.'"));
+  assert.ok(s.includes("'Saved. Your phone and shared pages show it at their next refresh.'"));
+  for (const m of s.match(/'[^'\n]*'/g)) assert.equal(/\b(relay|publish)\b/i.test(m), false, m);
+});
+
 test('look.js and switcher.js never use innerHTML or insertAdjacentHTML', () => {
   for (const f of ['look.js', 'switcher.js']) {
     const s = fs.readFileSync(path.join(WEB, f), 'utf8');

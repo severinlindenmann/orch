@@ -132,9 +132,9 @@
       n('div', {className: 'lk-preview' + (light ? ' light' : ''), 'aria-live': 'polite'},
         n('div', {className: 'lk-pv-head'}, n('p', {className: 'eyebrow grow'}, 'How it looks'),
           n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'light', 'data-key': 'lk-light'}, light ? 'Dark' : 'Light')),
-        prev(32, 'Dashboard, relay, publish'), prev(46, 'Phone'), prev(16, 'Browser tab, real size')),
+        prev(32, 'Dashboard and shared pages'), prev(46, 'Phone'), prev(16, 'Browser tab, real size')),
       n('div', {className: 'lk-foot'},
-        n('span', {className: 'meta grow'}, 'Shown in the dashboard, on your phone, in the relay and in publish.'),
+        n('span', {className: 'meta grow'}, 'Shown in the dashboard, on your phone and on shared pages.'),
         n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'cancel', 'data-key': 'lk-cancel'}, 'Cancel'),
         n('button', {type: 'button', className: 'btn primary sm', 'data-lk': 'save', 'data-key': 'lk-save', disabled: !changed || busy}, 'Save')));
   }
@@ -220,7 +220,7 @@
       case 'light': light = !light; repaint(); break;
       case 'save': {
         const r = await run('look.set', {icon: draft.icon, color: draft.color});
-        if (r && r.ok) { remember(draft.icon); Object.assign(look, {icon: draft.icon, color: draft.color, set_by: 'human'}); open = false; status = 'Saved. Your phone, the relay and publish show it at their next refresh.'; statusTone = 'ok'; paintFavicon(); repaint(); window.dispatchEvent(new CustomEvent('orch:look-saved')); }
+        if (r && r.ok) { remember(draft.icon); Object.assign(look, {icon: draft.icon, color: draft.color, set_by: 'human'}); open = false; status = 'Saved. Your phone and shared pages show it at their next refresh.'; statusTone = 'ok'; paintFavicon(); repaint(); window.dispatchEvent(new CustomEvent('orch:look-saved')); }
         break;
       }
       case 'desc-edit': editing = true; descDraft = look.description || ''; status = ''; repaint(); document.querySelector('[data-key="lk-desc-input"]')?.focus(); break;
