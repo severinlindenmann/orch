@@ -7,7 +7,7 @@
   function picker() {
     document.title = 'Focus · orch';
     root.classList.add('fx-picker');
-    root.append(h('header', {class: 'fx-top'}, homeLink(), h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'})),
+    root.append(h('header', {class: 'fx-top'}, INAPP ? homeLink() : null, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'})),
       h('main', {class: 'fx-pick'}, h('h1', {text: 'Where shall we focus?'}), h('p', {class: 'meta', text: 'Choose a ticket to take its next step.'})));
     fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
       const list = payload.tickets;
@@ -69,7 +69,7 @@
   const homeLink = () => h('a', {class: 'btn ghost sm fx-home', href: HOME, target: INAPP ? '_top' : '_self'}, h('span', {'aria-hidden': 'true', text: '←'}), h('span', {text: 'Back to Home'}));
   function emptyState() {
     return h('div', {class: 'fx-empty'}, h('p', {class: 'muted', text: 'No open tickets.'}),
-      h('div', {class: 'row'}, h('a', {class: 'btn primary sm', href: '/#new', target: INAPP ? '_top' : '_self', text: 'Create a ticket'}), homeLink()));
+      INAPP ? h('div', {class: 'row'}, h('a', {class: 'btn primary sm', href: '/#new', target: '_top', text: 'Create a ticket'}), homeLink()) : null);
   }
 
   /* "2 agents are working. One question needs you." The agent count comes from the live cards, the rest from the tickets. */
@@ -197,7 +197,7 @@
 
   function renderProof(v) {
     proof.setPageKey(v.page_key);
-    proof.setAgent(v.run.label);
+    proof.setAgent('Helper');
     const done = v.ticket.checklist.filter(c => c.done && !c.wont_do);
     const list = [];
     for (const c of done) for (const ev of c.evidence || []) list.push({c, ev});

@@ -344,15 +344,12 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 
 /* Focus QA: compact tasks and phone controls follow the draft on small screens. */
 .fx .eyebrow,.fx-pt-k,.fx-pv-cap{text-transform:none;letter-spacing:normal}
-.fx-mobile-tasks{display:none}
 .fx-picker .fx-top{justify-content:space-between}
 .fx-receipt{display:inline-flex;margin-top:12px;vertical-align:middle}
 @media(max-width:720px){
- .fx-mobile-tasks{display:block;text-align:left;padding:12px 20px;background:var(--surface);color:var(--text-muted);border:0;border-bottom:1px solid var(--border);font:inherit;cursor:pointer}
  .fx-top>.fx-tools{display:contents}
  .fx-phone{order:2;flex-basis:100%;min-height:40px}
- .fx-tools [data-act=stop],.fx-more,.fx-exit{order:3}
- .fx-exit .opt{display:none}
+ .fx-tools [data-act=stop],.fx-more{order:3}
 }
 /* Running now (every run Focus started) and the Done search on the ticket list */
 .fx-procs{margin-top:24px}
@@ -547,12 +544,8 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 /* ---- Phone width: room under the last row, "+" for a new task, labelled Stop and Exit ---- */
 .fx-add-wrap{margin-top:auto;flex-shrink:0;display:grid;gap:6px}
 .fx-add-wrap .fx-add-task{margin-top:0}
-.fx-add-toggle{display:none}
 @media(max-width:720px){
   .fx-pane{padding-bottom:calc(var(--fx-compose-h,120px) + env(safe-area-inset-bottom,0px));box-sizing:border-box}
-  .fx-add-toggle{display:inline-flex;gap:6px;justify-self:start;min-height:40px}
-  .fx:not(.fx-adding) .fx-add-task{display:none}
-  .fx-tools [data-act=stop] .opt,.fx-exit .opt{display:inline}
   .fx-clash-wrap{padding:16px 20px 0}
   .fx-agent-s{white-space:normal}
 }
@@ -591,5 +584,7 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
  .fx-action-menu .fx-desktop{display:none}
  .fx-back{display:none}
  .fx-stepbar{padding:6px 12px;gap:8px}
- .fx:not(.fx-adding) .fx-add-task{display:flex}
+ /* 44px touch targets on a phone */
+ .fx-top .btn,.fx-mobile-tasks,.fx-tech summary,.fx-action-menu button{min-height:44px;align-items:center}
+ .fx-action-menu button{height:auto}
 }

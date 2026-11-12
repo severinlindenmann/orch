@@ -117,6 +117,7 @@
       closePopovers(); button.focus(); e.preventDefault(); e.stopImmediatePropagation();
     }, true);
     root.addEventListener('click', e => {
+      if (e.target.closest('[data-act]')?.disabled) return;  // a greyed-out menu row does nothing, even if the click gets through
       const a = e.target.closest('[data-act]')?.dataset.act;
       /* Start fresh asks once: the first click turns the row into its own confirm, the second starts */
       if (a === 'fresh' && !els.fresh.disabled && !els.fresh.classList.contains('fx-confirm')) { armFresh(true); return; }

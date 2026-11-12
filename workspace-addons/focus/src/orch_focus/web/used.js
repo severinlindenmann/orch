@@ -145,7 +145,7 @@
         status ? h('span', {class: 'fx-agent-s', text: status}) : null));
     };
     const line = s => text(S.plainNames(s));
-    const rows = [row('main', 'MAIN', text(v.run.label) || 'Main agent', line(now.main || v.board.step || (v.run.running ? 'Working' : 'Resting')), 0, v.run.running ? 'working' : 'done')];
+    const rows = [row('main', 'MAIN', 'Main helper', line(now.main || v.board.step || (v.run.running ? 'Working' : 'Resting')), 0, v.run.running ? 'working' : 'done')];
     const seen = new Set();
     const walk = (parent, depth) => {
       for (const x of kids.get(parent) || []) {

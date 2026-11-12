@@ -83,3 +83,99 @@ test('dash56: one full-width Add a task field, Enter submits, 44px tall', () => 
   assert.match(t, /fx-add-task', id: 'fx-add-task'\}, els\.addInput\)/);
   assert.match(css, /\.fx-add-task \.input\{width:100%;height:44px/);
 });
+
+/* ---- behaviour: the real ticket.js + focus.js wired on a tiny fake DOM ---- */
+const vm = require('node:vm');
+function fakeEl(name, act) {
+  const on = {}, cls = new Set(), attrs = {};
+  const e = {
+    name, hidden: false, disabled: false, dataset: act ? {act} : {}, style: {setProperty() {}}, textContent: '', kids: [],
+    lastElementChild: {textContent: ''},
+    classList: {toggle(c, f) { f = f === undefined ? !cls.has(c) : f; if (f) cls.add(c); else cls.delete(c); return f; }, contains: c => cls.has(c), add: c => cls.add(c), remove: c => cls.delete(c)},
+    addEventListener(t, f) { (on[t] = on[t] || []).push(f); }, fire(t, ev) { (on[t] || []).forEach(f => f(ev)); },
+    setAttribute(k, v) { attrs[k] = String(v); }, getAttribute: k => (k in attrs ? attrs[k] : null),
+    focus() {}, click() { e.fire('click', {target: e}); }, contains: x => x === e || e.kids.includes(x),
+    closest: sel => (sel === '[data-act]' ? (e.dataset.act ? e : null) : sel === 'button' ? e : null),
+    querySelector: () => fakeEl(), querySelectorAll: () => [], getBoundingClientRect: () => ({left: 0, right: 100}),
+  };
+  return e;
+}
+function focusPage() {
+  const calls = [], docOn = {};
+  const store = {};
+  const els = new Proxy(store, {get: (t, k) => (k in t ? t[k] : (t[k] = fakeEl(String(k))))});
+  els.tabs = [0, 1, 2, 3].map(i => { const b = fakeEl('tab' + i); b.setAttribute('aria-selected', String(i === 0)); return b; });
+  els.fresh = fakeEl('fresh', 'fresh'); els.attachBtn = fakeEl('attach', 'attach'); els.help.hidden = true;
+  els.menu.kids.push(els.fresh, els.attachBtn);
+  const root = fakeEl('root');
+  const S = {root, TID: 't_1', P: '', INAPP: true, els, h: () => fakeEl(), ic: () => '', toast() {}, act: async () => ({ok: true}),
+    proof: {isOpen: () => false}, keyOf: JSON.stringify, state: {firstRender: true, tab: 0}, views: {}, register: (n, m) => { S.views[n] = m; }};
+  S.views.live = {startFresh: () => calls.push('fresh'), stopToggle() {}, focusQuestion() {}};
+  S.views.session = {showAttach: () => calls.push('attach')};
+  const ctx = vm.createContext({
+    window: {FocusStore: S, addEventListener() {}}, matchMedia: () => ({matches: false, addEventListener() {}}), innerWidth: 1000,
+    document: {addEventListener(t, f) { (docOn[t] = docOn[t] || []).push(f); }, getElementById: () => Object.assign(fakeEl(), {hidden: true}), hidden: true}, location: {hash: ''},
+    fetch: () => new Promise(() => {}), setTimeout: () => 0, clearTimeout() {}, CSS: {escape: s => s},
+  });
+  ctx.globalThis = ctx;
+  for (const name of ['helpers', 'ticket']) vm.runInContext(web(name + '.js'), ctx);
+  S.views.ticket.build = () => {};
+  vm.runInContext(web('focus.js'), ctx);
+  const doc = (t, ev) => (docOn[t] || []).forEach(f => f(ev));
+  return {S, els, calls, click: el => root.fire('click', {target: el}), doc};
+}
+
+test('dash27: Start fresh needs two clicks, and closing the menu disarms it', () => {
+  const p = focusPage();
+  p.click(p.els.fresh);
+  assert.deepEqual(p.calls, []);
+  assert.ok(p.els.fresh.classList.contains('fx-confirm'));
+  p.doc('click', {target: fakeEl('outside')});  // the menu closes
+  assert.ok(!p.els.fresh.classList.contains('fx-confirm'));
+  p.click(p.els.fresh);
+  assert.deepEqual(p.calls, []);
+  p.click(p.els.fresh);
+  assert.deepEqual(p.calls, ['fresh']);
+});
+
+test('dash27: a greyed-out row does nothing even when its click gets through', () => {
+  const p = focusPage();
+  p.els.fresh.disabled = true; p.els.attachBtn.disabled = true;
+  p.click(p.els.fresh); p.click(p.els.fresh); p.click(p.els.attachBtn);
+  assert.deepEqual(p.calls, []);
+  p.els.attachBtn.disabled = false;
+  p.click(p.els.attachBtn);
+  assert.deepEqual(p.calls, ['attach']);
+});
+
+test('dash30: hiding the open tab falls back to Live; a hidden tab cannot be picked with 1-4', () => {
+  const p = focusPage();
+  const key = k => p.doc('keydown', {key: k, target: fakeEl(), preventDefault() {}});
+  key('3');
+  assert.equal(p.S.state.tab, 2);
+  p.els.tabs[2].setAttribute('aria-selected', 'true');
+  p.S.views.ticket.showTab(2, false);
+  assert.equal(p.els.tabs[2].hidden, true);
+  assert.equal(p.S.state.tab, 0);
+  key('3');
+  assert.equal(p.S.state.tab, 0);
+  p.S.views.ticket.showTab(2, true);
+  key('3');
+  assert.equal(p.S.state.tab, 2);
+});
+
+test('dash07: on a phone Back to list stays first in the header; only Pause and ••• move to the end', () => {
+  const css = web('focus.css');
+  for (const rule of css.match(/[^{}]*\{order:[1-9]\}/g) || []) assert.doesNotMatch(rule, /fx-exit/);
+  assert.doesNotMatch(css, /fx-add-toggle|fx-adding/);
+  assert.match(css, /\.fx-top \.btn,\.fx-mobile-tasks,\.fx-tech summary,\.fx-action-menu button\{min-height:44px/);
+});
+
+test('dash24: the vendor name is not shown on the helper row or in Results', () => {
+  assert.match(web('used.js'), /'Main helper'/);
+  assert.doesNotMatch(web('used.js') + web('ticket.js'), /'Main agent'|setAgent\(v\.run\.label\)/);
+});
+
+test('dash33: outside the app the empty state does not link back to the same page', () => {
+  assert.match(web('ticket.js'), /INAPP \? h\('div', \{class: 'row'\}, h\('a', \{class: 'btn primary sm', href: '\/#new'/);
+});
