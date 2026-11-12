@@ -3,6 +3,7 @@ tests through the record API and the `orch record` CLI. Raw run files are made w
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -725,8 +726,8 @@ def test_nothing_recursive_ever_touches_pending():
         for n in ast.walk(ast.parse(text))
         if isinstance(n, ast.FunctionDef)
     }
-    for name in ("_reject", "_drain", "_spool", "_pending_count", "_rename_aside"):
-        assert "_rmtree(" not in found[name] and "_size(" not in found[name], name
+    for name in ("_reject", "_drain", "_spool", "_pending_count", "_rename_aside", "_file_size"):
+        assert "_rmtree(" not in found[name] and not re.search(r"(?<![A-Za-z_])_size\(", found[name]), name
 
 
 def test_a_reject_before_the_first_sealed_line_survives_sealing(store, proj_cli, capsys):
@@ -805,23 +806,38 @@ def _mtime(path, iso):
     os.utime(path, (t, t))
 
 
-def test_unchecked_runs_are_pruned_by_age_and_never_count_toward_the_size_cap(store):
+def test_a_legacy_run_is_pruned_by_the_recorded_time_never_by_its_mtime(store):
     ws, writer = store
-    _legacy_run(ws, writer)  # OTHER: legacy
-    write3(writer)  # RUN: checked
-    writer.append(
-        example(
-            run=RUN, id="r_end", kind="run.state", via="core", at=at(5), used=None, data={"state": "done"}
-        )
-    )
+    _legacy_run(ws, writer)  # OTHER: legacy, listed in the cutover list made by the first write
+    write3(writer)
+    at_cutover = hp.record_cutover_at(ws)
+    assert at_cutover
     folds = []
-    now = "2027-03-01T00:00:00Z"
-    _mtime(runfile(ws, OTHER), "2027-02-20T00:00:00Z")  # written recently: kept, whatever its size
-    res = record.apply_retention(ws, now, 90, 2048, lambda r, es: folds.append((r, len(es))))
-    assert res["delete_run"] == [RUN] and runfile(ws, OTHER).exists()
-    _mtime(runfile(ws, OTHER), "2026-10-01T00:00:00Z")  # its file is older than keep_days: pruned
-    res = record.apply_retention(ws, now, 90, 2048, lambda r, es: folds.append((r, len(es))))
-    assert res["delete_run"] == [OTHER] and not runfile(ws, OTHER).exists() and (OTHER, 0) in folds
+    fold = lambda r, es: folds.append((r, len(es)))  # noqa: E731
+    path = runfile(ws, OTHER)
+    _mtime(path, "2020-01-01T00:00:00Z")  # an agent makes the file look very old
+    soon = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 86400))
+    res = record.apply_retention(ws, soon, 90, 2048, fold)
+    assert OTHER not in res["delete_run"] and path.exists()  # protection began yesterday: not old enough
+    _mtime(path, "2027-06-01T00:00:00Z")  # nor does a new mtime keep it
+    later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 100 * 86400))
+    res = record.apply_retention(ws, later, 90, 2048, fold)
+    assert OTHER in res["delete_run"] and not path.exists() and (OTHER, 0) in folds
+
+
+def test_a_tampered_run_is_never_pruned_whatever_its_mtime(store):
+    ws, writer = store
+    write3(writer)
+    writer.append(
+        example(id="r_end", kind="run.state", via="core", at=at(5), used=None, data={"state": "done"})
+    )
+    path = runfile(ws)
+    stripped = [json.loads(ra.split(x)[0]) for x in path.read_bytes().splitlines()]
+    path.write_text("".join(json.dumps(e) + "\n" for e in stripped))  # the agent strips auth: unverified
+    _mtime(path, "2020-01-01T00:00:00Z")
+    res = record.apply_retention(ws, "2035-01-01T00:00:00Z", 90, 2048, lambda r, es: None)
+    assert res["delete_run"] == [] and path.exists() and res["status"] == "tampered"
+    assert hp.record_head_read(ws, RUN)[0].get("pruned") is None  # no tombstone either
 
 
 def test_the_size_cap_ignores_runs_orch_cannot_check():
@@ -868,3 +884,39 @@ def test_the_outside_day_cap_fails_closed_when_the_run_cannot_be_read(store, mon
     monkeypatch.setattr(record, "read_run", lambda *a, **k: bad)
     with pytest.raises(Refused, match="too many key uses"):
         secretrun._write_record(ws, {})
+
+
+@pytest.mark.parametrize("how", ["file", "symlink", "wrong_mode"])
+def test_a_quarantine_that_is_not_a_clean_folder_never_leaves_the_entry_under_a_valid_name(
+    store, how, tmp_path
+):
+    ws, writer = store
+    write3(writer)
+    q = record_dir(ws) / "quarantine"
+    q.mkdir()
+    target = q / RUN
+    if how == "file":
+        target.write_text("not a folder")
+    elif how == "symlink":
+        (tmp_path / "out").mkdir()
+        target.symlink_to(tmp_path / "out")
+    else:
+        target.mkdir(mode=0o777)
+        target.chmod(0o777)
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    planted = d / ("0" * 19 + "1_" + "a" * 32 + ".json")
+    planted.mkdir()  # a folder: it cannot be unlinked, so the rename is tried
+    (planted / "x").write_text("x")
+    writer.append(example(id="toolu_4", at=at(4)))
+    assert not planted.exists()  # gone from its valid name every time
+    assert record._pending_count(ws, RUN) == 0
+    left = [p.name for p in d.iterdir()]
+    assert all(not n.startswith("0") for n in left)
+    if (
+        how != "wrong_mode"
+    ):  # no clean quarantine: the entry stays inside the spool under a name never drained
+        assert any(n.startswith(".rejected_") for n in left)
+    assert not (tmp_path / "out").exists() or list((tmp_path / "out").iterdir()) == []  # not through the link
+    writer.append(example(id="toolu_5", at=at(5)))  # a later drain never executes it
+    assert "toolu_x" not in ids(ws)

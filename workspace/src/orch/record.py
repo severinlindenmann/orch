@@ -546,27 +546,31 @@ def _rmtree(ws, rel):
         os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
 
 
-def _mtime_iso(ws, rel):
-    """When the file was last written (UTC, whole seconds), or None when there is no such file."""
-    try:
-        fd = _open(ws, rel, "read")
-    except RecordUnavailable as error:
-        if error.reason != "missing":
-            raise
-        return None
+def _file_size(ws, rel):
+    """The size of ONE regular file (flat: anything else, a folder included, is refused as not_regular and
+    never walked). For spool entries."""
+    fd = _open(ws, rel, "read")
     try:
         with _io():
-            stamp = os.fstat(fd).st_mtime
+            return os.fstat(fd).st_size
     finally:
         _close(fd)
-    return datetime.fromtimestamp(stamp, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _rename_aside(ws, rel, run):
-    """Move one entry (of any kind, a link is not followed) out of pending/<run>/ into quarantine/<run>/ (a
-    folder only orch writes and nothing reads), atomically, under a name orch makes. No recursion, nothing is
-    deleted, and the entry can no longer be mistaken for a spool entry."""
+def _rename_aside(ws, rel, run, *, inside=False):
+    """Move one entry (of any kind, a link is not followed) out of the spool, atomically, under a name orch
+    makes: into quarantine/<run>/ (a folder only orch writes), or with `inside` within its own folder under a
+    name the spool never matches (`.rejected_...`: the scan tells it, it is never counted or drained). No
+    recursion, nothing is deleted."""
     _parts(rel)
+    if inside:
+        with _walk(ws, rel[:-1]) as source:
+            kw = {"src_dir_fd": source.fd, "dst_dir_fd": source.fd} if _FD else {}
+            src = rel[-1] if _FD else source.path / rel[-1]
+            aside = ".rejected_" + uuid.uuid4().hex
+            with _io():
+                os.rename(src, aside if _FD else source.path / aside, **kw)
+        return
     aside = "q_" + uuid.uuid4().hex
     with _walk(ws, ("quarantine", run), create=True) as target, _walk(ws, rel[:-1]) as source:
         kw = {"src_dir_fd": source.fd, "dst_dir_fd": target.fd} if _FD else {}
@@ -1779,9 +1783,10 @@ class RecordWriter:
         """A spool entry orch did not prepare (planted, renamed, replayed, not valid): one alert, deleted by
         its exact path, counted in the head (`rejected`). Never committed, never left in place."""
         alert_content(self.workspace, run)
-        # Spool entries are flat regular files. Anything else is never walked and never deleted recursively:
-        # a non-directory (a link, fifo, odd file) is removed by its exact name (a link is not followed); a
-        # directory is renamed aside once (atomic), where nothing reads it.
+        # Spool entries are flat regular files. Anything else is never walked and never deleted recursively.
+        # In order, until it is gone from its valid name: remove it by its exact name (a link is removed,
+        # never followed); rename it into quarantine/<run>/; rename it inside the spool to a name the scan
+        # alerts on and never counts or drains. It is never left under a valid spool name.
         try:
             with _io():
                 _unlink(self.workspace, rel)
@@ -1789,10 +1794,16 @@ class RecordWriter:
             try:
                 _rename_aside(self.workspace, rel, run)
             except (RecordTampered, RecordUnavailable, RecursionError) as error:
-                if isinstance(error, RecursionError):
+                if not isinstance(error, RecursionError):
+                    _report(
+                        self.workspace, error, "folder", run, "writer"
+                    )  # quarantine is not a clean folder
+                try:
+                    _rename_aside(self.workspace, rel, run, inside=True)
+                except (RecordTampered, RecordUnavailable, RecursionError) as again:
+                    if not isinstance(again, RecursionError):
+                        _report(self.workspace, again, "folder", run, "writer")
                     return
-                _report(self.workspace, error, "folder", run, "writer")
-                return
         head, _ = humanproof.record_head_read(self.workspace, run)
         if head is not None:
             self._move_head(run, head, head["seq"], head.get("mac"), rejected=1)
@@ -1841,7 +1852,7 @@ class RecordWriter:
                 _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
                 continue
             try:
-                if _size(self.workspace, rel) > _SPOOL_MAX_BYTES:
+                if _file_size(self.workspace, rel) > _SPOOL_MAX_BYTES:
                     self._reject(run, rel, check_lock)  # orch never spools more than a line and its detail
                     continue
                 pending = _read_json(self.workspace, rel)
@@ -2268,15 +2279,17 @@ def _tombstone(workspace, run, now):
 
 def _retention_end(workspace, run, read, now):
     """(when the run ended, whether its size counts toward max_mb), or None when retention must leave it.
-    A checked run ends with its checked core run.state. A run orch cannot check (a legacy run, or one whose
-    records are unverified or from before a protection reset) ends when its file was last written: it is
-    pruned once that is older than keep_days, and its size never counts toward max_mb."""
+    A checked run ends with its checked core run.state. A true legacy run (made before protection: no head,
+    no sealed line, on the cutover list) ends when protection began, orch's own MACed time: it is pruned once
+    that is older than keep_days and its size never counts toward max_mb. Every other run orch cannot check
+    (tampered, unverified, removed, old key) is NEVER pruned by retention: it stays and stays reported (a
+    file's mtime is the agent's to set, so it decides nothing here)."""
     if read.status == "ok" and not read.legacy:
         return _ended_run(run, _own(read.value), now), True
-    if (read.status == "ok" and read.legacy) or (
-        read.status == "tampered" and read.reason in ("unverified", "old_key")
-    ):
-        return _mtime_iso(workspace, ("runs", run + ".jsonl")), False
+    if read.status == "ok" and read.legacy:
+        listed = humanproof.record_cutover_read(workspace)
+        if isinstance(listed, set) and run in listed:
+            return humanproof.record_cutover_at(workspace), False
     return None
 
 

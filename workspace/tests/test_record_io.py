@@ -48,7 +48,7 @@ CORE = {
     "_unlink",
     "_write_new",
     "_size",
-    "_mtime_iso",
+    "_file_size",
     "_rmtree",
     "_rename_aside",
     "_rmdir_empty",
@@ -238,6 +238,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "name.startswith",
     "run.get",
     "raw.split",
+    "humanproof.record_cutover_at",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",

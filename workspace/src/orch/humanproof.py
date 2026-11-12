@@ -744,21 +744,19 @@ def _cutover_path(root: Path) -> Path:
     return key_dir(root, create=False) / "record-cutover.json"
 
 
-def record_cutover_read(root: Path) -> set[str] | None | bool:
-    """The runs that existed when protection began (the only runs whose unsigned lines may be shown as "not
-    checked, before protection"): a set; None when no list was made yet (nothing was written since the
-    upgrade); False when it is damaged or fails its MAC (no run may then be treated as legacy)."""
+def _cutover_load(root: Path):
+    """(state, runs, at): state None (no list yet), False (damaged or fails its MAC) or True."""
     from orch import record_auth
 
     rec = record_key(root)
     if rec is None:
-        return False
+        return False, set(), None
     try:
         raw = _read_guarded(_cutover_path(root))
     except FileNotFoundError:
-        return None
+        return None, set(), None
     except (Refused, OSError, ValueError):
-        return False
+        return False, set(), None
     try:
         body = json.loads(raw)
         ok = (
@@ -766,14 +764,30 @@ def record_cutover_read(root: Path) -> set[str] | None | bool:
             and body.get("schema") == "orch.record-cutover/1"
             and body.get("kid") == rec[1]
             and isinstance(body.get("runs"), list)
+            and isinstance(body.get("at"), str)
             and isinstance(body.get("cm"), str)
             and hmac.compare_digest(
                 record_auth.cutover_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
             )
         )
     except (ValueError, TypeError, UnicodeError, RecursionError):
-        return False
-    return set(body["runs"]) if ok else False
+        return False, set(), None
+    return (True, set(body["runs"]), body["at"]) if ok else (False, set(), None)
+
+
+def record_cutover_at(root: Path) -> str | None:
+    """When protection began for this workspace (orch's own time, MACed in the cutover list), or None. The
+    only age retention may use for a legacy run: a file's mtime is the agent's to set."""
+    state, _runs, at = _cutover_load(root)
+    return at if state else None
+
+
+def record_cutover_read(root: Path) -> set[str] | None | bool:
+    """The runs that existed when protection began (the only runs whose unsigned lines may be shown as "not
+    checked, before protection"): a set; None when no list was made yet (nothing was written since the
+    upgrade); False when it is damaged or fails its MAC (no run may then be treated as legacy)."""
+    state, runs, _at = _cutover_load(root)
+    return runs if state else state
 
 
 def record_cutover_ensure(root: Path) -> None:
@@ -798,7 +812,12 @@ def record_cutover_ensure(root: Path) -> None:
         names = []
     except (Refused, OSError, ValueError):
         return
-    body = {"schema": "orch.record-cutover/1", "kid": rec[1], "runs": names}
+    body = {
+        "schema": "orch.record-cutover/1",
+        "kid": rec[1],
+        "runs": names,
+        "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
     body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
     try:
         _write_private(path, json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
