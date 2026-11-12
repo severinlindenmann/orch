@@ -483,6 +483,8 @@ def _bound_folders(root: Path, home: Path) -> list[str]:
     keys = home / "keys"
     here = os.path.realpath(root)
     out: list[str] = []
+    if keys.is_symlink() or keys.exists():
+        _check_dir(keys)  # a link or a foreign keys/ is refused here, before anything is listed through it
     try:
         names = sorted(os.listdir(keys))
     except FileNotFoundError:

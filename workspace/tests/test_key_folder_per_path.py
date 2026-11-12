@@ -238,3 +238,61 @@ def test_first_setup_race_one_id_one_folder(proj, monkeypatch):
     d = hp.key_dir(proj)
     assert d.name == other_id == _id(proj)
     assert _keys(proj) == [other_id]
+
+
+def test_orch_swapped_for_link_at_write_time(proj, tmp_path, monkeypatch):
+    """.orch is swapped for a link to another folder right when the temp file is made: nothing lands there."""
+    from orch import addons
+
+    other = tmp_path / "other"
+    other.mkdir()
+    (proj / ".orch").mkdir(exist_ok=True)
+    monkeypatch.setattr(addons, "_orch_dir_is_plain", lambda r: True)
+    real_open = os.open
+    swapped = []
+
+    def swapping(path, flags, *a, **kw):
+        if isinstance(path, str) and path.startswith(".local-id.") and not swapped:
+            swapped.append(1)
+            os.rename(proj / ".orch", proj / ".orch-moved")
+            os.symlink(other, proj / ".orch")
+        return real_open(path, flags, *a, **kw)
+
+    monkeypatch.setattr(os, "open", swapping)
+    with pytest.raises(Refused):
+        addons.put_local_id(proj, secrets.token_hex(16))
+    assert list(other.iterdir()) == []
+
+
+def test_orch_swapped_for_link_before_open(proj, tmp_path, monkeypatch):
+    from orch import addons
+
+    other = tmp_path / "other"
+    other.mkdir()
+    (proj / ".orch").mkdir(exist_ok=True)
+
+    real_mkdir = os.mkdir
+
+    def swap_then_mkdir(path, *a, **kw):
+        if str(path) == str(proj / ".orch"):
+            os.rename(proj / ".orch", proj / ".orch-moved")
+            os.symlink(other, proj / ".orch")
+        return real_mkdir(path, *a, **kw)
+
+    monkeypatch.setattr(os, "mkdir", swap_then_mkdir)
+    with pytest.raises(Refused):
+        addons.put_local_id(proj, secrets.token_hex(16))
+    assert list(other.iterdir()) == []
+
+
+def test_winner_seen_late_is_kept(proj, monkeypatch):
+    """A concurrent writer's file has 2 links for a moment (a read says None): wait, never overwrite."""
+    from orch import addons
+
+    winner = secrets.token_hex(16)
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch" / ".local-id").write_text(winner + "\n")
+    answers = iter([None, None, winner])
+    monkeypatch.setattr(addons, "read_local_id", lambda r: next(answers, winner))
+    assert addons.put_local_id(proj, secrets.token_hex(16)) == winner
+    assert (proj / ".orch" / ".local-id").read_text().strip() == winner
