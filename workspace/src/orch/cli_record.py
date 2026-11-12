@@ -886,14 +886,11 @@ def run_model(run: str, events: list[dict], *, root=None, problem: bool = False)
     if sees is None:  # no capability list was written: only what the run actually used is known to be seen
         sees = sorted({i["kind"] for i in items})
     first = events[0]["at"] if events else None
-    # the harness only from a line orch itself wrote and verified (the core's run.state): a hook line is the
-    # agent's word and could claim another tool. Unknown means "not protected": the marker is shown.
+    # the harness only from a checked line orch's own collector wrote (via log, sealed, not a hook line): a
+    # hook line is the agent's word and could claim another tool. Unknown means "not protected": the marker
+    # is shown.
     harness = next(
-        (
-            e.get("harness")
-            for e in events
-            if e["kind"] == "run.state" and e.get("via") == "core" and record.is_checked(e)
-        ),
+        (e.get("harness") for e in events if e.get("via") == "log" and record.is_checked(e)),
         None,
     )
     return {

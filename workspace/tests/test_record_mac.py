@@ -491,21 +491,24 @@ def test_a_rejected_spool_entry_keeps_a_count_only_where_a_head_exists(store, mo
 # ------------------------------------------------------------------ the marker for helpers without deny rules
 
 
-def _state(harness, via="core", **kw):
-    return dict(example("valid-run-state-say"), via=via, harness=harness, **kw)
-
-
-def test_protected_comes_only_from_a_verified_core_line():
+def test_protected_comes_only_from_a_checked_collector_line(store, proj_cli):
     from orch import cli_record
 
-    hook = dict(example(), via="hook", harness="claude", checked=False)
-    forged = cli_record.run_model("r_x", [hook])
-    assert forged["protected"] is False  # unknown tool: the marker is shown
-    core = dict(_state("codex"), checked=True)
-    assert cli_record.run_model("r_x", [hook, core])["protected"] is False  # codex has no deny rules
-    claude = dict(_state("claude"), checked=True)
-    assert cli_record.run_model("r_x", [claude])["protected"] is True
-    assert cli_record.run_model("r_x", [claude], problem=True)["complete"] is False
+    ws, writer = store
+    for run, harness in ((RUN, "claude"), (OTHER, "codex")):
+        writer.append(example(run=run, id="toolu_h", via="hook", harness="claude"))  # the agent's word
+        writer.append(example(run=run, id="toolu_l", via="log", harness=harness, at=at(2)))
+    models = {}
+    for run in (RUN, OTHER):
+        events, _ = cli_record._events(ws, [run], None)
+        models[run] = cli_record.run_model(run, events[run], root=ws)
+    assert models[RUN]["protected"] is True and models[OTHER]["protected"] is False  # codex: no deny rules
+    # a forged hook line claiming `claude` in a codex run does not remove the marker; no collector line = unknown
+    only_hook = [dict(example(via="hook", harness="claude"), checked=False)]
+    assert cli_record.run_model("r_x", only_hook)["protected"] is False
+    legacy = dict(example(via="log", harness="claude"), before_protection=True, checked=False)
+    assert cli_record.run_model("r_x", [legacy])["protected"] is False
+    assert cli_record.run_model("r_x", only_hook, problem=True)["complete"] is False
     assert record.UNPROTECTED_TEXT == "Records from this helper can't be fully checked."
 
 
@@ -561,11 +564,11 @@ def test_checked_markers_of_events_details_and_run_model(store, proj_cli, capsys
     assert code == 0 and log["checked"] is True  # a verified, non-hook sealed line
     code, lines = cli_lines(capsys, "tail", "--run", RUN)
     assert {ln["event"]["id"]: ln["event"]["checked"] for ln in lines} == {"toolu_h": False, "toolu_l": True}
-    # run_model: only a checked core line tells the tool; a hook line and a before-protection line never do
-    state = dict(_state("claude"), checked=True)
-    assert cli_record.run_model("r_x", [state])["protected"] is True
-    assert cli_record.run_model("r_x", [dict(state, via="hook")])["protected"] is False
-    assert cli_record.run_model("r_x", [dict(state, before_protection=True)])["protected"] is False
+    # run_model: only a checked collector line tells the tool; a hook line and a before-protection line never do
+    line = dict(example(via="log", harness="claude"), checked=True)
+    assert cli_record.run_model("r_x", [line])["protected"] is True
+    assert cli_record.run_model("r_x", [dict(line, via="hook")])["protected"] is False
+    assert cli_record.run_model("r_x", [dict(line, before_protection=True)])["protected"] is False
 
 
 def test_a_deleted_run_file_or_runs_folder_cannot_hide_the_run(store, proj_cli, capsys):
