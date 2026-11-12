@@ -2461,7 +2461,7 @@ def test_b13g_displayed_tip_without_a_person_changes_nothing(done_copy, run):
 
 
 def test_b13h_reopened_while_the_merge_is_prepared_merges_nothing(done_copy, monkeypatch):
-    """A reopen during the preparation withdraws the Done: nothing is merged and the next round starts clean."""
+    """A reopen during the preparation withdraws the Done: nothing merges, the next round starts clean."""
     root, tid, copy = done_copy
     to_review(root, tid)
     tickets.set_status(root, tid, "done", "human:test", proven=True)
@@ -2478,3 +2478,31 @@ def test_b13h_reopened_while_the_merge_is_prepared_merges_nothing(done_copy, mon
     assert tickets.load(root, tid)["status"] == "active"
     assert git(root, "rev-parse", "HEAD") == head and not (root / "code.py").read_text() == "print(2)\n"
     assert not worktrees._copy_authority(root, tid).get("finished")
+
+
+def test_b13h_none_binds_between_the_run_end_read_and_write(done_copy, run, monkeypatch):
+    """A Done that saw no tip lands between a run end's read and its write: the tip it then records is
+    voided, so the Done approves nothing (no gap between reading the tip and voiding)."""
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_alive_here", lambda *a: {"live": True})
+        tickets.set_status(root, tid, "review", "human:test")
+    agent_commits(copy)
+    real = worktrees._copy_holds_tip
+
+    def holds(*a):
+        monkeypatch.setattr(worktrees, "_copy_holds_tip", real)
+        assert worktrees.bind_shown(root, tid, "none") is True  # nothing recorded yet: voided
+        return real(*a)
+
+    monkeypatch.setattr(worktrees, "_copy_holds_tip", holds)
+    worktrees.on_run_ended(root, tid)
+    assert not worktrees._copy_authority(root, tid).get("review_tip")
+    head = git(root, "rev-parse", "HEAD")
+    code, out, err = cli_done(run, root, tid, "status")
+    assert code == 0, err
+    worktrees.sweep(root)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting"
+    assert git(root, "rev-parse", "HEAD") == head and not (root / "late.py").exists()

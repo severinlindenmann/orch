@@ -1330,7 +1330,12 @@ def _record_review_locked(root: Path, ticket: str, new_round: bool = True) -> No
     tip = _branch_tip(top, ticket) if top is not None else None
     if tip is None or not _copy_holds_tip(root, top, ticket, tip):
         return
-    _copy_authority(root, ticket, lambda r: r.update(review_tip=tip, review_at=tickets.now()))
+
+    def record(r):  # decided inside the store update: a void set meanwhile (a Done that saw no tip) wins
+        if not r.get("review_void") and not r.get("review_tip"):
+            r.update(review_tip=tip, review_at=tickets.now())
+
+    _copy_authority(root, ticket, record)
 
 
 def _person_done(root: Path, t: dict, since: str) -> bool:
@@ -1357,7 +1362,7 @@ def _judge_done_locked(root: Path, ticket: str) -> None:
         return
     _copy_authority(root, ticket, lambda r: r.update(done_seen=True))  # a retry is never a fresh review
     review_tip, review_at = known.get("review_tip"), known.get("review_at")
-    if not review_tip or not isinstance(review_at, str):
+    if known.get("review_void") or not review_tip or not isinstance(review_at, str):
         return
     t = tickets.load(root, ticket)
     if t.get("status") != "done" or _alive_here(root, ticket) or not _person_done(root, t, review_at):
@@ -1397,23 +1402,35 @@ def bind_shown(root: Path, ticket: str, shown) -> bool:
         _forget_review(r)
         r["shown_stale"] = True
 
+    def judge(r):  # one store update: what is recorded and what is voided cannot interleave with a run end
+        if shown is None:
+            if r.get("review_tip"):
+                stale(r)
+                result.append(False)
+            else:
+                r["review_void"] = True
+        elif r.get("review_tip") == shown and not r.get("review_void"):
+            result.append(None)  # the branch tip is compared below
+        else:
+            stale(r)
+            result.append(False)
+
+    result: list = []
     try:
         if not _has_work(root, ticket):
             return True
         with _scoped(root):
-            top = _top_of(root)
-            tip = _branch_tip(top, ticket) if top is not None else None
-            recorded = _copy_authority(root, ticket).get("review_tip")
-            if shown is None and not recorded:
-                # nothing to forget, but a run that ends before the Done is written must not record one
-                _copy_authority(root, ticket, lambda r: r.update(review_void=True))
-                return True
-            if shown is not None and tip == shown and recorded == shown:
-                return True
-            _copy_authority(root, ticket, stale)
+            _copy_authority(root, ticket, judge)
+            if result == [None]:
+                top = _top_of(root)
+                tip = _branch_tip(top, ticket) if top is not None else None
+                if tip == shown:
+                    return True
+                _copy_authority(root, ticket, stale)
+                return False
+            return not result
     except (OSError, ValueError, Refused):
         return True  # no readable store: nothing recorded there can approve the Done either
-    return False
 
 
 def _record_done_tip(root: Path, ticket: str) -> None:
