@@ -60,8 +60,11 @@ def test_other_kinds_and_bad_shapes_give_nothing_or_the_right_event():
     assert to_events({"kind": "task.start", "run": RUN}, TICKET, RUN) == []  # the ticket watcher makes these
     assert to_events({"kind": "key.use"}, TICKET, RUN) == []
     assert to_events({"nonsense": 1}, TICKET, RUN) == [] and to_events({"kind": "step"}, TICKET, RUN) == []
-    st = to_events(example("valid-run-state-say.json"), TICKET, RUN)
+    st = to_events(example("valid-run-state-say.json", checked=True), TICKET, RUN)
     assert st and st[0]["kind"] == "run.state"
+    # an unchecked line (a hook line, a line from before protection) never drives the run state
+    assert to_events(example("valid-run-state-say.json", checked=False), TICKET, RUN) == []
+    assert to_events(example("valid-run-state-say.json"), TICKET, RUN) == []
 
 
 def test_text_is_hidden_again_before_it_reaches_the_page():
@@ -162,7 +165,9 @@ def test_the_view_shows_live_steps_from_the_record(server, ws, fake_orch, monkey
 
 
 def denial(**kw):
-    e = example("valid-step-started.json", kind="denial", text="Not allowed by this workspace", via="log")
+    e = example(
+        "valid-step-started.json", kind="denial", text="Not allowed by this workspace", via="log", checked=True
+    )
     e["outcome"] = {"ok": False, "error": "Not allowed by this workspace", "ms": None}
     e.update(kw)
     return e
@@ -307,3 +312,19 @@ def test_focus_checks_paths_the_way_the_core_writer_does():
     cases = ["a.txt", "a b/c.d", "ünï/x", "e\u0301.txt", "/x", "../x", "a/../b", "a\\b", "C:/x", "c:x", "~/x", "$HOME/x",
              "file:x", "a\x00b", "a\u200bb", "", "x" * 260, "x" * 261, "a//b", ".", "a/./b", 5, None]  # fmt: skip
     assert [file_ok(c) for c in cases] == [core_ok(c) for c in cases]
+
+
+def test_an_unchecked_denial_or_a_before_protection_line_never_drives_the_board():
+    assert to_events(denial(checked=False), TICKET, RUN) == []  # via log, but from before protection
+    assert to_events(denial(checked=False, via="core"), TICKET, RUN) == []
+    step = to_events(example("valid-step-started.json", via="log", checked=False), TICKET, RUN)
+    assert step and step[0]["data"]["source"] == "hook"  # shown, but as the agent's word
+    ok = to_events(example("valid-step-started.json", via="log", checked=True), TICKET, RUN)
+    assert ok[0]["data"]["source"] == "log"
+
+
+def test_problem_markers_of_orch_are_kept_not_dropped(tmp_path):
+    f = RecordFeed(tmp_path, None, RUN, TICKET)
+    f._line(json.dumps({"type": "unavailable", "cursor": "rc1.x", "run": RUN, "status": "ok",
+                        "reason": "content", "message": "m", "changed": 2, "removed": 0}).encode())
+    assert f.notes["content"]["changed"] == 2 and f.cursor == "rc1.x"

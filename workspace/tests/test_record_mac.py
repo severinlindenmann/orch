@@ -760,3 +760,21 @@ def test_a_hook_line_that_says_ok_is_never_counted_as_ok(store):
     assert sorted(u["result"] for u in model["uses"]) == ["ok", "unknown"]  # the hook line's "ok" is not one
     only_hook = [e for e in events[RUN] if e["via"] == "hook"]
     assert [u["result"] for u in cli_record.run_model(RUN, only_hook)["uses"]] == ["unknown"]
+
+
+def test_add_ons_that_read_record_lines_use_the_computed_checked_marker():
+    """Source walk over the add-ons: a module that decides anything from a record line's `via` must also read
+    `checked` (computed by orch, record.is_checked); none re-derives `before_protection`."""
+    import re
+
+    root = Path(__file__).resolve().parents[2] / "workspace-addons"
+    seen = 0
+    for p in sorted(root.glob("*/src/**/*.py")):
+        if ".venv" in p.parts:
+            continue
+        text = p.read_text()
+        assert "before_protection" not in text, p
+        if re.search(r'e(?:vent)?\.get\("via"\)|\["via"\]', text) and "record" in p.name:
+            seen += 1
+            assert 'get("checked")' in text, p
+    assert seen >= 1  # the Focus reader

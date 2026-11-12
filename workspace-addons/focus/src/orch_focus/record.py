@@ -98,7 +98,10 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
         text, at = str(e.get("text") or ""), e.get("at")
         done = e.get("outcome")
         eid = str(e["id"])
-        source = str(e.get("via") or "log")
+        # `checked` is computed by orch (record.is_checked): true only for a verified line that is not a hook
+        # line. Anything else, an unchecked or old line included, is the agent's word: never drives the board.
+        checked = e.get("checked") is True
+        source = str(e.get("via") or "log") if checked else "hook"
 
         def make(k, **data):
             return events.make(run, ticket, agent, k, text, source, at=at, **data)
@@ -113,6 +116,8 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
         if kind == "helper.end":
             return [make("helper.end", id=eid, ok=(done or {}).get("ok") is not False)]
         if kind == "run.state":
+            if not checked:
+                return []
             state = _data(e).get("state")
             return [make("run.state", state="idle" if state == "waiting_you" else state)] if state else []
         if kind == "usage":
@@ -121,7 +126,7 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
                 return []
             return [make("usage", used=d["used"], window=d.get("window"), status=d.get("status", "ok"))]
         if kind == "denial":
-            if e.get("via") not in TRUSTED_DENIAL:
+            if e.get("via") not in TRUSTED_DENIAL or not checked:
                 return []
             return [make("denial", tool=str(_used(e).get("name") or "a tool"))]
     except (KeyError, TypeError, AttributeError, ValueError):
@@ -135,6 +140,7 @@ class RecordFeed:
     def __init__(self, root: Path, orch_bin: str | None, run: str, ticket: str):
         self.root, self.orch_bin, self.run, self.ticket = Path(root), orch_bin, run, ticket
         self.cursor: str | None = None
+        self.notes: dict[str, dict] = {}  # the last problem marker of orch for this run (S3 shows its text)
         self.lock = threading.Lock()
         self.queue: list[dict] = []
         self.stopped = threading.Event()
@@ -187,6 +193,11 @@ class RecordFeed:
         if not isinstance(doc, dict):
             return
         cur = doc.get("cursor")
+        if doc.get("type") == "unavailable" and isinstance(doc.get("reason"), str):
+            with self.lock:  # kept, never dropped: changed, removed or unchecked records of this run
+                self.notes[doc["reason"]] = {
+                    k: doc.get(k) for k in ("status", "reason", "message", "changed", "removed")
+                }
         if doc.get("type") == "event" and isinstance(doc.get("event"), dict):
             got = to_events(doc["event"], self.ticket, self.run)
             with self.lock:
