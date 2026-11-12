@@ -1041,7 +1041,7 @@ def _blob_id(data: bytes, sha: str) -> str:
 def _crlf_checkout(top: Path) -> bool:
     """The project's git writes CRLF line ends on checkout: core.autocrlf=true, git for Windows' default.
     (core.eol=crlf alone converts nothing without a text attribute, and attributes are refused before a merge;
-    autocrlf=input|false never writes CRLF.) Only then is the CRLF form of a blob what the folder should hold."""
+    autocrlf=input|false never writes CRLF.) Only then is a CRLF form of a blob what the folder holds."""
     rc, out, _ = _git(["config", "--get", "core.autocrlf"], top, read_only=True)
     return rc == 0 and out.strip().lower() == "true"
 
