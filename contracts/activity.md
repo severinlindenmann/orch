@@ -548,11 +548,34 @@ prefix whose hash differs) is `changed`, reason `content`, not shown. Vectors `r
 one marker per change of `(reason, changed, removed)`. `query` and `counts` use the same view; any run with changed,
 removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete` and `protected`: `protected`
 is false for a run by a tool orch cannot give deny rules (codex, generic: the adapter's `deny.format` is `none`) and
-whenever the tool is not known from an orch-written verified line (the core's `run.state`, never a hook line); those
+whenever the tool is not known from a checked line of orch's own collector (`via: log`, sealed; never a hook line); those
 runs show "Records from this helper can't be fully checked." (`record.UNPROTECTED_TEXT`). `--detail` takes the
 `detail_hash` from the verified line that points at the file (never from the caller): a file with other bytes, or a
 sealed line that has a detail pointer but no `detail_hash`, is refused as `swapped` ("Details changed outside orch.");
 only a legacy run reads a detail with no hash.
+
+**Cutover, counters, quarantine, retention (S2).**
+- *Cutover list.* The first sealed write makes `<guarded home>/keys/<ws>/record-cutover.json` (MACed, `cm`): the runs
+  whose unsigned files existed at that moment. Only those runs may have their unsigned lines shown as legacy or
+  recorded as a legacy prefix; every other run's unsigned lines are `changed` (a predictable run name, a file the agent
+  made first, a pruned run's name: a tombstone counts as a head). No list yet: runs without a head or sealed line read
+  as legacy (shown, labelled, never trusted). A list that fails its MAC: no run is legacy.
+- *Rejected spool entries* are counted twice over and summed, never folded: `head.rejected`, and for a run without a
+  head the MACed counter `record-heads/<run>.rej`. Every reader adds them to `changed` (reason `content`). A counter
+  that fails its MAC counts as 1.
+- *Spool folder.* Entries are flat regular files named `\d{20}_[0-9a-f]{32}\.json`, at most 3 MB. Any other name is
+  alerted (`swapped`) and never counted. A planted entry (bad MAC, link, special file, oversized) is removed by its exact
+  name; a folder is renamed once into `.orch/record/quarantine/<run>/` (only orch writes there). Nothing under `pending/`
+  is ever sized or deleted recursively, and nothing deeper than 8 levels is walked anywhere.
+- *Runs are listed from the files and the heads* (non-pruned): a run file or `runs/` deleted shows as `removed`.
+- *Retention.* A run orch cannot check (legacy, unverified) is pruned once its file is older than `keep_days` and its
+  size never counts toward `max_mb`. The tombstone is written before the run file is deleted. A recorded legacy prefix
+  that is gone from the file counts as `removed`.
+- *Trust markers.* `record.is_sealed` / `record.is_checked` are the only definitions (events, details, counts, run
+  model, retention, caps). Only a checked line can count a call as `ok`; a hook line's `ok` is `unknown`. Add-ons
+  (Focus) drive denials and run state only from lines with `checked: true` and keep orch's problem markers.
+- *Not in S2:* job streams, alerts and counts files are not sealed yet (S3); a protection reset does not carry the legacy
+  prefix or tombstones over to the new key (fail closed: the old unsigned lines are `changed`).
 
 ### Known limit (Level 1)
 
