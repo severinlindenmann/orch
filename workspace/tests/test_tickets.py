@@ -472,3 +472,24 @@ def test_proof_state_levels():
     stale = _c("c1")
     stale["evidence"][0]["stale"] = True  # a stored flag is never trusted
     assert tickets.proof_state(_t([stale]))["per_item"]["c1"] == "passed"
+
+
+def test_every_apply_op_call_names_its_actor():
+    """apply_op takes `by` (a required keyword): the actor of an agent op, or tickets.SYSTEM. A call
+    in the sources that leaves it out would skip the closed-ticket guard, so a new op cannot do that."""
+    import ast
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    files = [*(repo / "workspace" / "src").rglob("*.py"), *repo.glob("workspace-addons/*/src/**/*.py")]
+    assert files
+    missing = []
+    for f in files:
+        for n in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            if not isinstance(n, ast.Call):
+                continue
+            fn = n.func
+            name = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else None
+            if name == "apply_op" and not any(k.arg == "by" for k in n.keywords):
+                missing.append(f"{f.relative_to(repo)}:{n.lineno}")
+    assert not missing, f"apply_op without by=: {missing}"

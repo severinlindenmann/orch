@@ -365,9 +365,12 @@ def test_ticket_data_never_chooses_the_setup_command(repo):
         ("done_when", f"touch {marker}"),
         ("ext", {"copy_setup": "touch x"}),
     ):
-        tickets.apply_op(repo, a, lambda t, k=key, v=val: t.__setitem__(k, v))
+        tickets.apply_op(repo, a, lambda t, k=key, v=val: t.__setitem__(k, v), by=tickets.SYSTEM)
     tickets.apply_op(
-        repo, a, lambda t: t.__setitem__("work", {"copy_setup": f"touch {marker}", "folders": []})
+        repo,
+        a,
+        lambda t: t.__setitem__("work", {"copy_setup": f"touch {marker}", "folders": []}),
+        by=tickets.SYSTEM,
     )
     f, notes = _route(repo, a)
     assert f != repo and notes == [] and not marker.exists()
@@ -705,7 +708,10 @@ def test_a_forged_registry_path_cannot_point_a_ticket_at_another_copy(repo):
 def test_legacy_ticket_work_paths_are_stripped_on_rewrite(repo):
     a, _ = repo.tids
     tickets.apply_op(
-        repo, a, lambda t: t.__setitem__("work", {"folders": [{"path": "/home/x/y", "branch": "orch/old"}]})
+        repo,
+        a,
+        lambda t: t.__setitem__("work", {"folders": [{"path": "/home/x/y", "branch": "orch/old"}]}),
+        by=tickets.SYSTEM,
     )
     config.set_copies_mode(repo, "always")
     _route(repo, a)
