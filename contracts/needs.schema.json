@@ -32,7 +32,7 @@
         "cli": { "type": "string", "minLength": 1, "maxLength": 300, "description": "Optional command that settles the row, shown to people who use the terminal." },
         "actions": {
           "type": "array", "maxItems": 4,
-          "description": "Optional buttons of an add-on's own row (the dashboard shows them instead of the answer options). Each runs `orch <source> act <verb> -- <target>` through the dashboard's one generic op; `sign` = the person's sign step first (the page asks the add-on `act <verb> --proof-target` for the target and the review it shows, and mints only that target, only ever `addon.act` under the add-on's own name). `later` hides the row for a day, `view` opens a ticket's file, `op` may only name a core op the dashboard already signs (private.move, in sync rows only; its label and review are the dashboard's own).",
+          "description": "Optional buttons of an add-on's own row (a page shows them instead of the answer options). Each runs `orch <source> act <verb> -- <target>` through the one generic add-on op; `sign` = the person's sign step first (the page asks the add-on `act <verb> --proof-target` for the target and the review it shows, and mints only that target, only ever `addon.act` under the add-on's own name). `later` hides the row for a day, `view` opens a ticket's file, `op` may only name a core op the page already signs (private.move, only in rows from the add-on that owns it; its label and review are the page's own).",
           "items": {
             "type": "object", "required": ["label"],
             "properties": {
