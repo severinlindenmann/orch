@@ -56,6 +56,10 @@ def main(argv=None):
     p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("take-remote")  # a history pause: the other computer's history becomes the base
+    p.add_argument("--proof-stdin", action="store_true")
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("approve")
     p.add_argument("ticket")
     p.add_argument("addon")
@@ -146,6 +150,10 @@ def main(argv=None):
             from .pause import keep_key
 
             result = keep_key(root, args.key, args.ticket, args)
+        elif args.cmd == "take-remote":
+            from .pause import take_remote
+
+            result = take_remote(root, args)
         elif args.cmd == "approve":
             from .approval import approve
 
@@ -157,7 +165,7 @@ def main(argv=None):
         elif args.cmd == "deleted":
             from orch import config, humanproof, syncgate
 
-            from .step import encoded, step_lock, write
+            from .step import encoded, entries, step_lock, write
 
             with step_lock(root), syncgate.hold(root):
                 state = read(root, "state")
@@ -172,10 +180,21 @@ def main(argv=None):
                         no_handoff="Leaving a ticket deleted needs a person's proof.",
                     )
                     config.require_person(by, "leave this ticket deleted")
+                    from . import records
+
+                    # bound to the synced copy the person leaves deleted: a changed ticket needs them again
+                    old = entries(root, "HEAD").get(f"tickets/{args.ticket}.json")
+                    if not old:
+                        raise repo.Refused("This ticket has no synced copy to leave deleted")
                     allowed = read(root, "allow-delete")
-                    allowed[args.ticket] = True
+                    allowed[args.ticket] = records.make(
+                        root, "delete", f"{args.ticket}:{old[1]}", {"ticket": args.ticket, "blob": old[1]}
+                    )
                     write(root, "run/sync/allow-delete.json", encoded(allowed))
                 state["deleted"].pop(args.ticket)
+                from .pause import verified_pause
+
+                state["paused"] = verified_pause(root, state)  # a planted pause is not written back
                 write(root, "run/sync/state.json", encoded(state))
             result = {"acknowledged": args.ticket}
         elif args.cmd == "start":

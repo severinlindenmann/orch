@@ -479,10 +479,10 @@ def test_merge_uses_checked_commit_when_remote_ref_moves(machines, monkeypatch, 
         moves.append(moved)
         return result
 
-    def checked_merge(root, head, remote, index, now):
+    def checked_merge(root, head, remote, index, now, **kwargs):
         merged.append(remote)
         assert remote == checked[-1]
-        return merged_tree(root, head, remote, index, now)
+        return merged_tree(root, head, remote, index, now, **kwargs)
 
     monkeypatch.setattr(step.incoming, "check", racing_check)
     monkeypatch.setattr(step, "merged_tree", checked_merge)

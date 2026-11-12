@@ -28,6 +28,7 @@ def row(kind, key, text, since, command, options, ticket=None, title="Sync needs
 
 
 TID = re.compile(r"t_[a-z0-9]{6,16}")
+ADDON = re.compile(r"[a-z][a-z0-9-]{0,31}")
 
 
 def _ticket_of(path):
@@ -40,19 +41,20 @@ def rows(root):
     state = cli.read(root, "state")
     now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     out = []
-    paused = state.get("paused")
+    paused = pause.verified_pause(root, state)  # an edited or planted pause shows nothing
     if paused:
         if paused.get("kind") == "history":
-            # no file to choose; the pause clears by itself when the other computer's history changes
+            # no file to choose: take the other computer's history (a person's proof), or it clears by itself
             out.append(
                 row(
                     "history",
                     "state",
                     "Sync paused: the histories of the two computers cannot be combined automatically. Your "
-                    "files stay as they are. Sync goes on by itself once the other computer sends a change.",
+                    "files stay as they are. Take the other computer's copy (Done, ticket numbers and add-on "
+                    "changes are still checked here; files only you have stay), or wait for its next change.",
                     paused["since"],
-                    "orch sync status --json",
-                    None,
+                    "orch sync take-remote --proof-stdin",
+                    ["Take theirs", "Wait"],
                     tone="warn",
                 )
             )
@@ -148,15 +150,20 @@ def rows(root):
     for _, block in approval.held(root):
         grouped.setdefault(block["ticket"], []).append(block["addon"])
         dates[block["ticket"]] = min(dates.get(block["ticket"], now), block.get("since", now))
+    installed = approval.manifests()
     for tid, names in grouped.items():
+        # LOW-7: an add-on name from the other computer is shown only when it is an installed add-on's
+        # (never free text from the peer in a person's row or an agent's --json)
+        shown = sorted({n if n in installed and ADDON.fullmatch(n) else "an add-on not installed here" for n in names})
+        first = min((n for n in names if n in installed and ADDON.fullmatch(n)), default=None)
         out.append(
             row(
                 "held",
                 tid,
-                f"A synced ticket wants {', '.join(sorted(names))} to run something. Allow?",
+                f"A synced ticket wants {', '.join(shown)} to run something. Allow?",
                 dates[tid],
-                f"orch sync approve {shlex.quote(tid)} {shlex.quote(min(names))}",
-                ["Allow", "Ignore"],
+                f"orch sync approve {shlex.quote(tid)} {shlex.quote(first)}" if first else "orch sync needs --json",
+                ["Allow", "Ignore"] if first else None,
                 ticket=tid,
             )
         )

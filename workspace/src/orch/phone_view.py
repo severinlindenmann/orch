@@ -24,7 +24,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import net, phone_results, refs, runs, safefile, tickets
+from orch import history, net, phone_results, refs, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -593,14 +593,7 @@ def size_of(view: dict) -> int:
     return len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode())
 
 
-def is_agent_history_author(by) -> bool:
-    """Only explicit agent labels are safe as unverified synced attribution."""
-    if not isinstance(by, str) or not by.isascii() or by != unicodedata.normalize("NFKC", by):
-        return False
-    label = by.casefold()
-    return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
-        ("relay", "phone", "ph_")
-    )
+is_agent_history_author = history.is_agent_history_author  # ONE rule (orch.history)
 
 
 def _who(by: str, h=None) -> tuple[str, str]:
@@ -1254,6 +1247,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     """The full view. Every text goes through the scrub and the value hider `h` (built here when not given):
     a stored key value never leaves, also in prose without a label. No value hider, or a value still in the
     finished view: _closed_view (fail closed)."""
+    ticket = history.shown_ticket(root, ticket)  # EVERY person field as this machine can prove it
     checklist = _shown_checklist(ticket)
     done, wont, total = tickets.checks_split({"checklist": checklist})
     h = h if h is not None else phone_results.value_hider(root)
@@ -1261,7 +1255,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     if h is None:
         return _closed_view(ticket, running, done, total)
     hist = []
-    for entry in (ticket.get("history") or [])[-HISTORY:]:
+    for entry in history.lines(root, ticket)[-HISTORY:]:  # an unproven synced author is the sync role here
         if internal_wakeup(entry) or _ADMIN_NOTE.match(str(entry.get("text", ""))):
             continue
         # Ticket history has no verified relay sender; raw labels cannot name a phone.
@@ -1405,6 +1399,7 @@ def light_view(root: Path, ticket: dict) -> dict:
     The phone overlays these on its last full snapshot. No questions, no checklist, history or files. Texts
     pass the scrub and the value hider; without a value hider (or a stored value still in it) Refused: the
     light update is not sent (sync_light backs off), never sent with a value or with a blank title."""
+    ticket = history.shown_ticket(root, ticket)  # as in build
     h = phone_results.value_hider(root)
     if h is None:
         raise Refused("Stored key values can't be hidden right now, so no light update was sent.")
