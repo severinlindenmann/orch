@@ -508,3 +508,41 @@ def test_a_ten_thousand_line_run_verifies_fast_and_warm_from_the_cache(store):
     warm = time.monotonic()
     view = record._verified(ws, RUN, more)  # resumed from the cached prefix: only the new line is verified
     assert len(view.events) == 10001 and time.monotonic() - warm < 0.5
+
+
+# ------------------------------------------------------------------ one definition of "checked"
+
+
+def test_one_helper_decides_every_trust_marker():
+    """Source walk: `before_protection` is tagged and read only in record.py; every `checked` marker
+    computed in the CLI is record.is_checked; the CLI never compares `via` with "hook" to decide trust."""
+    src = Path(record.__file__).parent
+    for p in sorted(src.glob("*.py")):
+        text = p.read_text()
+        if p.name != "record.py":
+            assert "before_protection" not in text, p.name
+        if p.name in ("cli_record.py", "secretrun.py", "run_record.py"):
+            assert 'via") != "hook"' not in text and 'via") == "hook"' not in text, p.name
+            for n, line in enumerate(text.splitlines(), 1):
+                if '"checked":' in line and "detail.value" not in line:
+                    assert "record.is_checked(" in line, (p.name, n)
+    assert Path(record.__file__).read_text().count("def is_checked(") == 1
+
+
+def test_checked_markers_of_events_details_and_run_model(store, proj_cli, capsys):
+    from orch import cli_record
+
+    ws, writer = store
+    writer.append(example(id="toolu_h", via="hook"), detail={"input": "h", "output": "h"})
+    writer.append(example(id="toolu_l", via="log", at=at(2)), detail={"input": "l", "output": "l"})
+    code, (hook,) = _query_detail(capsys, RUN, "toolu_h")
+    assert code == 0 and hook["checked"] is False  # a hook line's detail is the agent's word
+    code, (log,) = _query_detail(capsys, RUN, "toolu_l")
+    assert code == 0 and log["checked"] is True  # a verified, non-hook sealed line
+    code, lines = cli_lines(capsys, "tail", "--run", RUN)
+    assert {ln["event"]["id"]: ln["event"]["checked"] for ln in lines} == {"toolu_h": False, "toolu_l": True}
+    # run_model: only a checked core line tells the tool; a hook line and a before-protection line never do
+    state = dict(_state("claude"), checked=True)
+    assert cli_record.run_model("r_x", [state])["protected"] is True
+    assert cli_record.run_model("r_x", [dict(state, via="hook")])["protected"] is False
+    assert cli_record.run_model("r_x", [dict(state, before_protection=True)])["protected"] is False

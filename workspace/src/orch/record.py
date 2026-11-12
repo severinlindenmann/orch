@@ -1272,7 +1272,8 @@ def read_detail(workspace, run, file_id, *, line_id, ticket=None):
         lines = [e for e in view.value if e.get("id") == line_id and e.get("detail") == point]
         if not lines:
             raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
-        want, unchecked = None, view.legacy or bool(lines[-1].get("before_protection"))
+        unchecked = not is_sealed(lines[-1], legacy=view.legacy)
+        want = None
         if not unchecked:
             want = lines[-1].get("detail_hash")
             if not isinstance(want, str):
@@ -2122,9 +2123,23 @@ def _ended_run(run, events, now):
     return f"{end:%Y-%m-%dT%H:%M:%SZ}" if over else None
 
 
+def is_sealed(line, *, legacy=False) -> bool:
+    """The ONE definition of "orch verified this line": it is a line of a run read through the verified view,
+    not a line of a legacy run and not one made before protection. What retention, caps, counts and run state
+    may believe (a hook line is sealed too: it is verified to be the hook entry's, see is_checked)."""
+    return not (legacy or line.get("before_protection"))
+
+
+def is_checked(line, *, legacy=False) -> bool:
+    """The ONE definition of the computed `checked` marker (never stored): True only for a sealed, verified
+    line that is not a hook line (a verified `via: hook` line is still the agent's word). Every screen,
+    count and detail that shows or reads a trust marker uses this and nothing else."""
+    return is_sealed(line, legacy=legacy) and line.get("via") != "hook"
+
+
 def _own(events):
     """The lines orch checked (not those made before protection): the only ones retention may believe."""
-    return [e for e in events if not e.get("before_protection")]
+    return [e for e in events if is_sealed(e)]
 
 
 def _tombstone(workspace, run, now):

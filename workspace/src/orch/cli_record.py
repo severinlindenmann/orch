@@ -389,10 +389,7 @@ def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False, tell
             # `checked` is computed, never stored: a hook line is the agent's word, and every line of a run
             # made before orch checked it is unchecked too
             out[run] = [
-                {
-                    **e,
-                    "checked": not (result.legacy or e.get("before_protection")) and e.get("via") != "hook",
-                }
+                {**e, "checked": record.is_checked(e, legacy=result.legacy)}
                 for e in result.value
                 if ticket is None or e.get("ticket") == ticket
             ]
@@ -623,7 +620,9 @@ def _detail(root: Path, args) -> dict:
     if stored != (line.get("ticket"), line["id"]) or line["id"] != args.detail:
         raise RecordError(str(record.RecordTampered("swapped")), "tampered")
     # computed in this one place, never stored: a detail of a line made before orch checked it is not checked
-    return {**detail.value, "checked": detail.reason != "unchecked"}
+    # (the line's own marker too: a detail written by the hook entry is the agent's word)
+    own = record.is_checked(line, legacy=result.legacy) and detail.reason != "unchecked"
+    return {**detail.value, "checked": own}
 
 
 # --- settings (read only) ---
@@ -886,7 +885,7 @@ def run_model(run: str, events: list[dict], *, root=None, problem: bool = False)
         (
             e.get("harness")
             for e in events
-            if e["kind"] == "run.state" and e.get("via") == "core" and e.get("checked") is not False
+            if e["kind"] == "run.state" and e.get("via") == "core" and record.is_checked(e)
         ),
         None,
     )
@@ -991,7 +990,7 @@ def counts(root: Path, args) -> dict:
     for run, events in by_run.items():
         if run in unchecked:  # a run made before orch checked it is never counted
             continue
-        events = [e for e in events if not e.get("before_protection")]  # nor its lines from before protection
+        events = [e for e in events if record.is_sealed(e)]  # nor its lines from before protection
         if not events:
             continue
         model = run_model(run, events, root=root, problem=run in flagged)
