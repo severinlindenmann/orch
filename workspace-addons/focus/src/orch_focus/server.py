@@ -428,7 +428,8 @@ class Tracker:
                 "id": ticket.get("id"), "key": ticket.get("key"), "title": ticket.get("title"),
                 "status": ticket.get("status"), "closed_at": ticket.get("closed_at"),
                 "started": bool(ticket.get("started") or (ticket.get("ticket_view") or {}).get("started") or claim.get("run")),
-                "revision": ticket.get("revision", 0), "checklist": checks, "questions": questions,
+                "revision": ticket.get("revision", 0), "checklist": checks,
+                "questions": [{**q, "digest": livecards.question_digest(q)} if isinstance(q, dict) else q for q in questions],
                 "history": (ticket.get("history") or [])[-80:],
             },
             "run": {

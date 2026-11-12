@@ -101,7 +101,14 @@ def test_answer_click(live, run):
     code, out, _ = run("ask", tid, "Which?", "--json", "--by", "agent:x")
     q = json.loads(out)["id"]
     ck = signed_in(root, port)
-    st, _, body = act(root, port, ck, "answer", {"ticket": tid, "question": q, "answer": "Blue -- not red"})
+    shown = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q)  # what the page showed
+    st, _, body = act(
+        root,
+        port,
+        ck,
+        "answer",
+        {"ticket": tid, "question": q, "digest": tickets.question_digest(shown), "answer": "Blue -- not red"},
+    )
     assert st == 200, body
     t = tickets.load(root, tid)
     assert t["questions"][0]["answer"] == "Blue -- not red"  # text after `--` survived

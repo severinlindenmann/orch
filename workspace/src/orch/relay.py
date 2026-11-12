@@ -838,6 +838,7 @@ def _send_proposal(
     with contextlib.suppress(Refused, OSError):
         _record_general(root, local, text, general_body, reply_to, refs)
     rec = {"ticket": None, "question_id": body["question_id"], "to": to, "proposal": True, "title": title}
+    sign_asked(root, mid, rec)
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     # The caller (the helper's command) always gets "sent": relay trouble is not its business; a message that
     # is only waiting offline goes out later from the outbox, the same bytes.
@@ -957,7 +958,13 @@ def send_question(
         **question_extras(q, previews, scope),
     }
     msg = _message(root, "phones", "question", body, ticket["id"])
-    rec = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
+    rec = {
+        "ticket": ticket["id"],
+        "question_id": q["id"],
+        "to": "phones",
+        "question_digest": tickets.question_digest(q),  # the question as the phones were shown it
+    }
+    sign_asked(root, msg["id"], rec)
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
@@ -984,6 +991,7 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
         "review": True,
     }
     rec = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
+    sign_asked(root, mid, rec)
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     try:
         return _message(root, "phones", "question", body, ticket["id"], mid=mid)
@@ -1288,7 +1296,7 @@ def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
 def _applied_ticket(root: Path, msg: dict) -> str | None:
     """The ticket this answer was written into (by this message), else None. Read-only."""
     asked, _ = _answer_asked(root, msg)
-    if not asked:
+    if not asked or not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # unsigned: never "answered"
         return None
     by, via = _answer_by(msg, asked)
     try:
@@ -1309,17 +1317,71 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
     )
 
 
+QUESTION_UNCHECKABLE = "This question changed or can't be checked. Ask again."
+
+# questions-sent.json lives in the workspace, so an agent can rewrite a record's question_digest together with
+# the ticket's question, or mark an ordinary record as a review (round) or proposal one. Every record kind
+# counts only with question_mac: the local1 MAC (human key, which the agent cannot read) over the message id,
+# the record's kind (ordinary / review / proposal, the raw flags), round, title and the other fields. It is
+# checked BEFORE any dispatch. No key at send time: the question still goes out, but its record carries no
+# MAC and any answer to it is refused (fail closed, never unchecked). Older records without a MAC: refused.
+QUESTION_MAC_KIND = "question-sent"
+
+
+def _asked_kind(rec: dict) -> str:
+    return (
+        "review" if rec.get("review") is True else "proposal" if rec.get("proposal") is True else "ordinary"
+    )
+
+
+def _asked_signed_fields(mid: str, rec: dict) -> list:
+    return [
+        mid,
+        _asked_kind(rec),
+        rec.get("review"),
+        rec.get("proposal"),
+        rec.get("round"),
+        rec.get("title"),
+        rec.get("ticket"),
+        rec.get("question_id"),
+        rec.get("to"),
+        rec.get("group"),
+        rec.get("question_digest"),
+    ]
+
+
+def sign_asked(root: Path, mid: str, rec: dict) -> dict:
+    """Adds question_mac to the record of an answerable question sent as `mid` (when it can be signed)."""
+    mac = humanproof.local_sign(root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec))
+    if mac:
+        rec["question_mac"] = mac
+    else:
+        rec.pop("question_mac", None)
+    return rec
+
+
+def asked_mac_ok(root: Path, mid: str, rec: dict) -> bool:
+    return humanproof.local_ok(
+        root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec), rec.get("question_mac")
+    )
+
+
 def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
     asked, why = _answer_asked(root, msg)
     if not asked:
         return why, None
+    if not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # first: kind, round, digest provably ours
+        return f"not applied: {QUESTION_UNCHECKABLE}", None
     if asked.get("review") is True:
         return _apply_review_answer(root, msg, asked)
     if asked.get("proposal") is True:
         return _apply_proposal_answer(root, msg, asked)
     by, via = _answer_by(msg, asked)
     try:
+        digest = asked.get("question_digest")
+        if not isinstance(digest, str) or not digest:  # no digest of the question as sent: never unchecked
+            raise Refused(QUESTION_UNCHECKABLE)
         t, q = tickets.answer(
             root,
             asked["ticket"],
@@ -1327,6 +1389,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
             clean_untrusted(str(msg.get("body", {}).get("answer")), 2000),
             by,
             via,
+            expected_question_digest=digest,
         )
     except Refused as e:
         if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo

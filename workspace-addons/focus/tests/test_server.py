@@ -103,7 +103,7 @@ def test_ops_build_exact_argv(server, fake_orch):
         )[0]
         == 200
     )
-    assert go("answer", {"ticket": TID, "question": "q1", "answer": "CHF"})[0] == 200
+    assert go("answer", {"ticket": TID, "question": "q1", "digest": "a" * 64, "answer": "CHF"})[0] == 200
     assert go("check.add", {"ticket": TID, "text": "--new task"})[0] == 200
     got = [
         c
@@ -137,6 +137,11 @@ def test_bad_ops_are_400_and_run_nothing(server, fake_orch, op, args):
 def test_build_argv_unknown_and_types():
     with pytest.raises(actions.BadRequest):
         actions.build_argv(["x"], {})
+    for d in (None, "x", "A" * 64):  # an answer without the digest of the question shown: refused
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("answer", {"ticket": "t_abc123", "question": "q1", "answer": "a", "digest": d})
+    with pytest.raises(actions.BadRequest):
+        actions.proof_for("answer", {"ticket": "t_abc123", "question": "q1", "answer": "a"})
     with pytest.raises(actions.BadRequest):
         actions.build_argv("run.stop", [])
 

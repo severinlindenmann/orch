@@ -50,7 +50,7 @@ except ImportError:  # no orch: nothing runs
 
 # page op -> (core op, target): the clicks that are a person's (H1, contracts/human-proof.md)
 PROOF_OPS = {
-    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
+    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}:{_question_digest(a)}"),
     "ticket.done": ("ticket.verdict", lambda a: a.get("ticket")),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),
     "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
@@ -120,11 +120,19 @@ def _t(a):
     return _id(TID, a.get("ticket"), "ticket")
 
 
+def _question_digest(a):
+    """The digest of the question as the page showed it (sent back with the answer): no digest, no answer."""
+    d = a.get("digest")
+    if not (isinstance(d, str) and re.fullmatch(r"[0-9a-f]{64}", d)):
+        raise BadRequest("This question changed or can't be checked. Ask again.")
+    return d
+
+
 def _answer(a):
-    _only(a, ("ticket", "question", "answer"))
+    _only(a, ("ticket", "question", "answer", "digest"))
     return (
         ["answer", _t(a), _id(QID, a.get("question"), "question")],
-        ["--via", "focus"],
+        ["--via", "focus", "--question-digest", _question_digest(a)],
         [_text(a.get("answer"), "answer")],
     )
 

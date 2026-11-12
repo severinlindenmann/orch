@@ -835,7 +835,7 @@ function ticketPlan(t, q, children) {
     if (locks.has(lock)) return;
     locks.add(lock); start.disabled = true;
     try {
-      const result = await act('answer', {ticket:t.id, question:q.id, answer:'Start work'});
+      const result = await act('answer', {ticket:t.id, question:q.id, digest:q.digest, answer:'Start work'});
       window.orch.toast(result.ok ? 'Answered · Start work · dashboard' : result.text, result.ok ? 'ok' : 'error');
       if (result.ok) { ticketPlanEditing.delete(t.id); render(); refresh(); }
     } finally { locks.delete(lock); start.disabled = false; }
@@ -1079,7 +1079,7 @@ function mountQuestion(host, q, context = {}) {
     send: sendAnswer = async answer => {
       const lock = context.lock || host.dataset.key;
       if (lock) locks.add(lock);
-      const result = await act('answer', {ticket:q.ticket, question:q.id, answer});
+      const result = await act('answer', {ticket:q.ticket, question:q.id, digest:q.digest, answer});
       if (!result.ok) {
         let fresh = result.state;
         try {
@@ -1144,7 +1144,7 @@ async function openNeed(row, trigger) {
     const {d, actions} = dialog(row.title, 'dialog', 'needs-you');
     const host = el('div');
     d.append(host, actions);
-    mountQuestion(host, {ticket:row.ticket, id:row.answer.question, title:row.title, text:row.text, options:array(row.answer.options).map(o => ({text:o, suggested:o === row.answer.recommended}))}, {dialog:d, row:trigger.closest('[data-need-row]'), lock:'needs-you'});
+    mountQuestion(host, {ticket:row.ticket, id:row.answer.question, digest:row.answer.digest, title:row.title, text:row.text, options:array(row.answer.options).map(o => ({text:o, suggested:o === row.answer.recommended}))}, {dialog:d, row:trigger.closest('[data-need-row]'), lock:'needs-you'});
     window.orch.open(d);
   } else if (row.ticket) location.hash = href(row.ticket);
   else {

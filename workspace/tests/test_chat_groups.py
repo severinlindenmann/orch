@@ -630,6 +630,32 @@ def test_info_question_and_answer_flow(proj, run, rel, host):
     del q
 
 
+def test_group_answer_needs_the_question_mac_of_the_question_as_sent(proj, run, rel, host):
+    """#580: an agent that rewrites the question and the record's digest cannot forge question_mac."""
+    import json
+
+    from orch import relay
+
+    tickets.ask(proj, host, "Which account paid the 2025 car tax?", [], None, "agent:t")
+    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
+    qm = sent(rel, type="question")[0]
+    rec = json.loads(relay._asked_path(proj).read_text())[qm["id"]]
+    assert relay.asked_mac_ok(proj, qm["id"], rec)
+    path = tickets.ticket_path(proj, host)
+    raw = json.loads(path.read_text())
+    raw["questions"][0]["text"] = "Which account should pay the fine?"
+    path.write_text(json.dumps(raw))
+    rec["question_digest"] = tickets.question_digest(tickets.load(proj, host)["questions"][0])
+    relay._asked_path(proj).write_text(json.dumps({qm["id"]: rec}))
+    body = {"question_id": "q1", "answer": "Household account.", "answered_by": "human:owner"}
+    body |= {"group": {**qm["body"]["group"]}, "by": HOME, "via": "helper"}
+    ans = {"schema": "orch.msg/1", "id": mid("ans9"), "from": HOME, "to": WS, "type": "answer"}
+    ans |= {"created_at": "2026-11-08T10:06:00Z", "reply_to": qm["id"], "ticket": host, "body": body}
+    note, applied = relay._apply_answer(proj, ans)
+    assert applied is None and relay.QUESTION_UNCHECKABLE in note
+    assert tickets.load(proj, host)["questions"][0]["answer"] is None
+
+
 def test_permission_and_approval_questions_are_never_sent(proj, run, rel, host):
     tickets.ask(proj, host, "May I publish the page?", ["Once", "Always", "No"], None, "agent:t")
     code, _, err = run("relay", "group", "ask", host, "Home", "q1")
