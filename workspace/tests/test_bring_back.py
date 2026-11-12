@@ -3131,3 +3131,12 @@ def test_b13y_a_file_stamped_after_the_merge_ended_is_not_the_merges_output(tmp_
     assert (
         worktrees._written_hashes(tmp_path, ["a.txt"], now - 1)["a.txt"] == "other"
     )  # edited after: no --hard
+
+
+def test_work_branches_lists_the_tickets_with_a_branch_in_one_call(done_copy):
+    root, tid, copy = done_copy
+    assert tid in worktrees.work_branches(root)
+    assert (
+        worktrees.review_tip(root, tid, set()) is None
+    )  # not in the set, no copy registered... or registered
+    assert worktrees.review_tip(root, "t_nothere", {tid}) is None

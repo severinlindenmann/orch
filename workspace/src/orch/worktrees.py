@@ -1429,11 +1429,38 @@ def _judge_done_locked(root: Path, ticket: str) -> None:
     _copy_authority(root, ticket, lambda r: r.update(reviewed_tip=tip, reviewed_at=tickets.now()))
 
 
-def review_tip(root: Path, ticket: str) -> str | None:
-    """The tip recorded for the review shown now (the person's page shows it and sends it back with the
-    Done), or None. Read only; never raises."""
+def work_branches(root: Path) -> set[str]:
+    """The tickets that have a work branch (refs/heads/orch/<ticket>): ONE git call for all of them (the
+    dashboard asks for every ticket in Review on each state load). Empty on any problem."""
     try:
-        if not _has_work(root, ticket):
+        with _scoped(root):
+            rc, out, _ = _git(
+                ["for-each-ref", "--format=%(refname)", "refs/heads/orch/"],
+                root,
+                read_only=True,
+                filters=False,
+            )
+    except Exception:  # noqa: BLE001
+        return set()
+    if rc != 0:
+        return set()
+    names = (ln.strip().removeprefix("refs/heads/orch/") for ln in out.splitlines())
+    return {n for n in names if _TID.fullmatch(n)}
+
+
+def review_tip(root: Path, ticket: str, branches: set[str] | None = None) -> str | None:
+    """The tip recorded for the review shown now (the person's page shows it and sends it back with the
+    Done), or None. Read only; never raises. `branches`: work_branches(root) read once by a caller that asks
+    for many tickets (no git call per ticket); copies off and no copy registered: nothing to look up."""
+    try:
+        if ticket in registry(root):
+            pass
+        elif config.copies_mode(root) == "off":
+            return None
+        elif branches is not None:
+            if ticket not in branches:
+                return None
+        elif not _has_work(root, ticket):
             return None
         tip = _copy_authority(root, ticket).get("review_tip")
     except Exception:  # noqa: BLE001 - nothing to show: the Done is judged as without a shown tip

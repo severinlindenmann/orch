@@ -1836,3 +1836,9 @@ def test_the_closed_list_of_leading_options_has_exact_arity():
     assert safegit.subcommand_index(["-C", "x", "rev-parse"]) == 2  # exactly one value
     assert safegit.subcommand_index(["--no-optional-locks", "--literal-pathspecs", "rev-parse"]) == 2
     assert safegit.subcommand_index(["-C", "rev-parse"]) == 2  # -C swallows one word, as git does
+
+
+def test_for_each_ref_runs_without_filters_only_with_the_names_format():
+    assert safegit.filters_off_refusal(["for-each-ref", "--format=%(refname)", "refs/heads/orch/"]) is None
+    assert safegit.filters_off_refusal(["for-each-ref", "--format=%(contents)", "refs/heads/"]) is not None
+    assert safegit.filters_off_refusal(["for-each-ref", "--shell", "refs/heads/"]) is not None

@@ -692,6 +692,7 @@ def refusal(args: list[str]) -> str | None:
 _LS_FILES_OK = {"-z", "-s", "--stage", "-o", "--others", "--exclude-standard", "--error-unmatch"}
 FILTERS_OFF_OK = {
     "rev-parse": None,  # resolves names and paths; reads refs only
+    "for-each-ref": {"--format=%(refname)"},  # ref names only (one call lists every work branch)
     "symbolic-ref": None,  # reads / writes HEAD
     "branch": {"-D", "-d", "--list"},  # refs only
     "check-attr": None,  # attribute lookup only; refusal() limits it to -z, --cached, --source=<commit>

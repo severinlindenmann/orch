@@ -289,13 +289,17 @@ def _bring_back_view(back: dict, review) -> dict:
     return view
 
 
-def _review_tip(root: Path, tid: str) -> str | None:
+def _review_tip(root: Path, tid: str, branches: dict) -> str | None:
     """The tip recorded when the ticket entered Review (B13g): the ticket page shows it and its Done sends it
-    back, so the core can tell whether new changes arrived after the person looked. None when there is none."""
+    back, so the core can tell whether new changes arrived after the person looked. None when there is none.
+    `branches`: one per-load cache; the work branches are listed with ONE git call, and not at all while
+    copies are off (nothing to look up then)."""
     try:
         from orch import worktrees
 
-        tip = worktrees.review_tip(root, tid)
+        if "set" not in branches:
+            branches["set"] = worktrees.work_branches(root)
+        tip = worktrees.review_tip(root, tid, branches["set"])
     except Exception:  # noqa: BLE001 - no tip shown: the Done is judged as without one
         return None
     return tip if isinstance(tip, str) and re.fullmatch(r"[0-9a-f]{40,64}", tip) else None
@@ -304,6 +308,7 @@ def _review_tip(root: Path, tid: str) -> str | None:
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
     """Valid-looking tickets (schema orch.ticket/1, id, title, status). Returns (tickets, skipped).
     Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets would vanish); without the orch command (standalone use) from .orch/tickets."""
+    branch_cache: dict = {}  # the work branches, listed once per load (see _review_tip)
     raw = run_orch(orch_bin, ["ticket", "list", "--all", "--json"], root)
     if isinstance(raw, dict):
         raw = raw.get("tickets")
@@ -327,7 +332,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
                 t[k] = []
         t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
         if t["status"] == "review":
-            tip = _review_tip(root, t["id"])
+            tip = _review_tip(root, t["id"], branch_cache)
             if tip:
                 t["review_tip"] = tip
         back = (t.get("work") or {}).get("bring_back") or {}

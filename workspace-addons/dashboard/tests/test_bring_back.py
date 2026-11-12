@@ -132,13 +132,14 @@ def test_ticket_in_review_shows_the_recorded_review_tip(tmp_path, monkeypatch):
     ]
     monkeypatch.setattr(data, "run_orch", lambda *a: json.loads(json.dumps(rows_in)))
     recorded = {"t_review1": "c" * 40, "t_review2": None, "t_active1": "d" * 40}
-    monkeypatch.setattr(worktrees, "review_tip", lambda root, tid: recorded[tid])
+    monkeypatch.setattr(worktrees, "work_branches", lambda root: set())
+    monkeypatch.setattr(worktrees, "review_tip", lambda root, tid, branches=None: recorded[tid])
     rows, _ = data.load_tickets(tmp_path, "orch")
     by_id = {r["id"]: r for r in rows}
     assert by_id["t_review1"]["review_tip"] == "c" * 40
     assert "review_tip" not in by_id["t_review2"]
     assert "review_tip" not in by_id["t_active1"]
-    monkeypatch.setattr(worktrees, "review_tip", lambda root, tid: "<b>not a tip</b>")
+    monkeypatch.setattr(worktrees, "review_tip", lambda root, tid, branches=None: "<b>not a tip</b>")
     rows, _ = data.load_tickets(tmp_path, "orch")
     assert all("review_tip" not in r for r in rows)
 
@@ -167,3 +168,27 @@ def test_review_metadata_comes_from_core_command(tmp_path, monkeypatch):
     assert rows[0]["bring_back"]["control_paths"] == 2
     assert rows[0]["bring_back"]["paths_hash"] == "12345678"
     assert seen[-1] == ["copy", "review", ticket["id"], "--json"]
+
+
+def test_load_state_with_100_tickets_in_review_makes_at_most_two_git_calls(tmp_path, monkeypatch):
+    """Lane C blocker: one git call per ticket made /api/state take seconds. Now at most one (the work branches,
+    read once per load), and none at all while copies are off."""
+    from orch import config, safegit, worktrees
+
+    base = {"schema": "orch.ticket/1", "title": "T", "status": "review"}
+    rows_in = [{**base, "id": f"t_rev{i:04d}"} for i in range(100)]
+    monkeypatch.setattr(data, "run_orch", lambda *a: json.loads(json.dumps(rows_in)))
+    monkeypatch.setattr(worktrees, "registry", lambda root: {})
+    monkeypatch.setattr(worktrees, "_copy_authority", lambda *a, **k: {})
+    calls = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: calls.append(argv) or (0, "", "")
+    )
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    for mode, most in (("together", 1), ("off", 0)):
+        calls.clear()
+        monkeypatch.setattr(config, "copies_mode", lambda root, m=mode: m)
+        rows, _ = data.load_tickets(tmp_path, "orch")
+        assert len(rows) == 100
+        git_calls = [a for a in calls if "git" in str(a[0])]
+        assert len(git_calls) <= 2 and len(git_calls) <= most + 1, (mode, len(git_calls))
